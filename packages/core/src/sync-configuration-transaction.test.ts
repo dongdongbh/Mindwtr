@@ -278,9 +278,7 @@ describe('commitProvenSyncConfiguration', () => {
         expect(harness.getState()).toEqual(initial);
     });
 
-    // #1043: on a sandbox without a Secret Service the prior secret can become
-    // unreadable while its endpoint stays configured. Re-entering the secret is
-    // the only recovery, so it must not be gated on reading the one it replaces.
+
     it.each([
         {
             label: 'WebDAV',
@@ -447,10 +445,8 @@ describe('commitProvenSyncConfiguration', () => {
         const readConfiguration = harness.dependencies.readConfiguration;
         harness.dependencies.readConfiguration = async (requirements = {}) => {
             const snapshot = await readConfiguration(requirements);
-            // Model a native/keyring outage: exact candidate readback works
-            // while the candidate exists, but the restored empty identity is
-            // still represented as opaque. Rollback must not reuse the
-            // candidate's strict secret requirement.
+
+
             if (requiresCandidateSecret(requirements) && isRestoredEmpty(harness.getState())) {
                 throw new Error('restored empty secret remains opaque');
             }
@@ -539,8 +535,7 @@ describe('commitProvenSyncConfiguration', () => {
             },
         }, harness.dependencies);
 
-        // One opening read: a candidate carrying its own token never needs the
-        // strict re-read of the secret it is about to replace (#1043).
+
         expect(harness.events).toEqual([
             'read',
             'backend:off',
@@ -916,9 +911,7 @@ describe('commitProvenSyncConfiguration', () => {
         expect(harness.events).toContain('webdav:https://old-dav.example.com');
     });
 
-    // A backend with no provider of its own must still clear a stale one, or
-    // provider-keyed lookups keep resolving to the old service after the backend
-    // has moved on.
+
     it('clears a stale cloud provider for a provider-less backend and restores it on failure', async () => {
         const initial = baselineConfiguration();
         initial.backend = 'cloud';
@@ -930,15 +923,14 @@ describe('commitProvenSyncConfiguration', () => {
             harness.dependencies,
         )).rejects.toThrow('injected backend failure');
 
-        // Restored at all only because the cleared provider was marked touched.
+
         expect(harness.getState()).toEqual(initial);
         expect(harness.events.lastIndexOf('provider:dropbox')).toBeGreaterThan(
             harness.events.indexOf('provider:selfhosted'),
         );
     });
 
-    // Written even when the canonical value already matches: an adapter may keep
-    // its own representation in that slot which the canonical value cannot see.
+
     it('writes the cloud provider for a provider-less backend even when it already matches', async () => {
         const initial = baselineConfiguration();
         initial.backend = 'file';
@@ -975,11 +967,7 @@ describe('commitProvenSyncConfiguration', () => {
     });
 });
 
-// Characterization goldens for the sync-configuration commit protocol. These
-// pin the complete observable call sequence — not just relative ordering — for
-// a scenario matrix that the mobile implementation can also express, so the two
-// platforms' protocols can be compared step by step. Treat a change here as a
-// protocol change, not a test update.
+
 describe('commit protocol goldens (desktop reference semantics)', () => {
     const goldenHarness = (
         initial: PersistedSyncConfiguration,
@@ -1075,8 +1063,7 @@ describe('commit protocol goldens (desktop reference semantics)', () => {
             dropboxCredentialHandle: 'golden-handle',
         }, harness.dependencies);
 
-        // A candidate that owns a staged handle skips reload-time recovery: it
-        // runs its own credential transaction instead.
+
         expect(harness.events).toEqual([
             'read',
             'backend:off',
@@ -1103,9 +1090,7 @@ describe('commit protocol goldens (desktop reference semantics)', () => {
             },
         }, harness.dependencies)).rejects.toThrow('injected webdav failure');
 
-        // Two independent `backend:off` proofs: one for the containing rollback
-        // path, one inside the restore itself. Restore rewrites only the touched
-        // webdav slot, then reactivates and re-verifies the prior backend.
+
         expect(harness.events).toEqual([
             'recover-staged-credentials',
             'read',
@@ -1166,8 +1151,7 @@ describe('commit protocol goldens (desktop reference semantics)', () => {
             },
         }, harness.dependencies)).rejects.toThrow(/sync remains disabled/i);
 
-        // A partly restored snapshot is never reactivated and never verified;
-        // the last write is unconditionally `off`.
+
         expect(harness.events).toEqual([
             'recover-staged-credentials',
             'read',

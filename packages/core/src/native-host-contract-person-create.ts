@@ -28,7 +28,7 @@ const iso = (value: unknown): value is string => typeof value === 'string' && Nu
 const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message: string): NativeHostResult<never> =>
     ({ ok: false, error: { code, message } });
 
-/** Reject non-JSON values before detaching a request or cold-start journal. */
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number): boolean => {
         if (depth > 24) return false;
@@ -59,7 +59,7 @@ const readPerson = (value: unknown): value is Person => record(value)
     && (value.revBy === undefined || typeof value.revBy === 'string' && Boolean(value.revBy))
     && (value.deletedAt === undefined || text(value.deletedAt, 500) && Boolean(value.deletedAt));
 
-/** Pure replanning: safe before opening SQLite on a cold journal replay. */
+
 const readPrepared = (value: unknown): NativePreparedPersonCreate | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -108,7 +108,7 @@ export function createPersonCreateMethods(deps: {
                 displayName: found && !found.deletedAt ? found.name : normalizePersonName(value.name) } };
         },
 
-        /** Read-only outcome after the host confirms no journal remains; never authorizes a write. */
+
         probePersonCreateOutcome(input: NativePersonCreateRequest): NativeHostResult<NativePersonCreateResult> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

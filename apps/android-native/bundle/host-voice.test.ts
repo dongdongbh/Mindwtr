@@ -2,8 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import type { AppSettings, Attachment, Project, QuickCaptureAudioStore, QuickCaptureOptions, Task } from '@mindwtr/core';
 import { createNativeVoice, persistIntoManagedStorage, type NativeVoiceBindings, type VoiceCaptureLine } from './host-voice';
 
-// Voice pass V3: RN's quick capture recording on this host (use-quick-capture-audio.ts), with stand-ins for Kotlin's recorder,
-// the store, the attachment port and the provider. Each RN fix this pass carries has its test, named by its commit.
 
 const DOCS = 'file:///data/user/0/tech.dongdongbh.mindwtr.nativeclient.dev/files/';
 const OPTIONS: QuickCaptureOptions = {
@@ -20,7 +18,7 @@ const deferred = <T,>() => {
 
 const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
     settings?: AppSettings; key?: string; transcript?: string | Promise<string>; tags?: string[]; projectTitle?: string; save?: 'fails' | 'refused-before-landing' | 'refused';
-    /** A save still in flight: the store write waits for it. */
+
     gate?: Promise<void>;
 } = {}) => {
     const deleted: string[] = [];
@@ -44,7 +42,7 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
             return { success: true };
         },
     };
-    // A test can land a "sync" when the store is read (onRead): a real sync lands between reads, never inside a store command.
+
     const reads = { onRead: undefined as undefined | (() => void) };
     const store = { getState: () => { reads.onRead?.(); return state; } } as unknown as QuickCaptureAudioStore;
     const transcript = setup.transcript ?? 'Buy milk';
@@ -68,9 +66,9 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
             submitted.push(input);
             const task = { id: input.captureId, title: input.text.trim() || input.fallbackTitle, status: 'inbox', tags: ['#synced'], contexts: [],
                 attachments: input.attachments, createdAt: '', updatedAt: '' } as unknown as Task;
-            // Core's addTask lands the task before the save; a save that fails leaves it in the store (SAVE_FAILED).
+
             if (setup.save === 'refused-before-landing') return { ok: false, error: { code: 'ACTION_FAILED', message: 'Write failed' } };
-            // An unreadable date command: core writes nothing and answers its notice.
+
             await setup.gate;
             if (setup.save === 'refused') return { ok: true, value: { kind: 'refused', notice: { tone: 'warning', title: 'Date', message: 'Unreadable' } } };
             state.tasks = [...state.tasks, task];
@@ -84,7 +82,7 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
         newId: () => `00000000-0000-4000-8000-00000000000${++next}`,
         log: (line) => { lines.push(line); },
         formatDate: () => '06/29/2026, 9:00 AM',
-        // Another bundle test file can leave core's sandbox on for the process.
+
         sandbox: () => false,
         fetcher: (async () => new Response(JSON.stringify({
             candidates: [{ content: { parts: [{ text: JSON.stringify({ transcript: await transcript, title: (await transcript) || null, tags: setup.tags ?? null, projectTitle: setup.projectTitle ?? null }) }] } }],
@@ -110,8 +108,8 @@ describe('native voice capture', () => {
         const taskId = (saved as { taskId: string }).taskId;
         expect(h.submitted[0]?.fallbackTitle).toBe('Audio note 06/29/2026, 9:00 AM');
         expect(h.submitted[0]?.attachments.map((attachment) => attachment.uri)).toEqual([`${DOCS}attachments/${h.submitted[0]!.attachments[0]!.id}.m4a`]);
-        // A sync lands after the transcript's first read of the row and before its store command: the write is built again on
-        // the row as it is then.
+
+
         let count = 0;
         h.reads.onRead = () => {
             count += 1;
@@ -121,15 +119,15 @@ describe('native voice capture', () => {
         await h.voice.settled();
         const task = h.state.tasks.find((entry) => entry.id === taskId)!;
         expect(task.title).toBe('Buy milk');
-        // The transcript's tag joins the row as stored now: the tag the sync added meanwhile survives.
+
         expect(task.tags).toEqual(expect.arrayContaining(['#synced', '#later', '#errand']));
         expect(task.projectId).toBe('p-Errands');
-        // The original recording goes once its managed copy is the task's.
+
         expect(h.deleted).toEqual([`${DOCS}voice-captures/rec-1.m4a`]);
         expect(h.lines.map((line) => `${line.kind}:${line.outcome}`)).toEqual(['capture:saved', 'transcribe:applied']);
     });
 
-    // Voice V3 review N11 (both apps): a late transcript never replaces a title the user typed after the save.
+
     it('keeps a title typed after the save when the transcript arrives later', async () => {
         const late = deferred<string>();
         const h = harness({}, { transcript: late.promise, tags: ['#errand'] });
@@ -183,12 +181,12 @@ describe('native voice capture', () => {
     it('a popup closed or reopened while it recorded saves nothing and leaves no file (RN 9604387e4, c5fc870fe, 47b2f11a1)', async () => {
         const h = harness();
         const first = await record(h);
-        // Reopened: the old session's recording ends unsaved.
+
         const { session } = await h.voice.open();
         expect(h.calls).toContain('cancel:rec-1');
         expect(await h.voice.stop({ session: first, save: true, text: '', options: OPTIONS })).toEqual({ status: 'idle' });
 
-        // Closed while the save copies the recording: the stale submission writes nothing, and the recording and its copy go.
+
         const gate = deferred<void>();
         const copying = deferred<void>();
         const slow = harness({
@@ -262,7 +260,7 @@ describe('native voice capture', () => {
         const saved = await h.voice.stop({ session, save: true, text: '', options: OPTIONS }) as { status: string; taskId: string };
         expect(saved.status).toBe('saved');
         await h.voice.settled();
-        // The managed copy stays with the task; only the original recording goes, after the transcription, as on a saved capture.
+
         expect(h.deleted).toEqual([`${DOCS}voice-captures/rec-1.m4a`]);
         expect(h.state.tasks.find((task) => task.id === saved.taskId)?.title).toBe('Buy milk');
         expect(h.lines.map((line) => `${line.kind}:${line.outcome}:${'errorKind' in line ? line.errorKind ?? '' : ''}`))
@@ -289,8 +287,7 @@ describe('native voice capture', () => {
         await expect(check(`${DOCS}attachments/a1.m4a`, { exists: true, isDirectory: true })).rejects.toThrow('not cached');
     });
 
-    // Voice V3 review N5: leaving the app ends the recording (Kotlin's recorder cancels it), and host-voice forgets it too, so the
-    // next start records again instead of answering busy.
+
     it('leaving the app ends a recording and frees the next start', async () => {
         const h = harness();
         const session = await record(h);
@@ -324,8 +321,7 @@ describe('native voice capture', () => {
         expect(h.voice.state()).toMatchObject({ recording: false, busy: false });
     });
 
-    // Voice V3 review N2: a refused save (an unreadable date command) keeps the recording, as RN's recovery attachment: the user
-    // fixes the draft and the next Save attaches it. A popup closed instead deletes it.
+
     it('a refused save keeps the recording for the next save, and a close without one deletes it', async () => {
         const setup: { save?: 'refused' } = { save: 'refused' };
         const h = harness({}, setup);
@@ -341,7 +337,7 @@ describe('native voice capture', () => {
         expect(held.attachments.map((attachment) => attachment.uri)).toEqual([`${DOCS}attachments/${held.attachments[0]!.id}.m4a`]);
         expect(held.fallbackTitle).toBe('Audio note 06/29/2026, 9:00 AM');
         expect(h.voice.state()).toMatchObject({ held: false });
-        // The original recording goes once its managed copy is the task's; the copy stays.
+
         expect(h.deleted).toEqual([`${DOCS}voice-captures/rec-1.m4a`]);
 
         const closed = harness({}, { save: 'refused' });
@@ -352,8 +348,7 @@ describe('native voice capture', () => {
         expect(closed.voice.state()).toMatchObject({ held: false });
     });
 
-    // Review N2, RN's initialAttachments: a kept recording rides the next recording's save too, as RN's stopRecording sends
-    // [...initialAttachments, audio]; a second refused save keeps both.
+
     it('a kept recording rides the next recording\'s save with it', async () => {
         const setup: { save?: 'refused' } = { save: 'refused' };
         const h = harness({}, setup);
@@ -371,13 +366,12 @@ describe('native voice capture', () => {
         expect(attachments.every((uri) => uri.startsWith(`${DOCS}attachments/`))).toBe(true);
         expect(h.voice.state()).toMatchObject({ held: false });
         await h.voice.settled();
-        // Each original recording goes once its managed copy is the task's; the copies stay.
+
         expect(h.deleted.filter((uri) => uri.startsWith(`${DOCS}attachments/`))).toEqual([]);
         expect(new Set(h.deleted.filter((uri) => uri.startsWith(`${DOCS}voice-captures/`))).size).toBe(3);
     });
 
-    // Voice V5 review B1 (the reviewer's repro): RN's handleClose waits for a running submission; here a close that still
-    // arrives while a kept recording's save runs keeps the files that save hands to the task.
+
     it('a close during an in-flight save of a kept recording keeps the files the saved task points to', async () => {
         let release!: () => void;
         const setup: { save?: 'refused'; gate?: Promise<void> } = { save: 'refused' };
@@ -411,8 +405,7 @@ describe('native voice capture', () => {
         expect(h.deleted.filter((uri) => uri.startsWith(`${DOCS}attachments/`))).toHaveLength(1);
     });
 
-    // Voice V5 review N6: with save audio off, a refused save copies the recording to keep it. A failed copy keeps the
-    // recording itself, as RN keeps its recovery attachment; the next Save copies it again before the task takes it.
+
     it('a refused save whose recovery copy fails keeps the recording, and the next save copies it first', async () => {
         let copies = 0;
         const setup: { save?: 'refused'; settings?: AppSettings } = { save: 'refused', settings: { ...gemini(), gtd: { saveAudioAttachments: false } } as AppSettings };
@@ -427,7 +420,7 @@ describe('native voice capture', () => {
         expect(await h.voice.stop({ session, save: true, text: 'x /due:someday', options: OPTIONS })).toMatchObject({ status: 'refused' });
         expect(h.deleted).toEqual([]);
         expect(h.voice.state()).toMatchObject({ held: true });
-        // Review N7: the kept recording is a forced line, since the tester cannot see it.
+
         expect(h.lines).toContainEqual({ kind: 'capture', outcome: 'kept', provider: 'gemini', copied: false });
         setup.save = undefined;
         expect(await h.voice.save({ session, text: 'Call mom', options: OPTIONS })).toMatchObject({ status: 'saved' });
@@ -435,8 +428,7 @@ describe('native voice capture', () => {
         expect(h.deleted).toEqual([`${DOCS}voice-captures/rec-1.m4a`]);
     });
 
-    // Voice V5 review N1: the popup's Save with a kept recording is RN's handleSave: its Save and edit reaches core, and core's
-    // next step comes back for the popup; a stop's save says nothing of it (RN's stopRecording closes).
+
     it('a kept recording\'s save carries Save and edit and answers core\'s next step', async () => {
         const setup: { save?: 'refused' } = { save: 'refused' };
         const h = harness({}, setup);
@@ -452,7 +444,7 @@ describe('native voice capture', () => {
     it('opens a session that says whether Audio is the default capture method', async () => {
         expect(await harness({}, { settings: { ...gemini(), gtd: { defaultCaptureMethod: 'audio' } } as AppSettings }).voice.open()).toMatchObject({ defaultAudio: true });
         expect(await harness().voice.open()).toMatchObject({ defaultAudio: false, sandbox: false });
-        // Review N3: RN skips the automatic start in Sandbox mode; review N4: the center + reads the default method alone.
+
         expect(await harness({ sandbox: () => true }).voice.open()).toMatchObject({ sandbox: true });
         const audio = harness({}, { settings: { ...gemini(), gtd: { defaultCaptureMethod: 'audio' } } as AppSettings });
         expect(await audio.voice.request('defaults', {})).toEqual({ defaultAudio: true });

@@ -40,5 +40,5 @@ export const logViewSectionWrite = (
   if (value === undefined) return;
   try {
     logger?.('MCP view section assignment committed', { extra: { releaseCheck: 'v1.3.8/mcp-view-sections', entityType, operation } });
-  } catch { /* logging cannot change a completed write */ }
+  } catch {                                               }
 };

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 1x1 "Quick capture" button: the same "+" as the Tasks widget header, with
-     the dialog title underneath. -->
+
+
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/mindwtr_widget_capture"
     android:layout_width="match_parent"

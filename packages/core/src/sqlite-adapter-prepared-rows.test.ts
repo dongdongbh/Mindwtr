@@ -7,9 +7,6 @@ import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter } from './sqlite-adapter';
 import type { AppData, Project } from './types';
 
-// D9b §2: a sliced sync cycle builds a save's rows before it takes the write gate (prepareSaveRows). The save uses them only
-// for that exact document and only while no write transaction ran since; otherwise it builds them in its own transaction.
-// The probe: a project changed in place after the preparation. Prepared rows still hold the title it had then.
 
 const AT = '2026-09-01T00:00:00.000Z';
 const LATER = '2026-09-02T00:00:00.000Z';
@@ -37,7 +34,7 @@ describe('SqliteAdapter rows prepared before a sliced save (D9b §2)', () => {
         await new SqliteAdapter(opened.client).saveData(library());
         const adapter = new SqliteAdapter(opened.client, { rejectConcurrentWrites: true });
         const read = await adapter.getData();
-        // The cycle's next document: the project renamed at a new revision, its rows prepared, then changed in place.
+
         const project: Project = { ...read.projects[0], title: 'Prepared title', rev: 2, updatedAt: LATER };
         const next: AppData = { ...read, projects: [project] };
         runToEnd(adapter.prepareSaveRows(next));

@@ -9,7 +9,7 @@ internal data class ChecklistFormScroll(val state: ScrollState, val viewport: Re
 internal val LocalChecklistFormScroll = compositionLocalOf<ChecklistFormScroll?> { null }
 internal data class ChecklistSessionRow(val identity: String, val item: JSONObject)
 
-/** The UI session owns row identity, never the persisted (possibly repeated) item ID. */
+
 internal class ChecklistRowSession(private val sessionId: String = "checklist") {
     private var serial = 0
     private var rows = emptyList<ChecklistSessionRow>()

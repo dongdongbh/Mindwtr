@@ -30,41 +30,35 @@ const scheduleToastTimer = (id: string, timer: ToastTimer, onElapsed: () => void
         onElapsed();
     }, timer.remainingMs);
 };
-// These are the localStorage sanitizers for what the Focus/Next and Reference
-// dropdowns write. They read the dropdowns' own rosters, so a value the menu
-// offers can never be one this rejects — which would silently reset the user's
-// grouping to the default on the next launch.
+
+
 type ListNextGroupBy = NextGroupBy;
 type ListReferenceGroupBy = ReferenceGroupBy;
 type ListDoneGroupBy = DoneGroupBy;
 type ListSomedayGroupBy = SomedayGroupBy;
 type ListOptions = {
     showDetails: boolean;
-    // One axis per list: these all share FOCUS_AXES, but "group Focus by
-    // project" and "group my Inbox by context" are different questions, so a
-    // single shared key made changing one list silently regroup four (#1063).
+
+
     focusGroupBy: ListNextGroupBy;
     inboxGroupBy: ListNextGroupBy;
     nextGroupBy: ListNextGroupBy;
     waitingGroupBy: ListNextGroupBy;
     somedayGroupBy: ListSomedayGroupBy;
     referenceGroupBy: ListReferenceGroupBy;
-    // Done keeps its own axis rather than sharing nextGroupBy: 'completedDate'
-    // is not in FOCUS_AXES, so that sanitizer would reset it on every launch.
+
+
     doneGroupBy: ListDoneGroupBy;
     doneSortBy?: TaskSortBy;
-    // Archive is completed work too, so it reads the same rosters as Done — but
-    // keeps its own values, because "group my archive by project" and "group my
-    // Done list by completion date" are different questions (#959).
+
+
     archivedGroupBy: ListDoneGroupBy;
     archivedSortBy?: TaskSortBy;
 };
 
 export const LIST_OPTIONS_STORAGE_KEY = 'mindwtr:list-options:v1';
 
-// Sections-as-columns is a per-project *presentation* choice, so it stays
-// device-local next to the other view options rather than becoming a synced
-// Project field (#1019).
+
 export type ProjectLayout = 'list' | 'columns';
 export const PROJECT_LAYOUTS_STORAGE_KEY = 'mindwtr:project-layouts:v1';
 
@@ -97,8 +91,8 @@ function readStoredListOptions(): ListOptions {
         const archivedSortBy = DONE_TASK_LIST_SORT_OPTIONS.includes(parsed?.archivedSortBy as TaskSortBy)
             ? parsed?.archivedSortBy as TaskSortBy
             : undefined;
-        // Every list shared nextGroupBy before #1063, so a key the blob does not
-        // have yet seeds from it — otherwise the split would read as a reset.
+
+
         const perViewAxis = (value: unknown) => sanitizeAxis(FOCUS_AXES, value ?? parsed?.nextGroupBy, DEFAULT_LIST_OPTIONS.nextGroupBy);
         return {
             showDetails: typeof parsed?.showDetails === 'boolean' ? parsed.showDetails : DEFAULT_LIST_OPTIONS.showDetails,
@@ -128,7 +122,7 @@ function saveStoredListOptions(options: ListOptions) {
     try {
         storage.setItem(LIST_OPTIONS_STORAGE_KEY, JSON.stringify(options));
     } catch {
-        // View options are convenience state; storage failures should not block UI updates.
+
     }
 }
 
@@ -150,11 +144,7 @@ function readStoredProjectLayouts(): Record<string, ProjectLayout> {
     }
 }
 
-// Drops entries for projects the store no longer knows about (deleted and
-// purged, not just soft-deleted — _allProjects keeps trashed ones restorable).
-// Skipped when _allProjects is empty: that means "not loaded yet" at cold
-// boot, not "no projects exist", and pruning against it would wipe every
-// saved layout on every launch.
+
 function pruneProjectLayouts(layouts: Record<string, ProjectLayout>): Record<string, ProjectLayout> {
     const allProjects = useTaskStore.getState()._allProjects;
     if (allProjects.length === 0) return layouts;
@@ -184,7 +174,7 @@ function saveStoredHiddenSidebarViews(views: HideableSidebarViewId[]) {
     try {
         storage.setItem(HIDDEN_SIDEBAR_VIEWS_STORAGE_KEY, JSON.stringify(views));
     } catch {
-        // Sidebar visibility is convenience state; storage failures should not block UI updates.
+
     }
 }
 
@@ -194,7 +184,7 @@ function saveStoredProjectLayouts(layouts: Record<string, ProjectLayout>) {
     try {
         storage.setItem(PROJECT_LAYOUTS_STORAGE_KEY, JSON.stringify(layouts));
     } catch {
-        // Layout choice is convenience state; storage failures should not block UI updates.
+
     }
 }
 
@@ -368,8 +358,7 @@ export const useUiStore = createWithEqualityFn<UiState>()((set) => ({
         }),
 }));
 
-// Tests and full UI resets replace toast state directly. Clear any timer whose
-// toast disappeared so an old callback cannot outlive its surface.
+
 useUiStore.subscribe((state, previousState) => {
     if (state.toasts === previousState.toasts) return;
     const visibleToastIds = new Set(state.toasts.map((toast) => toast.id));

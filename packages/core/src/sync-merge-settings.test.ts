@@ -13,10 +13,7 @@ import type { AppData, SavedFilter, SettingsSyncGroup } from './types';
 
 type Settings = AppData['settings'];
 
-// #742 (2026-07-16 comment): naturalLanguageDates is a synced GTD boolean.
-// Per P14 (#120), explicit values always beat an unset/default value on a
-// peer, regardless of which side's sync timestamp is newer — a device that
-// never touched the field must never overwrite a peer that set it.
+
 describe('mergeSettingsForSync > gtd.naturalLanguageDates', () => {
     it('an incoming explicit false survives merge against a local peer without the field', () => {
         const local: Settings = { gtd: {} };
@@ -48,9 +45,7 @@ describe('mergeSettingsForSync > gtd.naturalLanguageDates', () => {
 
         const merged = mergeSettingsForSync(local, incoming);
 
-        // The local device's newer gtd timestamp wins the tiebreaker for
-        // fields both sides set differently, but naturalLanguageDates is
-        // unset locally, so the incoming explicit value still applies.
+
         expect(merged.gtd?.naturalLanguageDates).toBe(false);
         expect(merged.gtd?.defaultScheduleTime).toBe('09:00');
     });
@@ -122,8 +117,7 @@ describe('mergeSettingsForSync > AI request timeout', () => {
     });
 });
 
-// One representative field per value-replacing group. savedFilters is excluded on
-// purpose: it merges by filter id with its own per-filter LWW, covered separately below.
+
 const GROUP_CASES: Array<{
     group: SettingsSyncGroup;
     local: Settings;
@@ -475,8 +469,7 @@ describe('mergeSettingsForSync > savedFilters', () => {
         expect(merged.savedFilters?.map((filter) => filter.id)).toEqual(['filter-1']);
     });
 
-    // A newer app's filter (a view, a field and a sort this build does not
-    // know), an undated filter, and a user order that is not createdAt order.
+
     const newer = {
         id: 'filter-newer', name: 'Calendar lane', view: 'calendar', color: '#ff0000', sortBy: 'somethingNew',
         criteria: { contexts: ['@desk'] }, createdAt: NEWER, updatedAt: NEWER,
@@ -527,7 +520,7 @@ describe('mergeSettingsForSync > savedFilters', () => {
         expect(mergeSettingsForSync(tie, settingsWith(reordered, OLDER)).savedFilters).toEqual(reordered);
 
         expect(mergeSettingsForSync(settingsWith(stored, NEWER), settingsWith(reordered, OLDER)).savedFilters).toEqual(stored);
-        // Entries only the other side holds join at the end, in that side's order.
+
         expect(mergeSettingsForSync(settingsWith([older], NEWER), settingsWith([newer, undated], OLDER)).savedFilters)
             .toEqual([older, newer, undated]);
     });
@@ -558,22 +551,22 @@ describe('mergeSettingsForSync > savedFilters', () => {
     it('keeps the full filter when a v1.3.2 peer publishes only its rewrite of it', () => {
         const full = { ...newer, view: 'calendar', color: 'red' } as unknown as SavedFilter;
         const plain = older as SavedFilter;
-        // The v1.3.2 peer holds its rewrite of the filter and makes an unrelated edit.
+
         const editedOnOldPeer = { ...plain, name: 'Desk (edited on v1.3.2)', updatedAt: LATEST };
         const oldPeerList = v132NormalizeSavedFilters([full, editedOnOldPeer]);
         expect(oldPeerList.find((filter) => filter.id === full.id)).toMatchObject({ view: 'focus' });
 
         const published = mergeSettingsForSync(settingsWith([full, plain], OLDER), settingsWith(oldPeerList, NEWER));
 
-        // The remote copy's order (v1.3.2 sorted it), the full filter, the old peer's edit.
+
         expect(published.savedFilters).toEqual([editedOnOldPeer, full]);
         expect(selectFocusSavedFilters(published.savedFilters).map((filter) => filter.id)).toEqual(['filter-older']);
-        // Both directions agree, and a second merge changes nothing.
+
         expect(mergeSettingsForSync(settingsWith(oldPeerList, NEWER), settingsWith([full, plain], OLDER)).savedFilters)
             .toEqual([editedOnOldPeer, full]);
         expect(mergeSettingsForSync(published, published).savedFilters).toEqual(published.savedFilters);
-        // v1.3.2 compares documents after its own rewrite: what this build publishes
-        // reads as unchanged there, so the old peer does not upload again.
+
+
         expect(v132NormalizeSavedFilters(published.savedFilters)).toEqual(oldPeerList);
     });
 
@@ -593,7 +586,7 @@ describe('mergeSettingsForSync > savedFilters', () => {
                 expect(completePeer.savedFilters).toEqual([full]);
                 expect(v132NormalizeSavedFilters(completePeer.savedFilters)).toEqual(stripped);
             }
-            // A real edit is distinguished by updatedAt, even when it removes the date criterion.
+
             const edited = { ...stripped[0], updatedAt: LATEST };
             expect(mergeSettingsForSync(completePeer, settingsWith([edited], NEWER)).savedFilters).toEqual([edited]);
             expect(mergeSettingsForSync(settingsWith([edited], NEWER), completePeer).savedFilters).toEqual([edited]);
@@ -648,7 +641,7 @@ describe('mergeSettingsForSync > savedFilters', () => {
         const a = { id: 'f', name: 'A', view: 'focus', criteria: {} };
         const b = { id: 'f', name: 'B', view: 'focus', criteria: {} };
 
-        // Same group timestamp: one deterministic winner, whichever side merges.
+
         let peerA = settingsWith([a], OLDER);
         let peerB = settingsWith([b], OLDER);
         for (let round = 0; round < 3; round += 1) {
@@ -659,7 +652,7 @@ describe('mergeSettingsForSync > savedFilters', () => {
         expect(mergeSettingsForSync(settingsWith([a], OLDER), settingsWith([b], OLDER)).savedFilters)
             .toEqual(mergeSettingsForSync(settingsWith([b], OLDER), settingsWith([a], OLDER)).savedFilters);
 
-        // A strictly newer group timestamp wins, from either side.
+
         expect(mergeSettingsForSync(settingsWith([a], OLDER), settingsWith([b], NEWER)).savedFilters).toEqual([b]);
         expect(mergeSettingsForSync(settingsWith([b], NEWER), settingsWith([a], OLDER)).savedFilters).toEqual([b]);
     });
@@ -667,10 +660,7 @@ describe('mergeSettingsForSync > savedFilters', () => {
 
 const LATEST = '2026-09-01T00:00:00.000Z';
 
-// v1.3.2's saved-filter behavior (packages/core/src/saved-filters.ts
-// at tag v1.3.2). Other criterion normalization is unchanged; freeze the old
-// date surface below rather than teaching this fixture new fields/presets. Every v1.3.2 load,
-// save, merge and remote comparison ran its list through this.
+
 const V132_VIEWS = new Set(['focus', 'next', 'waiting', 'someday', 'contexts', 'all']);
 const V132_GROUP_BY = new Set(['none', 'context', 'project', 'area', 'energy', 'priority', 'person', 'tag']);
 const V132_SORT_FIELDS = new Set([
@@ -712,7 +702,7 @@ function v132NormalizeSavedFilter(value: unknown): SavedFilter | null {
         ...(deletedAt ? { deletedAt } : {}),
     } as SavedFilter;
 }
-// v1.3.2 date-range reader, including fallback to explicit bounds.
+
 function v132NormalizeDateRange(value: unknown): import('./types').DateRange | undefined {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
     const record = value as Record<string, unknown>;
@@ -759,12 +749,10 @@ describe('sanitizeMergedSettingsForSync', () => {
     });
 });
 
-// Two behaviours worth pinning because they read as accidents. Both are reported
-// rather than changed: they are the current, shipped arbitration.
+
 describe('mergeSettingsForSync > documented quirks', () => {
-    // mergeGroup reads localSettings.syncPreferences, not the preferences it just
-    // merged, so a remote that re-enables a group only takes effect on the NEXT
-    // merge. The merged preference itself is stored immediately, so it converges.
+
+
     it('honors the pre-merge opt-out even when the incoming side re-enabled the group', () => {
         const local = stamp(
             stamp({ theme: 'dark', syncPreferences: { appearance: false } }, 'appearance', OLDER),
@@ -781,13 +769,11 @@ describe('mergeSettingsForSync > documented quirks', () => {
 
         expect(merged.syncPreferences?.appearance).toBe(true);
         expect(merged.theme).toBe('dark');
-        // Second round, now that the opt-out is gone, the incoming value lands.
+
         expect(mergeSettingsForSync(merged, incoming).theme).toBe('light');
     });
 
-    // isSameValue compares with JSON.stringify, which is key-order sensitive, so
-    // two semantically identical objects count as a difference and the winner's
-    // copy (key order included) replaces the local one.
+
     it('treats key-order-only differences as a change and takes the winner copy', () => {
         const local = stamp({ ai: { enabled: true, model: 'shared-model' } }, 'ai', OLDER);
         const incoming = stamp({ ai: { model: 'shared-model', enabled: true } }, 'ai', NEWER);
@@ -820,9 +806,7 @@ describe('mergeSettingsForSync > dataset identity', () => {
     });
 });
 
-// The API key lives only on the device, so the address it is sent to and the
-// extra request body must be device-local too: a sync document must never
-// choose where this device sends its key or what the request carries.
+
 describe('mergeSettingsForSync > device-local AI fields', () => {
     it('drops an incoming endpoint and extra body when the local device has none', () => {
         const local = stamp({ ai: { enabled: true, provider: 'openai' } }, 'ai', OLDER);
@@ -886,9 +870,7 @@ describe('mergeSettingsForSync > device-local AI fields', () => {
     });
 });
 
-// The sync run reconciles the copy it read from disk with the live store and
-// passes the disk copy first, so the merge's device-local AI fields come from
-// the wrong side there. This puts them back.
+
 describe('restoreDeviceLocalAiSettings', () => {
     const data = (ai: AppData['settings']['ai']): AppData => ({
         tasks: [], projects: [], sections: [], areas: [], people: [], settings: { ai },
@@ -914,7 +896,7 @@ describe('restoreDeviceLocalAiSettings', () => {
         expect(restored.settings.ai?.openAIExtraBodyParams).toEqual({ fresh: true });
         expect(restored.settings.ai?.speechToText?.baseUrl).toBe('http://new-speech/v1');
         expect(restored.settings.ai?.speechToText?.offlineModelPath).toBe('/new/model.bin');
-        // Fields outside the device-local set are left as the merge decided.
+
         expect(restored.settings.ai?.speechToText?.enabled).toBe(true);
     });
 
@@ -926,8 +908,7 @@ describe('restoreDeviceLocalAiSettings', () => {
         expect(restored.settings.ai?.baseUrl).toBeUndefined();
     });
 
-    // The caller reads this identity to decide whether its snapshot still matches
-    // the document on disk, so an unchanged call must not build a new object.
+
     it('returns the same object when nothing has to change', () => {
         const ai = {
             provider: 'openai' as const,

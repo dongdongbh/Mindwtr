@@ -21,8 +21,7 @@ type NativeThemeWindowModule = Awaited<
 >;
 type NativeThemeWindow = ReturnType<NativeThemeWindowModule['getCurrentWindow']>;
 
-// The theme commands go through the invoke seam, which refuses to reach Rust
-// unless a Tauri runtime is present. Both are true in the desktop shell.
+
 const enableNativeInvoke = (transport: (command: string) => Promise<unknown>) => {
     (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
     setNativeInvokeTransport(transport as never);
@@ -71,8 +70,7 @@ describe('applyThemeMode', () => {
         expect(document.documentElement.classList.contains('dark')).toBe(false);
     });
 
-    // Tailwind is darkMode:'class', so a preset theme that forgets the `dark`
-    // class paints light-mode utilities over dark CSS variables.
+
     it.each([
         ['nord', 'theme-nord'],
         ['catppuccin-macchiato', 'theme-catppuccin-macchiato'],
@@ -152,7 +150,7 @@ describe('coerceDesktopThemeMode', () => {
     it('accepts the preset themes and rejects an unknown value', () => {
         expect(coerceDesktopThemeMode('catppuccin-macchiato')).toBe('catppuccin-macchiato');
         expect(coerceDesktopThemeMode('dracula')).toBe('dracula');
-        // A one-letter drift in either identifier must not silently resolve.
+
         expect(coerceDesktopThemeMode('catpuccin-macchiato')).toBeNull();
         expect(coerceDesktopThemeMode('draculaa')).toBeNull();
     });
@@ -293,7 +291,7 @@ describe('watchSystemThemePreference', () => {
         }));
 
         listener?.({ matches: true });
-        listener?.({ matches: true }); // GTK setting the same color must not recurse.
+        listener?.({ matches: true });
         await flushMicrotasks();
         expect(document.documentElement.classList.contains('dark')).toBe(true);
         expect(setWindowTheme).toHaveBeenCalledTimes(1);

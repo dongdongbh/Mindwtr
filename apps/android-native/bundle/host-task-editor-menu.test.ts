@@ -7,8 +7,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import { createTaskDraft } from '../../../packages/core/src/task-draft';
 import type { AppData } from '../../../packages/core/src/types';
 
-// The task editor's "..." menu on Android: Share is a Menu read (taskShare) and every write one journaled Menu command
-// (taskEditorAction). This runs host-entry's own MENU_READS and MENU_COMMANDS source with core's real contract.
+
 const entry = readFileSync(new URL('./host-entry.ts', import.meta.url), 'utf8');
 const table = (name: string) => {
     const start = entry.indexOf(`const ${name}: `);

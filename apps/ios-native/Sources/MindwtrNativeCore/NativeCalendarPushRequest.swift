@@ -1,7 +1,7 @@
 import CoreFoundation
 import Foundation
 
-/// Closed values only: parsing never authorizes provider, mapping or device-state effects.
+
 enum NativeCalendarPushRequest: Sendable {
     enum Read: Sendable {
         case permissions, calendars

@@ -1,18 +1,6 @@
-// Voice capture check for the isolated native Android development app (voice pass V5), against a local stub only.
-//
-//   node apps/android-native/scripts/check-voice-device.mjs <adb-serial> [apk]
-//
-// Starts an OpenAI-compatible speech stub on this computer (127.0.0.1:<port>, MINDWTR_VOICE_STUB_PORT or 18782) and maps the
-// phone's port to it (`adb reverse`): no real provider and no key is used, and nothing plays on the phone (it records the room).
-// Through the app's own screens:
-//   (1) Settings › Advanced › AI › Speech: speech on, OpenAI, the stub's base URL (a self-hosted server needs no key, #930);
-//   (2) the capture popup's mic: RN's record button (Record audio), its recording row; a stop shows the processing row, the
-//       popup closes, and the task saves first as "Audio Note …" with the recording attached (audio/mp4 in managed storage);
-//       the stub's transcript then becomes its title, from a multipart upload of an .m4a;
-//   (3) the popup closed while recording: no task, no recording left in files/voice-captures;
-//   (4) the app left while recording (Home), then back: the mic is idle and records again (review N5);
-//   (5) the microphone permission refused: RN's alert, nothing records.
-// Speech is turned off at the end, and the permission granted again.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
@@ -50,11 +38,7 @@ const PORT = Number(process.env.MINDWTR_VOICE_STUB_PORT ?? 18782);
 const BASE_URL = `http://127.0.0.1:${PORT}/v1`;
 const SPOKEN = `Voice check ${run}`;
 
-/**
- * The OpenAI-compatible speech stub: POST /v1/audio/transcriptions answers SPOKEN and reports the upload's content type, the file
- * part's name and type and its size; POST /v1/chat/completions (core's parse of the transcript) answers it as the title. On a
- * worker thread, so the check's synchronous adb calls never hold a request.
- */
+
 const STUB_SOURCE = `
     const { createServer } = require('node:http');
     const { parentPort, workerData: { port, spoken } } = require('node:worker_threads');
@@ -104,7 +88,7 @@ const sqlite = (sql) => {
     const out = execFileSync('sqlite3', ['-json', pullDatabase(), sql], { encoding: 'utf8' }).trim();
     return out ? JSON.parse(out) : [];
 };
-/** This run's live tasks: their titles and attachments. */
+
 const runTasks = () => sqlite(`SELECT id, title, attachments FROM tasks WHERE deletedAt IS NULL AND (title = '${SPOKEN}' OR title LIKE '${en['quickAdd.audioNoteTitle']} %') AND createdAt >= '${started}'`);
 const recordings = () => sh(`run-as ${PKG} sh -c 'ls files/voice-captures 2>/dev/null; ls files/voice-captures/quick-capture-audio 2>/dev/null' || true`)
     .split(/\s+/).filter((name) => /\.(m4a|wav|tmp)$/.test(name));
@@ -179,7 +163,7 @@ try {
     sh(`pm grant ${PKG} ${MIC}`);
     await restart();
 
-    // (1) Speech on, OpenAI, the stub's base URL.
+
     let nodes = await openSpeech();
     if (!speechSettings().enabled) {
         await tap(tagged(nodes, 'ai-speech-enabled') ?? fail('no speech switch'));
@@ -191,7 +175,7 @@ try {
     await tap(openai);
     await sleep(800);
     await agreeIfAsked();
-    // The field emptied and the stub's URL typed, as check-ai-device.mjs types its base URL.
+
     await device.focusAtEnd(await device.revealNode((next) => tagged(next, 'ai-speech-base-url'), 'speech base URL'));
     requireAppFront();
     sh('input keycombination KEYCODE_CTRL_LEFT KEYCODE_A');
@@ -205,7 +189,7 @@ try {
     }, 30_000);
     check(true, `(1) speech on with OpenAI at ${BASE_URL}`);
 
-    // (2) Record, stop, save first, then the transcript.
+
     nodes = await openPopup();
     check(micLabel(nodes) === en['quickAdd.audioRecord'], `(2) RN's record button beside the title: "${micLabel(nodes)}"`);
     nodes = await startRecording();
@@ -213,7 +197,7 @@ try {
     await sleep(3000);
     await tap(mic(await screen()));
     await waitFor('the popup closed after the save', (current) => !popup(current), 30_000);
-    // waitFor answers the screen's nodes, so the task is kept here. The first title is quickAdd.audioNoteTitle ("Audio Note").
+
     let saved = null;
     await waitFor('the voice task', () => (saved = runTasks().find((task) => task.title === SPOKEN
         || task.title.startsWith(`${en['quickAdd.audioNoteTitle']} `))), 30_000);
@@ -227,7 +211,7 @@ try {
         `(2) an m4a multipart upload: ${upload?.part?.join(' ')} ${upload?.bytes} bytes`);
     check(recordings().length === 0, `(2) no recording left in files/voice-captures (${recordings().join(' ')})`);
 
-    // (3) Closed while recording: nothing saved, nothing left.
+
     const before = runTasks().length;
     await openPopup();
     await startRecording();
@@ -237,7 +221,7 @@ try {
     await sleep(2000);
     check(runTasks().length === before && recordings().length === 0, '(3) closing the popup while recording saves nothing and leaves no file');
 
-    // (4) Leaving the app while recording, then back: idle, and it records again (review N5).
+
     await openPopup();
     await startRecording();
     requireAppFront();
@@ -252,19 +236,18 @@ try {
     check(recording(nodes), '(4) the next tap records again');
     await tapExpecting(withDescription(nodes, en['common.close']) ?? fail('no Close'), (current) => !popup(current), 'the popup closed');
 
-    // (5) The permission refused: RN's alert, nothing records.
-    // Two denials make Android stop asking ("don't ask again"), and pm revoke keeps that flag: clear it, so each run sees the prompt.
+
     sh(`pm clear-permission-flags ${PKG} ${MIC} user-set user-fixed`);
     sh(`pm revoke ${PKG} ${MIC}`);
     await restart();
     nodes = await openPopup();
     await tap(mic(nodes) ?? fail('no mic'));
     const deny = await waitFor('the system permission prompt', (current) => current.find((node) => /permission_deny(_and_dont_ask_again)?_button$/.test(node['resource-id'] ?? '')), 20_000);
-    // The system's own dialog is in front, so the app-front guard of tap() does not apply: tap it only while it is the one in front.
+
     if (!front().includes('permissioncontroller')) throw new Stopped(`the permission prompt is not in front: ${front().trim()}`);
     const [dx1, dy1, dx2, dy2] = box(deny.find((node) => /permission_deny(_and_dont_ask_again)?_button$/.test(node['resource-id'] ?? '')));
     sh(`input tap ${Math.round((dx1 + dx2) / 2)} ${Math.round((dy1 + dy2) / 2)}`);
-    // The alert is a dialog window, which carries no test tags: it is found by RN's title and its OK button by text.
+
     const alertShown = (current) => current.some((node) => node.text === en['quickAdd.audioPermissionTitle']);
     const alertOk = (current) => current.find((node) => node.text === en['common.ok']);
     nodes = await waitFor('RN\'s permission alert', (current) => alertShown(current) && Boolean(alertOk(current)), 20_000);
@@ -274,7 +257,7 @@ try {
     sh(`pm clear-permission-flags ${PKG} ${MIC} user-set user-fixed`);
     sh(`pm grant ${PKG} ${MIC}`);
 
-    // Speech off again, for the checks after this one.
+
     nodes = await openSpeech();
     if (speechSettings().enabled) await tap(tagged(nodes, 'ai-speech-enabled'));
     await waitFor('speech off', () => speechSettings().enabled !== true, 20_000);

@@ -79,7 +79,7 @@ const t = (key: string) => ({
 
 let tree: ReactTestRenderer | null = null;
 
-/** Renders the sheet over a real selections hook, as all mobile hosts do. */
+
 function renderSheet({
   view = 'list',
   options,
@@ -130,7 +130,7 @@ const hasText = (text: string): boolean => (
   tree!.root.findAllByType(Text).some((node) => node.props.children === text)
 );
 
-/** Depth-first index of the first node matching, i.e. its place in the sheet. */
+
 const renderOrderIndexOf = (predicate: (node: { type: unknown; props: Record<string, unknown> }) => boolean): number => (
   tree!.root.findAll(() => true).findIndex(predicate as never)
 );

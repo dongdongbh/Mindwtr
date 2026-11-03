@@ -26,7 +26,7 @@ import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { logError } from '@/lib/app-log';
 import { styles } from './task-edit-modal.styles';
 
-/** Writes core's move patch into the draft, where '' is this screen's "none". */
+
 export function applyTaskEditDestination(
     setDraftField: (field: 'projectId' | 'areaId' | 'sectionId', value: string) => void,
     currentProjectId: string | undefined,
@@ -102,7 +102,7 @@ export function TaskEditDestinationPicker({
         () => getProjectChoiceState(projects, query, allProjects ?? projects),
         [allProjects, projects, query],
     );
-    // Active projects first, then Someday / Waiting under their own heading (#1467).
+
     const projectGroups = useMemo(() => groupProjectsForPicker(projectChoices.filteredProjects, areas), [areas, projectChoices.filteredProjects]);
     const activeAreas = useMemo(
         () => areas.filter((area) => !area.deletedAt).sort(compareAreasByOrder),

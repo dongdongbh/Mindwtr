@@ -79,7 +79,7 @@ describe('MindSweepLauncher', () => {
         fireEvent.click(getByText('mindSweep.scopeWork'));
         fireEvent.click(getByText('mindSweep.start'));
 
-        // First work group, not a personal one.
+
         expect(getByText('mindSweep.group.commitments.title')).toBeInTheDocument();
         expect(queryByText('mindSweep.group.homeStuff.title')).toBeNull();
 
@@ -88,13 +88,13 @@ describe('MindSweepLauncher', () => {
         fireEvent.keyDown(input, { key: 'Enter' });
         await waitFor(() => expect(getByText('Reply to the vendor')).toBeInTheDocument());
 
-        // 4 work groups -> press next 4 times to land on the summary.
+
         fireEvent.click(getByText('mindSweep.next'));
         fireEvent.click(getByText('mindSweep.next'));
         fireEvent.click(getByText('mindSweep.next'));
         fireEvent.click(getByText('mindSweep.next'));
         expect(getByText('mindSweep.summaryTitle')).toBeInTheDocument();
-        // With t = (key) => key the count template renders as the literal key.
+
         expect(getByText('mindSweep.summaryCount')).toBeInTheDocument();
     });
 });

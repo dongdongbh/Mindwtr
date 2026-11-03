@@ -99,7 +99,7 @@ describe('mobile background sync policy', () => {
     expect(fake.ports.sync.performSync).toHaveBeenCalledTimes(1);
     expect(fake.logs).toContainEqual(expect.objectContaining({ message: 'Mobile background sync skipped during failure cooldown' }));
 
-    // A Save from the capture dialog is the user acting now: no cooldown.
+
     fake.ports.drainPendingCaptures.mockResolvedValueOnce(1);
     fake.ports.sync.performSync.mockResolvedValue({ success: true });
     await expect(runner.run('capture')).resolves.toBe('success');

@@ -43,7 +43,7 @@ vi.mock('@mindwtr/core', () => ({
 vi.mock('@/lib/pending-captures', () => ({
   ingestPendingCaptures: mocks.ingestPendingCaptures,
 }));
-// The shared drain module also serves the background path, which owns these two.
+
 vi.mock('@/lib/storage-adapter', () => ({ mobileStorage: {} }));
 vi.mock('@/lib/file-system', () => ({ documentDirectory: null, getInfoAsync: vi.fn(), readDirectoryAsync: vi.fn() }));
 vi.mock('../../modules/notification-open-intents', () => ({ peekPendingNotificationCompletions: vi.fn(async () => []) }));
@@ -103,8 +103,7 @@ describe('useRootLayoutPendingCaptures', () => {
     act(() => tree.unmount());
   });
 
-  // Before canonical data only the startup snapshot is in the store. A write
-  // there makes core discard the SQLite load, so the queue waits on disk.
+
   it('holds the queue until canonical data is ready, then drains it once', async () => {
     let drain!: () => Promise<void>;
     function Probe({ canonicalDataReady }: { canonicalDataReady: boolean }) {
@@ -113,7 +112,7 @@ describe('useRootLayoutPendingCaptures', () => {
     }
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<Probe canonicalDataReady={false} />); });
-    // A Watch wake-up before the load is a no-op, not a lost capture.
+
     await act(async () => { await drain(); });
     expect(mocks.ingestPendingCaptures).not.toHaveBeenCalled();
     expect(mocks.ingestIosWidgetCompletions).not.toHaveBeenCalled();
@@ -130,7 +129,7 @@ describe('useRootLayoutPendingCaptures', () => {
       },
     });
 
-    // Later foregrounds drain again; the startup line stays one per launch.
+
     await act(async () => { mocks.listeners.forEach((listener) => listener('active')); });
     expect(mocks.ingestPendingCaptures).toHaveBeenCalledTimes(2);
     expect(vi.mocked(logInfo).mock.calls.filter(

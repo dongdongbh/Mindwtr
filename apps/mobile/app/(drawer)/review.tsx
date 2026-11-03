@@ -135,7 +135,7 @@ export default function ReviewScreen() {
     tagModalVisible,
     toggleMultiSelect,
   } = useTaskListSelection({
-    // The hook gates its own tag dialogs; these are the screen's.
+
     backExitsSelection: !(isModalVisible || moveModalVisible || bulkOrganizeVisible || showReviewModal || reviewPickerVisible),
     batchDeleteTasks,
     batchMoveTasks,
@@ -240,9 +240,7 @@ export default function ReviewScreen() {
     setExpandedReviewProjectIds((prev) => toggleReviewExpandedId(prev, projectGroupId));
   }, []);
 
-  // One actions object for every row on the screen, reading the current store
-  // handlers from a ref, so re-rendering the review list does not hand each row
-  // a fresh set of arrows (#766).
+
   const rowSourcesRef = useRef({ updateTask, deleteTask, toggleMultiSelect });
   rowSourcesRef.current = { updateTask, deleteTask, toggleMultiSelect };
   const openTaskEditor = useCallback((task: Task) => {

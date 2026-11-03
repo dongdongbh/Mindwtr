@@ -81,8 +81,8 @@ export default function SearchScreen() {
   const requestedIncludeCompleted = firstSearchParam(params.includeCompleted).toLowerCase() === 'true';
   const [query, setQuery] = useState(requestedQuery);
   const [ftsResults, setFtsResults] = useState<SearchResults | null>(null);
-  // Which query the current ftsResults answer — stale answers must not merge
-  // in front of fresh in-memory results while the user is still typing.
+
+
   const [ftsQuery, setFtsQuery] = useState('');
   const [ftsLoading, setFtsLoading] = useState(false);
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -165,8 +165,8 @@ export default function SearchScreen() {
         hiddenCompletedCount,
     } = useMemo(
         () => {
-            // These clock hooks deliberately invalidate otherwise unchanged
-            // search inputs at midnight and at the next timed start.
+
+
             void futureStartDayKey;
             void futureStartRevealTick;
             return computeGlobalSearchResults({
@@ -215,14 +215,11 @@ export default function SearchScreen() {
             : null,
         [_allTasks, editingTaskId]
     );
-    // The store already maintains _tasksById over the same _allTasks array
-    // (PERF-03); no need to rebuild a fresh Map on every render.
+
+
     const taskById = _tasksById;
-    // Search rows are SearchTaskResult, which deliberately carries no
-    // completedAt — the full task behind the row does (#991). The label word is
-    // what tells a completion date from a deadline, so neither is ever shown
-    // bare; a finished task with no completedAt shows nothing rather than
-    // falling back to its due date.
+
+
     const resolveResultDate = (result: SearchTaskResult): { color: string; label: string } | null => {
         const date = getGlobalSearchResultDate(taskById.get(result.id), t, safeFormatDate);
         return date ? { label: date.label, color: date.tone === 'danger' ? tc.danger
@@ -277,8 +274,7 @@ export default function SearchScreen() {
         });
     };
 
-    // The row's check icon completes the task in place (#1051) — same
-    // immediate-complete-with-undo-toast contract as the task list rows.
+
     const completeTaskFromSearch = (result: SearchTaskResult) => {
         const task = _allTasks.find((item) => item.id === result.id && !item.deletedAt);
         if (!task || isTaskFinished(task)) return;
@@ -715,11 +711,11 @@ export default function SearchScreen() {
                 onContextNavigate={openContextsScreen}
                 onTagNavigate={openContextsScreen}
             />
-            {/* This route is presented modally, so a root-level alert never
-                reaches the screen on iOS (#940). */}
+            {
+                                                    }
             <ThemedAlertHost />
-            {/* Same modal-covering problem for toasts: the completion undo
-                toast must render inside this screen, not the root overlay. */}
+            {
+                                                                              }
             <ToastViewport />
         </SafeAreaView>
     );

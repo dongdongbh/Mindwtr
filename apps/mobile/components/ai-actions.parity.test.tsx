@@ -1,27 +1,6 @@
-/**
- * React Native's AI actions, replayed against the frozen parity fixture
- * (packages/core/src/ai-actions-parity.fixtures.json) that core's AI request
- * rules and the native host contract are tested against: the task editor's
- * copilot, Clarify and Break down, Process Inbox's Clarify, and the Weekly
- * Review's analysis.
- *
- * To recapture, keep every file under apps/ at HEAD except the parity
- * harnesses, then run
- *   MINDWTR_CAPTURE_AI_ACTIONS=1 TZ=UTC bunx vitest run components/ai-actions.parity.test.tsx
- * The capture refuses to run while any other file under apps/ differs from HEAD.
- * After a recorded React Native fix, MINDWTR_DUMP_AI_ACTIONS=<file> writes this
- * run's observations, to replace only the ones the fix changes.
- *
- * Each scenario runs React Native's own hooks (the editor's useTaskEditCopilot,
- * useTaskEditActions and useTaskEditPreview; useInboxProcessingController;
- * useReviewModalController) over the real core store and React Native's real
- * key storage, and records every request the AI provider receives (the
- * provider's settings and the method's input), the alerts, toasts and dialog
- * the user sees, and what the action changes: the editor's draft and checklist,
- * the Process Inbox title and contexts, the review's suggestions and writes. The
- * provider answers from the scenario's queue; the secure store and AsyncStorage
- * are the scenario's maps.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -63,13 +42,13 @@ const harness = vi.hoisted(() => ({
   toasts: [] as unknown[][],
   routes: [] as unknown[],
   logs: [] as unknown[][],
-  /** A keystore that cannot be read (locked, or its key lost). */
+
   secretsFail: false,
 }));
 
 const translate = (key: string) => harness.strings[key] ?? key;
 
-/** The provider's next answer for `method`: `{ value }` answers it, `{ error }` rejects. */
+
 const answer = async (method: string): Promise<any> => {
   const queue = harness.queues[method];
   const entry = queue && queue.length > 0 ? queue.shift() : { error: `No ${method} answer queued` };
@@ -165,8 +144,6 @@ vi.mock('../lib/task-meta-navigation', () => ({
   openContextsScreen: () => undefined, openProjectScreen: () => undefined, openTaskScreen: () => undefined,
 }));
 
-// ---------------------------------------------------------------------------
-// Scenario data.
 
 const at = (day: string, time = '12:00:00') => `2026-${day}T${time}.000Z`;
 const task = (id: string, title: string, extra: Partial<Task> = {}): Task => ({
@@ -205,14 +182,8 @@ const SETTINGS: Record<string, AppSettings> = {
 const KEYS = { 'mindwtr-ai-key_openai': 'sk-open-111', 'mindwtr-ai-key_anthropic': 'sk-ant-222' };
 
 type Device = { language?: Language; secrets?: Record<string, string>; queues?: Record<string, unknown[]> };
-/**
- * Editor actions: ['title', text], ['description', text] type into the fields;
- * ['wait'] lets the copilot's 800 ms pause pass; ['chip', value] applies one
- * suggested part, ['applyAll'] all of them; ['clarify'], ['breakdown'] press the
- * AI buttons; ['modal', label] presses a dialog button; ['hide'] closes the
- * editor. Inbox actions: ['clarify'], ['modal', label], ['title', text].
- * Review actions: ['run'], ['toggle', id], ['apply'].
- */
+
+
 type Scenario = {
   name: string;
   screen: 'editor' | 'inbox' | 'review';
@@ -373,8 +344,6 @@ const scenarios: Scenario[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// The store: real data, recorded writes.
 
 const writeLog: unknown[][] = [];
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
@@ -416,8 +385,6 @@ function setDevice(device: Device) {
   writeLog.length = 0;
 }
 
-// ---------------------------------------------------------------------------
-// The hosts: React Native's hooks, each with the state its screen gives it.
 
 type Modal = { title: string; message?: string; actions: AIResponseAction[] } | null;
 const readModal = (modal: Modal) => (modal
@@ -590,8 +557,6 @@ function ReviewHost({ api }: { api: { current: ReviewApi | null } }) {
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Driving a scenario.
 
 const settle = async () => {
   await act(async () => {
@@ -745,7 +710,7 @@ describe('React Native AI actions parity fixture', () => {
       return [alerts, error ?? null];
     });
     const text = JSON.stringify([shown, harness.logs]);
-    // Each alert, the review's error and each log line still say what failed.
+
     expect(text.match(/Incorrect API key provided/g)?.length).toBeGreaterThanOrEqual(4);
     expect(text).not.toContain('local-secret-42');
   });

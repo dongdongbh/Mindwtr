@@ -3,7 +3,7 @@ import { isEntityOpenUrl, parseEntityOpenUrl, translateWithFallback, useTaskStor
 import { logInfo, logWarn } from '../lib/app-log';
 import { useUiStore } from '../store/ui-store';
 
-/** Exact-ID navigation only; pending links never write tasks or change saved filters. */
+
 export function useTaskDeepLink(dataReady: boolean, enabled: boolean, t: (key: string) => string) {
     const [pendingUrl, setPendingUrl] = useState<{ url: string } | null>(null);
     const [openTaskId, setOpenTaskId] = useState<string | null>(null);
@@ -24,7 +24,7 @@ export function useTaskDeepLink(dataReady: boolean, enabled: boolean, t: (key: s
             if (url) setPendingUrl({ url });
         };
         void import('@tauri-apps/plugin-deep-link').then(async ({ onOpenUrl, getCurrent }) => {
-            // Listen before reading startup URLs so a warm event cannot fall into the gap.
+
             const stop = await onOpenUrl(receive);
             if (disposed) { stop(); return; }
             unlisten = stop;
@@ -41,7 +41,7 @@ export function useTaskDeepLink(dataReady: boolean, enabled: boolean, t: (key: s
         if (!dataReady) {
             if (error && !loadFailed.current) {
                 loadFailed.current = true;
-                // Preserve the pending link for a successful reload; surface the existing load error.
+
                 useUiStore.getState().showToast(error, 'error');
             }
             return;

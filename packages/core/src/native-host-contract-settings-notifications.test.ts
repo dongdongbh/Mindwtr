@@ -5,7 +5,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import type { AppSettings } from './types';
 import { generateUUID } from './uuid';
 
-/** Settings › Notifications (RN's notifications-settings-screen.tsx) through the native host contract. */
+
 const value = <T,>(result: NativeHostResult<T>): T => {
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
     return result.value;
@@ -57,7 +57,7 @@ describe('native host contract: Settings › Notifications', () => {
             disabled: false, edit: { type: 'notificationsEnabled', value: true }, askPermission: true });
         expect(view.reminders.startReminders).toMatchObject({ value: false, disabled: true });
         expect(view.reminders.dueReminders).toMatchObject({ value: false, disabled: true });
-        // No notification feature on: RN shows no exact-alarm row; a host without the switch draws none.
+
         expect(view.reminders.exactAlarmNotice).toBeNull();
         expect(view.reminders.persistentCapture).toBeNull();
         expect(view.weeklyReview.enable).toMatchObject({ value: false, edit: { type: 'weeklyReviewEnabled', value: true } });
@@ -65,7 +65,7 @@ describe('native host contract: Settings › Notifications', () => {
         expect(view.weeklyReview.day.options.map((option) => option.label)).toEqual(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
         expect(view.weeklyReview.time).toEqual({ label: t('settings.weeklyReviewTime'), description: '18:00', value: '18:00', hour: 18, minute: 0,
             disabled: true, type: 'weeklyReviewTime' });
-        // The digests and the weekly review stand apart from Task reminders (RN's 255444968, 4176b4ec7): never dimmed by it.
+
         expect(view.dailyDigest.morning).toMatchObject({ description: `${t('settings.dailyDigestMorningTime')}: 09:00`, value: false, disabled: false });
         expect(view.dailyDigest.evening.disabled).toBe(false);
         expect(view.weeklyReview.enable.disabled).toBe(false);
@@ -122,7 +122,7 @@ describe('native host contract: Settings › Notifications', () => {
             { type: 'notificationsEnabled', value: 'yes' },
             { type: 'theme', value: 'dark' },
             { type: 'notificationsEnabled', value: true, extra: 1 },
-            // No persistent capture switch on this host.
+
             { type: 'persistentCapture', value: true },
         ]) {
             const result = await host.setNotificationsSetting({ requestId: generateUUID(), edit: edit as never });
@@ -143,7 +143,7 @@ describe('native host contract: Settings › Notifications', () => {
         const strings = { title: t('captureNotification.title'), text: t('captureNotification.text'), channelName: t('captureNotification.channelName') };
         const requestId = generateUUID();
         expect(value(await host.setNotificationsSetting({ requestId, edit: row.edit }))).toEqual({ changed: true, deviceWrites: [], persistentCapture: { post: strings } });
-        // A new request for the same state writes nothing and still says what to show (a replay after a restart posts it again).
+
         expect(value(await host.setNotificationsSetting({ requestId: generateUUID(), edit: row.edit })))
             .toEqual({ changed: false, deviceWrites: [], persistentCapture: { post: strings } });
         expect(writes).toEqual([true]);
@@ -152,7 +152,7 @@ describe('native host contract: Settings › Notifications', () => {
         expect(value(await host.setNotificationsSetting({ requestId: generateUUID(), edit: { type: 'persistentCapture', value: false } })))
             .toEqual({ changed: true, deviceWrites: [], persistentCapture: { post: null } });
         expect(writes).toEqual([true, false]);
-        // Device-local: the synced settings are never written.
+
         await flushPendingSave();
         expect(saves).toBe(0);
     });
@@ -160,7 +160,7 @@ describe('native host contract: Settings › Notifications', () => {
     it('shows an unreadable persistent capture store as off, and never tells the host to remove the notification', async () => {
         const { host } = await openHost({}, { capture: { stored: true, failRead: true } });
         expect(value(host.getNotificationsSettings()).reminders.persistentCapture?.value).toBe(false);
-        // Only a store read as off removes it: an unreadable one is a failure, and the host keeps what it shows.
+
         const restore = host.getPersistentCaptureNotification();
         expect(restore.ok ? null : restore.error.code).toBe('ACTION_FAILED');
     });

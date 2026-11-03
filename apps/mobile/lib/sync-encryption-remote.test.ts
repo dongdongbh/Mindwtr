@@ -119,7 +119,7 @@ describe('attachment byte seam', () => {
     const plaintext = new Uint8Array([0, 1, 2, 250, 251, 255]);
     const sealed = await sealAttachmentBytesForUpload(plaintext, material);
     expect(inspectSyncArtifact(sealed).kind).toBe('encrypted');
-    expect(sealed.length).toBe(plaintext.length + 70); // fixed MWENC1 overhead
+    expect(sealed.length).toBe(plaintext.length + 70);
     expect(Array.from(await openAttachmentBytesFromDownload(sealed, material)))
       .toEqual(Array.from(plaintext));
   });
@@ -154,22 +154,19 @@ describe('attachment byte seam', () => {
       PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
     );
     const sealed = await sealAttachmentBytesForUpload(new Uint8Array([1, 2, 3]), material);
-    sealed[6] = 0x09; // unknown format_version -> 'unsupported'
+    sealed[6] = 0x09;
     await expect(openAttachmentBytesFromDownload(sealed, material))
       .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
   });
 
-  // fresh-join-attachment-posture packet -10 (correction pass, item 2): the attachment-byte
-  // decrypt/encrypt seams get their own `remote-read` line — same event/builder as the
-  // document-read seams — so a support log can explain an attachment refusal without a
-  // second round-trip. Shown here to precede BOTH ways this seam can throw.
+
   describe('remote-read diagnostics', () => {
     it('logs a remote-read line before a decrypt failure on a corrupt container', async () => {
       const material = await deriveSyncKeyMaterial(
         PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
       );
       const sealed = await sealAttachmentBytesForUpload(new Uint8Array([1, 2, 3]), material, 'attachments/corrupt.bin');
-      sealed[6] = 0x09; // unknown format_version -> 'unsupported'
+      sealed[6] = 0x09;
       vi.mocked(logInfo).mockClear();
 
       await expect(openAttachmentBytesFromDownload(sealed, material, 'attachments/corrupt.bin'))
@@ -201,10 +198,8 @@ describe('attachment byte seam', () => {
       const remoteReadCalls = vi.mocked(logInfo).mock.calls
         .filter(([message]) => message === '[sync-encryption] remote-read')
         .map(([, context]) => (context as { extra?: Record<string, string> }).extra);
-      // seal(off) -> plaintext/seal, seal(material) -> encrypted/seal, open(material,
-      // decrypts) -> encrypted/decrypt. `artifact` (review finding S1) carries the cloudKey's
-      // leaf name through `syncEncryptionArtifactLabel`, never the absent marker when a name
-      // is available.
+
+
       expect(remoteReadCalls).toEqual([
         expect.objectContaining({ artifact: 'plain.bin', kind: 'plaintext', decision: 'seal' }),
         expect.objectContaining({ artifact: 'secret.bin', kind: 'encrypted', decision: 'seal' }),
@@ -234,7 +229,7 @@ describe('transition entry derivation', () => {
     expect(entries.filter((e) => e.kind === 'document').map((e) => e.name)).toEqual([
       'data.json', 'data.json.enc', 'data.json.bak', 'data.json.enc.bak',
     ]);
-    // Deduplicated, and attachments keep their exact cloudKey name.
+
     expect(entries.filter((e) => e.kind === 'attachment').map((e) => e.name)).toEqual([
       'attachments/a0.png', 'attachments/a1.png',
     ]);
@@ -307,7 +302,7 @@ describe('WebDAV remote port error boundaries', () => {
   });
 
   it.each([403, 404])('fails closed on an HTTP %s collection response', async (status) => {
-    // 404 stays fatal when the collection still cannot be listed after creating it.
+
     const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => (
       new Response(null, { status: init?.method === 'MKCOL' ? 201 : status })
     ));
@@ -507,9 +502,7 @@ describe('WebDAV remote port error boundaries', () => {
     expect(fetcher.mock.calls.every(([, init]) => ['GET', 'PROPFIND'].includes(init?.method ?? 'GET'))).toBe(true);
   });
 
-  // A server without strong ETags must be refused as the transition's own check refuses it, before the remote mutation fence
-  // is written: the fence's read-back has no version there, so it failed as "fence lost" (the card's "safe to try again"),
-  // and the fence file it wrote stayed on the server.
+
   it.each([
     ['missing', undefined],
     ['weak', 'W/"v1"'],
@@ -822,8 +815,7 @@ describe('Dropbox remote port + core transition round trip', () => {
       undefined, mobileSyncCryptoPrimitives,
     );
 
-    // Resume re-derives the SAME key from the existing header and skips artifacts whose
-    // current bytes already decrypt — no double encryption, no orphaned second salt.
+
     expect(Buffer.from(remote.get('/data.json.enc')!).toString('base64')).toBe(sealedDoc);
     expect(Buffer.from(remote.get('/attachments/a0.png')!).toString('base64')).toBe(sealedAttachment);
   }, 30_000);

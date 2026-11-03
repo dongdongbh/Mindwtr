@@ -13,8 +13,7 @@ const {
   patchSchedulerSource,
 } = plugin.__testables;
 
-// The real vendored file. It may already carry the patch from an earlier prebuild, so the
-// anchor-level assertions run against a pristine fixture and this one checks the end state.
+
 const vendoredSchedulerPath = [process.cwd(), path.join(process.cwd(), 'apps', 'mobile')]
   .flatMap((root) => getSchedulerCandidates(root))
   .find((candidate) => fs.existsSync(candidate));
@@ -26,7 +25,7 @@ const readVendoredScheduler = () => {
   return fs.readFileSync(vendoredSchedulerPath, 'utf8');
 };
 
-// The two upstream regions the patch anchors on, verbatim from expo-background-task 1.0.10.
+
 const PRISTINE_SOURCE = `object BackgroundTaskScheduler {
   private suspend fun scheduleWorker(context: Context, appScopeKey: String, cancelExisting: Boolean = true, overriddenIntervalMinutes: Long = intervalMinutes): Boolean {
     if (numberOfRegisteredTasksOfThisType == 0) {
@@ -79,7 +78,7 @@ describe('patch-expo-background-task plugin', () => {
       'if (cancelExisting && getWorkerInfo(context)?.state == WorkInfo.State.RUNNING)'
     );
     expect(patched).toContain(APPLIED_MARKER);
-    // The guard must sit above the cancel, otherwise the running worker still dies.
+
     expect(patched.indexOf(APPLIED_MARKER)).toBeLessThan(
       patched.indexOf('// Stop the current worker (if any)')
     );
@@ -89,8 +88,7 @@ describe('patch-expo-background-task plugin', () => {
   it('makes a RUNNING work info win the unique-work lookup', () => {
     const patched = applyRunningWorkerGuard(PRISTINE_SOURCE);
 
-    // An APPEND chain holds several work infos; firstOrNull() can return an ENQUEUED sibling
-    // while another is RUNNING, and cancelUniqueWork would then cancel the running one too.
+
     expect(patched).toContain(`return ${WORK_INFO_MARKER} ?: workInfos.firstOrNull()`);
     expect(patched).not.toMatch(/return workInfos\.firstOrNull\(\)\n/);
   });
@@ -111,7 +109,7 @@ describe('patch-expo-background-task plugin', () => {
   });
 
   it('still finds both anchors in the vendored expo-background-task source', () => {
-    // Fails loudly if an upstream bump moves either anchor, instead of shipping an inert patch.
+
     const patched = applyRunningWorkerGuard(readVendoredScheduler());
 
     expect(patched).toContain(APPLIED_MARKER);

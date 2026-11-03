@@ -6,7 +6,7 @@ import {
     type AttachmentCleanupPolicyAttachment,
 } from './attachment-cleanup';
 
-/** A retained native cleanup owner forbids further work until its exact retry settles. */
+
 export class NativeAttachmentCleanupUnconfirmedError extends Error {
     constructor() {
         super('Attachment cleanup could not be confirmed; retry the retained request');
@@ -53,7 +53,7 @@ const exact = (value: unknown, fields: readonly string[]): value is Record<strin
         return Boolean(descriptor?.enumerable && own(descriptor, 'value'));
     })
 );
-// Native JavaScript engines do not need a TextEncoder capability for this guard.
+
 const utf8Bytes = (text: string, limit: number): number => {
     let bytes = 0;
     for (let index = 0; index < text.length; index++) {
@@ -108,7 +108,7 @@ const projection = (value: unknown): { tasks: Parent[]; projects: Parent[] } => 
         }
     }
     if (utf8Bytes(JSON.stringify(raw), FRAME_BYTES) > FRAME_BYTES) invalid();
-    // Inner SQL cells are parsed only after the entire projection passes its caps.
+
     const parents = (rows: NativeAttachmentCleanupRawRow[]): Parent[] => rows.map((row) => {
         const values: unknown = row.attachments === null ? [] : JSON.parse(row.attachments);
         if (!Array.isArray(values) || values.length > 1000) return invalid();
@@ -147,12 +147,12 @@ const prepare = (raw: unknown, selected: unknown): NativeAttachmentCleanupWitnes
     return witness;
 };
 
-/** A policy witness only: native still owns the exact physical file proof. */
+
 export function prepareNativeAttachmentCleanupWitness(raw: unknown, selected: unknown): NativeAttachmentCleanupWitness | null {
     try { return prepare(raw, selected); } catch { return invalid(); }
 }
 
-/** Re-run the existing cleanup policy over fresh durable rows, preserving all selected metadata. */
+
 export function isNativeAttachmentCleanupWitnessEligible(raw: unknown, value: unknown): boolean {
     try {
         if (!exact(value, ['version', 'parentKind', 'parentID', 'parentPurgedAt', 'attachmentID', 'targetURI', 'attachmentJSON'])

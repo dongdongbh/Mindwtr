@@ -198,7 +198,7 @@ describe('prepared notification Settings', () => {
             { ...request, requestId: 'not-a-uuid' }, { ...request, expected: { present: false, value: 0 } },
             { ...request, expected: { present: true, value: 'x'.repeat(1025) } },
             ...badEdits.map((edit) => ({ ...request, edit }))];
-        // This UUID contains no letters; use an uppercase UUID with an actual alpha cell.
+
         badRequests[3] = { ...request, requestId: 'AAAAAAAA-0000-4000-8000-000000000442' };
         for (const input of badRequests) {
             expect(await env.host.prepareNotificationSetting(input)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });

@@ -184,8 +184,8 @@ describe('TaskBulkOrganizeModal', () => {
 
     it('treats newlines as token separators without splitting spaces inside labels', () => {
         const { getByLabelText, getByRole, onApply } = renderModal();
-        // Single-line DOM inputs strip newlines; supply a synthetic multiline
-        // change to exercise the Apply boundary independently of that behavior.
+
+
         for (const [label, value] of [
             ['Contexts', 'Home Office\nTravel Plans'],
             ['Tags', 'Fresh Ideas\nProject Admin'],

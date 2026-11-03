@@ -2,7 +2,7 @@ import { safeParseDueDate } from './date';
 import { isTaskActionable } from './task-status';
 import type { Project, Section, Task } from './types';
 
-/** Counts persisted tasks only; recurrence projection and start dates are irrelevant to a due badge. */
+
 export function countTasksForIconBadge(
     tasks: readonly Task[],
     projects: readonly Project[],

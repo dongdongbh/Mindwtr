@@ -111,9 +111,7 @@ describe('useRootLayoutContextAutomation', () => {
     expect(returnToBackground).toHaveBeenCalledTimes(1);
   });
 
-  // The Android broadcast hands on its `context` extra as sent (for example
-  // `home`); the Contexts screen matches '@home' only, so the notification must
-  // open the token, as a link's does.
+
   it('opens the @ token from the receiver\'s bare context name', async () => {
     mockStoreState.tasks = [{
       id: 'task-1',
@@ -135,8 +133,7 @@ describe('useRootLayoutContextAutomation', () => {
     );
   });
 
-  // The notification lists next actions from the store; the startup snapshot
-  // can lag SQLite, so the URL is held until canonical data, then handled once.
+
   it('holds a context URL delivered before canonical data and handles it once after', async () => {
     const returnToBackground = vi.fn();
     const url = 'mindwtr://contexts?token=%40parents&contextAction=activate';

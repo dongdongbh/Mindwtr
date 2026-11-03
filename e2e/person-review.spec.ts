@@ -37,7 +37,7 @@ test('Manage People opens a combined, deduplicated person review', async ({ page
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Search', exact: true }).click();
     await expect(page.getByRole('dialog').getByRole('textbox', { name: 'Search', exact: true })).toHaveValue('');
-    // A review shortcut only changes search state; it never rewrites tasks.
+
     const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem('mindwtr-data')!).tasks);
     expect(persisted.find((task: { id: string }) => task.id === 'context').assignedTo).toBeUndefined();
     expect(persisted.find((task: { id: string }) => task.id === 'both').contexts).toEqual(['@Alex']);

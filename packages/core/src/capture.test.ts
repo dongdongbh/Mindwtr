@@ -127,8 +127,8 @@ describe('buildCaptureTaskProps', () => {
     });
 
     it('preserve mode: detected date applies while the title stays verbatim (quick capture default)', () => {
-        // In preserve mode quick-add hands back titleWithoutDate = verbatim
-        // title, so the capture keeps the typed text AND gets the due date.
+
+
         const detected = { date: '2026-08-01', matchedText: 'aug 1', titleWithoutDate: 'Pay rent aug 1' };
         const applied = buildCaptureTaskProps({
             parsed: { ...parsedBase, title: 'Pay rent aug 1', detectedDate: detected },

@@ -1,9 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initializeSandboxRuntime, useTaskStore } from '@mindwtr/core';
 
-// Calendar push writes events into the device calendar. In the sandbox
-// workspace none of that may happen: no expo-calendar call, no stored setting,
-// no calendar_sync row, and no subscription to the task store.
+
 const {
   mockGetItem,
   mockSetItem,
@@ -132,8 +130,8 @@ describe('calendar-push-sync in sandbox mode', () => {
       const unsubscribe = startCalendarPushSync();
       unsubscribe();
       stopCalendarPushSync();
-      // A debounced push waits CALENDAR_PUSH_SYNC_DEBOUNCE_MS (2500 ms) before it
-      // runs, so run the clock past it rather than asserting on the same tick.
+
+
       await vi.advanceTimersByTimeAsync(10_000);
     } finally {
       vi.useRealTimers();

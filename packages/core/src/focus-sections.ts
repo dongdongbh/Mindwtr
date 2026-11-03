@@ -1,18 +1,6 @@
-/**
- * The ONE derivation of which task lands in which Focus section — Today's
- * Focus, Today (schedule), Review Due, Next actions, Upcoming — shared by the
- * desktop Focus screen (`AgendaView.tsx`), the mobile Focus screen
- * (`app/(drawer)/(tabs)/focus.tsx`), the mobile widget payload
- * (`widget-payload.ts`), the Shortcuts snapshot and the macOS widget
- * (`focus-widget-selection.ts`). Three hand copies used to disagree about the
- * equal-time tiebreak; they no longer can.
- *
- * Two steps, so a caller can own its pools without owning the buckets:
- * `buildFocusPools` narrows the store's tasks the way Focus narrows them, and
- * `deriveFocusTaskLists` buckets and sorts what came out. Both are pure and
- * take `now` as a parameter, never `Date.now()`, so one render sees one
- * instant and tests are deterministic.
- */
+
+
+
 import { hasTimeComponent, isDueForReview, safeParseDate, safeParseDueDate } from './date';
 import { applyFilter } from './saved-filters';
 import { isTaskCountedAsFocused } from './store-helpers';
@@ -37,8 +25,7 @@ import type { FilterCriteria, Project, Section, SortField, Task, TaskPriority } 
 
 export const DEFAULT_FOCUS_SORT_BY: SortField = 'default';
 
-/** The calendar day `now` falls in, as the half-open pair every Today rule reads. */
-// Clock: midnight. A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
+
 export function getTodayBounds(now: Date): { startOfToday: Date; endOfToday: Date } {
     return {
         startOfToday: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0),
@@ -46,16 +33,7 @@ export function getTodayBounds(now: Date): { startOfToday: Date; endOfToday: Dat
     };
 }
 
-/**
- * "Due today or (when enabled) starting today" — the ONE answer to what belongs in Today, read
- * by the Today bucket below and by the widget selection's starred rule. A change
- * to what counts as today is an edit to this function and nothing else.
- *
- * `bounds` is the same pair `getTodayBounds(now)` returns; a caller testing many
- * tasks against one `now` passes it so the two `Date` objects are built once for
- * the loop instead of once per task. Leaving it out is exactly as before.
- */
-// Clock: midnight (today's bounds). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
+
 export function isTodayScheduleCandidate(
     task: Task,
     now: Date,
@@ -70,45 +48,34 @@ export function isTodayScheduleCandidate(
     return (due !== undefined && due <= endOfTodayMs) || startsToday;
 }
 
-/**
- * The narrowed task pools every Focus section is cut from. Kept apart from the
- * buckets because each platform reaches its store differently, and because the
- * widget builders hand over pools they narrowed themselves.
- */
+
 export interface FocusPools {
-    /**
-     * Today's area-visible starred tasks after the user's criteria.
-     * Future-start stars remain in Upcoming until ready.
-     */
+
+
     focused: Task[];
-    /** The time-granularity pool after the user's criteria (Next actions, Review Due). */
+
     active: Task[];
-    /** The day-granularity pool after the user's criteria (Today membership). */
+
     schedule: Task[];
-    /** `getUpcomingDeferredTasks` output in reveal-date order; the date rides each entry. */
+
     upcoming: UpcomingDeferredTask[];
-    /**
-     * The unfiltered actionable pool a sequential project's one slot is decided
-     * on. It must keep the steps that are hidden today, or a step deferred to
-     * next week would stop blocking the ones after it.
-     */
+
+
     base: Task[];
 }
 
 export interface BuildFocusPoolsInput {
-    /**
-     * Actionable, undeleted tasks WITHOUT area narrowing: the global slot
-     * count and the starred pool's explicit area-membership projection.
-     */
+
+
     tasks: Task[];
-    /** Normal base visibility; also the starred pool when no area-only predicate is supplied. */
+
     visibleTasks: Task[];
     projects: Project[];
     criteria: FilterCriteria | undefined;
     now: Date;
-    /** An extra caller predicate applied to every pool — desktop's search box. */
+
     keep?: (task: Task) => boolean;
-    /** Area membership alone, excluding unrelated base visibility such as a parked project. */
+
     isAreaVisible?: (task: Task) => boolean;
 }
 
@@ -131,13 +98,11 @@ export function buildFocusPools({
         focused: narrow((isAreaVisible ? tasks.filter(isAreaVisible) : visibleTasks)
             .filter((task) => isTaskFocusedNow(task, now))),
         active: narrow(visibleTasks.filter((task) => shouldShowTaskForStart(task, { now, granularity: 'time' }))),
-        // Today membership is decided at day granularity (a later-today start
-        // belongs there, by its time). A task deferred to another day must
-        // still be excluded, or a due-today row with a future-day start would
-        // double up in both Today and Upcoming.
+
+
         schedule: narrow(visibleTasks.filter((task) => shouldShowTaskForStart(task, { now }))),
-        // A future-start star stays in Upcoming until its start day. Today's
-        // stars cannot enter this pool because they are no longer deferred.
+
+
         upcoming: getUpcomingDeferredTasks(narrow(visibleTasks), { now }),
         base: visibleTasks,
     };
@@ -145,8 +110,7 @@ export function buildFocusPools({
 
 export type FocusSelection = { globalCount: number; hiddenByAreaCount: number };
 
-/** Counts precede search and criteria: only the area selector can hide an area slot. */
-// Clock: midnight (isTaskCountedAsFocused). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
+
 export function getFocusSelection(tasks: readonly Task[], visibleTasks: readonly Task[], now: Date,
     isAreaVisible?: (task: Task) => boolean): FocusSelection {
     const visibleIds = new Set(visibleTasks.map((task) => task.id));
@@ -167,12 +131,8 @@ export interface FocusTaskLists {
     nextActions: Task[];
     upcoming: Task[];
     projectDeadlineBoosts: Map<string, ProjectDeadlineBoost>;
-    /**
-     * The steps the sequential gate holds back: in a sequential project and not
-     * the one holding its slot. Today and Next actions already exclude them;
-     * Review Due deliberately does not, so a caller that folds Review Due into
-     * another list (the widget) can apply the gate itself.
-     */
+
+
     sequentialBlockedIds: Set<string>;
 }
 
@@ -183,7 +143,7 @@ export interface FocusListContext {
     sortBy: SortField;
     prioritiesEnabled: boolean;
     focusIncludeStartDates?: boolean;
-    /** The saved filter's direction, honoured by a non-default sort. */
+
     sortOrder?: 'asc' | 'desc';
 }
 
@@ -196,12 +156,7 @@ export function deriveFocusTaskLists(pools: FocusPools, ctx: FocusListContext): 
         sortOrder: ctx.sortOrder,
     }));
 
-    // Equal times fall back to priority (when the feature is on) and then to
-    // creation order — one rule for Today and Review Due on every surface.
-    // The three values are read once per task, not once per comparison: the
-    // comparator used to parse `createdAt` (and, through `getTime`, the due and
-    // start strings) on every one of the O(n log n) comparisons, which was the
-    // cost here — the same finding as #766, and the same fix.
+
     const sortWith = (items: Task[], getTime: (task: Task) => number) => sortByPrecomputedKey(
         items,
         (task) => ({
@@ -220,8 +175,7 @@ export function deriveFocusTaskLists(pools: FocusPools, ctx: FocusListContext): 
         },
     );
 
-    // Per section projects (#1429) add one sequence per Sequential section; their
-    // Parallel sections and section-less tasks are never held back.
+
     const sequencing = getTaskSequencing(projects, sections);
     const sequentialFirstTaskIds = getFocusSequentialFirstTaskIds(pools.base, sequencing.sequentialProjectIds, {
         now,
@@ -231,7 +185,7 @@ export function deriveFocusTaskLists(pools: FocusPools, ctx: FocusListContext): 
     });
     const isSequentialBlocked = (task: Task) => isTaskSequenceBlocked(task, sequencing, sequentialFirstTaskIds);
 
-    // One pair of Date objects for the whole loop, not one pair per task.
+
     const todayBounds = getTodayBounds(now);
     const scheduleItems = pools.schedule.filter((task) => {
         if (task.isFocusedToday) return false;
@@ -257,7 +211,7 @@ export function deriveFocusTaskLists(pools: FocusPools, ctx: FocusListContext): 
         ? getProjectDeadlineBoosts(nextItems, projects, { now })
         : new Map<string, ProjectDeadlineBoost>();
 
-    // The earlier of due and start, so a 09:00 start sorts ahead of a 17:00 due.
+
     const scheduleSortTime = (task: Task) => {
         const due = safeParseDueDate(task.dueDate)?.getTime();
         const start = safeParseDate(task.startTime)?.getTime();
@@ -268,8 +222,8 @@ export function deriveFocusTaskLists(pools: FocusPools, ctx: FocusListContext): 
     };
 
     return {
-        // The default sort honours the manual Today's Focus order (focusOrder);
-        // an explicit or saved sort wins and hides the reorder affordance.
+
+
         focusedTasks: isDefaultSort ? sortTasksByFocusOrder(pools.focused) : sortBySavedPerspective(pools.focused),
         schedule: isDefaultSort ? sortWith(scheduleItems, scheduleSortTime) : sortBySavedPerspective(scheduleItems),
         reviewDue: isDefaultSort
@@ -278,8 +232,8 @@ export function deriveFocusTaskLists(pools: FocusPools, ctx: FocusListContext): 
         nextActions: isDefaultSort
             ? sortFocusNextActions(nextItems, { now, prioritizeByPriority: prioritiesEnabled, projectDeadlineBoosts })
             : sortBySavedPerspective(nextItems),
-        // The forecast keeps reveal-date order even under a custom sort — the
-        // date a task appears is the only ordering that means anything here.
+
+
         upcoming: pools.upcoming.map((entry) => entry.task).filter((task) => !isSequentialBlocked(task)),
         projectDeadlineBoosts,
         sequentialBlockedIds: new Set(
@@ -296,12 +250,7 @@ export interface FocusTaskSection {
     items: Task[];
 }
 
-/**
- * The Focus screen's task sections in screen order with the screen's titles:
- * Today's Focus (only when starred tasks exist), Today, Next actions, Review
- * Due, Upcoming (only when non-empty). `translate` returns undefined for a
- * missing key so both `t()` and a raw dictionary lookup fit.
- */
+
 export function buildFocusTaskSections(
     lists: Pick<FocusTaskLists, 'focusedTasks' | 'schedule' | 'reviewDue' | 'nextActions' | 'upcoming'>,
     translate: (key: string) => string | undefined,
@@ -322,12 +271,7 @@ export function buildFocusTaskSections(
     return sections;
 }
 
-/**
- * Focus's "Projects to review" list, shown after the task sections: live,
- * non-archived projects whose review date has come, earliest review first,
- * then by title. Pass the projects the screen's area filter keeps.
- */
-// Clock: a review instant (isDueForReview). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
+
 export function getReviewDueProjects(projects: readonly Project[], now: Date): Project[] {
     return projects
         .filter((project) => project.status !== 'archived' && isDueForReview(project.reviewAt, now))
@@ -339,14 +283,10 @@ export function getReviewDueProjects(projects: readonly Project[], now: Date): P
         });
 }
 
-/**
- * Every function a Focus model build (buildFocusControlsModel, and the native contract's splitTodayTasksByStartTime) reads the
- * clock in, with the boundary it changes at. getFocusModelValidUntil covers each kind; a function that reads the clock and is
- * not here fails focus-model-clock.test.ts. Adding one: name its boundary here and in getFocusModelValidUntil, or the cache is wrong.
- */
+
 export const FOCUS_MODEL_CLOCK_READERS: Record<string, 'midnight' | 'timed start' | 'due' | 'review'> = {
-    // Day: the end of today, today's bounds, a window counted in days, the saved-filter presets (day, week, month; their
-    // overdue part compares dates before today, already before now).
+
+
     isTaskFutureStart: 'midnight',
     isTaskFocusedNow: 'midnight',
     isTaskCountedAsFocused: 'midnight',
@@ -357,27 +297,21 @@ export const FOCUS_MODEL_CLOCK_READERS: Record<string, 'midnight' | 'timed start
     getProjectDeadlineBoosts: 'midnight',
     getFocusSequentialScheduleKey: 'midnight',
     matchesDateRange: 'midnight',
-    // A timed start passing: shouldShowTaskForStart at time granularity (its day check is isTaskFutureStart's), later today.
+
     shouldShowTaskForStart: 'timed start',
     splitTodayTasksByStartTime: 'timed start',
-    // The due-soon window before a due instant (getFocusNextActionBucket).
+
     sortFocusNextActions: 'due',
-    // isDueForReview: a task's or project's review instant.
+
     isDueForReview: 'review',
     getReviewDueProjects: 'review',
 };
 
-/**
- * The first instant (epoch ms) after `now` at which a Focus model built at `now` can differ, for the same store and settings:
- * the next local midnight, each task's timed start, each due instant less the due-soon window, each task's and project's
- * review instant (FOCUS_MODEL_CLOCK_READERS). Each predicate flips at its instant (start > now, review <= now, due <= now +
- * window). The due instant itself is kept as a conservative extra: today's due checks compare with the end of today. Dates parse with the predicates' own parsers, so a value they
- * ignore is ignored here too. Null when it cannot be worked out: the caller rebuilds.
- */
+
 export function getFocusModelValidUntil(input: { tasks: readonly Task[]; projects: readonly Project[]; now: Date }): number | null {
     const nowMs = input.now.getTime();
     if (!Number.isFinite(nowMs)) return null;
-    // DST-safe: the first instant of tomorrow, as getTodayBounds' end of today plus 1 ms.
+
     let next = new Date(input.now.getFullYear(), input.now.getMonth(), input.now.getDate() + 1).getTime();
     const dueSoonWindowMs = FOCUS_NEXT_DUE_SOON_WINDOW_DAYS * 24 * 60 * 60 * 1000;
     const consider = (at: number | undefined) => {
@@ -388,7 +322,7 @@ export function getFocusModelValidUntil(input: { tasks: readonly Task[]; project
         const due = safeParseDueDate(task.dueDate)?.getTime();
         if (due !== undefined) {
             consider(due - dueSoonWindowMs);
-            // Conservative: no predicate flips at a due instant today; kept so a future due-time rule cannot go stale.
+
             consider(due);
         }
         consider(safeParseDate(task.reviewAt)?.getTime());

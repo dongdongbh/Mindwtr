@@ -1,6 +1,6 @@
 import type { Project } from './types';
 
-/** The RN Area manager blocks deletion for every live linked Project, regardless of status. */
+
 export function countLiveProjectsByArea(projects: readonly Project[]): Map<string, number> {
     const counts = new Map<string, number>();
     for (const project of projects) {

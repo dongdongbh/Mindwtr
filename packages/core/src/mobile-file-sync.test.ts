@@ -6,8 +6,7 @@ import { defaultSyncCryptoPrimitives } from './sync-crypto';
 import { compareSyncTransitionEntryNames, runChangeSyncEncryptionPassphraseOverRemote, runDisableSyncEncryptionOverRemote, runEnableSyncEncryptionOverRemote, type SyncEncryptionLocalState } from './sync-encryption';
 import type { AppData } from './types';
 
-// File Sync's log contexts never carry the sync folder's path or a document URI: a provider's or the file system's error text
-// quotes them, and they name the user and their files. Each site logs the error's code or name instead.
+
 const PRIVATE = 'private-folder';
 const PATH_DIR = `file:///data/user/0/tech.dongdongbh.mindwtr/files/${PRIVATE}`;
 const SAF_TREE = `content://com.android.externalstorage.documents/tree/primary%3A${PRIVATE}`;
@@ -26,7 +25,7 @@ const fakeHost = (overrides: Partial<MobileFileSyncFullHost>) => {
         log: {
             info: (message: string, context: unknown) => logged.push({ level: 'info', message, context }),
             warn: (message: string, context: unknown) => logged.push({ level: 'warn', message, context }),
-            // The diagnostics builder logs an error line's message and stack: both count as logged text.
+
             error: (error: unknown, context: unknown) => logged.push({
                 level: 'error',
                 message: error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error),
@@ -40,7 +39,7 @@ const fakeHost = (overrides: Partial<MobileFileSyncFullHost>) => {
     return { host, logged, contexts: () => JSON.stringify(logged.map((entry) => entry.context)), all: () => JSON.stringify(logged) };
 };
 
-/** A plain folder in memory; [refuse] makes one file name fail with an error that quotes its path. */
+
 const pathFolder = (refuse?: (name: string) => boolean) => {
     const files = new Map<string, Uint8Array>();
     const leaf = (uri: string) => uri.slice(uri.lastIndexOf('/') + 1);
@@ -122,7 +121,7 @@ describe('File Sync log contexts', () => {
                 readBytes: async (uri: string) => ({ bytes: documents.get(uri)!.bytes, lengthVerified: true }),
                 writeBytes: async (uri: string, bytes: Uint8Array) => { documents.get(uri)!.bytes = bytes; },
                 writeText: async () => undefined,
-                // The provider decorates the write's stage name, as #1113's providers add ".bin".
+
                 createFile: async (_dir: string, name: string) => {
                     const shown = name.startsWith('.mindwtr-et-s-') ? `${name}.bin` : name;
                     documents.set(safChild(shown), { name: shown, bytes: new Uint8Array(0) });
@@ -177,16 +176,15 @@ describe('fileSyncErrorCode', () => {
 });
 
 describe('File Sync encryption enable order', () => {
-    // assertFolderHoldsNoCiphertext (mobile-attachment-backends.ts) relies on this order: a cut-off Enable has always sealed
-    // the first entry of attachments/ in compareSyncTransitionEntryNames order, the order desktop's Rust transition uses too
-    // (collect_sync_folder_attachments sorts by bytes).
+
+
     it('seals attachments/ one entry at a time in compareSyncTransitionEntryNames order, whatever the case or punctuation', async () => {
         const folder = pathFolder();
         const encode = (text: string) => new TextEncoder().encode(text);
         folder.files.set(`${PATH_DIR}/data.json`, encode(JSON.stringify(data)));
         const names = ['b.txt', 'B.txt', 'a-1.txt', 'a.1.txt', 'A.txt', '10.txt', '9.txt', '_x.txt', 'Z-z.txt'];
         for (const name of names) folder.files.set(`${PATH_DIR}/attachments/${name}`, encode(name));
-        // The path port lists a folder by its URI with a trailing slash: its direct children, subfolders by name.
+
         folder.port.list = async (dir: string) => [...new Set([...folder.files.keys()]
             .filter((key) => key.startsWith(dir)).map((key) => key.slice(dir.length).split('/')[0]))];
         const sealed: string[] = [];
@@ -209,11 +207,7 @@ describe('File Sync encryption enable order', () => {
     });
 });
 
-/** A SAF tree in memory that counts the provider calls: a listing costs one call and one row per child. A taken name on
- *  create is decorated (" (1)", as the external storage provider does), kept twice (`duplicate`, as Google Drive allows),
- *  or answered with the existing document (`return-existing`); `lag` hides a new document from its first listing.
- *  `pathIds` names a document by its path, as Android's external storage does: one recreated under a name gets its URI back.
- *  [onCall] sees each create, write and read by document name, for a peer that acts in between. */
+
 const safFolder = (options: { create?: 'decorate' | 'duplicate' | 'return-existing'; lag?: boolean; pathIds?: boolean } = {}) => {
     const root = `${SAF_TREE}/document/primary%3A${PRIVATE}`;
     const docs = new Map<string, { parent: string; name: string; bytes: Uint8Array | null; hidden: number }>();
@@ -277,7 +271,7 @@ const memoryKeys = () => {
 };
 const CHEAP_KDF = { mKib: 8, t: 1, p: 1 };
 
-/** A SAF folder holding data.json and three plain attachments, and Enable over it. */
+
 const enableOver = async (folder: ReturnType<typeof safFolder>) => {
     folder.add(folder.root, 'data.json', encodeText(JSON.stringify(data)));
     const attachmentsDir = folder.add(folder.root, 'attachments', null);
@@ -344,8 +338,8 @@ describe('File Sync encryption transition guards kept while cutting its cost', (
             });
             const { outcome } = await enableOver(folder);
             expect(outcome).toBe('SyncEncryptionRemoteConflictError');
-            // By path the stat finds the peer's document under the name, so the old copy's check is the read after the move
-            // aside: the peer's bytes go back under the name, and the moved-aside copy is kept.
+
+
             expect([...folder.docs.values()].filter((doc) => doc.name === 'file-0.txt').map((doc) => decodeText(doc.bytes)))
                 .toEqual(['PEER-REPLACEMENT']);
             expect([...folder.docs.values()].filter((doc) => doc.name.startsWith('.mindwtr-et-q-')).map((doc) => decodeText(doc.bytes)))
@@ -374,7 +368,7 @@ describe('File Sync encryption transition guards kept while cutting its cost', (
         const folder = safFolder();
         const { outcome, keys, attachmentsDir } = await enableOver(folder);
         expect(outcome).toBe('ok');
-        // The app was killed between the probe's creates and its deletes (one copy under the name Android gives the second).
+
         folder.add(attachmentsDir, '.mindwtr-et-p-mvn0-1-left', new Uint8Array(0));
         folder.add(attachmentsDir, '.mindwtr-et-p-mvn0-1-left (1)', new Uint8Array(0));
         const { host, logged } = fakeHost({ saf: folder.port as never, crypto: defaultSyncCryptoPrimitives });
@@ -400,10 +394,8 @@ describe('File Sync encryption transition guards kept while cutting its cost', (
 });
 
 describe('File Sync encryption transition cost', () => {
-    // Each SAF listing reads the whole folder, and a provider call costs tens of milliseconds on a phone: Enable and Disable
-    // over hundreds of attachments took minutes on the S23. Each attachment may cost at most two listings (the exact-name
-    // checks before its old copy is moved aside and after its new copy is created) and five reads (the copy as it stands,
-    // the staged copy, the moved-aside copy twice and the installed copy), plus one read each in the inventory and the final check.
+
+
     const run = async (count: number, create: 'decorate' | 'duplicate' | 'return-existing' = 'decorate') => {
         const folder = safFolder({ create });
         const encode = (text: string) => new TextEncoder().encode(text);
@@ -432,11 +424,11 @@ describe('File Sync encryption transition cost', () => {
         expect(opened.map((doc) => new TextDecoder().decode(doc.bytes!)).sort())
             .toEqual(Array.from({ length: count }, (_, i) => `attachment ${i} `.repeat(20)).sort());
         expect(folder.docs.size).toBe(count + 2);
-        // The diagnostics line a tester's log shows once per transition (v1.3.8/file-sync-transition-cost).
+
         const lines = logged.filter((entry) => entry.message === 'File Sync transition final check listed names only');
         expect(lines.map((entry) => (entry.context as { extra: { entries: number; writes: number } }).extra))
             .toMatchObject([{ entries: count + 10, writes: count + 1 }, { entries: count + 10, writes: count + 1 }]);
-        // Each transition probes once how the provider names a second document under a taken name (v1.3.8/file-sync-name-probe).
+
         const modes = logged.filter((entry) => entry.message === 'File Sync transition chose its name check')
             .map((entry) => (entry.context as { extra: { mode: string; outcome: string } }).extra);
         return { enable, disable, modes };

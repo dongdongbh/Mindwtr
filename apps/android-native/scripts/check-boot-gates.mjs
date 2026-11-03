@@ -14,7 +14,7 @@ const consoleState = {
 };
 vm.runInNewContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), consoleState);
 assert.doesNotThrow(() => consoleState.console.info('saved'));
-// A body refused after metadata still settles its promise and lets the next reply drain.
+
 {
     let sequence = 0, body = 0;
     const answers = [];
@@ -39,24 +39,24 @@ assert.doesNotThrow(() => consoleState.console.info('saved'));
     assert.deepEqual(Array.from(await third), [1]);
     assert.equal(state.__pumpTimers(), 0);
 }
-// The URL polyfill parses a person's mailto: and tel: links as the platform URL does, so their open button shows.
+
 for (const text of ['mailto:alex@example.com', 'tel:+1-555-0100', 'MAILTO:bea@example.com?subject=Hi', 'javascript:alert(1)', 'obsidian://people/alex', 'https://bea.example/fail']) {
     const parts = (url) => [url.protocol, url.pathname, url.search, url.hash, url.host, String(url)];
     assert.deepEqual(parts(new consoleState.URL(text)), parts(new URL(text)), text);
 }
-// Query values read as WHATWG (and RN's URL shim) read them: everything after the first "=", "+" as a space; a "+" in a
-// query survives the polyfill's own String(url).
+
+
 const queryPairs = (params) => { const pairs = []; params.forEach((value, key) => pairs.push([key, value])); return pairs; };
 for (const text of ['mindwtr:///capture?title=a=b&note=Buy+milk+%2B+eggs&empty=&flag&x%20y=1+2', 'https://host/dav/?dir=a+b']) {
     assert.deepEqual(queryPairs(new consoleState.URL(text).searchParams), queryPairs(new URL(text).searchParams), text);
 }
 assert.equal(String(new consoleState.URL('https://host/dav/?dir=a+b')), 'https://host/dav/?dir=a+b');
-// QuickJS has no Intl: the polyfill's Collator and localeCompare sort by the host's ICU collation keys (one bridge call per
-// text and options), so titles order as in RN; without the bridge they fall back to a plain comparison.
+
+
 {
     const polyfills = readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8');
     const calls = [];
-    // A stand-in for Android's keys: accents and case folded first, as ICU's primary level does.
+
     const fold = (text) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
     const bridge = { log() {}, collationKey(text, options) { calls.push(`${options}|${text}`); return fold(text) + (options.startsWith('base:') ? '' : `\u0001${text}`); } };
     const withKeys = vm.createContext({ console: { info() {} }, Intl: undefined, __mindwtrNative: bridge });
@@ -70,10 +70,8 @@ assert.equal(String(new consoleState.URL('https://host/dav/?dir=a+b')), 'https:/
     vm.runInContext(polyfills, noKeys);
     assert.deepEqual([...vm.runInContext("['b', 'a', 'C'].sort(new Intl.Collator().compare)", noKeys)], ['C', 'a', 'b'], 'the fallback without the bridge');
 }
-// Intl.DateTimeFormat and Date's toLocale*String go to the host's `dateTimeFormat` bridge (IcuDateTimeFormat.kt: Android's
-// ICU, resolved as Hermes's Java does); the polyfill does Hermes's C++ part (Intl.cpp: the locales and options read,
-// toLocale*String's defaults, TimeClip). A stand-in bridge on Node's own Intl proves the options pass through and every
-// result is assembled exactly as Node's Intl gives it, over core's option sets.
+
+
 {
     const polyfills = readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8');
     const specs = [];
@@ -93,7 +91,7 @@ assert.equal(String(new consoleState.URL('https://host/dav/?dir=a+b')), 'https:/
     const dates = vm.createContext({ console: { info() {} }, Intl: undefined, __mindwtrNative: bridge });
     vm.runInContext(polyfills, dates);
     const run = (code) => vm.runInContext(code, dates);
-    // The device check's option sets (host-entry.ts INTL_CHECK_OPTIONS): core's calls, then defaults, hour cycles and styles.
+
     const optionSets = vm.runInNewContext(/const INTL_CHECK_OPTIONS = (\[[\s\S]*?\]);\n/.exec(readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8'))[1]);
     assert(optionSets.length >= 20);
     const times = [Date.UTC(2026, 8, 6, 8, 5, 9), Date.UTC(2026, 0, 1, 0, 30, 0), Date.UTC(1999, 11, 31, 23, 59, 59, 999)];
@@ -107,21 +105,21 @@ assert.equal(String(new consoleState.URL('https://host/dav/?dir=a+b')), 'https:/
                 assert.equal(run(`new Intl.DateTimeFormat(${args}).format(${time})`), node.format(time), `format ${at}`);
                 assert.equal(run(`JSON.stringify(new Intl.DateTimeFormat(${args}).formatToParts(new Date(${time})))`), JSON.stringify(node.formatToParts(time)), `formatToParts ${at}`);
                 for (const method of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString']) {
-                    // A style the call cannot take is Node's TypeError and the polyfill's alike.
+
                     const expected = (() => { try { return new Date(time)[method](locale, options); } catch (error) { return error.name; } })();
                     assert.equal(run(`(() => { try { return new Date(${time}).${method}(${args}); } catch (error) { return error.name; } })()`), expected, `${method} ${at}`);
                 }
             }
         }
     }
-    // No arguments: the device's locale and time zone (RN's Sync screen history dates, core's resolvedOptions().locale reads).
+
     for (const method of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString']) assert.equal(run(`new Date(${times[0]}).${method}()`), new Date(times[0])[method]());
     assert.deepEqual(JSON.parse(run('JSON.stringify(Intl.DateTimeFormat().resolvedOptions())')), Intl.DateTimeFormat().resolvedOptions(), 'callable without new');
-    // Hermes's format is a getter that keeps one bound function; formatToParts without a date formats now.
+
     assert.equal(run(`(() => { const dtf = new Intl.DateTimeFormat('de-DE', { weekday: 'long' }); const format = dtf.format; return format(${times[0]}) + (dtf.format === format); })()`), 'Sonntagtrue');
     assert.equal(run("new Intl.DateTimeFormat('en-US', { year: 'numeric' }).formatToParts()[0].value"), String(new Date().getFullYear()));
-    // Hermes's errors: a bad time zone or option value (RangeError), a style with a field or a time style on a date call
-    // (TypeError), an invalid time (RangeError); an invalid Date prints as "Invalid Date".
+
+
     for (const [code, name] of [["new Intl.DateTimeFormat('en', { timeZone: 'Mars/Base' })", 'RangeError'], ["new Intl.DateTimeFormat('en', { weekday: 'tiny' })", 'RangeError'],
         ["new Intl.DateTimeFormat('en', { dateStyle: 'short', day: 'numeric' })", 'TypeError'], ["new Date(0).toLocaleDateString('en', { timeStyle: 'short' })", 'TypeError'],
         ["new Intl.DateTimeFormat('en').format(NaN)", 'RangeError'], ["new Intl.DateTimeFormat('en', null)", 'TypeError']]) {
@@ -130,12 +128,12 @@ assert.equal(String(new consoleState.URL('https://host/dav/?dir=a+b')), 'https:/
     assert.equal(run("new Date(NaN).toLocaleString('de-DE')"), 'Invalid Date');
     assert.equal(run("Object.keys(Date.prototype).length + Object.keys(new Intl.DateTimeFormat()).length"), 0, 'nothing enumerable added');
     assert(specs.length > 0 && specs.every((spec) => typeof JSON.parse(spec).options === 'object'), 'every call sends its locales and options');
-    // Without the bridge (a VM gate) the English stand-in stays.
+
     const noDates = vm.createContext({ console: { info() {} }, Intl: undefined, __mindwtrNative: { log() {} } });
     vm.runInContext(polyfills, noDates);
     assert.equal(vm.runInContext("new Intl.DateTimeFormat('de-DE', { weekday: 'long' }).format(new Date(2026, 8, 6))", noDates), 'Sunday');
-    // The Kotlin side: one guarded callback, its formatter made in install (on the engine thread) and used only there, no IO;
-    // the device check's cases run only in a debug build.
+
+
     const kotlin = (name) => readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core', name), 'utf8');
     const host = kotlin('CoreHost.kt');
     const icu = kotlin('IcuDateTimeFormat.kt');
@@ -144,10 +142,10 @@ assert.equal(String(new consoleState.URL('https://host/dav/?dir=a+b')), 'https:/
     assert.doesNotMatch(icu, /java\.io|java\.nio|\bFile\b|Thread|Executor|\bLog\.|debugProperty|synchronized|Volatile|quickjs|getprop/, 'pure: no IO, no threads');
     assert.match(host, /if \(debugFault\("intl_check"\) == "1"\) engine\.globalObject\.setProperty\("__mindwtrIntlCheck", true\)/);
 }
-// A context automation link names a context with a space as "+" (core's parseContextAutomationUrl reads the query).
+
 assert.equal(new consoleState.URL('mindwtr://contexts?token=home+office&contextAction=activate').searchParams.get('token'), 'home office');
 assert.equal(new consoleState.URL('mindwtr://activate-context?name=%40home+office%2Bgym').searchParams.get('name'), '@home office+gym');
-// Query decoding is forgiving like the platform URL parser; response-body decoding stays fatal by default.
+
 for (const init of ['?task=%', '?task=%A', '?task=%GG', '?task=%E0%A4%A', '?task=%E0%A4', '?task=%80',
     '?task=%C0%AF', '?task=%ED%A0%80', '?task=%F4%90%80%80', '?task=%F0%9F%98%80',
     '?task=home+office%2Bgym', '?task=漢😀', '?task=%EF%BB%BFtask', '?task=\uD800',
@@ -156,28 +154,28 @@ for (const init of ['?task=%', '?task=%A', '?task=%GG', '?task=%E0%A4%A', '?task
     assert.equal(JSON.stringify([...new consoleState.URLSearchParams(init)]), expected, `query decode ${JSON.stringify(init)}`);
     assert.equal(JSON.stringify([...new consoleState.URL('mindwtr://open' + init).searchParams]), expected, `URL query decode ${JSON.stringify(init)}`);
 }
-// URLSearchParams.toString() has no "?", as WHATWG writes it: core posts it as a form body (dropbox-auth-tokens.ts) and puts
-// its own "?" before it (sync-helpers.ts); String(url) still writes the "?" before a query.
+
+
 for (const init of ['?a=1&b=x+y', 'a=1', '', { grant_type: 'refresh_token', refresh_token: 'r t+s' }, { a: 'x y', b: '1+1' }]) {
     assert.equal(new consoleState.URLSearchParams(init).toString(), new URLSearchParams(init).toString(), JSON.stringify(init));
 }
 for (const text of ['https://host/dav/?dir=a+b&_=1', 'https://host/dav/', 'mindwtr:///capture?title=a', 'mailto:alex@example.com?subject=Hi']) {
     assert.equal(String(new consoleState.URL(text)), String(new URL(text)), text);
 }
-// Core's log sanitizer walks a URL's query (sanitizeUrl: searchParams.keys()); a sync error's URL is logged that way.
+
 for (const init of ['?token=1&a=2&token=3', '']) {
     const mine = new consoleState.URLSearchParams(init);
     const theirs = new URLSearchParams(init);
     assert.deepEqual([...mine.keys()], [...theirs.keys()], `keys() of ${init}`);
     assert.deepEqual([...mine.values()], [...theirs.values()], `values() of ${init}`);
-    // The VM's pairs are another realm's arrays: compared as JSON.
+
     assert.equal(JSON.stringify([...mine.entries()]), JSON.stringify([...theirs.entries()]), `entries() of ${init}`);
     assert.equal(JSON.stringify([...mine]), JSON.stringify([...theirs]), `iterating ${init}`);
 }
-// Review S3 2 and 3: userinfo ends at the authority's LAST "@" (its password at the first ":"), and set() replaces the first
-// pair and drops every later one, as WHATWG: core's sanitizer then removes a whole password and every repeated token.
+
+
 for (const text of ['https://alice:p@ss@nas.local/dav', 'https://alice:a:b@nas.local:8443/dav?x=1', 'https://bob@nas.local/', 'https://nas.local/a@b']) {
-    // WHATWG percent-encodes an "@" inside userinfo; the polyfill keeps it as typed: compared decoded.
+
     const parts = (url) => [decodeURIComponent(url.username), decodeURIComponent(url.password), url.host, url.pathname, url.search];
     assert.deepEqual(parts(new consoleState.URL(text)), parts(new URL(text)), text);
 }
@@ -188,11 +186,11 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     theirs.set(key, 'redacted');
     assert.equal(mine.toString(), theirs.toString(), `set(${key}) on ${init}`);
 }
-// fetch and the secret calls (HostIo.kt): the polyfill hands each call to the bridge and settles it only when the pump
-// takes the host's answer (ioNext), as timers fire. A stand-in bridge answers here.
+
+
 {
     const sent = [];
-    // The host's queue: each answer's JSON, and its body apart (ioBody), as HostIo keeps them.
+
     const answers = [];
     let taken = '';
     const aborted = [];
@@ -254,7 +252,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     assert.equal(await res.text(), JSON.stringify({ text }));
     assert.equal(res.bodyUsed, true);
 
-    // Request bodies: text as text (RN's default type when none is set), bytes as base64, a form as its text.
+
     const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
     net.bytes = bytes;
     const bodies = run("[fetch('https://dav.example/a', { method: 'put', body: 'Grüße' }),"
@@ -267,7 +265,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
         ['POST', 'a=1&b=%C3%BC', [['content-type', 'application/x-www-form-urlencoded;charset=UTF-8']], 'follow'],
         ['PROPFIND', Buffer.from(bytes).toString('base64'), [], 'follow'],
     ]);
-    // The answers: every byte back from base64, a failed request as RN's TypeError, the host's own refusal as it is.
+
     answer({ id: '3', status: 200, statusText: 'OK', url: 'https://dav.example/final', redirected: true, headers: [], base64: Buffer.from(bytes).toString('base64') });
     answer({ id: '2', error: 'Network request failed: Failed to connect to dav.example/10.0.0.1:443' });
     answer({ id: '4', error: 'fetch failed: unexpected redirect' });
@@ -278,9 +276,8 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     assert.deepEqual([b.value.url, b.value.redirected, Buffer.from(await b.value.arrayBuffer()).equals(Buffer.from(bytes))], ['https://dav.example/final', true, true]);
     assert.deepEqual([c.reason.name, c.reason.message], ['TypeError', 'fetch failed: unexpected redirect']);
     assert.deepEqual([d.value.status, d.value.ok, await d.value.text()], [404, false, '']);
-    // A body is whole or the fetch rejects, never a short or empty body: core reads an unreadable sync document as a
-    // missing remote and writes local data over it. HostIo answers a body cut short, a reset mid-body, an oversized body
-    // and a broken gzip stream as errors; an answer whose body is not whole base64 is refused here.
+
+
     const whole = (base64) => ({ status: 200, statusText: 'OK', url: 'https://dav.example/data.json', redirected: false, headers: [], base64 });
     const cases = [
         ...['Network request failed: unexpected end of stream on http://127.0.0.1:18765/...', 'Network request failed: Connection reset',
@@ -295,8 +292,8 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
         assert.equal(outcome.status, 'rejected', `case ${i} rejects`);
         assert.deepEqual([outcome.reason.name, outcome.reason.message], ['TypeError', cases[i][1]], `case ${i}`);
     });
-    // Only a structured native cap reply marks the rejected Error. English text,
-    // malformed metadata and an ordinary remote JSON body confer no authority.
+
+
     const capBeforeBody = bodyCalls;
     const capReply = run("fetch('https://dav.example/capped')");
     answer({ id: String(ids), error: 'Native cap fixture', errorCode: 'response-too-large', limitBytes: 4 });
@@ -324,12 +321,12 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     const remoteResponse = await remoteMarker;
     assert.equal(remoteResponse.code, undefined);
     assert.deepEqual(plain(await remoteResponse.json()), { errorCode: 'response-too-large', limitBytes: 4 });
-    // Whole base64 with its padding reads back exactly, the empty body included.
+
     const padded = run("['', 'QQ==', 'QUI=', 'QUJD'].map((_, i) => fetch('https://dav.example/pad/' + i))");
     ['', 'QQ==', 'QUI=', 'QUJD'].forEach((base64, i) => answer({ id: String(ids - 3 + i), ...whole(base64) }));
     net.__pumpTimers();
     assert.deepEqual(await Promise.all((await Promise.all(padded)).map((res) => res.text())), ['', 'A', 'AB', 'ABC']);
-    // Refused before the bridge: a GET body, a method outside the list, a bad header; the host's own refusal is a TypeError too.
+
     const before = sent.length;
     for (const [code, message] of [
         ["fetch('https://dav.example', { body: 'x' })", /GET\/HEAD method cannot have body/], ["fetch('https://dav.example', { method: 'TRACE' })", /Unsupported method: TRACE/],
@@ -341,14 +338,14 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     }
     assert.equal(sent.length, before, 'a refused request never reaches the host');
 
-    // Abort: the promise rejects at once with the signal's reason, the host cancels the call, and its late answer is dropped.
+
     const aborting = run("const controller = new AbortController(); globalThis.aborting = fetch('https://dav.example/slow', { signal: controller.signal }); controller.abort(); aborting");
     assert.deepEqual(await failure(aborting), { name: 'AbortError', message: 'This operation was aborted' });
     assert.deepEqual(aborted, [String(ids)]);
     const reasoned = run("const withReason = new AbortController(); const call = fetch('https://dav.example/slow', { signal: withReason.signal }); withReason.abort(new Error('Sync cancelled')); call");
     assert.equal((await failure(reasoned)).message, 'Sync cancelled');
     assert.deepEqual(await failure(run("fetch('https://dav.example', { signal: AbortSignal.abort() })")), { name: 'AbortError', message: 'This operation was aborted' });
-    // AbortSignal.timeout fires on the host's timers: a TimeoutError once the clock passes it.
+
     const timed = run("fetch('https://dav.example/slow', { signal: AbortSignal.timeout(1000) })");
     clock = 999;
     net.__pumpTimers();
@@ -362,7 +359,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     net.__pumpTimers();
     assert.equal(nextCalls, asked, 'the pump asks the host only while a call is open');
 
-    // Secrets: each call settles in the pump; a bad key is the host's refusal; a value must be a string.
+
     const secrets = net.__mindwtrSecrets;
     const saved = secrets.setSecret('mindwtr_webdav_password', text);
     net.__pumpTimers();
@@ -380,9 +377,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     assert.deepEqual(await failure(secrets.setSecret('mindwtr_cloud_token', 42)), { name: 'TypeError', message: 'A secret value must be a string' });
     assert.equal(answers.length, 0);
 
-    // Review 1: text is fatal UTF-8. Core reads every response through `new TextDecoder()`: a malformed body throws, never
-    // decodes to other text (E2 alone once read as U+2000, a space, so a body trimmed to empty read as a missing remote).
-    // `fatal: false` gives the platform's replacement text, compared with Node's decoder.
+
     const malformed = [[0xe2], [0x20, 0xc0, 0xa0, 0x20], [0x80], [0xc1, 0xbf], [0xe0, 0x80, 0x80], [0xed, 0xa0, 0x80], [0xf0, 0x80, 0x80, 0x80],
         [0xf4, 0x90, 0x80, 0x80], [0xf5, 0x80], [0xff], [0xe2, 0x82], [0x61, 0xe2, 0x28, 0xa1], [0xf0, 0x9f, 0x98]];
     net.cases = malformed.map((bytes) => new Uint8Array(bytes));
@@ -390,7 +385,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
         assert.throws(() => run(`new TextDecoder().decode(cases[${i}])`), (error) => error.name === 'TypeError' && error.message === 'The encoded data was not valid for encoding utf-8', `fatal ${bytes}`);
         assert.equal(run(`new TextDecoder('utf-8', { fatal: false }).decode(cases[${i}])`), new TextDecoder().decode(Uint8Array.from(bytes)), `replacement ${bytes}`);
     }
-    // Well-formed text, and 300 random byte strings without `fatal`, decode exactly as the platform decodes them.
+
     const random = Array.from({ length: 300 }, (_, i) => Uint8Array.from({ length: 1 + (i % 40) }, (_, j) => (i * 131 + j * 89 + ((i * j) % 7) * 37) & 0xff));
     net.random = random.map((bytes) => new Uint8Array(bytes));
     random.forEach((bytes, i) => assert.equal(run(`new TextDecoder('utf-8', { fatal: false }).decode(random[${i}])`), new TextDecoder().decode(bytes), `random ${i}`));
@@ -398,13 +393,13 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     net.wellFormed = wellFormed.map((value) => new TextEncoder().encode(value));
     wellFormed.forEach((value, i) => assert.equal(run(`new TextDecoder().decode(wellFormed[${i}])`), value));
     assert.equal(run('new TextDecoder().decode(new Uint8Array([0x78, 0x61, 0x62, 0x63, 0x78]).subarray(1, 4))'), 'abc', 'a view decodes from its offset');
-    // The encoder writes a lone surrogate as U+FFFD, as the platform does, so the fatal decoder reads back what it wrote.
+
     for (const value of ['\ud800', 'a\udc00b', '\ud83d', '\udfff\ud800', '\ud83d\ude00']) {
         net.value = value;
         assert.deepEqual([...run('new TextEncoder().encode(value)')], [...new TextEncoder().encode(value)], JSON.stringify(value));
         assert.equal(run('new TextDecoder().decode(new TextEncoder().encode(value))'), new TextDecoder().decode(new TextEncoder().encode(value)));
     }
-    // Response.text() and json() reject a body that is not UTF-8; arrayBuffer() stays byte-exact.
+
     const loose = run("fetch('https://dav.example/utf8')");
     answer({ id: String(ids), status: 200, statusText: 'OK', url: 'https://dav.example/utf8', redirected: false, headers: [], base64: Buffer.from([0x20, 0xe2, 0x20]).toString('base64') });
     net.__pumpTimers();
@@ -412,9 +407,8 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     assert.deepEqual([...new Uint8Array(await looseResponse.clone().arrayBuffer())], [0x20, 0xe2, 0x20]);
     assert.deepEqual(await failure(looseResponse.clone().text()), { name: 'TypeError', message: 'The encoded data was not valid for encoding utf-8' });
     assert.deepEqual(await failure(looseResponse.json()), { name: 'TypeError', message: 'The encoded data was not valid for encoding utf-8' });
-    // D9 A2: a body the host decoded (HostIo.read: strict UTF-8, `utf8` with its byte count) arrives as text. text() and json()
-    // read it, core's readDecodedResponseText finds its bytes, and arrayBuffer() and a clone give the exact bytes back (a BOM, an
-    // astral character and a NUL included).
+
+
     const decodedValue = '\ufeff{"t":"Grüße ✓ 😀\u0000"}';
     const decodedBytes = Buffer.from(decodedValue, 'utf8');
     const decoded = run("fetch('https://dav.example/decoded')");
@@ -427,8 +421,8 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     assert.equal(await decodedResponse.text(), decodedValue);
     assert.equal(decodedResponse.bodyUsed, true);
     assert.equal(looseResponse.mindwtrDecodedTextBytes, undefined, 'a base64 body is not marked decoded');
-    // Review (Codex 1): a text body that starts like a bridge error is still the body, and a body the bridge cannot hand over
-    // fails its own fetch instead of stranding it.
+
+
     const markerText = '!MindwtrNativeError:not an error';
     const marker = run("fetch('https://dav.example/marker')");
     answer({ id: String(ids), status: 200, statusText: 'OK', url: 'https://dav.example/marker', redirected: false, headers: [], utf8: true, bytes: markerText.length, base64: `T${markerText}` });
@@ -438,21 +432,20 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     answer({ id: String(ids), status: 200, statusText: 'OK', url: 'https://dav.example/broken', redirected: false, headers: [], body: true, base64: '!MindwtrNativeError:Answers closed' });
     net.__pumpTimers();
     assert.deepEqual(await failure(broken), { name: 'TypeError', message: 'I/O response body is unavailable' });
-    // The host's decoder and the polyfill's fatal one agree on the shared cases (StrictUtf8Test reads the same file). The file's
-    // answers are Node's own fatal decoder with the BOM kept, as the polyfill keeps it.
+
+
     const parity = JSON.parse(readFileSync(resolve(app, 'scripts/utf8-parity-cases.json'), 'utf8'));
     net.parity = parity.map(({ hex }) => new Uint8Array(Buffer.from(hex, 'hex')));
     parity.forEach(({ hex, text: expected }, i) => {
         let reference = null;
-        try { reference = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.from(hex, 'hex')); } catch { /* malformed */ }
+        try { reference = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.from(hex, 'hex')); } catch {                 }
         assert.equal(expected, reference, `utf8-parity-cases.json is Node's answer for ${hex}`);
         let polyfill = null;
-        try { polyfill = run(`new TextDecoder().decode(parity[${i}])`); } catch { /* malformed */ }
+        try { polyfill = run(`new TextDecoder().decode(parity[${i}])`); } catch {                 }
         assert.equal(polyfill, expected, `the polyfill decodes ${hex} as the file says`);
     });
 
-    // Review 2: the host's deadline passed. Every open fetch rejects with an AbortError and is cancelled at the host, and a
-    // new fetch or secret call is refused (it never reaches the host) until the host resumes calls.
+
     const open = run("fetch('https://dav.example/slow')");
     const openId = String(ids);
     net.__cancelHostCalls('The host operation timed out');
@@ -462,8 +455,8 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     assert.deepEqual(await failure(run("fetch('https://dav.example/after', { method: 'PUT', body: '{}' })")), { name: 'AbortError', message: 'The host operation timed out' });
     assert.deepEqual(await failure(secrets.setSecret('mindwtr_cloud_token', 'x')), { name: 'AbortError', message: 'The host operation timed out' });
     assert.equal(sent.length, refusedFrom, 'no call reaches the host while the operation drains');
-    // Review 11: sync's secrets (host-sync.ts) are never refused. Another call's deadline must not fail a Save's commit
-    // half-way (its URL written, its password refused) and leave sync off; a keystore call answers at once, so the drain ends.
+
+
     const syncSaved = net.__mindwtrSyncSecrets.setSecret('mindwtr_cloud_token', 'drained');
     net.__pumpTimers();
     assert.equal(await syncSaved, undefined);
@@ -483,9 +476,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     run("fetch('https://dav.example/later')");
     assert.equal(sent.at(-1).url, 'https://dav.example/later', 'calls reach the host again once it resumes them');
 
-    // D9: a bounded idle pump turn (CoreHost.idlePump) takes one answer or due timer at a time (__pumpOne) and times each with
-    // the promise jobs it set off, which run before the call returns; the turn ends once its budget is spent. Review (Codex 8):
-    // fifty cheap timers whose promise continuations take 10 ms each fill one turn with one timer, not all fifty.
+
     net.__pumpTimers();
     bridge.tick = (ms) => { clock += ms; };
     run('globalThis.continued = 0; for (let i = 0; i < 50; i += 1) setTimeout(() => { Promise.resolve().then(() => { globalThis.continued += 1; __mindwtrNative.tick(10); }); }, 0)');
@@ -507,7 +498,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     while (net.__nextTimerDelay() === 0) { await turn(); turns += 1; }
     assert.equal(run('continued'), 50);
     assert.equal(turns, 50);
-    // Answers too: one per item, and a cancelled call's late answer counts as taken but settles nothing.
+
     const slow = run("[fetch('https://dav.example/s1'), fetch('https://dav.example/s2')]");
     for (const id of [String(ids - 1), String(ids)]) answer({ id, status: 200, statusText: 'OK', url: 'https://dav.example/s', redirected: false, headers: [], base64: '' });
     assert.equal(net.__pumpOne(), 1);
@@ -516,11 +507,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     assert.equal((await Promise.all(slow)).length, 2);
 }
 
-// S4b: sync encryption's primitives on the host's crypto calls (host-polyfills.js __mindwtrCryptoCall, host-sync.ts
-// createHostSyncCrypto) with core itself. The fake bridge answers as HostCrypto.kt does (Argon2id, AES-256-GCM, `auth` for a tag
-// mismatch); HostCryptoTest proves the Kotlin bytes. Here: every byte crosses the base64 transport whole, an answer settles only in
-// the pump, core opens and reproduces every MWENC1 vector, a tag mismatch is core's own SyncCryptoAuthError (core checks it with
-// instanceof), and a host without the calls refuses every primitive.
+
 {
     const { argon2id } = await import('@noble/hashes/argon2.js');
     const nodeCrypto = await import('node:crypto');
@@ -571,11 +558,11 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
     vm.runInContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), context);
     vm.runInContext(gateBundle.outputFiles[0].text, context);
     const gate = context.cryptoGate;
-    // Settles a crypto promise the way CoreHost's pump does: only __pumpTimers hands an answer back.
+
     const pumped = async (promise) => {
         let done = false;
         const settled = promise.finally(() => { done = true; });
-        settled.catch(() => {}); // the caller takes the rejection; this only keeps Node from calling it unhandled meanwhile
+        settled.catch(() => {});
         await new Promise((tick) => setImmediate(tick));
         assert.equal(done, false, 'a crypto call settles only in the pump');
         while (!done) { context.__pumpTimers(); await new Promise((tick) => setImmediate(tick)); }
@@ -588,14 +575,14 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
         const encrypted = u8(b(vector.encryptedB64));
         const opened = await pumped(gate.decryptSyncArtifact(encrypted, material.key, gate.prims));
         assert(Buffer.from(opened).equals(b(vector.plaintextB64)), `${vector.name} opens through the host's calls`);
-        // The same key, salt and nonce reproduce the container byte for byte.
+
         const nonce = encrypted.slice(34, 46);
         const sealed = await pumped(gate.encryptSyncArtifact(u8(b(vector.plaintextB64)), material, { ...gate.prims, randomBytes: () => nonce }));
         assert(Buffer.from(sealed).equals(b(vector.encryptedB64)), `${vector.name} seals byte for byte`);
     }
     const argonRequest = requests.find((request) => request.op === 'argon2id' && request.m === 19456);
     assert.deepEqual([argonRequest.t, argonRequest.p, argonRequest.dkLen, b(argonRequest.pass).toString()], [2, 1, 32, 'hunter2'], 'Argon2id\'s cost reaches the host as core asked it');
-    // A changed byte: core's own SyncCryptoAuthError, so core reads it as a wrong passphrase, never as a transport failure.
+
     const first = vectors[0];
     const material = await pumped(gate.deriveSyncKeyMaterial(first.passphrase, u8(b(first.saltB64)), first.params, gate.prims));
     const tampered = u8(b(first.encryptedB64));
@@ -604,24 +591,23 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
     assert(authError instanceof gate.SyncCryptoAuthError, 'a tag mismatch is core\'s SyncCryptoAuthError');
     const short = await pumped(gate.prims.aesGcmOpen(material.key, u8(new Uint8Array(12)), u8(new Uint8Array(15)), u8(new Uint8Array(0)))).then(() => null, (error) => error);
     assert(short instanceof gate.SyncCryptoAuthError, 'a body too short for a tag is an auth failure too');
-    // A refused Argon2id cost (fewer than 8 KiB per lane) rejects, and core names it unsupported.
+
     const badParams = await pumped(gate.deriveSyncKeyMaterial('x', u8(new Uint8Array(16)), { mKib: 8, t: 1, p: 2 }, gate.prims)).then(() => null, (error) => error);
     assert(badParams instanceof gate.SyncCryptoUnsupportedError, 'an Argon2id refusal is core\'s SyncCryptoUnsupportedError');
     assert.equal(gate.prims.randomBytes(12).length, 12, 'random bytes come from the host at the asked length');
-    // No crypto calls: every primitive refuses, so an encrypted location fails closed instead of syncing plaintext.
+
     await assert.rejects(gate.refusing.argon2id(u8([1]), u8(new Uint8Array(16)), { mKib: 64, t: 1, p: 1 }, 32), /Sync encryption is not available/);
     await assert.rejects(gate.refusing.aesGcmSeal(u8(new Uint8Array(32)), u8(new Uint8Array(12)), u8([1]), u8([])), /Sync encryption is not available/);
     assert.throws(() => gate.refusing.randomBytes(12), /Sync encryption is not available/);
-    // The bridge: started on the engine thread, run on HostIo's crypto thread, its callback guarded; never refused after a deadline.
+
     const kotlinCore = (name) => readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core', name), 'utf8');
     const coreHostSource = kotlinCore('CoreHost.kt');
     const hostIoSource = kotlinCore('HostIo.kt');
     assert.match(coreHostSource, /bridge\.setProperty\("cryptoCall", guarded \{ args -> io\.crypto\(args\[0\] as String\) \}\)/);
     assert.match(hostIoSource, /private val cryptoThread = Executors\.newSingleThreadExecutor/);
     assert.match(hostIoSource, /cryptoThread\.execute \{\s+val reply = runCatching \{ cryptoReply\(id, json\) \}\.getOrElse/, 'a crypto failure, an OutOfMemoryError included, is an answer, never a crash');
-    // Review S4b 3 (and its verification): once the host closed, no answer of any kind (a secret's value, a derived key, a
-    // plaintext, a fetch body) is queued or taken, and close drops what waited (HostAnswers, HostAnswersTest). Every answer goes
-    // through the one HostAnswers queue; HostIo keeps no queue or held answer of its own.
+
+
     const hostAnswersSource = kotlinCore('HostAnswers.kt');
     assert.match(hostIoSource, /private val answers = HostAnswers\(\)/);
     assert.doesNotMatch(hostIoSource, /LinkedBlockingQueue|private var held|private var taken/);
@@ -632,7 +618,7 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
     assert.match(hostAnswersSource, /fun add\(answer: Answer\): Boolean = synchronized\(lock\) \{ if \(closed\) false else queue\.add\(answer\) \}/);
     assert.match(hostAnswersSource, /fun next\(\): Answer\? = synchronized\(lock\) \{\s+if \(closed\) return null/);
     assert.match(hostAnswersSource, /fun close\(\) = synchronized\(lock\) \{\s+closed = true\s+queue\.clear\(\)\s+held = null\s+taken = null\s+\}/);
-    // Review S4b 2: Argon2id's cost is read as exact whole numbers (HostCrypto.argon2Params), never getInt's truncation.
+
     assert.match(hostIoSource, /val \(m, t, p, dkLen\) = HostCrypto\.argon2Params\(request\)/);
     assert.doesNotMatch(hostIoSource, /getInt\("(m|t|p|dkLen)"\)/);
     const polyfillSource = readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8');
@@ -642,19 +628,19 @@ const coreHost = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongd
 const sqliteBridge = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/SqliteBridge.kt'), 'utf8');
 const hostEntry = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');
 assert.match(hostEntry, /new ValidatedSqliteAdapter\(sqlite, \{ rejectConcurrentWrites: true \}\)/);
-// Review 11: sync's service, its Save commit and its screen use the secrets no other call's deadline refuses.
+
 assert.equal(/const nativeSyncBindings: NativeSyncBindings = \{[\s\S]*?localData:/.exec(hostEntry)?.[0].match(/__mindwtrSyncSecrets/g)?.length, 3, 'sync binds the unrefused secrets');
 assert.match(hostEntry, /createNativeSync\(nativeSyncBindings\)/);
-// Durable request receipts: core's adapter commits a write's receipt in its data's transaction (the hook right before
-// COMMIT in both data saves, into native_request_receipts), and boot loads them before activation and the journal's replay.
+
+
 {
     assert.match(hostEntry, /class ValidatedSqliteAdapter extends NativeReceiptSqliteAdapter \{/);
     const bootBody = hostEntry.slice(hostEntry.indexOf('const boot = '), hostEntry.indexOf('globalThis.MindwtrHost ='));
     const bootOrder = ['setStorageAdapter(adapter)', 'if (journaled) await adapter.withConnection(() => loadNativeRequestReceipts(sqlite), { write: true })', "else await adapter.withConnection(() => loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'aiRequestTimeout', 'aiReasoningEffort', 'aiGeminiThinkingBudget', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'boardTaskCompletion', 'boardTaskCompletionUndo', 'boardTaskReactivate', 'boardTaskOrder', 'archivedTaskRestore', 'archivedTasksRestore', 'trashItemsRestore', 'trashItemsPurge', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'inboxTasksDelete', 'inboxTasksDeleteUndo', 'referenceTasksMove', 'inboxTasksMove', 'inboxTasksAddTag', 'inboxTasksRemoveTag', 'inboxTasksOrganize', 'inboxOrganizeDestinationCreate', 'inboxPreparedCommit', 'inboxUndo', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument', 'pomodoroTransition', 'appleReminderImportItem'] }), { write: true })", 'await adapter.getData()', 'await activateAndVerify(adapter'].map((text) => bootBody.indexOf(text));
     assert(bootOrder.every((index, i) => index > (i ? bootOrder[i - 1] : -1)), `receipts boot order ${bootOrder}`);
     assert.match(hostEntry, /pruneReceipts\(\): string \{\s*return submit\(async \(\) => \(\{ pruned: await withHostConnection\(\(\) => pruneNativeRequestReceipts\(sqlite\)\) \}\)\);/);
-    // D9b change 1 (design.md W2): the host's own SQL runs inside core's adapter lock, and the read check runs in the read's
-    // own hold (afterReadNow), never after a public getData returned: a queued write then could fake "Incomplete … load".
+
+
     const validatedAdapter = hostEntry.slice(hostEntry.indexOf('class ValidatedSqliteAdapter'), hostEntry.indexOf('type Pending = '));
     assert.match(validatedAdapter, /protected override afterReadNow\(loaded: \(table: EntityTable\) => number, settings: LoadedData\['settings'\]\): Promise<void> \{\s*return this\.validate\(loaded, settings\);/);
     assert.doesNotMatch(validatedAdapter, /override async (getData|readRowBaseline|saveData|saveTask)\(/);
@@ -671,9 +657,8 @@ assert.match(hostEntry, /createNativeSync\(nativeSyncBindings\)/);
     assert.match(coreReceipts, /class NativeReceiptSqliteAdapter extends SqliteAdapter \{[\s\S]*?protected override async beforeCommit\([\s\S]*?INSERT INTO native_request_receipts/);
 }
 assert.match(sqliteBridge, /PRAGMA synchronous = FULL/);
-// Nothing writes the RN database before its .prewrite snapshot: the open sets only foreign_keys (a connection
-// setting), and WAL (which rewrites a rollback-journal header) and synchronous follow VACUUM INTO or the
-// validated existing snapshot.
+
+
 const bridgeOpen = sqliteBridge.slice(sqliteBridge.indexOf('private val connection'), sqliteBridge.indexOf('private val statements'));
 assert.deepEqual(bridgeOpen.match(/PRAGMA [^"]*/g), ['PRAGMA foreign_keys = ON']);
 const bridgeCheckpoint = sqliteBridge.slice(sqliteBridge.indexOf('fun ensureRecoveryCheckpoint'), sqliteBridge.indexOf('private fun syncCheckpoint'));
@@ -683,8 +668,8 @@ assert(pragmaOrder.every((index, i) => index > (i ? pragmaOrder[i - 1] : -1)), `
 assert.equal(sqliteBridge.match(/journal_mode|synchronous =/g).length, 2);
 assert.doesNotMatch(bridgeCheckpoint, /\breturn\b/);
 assert.match(sqliteBridge, /syncFile\(partial\)[\s\S]*?renameTo\(checkpointFile\)[\s\S]*?syncDirectory/);
-// Startup (phase 2 #3): SQLite opens and takes its checkpoint on the caller's thread while the engine loads the bundle. No SQL runs
-// before the checkpoint: the bridge reaches SQLite only through the open's future, and boot starts after the engine took it.
+
+
 {
     const start = coreHost.slice(coreHost.indexOf('fun start(bundle: CoreBundle'), coreHost.indexOf('/** Where the bundle came from'));
     const order = ['val opened = FutureTask {', 'database.ensureRecoveryCheckpoint()', 'val database = { opened.get() }', 'executor.submit(Callable {',
@@ -692,13 +677,13 @@ assert.match(sqliteBridge, /syncFile\(partial\)[\s\S]*?renameTo\(checkpointFile\
         'activationOwed = pendingBackupIds().isNotEmpty()',
         '(if (activationOwed) callAsync("bootRecovery", legacyState, legacyBackup, "journaled", storageBudget(), deadlineMs = bootDeadline)\n                else callAsync("boot", legacyState, legacyBackup, "journaled", storageBudget(), deadlineMs = bootDeadline))'].map((text) => start.indexOf(text));
     assert(order.every((index, i) => index > (i ? order[i - 1] : -1)), `start order ${order}`);
-    // Pass D1a: a journaled backup commit boots in recovery (no load maintenance before its replay), and the replay resumes normal
-    // activation once its last backup commit has a final reply, before the entries after it.
+
+
     assert.match(coreHost, /if \(index == lastBackup && activationOwed\) resumeActivation\(\)/);
     assert.match(coreHost, /if \(owed == null && activationOwed\) resumeActivation\(\)/);
     assert.match(hostEntry, /bootRecovery\(legacyState: string, legacyBackup: string, writeJournal = '', budgetJSON = ''\): string \{\s*return boot\(legacyState, legacyBackup, true, writeJournal === 'journaled', budgetJSON\);/);
-    // Audit C: core's stricter legacy-import preflight runs once the bundle has loaded and before the RN database opens; a
-    // refusal closes only the engine (the open never ran, so nothing waits on it).
+
+
     const preflight = ['load(engine, database, bundle)', 'if (preflight) {', '                    loading.get()\n', 'answer("legacyCheck", arrayOf(legacyState, legacyBackup)',
         'check(checked.getBoolean("ok"))', 'onEngine { closeOnEngine() }', 'opened.run()'].map((text) => start.indexOf(text));
     assert(preflight.every((index, i) => index > (i ? preflight[i - 1] : -1)), `preflight order ${preflight}`);
@@ -721,16 +706,15 @@ const areaUi = source('AreaSwitcher.kt');
 const viewStateKt = source('ViewState.kt');
 const searchUi = source('SearchScreen.kt');
 const processUi = source('ProcessInbox.kt');
-// #1445: each new question or item starts at the top, as RN's scrollProcessingToTop after every answer; one scroll position no longer spans steps.
-// Only a new question (animated) or item (at once) scrolls; the question last shown survives a recreation (ProcessInboxScrollTest).
+
+
 assert.match(processUi, /val scroll = rememberScrollState\(\)[\s\S]{0,300}LaunchedEffect\(flow\.taskId, flow\.step\) \{\s+when \(stepScroll\(shownTask, shownStep, flow\.taskId, flow\.step\)\) \{\s+StepScroll\.Animate -> scroll\.animateScrollTo\(0\)\s+StepScroll\.Jump -> scroll\.scrollTo\(0\)/);
 assert.match(processUi, /var shownTask by rememberSaveable \{ mutableStateOf<String\?>\(null\) \}/);
-// RN's system bars (SystemBarsTest): set by the screens and the lock screen, only when the background or darkness changes.
+
 assert.match(activity, /LaunchedEffect\(c\.bg, theme\.isDark\) \{ window\.applySystemBars\(c\.bg\.toArgb\(\), theme\.isDark\) \}/);
 assert.match(source('AppLock.kt'), /LaunchedEffect\(c\.bg, theme\.isDark\) \{ activity\?\.window\?\.applySystemBars\(c\.bg\.toArgb\(\), theme\.isDark\) \}/);
-// RN's window theme is DayNight (Theme.AppCompat.DayNight.NoActionBar): at night the window is not a light theme. From Android 15 a
-// light window theme makes the system force dark navigation buttons (APPEARANCE_FORCE_LIGHT_NAVIGATION_BARS), which three-button
-// navigation then draws gray on the dark tab bar while RN's are white (nav3-voice-20261028-04, emulator pairs).
+
+
 {
     const res = resolve(app, 'android/app/src/main/res');
     assert.match(readFileSync(resolve(res, 'values/themes.xml'), 'utf8'), /<style name="Theme\.NativeDev" parent="android:Theme\.Material\.Light\.NoActionBar"/);
@@ -738,25 +722,25 @@ assert.match(source('AppLock.kt'), /LaunchedEffect\(c\.bg, theme\.isDark\) \{ ac
 }
 assert.match(processUi, /\.verticalScroll\(scroll\)/);
 const captureUi = source('CaptureScreen.kt');
-// RN's quick capture TextInputs (title and notes) keep RN's default autoCapitalize ("sentences"): the keyboard opens with Shift on.
+
 assert.match(captureUi, /private fun InboxViewModel\.TitleField\([\s\S]{0,1200}keyboardOptions = KeyboardOptions\(capitalization = KeyboardCapitalization\.Sentences, imeAction = ImeAction\.Done\)/);
 assert.match(captureUi, /private fun NoteField\([\s\S]{0,1200}keyboardOptions = KeyboardOptions\(capitalization = KeyboardCapitalization\.Sentences\)/);
 const captureModalUi = source('CaptureModal.kt');
 const captureModalModel = source('CaptureModalModel.kt');
-// RN's capture TextInputs keep RN's default autoCapitalize ("sentences"): the keyboard opens with Shift on for the title and the
-// description alike, through the one ModalField.
+
+
 assert.match(captureModalUi, /private fun ModalField\([\s\S]{0,1200}keyboardOptions = KeyboardOptions\(capitalization = KeyboardCapitalization\.Sentences\)/);
-// The Menu tab (pass 6): its model, the More sheet, the shared widgets, and one file per list screen.
+
 const menuModel = source('MenuModel.kt');
 const moreUi = source('MoreSheet.kt');
-// The Menu tab's sync dot: its opacity layer after the offset (a layer before it drew nothing on the S23).
+
 assert.match(moreUi, /Box\(Modifier\.align\(Alignment\.TopEnd\)\.offset\(x = 7\.dp, y = \(-2\)\.dp\)\.size\(7\.dp\)\.fade\(0\.85f\)\.clip\(CircleShape\)\.background\(dot\)/);
 const menuUi = source('MenuWidgets.kt');
 const waitingUi = source('WaitingScreen.kt');
 const somedayUi = source('SomedayScreen.kt');
 const statusListUi = source('StatusListScreen.kt');
 const archiveUi = source('ArchiveScreen.kt');
-// Pass 7: Contexts, Trash, Review and the Weekly and Daily Review, each in its own file, and core's list actions they send.
+
 const contextsUi = source('ContextsScreen.kt');
 const trashUi = source('TrashScreen.kt');
 const reviewUi = source('ReviewScreen.kt');
@@ -764,23 +748,23 @@ const weeklyUi = source('WeeklyReviewScreen.kt');
 const dailyUi = source('DailyReviewScreen.kt');
 const listActionsKt = source('ListActions.kt');
 const reviewScreens = { contextsUi, trashUi, reviewUi, weeklyUi, dailyUi, listActionsKt };
-// Pass 9: the Inbox tab on its view contract, the lists' selection mode (the bulk bar and its dialogs), and Focus's controls.
+
 const inboxUi = source('InboxScreen.kt');
 const bulkUi = source('BulkBar.kt');
 const focusControlsUi = source('FocusControls.kt');
 const focusModelKt = source('FocusModel.kt');
-// Pass 11: a saved search's screen draws the menu list machinery's page (its model is MenuModel's).
+
 const savedSearchUi = source('SavedSearchScreen.kt');
 const menuScreens = { moreUi, menuUi, waitingUi, somedayUi, statusListUi, archiveUi, ...reviewScreens, inboxUi, bulkUi, focusControlsUi, savedSearchUi };
 const snapshotsKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/RecoverySnapshots.kt'), 'utf8');
-// Comments may name the rules below; only code is checked against them.
+
 const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-// A failed read offers Try again; while a failed command's retry is owed, nothing else is offered.
+
 assert.match(activity, /if \(failedAction == null\) RetryButton\(\{ refresh\(\) \}, !busy, "read-retry"\)/);
-// Every owed command keeps a reachable retry: each screen's failure banner offers Try again (retryOwed), which re-sends the
-// exact recorded FailedAction, whatever screen or control started it (a status change from Focus's menu included).
+
+
 assert.match(activity, /fun OwedRetry\(model: InboxViewModel\) \{\s+if \(model\.failedAction != null\) RetryButton\(model::retryOwed, !model\.busy, "owed-retry"\)/);
-// The read refresh and the owed retry are told apart (test tags): the checks assert the owed one only while a retry is owed.
+
 assert.match(activity, /\} else OwedRetry\(model\)|else OwedRetry\(model\)/);
 for (const [name, text] of Object.entries({ activity, editorUi, searchUi, processUi, menuUi, weeklyUi, dailyUi })) {
     assert.match(text, /FailureBanner\(message\) \{[\s\S]{0,320}?OwedRetry\(model\)/, `${name}: the failure banner offers the owed retry`);
@@ -794,101 +778,97 @@ for (const [name, text] of Object.entries({ activity, editorUi, searchUi, proces
     assert.match(retry, /"inboxCommit", "inboxSkip" -> sendAnswer\(action,/);
 }
 assert.match(rowUi, /failedAction == null \|\| failedAction == completeAction\(task\.id, task\.taskRevision\)/);
-// Every task row carries core's revision (NativeTaskRow.taskRevision), parsed as core sent it; Kotlin never computes one.
+
 assert.match(model, /text\("revealLabel"\), getBoolean\("laterToday"\), optString\("taskRevision"\), text\("focusBlockedLabel"\)\)/);
 assert.match(model, /fun completeAction\(id: String, taskRevision: String\) = FailedAction\("complete", id, patch = mapOf\("taskRevision" to taskRevision\)\)/);
-// The swipe is core's meta.swipe (RN's getLeftAction moved to core); it and TalkBack's custom action are one command with one enabled rule.
-// Done keeps core's completeTask and its retry; Restore and Next are the status change with theirs. RN draws no Done button.
+
+
 assert.match(rowUi, /val target = meta\.swipe\.target\s+val swipeLabel = meta\.swipe\.label/);
 assert.match(model, /meta\.getJSONObject\("swipe"\)\.let \{ RowSwipe\(it\.getString\("target"\), it\.getString\("label"\), it\.getString\("icon"\)\) \}/);
-// No Kotlin status-to-swipe map: no status literal decides a swipe target, label, or icon.
+
 const STATUS = '"(?:inbox|next|waiting|someday|reference|done)"';
 for (const [name, text] of Object.entries({ rowUi, model, focusUi, projectsUi, activity })) {
     assert.doesNotMatch(code(text), new RegExp(`${STATUS}(?:\\s*,\\s*${STATUS})*\\s*->\\s*${STATUS}`), `${name}: no status-to-swipe map in Kotlin`);
 }
 assert.doesNotMatch(code(rowUi), /swipeTarget|archived\.restoreToInbox/);
 assert.match(rowUi, /when \(swipe\.icon\) \{ "restore" -> Lucide\.RotateCcw; "done" -> Lucide\.Circle; else -> Lucide\.ArrowRight \}/);
-// Done is core's completeTask on every list, with RN's Undo toast (13a review: RN's swipeable-task-item shows it on Review and Contexts
-// too). Another status on a list whose contract writes its rows (Contexts, the Review screens) is that list's own action, with the
-// same enabled rule for swipe and TalkBack. A selecting row has no swipe; a list with core's bulk contract keeps the row's own swipe.
+
+
 assert.match(rowUi, /val listed = actions\?\.status\s+val swipeOn = !selecting && if \(target == "done"\) completable && canComplete else if \(listed != null\) canEdit else completable && canMove/);
 assert.match(rowUi, /val canMove = writable && !busy && \(failedAction == null \|\| failedAction == statusAction\(task, target\)\)/);
 assert.match(rowUi, /val onSwipe = if \(target == "done"\) \{ \{ complete\(task\.id, task\.taskRevision, askNext = true\) \} \} else listed\?\.let \{ status -> \{ status\(target\) \} \} \?: \{ changeStatus\(task, target\) \}/);
 assert.match(rowUi, /SwipeAction\(enabled = swipeOn, swipe = meta\.swipe, shape = shape, onSwipe = onSwipe, onMenu = \{ showStatusMenu\(task\) \}, onDelete = onDelete, onLongDone = onLongDone\)/);
 assert.match(rowUi, /if \(swipeOn\) customActions = listOf\(CustomAccessibilityAction\(swipeLabel\) \{ onSwipe\(\); true \},\s*CustomAccessibilityAction\(t\("taskStatus\.changeStatus"\)\) \{ showStatusMenu\(task\); true \}\)/);
-// RN's status menu (43479990e): the Destination group's Move to project or area… opens core's picker; its rows keep their words.
+
 assert.match(rowUi, /StatusMenuAction\(t\("task\.moveToProjectOrArea"\), idle\) \{ openDestination\(task\) \}/);
-// Status menu review: a stale move shows core's line as RN's failure toast and closes the project's move dialog; the picker
-// with its search sits above the keyboard.
+
+
 assert.match(source('MenuModel.kt'), /staleMoveLine\(action\.kind, failure\.message\)\?\.let \{ line -> shell\.ui \{/);
 assert.match(source('TaskEditor.kt'), /detectTapGestures \{ dismiss\(\) \} \}\.imePadding\(\)\.padding\(20\.dp\)/);
 assert.match(rowUi, /Text\(label, style = rnText\(14, 500\), color = c\.text, textAlign = TextAlign\.Center\)/);
 assert.doesNotMatch(rowUi, /split\(' '\)\.joinToString/, 'no capitalized words in the status menu rows');
-// RN's long press on a parked project in its Someday section opens Move to section… for it (#1319, 8fd2cab96).
+
 assert.match(source('MenuWidgets.kt'), /onLongClick = moveLabel\?\.let \{ \{ if \(enabled\) menu\.openProjectMove\(id, revision\) \} \}/);
 assert.match(source('SomedayScreen.kt'), /ParkedProject\(model, item\.json\.getJSONObject\("project"\), item\.json\.getString\("activateLabel"\), view\.getJSONObject\("text"\)\.getString\("moveToSection"\)\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');
-// RN's reveal-then-tap (#1275): the swipe only reveals the button; its tap runs the action, its long-press opens the status menu.
+
 assert.match(rowUi, /\.combinedClickable\(enabled = enabled, role = Role\.Button, onLongClick = \{ settle\(0f\); \(onLongDone \?: onMenu\)\(\) \}\) \{ settle\(0f\); onSwipe\(\) \}/);
 assert.match(rowUi, /onDragStopped = \{ settle\(if \(offset\.value > open \/ 2\) open else if \(offset\.value < left \/ 2\) left else 0f\) \}/, 'a drag only opens or closes the row');
-// RN's Delete swipe exists only where a list's contract trashes rows with core's Undo; a selecting list has no swipe.
+
 assert.match(rowUi, /val left = if \(onDelete != null\) -open else 0f/);
 assert.match(rowUi, /val onDelete = actions\?\.delete\?\.takeIf \{ canEdit && !selecting \}/);
 assert.doesNotMatch(code(rowUi), /SwipeToDismissBox|combinedClickable\([^)]*\)[^\n]*openEditor/, 'no one-gesture swipe; the row\'s own long-press stays free');
-// Every failed command holds its exact retry, except one core refused before writing (Done and its Undos too: 13a review P2).
+
 assert.match(model, /internal val UPDATE_REFUSALS = listOf\("STALE_REVISION", "INVALID_INPUT", "TASK_NOT_FOUND"\)/);
 assert.match(model, /private val REFUSABLE = setOf\("complete", "completeUndo", "inboxDecisionUndo", "update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker"\) \+ MENU_KINDS \+ CAPTURE_MODAL_KINDS \+ ATTACHMENT_KINDS/);
 assert.match(model, /message\.startsWith\("STALE_REVISION"\) \|\| \(kind in REFUSABLE && UPDATE_REFUSALS\.any \{ message\.startsWith\(it\) \}\)\s+\|\| \(kind in setOf\("completeUndo", "inboxDecisionUndo"\) && message\.startsWith\("ACTION_FAILED"\)\)/);
 assert.match(model, /val refused = refusedUnwritten\(action\?\.kind, message\)/);
-// A command refused as stale wrote nothing: it is never owed (no retry loop on a revision that can never match), its lists are
-// read again, and nothing shows but the conflict line of the editor save, the status menu, an open draft's Save, and a completion's
-// Undo refused because the task changed since (RN shows its failure too).
+
+
 assert.match(model, /stale = action != null && action\.kind !in STALE_SHOWN && message\.startsWith\("STALE_REVISION"\)/);
 assert.match(model, /private val STALE_SHOWN = setOf\("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo", "taskCompletedAt"\)/);
-// RN's applyCompletedAt (swipeable-task-item.tsx): a Done at a picked time asks for the project's next action, as a row's Done
-// does; both read core's prompt through one guarded helper (backdate review B1). An edit of a finished row's time never asks.
+
+
 assert.match(model, /internal fun askNextAction\(runtime: CoreHost, taskId: String\) \{\s+\/\/[^\n]*\s+val prompt = runCatching \{ runtime\.menuRead\("projectNextActionPrompt", JSONObject\(\)\.put\("taskId", taskId\)\.toString\(\)\)\.optJSONObject\("prompt"\) \}/);
 assert.match(model, /if \(askNext\) askNextAction\(runtime, id\)/);
 assert.match(menuModel, /if \(action\.kind == "taskCompletedAt" && reply\.optBoolean\("completed"\)\) shell\.askNextAction\(runtime, JSONObject\(action\.title\)\.getString\("taskId"\)\)/);
 assert.match(model, /if \(stale\) acknowledged\(action!!\)\s+else ui \{/);
 assert.match(model, /\(action != null && !refused\) \|\| message\.startsWith\("SAVE_FAILED"\)/);
-// While a failed command's retry is owed, only that exact command runs: no read starts, and the retry
-// keeps the failure on screen. A read's failure never replaces an owed command, in the ViewModel or the process record.
+
+
 assert.match(model, /if \(busy \|\| runtime == null \|\| \(failedAction != null && failedAction != action\)\) return false\s+busy = true\s+if \(action != null\) commandAt = \+\+issued\s+if \(failedAction == null\) error = null/);
 assert.equal(code(model).match(/\berror = null\b/g).length, 4, 'perform and a read\'s success (no retry owed), closeEditor, and an accepted edit clearing only a refused edit\'s message');
 assert.match(model, /if \(error != null && error == editRefusal\) error = null/);
 assert.match(model, /if \(failedAction == null\) error = null\s+\}/, 'a read\'s success never clears an owed retry\'s failure');
 assert.match(model, /val owed = failedAction\?\.takeIf \{ action == null && it\.kind != "storage" \}\s+if \(owed == null\) \{\s+error = message[\s\S]{0,120}?if \(failed != null\) failedAction = failed/);
 assert.match(owner, /if \(pending\.action\.kind == "storage" && failure\?\.action\?\.kind\.let \{ it != null && it != "storage" \}\) return/);
-// User actions go through perform: the three commands with their action, the reads the user asked for without one.
+
 assert.equal(code(model).match(/\bperform\(action\)/g).length, 17, 'complete, its Undo, a Process Inbox decision\'s Undo, editor save, Reset checklist, task star, project star, status, project create, area filter, saved search, Process Inbox answer, the storage retry, the journal replay\'s retry, and the capture popup\'s capture, lines and picker create');
 assert.equal(code(model).match(/\bperform\s*\{/g).length, 11, 'editor, reload, Try again, two More (Focus, a project), open project, open Process Inbox, open the capture popup, a project\'s capture screen, a Focus control\'s edit, Import .txt');
-// Background reads (resume, each minute, after a command) never take busy, so they disable no control and never
-// turn a user's tap away: only perform sets busy, and its guard knows nothing of reads in flight.
+
+
 const backgroundFn = code(model.slice(model.indexOf('internal fun <T> background('), model.indexOf('internal fun perform(')));
 assert.match(backgroundFn, /if \(runtime == null \|\| busy \|\| failedAction != null\) return run \{ always\?\.invoke\(\) \}\s+val mine = \+\+issued/);
-// After a command, what is on screen is read first and every other list once it answered (AfterCommandReads); a read that
-// answers, fails or never starts lets the next ones go.
+
+
 assert.match(backgroundFn, /try \{ show\(parts, mine, result, apply\) \} finally \{ always\?\.invoke\(\) \}/);
 assert.match(model, /AfterCommandReads\.run\(AfterCommandReads\.order\(screen, menu\.screen != null, search != null\)\)/);
 assert.doesNotMatch(backgroundFn, /busy = /);
 assert.equal(code(model).match(/\bbusy = true\b/g).length, 1, 'only a user action takes busy');
-// A list the boot left for later (still null) waits for a running action to end instead of being dropped (startup review 1).
+
 assert.match(model, /fun refreshFocus\(\) \{\s+\/\/[^\n]*\s+if \(focus == null && busy\) return menu\.whenIdle\(::refreshFocus\)\s+val depth = focus\.depth\(\)\s+val controls = menu\.focusControls\.state\.toString\(\)\s+background\(/);
-// Projects waits even when already read: a list older than a write made outside a command (the welcome sheet's Getting Started)
-// would keep the project's header title blank (O2f phone check).
+
+
 assert.match(model, /fun refreshProjects\(\) \{\s+(?:\/\/[^\n]*\s+)+if \(busy\) return menu\.whenIdle\(::refreshProjects\)\s+val at = depth\(\)\s+background\(/);
 assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, apply = ::showLists\)/);
-// After a command every list is still read: the full read is the step after what is on screen.
+
 assert.match(model, /AfterCommandReads\.Read\.AllLists -> background\(Part\.entries, \{ runtime -> read\(runtime, at\) \}, done, ::showLists\)/);
-// A command's lists are read again only after it succeeds (or was refused as stale), in the background, once busy is released.
+
 assert.match(model, /try \{\s+\/\/[^\n]*\s+debugProperty\("delay_action_ms"\)\.toLongOrNull\(\)\?\.let\(Thread::sleep\)\s+work\(runtime\); done = true\s+\}/);
 assert.match(model, /ui \{\s+busy = false\s+if \(\(done \|\| stale\) && action != null\) refreshAll\(\)\s+finished\?\.invoke\(\)\s+\}/);
 assert.doesNotMatch(code(model.slice(model.indexOf('fun add()'), model.indexOf('fun openEditor('))), /read\(runtime/);
-// Stale results never overwrite newer state: every list read takes a number; a command outdates every earlier read;
-// a result is shown only if nothing newer was shown first (a background failure too).
-// Freshness is per list (Inbox, Focus, Projects, the open project, the area filter): a faster single-list read never
-// makes a full read after an area change drop its other lists, and an older read never overwrites a newer one.
+
+
 assert.match(model, /internal fun fresh\(mine: Long, part: Part\) = \(mine > commandAt && mine > \(shownAt\[part\] \?: 0L\)\)\.also \{ if \(it\) shownAt\[part\] = mine \}/);
 assert.match(model, /internal enum class Part \{ Focus, Projects, Project, ProjectDetails, Areas, Editor, TaskView, Search, Menu, More, MenuDialog, Pomodoro \}/);
 {
@@ -903,64 +883,62 @@ for (const read of ['fun refresh()', 'fun loadMoreFocus(', 'fun openProject(', '
     assert.match(body, /val mine = \+\+issued[\s\S]*ui \{ (if \(fresh\(mine, Part\.\w+\)\)|showLists\(lists, mine\))/, `${read} shows its result only if nothing newer came first`);
 }
 assert.equal(code(model).match(/(?<!var )\bcommandAt = /g).length, 1, 'only a command\'s start outdates reads');
-// The exact retry of a failed Done is enabled wherever its row shows: Inbox, Focus, and a project.
+
 assert.match(rowUi, /val canComplete = writable && !busy &&\s*\(failedAction == null \|\| failedAction == completeAction\(task\.id, task\.taskRevision\)\)/);
-// Only the capture draft survives process death; a restored unchanged draft reuses its capture UUID.
-// The editor draft survives process death through a synced file in the no-backup folder; the Bundle holds only its key.
-// The model is read again from core, and the saved edits go on top with their own bases.
+
+
 assert.match(model, /private var editorKey: String\? = saved\.get<String>\("editorKey"\)/);
 assert.doesNotMatch(code(model), /saved\["editor(?!Key)/, 'no editor model or draft in the Bundle');
 assert.match(model, /EditorDrafts\(File\(app\.noBackupFilesDir, "editor"\)\)/);
 assert.match(model, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\(key\)\)\)/);
 assert.match(model, /TaskEditor\.restore\(readEditor\(runtime, draft\.getString\("id"\)\), draft\)/);
 assert.match(editorUi, /put\("bases", JSONObject\(edited\.keys\.associateWith \{ base\(it\) \}\)\)/);
-// An uncertain save's exact request is on disk before the call; after process death it is sent again before the draft unlocks.
+
 assert.match(model, /val action = saveDraftAction\(current\)\s+pendingSave = action\s+keepEditor\(current\)\s+sendDraft\(action\)/);
-// The pending save keeps its request UUID, so the re-send after process death answers core's receipt for the first send.
+
 assert.match(model, /pendingSave\?\.let \{\s+state\.put\("pending", JSONObject\(\)\.put\("base", JSONObject\(it\.base\)\)\.put\("patch", JSONObject\(it\.patch\)\)\.put\("checklist", it\.title\)\.put\("requestId", it\.requestId\)\s+\.put\("attachments", it\.attachments\)\)\s+\}\s+drafts\.write\(key, state\)/);
 assert.match(model, /val action = FailedAction\("saveDraft", restored\.id, pending\.optString\("checklist"\), base = map\("base"\), patch = map\("patch"\),\s+requestId = pending\.optString\("requestId"\), attachments = pending\.optString\("attachments"\)\)\s+failedAction = action\s+sendDraft\(action\)/);
-// Unresolved typed text is an unsaved edit: Close asks, and Save waits for core, then saves.
+
 assert.match(editorUi, /val dirty get\(\) = patch\.isNotEmpty\(\) \|\| waiting \|\| checklistChanged \|\| attachmentsChanged/);
-// The draft's attachments (pass A2) count as RN's areDraftAttachmentsDirty counts them: id, uri, title and removal.
+
 assert.match(editorUi, /listOf\(it\.getString\("id"\), it\.optString\("uri"\), it\.optString\("title"\), it\.optString\("deletedAt"\)\)/);
 assert.match(readFileSync(resolve(app, '../../packages/core/src/task-draft.ts'), 'utf8'), /`\$\{attachment\.id\}\\0\$\{attachment\.uri \?\? ''\}\\0\$\{attachment\.title \?\? ''\}\\0\$\{attachment\.deletedAt \?\? ''\}`/);
 assert.match(editorUi, /val leave = \{ if \(editor\.readOnly \|\| \(!editor\.dirty && !editsPending\)\) closeEditor\(\) else confirmLeave = true \}/);
 assert.match(model, /if \(current\.waiting \|\| editsPending\) \{ saveQueued = true; return \}/);
 assert.match(model, /if \(saveQueued && !resolved\.waiting && !editsPending\) \{ saveQueued = false; saveEditor\(\) \}/);
-// Text the app puts in a field (a chosen suggestion) leaves the cursor at its end, as RN's TextInput does.
+
 assert.match(editorUi, /if \(field\.text != value\) field = TextFieldValue\(value, TextRange\(value\.length\)\)\s+BasicTextField\(field, \{ typed -> field = typed;/);
-// A focused editor field scrolls wholly into view with RN's clearance above the keyboard (RN's scrollHandleIntoView),
-// again as the form shrinks with the keyboard; Compose alone brings only the cursor line in.
+
+
 assert.match(editorUi, /LaunchedEffect\(focused, viewport\) \{\s+if \(focused && viewport > 0\) reveal\.bringIntoView\(Rect\(0f, 0f, size\.width\.toFloat\(\), focusRevealBottom\(size\.height, viewport\)\)\)/);
 assert.match(editorUi, /modifier = Modifier\.bringIntoViewRequester\(reveal\)\.onSizeChanged \{ size = it \}\.onFocusChanged \{ if \(focused && !it\.isFocused\) commit\?\.invoke\(\); focused = it\.isFocused \}/);
 assert.match(editorUi, /val checklistFormScroll = rememberScrollState\(\)/);
 assert.match(editorUi, /\.imePadding\(\)\.onSizeChanged \{ formViewport = it\.height \}\s+\.onGloballyPositioned \{ checklistFormBounds = it\.boundsInWindow\(\) \}\s+\.verticalScroll\(checklistFormScroll, enabled = !checklistDragging\)/);
-// RN's Contexts and Tags inputs (TaskEditTokenField): one line with the keyboard's Done; Done leaves the field, and leaving it
-// shows core's tidy token list (draftValue), as RN's commitContextDraft / commitTagDraft on submit and on blur (TokenCommitTest).
+
+
 assert.match(editorUi, /keyboardOptions = if \(commit != null\) KeyboardOptions\(imeAction = ImeAction\.Done\) else KeyboardOptions\.Default,\s+keyboardActions = KeyboardActions\(onDone = \{ focusManager\.clearFocus\(\) \}\)/);
 assert.match(editorUi, /\.onFocusChanged \{ if \(focused && !it\.isFocused\) commit\?\.invoke\(\); focused = it\.isFocused \}/);
 assert.match(editorUi, /!locked, singleLine = true, description = label, tag = "editor-\$id",\s+commit = \{ committedTokens\(editor\.input\(id\), suggestions\[id\]\)\?\.let \{ editInput\(id, it\) \} \}\)/);
-// RN's Process Inbox header (inbox-processing-modal.tsx): Close, the progress, Edit (the pencil: the full task editor on the item,
-// whose saved changes the step then shows), the mode switch and Skip; its top is max(status bar, 10) (ProcessInboxHeaderTest).
+
+
 assert.match(processUi, /val edit = t\("common\.edit"\)\s+Box\(Modifier\.size\(44\.dp\)\.clickable\(enabled = !locked, role = Role\.Button\) \{ openEditor\(flow\.taskId, "task"\) \}\s+\.semantics \{ contentDescription = edit \}, contentAlignment = Alignment\.Center\) \{\s+Icon\(Lucide\.Pencil, null, tint = c\.tint, modifier = Modifier\.size\(20\.dp\)\)/);
 assert.match(processUi, /\.heightIn\(min = headerMinHeight\(statusTop\)\.dp\)[^\n]*\s+\.padding\(start = 20\.dp, end = 20\.dp, top = headerTopPadding\(statusTop\)\.dp, bottom = 10\.dp\)/);
 assert.match(model, /if \(processing\?\.takeUnless \{ it\.hidden \}\?\.taskId == closed\?\.id\) editStep\(JSONObject\(\)\.put\("reload", true\)\)/);
-// RN's Destination (TaskEditOrganizationField): the DESTINATION heading over a full-width input-style button with the value.
+
 assert.match(editorUi, /FieldHeading\(Lucide\.Folder, t\("task\.destination"\)\)\s+DateButton\(value, t\("task\.destination"\), !locked, Modifier\.fillMaxWidth\(\)\) \{ openPicker\("destination"\) \}/);
-// A chip's click, label, and state are one accessibility node: one-of-many choices are selectable (TalkBack says
-// "selected" as RN does; uiautomator reports selected), and only on/off chips (quick tokens, after completion) toggle.
+
+
 assert.match(editorUi, /\.semantics \{ contentDescription = description \}\s+\.then\(if \(toggle\) Modifier\.toggleable\(value = active, enabled = enabled, role = Role\.Button, onValueChange = \{ onClick\(\) \}\)\s+(?:\/\/[^\n]*\s+)?else if \(longPress != null\) Modifier\.semantics \{ selected = active \}\.combinedClickable\(enabled = enabled, role = Role\.Tab,\s+onLongClickLabel = longPress\.first, onLongClick = longPress\.second, onClick = onClick\)\s+else Modifier\.selectable\(selected = active, enabled = enabled, role = Role\.Tab, onClick = onClick\)\)/);
-// RN's long-press on Done (bca5e3e7e): the Form tab's Done chip and the View tab's Done badge open the completion-time picker.
+
 assert.match(editorUi, /val backdate = if \(status == "done"\) t\("task\.completeBackdateHintMobile"\) to \{ completedAt\.openEditor\(\) \} else null/);
 assert.match(source('TaskView.kt'), /StatusPill\(status, row\.getString\("value"\), editable, pickStatus,\s+if \(status == "done"\) \{ \{ completedAt\.openEditor\(\) \} \} else null\)/);
 assert.match(source('TaskView.kt'), /if \(enabled && backdate != null\) onLongClick\(t\("task\.completeBackdateHintMobile"\)\) \{ backdate\(\); true \}/);
 assert.equal(code(editorUi).match(/toggle = true/g).length, 2, 'only the quick token chips and "Repeat after completion" toggle');
-// RN's Waiting prompt: choosing Waiting asks for the person first, with core's people suggestions.
+
 assert.match(editorUi, /if \(status == "waiting" && !active\) openWaitingPrompt\(\) else editFields\(mapOf\("status" to status\)\)/);
 assert.match(model, /keepEditor\(current\.assignWaiting\(person\)\)\s+editFields\(mapOf\("status" to "waiting", "assignedTo" to person\)\)/);
-// One host per process: the Activity and ViewModel never close it, and only the owner constructs it.
-// The ViewModel's only onCleared stops its sync event listener (ProcessCoreHost keeps the listeners), the entry router's
-// file-share staging thread (EntryRouter.close) and the last screen's store thread (pass O2b); it closes no host.
+
+
 const listenerOnly = /\n    override fun onCleared\(\) \{\n        ProcessCoreHost\.unlistenSync\(syncListener\)\n        entries\.close\(\)\n        routeWrites\.shutdown\(\)\n        prompts\.shutdown\(\)\n        super\.onCleared\(\)\n    \}\n/;
 assert.match(model, listenerOnly);
 for (const file of [activity, model.replace(listenerOnly, '\n'), editorUi, focusUi, projectsUi, labelsKt, rowUi, areaUi, viewStateKt, searchUi, processUi, captureUi, captureModalUi, captureModalModel, menuModel, ...Object.values(menuScreens)]) {
@@ -973,14 +951,14 @@ const logFileKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dong
 const kotlinFiles = [activity, model, owner, editorUi, focusUi, projectsUi, labelsKt, themeKt, iconsKt, rowUi, areaUi, viewStateKt, searchUi, processUi, captureUi, captureModalUi, captureModalModel, snapshotsKt, coreHost, sqliteBridge, guard,
     menuModel, logFileKt, ...Object.values(menuScreens)];
 assert.equal(kotlinFiles.join('\n').match(/(?<!class )CoreHost\(/g).length, 1);
-// The dev build keeps its own database. The upgradetest build gets the RN database and RN's state
-// only from the guard, before CoreHost exists: before any open of it, the checkpoint, and any core write.
+
+
 assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val keyValue = RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)\s*val runtime = CoreHost\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*File\(app\.filesDir, "journal"\), deviceStore\(app, keyValue\),\s*File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),\s*backups = BackupOperations\(File\(app\.noBackupFilesDir, \"backup-operations\"\), File\(app\.filesDir, \"snapshots\"\), maxPlanBytes = DataTransferLimits\.MAX_PLAN_BYTES\),\s*calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\),\s*voice = HostVoice\.forApp\(app\)::call\)\s*try \{\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
-// Once the guard passes, it copies RN's RKStorage before it returns, so before RnKeyValue (or anything) opens it: an open can
-// checkpoint RN's WAL away when it closes.
+
+
 assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S])*?\n\s*checkpointRnState\(dataDir\)\n(?:(?!fun )[\s\S])*?return Opened\(/);
-// About asks Google Play only through aboutPlayAnswer (AboutEndpointsTest), after core's preflight answered; a device check's stub
-// never reaches Play's referrer.
+
+
 {
     const about = source('AboutSettings.kt');
     assert.equal(about.match(/PlayServices\.updateInfo\(/g)?.length, 1);
@@ -988,14 +966,14 @@ assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S
     assert.equal(about.match(/PlayServices\.installReferrer\(/g)?.length, 1);
     assert.match(about, /if \(stubbed\) debugProperty\("about_referrer"\) else PlayServices\.installReferrer\(app\)/);
 }
-// RN's installer journal recovery runs at boot after the validated load and before the journal's replay, the first write that
-// can reach files/attachments (pass A2); it is RN's own Kotlin, compiled as it is.
+
+
 assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s*(?:\/\/[^\n]*\n\s*)*recoverInstalls\(installer\)\s*if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/);
 assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /include\(listOf\("AttachmentFileInstallerCore", "AndroidAttachmentInstallerFileOps"\)\.map \{ "main\/java\/\$installer\/\$it\.kt" \}\)/);
-// RN's JVM tests of both, the file operations' hard-link fallback and errno names (#1139) included, run in this app's unit tests.
+
 assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /include\(listOf\("AttachmentFileInstallerCoreTest", "AndroidAttachmentInstallerFileOpsTest"\)\.map \{ "test\/java\/\$installer\/\$it\.kt" \}\)/);
-// The Kotlin host journals every write, and says so at boot: core then requires each write's replay tokens. Only this
-// flag sets 'required'; iOS boots and recovers with none (its bootRecovery sends two arguments).
+
+
 assert.match(coreHost, /\(if \(activationOwed\) callAsync\("bootRecovery", legacyState, legacyBackup, "journaled", storageBudget\(\), deadlineMs = bootDeadline\)\s+else callAsync\("boot", legacyState, legacyBackup, "journaled", storageBudget\(\), deadlineMs = bootDeadline\)\)/);
 assert.equal(coreHost.match(/"journaled"/g).length, 2);
 assert.match(hostEntry, /setNativeReplayTokens\(journaled \? 'required' : 'optional'\)/);
@@ -1004,8 +982,8 @@ assert.equal(hostEntry.match(/setNativeReplayTokens\(/g).length, 1);
 assert.equal(kotlinFiles.join('\n').match(/LegacyRnStoreGuard\.requireClear\(/g).length, 1);
 assert.match(guard, /private const val DATABASE = "files\/SQLite\/mindwtr\.db"/);
 assert.match(guard, /val database = File\(dataDir, DATABASE\)/);
-// AsyncStorage first (unreadable, then an oversized backup), then a missing database with RN state and
-// no backup, then quick_check; only a clear result may create the folder. json-ahead no longer blocks.
+
+
 const decision = guard.slice(guard.indexOf('fun requireClear'), guard.indexOf('private fun readState'));
 const order = ['"async-storage-unreadable"', '"json-too-large"', '"database-missing"', 'queryCopy(database, scratch)', '"database-unreadable"']
     .map((text) => decision.indexOf(text));
@@ -1013,25 +991,25 @@ assert(order.every((index, i) => index > (i ? order[i - 1] : -1)), `guard order 
 assert.match(decision, /state\.backup == null && hasRnState\(dataDir, asyncStorage\)\) "database-missing"/);
 assert.doesNotMatch(guard, /"json-ahead"/);
 assert(guard.indexOf('check(blocked == null)') < guard.indexOf('database.parentFile!!.mkdirs()'));
-// The preflight is needed while RN's import can still read the backup, decided before the folder is made (a missing database).
+
 assert(guard.indexOf('check(blocked == null)') < guard.indexOf('val preflight = preflightNeeded(state.jsonAhead, state.reconciled, state.backup != null, database.exists())')
     && guard.indexOf('val preflight = preflightNeeded(') < guard.indexOf('database.parentFile!!.mkdirs()'));
 assert.match(guard, /jsonAhead \|\| \(backupPresent && \(!reconciled \|\| !databaseExists\)\)/);
-// RN f06e5d1f9, 2093d9f1d: Android's editor Save and Process Inbox merge a change another device synced meanwhile (core's
-// mergeSyncedChanges, tested in native-host-contract-sync-merge.test.ts) instead of refusing it and losing the user's edit.
+
+
 assert.match(hostEntry, /contract\.saveTaskDraft\(\{ \.\.\.JSON\.parse\(json\), mergeSyncedChanges: globalThis\.__mindwtrHostPlatform !== 'ios' \}\)/);
 assert.match(hostEntry, /contract\.startInboxProcessing\(\{ mode: mode as 'guided' \| 'quick', mergeSyncedChanges: globalThis\.__mindwtrHostPlatform !== 'ios' \}\)/);
 assert.match(hostEntry, /legacyCheck\(legacyState: string, legacyBackup: string\): string \{\s*return submit\(async \(\) => \{\s*const state = JSON\.parse\(legacyState\) as LegacyState;\s*assertNativeLegacyBackupSafe\(\{ jsonAhead: state\.jsonAhead, backupJson: state\.backupPresent \? legacyBackup : null \}\);/);
 assert.match(guard, /\/\/ ponytail: copies the whole database on every boot\. Skip it once a native-owned\s*\/\/ marker proves the last shutdown was clean\./);
-// RKStorage and the RN database are only read as bytes: SQLite writes -wal/-shm even through a
-// read-only connection, and a failed read-write open can checkpoint the WAL into the file on close.
+
+
 const originalUses = [...guard.matchAll(/\b(asyncStorage|database|file|source)\.(\w+)/g)].map(([, name, member]) => `${name}.${member}`);
 assert.deepEqual([...new Set(originalUses)].sort(), ['asyncStorage.exists', 'asyncStorage.path', 'database.exists', 'database.parentFile',
     'file.name', 'file.path', 'source.copyTo', 'source.exists', 'source.name']);
 assert.equal(guard.match(/BundledSQLiteDriver\(\)\.open\(/g).length, 2);
 assert.match(guard, /BundledSQLiteDriver\(\)\.open\(File\(scratch, file\.name\)\.path\)/);
-// The one read-write open of an original is RKStorage in commitRnState, after its byte checkpoint, and it
-// only deletes the json-ahead marker and sets the reconcile flag, in one transaction.
+
+
 const commit = guard.slice(guard.indexOf('fun commitRnState'), guard.indexOf('private fun ensureRnStateCheckpoint'));
 assert(commit.indexOf('ensureRnStateCheckpoint(asyncStorage') > 0
     && commit.indexOf('ensureRnStateCheckpoint(asyncStorage') < commit.indexOf('BundledSQLiteDriver().open(asyncStorage.path)'));
@@ -1040,18 +1018,18 @@ assert.deepEqual(commit.match(/"(BEGIN IMMEDIATE|COMMIT|ROLLBACK|DELETE FROM[^"]
     '"PRAGMA synchronous = FULL"', '"BEGIN IMMEDIATE"', '"DELETE FROM catalystLocalStorage WHERE key = ?"',
     '"INSERT OR REPLACE INTO catalystLocalStorage VALUES (?, ?)"', '"COMMIT"', '"ROLLBACK"']);
 assert.match(commit, /bindText\(1, JSON_AHEAD\)[\s\S]*bindText\(1, RECONCILED\)\s*it\.bindText\(2, "1"\)/);
-// The checkpoint: each file synced, the folder synced, then promoted by rename, then the parent synced.
+
 const rnCheckpoint = guard.slice(guard.indexOf('private fun ensureRnStateCheckpoint'), guard.indexOf('private fun hasRnState'));
 assert.match(rnCheckpoint, /if \(!checkpoint\.exists\(\)\)[\s\S]*listOf\("", "-wal", "-journal", "-shm"\)[\s\S]*syncFile\(source\.copyTo[\s\S]*syncDirectory\(partial\)[\s\S]*renameTo\(checkpoint\)[\s\S]*syncDirectory\(checkpoint\.parentFile!!\)/);
 assert.match(guard, /RN_STATE_CHECKPOINT = "files\/SQLite\/RKStorage\.prewrite"/);
-// Kotlin reads, JS decides: no merge, and the backup is passed on as text, never parsed.
+
 assert.doesNotMatch(code(kotlinFiles.join('\n')), /merge|JSONObject\((state\.)?backup|JSONArray\((state\.)?backup/i);
 assert.match(guard, /return Opened\(database, bootState\.toString\(\), state\.backup \?: "", state\.language, state\.theme, preflight\)/);
-// RN's device-local language is one more AsyncStorage row read from the byte copy, passed on as text.
+
 assert.match(guard, /private const val LANGUAGE = "mindwtr-language"/);
 assert.match(guard, /listOf\(JSON_AHEAD, RECONCILED, BACKUP_VERSION, LANGUAGE, THEME\)/);
 assert.match(guard, /language = if \(LANGUAGE in sizes\) value\(LANGUAGE\) else null/);
-// RN's device-local theme is one more row read the same way (theme-context.tsx THEME_STORAGE_KEY).
+
 assert.match(guard, /private const val THEME = "@mindwtr_theme"/);
 assert.match(guard, /theme = if \(THEME in sizes\) value\(THEME\) else null/);
 assert.match(coreHost, /LegacyRnStoreGuard\.commitRnState\(checkNotNull\(rnDataDir\)/);
@@ -1066,19 +1044,19 @@ for (const [, name] of guardLog.matchAll(/(\w+)=/g)) assert.doesNotMatch(name, /
 assert.equal(owner.match(/close\(\)/g).length, 1);
 assert.match(owner, /catch \(failure: Throwable\) \{\s*runCatching \{ runtime\.close\(\) \}/);
 assert.match(activity, /model\.attach\(\)/);
-// A failed command's exact retry outlives its screen inside this process only.
+
 assert.match(model, /val failed = if \(\(action != null[\s\S]*?ProcessCoreHost\.recordFailure\([\s\S]*?ui \{/);
-// A failed update keeps its editor draft with the retry, so a new screen reopens the editor on it.
+
 assert.match(model, /PendingFailure\(failed, message, menu\.page, editor, screen, focus, projects, project, areaFilter\)/);
 assert.match(model, /pending\.menuPage\?\.let\(menu::restorePage\)/, 'a new screen shows the failed command\'s list page again');
 assert.match(model, /pending\.editor\?\.let\(::keepEditor\)/);
-// ...and a failure on Focus reopens Focus with its rows, since reads wait for the retry.
+
 assert.match(model, /focus = pending\.focus\s+focusRevision = pending\.focus\?\.revision\.orEmpty\(\)\s+projects = pending\.projects\s+keepProject\(pending\.project\?\.projectId\)\s+project = pending\.project\s+show\(pending\.screen\)/);
-// Both also start storing the last screen (pass O2b review P3-3).
+
 assert.equal(model.match(/ProcessCoreHost\.failure\?\.let \{ pending -> ui \{ host = runtime; restore\(pending, storedProcessing, storedCapture\); keepRoutes\(\) \}/g).length, 2);
 assert.match(model, /runtime\.completeTask\(id, taskRevision\)\s+acknowledged\(action\)/);
 assert.match(model, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{[\s\S]{0,300}?throw failure\s+\}\s+acknowledged\(action\)\s+(?:\/\/[^\n]*\s+)*if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+(?:\/\/[^\n]*\s+)*ui \{ editorMenu\.saved\(action\.id\); closeEditor\(settle = false\) \}/);
-// The new contract commands: each is a perform(action) with its exact retry, acknowledged only after core's reply.
+
 for (const [call, fn] of [
     ['runtime\\.setTaskFocus\\(id, focused, taskRevision\\)', 'fun setTaskFocus('], ['runtime\\.setProjectFocus\\(id, focused, projectRevision\\)', 'fun setProjectFocus('],
     ['runtime\\.updateTask\\(action\\.id, json\\(action\\.base\\), json\\(action\\.patch\\), action\\.requestId\\)', 'private fun sendUpdate('],
@@ -1087,10 +1065,10 @@ for (const [call, fn] of [
     const body = model.slice(model.indexOf(fn), model.indexOf('\n    }\n', model.indexOf(fn)));
     assert.match(body, new RegExp(`perform\\(action\\) \\{ runtime ->\\s+(val reply = )?${call}\\s+acknowledged\\(action\\)`), `${fn} runs through perform(action) with its exact retry`);
 }
-// A star's retry re-sends the same target at the same revision; a new project's retry re-sends the same request UUID, kept with its draft.
+
 assert.match(model, /FailedAction\("taskFocus", id, patch = mapOf\("focused" to "\$focused", "taskRevision" to taskRevision\)\)/);
 assert.match(model, /FailedAction\("projectFocus", id, patch = mapOf\("focused" to "\$focused", "projectRevision" to projectRevision\)\)/);
-// The rows' revisions are core's: CoreHost passes them straight to host-entry's complete, taskFocus and projectFocus.
+
 assert.match(coreHost, /fun completeTask\(id: String, taskRevision: String\): JSONObject = callAsync\("complete", id, taskRevision\)/);
 assert.match(coreHost, /fun setTaskFocus\(id: String, focused: Boolean, taskRevision: String\): JSONObject = callAsync\("taskFocus", id, focused, taskRevision\)/);
 assert.match(coreHost, /fun setProjectFocus\(id: String, focused: Boolean, projectRevision: String\): JSONObject = callAsync\("projectFocus", id, focused, projectRevision\)/);
@@ -1098,54 +1076,54 @@ assert.match(projectsUi, /it\.getBoolean\("focusedWithoutNextAction"\), it\.optS
 assert.match(model, /FailedAction\("createProject", projectRequestId, projectDraft, base = mapOf\("areaId" to areaId\)\)/);
 for (const field of ['projectDraft', 'projectRequestId']) assert.match(model, new RegExp(`saved\\.get<String>\\("${field}"\\)`));
 assert.match(model, /if \(action\.kind == "createProject"\) setProjectDraft\(action\.title, action\.base\["areaId"\], action\.id\)/, 'a new screen restores the owed create, never re-sends it');
-// A refused star shows core's own text (RN's toast); an empty refusal shows nothing.
+
 assert.match(model, /val blocked = reply\.optString\("blocked"\)\s+if \(blocked\.isNotEmpty\(\)\) ui \{ showToast\(reply\.getString\("blockedTitle"\), blocked\) \}/);
-// The area filter is read with every list, so its label and the lists change together.
+
 assert.match(model, /readOpen\(runtime, at\) else null,\s+AreaFilter\.parse\(runtime\.areaFilter\(\)\),\s+\)/);
-// Startup (phase 2 #2): the boot reads only the tab on screen; Focus and Projects follow first content (or their tab opening, or a
-// tab chosen while the boot ran). Every other full read (refreshAll) reads every list.
+
+
 assert.match(model, /private fun read\(runtime: CoreHost, at: Depth, shown: Screen\? = null\) = Lists\(\s+if \(shown == null \|\| shown == Screen\.Focus\) readFocus\(runtime, null, at\.focus, at\.controls\) else null,\s+if \(shown == null \|\| shown == Screen\.Projects\) ProjectsView\.parse\(runtime\.projects\(\)\) else null,\s+at\.project,\s+if \(shown == null \|\| shown == Screen\.Projects\) readOpen\(runtime, at\) else null,/);
 assert.equal(code(model).match(/\bread\(runtime, at\b[^)]*\)/g).join(' | '), 'read(runtime, at, screen) | read(runtime, at) | read(runtime, at) | read(runtime, at, Screen.Focus) | read(runtime, at, Screen.Projects) | read(runtime, at)',
     'the boot reads the tab on screen; a read\'s Try again and a sync\'s refreshAll read all; a command\'s refreshAll reads the tab on screen, then all (AfterCommandReads)');
 assert.match(model, /fun contentShown\(\) \{\s+if \(focus == null\) refreshFocus\(\)\s+if \(projects == null\) refreshProjects\(\)\s+ProcessCoreHost\.contentShown\(\)\s+\}/);
 assert.match(model, /loading = false\s+\/\/[^\n]*\s+if \(screen == Screen\.Focus && lists\.focus == null\) refreshFocus\(\)\s+if \(screen == Screen\.Projects && lists\.projects == null\) refreshProjects\(\)/);
-// A list the boot did not read never closes the open project.
+
 assert.match(model, /lists\.projects\?\.let \{ read ->\s+if \(fresh\(mine, Part\.Projects\)\) projects = read\s+if \(fresh\(mine, Part\.Project\)\) showProject\(lists\.projectId, lists\.project\)\s+\}/);
 for (const [fn, js] of [['setTaskFocus', 'taskFocus'], ['setProjectFocus', 'projectFocus'], ['createProject', 'createProject'], ['areaFilter', 'areaFilter'], ['setAreaFilter', 'setAreaFilter']]) {
     assert.match(coreHost, new RegExp(`fun ${fn}\\([^)]*\\): JSONObject =\\s*callAsync\\("${js}"`), `CoreHost.${fn} reaches host method ${js}`);
 }
 assert.equal([activity, owner, editorUi, focusUi, projectsUi, rowUi, areaUi].join('\n').match(/\.setTaskFocus\(|\.setProjectFocus\(|\.createProject\(|\.setAreaFilter\(|\.areaFilter\(\)/g), null);
 assert.equal(model.match(/clearFailure/g).length, 1);
-// The boot owner names only the database, the journal, (pass D1a) RN's recovery snapshots folder, which a backup operation's
-// identity check reads, and (G2) RN's Gmail receipts folder, which only HostGmailReceipts opens.
+
+
 assert.doesNotMatch(owner, /SharedPreferences|SavedStateHandle|File\(app\.filesDir, "(?!mindwtr-native-dev\.db"|SQLite\/mindwtr\.db"|journal"|snapshots"|GmailCapture")/);
 assert.match(model, /ProcessCoreHost\.get\(/);
-// Storage exceptions never cross the QuickJS JNI boundary.
+
 assert.equal(coreHost.match(/JSCallFunction \{/g).length, 1, 'the only JS callback constructor is guarded');
 const bridgeCallbacks = coreHost.match(/bridge\.setProperty\([^\n]*/g);
 assert.equal(bridgeCallbacks.length, 55, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, the device calendar call, system search\'s info and call (O2d), and File Sync\'s document and lock calls (S5), Gmail\'s authorization call, receipts file call and receipts SQL (G2), and voice capture\'s microphone call (V3): each guarded');
-// G2: Gmail's authorization call only starts on the engine thread (GmailAuthorization runs it on its own pool or the main thread);
-// the receipts file calls and SQL run at once, as op-sqlite's executeSync does on RN's JS thread.
+
+
 assert(bridgeCallbacks.includes('bridge.setProperty("gmailCall", guarded { args -> io.gmail(args[0] as String, authorization) }) }'));
 assert(bridgeCallbacks.includes('bridge.setProperty("gmailFile", guarded { args -> receipts.file(args[0] as String, args[1] as String, args[2] as String) })'));
 assert(bridgeCallbacks.includes('bridge.setProperty("gmailSql", guarded { args -> receipts.sql(args[0] as String, args[1] as String, args[2] as String) })'));
-// O2d: system search's calls run on HostIo's calendar thread, as the calendar's do.
+
 assert(bridgeCallbacks.includes('bridge.setProperty("appSearchCall", guarded { args -> io.calendar(args[0] as String, search::call) })'));
-// S5: File Sync's SAF documents and folder lock only start on the engine thread; HostIo runs them (a content:// call on a thread of its own).
+
 assert(bridgeCallbacks.includes('bridge.setProperty("documentCall", guarded { args -> io.file(args[0] as String, folder::call) }) }'));
 assert(bridgeCallbacks.includes('bridge.setProperty("syncLockCall", guarded { args -> io.file(args[0] as String, lock::call) }) }'));
-// C3: the device calendar call only starts on the engine thread; HostIo's calendar thread runs it (a prompt answers later).
+
 assert(bridgeCallbacks.includes('bridge.setProperty("calendarCall", guarded { args -> io.calendar(args[0] as String, device::call) }) }'));
 assert(bridgeCallbacks.includes('bridge.setProperty("fileAbort", guarded { args -> io.fileAbort(args[0] as String); null })'));
 assert(bridgeCallbacks.includes('bridge.setProperty("fileDeleteNow", guarded { args -> files.deleteNow(args[0] as String); null })'));
-// The attachment file port and the installer only start their call on the engine thread; HostIo's files thread runs it.
+
 assert(bridgeCallbacks.includes('bridge.setProperty("fileCall", guarded { args -> io.file(args[0] as String, files::call) })'));
 assert(bridgeCallbacks.includes('bridge.setProperty("installerCall", guarded { args -> io.file(args[0] as String, installer::call) })'));
-// The JS host's events (sync's badge and cycles, an automatic sync's warning): handed on as text, a listener's failure swallowed.
+
 assert(bridgeCallbacks.includes('bridge.setProperty("hostEvent", guarded { args -> runCatching { onEvent?.invoke(args[0] as String) }; null })'));
 for (const line of bridgeCallbacks) assert.match(line, /^bridge\.setProperty\("\w+", guarded \{/);
-// RN's AsyncStorage in place (plan D1): RKStorage's own table and statements, durable writes in one transaction, and a file it
-// creates left at RN's user_version 1 (at 0, RN's SQLiteOpenHelper re-runs onCreate, fails, and deletes the database).
+
+
 {
     const kv = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/RnKeyValue.kt'), 'utf8');
     const rnSupplier = readFileSync(resolve(app, '../../node_modules/@react-native-async-storage/async-storage/android/src/main/java/com/reactnativecommunity/asyncstorage/ReactDatabaseSupplier.java'), 'utf8');
@@ -1162,8 +1140,8 @@ for (const line of bridgeCallbacks) assert.match(line, /^bridge\.setProperty\("\
         assert(bridgeCallbacks.some((line) => line.startsWith(`bridge.setProperty("${name}", guarded { args -> `)), `${name} is guarded`);
     }
 }
-// The pending-captures queue's ports: app-private files only (HostFiles), RN's RKStorage for the last-applied record (RnKeyValue);
-// only a debug build's stop runs before a delete.
+
+
 for (const [name, call] of [['fileList', 'args -> files.list(args[0] as String)'], ['fileRead', 'args -> files.readText(args[0] as String)'],
     ['fileDelete', 'args -> queueStop(); files.delete(args[0] as String); null'], ['kvGet', 'args -> JSONArray().put(keyValue.get(args[0] as String) ?: JSONObject.NULL).toString()'],
     ['kvSet', 'args -> kvFault(); keyValue.set(args[0] as String, args[1] as String); null']]) {
@@ -1171,7 +1149,7 @@ for (const [name, call] of [['fileList', 'args -> files.list(args[0] as String)'
 }
 assert.match(coreHost, /private fun queueStop\(\) \{\s+if \(debugFault\("queue_stop"\) != "delete"\) return/, 'the queue stop is debug-only');
 assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_set"\) != "1"\)/, 'the injected RKStorage failure is debug-only');
-// fetch and the secrets (HostIo.kt, SecretStore.kt): started on the engine thread, run off it, answered only through the pump.
+
 {
     const core = (name) => readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core', name), 'utf8');
     const hostIo = core('HostIo.kt');
@@ -1182,78 +1160,75 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     }
     assert.doesNotMatch(hostIo + secretStore, /quickjs|JSFunction|JSObject|JSCallFunction/i, 'no host call touches the engine');
     assert.match(hostIo, /calls\[id\] = call\s+call\.enqueue\(object : Callback \{/, 'a request runs on OkHttp\'s dispatcher');
-    // The one wait: a debug build's Argon2id delay on the crypto thread (check-encryption-device.mjs taps during it).
+
     assert.doesNotMatch(hostIo.replace('if (argon2DelayMs > 0) Thread.sleep(argon2DelayMs).also { started = System.nanoTime() }', ''), /\.execute\(\)|runBlocking|Thread\.sleep/);
     assert.match(hostIo, /private val argon2DelayMs = debugProperty\("crypto_delay_ms"\)/);
-    // Nothing throws on OkHttp's thread, and (review 3) a call stays cancellable until its body is read: it leaves [calls]
-    // only after the read, on a failure, or on an abort, so an abort or close after the headers still cancels it.
+
+
     assert.match(hostIo, /override fun onResponse\(call: Call, response: Response\) \{[^{}]*?try \{\s*answers\.add\(runCatching \{ response\.use \{ read\(id, it, redirect\) \} \}\.getOrElse \{ failure\(id, call, it\) \}\)\s*\} finally \{\s*calls\.remove\(id\)\s*\}/);
     assert.equal(hostIo.match(/calls\.remove\(id\)/g).length, 3);
     assert.match(hostIo, /fun close\(\) \{\s*calls\.values\.forEach \{ it\.cancel\(\) \}/);
     assert.match(hostIo, /secretThread\.execute \{\s*\/\/ A read the closed host would never take is not made\.\s*if \(op == "get" && answers\.closed\) return@execute\s*answers\.add\(runCatching \{/, 'a secret call runs on the secrets thread');
-    // A file call (the attachment file port, the installer) runs on the files thread, its request read there too.
-    // A file call runs off the engine (FileJobs: the files thread, or a picked document's own thread), its request read there too;
-    // an aborted call that has not started never runs (review finding 2).
+
+
     assert.match(hostIo, /fileJobs\.start\(id, FileJobs\.readsPickedDocument\(json\), \{\s*val request = JSONObject\(json\)/, 'a file call runs off the engine');
     const fileJobs = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/FileJobs.kt'), 'utf8');
     assert.match(fileJobs, /if \(aborted\.remove\(id\)\) throw IOException\("Request cancelled"\)/);
     assert.match(fileJobs, /if \(readsDocument\) Thread\(job, "mindwtr-document-\$id"\)\.apply \{ isDaemon = true \}\.start\(\) else queue\.execute\(job\)/);
-    // C3: a device calendar call (HostCalendars) runs on the calendar thread and answers once, when it replies.
+
     assert.match(hostIo, /calendarThread\.execute \{ runCatching \{ run\(json, reply\) \}\.onFailure \{ reply\(Result\.failure\(it\)\) \} \}/, 'a calendar call runs off the engine');
     assert.match(hostIo, /if \(replied\.compareAndSet\(false, true\)\) \{\s*answers\.add\(/, 'a calendar call answers once');
     assert.equal(hostIo.match(/answers\.add\(/g).length, 6, 'the answer queue is the only way back');
-    // A body leaves apart from its answer's JSON (ioBody), and only for the answer just taken.
+
     const hostAnswers = core('HostAnswers.kt');
     assert.match(hostAnswers, /held = null\s+taken = answer\.body\s+answer\s+\}/);
     assert.match(hostAnswers, /fun body\(\): String = synchronized\(lock\) \{ if \(closed\) "" else \(taken \?: ""\)\.also \{ taken = null \} \}/);
-    // The whole body or a throw: the declared length and the running size are refused past the limit, and nothing in the
-    // read catches a failure (a cut, a reset, a broken gzip stream) into a short body.
+
+
     const read = hostIo.slice(hostIo.indexOf('private fun read('), hostIo.indexOf('private fun failure('));
     assert.match(read, /if \(body\.contentLength\(\) > maxResponseBytes\) throw Refused\(tooLarge\)/);
     assert.match(read, /while \(source\.read\(bytes, 64 \* 1024L\) != -1L\) \{\s*if \(bytes\.size > maxResponseBytes\) throw Refused\(tooLarge\)\s*\}/);
     assert.doesNotMatch(read, /catch|runCatching|getOrNull|getOrDefault|getOrElse|\?: ""|orEmpty/, 'HostIo.read swallows no IOException');
-    // The only places HostIo catches: each turns the failure into the call's error answer, so fetch rejects.
+
     assert.doesNotMatch(hostIo, /catch \(|getOrNull|getOrDefault/);
     assert.deepEqual(hostIo.match(/runCatching \{[\s\S]*?\}\.getOrElse \{ [^\n]*/g).map((line) => /getOrElse \{ (failure\(id, call, it\)|(Answer\()?JSONObject\(\)\.put\("id", id\)\.put\("error")/.test(line)), [true, true, false]);
-    // A crypto call's failure (S4b) is its error answer too: `auth` for a tag mismatch, else the failure's own text.
+
     assert.match(hostIo, /runCatching \{ cryptoReply\(id, json\) \}\.getOrElse \{ failure ->\s+val answer = JSONObject\(\)\.put\("id", id\)[\s\S]{0,400}?Answer\(answer\.toString\(\)\)\s+\}\s+\/\/[^\n]*\s+if \(reply != null\) answers\.add\(reply\)\s+wake\(\)/);
-    // A file call's failure (FileJobs runs it in runCatching and delivers the Result) is its error answer.
+
     assert.match(fileJobs, /val result = runCatching \{[\s\S]*?compute\(\)\s*\}[\s\S]*?deliver\(result\)/);
     assert.match(hostIo, /\}\) \{ Answer\(JSONObject\(\)\.put\("id", id\)\.put\("error", it\.message \?: it\.javaClass\.simpleName\)\.toString\(\)\) \}\)/);
-    // Review 5: the ceiling is core's largest limit (a sync document), bounded by a fifth of the heap; core applies its
-    // smaller limits itself. The lower limit the net check uses exists only in a debug build (debugProperty is "" in release).
+
+
     const coreHttp = readFileSync(resolve(app, '../../packages/core/src/http-utils.ts'), 'utf8');
     const product = (text) => text.replace(/[L_]/g, '').split('*').reduce((total, part) => total * Number(part.trim()), 1);
     assert.equal(product(/const val MAX_SYNC_DOCUMENT_BYTES = ([^\n]+)/.exec(hostIo)[1]), product(/export const MAX_SYNC_DOCUMENT_BYTES = ([^;]+);/.exec(coreHttp)[1]));
     assert.match(hostIo, /private val ceiling = minOf\(MAX_SYNC_DOCUMENT_BYTES, Runtime\.getRuntime\(\)\.maxMemory\(\) \/ 5\)/);
     assert.match(hostIo, /private val maxResponseBytes = debugProperty\("net_max_bytes"\)\.toLongOrNull\(\)\?\.takeIf \{ it > 0 \}\?\.let \{ minOf\(it, ceiling\) \} \?: ceiling/);
     assert.match(hostIo, /Log\.i\(CoreHost\.TAG, "Native Android fetch limit bytes=\$maxResponseBytes ceiling=\$ceiling heap=/);
-    // Review 4: a response without a body keeps its gzip label and is never decoded (cloud's HEAD failed on it).
+
     assert.match(read, /val bodiless = response\.request\.method == "HEAD" \|\| response\.code == 204 \|\| response\.code == 304 \|\| body\.contentLength\(\) == 0L/);
     assert.match(read, /val gzip = !bodiless && response\.header\("Content-Encoding"\)\.equals\("gzip", ignoreCase = true\)\s+val source = if \(gzip\) GzipSource/);
-    // A network failure's text never carries core's invalid-JSON phrases (retry-utils.ts), which sync reads as a missing
-    // remote and writes over: the host's list is core's, and a matching detail is replaced by the exception's name.
+
+
     const coreRetry = readFileSync(resolve(app, '../../packages/core/src/retry-utils.ts'), 'utf8');
     const corePhrases = [...coreRetry.slice(coreRetry.indexOf('export const isWebdavInvalidJsonError'), coreRetry.indexOf('export const isRetryableWebdavReadError')).matchAll(/normalized\.includes\('([^']+)'\)/g)].map((m) => m[1]);
     assert.deepEqual([.../INVALID_JSON_PHRASES = listOf\(([\s\S]*?)\)\n/.exec(hostIo)[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]), corePhrases);
     assert.match(hostIo, /detail\.isNotEmpty\(\) && INVALID_JSON_PHRASES\.none \{ detail\.lowercase\(\)\.contains\(it\) \}\s*\} \?: error\.javaClass\.simpleName/);
-    // Review 2: an operation's deadline is the longest core timeout it wraps (core's storage and request timeouts for a
-    // contract call; HostIo's request ceiling plus that for one that sends requests). Past it the operation is cancelled
-    // (JS cancel: its signal, its fetches) and drained; one that does not end stops the host, so it never resumes.
+
+
     const coreStorage = readFileSync(resolve(app, '../../packages/core/src/store-settings.ts'), 'utf8');
     const deadline = product(/const val OPERATION_DEADLINE_MS = ([^\n]+)/.exec(coreHost)[1]);
     assert(deadline >= product(/export const DEFAULT_TIMEOUT_MS = ([^;]+);/.exec(coreHttp)[1]) && deadline >= product(/const STORAGE_TIMEOUT_MS = ([^;]+);/.exec(coreStorage)[1]));
     assert.match(coreHost, /const val NETWORK_DEADLINE_MS = HostIo\.CALL_TIMEOUT_MS \+ OPERATION_DEADLINE_MS/);
     assert.match(coreHost, /private fun callAsync\(method: String, vararg args: Any\?, deadlineMs: Long = deadline\(method, args\.toList\(\)\)\): JSONObject \{/);
-    // D1c: a backup commit's deadline is the one frozen in its manifest; every other call's is deadlineOf's.
+
     assert.match(coreHost, /private fun deadline\(method: String, args: List<Any\?>\): Long =\s+if \(method == BackupOperations\.METHOD\) frozenBudget\(args\[0\] as String\) else deadlineOf\(method, args\)/);
     assert.match(coreHost, /else backups\?\.budgetMs\(reference, budget\) \?: BACKUP_DEADLINE_MS/);
-    // D9: a nested call (on the engine) pumps until its answer; any other starts its operation in one engine task and is answered
-    // from the pump's turns, so it never holds the engine while the operation waits. Past its deadline it is cancelled, drained,
-    // or stops the host, as a nested one.
+
+
     assert.match(coreHost, /if \(Thread\.currentThread\(\) === engineThread\) \{\s+stopped\?\.let \{ throw IllegalStateException\(it\) \}\s+finish\(begin\(method, args, deadlineMs, done\), answerChecked\(method, args, deadlineMs\)\)/);
-    // D9a review: a journaled write starts only after the write before it answered (WriteQueue, JVM-tested), reads at once;
-    // each ending call starts the next waiting write, and a closing host fails the writes that never started.
+
+
     assert.match(coreHost, /onEngineQueued \{\s+stopped\?\.let \{ throw IllegalStateException\(it\) \}[^}]*?begin\(method, args, deadlineMs, done\)\.let \{ if \(writeQueue\.admit\(it\)\) start\(it\) \}\s+\}/);
     assert.match(coreHost, /private val writeQueue = WriteQueue<Call> \{ it\.entry != null \}/);
     assert.match(coreHost, /call\.done\.completeExceptionally\(failure\)\s+\}\s+startNextWrite\(call\)\s+\}/, 'an answered write starts the next');
@@ -1266,20 +1241,20 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     assert.equal(coreHost.match(/pumpUntil\(/g).length, 4, 'a call pumps itself only through pumpUntil: a nested one, and a drain');
     assert.match(coreHost, /callAsync\("netCheck", port, deadlineMs = NETWORK_DEADLINE_MS\)/);
     assert.match(hostIo, /response\.use \{ read\(id, it, redirect\) \}/);
-    // RN's connect timeout (#1150).
+
     const rnClient = readFileSync(resolve(app, '../mobile/modules/sync-file-lock/android/src/main/java/tech/dongdongbh/mindwtr/syncfilelock/SyncHttpClientPackage.kt'), 'utf8');
     assert.equal(/CONNECT_TIMEOUT_MS = ([\d_]+L)/.exec(hostIo)[1], /CONNECT_TIMEOUT_MS = ([\d_]+L)/.exec(rnClient)[1]);
     assert.match(hostIo, /\.connectTimeout\(CONNECT_TIMEOUT_MS, TimeUnit\.MILLISECONDS\)/);
     assert.match(coreHost, /if \(io\.busy\(\)\) io\.await\(if \(delay < 0\) 25L else minOf\(delay, 25L\)\)\s+else if \(delay > 0\) Thread\.sleep\(minOf\(delay, 25L\)\)/);
     assert.match(coreHost, /\(if \(activationOwed\) callAsync\("bootRecovery", legacyState, legacyBackup, "journaled", storageBudget\(\), deadlineMs = bootDeadline\)\s+else callAsync\("boot", legacyState, legacyBackup, "journaled", storageBudget\(\), deadlineMs = bootDeadline\)\)\.also \{ netCheck\(\) \}/);
     assert.match(coreHost, /val port = debugFault\("net_check"\)\.ifEmpty \{ return \}/, 'the net check is debug-only');
-    // RN's network security config (cleartext as RN allows it, user CAs trusted), and the INTERNET permission.
+
     const rnConfig = /NETWORK_SECURITY_CONFIG_XML = `([\s\S]*?)`;/.exec(readFileSync(resolve(app, '../mobile/plugins/android-network-security-config.js'), 'utf8'))[1];
     assert.equal(readFileSync(resolve(app, 'android/app/src/main/res/xml/network_security_config.xml'), 'utf8'), rnConfig);
     const manifest = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
     assert.match(manifest, /<uses-permission android:name="android\.permission\.INTERNET" \/>/);
     assert.match(manifest, /<application\s+android:networkSecurityConfig="@xml\/network_security_config"/);
-    // expo-secure-store's own names, read from RN's copy: the file, the entry, the key alias, the item's fields.
+
     const expo = (name) => readFileSync(resolve(app, '../../node_modules/expo-secure-store/android/src/main/java/expo/modules/securestore', name), 'utf8');
     const expoSource = expo('SecureStoreModule.kt') + expo('encryptors/AESEncryptor.kt') + expo('AuthenticationHelper.kt');
     for (const pin of ['SHARED_PREFERENCES_NAME = "SecureStore"', 'DEFAULT_KEYSTORE_ALIAS = "key_v1"', 'return "$keychainService-$key"',
@@ -1298,33 +1273,30 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
 }
 assert.match(coreHost, /setProperty\("log", guarded \{ args -> runCatching \{/);
 assert.match(coreHost, /try \{ work\(args\) \} catch \(error: Throwable\) \{ NATIVE_ERROR \+/);
-// Fault hooks exist only behind BuildConfig.DEBUG.
+
 assert.equal(coreHost.match(/getprop/g).length, 1);
 assert.match(coreHost, /private fun debugFault\(name: String\): String = debugProperty\(name\)/);
 assert.match(coreHost, /fun debugProperty\(name: String\): String \{\s*if \(!BuildConfig\.DEBUG\) return ""/);
-// The only other debug properties: the capture check's clipboard, put there for the field's real Paste, and the projects
-// check's held user action (delay_action_ms, perform's worker thread; release builds read nothing), the splash check's slow
-// boot (boot_delay_ms, on the startup thread), the session restore's harness start and age (start_tab, session_age_ms, O2b),
-// and the system search check's index dump on a resume (appsearch_dump, O2d).
+
+
 assert.equal([activity, model, owner, editorUi, focusUi, projectsUi, labelsKt, captureUi].join('\n').match(/debugProperty\(/g).length, 6);
 assert.match(model, /private val harnessStart = debugProperty\("start_tab"\)/);
 assert.match(model, /if \(BuildConfig\.DEBUG\) debugProperty\("session_age_ms"\)\.toLongOrNull\(\) \?: 0L else 0L/);
 assert.match(owner, /if \(BuildConfig\.DEBUG && runtime != null && debugProperty\("appsearch_dump"\) == "1"\)/);
-// System search's switch and its journal sequence land in one RKStorage transaction (O2d review R-P2-2).
+
 assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsModel.kt'), 'utf8'), /\}, keyValue\)/);
 assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/DeviceWrites.kt'), 'utf8'), /if \(rk\.isNotEmpty\(\)\) rkStorage\.apply\(rk\)/);
 assert.match(model, /debugProperty\("boot_delay_ms"\)\.toLongOrNull\(\)\?\.let\(Thread::sleep\)\s+val runtime = ProcessCoreHost\.get\(/);
 assert.match(captureUi, /withContext\(Dispatchers\.IO\) \{ debugProperty\("clipboard"\) \}\.takeIf \{ it\.isNotEmpty\(\) \}\?\.let \{ clipboard\.setText\(/);
-// The command path's fault hook, and the same hook for a journal replay (a replay can meet a failed save too).
+
 assert.equal(coreHost.match(/failCommits =/g).length, 2);
 assert.match(coreHost, /failCommits = debugFault\("fail_commit"\) == "1"/);
 assert.equal([activity, model, owner, editorUi, focusUi, projectsUi, labelsKt].join('\n').match(/failCommits|debugFault|getprop/g), null);
-// The language override is the same debug-only property read, and it replaces only the stored language.
+
 assert.match(coreHost, /fun language\(stored: String, system: String\): JSONObject =\s*callAsync\("language", debugFault\("language"\)\.ifEmpty \{ stored \}, system\)/);
 assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
-// The write-ahead journal (WriteJournal.kt). Every write goes through callAsync, the one call path: it is on disk before the
-// engine sees it, and core's reply settles it. The write list is host-entry's task commands, and those call exactly core's
-// write commands (the crash-safe table), so a new write cannot skip the journal. The fault hooks cover the same writes.
+
+
 {
     const journalKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt'), 'utf8');
     const shapes = Object.fromEntries([.../val SHAPES = mapOf\(([\s\S]*?)\n        \)\n/.exec(journalKt)[1].matchAll(/"(\w+)" to listOf\(([^)]*)\)/g)]
@@ -1334,26 +1306,25 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     const host = hostEntry.slice(hostEntry.indexOf('globalThis.MindwtrHost = {'));
     const methods = [...host.matchAll(/\n    (\w+)\([^)]*\): [^{\n]+\{([\s\S]*?)\n    \},/g)].map(([, name, body]) => ({ name, body }));
     assert(methods.length > 40 && methods.some((m) => m.name === 'menuCommand'), 'host-entry\'s methods parsed');
-    // The iOS host's prepared commits and its Calendar preference, Focus grouping, Someday section task and task attachment
-    // link/remove writes: its own journal holds them, and Kotlin never calls them.
+
+
     const iosPreparedCommits = ['captureCommit', 'captureLinesCommit', 'draftCommit'];
-    // The iOS host's task attachment link/remove methods (taskAttachmentLinks, taskAttachmentRemove) are its own; Kotlin sends
-    // the same core writes through MENU_COMMANDS and the journal (pass A2).
+
+
     const iosOnlyWrites = ['commitPreparedInboxTasksOrganize', 'commitPreparedInboxOrganizeDestinationCreate', 'commitPreparedNotificationSetting', 'commitReminderCompletion', 'retryReminderCompletion', 'commitReminderSnooze', 'retryReminderSnooze', 'setCalendarPreference', 'setFocusGroupChecked', 'commitPreparedSomedaySectionTask', 'submitAttachmentLinks', 'removeAttachment'];
-    // Core writes no host method calls yet: wiring one into host-entry fails the write-list checks above until the journal
-    // takes it. (Settings › Calendar's edits were wired in pass C3.)
+
+
     const unwiredWrites = [];
     assert.equal(coreHost.match(new RegExp(`"(${iosPreparedCommits.join('|')})"`, 'g')), null, 'Kotlin never calls the iOS prepared commits');
-    // The one named exception (pass D1a): Settings › Data's backup commit. Its journal entry holds the operation's reference and
-    // snapshot name; CoreHost sends the checked plan (BackupOperations) as host-entry's middle argument, so the journal never
-    // holds library data. Core's commit is receipted itself (native-backup-document.ts), not a task command.
+
+
     const backupCommit = 'backupDocumentCommit';
     assert.deepEqual(shapes[backupCommit], ['{id,sha256}', 'id'], 'the backup commit journals its reference and snapshot name');
     assert.match(host, /\n    backupDocumentCommit\(referenceJSON: string, planJSON: string, snapshotName: string, budgetMs\?: number\): string \{/);
-    // D1c: the checked plan goes as a read handle whose close checks the same hash again.
+
     assert.match(coreHost, /val \(plan, sha256\) = checkNotNull\(backups\)\.plan\(args\[0\] as String, args\[1\] as String\)(?:\s*\/\/[^\n]*)?\s+return arrayOf\(args\[0\], data\.openRead\(plan, expectedSha256 = sha256\), args\[1\], deadline\(method, args\.toList\(\)\)\)/);
-    // R2b: the native Pomodoro's commit, receipted itself (native-request-receipts.ts savePomodoroTransitionWithReceipt) as the
-    // backup commit is: the journal holds core's prepared plan and replayOnly=false, so a replay re-sends the exact plan.
+
+
     const pomodoroCommit = 'pomodoroTransitionCommit';
     assert.deepEqual(shapes[pomodoroCommit], ['text', 'bool'], 'the Pomodoro commit journals its plan');
     assert.match(host, /\n    pomodoroTransitionCommit\(planJSON: string, replayOnly: boolean\): string \{/);
@@ -1364,7 +1335,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     const pushSetting = methods.find((method) => method.name === 'iosCalendarPushSetting');
     assert(pushSetting && pushSetting.body.includes('iosCalendarPushOwned('), 'Calendar push settings require the private iOS owner');
     assert.deepEqual(called(pushSetting.body), ['setCalendarSetting'], 'the private push facade delegates only its shared setting');
-    // iOS's Calendar push facade sends the shared setCalendarSetting (Android journals it through its own method).
+
     const iosOnlyMethods = [...methods.filter((m) => called(m.body).some((name) => iosOnlyWrites.includes(name))).map((m) => m.name), 'iosCalendarPushSetting'];
     {
         assert.equal(iosOnlyMethods.length, iosOnlyWrites.length + 1, 'each iOS-only write has its host method');
@@ -1372,7 +1343,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         const kotlin = readdirSync(java, { recursive: true }).filter((file) => file.endsWith('.kt')).map((file) => readFileSync(resolve(java, file), 'utf8')).join('\n');
         assert.equal(kotlin.match(new RegExp(`"(${iosOnlyMethods.join('|')})"`, 'g')), null, 'Kotlin never calls the iOS-only writes');
     }
-    // Core's write commands: every command of the crash-safe table (native-request-receipts.ts states the rule each follows).
+
     const coreWrites = ['setTaskFocus', 'completeTask', 'undoTaskCompletion', 'undoInboxDecision', 'setProjectFocus', 'createProject', 'saveSearch', 'updateTask', 'saveTaskDraft', 'resetTaskChecklist',
         'submitQuickCapture', 'submitQuickCaptureLines', 'submitQuickCapturePickerQuery', 'commitInboxProcessingStep', 'skipInboxProcessingTask', 'setAreaFilter',
         'activateProject', 'moveSomedayTasksToSection', 'moveSomedayProjectToSection', 'moveTaskToDestination', 'undoSomedaySectionMove', 'addSomedaySectionTask', 'createSomedaySection', 'setTaskListSort',
@@ -1380,50 +1351,49 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         'saveFocusFilter', 'removeFocusFilterCriterion', 'deleteFocusFilter', 'reorderFocus', 'createBulkOrganizeDestination', 'addMindSweepItem', 'deleteSavedSearch', 'setSavedSearchSort',
         'setGeneralSetting', 'setGtdSetting', 'setDataSetting', 'saveManageEditor', 'deleteManageItem', 'renameSomedaySection', 'reorderSomedaySections', 'deleteSomedaySection',
         'submitCaptureModal', 'submitCaptureModalLines',
-        // Settings › Sync: its option (a receipt of its own) and the screen's commands (never journaled: core keeps no payload of theirs).
+
         'setSyncPreference', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection',
         'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction', 'answerSyncMissingFiles',
-        // Settings › AI (pass C1): a control's change and the screen's open (receipts of their own), a key and a base URL (never journaled).
+
         'setAISetting', 'openAISettings', 'setAIKey', 'setAIEndpoint', 'ingestPendingCaptures',
-        // Attachments (pass A2): Add file and Add photo, the link sheet's Save, Remove (a project's written at once, receipts of their own).
+
         'addAttachmentFile', 'submitAttachmentLinks', 'removeAttachment',
-        // A reminder notification's Done and Snooze (pass R1), sent by CoreWork under the request UUID the notification was posted with.
+
         'completeReminderTask', 'snoozeReminder',
-        // Project details: the user's edit (journaled ahead; core reads, prepares and commits it, a replay of an applied edit unchanged).
+
         'runProjectEdit',
-        // The Projects screen's Manage areas order (#1263): RN's intent on the order shown, prepared and committed inside (a target state).
+
         'runAreaOrder', 'runAreaColor',
-        // Settings › Notifications' controls (pass R2): each the state it asks for, under its receipt.
+
         'setNotificationsSetting',
-        // Settings › Calendar (pass C3): an edit the view gave (a receipt of its own), and a new subscription (never journaled).
+
         'setCalendarSetting', 'addCalendarFeed',
-        // Settings › Data's Getting Started (pass D1b): the seed and its receipt in one transaction, frozen language.
+
         'seedGettingStarted',
-        // The donation ask's synced record (pass O2f), with the time the ask showed.
+
         'supportPromptShown',
-        // The task editor's "..." menu: the user's action (journaled ahead; core prepares and commits it, a replay answers its first reply).
+
         'runTaskEditorAction',
-        // The project next-action prompt's Choose, Add or Complete project, under its receipt (a replay answers its first reply).
+
         'runProjectNextAction',
-        // A row's Done at a picked time, or a finished row's time (RN's CompletedAtPicker), under its receipt.
+
         'setTaskCompletedAt'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
-    // A write takes its input (openSyncSettings and closeSyncSettings take none).
+
     for (const name of coreWrites) assert.match(contractSource, new RegExp(`\\b(async )?${name}\\((input|\\))`), `core defines the write ${name}`);
     const writeCalls = [...methods.filter((m) => writes.includes(m.name)).flatMap((m) => called(m.body)), ...called(table('MENU_COMMANDS'))];
     assert.deepEqual([...new Set(writeCalls)].sort(), [...coreWrites].sort(), 'the journaled methods call exactly core\'s write commands');
-    // iOS's own write methods (taskAttachmentLinks, taskAttachmentRemove: core writes Kotlin journals as a project's, pass A2) are
-    // left out by name: the check above proves no Kotlin file names them, and iOS journals them.
+
+
     const readCalls = [...methods.filter((m) => !writes.includes(m.name) && !iosOnlyMethods.includes(m.name)).flatMap((m) => called(m.body)),
         ...called(table('MENU_READS'))];
     assert.deepEqual(readCalls.filter((name) => coreWrites.includes(name)), [], 'no unjournaled host method calls a core write');
-    // The AI's requests are reads too: they send task text to the provider and write nothing (an answer applies through the screen's edits).
+
     assert.deepEqual(called(table('AI_REQUESTS')).filter((name) => coreWrites.includes(name) || unwiredWrites.includes(name)), [], 'no AI request calls a core write');
-    // An attachment's Download, Open and draft settlement are long calls too (CoreHost.attachmentRequest), never a journaled write.
-    // A task draft's Add file, link Save and Remove write nothing (they answer the draft's next list), so they are never journaled
-    // (a replay would copy a file no draft owns): they go here too, each refused for any owner but a task.
+
+
     const draftCommands = ['addAttachmentFile', 'submitAttachmentLinks', 'removeAttachment'];
     assert.deepEqual(called(table('ATTACHMENT_REQUESTS')).sort(), ['addAttachmentFile', 'downloadAttachment', 'openAttachment', 'prepareSharedFiles', 'removeAttachment',
         'settleTaskDraftAttachments', 'submitAttachmentLinks'], 'ATTACHMENT_REQUESTS are core\'s attachment downloads, opens, draft settlement, task draft commands and a file share\'s copies');
@@ -1442,11 +1412,10 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.deepEqual(called(table('AI_REQUESTS')).sort(), ['loadAIModels', 'requestAICopilot', 'requestInboxClarify', 'requestTaskEditorBreakdown',
         'requestTaskEditorClarify', 'requestTaskEditorCopilot', 'requestWeeklyReviewAnalysis'], 'AI_REQUESTS are core\'s AI requests');
     assert.match(host, /aiRequest\(name: string, json: string\): string \{\s*return submit\(async \(signal\) => \{\s*requireSaved\(\);\s*const request = AI_REQUESTS\[name\];[\s\S]{0,120}?const answer = await request\(JSON\.parse\(json\) as never, signal\);\s*if \(signal\.aborted\) throw new Error\('The AI request was cancelled'\);\s*return unwrap\(answer\);/);
-    // Each AI request hands the operation's signal to core (review C1 5).
+
     assert.equal(table('AI_REQUESTS').match(/\{ signal \}/g).length, 7, 'every AI request passes its signal');
-    // Settings › AI (AISettings.kt) keeps a key and a base URL in memory only: no saved state, no saveable Compose state, no log
-    // line with a typed value; a key or base URL goes only through its unjournaled command, never the Menu tab's send(). A consent
-    // reset exists only behind the debug-only property.
+
+
     {
         const aiScreen = code(source('AISettings.kt'));
         assert.doesNotMatch(aiScreen, /saved\[|SavedStateHandle|rememberSaveable|keepDialog/, 'Settings › AI keeps nothing in saved state');
@@ -1458,23 +1427,22 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         assert.doesNotMatch(aiActions, /menuCommand\(|rememberSaveable|saved\[/, 'the AI actions write nothing themselves and keep no saved state');
         assert.match(coreHost, /if \(debugFault\("ai_consent_reset"\) == "1"\) keyValue\.remove\("mindwtr-ai-provider-consent-v1"\)/);
     }
-    // Core's AI device binds RN's stores (host-ai.ts): the refused secret calls (an AI key is no sync commit), RN's AsyncStorage.
+
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
     assert.match(hostEntry, /createNativeHostContract\(\{ reminderPlatform: globalThis\.__mindwtrHostPlatform === 'ios' \? 'ios' : 'android', get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*calendar: iosCalendar \?\? nativeCalendar \?\? undefined,\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected \?\? undefined;/);
     assert.match(hostEntry, /const result = await \(iosSelfHostedProjectAttachments \?\? iosManualSync\)\?\.prepareAttachmentAvailableDetailed\?\.\(attachment\);/);
     assert.match(hostEntry, /\.\.\.\(persistentCapture \? \{ persistentCapture \} : \{\}\) \}\);/);
-    // The persistent capture switch on RN's AsyncStorage key, on the host with RN's AsyncStorage (pass R2).
+
     assert.match(hostEntry, /const persistentCapture = nativeSync \? \{\s+read: \(\) => \(JSON\.parse\(checked\(native\(\)\.kvGet\(PERSISTENT_CAPTURE_STORAGE_KEY\)\)\) as \[string \| null\]\)\[0\] === 'true',/);
-    // C3: core's calendar device binds RN's AsyncStorage, the polyfill's fetch and file reads, and HostCalendars, only on a host with the calendar bridge.
+
     assert.match(hostEntry, /const nativeCalendar = nativeSync && typeof globalThis\.__mindwtrCalendarCall === 'function'\s*\? createNativeCalendar\(keyValue, \(\) => globalThis\.__mindwtrCalendarCall as never, \(\) => globalThis\.__mindwtrFileCall as never, \(\) => \{\s*if \(!bootAdapter\) throw new Error\('Native storage is not loaded yet'\);\s*return bootAdapter;\s*\}\)\s*: null;/);
-    // C3 review: RN's calendar_sync map is read (a task RN exported before the notes marker stays out of the device events), never written.
+
     assert.match(readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8'), /upsert: \(\) => Promise\.reject\(new Error\('Calendar push is not available on this host yet'\)\),\s*delete: \(\) => Promise\.reject\(/);
     assert.match(host, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];/);
-    // An entry replays only while it fits its write as host-entry takes it (WriteJournal.SHAPES): a JSON object for `json`, a
-    // boolean for a boolean, a Menu command for menuCommand's name, text for the rest; MENU names exactly host-entry's
-    // MENU_COMMANDS. One that does not fit is set aside intact, and the log names only its file.
+
+
     for (const [name, kinds] of Object.entries(shapes)) {
         if (name === backupCommit) continue;
         const params = new RegExp(`\\n    ${name}\\(([^)]*)\\): string \\{`).exec(host)[1].split(',').map((param) => param.trim());
@@ -1493,13 +1461,12 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     }
     assert.match(journalKt, /if \(!fits\(method, args\) \|\| key\(method, args\) in UNJOURNALED\) return null/);
     assert.match(journalKt, /val moved = file\.renameTo\(target\)\s+log\(if \(moved\) "Native Android journal entry set aside \$\{file\.name\}" else "Native Android journal entry not moved aside \$\{file\.name\}"\)/);
-    // SHAPES is only the first filter: a replay core refuses as malformed (INVALID_INPUT, an unknown Menu command too) moves
-    // aside intact; a first send's refusal is dropped like any other.
+
+
     assert.match(journalKt, /fun malformed\(error: String\?\): Boolean = error\?\.startsWith\("INVALID_INPUT"\) == true/);
     assert.match(journalKt, /if \(replay && malformed\(error\)\) \{\s+if \(!moveAside\(entry\.file\)\) return false\s+\} else if \(!entry\.file\.delete\(\) && entry\.file\.exists\(\)\) \{/);
-    // Never journaled: a write whose core command is in core's NATIVE_UNJOURNALED_COMMANDS (a payload that can carry a secret; the
-    // names are receipt payloads' first elements). Each name leads, through the core write that builds that payload, to its journal
-    // key (the host method, or a Menu command's name); WriteJournal.UNJOURNALED holds exactly those keys, and append skips them.
+
+
     {
         const receiptsTs = readFileSync(resolve(app, '../../packages/core/src/native-request-receipts.ts'), 'utf8');
         const set = /export const NATIVE_UNJOURNALED_COMMANDS: ReadonlySet<string> = new Set<string>\(([^)]*)\);/.exec(receiptsTs);
@@ -1510,8 +1477,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         for (const file of contractFiles) {
             const defs = [...file.matchAll(new RegExp(`\\n {8}(?:async )?(${[...coreWrites, ...iosOnlyWrites, ...unwiredWrites].join('|')})\\(input`, 'g'))];
             for (const site of file.matchAll(/JSON\.stringify\(\['(\w+)'/g)) {
-                // App lock's tiny, non-sensitive payload is canonicalized in a shared helper
-                // before both authorization and receipt lookup, outside the write body.
+
+
                 if (site[1] === 'appLock' && file.includes('const payload = (request: AppLockRequest)')) {
                     assert.match(file, /const payload = \(request: AppLockRequest\): string => JSON\.stringify\(\['appLock', request\.value,/);
                     assert.match(file, /receipts\.run<AppLockResult>\(request\.requestId, key,/);
@@ -1529,7 +1496,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
                     assert.match(file, /const completionPayload = \(request: ReminderCompletionRequest\) => JSON\.stringify\(\['reminderComplete', request\.taskId\]\);/);
                     assert.match(file, /methods\.completeReminderTask\(request\)/);
                     assert.match(file, /receipts\.saved<unknown>\(request\.requestId, completionPayload\(request\)\)/);
-                    // The original writer's literal remains attributed below; this helper only probes or retries it.
+
                     continue;
                 }
                 const snoozeHelper = 'const snoozePayload = (request: ReminderSnoozeRequest) => ';
@@ -1538,7 +1505,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
                     assert.match(file, /const snoozePayload = \(request: ReminderSnoozeRequest\) => JSON\.stringify\(\['reminderSnooze', request\.requestedAt, request\.details\]\);/);
                     assert.match(file, /methods\.snoozeReminder\(request\)/);
                     assert.match(file, /receipts\.saved<unknown>\(request\.requestId, snoozePayload\(request\)\)/);
-                    // The legacy writer still owns its original payload; this helper only probes or retries it.
+
                     continue;
                 }
                 const owner = defs.filter((def) => def.index < site.index).at(-1);
@@ -1566,7 +1533,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
             }
         }
         assert(sites >= 26, 'core\'s receipt payloads parsed');
-        // A name is a receipt payload's, or a core write that keeps no payload at all (Settings › Sync's screen commands).
+
         for (const name of unjournaledCore) assert([...receiptNames.values()].flat().includes(name) || receiptNames.get(name)?.length === 0, `core's unjournaled ${name} is a core write's receipt payload, or a payload-less core write`);
         const menuKeys = [...table('MENU_COMMANDS').matchAll(/\n    (\w+): \((input)?\) => contract\.(\w+)\((?:withCalendar\(\2\)|\2)\),/g)].map(([, key, , write]) => ({ key, writes: [write] }));
         assert.equal(menuKeys.length, table('MENU_COMMANDS').match(/\n    \w+: /g).length, 'every Menu command parsed');
@@ -1578,18 +1545,18 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         assert.deepEqual([...(kotlin[1] ?? '').matchAll(/"(\w+)"/g)].map((m) => m[1]).sort(), expected, 'WriteJournal.UNJOURNALED is core\'s NATIVE_UNJOURNALED_COMMANDS by journal key');
         assert.match(journalKt, /require\(method in WRITES\) \{ "\$method is not a write" \}\s+if \(key\(method, args\) in UNJOURNALED\) return null/);
         assert.match(journalKt, /\n        fun key\(method: String, args: List<Any\?>\): Any\? = if \(method == "menuCommand"\) args\.firstOrNull\(\) else method/);
-        // The long call path (CoreHost.callLong: Settings › Sync's commands and the AI's requests, which never hold the engine) takes
-        // only an unjournaled write or a read, so no journaled write can skip the journal through it.
+
+
         assert.match(journalKt, /fun unjournaled\(method: String, args: List<Any\?>\): Boolean = method in WRITES && key\(method, args\) in UNJOURNALED/);
         assert.match(coreHost, /private fun callLong\(method: String, vararg args: Any\?, handle: LongCall = LongCall\(\)\): JSONObject \{\s+require\(method !in WriteJournal\.WRITES \|\| WriteJournal\.unjournaled\(method, args\.toList\(\)\)\)/);
         assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['ingestAudio', 'backgroundSync', 'pullSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest', 'calendarRequest', 'gmailRequest', 'voiceRequest'],
             'only CoreWork\'s background sync run, a list\'s pull down to sync, Settings › Sync\'s commands, the AI\'s and About\'s requests, the attachments\' downloads, the calendar\'s, Gmail\'s and voice capture\'s requests and the widget\'s recordings take the long path');
-        // O1: About's requests (an update check, a feedback send, the heartbeat, the prompts) are reads of core: never journaled.
+
         assert(!writes.includes('aboutRequest'), 'an About request is no journaled write');
         assert.match(coreHost, /fun calendarRequest\(name: String, json: String\): JSONObject = callLong\("calendarRequest", name, json\)/);
         assert(!writes.includes('calendarRequest'), 'a calendar request is no journaled write');
         assert.deepEqual(called(table('CALENDAR_REQUESTS')).filter((name) => coreWrites.includes(name)), [], 'no calendar request calls a core write');
-        // S4a: CoreWork's background run (core's runner) is a read-and-sync like Sync now: no journaled write.
+
         assert.match(coreHost, /fun backgroundSync\(trigger: String, stored: Int\): JSONObject =\s+callLong\("backgroundSync", trigger, stored, debugFault\("bgsync_deadline_ms"\)\.toIntOrNull\(\) \?: 0\)/);
         assert(!writes.includes('backgroundSync'), 'a background sync run is no journaled write');
         assert.match(coreHost, /fun pullSync\(\): JSONObject = callLong\("pullSync"\)/);
@@ -1598,40 +1565,38 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         assert(!writes.includes('attachmentRequest'), 'an attachment request is no journaled write');
         assert.match(coreHost, /fun syncCommand\(name: String, json: String\): JSONObject = callLong\("menuCommand", name, json\)/);
         assert.match(coreHost, /fun aiRequest\(name: String, json: String, handle: LongCall = LongCall\(\)\): JSONObject = callLong\("aiRequest", name, json, handle = handle\)/);
-        // Review C1 5: a cancelled or timed-out AI request aborts its JS operation (the provider's fetch) through the host's abort.
+
         assert.match(coreHost, /fun cancel\(handle: LongCall\) \{[\s\S]{0,400}?abortLong\(handle\)/);
         assert.match(coreHost, /private fun abortLong\(handle: LongCall\) \{[\s\S]{0,200}?call\("abort", id\)/);
         assert(!writes.includes('aiRequest'), 'an AI request is no journaled write');
-        // The Kotlin screens' unjournaled commands are the unjournaled set: Settings › Sync's, and Settings › AI's key and base URL.
+
         const syncCommands = [.../val SYNC_COMMANDS = setOf\(([^)]*)\)/.exec(source('SyncSettings.kt'))[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
         const aiCommands = [.../val AI_COMMANDS = setOf\(([^)]*)\)/.exec(source('AISettings.kt'))[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
         const calendarCommands = [.../val CALENDAR_COMMANDS = setOf\(([^)]*)\)/.exec(source('CalendarSettings.kt'))[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
         assert.deepEqual([...syncCommands, ...aiCommands.filter((name) => name !== 'openAISettings'), ...calendarCommands].sort(), [...(kotlin[1] ?? '').matchAll(/"(\w+)"/g)].map((m) => m[1]).sort(),
             'SYNC_COMMANDS, AI_COMMANDS (but its journaled open) and CALENDAR_COMMANDS are WriteJournal.UNJOURNALED');
-        // Review S3 4: each backend choice goes, in tap order; only the same choice still pending is dropped.
+
         assert.match(source('SyncSettings.kt'), /run\("selectSyncBackend", [^\n]*key = "selectSyncBackend:\$option", ordered = choices\)/);
         assert.match(source('SyncSettings.kt'), /if \(!light && !inFlight\.add\(key\)\) return/);
-        // S4b: an encryption submit or decline runs with the passphrase fields core holds, so it starts only after every keystroke
-        // sent before it (the light queue); light actions (Show passphrase) keep answering while it runs.
+
+
         assert.match(source('SyncSettings.kt'), /run\("runSyncEncryptionAction", input, light = !heavy, after = if \(heavy\) SyncSettingsModel\.light else null,\s+admit = if \(type == "submit"\) \(\{ passphrases\.admit\(action\) \}\) else null\)/);
         assert.match(source('SyncSettings.kt'), /val result = runCatching \{\s+after\?\.submit \{\}\?\.get\(\)\s+admit\?\.let \{ check -> onMain\(check\)\?\.let \{ refusal -> throw IllegalStateException\("PASSPHRASE_REFUSED: \$refusal"\) \} \}\s+runtime\.syncCommand\(name, input\.toString\(\)\)/);
-        // Review S4b 1 (and its verification): a passphrase field never holds more than core takes (the row's maxLength), an edit
-        // core's `typed` command refused stands refused, and either blocks the submit instead of running it with the older text
-        // core kept, at the tap and again once the keystrokes before it settled. A flow change (open, cancel, retry) drops the
-        // refusals, and Abandon setup is never blocked (PassphraseFieldsTest).
+
+
         assert.match(source('SyncSettings.kt'), /passphrases\.admit\(action\)\?\.let \{ refusal -> shell\.showToast\(null, refusal, "error"\); return \}/);
         assert.match(source('SyncSettings.kt'), /sync\.typePassphrase\(field, text, row\.getInt\("maxLength"\), row\.getString\("tooLong"\)\)/);
         assert.match(source('SyncSettings.kt'), /val edit = passphrases\.type\(field, text, maxLength, tooLongText\) \?: return shell\.showToast\(null, tooLongText, "error"\)/);
         assert.match(source('SyncSettings.kt'), /failed = \{ message -> passphrases\.settled\(field, edit, message\) \}\) \{ passphrases\.settled\(field, edit, null\) \}/);
         assert.match(source('SyncSettings.kt'), /failed\(message\.substringAfter\(": "\)\)/);
     }
-    // Sync's engine work between host calls: a host-call answer wakes the idle pump, and the next timer schedules it; neither
-    // runs after the host stopped or closed.
+
+
     assert.match(coreHost, /io\.wake = \{ runCatching \{ executor\.execute \{ idlePump\(\) \} \} \}/);
     assert.match(coreHost, /private fun idlePump\(\) \{[\s\S]*?val engine = context \?: return\s+if \(stopped != null\) return/);
     assert.match(coreHost, /pumpTask = executor\.schedule\(\{ idlePump\(\) \}, delay, TimeUnit\.MILLISECONDS\)/);
     assert.match(coreHost, /executeExistingDelayedTasksAfterShutdownPolicy = false/);
-    // The network state as RN's expo-network reads it (Android 10+): reachable is an active network, connected a known transport.
+
     {
         const expoNetwork = readFileSync(resolve(app, '../../node_modules/expo-network/android/src/main/java/expo/modules/network/NetworkModule.kt'), 'utf8');
         const hostNetwork = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostNetwork.kt'), 'utf8');
@@ -1643,15 +1608,14 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         assert.match(readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8'), /android\.permission\.ACCESS_NETWORK_STATE/);
     }
 
-    // callAsync journals before the engine call and settles after the reply; answer() is the only engine call, used by callAsync,
-    // the replay and the start's legacy preflight (a read, never a write); nothing else calls a host method.
+
     const callAsyncFn = coreHost.slice(coreHost.indexOf('private fun callAsync('), coreHost.indexOf('private fun answer('));
     assert.match(callAsyncFn, /private fun begin\([^)]*\): Call \{\s+val entry = if \(method in WriteJournal\.WRITES\) checkNotNull\(journal\)\.append\(method, args\.toList\(\)\) else null/);
     assert.match(callAsyncFn, /private fun finish\(call: Call, result: JSONObject\) \{\s+call\.deadlineCheck\?\.cancel\(false\)\s+if \(call\.entry != null\) \{\s+debugDelay\("delay_after_ms"\)\s+journalStop\(call\.stop, "after", call\.entry\)\s+\}\s+try \{\s+if \(call\.method == BackupOperations\.METHOD\) backupFinish\(call\.entry, call\.args\.toList\(\), result, replay = false\)\s+else if \(call\.method in WriteJournal\.WRITES\) settle\(call\.entry, result, replay = false\)/);
-    // Pass D1a: a backup commit's checked plan goes in between its journaled arguments (sendArgs) before the send.
+
     assert.equal(callAsyncFn.match(/\bcall\(call\.method, \*sent\)/g).length, 1, 'start() starts a call\'s operation, after begin() journaled it');
     assert.match(callAsyncFn, /val sent = try \{ sendArgs\(call\.method, call\.args\) \} catch \(mismatch: BackupOperations\.Mismatch\)/);
-    // Pass D1a review: commit_stop (check-data-device E4c) is set as each journaled write is sent, debug builds only.
+
     assert.match(callAsyncFn, /if \(entry != null\) \{\s+checkNotNull\(sqlite\)\.failCommits = debugFault\("fail_commit"\) == "1"\s+\/\/ [^\n]*\n\s+sqlite\?\.stopAfterCommit = debugFault\("commit_stop"\) == WriteJournal\.key\(method, args\.toList\(\)\)\s+debugDelay\("delay_before_ms"\)\s+journalStop\(stop, "before", entry\)\s+\}/);
     assert.equal(coreHost.match(/\banswer\(/g).length, 4, 'answer(): its definition, answerChecked (a backup commit\'s plan put in, callAsync and replayJournal), resumeActivation and the legacy preflight');
     assert.equal(coreHost.match(/\banswerChecked\(/g).length, 3, 'answerChecked(): its definition, callAsync and replayJournal');
@@ -1659,45 +1623,44 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.deepEqual([...new Set([...coreHost.matchAll(/\bcall\("(\w+)"/g)].map((m) => m[1]))].sort(), ['abort', 'cancel', 'poll'], 'the engine\'s own calls: abort (a long call no longer wanted), cancel and poll');
     assert.equal(coreHost.match(/journalStop\((?:call\.)?stop, /g).length, 2, 'the stop hooks run for a first send only, never for a replay');
     assert.match(coreHost, /val stop = if \(entry != null\) debugFault\("journal_stop"\) else ""/, 'the stop hook is debug-only');
-    // Drop and keep: SAVE_FAILED keeps an entry, every other reply drops it; no reply (a throw) leaves it.
+
     assert.match(journalKt, /fun keeps\(error: String\?\): Boolean = error\?\.startsWith\("SAVE_FAILED"\) == true/);
-    // An entry leaves (in memory too) only after its delete and the folder sync; a failed one stays for the next boot.
+
     assert.match(journalKt, /fun settle\(entry: Entry, error: String\?, replay: Boolean = false\): Boolean \{\s+if \(keeps\(error\)\) return false\s+if \(replay && malformed\(error\)\) \{[\s\S]*?\} else if \(!entry\.file\.delete\(\) && entry\.file\.exists\(\)\) \{\s+log\([^\n]*\)\s+return false\s+\}\s+try \{\s+syncDirectory\(dir\)\s+\} catch \(failure: Exception\) \{\s+log\([^\n]*\)\s+return false\s+\}\s+entries\.remove\(entry\)\s+return true/);
     assert.match(journalKt, /entries\.firstOrNull \{ it\.text == text \}\?\.let \{ return it \}/, 'an owed retry reuses its entry');
     assert.match(journalKt, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(text\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)[\s\S]*?syncDirectory\(dir\)\s+return Entry/);
-    // Replay: in journal order, one at a time, stopped by a kept entry or no reply; at boot after the validated load and the
-    // language, before this boot hands the host to any screen (get() waits on the boot); a stop is the screens' owed retry.
+
+
     const replayFn = coreHost.slice(coreHost.indexOf('fun replayJournal()'), coreHost.indexOf('private fun journalStop('));
     assert.match(replayFn, /for \(\(index, entry\) in entries\.withIndex\(\)\) \{[\s\S]*?answerChecked\(entry\.method, entry\.args\.toTypedArray\(\), deadline\(entry\.method, entry\.args\)\)\.also \{\s+val left = if \(entry\.method == BackupOperations\.METHOD\) backupFinish\(entry, entry\.args, it, replay = true\) else settle\(entry, it, replay = true\)\s+if \(left\) dropped \+= 1\s+\}\.error\(\)\s+\} catch \(failure: Throwable\) \{\s+owed = [^\n]+\s+break\s+\}\s+if \(WriteJournal\.keeps\(error\)\) \{ owed = error; break \}/);
     assert.match(replayFn, /val entries = journal\.pending\(\)/);
     assert.match(replayFn, /Log\.i\(TAG, "Native Android journal replay sent=/);
     assert(coreHost.indexOf('journal = WriteJournal(journalDir') < coreHost.indexOf('engine.evaluate(bundle'));
     assert.match(owner, /private fun replay\(runtime: CoreHost\): Boolean \{\s+val replay = runtime\.replayJournal\(\)\s+replay\.owed\?\.let \{ recordFailure\(PendingFailure\(FailedAction\("journal", ""\), it, null\)\); return false \}\s+(?:\/\/[^\n]*\s+)+if \(replay\.left > 0\) return true\s+runCatching \{ runtime\.pruneReceipts\(\) \}[\s\S]*?return true\s+\}/);
-    // Sync (plan block 1): its triggers start only after the validated load, a replay that finished (no entry owed) and the queue
-    // drain (ProcessCoreHost.recovered), or once the owed journal retry went through; nothing else starts them.
+
+
     assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s+(?:\/\/[^\n]*\s+)*recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+(?:\/\/[^\n]*\s+)*deferredWidgets\.hold\(runtime\)\s+return runtime/);
     assert.equal([activity, model, owner, menuModel].join('\n').match(/syncStart\(/g).length, 1, 'one start of the triggers, in startSync');
     assert.equal([activity, model, owner, menuModel].join('\n').match(/startSync\(app, runtime\)/g).length, 3, 'startSync only in recovered, after the drain (held for the first screen\'s content, or CoreWork\'s through startSyncWithScreen)');
-    // Startup follow-up: the boot's start is held until the first screen shows its content: the Inbox's first rows (contentShown),
-    // another tab's boot read, or a 3 s fallback; CoreWork's and the owed retry's start at once. One start at a time.
-    // The reminder alarms start with sync (pass R1), held with it.
+
+
     assert.match(owner, /startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+\/\/[^\n]*\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},/);
     assert.match(owner, /fun startDeferredSync\(trigger: String = "content"\) \{\s+synchronized\(deferredSync\) \{\s+screenShown = true\s+deferredSync\.getAndSet\(null\)\s+\}\?\.let \{ start -> syncThread\.execute \{ start\(\) \} \}\s+deferredWidgets\.take\(\)\?\.let \{ publishHeldWidgets\(it, trigger\) \}\s+\}/, 'the boot\'s widget publication waits with its sync start');
-    // S4a: a process no screen showed in (a CoreWork job's) starts no triggers: as RN's headless runs, it syncs only through core's
-    // background run, which the job awaits. Once a screen showed, CoreWork's recovery starts them at once.
+
+
     assert.match(owner, /private fun startSyncWithScreen\(app: Application, runtime: CoreHost\) \{\s+val now = synchronized\(deferredSync\) \{\s+(?:\/\/[^\n]*\s+)*if \(!screenShown\) deferredSync\.compareAndSet\(null\) \{ startSync\(app, runtime\) \}\s+screenShown\s+\}\s+if \(now\) startSync\(app, runtime\)\s+\}/);
     assert.match(owner, /fun contentShown\(\) \{\s+startDeferredSync\(\)/);
     assert.match(owner, /private fun startSync\(app: Application, runtime: CoreHost\): Unit = synchronized\(syncLock\) \{\s+if \(syncHost != null\) return/);
     assert.match(model, /if \(screen != Screen\.Inbox\) ProcessCoreHost\.startDeferredSync\(\)\s+main\.postDelayed\(\{ ProcessCoreHost\.startDeferredSync\("boot-timeout"\) \}, SYNC_FALLBACK_MS\)/);
     assert.equal([activity, model, owner, menuModel].join('\n').match(/recovered\(app, runtime(?:, deferSync = true)?\)|ProcessCoreHost\.recovered\(getApplication\(\), runtime\)/g).length, 2, 'recovered after the boot replay and the owed retry (CoreWork\'s is checked with the runner)');
-    // Core's receipts are pruned once per boot, and only after a replay that left nothing: never before the replay, never while an
-    // entry that may need its receipt is left.
+
+
     assert.match(coreHost, /fun pruneReceipts\(\): JSONObject = callAsync\("pruneReceipts"\)/);
     assert.equal([activity, model, owner, menuModel].join('\n').match(/pruneReceipts\(\)/g).length, 1, 'one prune call, after the boot replay');
     assert.equal(owner.match(/replay\(runtime\)|replayJournal\(\)/g).length, 3, 'the boot\'s replay, and CoreWork\'s recovery');
     assert.match(model, /"journal" -> perform\(action\) \{ runtime ->\s+runtime\.replayJournal\(\)\.owed\?\.let \{ throw IllegalStateException\(it\) \}\s+acknowledged\(action\)\s+\/\/[^\n]*\s+if \(!ProcessCoreHost\.recovered\(getApplication\(\), runtime\)\) throw IllegalStateException\(ProcessCoreHost\.failure\?\.error \?: "SAVE_FAILED"\)\s+\}/);
     assert.equal([activity, model, owner, menuModel].join('\n').match(/replayJournal\(\)/g).length, 3, 'the boot, the owed retry and CoreWork\'s recovery replay; nothing else');
-    // The JVM tests keep the file rules (order, the atomic write, drop and keep, move-aside, writes only).
+
     const journalTest = readFileSync(resolve(app, 'android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournalTest.kt'), 'utf8');
     for (const name of ['entriesKeepTheirOrderAcrossAReopen', 'anEntryIsDurableBeforeAppendReturns', 'aWriteCutShortIsNeverAnEntry', 'anyFinalReplyDropsTheEntry',
         'saveFailedKeepsTheEntryAndItsRetryReusesIt', 'damagedOrUnknownEntriesMoveAsideAndAreNeverReplayed', 'onlyWriteMethodsAreJournaled', 'onlySaveFailedKeeps',
@@ -1708,9 +1671,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     }
 }
 
-// The editor reads core's model (getTaskEditorModel, getTaskView's saved checklist and attachments, and editTaskChecklist's field)
-// and saves only through core's saveTaskDraft (draft fields and checklist in one write), via perform with an exact FailedAction.
-// The status menu keeps updateTask.
+
 assert.match(coreHost, /fun taskEditorModel\(id: String\): JSONObject = callAsync\("editorModel", id\)/);
 assert.match(coreHost, /fun taskView\(json: String\): JSONObject = callAsync\("taskView", json\)/);
 assert.match(coreHost, /fun editTaskChecklist\(id: String, draftJson: String, checklistJson: String, editJson: String\): JSONObject =\s*callAsync\("editChecklist"/);
@@ -1720,8 +1681,8 @@ assert.match(coreHost, /fun saveTaskDraft\(id: String, baseJson: String, patchJs
 assert.match(coreHost, /fun updateTask\(id: String, baseJson: String, patchJson: String, requestId: String\): JSONObject =\s*callAsync\("update", JSONObject\(\)\.put\("id", id\)\.put\("base", JSONObject\(baseJson\)\)\.put\("patch", JSONObject\(patchJson\)\)\s*\.put\("requestId", requestId\)\.toString\(\)\)/);
 assert.doesNotMatch(coreHost + hostEntry, /taskEditor\(|getTaskEditor\(/, 'the seven-field editor reply is gone');
 assert.match(hostEntry, /editorModel\(id: string\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getTaskEditorModel\(\{ id \}\)\);/);
-// taskView parses through editorJson (shared with the iOS attachment edits): JSON.parse under a size bound, and a refusal
-// that never quotes the request.
+
+
 assert.match(hostEntry, /taskView\(json: string\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getTaskView\(editorJson\(json\) as Parameters<typeof contract\.getTaskView>\[0\]\)\);/);
 assert.match(hostEntry, /const editorJson = \(json: string\): unknown => \{\s*try \{ if \(json\.length <= 2_000_000\) return JSON\.parse\(json\); \}\s*catch \{ \/\*[^*]*\*\/ \}\s*throw new Error\('Invalid bounded editor request'\);\s*\};/);
 assert.match(hostEntry, /editChecklist\(json: string\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.editTaskChecklist\(JSON\.parse\(json\)\)\);/);
@@ -1737,74 +1698,74 @@ assert.equal(model.match(/runtime\.updateTask\(/g).length, 1, 'the status menu a
 assert.equal(model.match(/runtime\.editorSuggestions\(/g).length, 1);
 assert.equal([activity, owner, editorUi].join('\n').match(/taskEditorModel\(|taskView\(|editTaskChecklist\(|resetTaskChecklist\(|editorSuggestions\(|saveTaskDraft\(|updateTask\(/g), null);
 assert.equal([activity, editorUi, focusUi, projectsUi, rowUi, areaUi, viewStateKt, searchUi, processUi, captureUi, captureModalUi, ...Object.values(menuScreens)].join('\n').replace(/^import .*$/gm, '').match(/CoreHost|callAsync|\bruntime\b/g), null);
-// The save: exactly the changed draft fields, base = their loaded values, as a perform with its exact FailedAction; no change means no call.
+
 assert.match(editorUi, /val patch: Map<String, String\?> get\(\) = edited\.filter \{ \(field, literal\) -> literal != base\(field\) \}/);
 assert.match(editorUi, /val base: Map<String, String\?> get\(\) = patch\.keys\.associateWith \{ base\(it\) \}/);
 assert.match(model, /fun saveDraftAction\(current: TaskEditor\) =\s+withRequestId\(FailedAction\("saveDraft", current\.id, current\.checklistSave, base = current\.base, patch = current\.patch,\s+attachments = current\.attachmentsSave\), failedAction\)/);
-// An update and an editor save carry a request UUID (core's receipt answers a repeat with the first reply); the same command while
-// it is owed is the owed request itself, so its control sends the exact retry. Kotlin never derives a request UUID from the request.
+
+
 assert.match(model, /private fun withRequestId\(action: FailedAction, owed: FailedAction\?\) =\s+owed\?\.takeIf \{ it\.copy\(requestId = ""\) == action \} \?: action\.copy\(requestId = UUID\.randomUUID\(\)\.toString\(\)\)/);
 assert.match(model, /fun statusAction\(task: TaskRow, status: String\) =\s+withRequestId\(FailedAction\("update", task\.id, base = mapOf\("status" to task\.status\), patch = mapOf\("status" to status\)\), failedAction\)/);
 assert.match(model, /val current = editor \?: return\s+if \(current\.waiting \|\| editsPending\) \{ saveQueued = true; return \}\s+if \(current\.patch\.isEmpty\(\) && !current\.checklistChanged && !current\.attachmentsChanged\) \{ closeEditor\(\); return \}/);
-// The attachments ride the same save (pass A2): the list the draft started from and the edited one, sent only when changed.
+
 assert.match(editorUi, /val attachmentsSave: String get\(\) = if \(!attachmentsChanged\) "" else\s+JSONObject\(\)\.put\("base", JSONArray\(attachmentsFrom \?: model\.attachmentsBase\)\)\.put\("value", JSONArray\(attachmentsNow\)\)\.toString\(\)/);
 assert.match(editorUi, /val attachmentsBase: String = content\.optJSONArray\("attachmentsBase"\)\?\.toString\(\) \?: "\[\]"/);
-// The checklist rides the same save, sent only when changed: its base is the saved checklist the edit started from (checklistFrom,
-// kept across a restart), else the one the editor loaded (getTaskView's checklistBase).
+
+
 assert.match(editorUi, /val checklistSave: String get\(\) = if \(!checklistChanged\) "" else\s+JSONObject\(\)\.put\("base", JSONArray\(checklistFrom \?: model\.checklistBase\)\)\.put\("value", JSONArray\(checklistNow\)\)\.toString\(\)/);
 assert.match(editorUi, /val checklistBase: String = content\.getJSONArray\("checklistBase"\)\.toString\(\)/);
 assert.match(model, /private fun sendDraft\(action: FailedAction\) = perform\(action\) \{ runtime ->\s+try \{\s+runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)/);
-// Draft values are core's own JSON, compared and sent as JSON text; null stays JSON null.
+
 assert.match(editorUi, /fun draftJson\(values: Map<String, String\?>\): String =\s*JSONObject\(\)\.apply \{ values\.forEach \{ \(field, literal\) -> put\(field, draftValue\(literal\)\) \} \}\.toString\(\)/);
-// Typed token and person text becomes core's draft value (getTaskEditorSuggestions), applied only while the text is unchanged; Save waits for it.
+
 assert.match(editorUi, /if \(field !in inputs \|\| input\(field\) != text\) this\s+else withEdits\(mapOf\(field to draftLiteral\(draftValue\)\)\)\.copy\(resolved = resolved \+ \(field to text\)\)/);
 assert.match(model, /val resolved = current\.resolve\(field, text, found\.draftValue\)\s+keepEditor\(resolved\)/);
 assert.match(editorUi, /val saveEnabled = if \(editor\.readOnly\) true else writable && !busy &&\s*\(failedAction == null \|\| failedAction == saveDraftAction\(editor\)\)/);
-// Suggestions are a background read: they never take busy and never replace an owed retry.
+
 assert.match(model, /background\(listOf\(Part\.Editor\), \{ runtime -> EditorSuggestions\.parse\(text, runtime\.editorSuggestions\(id, coreField, text, SUGGESTIONS\)\) \}\)/);
-// Reload after a conflict: an edit survives only where the stored value still equals the old base.
+
 assert.match(editorUi, /val kept = \{ field: String -> \(fresh\.draft\[field\] \?: "null"\) == base\(field\) \}/);
-// Kotlin holds no editor rule: the fields, their order, sections, open state, badges, and choices are core's model, walked as sent.
+
 assert.match(editorUi, /for \(section in editor\.view\.sections\) \{/);
-// Every structural edit goes through core's editTaskDraft, one at a time, and the editor shows the model core returns.
+
 assert.match(coreHost, /fun editTaskDraft\(id: String, draftJson: String, editJson: String, checklistJson: String = ""\): JSONObject =\s*callAsync\("editDraft"[\s\S]{0,300}?put\("checklist", JSONArray\(checklistJson\)\)/);
-// The layout follows the editor's own checklist (unsaved items included), as RN's: every step sends it.
+
 assert.match(model, /if \(queued == null\) edit else "", list\)/);
 assert.match(hostEntry, /editDraft\(json: string\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.editTaskDraft\(JSON\.parse\(json\)\)\);/);
 assert.match(model, /background\(listOf\(Part\.Editor\), \{ engine -> runCatching \{ stepEditor\(engine, current, sent, next\.edit\) \} \}\)/);
-// A checklist edit is queued with the draft's edits: core's editTaskChecklist first (a list task's status follows its items), then
-// core's model for the draft, and core's checklist field for it. Kotlin never edits a checklist item itself.
+
+
 assert.match(model, /val checked = listEdit\?\.let \{ engine\.editTaskChecklist\(current\.id, draftJson\(sent\), current\.checklistNow, it\.toString\(\)\) \}/);
 assert.match(model, /val model = engine\.editTaskDraft\(current\.id, checked\?\.getJSONObject\("draft"\)\?\.toString\(\) \?: draftJson\(sent\), if \(queued == null\) edit else "", list\)/, 'a dropped checklist edit only reads the view');
 assert.match(model, /fun editChecklist\(edit: JSONObject, field: String\? = null\) = editDraft\(JSONObject\(\)\.put\("checklist", edit\), field\)/);
 assert.match(model, /if \(inFlight != null \|\| current == null \|\| runtime == null \|\| busy \|\| failedAction != null\) return/);
-// Generation and sequence: a reply counts only for its own editor session and the edit it answers, still first in the
-// queue; open, restore and Reload start a new session, and Close drops the in-flight ticket.
+
+
 assert.match(model, /val ticket = current\.session to next\.seq/);
 assert.match(model, /val now = editor\?\.takeIf \{ it\.session == ticket\.first && it\.pending\.firstOrNull\(\)\?\.seq == ticket\.second \}/);
 assert.match(editorUi, /val session: String = UUID\.randomUUID\(\)\.toString\(\)/);
 assert.match(model, /fun closeEditor\(settle: Boolean = true\) \{[\s\S]{0,600}?attachments\.closed\(\)\s+editorMenu\.closed\(\)\s+ai\.cancelEditor\(\)\s+inFlight = null/);
-// A Discard settles the draft's attachments (core's settleTaskDraftAttachments, pass A2): baseline and committed are the list the
-// draft started from, at the revision the editor read; a Save settles its own after it landed (closeEditor(settle = false)).
+
+
 assert.match(model, /attachments\.settle\(closing\.id, closing\.model\.taskRevision, from, closing\.attachmentsNow, from\)/);
-// A close while a save is owed (a View-tab link) never settles: that save's own settlement runs when it lands (review 2; the
-// rule itself is DraftAttachmentsTest's).
+
+
 assert.match(model, /editor\?\.takeIf \{ discardSettles\(settle, pendingSave != null, it\.attachments != null, it\.readOnly\) \}\?\.let \{ closing ->/);
-// Pending edits are in the draft file before dispatch; each reply's draft and the removal of its edit are one write;
-// a restore sends them again in order.
+
+
 assert.match(model, /keepEditor\(current\.queued\(edit\.toString\(\), field\)\)\s+pumpEdits\(\)/);
 assert.match(model, /keepEditor\(now\.viewed\(step\.view, sent\)\.copy\(pending = now\.pending\.drop\(1\)\)\.withChecklist\(step\.checklist \?: now\.checklist\)\)/);
 assert.match(editorUi, /\.put\("edits", JSONArray\(\)\.apply \{ pending\.forEach/);
 assert.match(editorUi, /val edits = saved\.optJSONArray\("edits"\)/);
 assert.match(model, /restored\?\.let \{ resumeEditor\(it, savedDraft\.optJSONObject\("pending"\)\) \}\s+\/\/[^\n]*\s+pumpEdits\(\)/);
-// A refused edit cancels a queued Save and keeps core's message; typed text keeps newer typing; Reload waits for the queue.
+
 assert.match(model, /error = editRefusal\s+saveQueued = false/);
 assert.match(editorUi, /LaunchedEffect\(coreValue\) \{ if \(!pending\) text = coreValue \}/);
 assert.match(editorUi, /RetryButton\(model::reloadEditor, !busy && !failed && !editsPending\)/);
 assert.match(model, /\.put\("amount", amount \?: latest\?\.get\("amount"\) \?: shown\.getInt\("amount"\)\)/);
 assert.match(model, /fun editFields\(values: Map<String, Any\?>\) =\s*editDraft\(JSONObject\(\)\.put\("type", "fields"\)/);
 assert.match(editorUi, /if \(\(current\[field\] \?: "null"\) != \(sent\[field\] \?: "null"\)\) current\[field\] \?: "null" else reply\.draft\[field\] \?: "null"/);
-// Dates: core's label, core's picker starts, core's date edits; Kotlin never writes a date value of its own.
+
 assert.match(editorUi, /DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);
 assert.match(editorUi, /JSONObject\(\)\.put\("type", "pickDate"\)\.put\("field", target\)\.put\("date", day\)/);
 assert.match(editorUi, /ClockPickerDialog\(hour, minute, \{ pickTime = null \}\) \{ time -> editDraft\(JSONObject\(\)\.put\("type", "pickTime"\)\.put\("field", target\)\.put\("time", time\)\) \}/);
@@ -1812,14 +1773,13 @@ assert.doesNotMatch(code(editorUi), /relativeStartOffset" to null\)(?!\))/, 'the
 assert.equal(code(editorUi).match(/"relativeStartOffset"/g).length, 1, 'only the Absolute chip names the relative start');
 assert.match(editorUi, /section\.fields\.forEach \{ field\(it\) \}/);
 assert.doesNotMatch(code(editorUi), /\.(sort\w*|sorted\w*|groupBy|reversed|shuffled|distinct\w*)\b/);
-// No Kotlin date parsing or formatting of stored values: dates show core's labels. Two helpers convert only between the
-// system date dialog's year, month and day and core's picker strings: pickedDay (picker output) and pickerStart (core's picker
-// start, yyyy-MM-dd, into the dialog); pickerClock splits core's HH:mm picker start into the time dialog's hour and minute.
+
+
 const PICKER_START = /internal fun pickerStart\(coreDate: String\?\): Triple<Int, Int, Int>\? =\s*coreDate\?\.let \{ PICKER_DAY\.matchEntire\(it\) \}\?\.destructured\?\.let \{ \(year, month, day\) -> Triple\(year\.toInt\(\), month\.toInt\(\) - 1, day\.toInt\(\)\) \}/;
 assert.match(editorUi, PICKER_START);
 assert.equal(editorUi.match(/pickerStart\(/g).length, 2, 'defined once, used once: the date dialog\'s start');
-// RN's Android date and time dialogs (datetimepicker, display "default"): the system's, on the field's day or today, dark with a
-// dark theme; never Material 3's (it opened with no day chosen and OK greyed out). PickerDialogTest drives the day helpers.
+
+
 assert.match(editorUi, /val dialog = DatePickerDialog\(systemDialogContext\(context, dark\)\)\s+pickerStart\(start\)\?\.let \{ \(year, month, day\) -> dialog\.updateDate\(year, month, day\) \}\s+dialog\.setOnDateSetListener \{ _, year, month, day -> picked\(pickedDay\(year, month, day\)\) \}/);
 assert.match(editorUi, /TimePickerDialog\(systemDialogContext\(context, dark\), \{ _, hour, minute -> picked\(pickedTime\(hour, minute\)\) \}, hour, minute, DateFormat\.is24HourFormat\(context\)\)/);
 assert.match(editorUi, /^import android\.app\.DatePickerDialog$/m);
@@ -1830,16 +1790,16 @@ assert.match(editorUi, /^import android\.app\.DatePickerDialog$/m);
         assert.doesNotMatch(readFileSync(resolve(dir, name), 'utf8'), /material3\.(DatePicker|TimePicker|rememberDatePickerState|rememberTimePickerState)\b/, `${name} uses a Material 3 picker; RN shows the system dialog`);
     }
 }
-// The platform's own date and time dialog themes (datePickerDialogTheme, timePickerDialogTheme) on a light or dark Material context,
-// as RN's Activity theme resolves them: an explicit dialog theme drew a wider dialog with rounded corners (phone pair).
+
+
 assert.match(editorUi, /internal fun systemDialogContext\(context: Context, dark: Boolean\): Context =\s+ContextThemeWrapper\(context, if \(dark\) android\.R\.style\.Theme_Material_NoActionBar else android\.R\.style\.Theme_Material_Light_NoActionBar\)/);
 assert.match(source('NotificationsSettings.kt'), /TimePickerDialog\(systemDialogContext\(context, dark\), \{ _, hour, minute -> picked\(coreTime\(hour, minute\)\) \}/);
 assert.match(editorUi, /val \(hour, minute\) = pickerClock\(editor\.view\.fields\.dates\.getValue\(target\)\.pickerTime\)/);
 assert.doesNotMatch([editorUi.replace(PICKER_START, ''), model, activity, focusUi, projectsUi, rowUi, areaUi, viewStateKt, menuModel, ...Object.values(menuScreens)].join('\n'),
     /java\.time|LocalDate|Instant|DateTimeFormatter|java\.util\.Calendar|GregorianCalendar|Calendar\.getInstance|(?<!InboxPage|FocusView|ProjectsView|ProjectDetail|AreaFilter|EditorSuggestions|SearchView)\.parse\(|DateFormat\.get|SimpleDateFormat\(\)/);
 assert.equal([model, activity, focusUi, projectsUi, rowUi, areaUi, viewStateKt, menuModel, ...Object.values(menuScreens)].join('\n').match(/SimpleDateFormat|\.format\(/g), null);
-// A fade is always a layer (Theme.kt fade): Modifier.alpha(1f) drops its layer, which left the capture popup's
-// enabled Save pills undrawn on the test phone (runs 31-32).
+
+
 {
     const { readdirSync } = await import('node:fs');
     const dir = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
@@ -1848,14 +1808,14 @@ assert.equal([model, activity, focusUi, projectsUi, rowUi, areaUi, viewStateKt, 
     }
 }
 assert.match(source('Theme.kt'), /fun Modifier\.fade\(alpha: Float\): Modifier = graphicsLayer \{ this\.alpha = alpha \}/);
-// RN's Android Switch for Add another (the M3 Switch hid the off thumb): a toggleable Role.Switch node.
+
 assert.match(captureUi, /toggleable\(on, enabled = enabled, role = Role\.Switch\)/);
 assert.doesNotMatch(code(captureUi), /material3\.Switch|SwitchDefaults/);
-// No Kotlin date formatting or date coloring anywhere in the UI package: dates and their tones are core's (row meta, the Focus date line).
+
 {
     const { readdirSync } = await import('node:fs');
     const dir = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
-    // The Calendar composer's time edits are core's edit names (NativeCalendarComposerEdit), not a task's field: that one line is left out.
+
     const composerTimeEdit = 'put("type", if (field == "start") "startTime" else "endTime")';
     for (const name of readdirSync(dir).filter((file) => file.endsWith('.kt') && file !== 'TaskEditor.kt')) {
         assert.doesNotMatch(code(readFileSync(resolve(dir, name), 'utf8')).replace(composerTimeEdit, ''), /SimpleDateFormat|DateTimeFormatter|LocalDate|java\.time|\bdueDate\b|\bstartTime\b/,
@@ -1867,17 +1827,15 @@ assert.match(editorUi, /internal fun pickedDay\(year: Int, month: Int, day: Int\
 assert.equal(editorUi.match(/pickedDay\(/g).length, 2);
 assert.match(editorUi, /internal fun pickedTime\(hour: Int, minute: Int\) = "\$\{hour\.toString\(\)\.padStart\(2, '0'\)\}:\$\{minute\.toString\(\)\.padStart\(2, '0'\)\}"/);
 assert.equal(editorUi.match(/pickedTime\(/g).length, 2, 'defined once; the shared ClockPickerDialog (the editor\'s, the capture popup\'s and Done\'s times)');
-// A draft date is never read apart: no substring, split, or pattern over a date field's value.
+
 assert.doesNotMatch(code(editorUi), /text\("(dueDate|startTime|reviewAt)"\)\.(substring|split|take|drop|contains|startsWith|endsWith|matches|replace)/);
 assert.doesNotMatch(code(editorUi), /\b(due|value)\.(substring|split|take|drop|contains|startsWith|endsWith|matches)\(/);
-// Read-only offers only Close; a failed save allows only its exact retry and leaves Back to the system.
+
 assert.match(editorUi, /val locked = busy \|\| failed \|\| editor\.readOnly/);
 assert.match(editorUi, /BackHandler\(enabled = !failed\)/);
 assert.match(editorUi, /clickable\(enabled = !busy && !failed, role = Role\.Button, onClick = leave\)/);
 
-// Focus reaches core only through CoreHost's two calls, which reach only core's two Focus queries. Kotlin sends Focus's control
-// state (FocusModel) and the device's group folds (#1444) with both, and a control's edit with the first; a read that sends
-// none of them keeps the flat Focus.
+
 assert.match(coreHost, /fun focus\(limit: Int, controls: String = "", controlEdit: String = "", folds: String = ""\): JSONObject =\s*callAsync\("focus", limit, controls, controlEdit, folds\)/);
 assert.match(coreHost, /fun focusWindow\(key: String, offset: Int, limit: Int, revision: String, controls: String = "", folds: String = ""\): JSONObject =\s*callAsync\("focusWindow", key, offset, limit, revision, controls, folds\)/);
 assert.match(hostEntry, /focus\(limit: number, controls = '', controlEdit = '', folds = ''\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*const focus = unwrap\(contract\.getFocus\(\{ limit, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\), \.\.\.\(controlEdit \? \{ controlEdit: JSON\.parse\(controlEdit\) \} : \{\}\),\s*\.\.\.\(folds \? \{ collapsedGroupIds: JSON\.parse\(folds\) \} : \{\}\) \}\)\);/);
@@ -1887,52 +1845,50 @@ assert.equal(model.match(/runtime\.focusWindow\(/g).length, 1);
 assert.match(model, /FocusView\.parse\(runtime\.focus\(PAGE, controls, edit, folds\)\)/, 'every Focus read sends the control state and the folds');
 assert.match(model, /view\.append\(runtime\.focusWindow\(key, loaded\.rows\.size, PAGE, view\.revision, state, folds\)\)/, 'later windows go with the state core answered');
 assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/\.focus\(|focusWindow\(/g), null);
-// Rows render in core's order: sections and rows are walked as parsed, never sorted, filtered, or regrouped.
+
 const focusCode = code(focusUi) + code(model.slice(model.indexOf('fun JSONObject.taskRows()'), model.indexOf('private const val PAGE')));
 assert.doesNotMatch(focusCode, /\.(sort\w*|sorted\w*|filter(?!Bg\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/);
 assert.match(focusUi, /return FocusView\(json\.getString\("revision"\), json\.getString\("dateLabel"\), List\(items\.length\(\)\) \{ index ->/);
 assert.match(model, /fun JSONObject\.taskRows\(\): List<TaskRow> = getJSONArray\("rows"\)\.let \{ items ->\s*List\(items\.length\(\)\) \{ index ->/);
 assert.match(focusUi, /for \(section in focus\?\.sections\.orEmpty\(\)\) \{/);
 assert.match(focusUi, /section\.rows\.forEachIndexed \{ index, task ->/);
-// Core's row data is the only row data Focus acts on: core's group headings (Today's Later today among them, #1444) go in
-// core's order before the row at their start, revealLabel is shown as text, and the row's focusBlockedLabel disables the star
-// with core's reason (#1277: per row).
+
+
 assert.match(focusUi, /while \(nextHeading < section\.groups\.size && section\.groups\[nextHeading\]\.getInt\("start"\) <= index\)/);
-assert.equal(code([focusUi, activity, model, rowUi].join('\n')).match(/(?<!"agenda)\.laterToday\b/g), null); // not the label key
+assert.equal(code([focusUi, activity, model, rowUi].join('\n')).match(/(?<!"agenda)\.laterToday\b/g), null);
 assert.match(rowUi, /task\.revealLabel\?\.let \{ MetaText\(it, c\.secondaryText, 600, Modifier\.padding\(top = 4\.dp\)\) \}/);
 assert.equal(code([focusUi, activity, model, rowUi].join('\n')).match(/\.revealLabel\b/g).length, 1);
 assert.doesNotMatch(code([focusUi, activity, model, rowUi].join('\n')), /revealDate/);
 assert.match(focusUi, /star = RowStar\.Shown, starBlocked = task\.focusBlockedLabel/);
 assert.doesNotMatch(code(focusUi), /"upcoming"/, 'Focus never names a section to decide a control');
 assert.match(rowUi, /val label = blocked \?: t\(if \(task\.isFocusedToday\) "agenda\.removeFromFocus" else "agenda\.addToFocus"\)/);
-// A stale Load more reads Focus again from offset 0; it is never shown as an error.
+
 assert.match(model, /if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure[\s\S]{0,200}?readFocus\(runtime, null, depth, state\)/);
-// Time-aware refresh: on resume and each minute, only while the Focus list is composed and resumed.
+
 assert.match(focusUi, /LaunchedEffect\(owner\) \{\s*owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{\s*while \(true\) \{\s*model\.refreshFocus\(\)\s*delay\(60_000\)/);
 assert.equal(code([activity, model, focusUi].join('\n')).match(/(?<!fun )refreshFocus\(\)/g).length, 4, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), and a group fold (#1444)');
 assert.match(activity, /Screen\.Focus -> FocusList\(model, Modifier\.fillMaxSize\(\)\)/);
-// Commands from Focus and a project use the Inbox's command path and its exact-retry lock.
+
 assert.match(rowUi, /fun TaskRowItem\(\s*model: InboxViewModel, task: TaskRow, status: RowStatus = RowStatus\.Hidden, star: RowStar = RowStar\.Hidden,/);
-// A task grouped under two Next actions headings shows under each: its heading is part of its key.
+
 assert.match(focusUi, /item\(key = "\$\{section\.key\}:\$\{group\}:\$\{task\.id\}"\) \{\s*Box\(Modifier\.padding\(bottom = 8\.dp\)\) \{ GroupedRow\(grouped\) \{\s*TaskRowItem\(model, task,/);
-// RN hides a section core counts as empty, "Projects to review" included, and folds a section on its title.
+
 assert.match(focusUi, /if \(section\.total == 0\) continue/);
 assert.match(focusUi, /if \(reviewCount > 0\) \{/);
 assert.match(focusUi, /if \(!open\) continue/);
 assert.match(focusUi, /view\.dateLabel\.uppercase\(\)/, 'the Focus date line is core\'s text');
-// Open sections are device-local, under RN's keys and defaults.
+
 assert.match(viewStateKt, /const val FOCUS_VIEW_KEY = "mindwtr:view:focus:v1"/);
 assert.match(viewStateKt, /const val PROJECTS_VIEW_KEY = "mindwtr:view:projects:v1"/);
 assert.match(viewStateKt, /val FOCUS_SECTION_KEYS = listOf\("focus", "schedule", "next", "upcoming", "reviewDue", "reviewProjects"\)/);
 assert.match(focusUi, /onClick = \{ loadMoreFocus\(section\.key\) \}, enabled = writable && !busy && failedAction == null/);
-// The selected list survives rotation (ViewModel) and process death (SavedStateHandle).
+
 assert.match(model, /saved\.get<String>\("screen"\)/);
 assert.match(model, /screen = target\s+saved\["screen"\] = target\.name/);
 
-// Labels: every word on screen comes from core's getStrings. One Kotlin map of core keys, filled at boot and
-// read again right after setLanguage; it holds no text of its own (a key core lacks shows as the key).
+
 const enSource = readFileSync(resolve(app, '../../packages/core/src/i18n/locales/en.ts'), 'utf8');
-// A key is quoted either way in en.ts (a value holding a quote is double-quoted, attachments.linkBatchHint).
+
 const enKeys = new Set([...enSource.matchAll(/^\s*(?:'([^']+)'|"([^"]+)"):/gm)].map(([, single, double]) => single ?? double));
 const labelBlock = labelsKt.slice(labelsKt.indexOf('val LABEL_KEYS = listOf('), labelsKt.indexOf('object Labels'));
 const labelKeys = [...code(labelBlock).matchAll(/"([^"]*)"/g)].map(([, name]) => name);
@@ -1944,14 +1900,13 @@ assert.match(labelsKt, /if \(logged\.add\(name\)\) Log\.w\(/, 'a missing key is 
 assert.equal(kotlinFiles.join('\n').match(/Labels\.load\(/g).length, 1);
 assert.match(owner, /runtime\.language\(stored \?: "", Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);
 assert.match(owner, /runtime\.start\([^\n]*\)\s+(?:\/\/[^\n]*\s+)*if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+(?:\/\/[^\n]*\s+)*recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+(?:\/\/[^\n]*\s+)*deferredWidgets\.hold\(runtime\)\s+return runtime/);
-// After a finished replay (the boot's, the owed retry's, CoreWork's): the queue drain, then sync (StartOrder, StartOrderTest). Any
-// drain that did not finish becomes the screens' owed journal retry, holds sync back, and CoreWork retries it.
+
+
 assert.match(owner, /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = StartOrder\.afterReplay\(\s+drain = \{ drain\(runtime, queue\(app\), app\) \},\s+owe = \{ message -> recordFailure\(PendingFailure\(FailedAction\("journal", ""\), message, null\)\) \},\s+retryLater = \{ runCatching \{ CoreWork\.retryDrain\(app\) \}[^\n]*\},\s+(?:\/\/[^\n]*\s+)*startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+\/\/[^\n]*\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},\s+refreshWidgets = \{ refreshWidgets\(runtime\) \},\s+\)/);
 assert.match(source('StartOrder.kt'), /Drain\.Done -> \{\s+startSync\(\)\s+return true\s+\}\s+Drain\.Unswept -> \{\s+startSync\(\)\s+(?:\/\/[^\n]*\s+)*refreshWidgets\(\)\s+retryLater\(\)\s+\}\s+Drain\.Waiting -> retryLater\(\)\s+is Drain\.Failed -> \{\s+owe\(result\.message\)\s+retryLater\(\)\s+\}/);
 assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueue\(context, CoreJob\.INGEST, emptyMap\(\), ExistingWorkPolicy\.KEEP\)/, 'a retry never cancels a running drain');
-// S4a: the background sync job, as RN's expo-background-task worker: core's interval, a network, its next run appended after it; a
-// reconcile keeps a queued or running job (KEEP: RN's #1001 fix), only core's "off" cancels it; RN's own worker is cancelled at every
-// process start. Core's runner and schedule decision on the host's ports are tested in bundle/host-sync.test.ts (bun), run here.
+
+
 {
     const coreWork = source('CoreWork.kt');
     const rnScheduler = readFileSync(resolve(app, '../../node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt'), 'utf8');
@@ -1962,7 +1917,7 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
     assert.match(coreWork, /\.setInitialDelay\(SYNC_INTERVAL_MINUTES, TimeUnit\.MINUTES\)\s+\.setConstraints\(Constraints\.Builder\(\)\.setRequiredNetworkType\(NetworkType\.CONNECTED\)\.build\(\)\)/);
     assert.match(coreWork, /if \(on\) work\.enqueueUniqueWork\(SYNC_WORK, ExistingWorkPolicy\.KEEP, syncRequest\(\)\) else work\.cancelUniqueWork\(SYNC_WORK\)/);
     assert.match(coreWork, /enqueueUniqueWork\(SYNC_WORK, ExistingWorkPolicy\.APPEND_OR_REPLACE, syncRequest\(\)\)/);
-    // Review S4a 4: core hears "scheduled" only once WorkManager stored it; a refusal or no answer throws back to core.
+
     assert.match(coreWork, /fun scheduleSyncStored\(context: Context, on: Boolean\) \{\s+scheduleSync\(context, on\)\.result\.get\(STORE_WAIT_SECONDS, TimeUnit\.SECONDS\)\s+\}/);
     assert.equal(coreWork.match(/enqueueUniqueWork\(SYNC_WORK/g).length, 2, 'the sync job is queued only by core\'s decision and by its own run');
     assert.match(coreWork, /syncAgain = \{ isStopped \|\| runCatching \{ syncAgain\(app\)\.result\.get\(STORE_WAIT_SECONDS, TimeUnit\.SECONDS\) \}/, 'a cancelled run queues no next one; a next run not stored retries this one (review S4a 3)');
@@ -1970,55 +1925,55 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
     assert.match(hostEntry, /scheduleBackgroundSync: \(on\) => \{ const bridge = native\(\); if \(bridge\.bgSyncSchedule\) checked\(bridge\.bgSyncSchedule\(on\)\); \},/);
     const tested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-sync.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(tested.status, 0, `bundle/host-sync.test.ts: ${tested.stderr.slice(-1500)}`);
-    // S5: File Sync on the host's SAF and lock channels, its encryption transitions and its diagnostics line (bun).
+
     const fileSyncTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-file-sync.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(fileSyncTested.status, 0, `bundle/host-file-sync.test.ts: ${fileSyncTested.stderr.slice(-1500)}`);
-    // S5 review: one test per RN File Sync fix (the inventory), and the lock channel a host cancel never strands; one file per process.
+
     for (const file of ['host-file-sync-inventory.test.ts', 'host-sync-lock-channel.test.ts']) {
         const tested = spawnSync('bun', ['test', `apps/android-native/bundle/${file}`], { cwd: resolve(app, '../..'), encoding: 'utf8' });
         assert.equal(tested.status, 0, `bundle/${file}: ${tested.stderr.slice(-1500)}`);
     }
-    // C3: the external calendars' device binding and each screen's feed (bundle/host-calendar.test.ts, bun).
+
     const calendarTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-calendar.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(calendarTested.status, 0, `bundle/host-calendar.test.ts: ${calendarTested.stderr.slice(-1500)}`);
-    // Leaving the app flushes only a waiting widget change (bundle/host-widgets.test.ts, bun).
+
     const widgetsTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-widgets.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(widgetsTested.status, 0, `bundle/host-widgets.test.ts: ${widgetsTested.stderr.slice(-1500)}`);
-    // D1c cut i: the storage adapter keeps no read document after a boot (bundle/host-backup-memory.test.ts, bun).
+
     const memoryTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-backup-memory.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(memoryTested.status, 0, `bundle/host-backup-memory.test.ts: ${memoryTested.stderr.slice(-1500)}`);
-    // O2d: Android system search on the host: one full reindex per start, never in the sandbox, General's switch in RKStorage
-    // (bundle/host-app-search.test.ts, bun).
+
+
     const appSearchTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-app-search.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(appSearchTested.status, 0, `bundle/host-app-search.test.ts: ${appSearchTested.stderr.slice(-1500)}`);
-    // D1c: host-entry's side of Settings › Data's file channel, each JS fix with its red run (bundle/host-data-channel.test.ts, bun).
+
     const channelTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-data-channel.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(channelTested.status, 0, `bundle/host-data-channel.test.ts: ${channelTested.stderr.slice(-1500)}`);
-    // D1c step 0: the transfer limit's rule (the whole matrix, a failing smaller row caps it, imports by the library they left).
+
     const limitTested = spawnSync('bun', ['test', 'apps/android-native/scripts/data-transfer-limit.test.mjs'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(limitTested.status, 0, `scripts/data-transfer-limit.test.mjs: ${limitTested.stderr.slice(-1500)}`);
-    // D8: the channel is the build's flavor, read by core as RN's isFossBuild; no host passes a fixed false any more.
+
     assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /create\("play"\) \{\s+dimension = "channel"\s+buildConfigField\("boolean", "FOSS", "false"\)[^}]*\}\s+create\("foss"\) \{\s+dimension = "channel"\s+buildConfigField\("boolean", "FOSS", "true"\)/);
     assert.match(coreHost, /engine\.globalObject\.setProperty\("__mindwtrFossBuild", BuildConfig\.FOSS\)/);
     assert.match(hostEntry, /const isFossBuild = globalThis\.__mindwtrFossBuild === true;/);
     const bundleHosts = ['host-sync.ts', 'host-ai.ts'].map((name) => readFileSync(resolve(app, 'bundle', name), 'utf8')).join('\n');
     assert.doesNotMatch(bundleHosts, /isFossBuild: false/, 'every host reads the flavor');
 }
-// The queue drain (RN's startup drain; CoreWork's ingest job too): after the journal replay, before any screen, entry point or
-// sync gets the host; never while a save is owed; a failed save becomes the journal's owed retry, which drains again.
+
+
 assert.match(owner, /fun queue\(app: Application\) = File\(app\.filesDir, PendingCaptureWriter\.DIRECTORY\)/, 'the queue is RN\'s writer\'s folder');
 assert.match(owner, /private fun drain\(runtime: CoreHost, queue: File, app: Application\): StartOrder\.Drain \{\s+if \(failure != null\) return StartOrder\.Drain\.Waiting\s+(?:\/\/[^\n]*\s+)*val unswept = runCatching \{ CheckoffStore\.sweep\(app\)\.failed > 0 \}[^\n]*\.getOrDefault\(true\)\s+if \(unswept\) runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unswept"\)\)\s+val drained = if \(unswept\) StartOrder\.Drain\.Unswept else StartOrder\.Drain\.Done\s+when \(StartOrder\.queueEmpty\(queue\.list\(\), queue\.exists\(\)\)\) \{\s+true -> return drained\s+(?:\/\/[^\n]*\s+)*null -> \{\s+runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unreadable"\)\)\s+return StartOrder\.Drain\.Unswept\s+\}\s+false -> Unit\s+\}\s+return try \{\s+val ingested = runtime\.ingestPendingCaptures\(UUID\.randomUUID\(\)\.toString\(\)\)/, 'a failed check-off sweep is retried, the queue still drained');
 assert.match(owner, /val ingested = [^\n]+\n\s+(?:\/\/[^\n]*\s+)*runCatching \{ CoreWork\.owedUploads\(app\)\.add\(ingested\) \}[^\n]+\n[^\n]+"drained"[^\n]+\n\s+drained\n/, 'what a drain stored is owed to CoreWork\'s next background run, across process death (S4a, review 2)');
 assert.match(source('CoreWork.kt'), /return host\.backgroundSync\(trigger, if \(ProcessCoreHost\.appActive\) 0 else stored\)\.also \{ owed\.settle\(stored\) \}/, 'an owed upload is settled only once its run settled');
 assert.match(owner, /\.put\("error", message\.substringBefore\(':'\)\)\)\s+StartOrder\.Drain\.Failed\(message\)/);
-// The runner's lines go through core's logger (logcat, and RN's diagnostics log file), their fields in context; a failure's code only.
+
 assert.match(owner, /runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "drained"\)\.put\("ingested", ingested\)\)/);
 assert.match(owner, /runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "failed"\)\.put\("error", message\.substringBefore\(':'\)\)\)/);
 assert.match(coreHost, /fun logLine\(message: String, context: JSONObject\) \{\s+runCatching \{ callAsync\("logLine", message, context\.toString\(\)\) \}\.onFailure \{ Log\.i\(TAG, "\$message \$context"\) \}/);
 assert.match(hostEntry, /logLine\(message: string, contextJson: string\): string \{\s+return submit\(async \(\) => \{\s+try \{\s+logInfo\(message, \{ scope: globalThis\.__mindwtrHostPlatform === 'ios' \? 'native-ios' : 'native-android', context: JSON\.parse\(contextJson\) as Record<string, unknown> \}\);/);
 assert.match(coreHost, /fun ingestPendingCaptures\(requestId: String\): JSONObject = callAsync\("ingest", requestId\)/);
 assert.equal(kotlinFiles.join('\n').match(/runtime\.language\(|runtime\.strings\(/g).length, 2);
-// Core's editor statuses and priorities each have their label key.
+
 const contractSource = readFileSync(resolve(app, '../../packages/core/src/native-host-contract.ts'), 'utf8');
 for (const [list, prefix] of [['EDITOR_STATUSES', 'status'], ['EDITOR_PRIORITIES', 'priority']]) {
     const values = [...new RegExp(`const ${list} = \\[([^\\]]*)\\]`).exec(contractSource)[1].matchAll(/'([^']+)'/g)].map(([, value]) => value);
@@ -2026,7 +1981,7 @@ for (const [list, prefix] of [['EDITOR_STATUSES', 'status'], ['EDITOR_PRIORITIES
 }
 assert.match(editorUi, /for \(status in editor\.view\.statuses\)/);
 assert.match(editorUi, /ChoiceChips\(editor, "priority", editor\.view\.priorities, !locked, t\("taskEdit\.priorityLabel"\), \{ t\("priority\.\$it"\) \}\)/);
-// Every label key core's editor model can send (recurrence choices, energy levels, section titles) is in LABEL_KEYS.
+
 {
     const modelSource = readFileSync(resolve(app, '../../packages/core/src/task-editor-model.ts'), 'utf8');
     for (const [, key] of modelSource.matchAll(/labelKey: '([^']+)'/g)) assert(labelKeys.includes(key), `LABEL_KEYS lacks ${key}`);
@@ -2035,16 +1990,16 @@ assert.match(editorUi, /ChoiceChips\(editor, "priority", editor\.view\.prioritie
     }
     for (const id of ['scheduling', 'organization', 'details']) assert(labelKeys.includes(`taskEdit.${id}`), `LABEL_KEYS lacks taskEdit.${id}`);
 }
-// No literal text reaches a Text, a content description, or a click label; key literals are label keys.
-// Pass 8's Calendar and Board screens and models are held to the same rule.
+
+
 const pass8Sources = { calendarModel: source('CalendarModel.kt'), calendarUi: source('CalendarScreen.kt'), boardModel: source('BoardModel.kt'), boardUi: source('BoardScreen.kt') };
 for (const [name, text] of Object.entries({ activity, model, editorUi, focusUi, projectsUi, themeKt, iconsKt, rowUi, areaUi, viewStateKt, searchUi, processUi, captureUi, captureModalUi, captureModalModel, menuModel, ...menuScreens, ...pass8Sources })) {
-    // Icons.kt's bySymbol keys are core's SF Symbols names (more-menu-model.ts), not label keys.
+
     const body = code(text).replace(/val bySymbol = mapOf\([\s\S]*?\n {4}\)/, '');
     for (const [, key] of body.matchAll(/"([a-z][A-Za-z]*(?:\.[A-Za-z]+)+)"/g)) assert(labelKeys.includes(key), `${name}: ${key} is not in LABEL_KEYS`);
     for (const [, rest] of body.matchAll(/(?:\bText\(|contentDescription = |onClickLabel = )([^\n]*)/g)) {
-        // Core's JSON is read by key (getString("label")); a key names a field of core's text, it is not text.
-        // A test tag (a Modifier's, or one set in a control's semantics block) names the control for the checks; it is not text.
+
+
         for (const [, literal] of rest.replace(/\b(t|testTag|getString|optString|text|getJSONObject|optJSONObject|getBoolean|optBoolean|getInt|menuText|menuObjects)\("[^"]*"\)/g, '').replace(/\btestTag = "[^"]*"/g, '').matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
             if (labelKeys.includes(literal)) continue;
             assert.doesNotMatch(literal.replace(/\$\{[^}]*\}|\$\w+/g, ''), /\p{L}/u, `${name}: hard-coded UI text "${literal}"`);
@@ -2054,28 +2009,24 @@ for (const [name, text] of Object.entries({ activity, model, editorUi, focusUi, 
 assert.match(activity, /Text\(t\(label\), style = rnText\(10, if \(active\) 700 else 600, 12\)/);
 assert.match(activity, /private fun RowScope\.TabItem\(model: InboxViewModel, tab: Screen, icon: ImageVector, label: String = tab\.label\)/);
 assert.match(model, /enum class Screen\(val label: String\) \{ Inbox\("tab\.inbox"\), Focus\("tab\.next"\), Projects\("nav\.projects"\) \}/);
-// A failed boot shows only its message, found by a test tag, and no command control.
+
 assert.match(activity, /\} else if \(!writable\) \{[^}]*Text\(error\.orEmpty\(\), color = MaterialTheme\.colorScheme\.error, modifier = Modifier\.testTag\("boot-failure"\)\.padding\(24\.dp\)\)\s*\} else \{/);
 assert.match(activity, /if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)/);
 
-// Landscape: the Inbox's controls, Process button and scope line are the list's first items; only the header, the tabs (and a
-// failure, and the bulk bar while selecting) stay fixed.
-// The list fills RN's pull down to sync (PullToSync, 5bb0ea8f), which takes the column's remaining height.
+
 assert.match(inboxUi, /PullToSync\(model, Modifier\.weight\(1f\)\.fillMaxWidth\(\)\) \{\s*LazyColumn\(Modifier\.fillMaxSize\(\), contentPadding = PaddingValues\(bottom = 12\.dp\)\) \{\s*val view = shown\?\.view \?: return@LazyColumn\s*item\(key = "toolbar"\)[\s\S]*?item\(key = "header"\)[\s\S]*?items\(shown\.items, key = \{ it\.key \}\)/);
 assert.match(activity, /Screen\.Inbox -> InboxList\(model, Modifier\.fillMaxSize\(\)\)/);
-// Capture: RN's center tab button opens RN's capture popup (CaptureScreen.kt), on core's quick capture contract.
-// Voice pass V5: RN's tab button records at once when Audio is the default capture method (a tap), the other way on a long press.
+
+
 assert.match(activity, /CaptureButton\(model\)[\s\S]*?combinedClickable\(role = Role\.Button,\s*onLongClick = \{ model\.menu\.closeSheet\(\); model\.openCapture\(AutoRecord\.OPPOSITE\) \}\) \{ model\.menu\.closeSheet\(\); model\.openCapture\(AutoRecord\.DEFAULT\) \}/);
 assert.match(activity, /capture\?\.let \{ CapturePopup\(model, it\) \}/);
 assert.doesNotMatch(code(activity + model), /CaptureSheet|createInboxTask|showCapture/, 'the pass-1 capture sheet is gone');
-// The tab bar: RN's order, Menu last (it opens RN's More sheet), and RN's lucide icons.
+
 const tabBar = activity.slice(activity.indexOf('private fun TabBar('), activity.indexOf('private fun RowScope.TabItem('));
 assert.deepEqual([...tabBar.matchAll(/TabItem\(model, Screen\.(\w+)|CaptureButton\(model\)|MenuTab\(model\)/g)]
     .map(([whole, tab]) => tab ?? (whole.startsWith('Capture') ? 'capture' : 'menu')), ['Focus', 'Inbox', 'capture', 'Projects', 'menu']);
-// The failure floats over the screen as RN's PersistenceFailureBanner does (absolute at the top, under the status bar, zIndex 100):
-// a screen's FailureBanner only puts its message and action in the root's slot, and FailureBannerHost draws the newest over every
-// screen and under the overlays that stand for RN's modals. It stays in the accessibility tree: a live region, reached first,
-// its tags readable by the device checks, and the list under it is clipped.
+
+
 const banner = activity.slice(activity.indexOf('class FailureBannerSlot'), activity.indexOf('private fun TabBar('));
 assert.match(banner, /fun FailureBanner\(message: String, action: @Composable RowScope\.\(\) -> Unit\) \{\s*val slot = LocalFailureBanners\.current \?: return FailureBannerCard\(message, action\)[\s\S]{0,400}DisposableEffect\(slot, content\) \{ val remove = slot\.put\(content\); onDispose\(remove\) \}/);
 assert.match(banner, /fun FailureBannerHost\(slot: FailureBannerSlot<FailureBannerContent>\) \{\s*val shown = slot\.shown \?: return\s*Box\(Modifier\.fillMaxWidth\(\)\.zIndex\(100f\)\.windowInsetsPadding\(WindowInsets\.safeDrawing\.only\(WindowInsetsSides\.Top\)\)\s*\.semantics \{ testTagsAsResourceId = true; isTraversalGroup = true; traversalIndex = -1f \}/);
@@ -2087,21 +2038,21 @@ assert.match(banner, /Text\(message,[\s\S]*?liveRegion = LiveRegionMode\.Asserti
     assert(order.every((index, i) => index > (i ? order[i - 1] : -1)), `the banner floats over every screen and under RN's modals ${order}`);
 }
 assert.match(activity, /Box\(Modifier\.weight\(1f\)\.fillMaxWidth\(\)\.background\(c\.bg\)\.clipToBounds\(\)\)/);
-// Section titles draw RN's capitals but expose core's own title, a Per section project's flow label (#1429) and the count.
+
 assert.match(activity, /clearAndSetSemantics \{ text = AnnotatedString\(spoken\); heading\(\) \}/);
 assert.match(activity, /val spoken = listOfNotNull\(title, note, count\?\.toString\(\)\)\.joinToString\(" · "\)/);
 
-// Theme: one Kotlin theme object holds RN's palettes, value for value, and every color the screens draw.
+
 const mobile = resolve(app, '../mobile');
 const hexes = (text) => [...text.matchAll(/"(#[0-9A-Fa-f]{6})"/g)].map(([, hex]) => hex.toUpperCase());
 const kotlinPalette = (name) => hexes(new RegExp(`${name} palette\\(([^)]*)\\)`).exec(themeKt)?.[1] ?? '');
 const FIELDS = ['bg', 'cardBg', 'taskItemBg', 'text', 'secondaryText', 'icon', 'border', 'tint', 'onTint', 'tabIconDefault',
     'tabIconSelected', 'inputBg', 'danger', 'success', 'warning', 'filterBg'];
 assert.match(themeKt, new RegExp(`data class ThemeColors\\(\\s*${FIELDS.map((field) => `val ${field}: Color,`).join('\\s*')}\\s*\\)`), 'ThemeColors has RN\'s fields in order');
-// RN's constants/theme-presets.ts re-exports core's table.
+
 const presetSource = readFileSync(resolve(app, '../../packages/core/src/theme-presets.ts'), 'utf8');
 const presetBlocks = [...presetSource.matchAll(/^ {4}'?([\w-]+)'?: \{\n([\s\S]*?)\n {4}\},/gm)];
-// The table is Record<ThemeStatusPreset, …>: every name in that union must parse as a block.
+
 const statusPresetUnion = /export type ThemeStatusPreset = ([^;]+);/.exec(readFileSync(resolve(app, '../../packages/core/src/theme-scheme.ts'), 'utf8'))[1];
 assert.deepEqual(presetBlocks.map(([, preset]) => preset).sort(), [...statusPresetUnion.matchAll(/'([\w-]+)'/g)].map(([, preset]) => preset).sort(),
     'every bespoke theme preset is read');
@@ -2134,14 +2085,14 @@ const genericValue = (scheme, field) => {
 for (const scheme of ['light', 'dark']) {
     assert.deepEqual(kotlinPalette(`${scheme.toUpperCase()} =`), FIELDS.map((field) => genericValue(scheme, field)), `RN default ${scheme} matches`);
 }
-// No color is written anywhere else: every other file draws with LocalTheme.
+
 for (const [name, text] of Object.entries({ activity, model, editorUi, focusUi, projectsUi, labelsKt, iconsKt, owner, rowUi, areaUi, viewStateKt, searchUi, processUi, captureUi, captureModalUi, captureModalModel, menuModel, ...menuScreens })) {
     assert.doesNotMatch(code(text), /\bColor\(|Color\.(Black|White|Red|Green|Blue|Gray|Yellow|Cyan|Magenta|DarkGray|LightGray|Transparent)\b|parseColor|"#[0-9A-Fa-f]{3,8}"|0x[0-9A-Fa-f]{8}/,
         `${name} writes a color; colors live only in Theme.kt`);
 }
 assert.equal([activity, focusUi, projectsUi, rowUi, areaUi, searchUi, processUi, captureUi, captureModalUi, ...Object.values(menuScreens)].join('\n').match(/MaterialTheme\.typography/g), null, 'the lists use RN\'s type (rnText), not Material\'s');
 assert.equal(code(activity).match(/MindwtrTheme\(/g).length, 1, 'one theme wraps the whole app');
-// Core classifies the theme and owns its hues; Kotlin never names a theme mode.
+
 assert.doesNotMatch(code(themeKt + owner), /"(system|material3-light|material3-dark)"/);
 assert.match(themeKt, /json\.getString\("preset"\), json\.getBoolean\("material"\), if \(json\.isNull\("scheme"\)\) null else json\.getString\("scheme"\)/);
 assert.match(coreHost, /fun theme\(stored: String\): JSONObject = callAsync\("theme", stored\)/);
@@ -2151,8 +2102,8 @@ const themeCall = hostEntry.slice(hostEntry.indexOf('theme(stored: string): stri
 assert.match(themeCall, /const mode = typeof synced === 'string' && synced \? synced : \(stored \|\| 'system'\);/, 'RN: the synced setting wins over the device-local choice');
 assert.match(themeCall, /themeDescriptor\(mode\)/);
 assert.doesNotMatch(themeCall, /requireSaved/);
-// Rows read core's meta: the parts in core's order (detail parts hidden, as RN's lists and default Focus hide them),
-// core's due tone mapped to RN's colors, the strip from meta.priority, and TalkBack's label from meta.accessibilityLabel.
+
+
 assert.match(model, /fun JSONObject\.taskRow\(\) = getJSONObject\("meta"\)\.let \{ meta ->/);
 assert.match(model, /meta\.getJSONArray\("parts"\)\.let \{ parts -> List\(parts\.length\(\)\) \{ parts\.getJSONObject\(it\)\.metaPart\(\) \} \}/);
 assert.match(rowUi, /val parts = if \(details\) meta\.parts else meta\.parts\.filter \{ !it\.detail \}/, 'detail parts show only where RN\'s list shows them');
@@ -2162,65 +2113,64 @@ assert.match(rowUi, /val strip = theme\.priority\(meta\.priority\)/);
 assert.match(rowUi, /contentDescription = meta\.accessibilityLabel/);
 assert.match(rowUi, /coreColorOrNull\(part\.dotColor\) \?: c\.tint/, 'a null dot color is the tint, as RN');
 assert.doesNotMatch(code(model), /"dueDate"|"startTime"|"projectTitle"/, 'no row reads core\'s raw dates');
-// Icons are lucide's own paths, with its ISC notice.
+
 assert.match(iconsKt, /Lucide is ISC licensed/);
 assert.match(iconsKt, /val Target = lucide\("Target", circle\(12, 12, 10\), circle\(12, 12, 6\), circle\(12, 12, 2\)\)/);
 
-// Projects: read only through CoreHost's two calls, which reach only core's two project queries.
+
 assert.match(coreHost, /fun projects\(\): JSONObject = callAsync\("projectList"\)/);
 assert.match(coreHost, /fun projectDetail\(id: String, offset: Int, limit: Int, revision: String\): JSONObject =\s*callAsync\("projectDetail", id, offset, limit, revision\)/);
 assert.match(coreHost, /fun strings\(keys: List<String>\): JSONObject = callAsync\("strings", JSONArray\(keys\)\.toString\(\)\)/);
 assert.match(hostEntry, /projects\(\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getProjects\(\)\);/);
 assert.match(hostEntry, /projectDetail\(id: string, offset: number, limit: number, revision: string\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getProjectDetail\(\{ projectId: id, offset, limit, revision: revision \|\| undefined \}\)\);/);
-// Labels are not stored data: a failed save never blocks them.
+
 const labelCalls = hostEntry.slice(hostEntry.indexOf('language(stored: string, system: string): string {'), hostEntry.indexOf('    projects(): string {'));
 assert.match(labelCalls, /contract\.setLanguage\(\{ storedLanguage: stored \|\| null, systemLocale: system \|\| null \}\)/);
 assert.match(labelCalls, /contract\.getStrings\(\{ keys: JSON\.parse\(keysJson\) as string\[\] \}\)/);
 assert.doesNotMatch(labelCalls, /requireSaved/);
 assert.equal(model.match(/runtime\.projects\(\)/g).length, 2, 'read() after boot and commands, and the resume refresh');
-// The open project reads core's project view (RN's Show completed and Completed pile, O2f-parity b4a): the first window and the next.
-// b4b: core's filter view, with the project's filters and the sheet's tokens while it is open; a filter edit reads the first window.
+
+
 assert.equal(model.match(/projectWindow\(runtime, /g).length, 3, 'the first window, the next, and a filter edit\'s first window');
 assert.match(model, /runtime\.menuRead\("projectDetailFilterView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)\s+\.put\("filters", projectDetails\.listFilterState\)\.put\("filterSheetOpen", projectDetails\.listFilterSheet != null\)/);
 assert.match(source('ViewState.kt'), /const val PROJECT_SHOW_COMPLETED_KEY = "mindwtr:view:project-detail:show-completed:v1"/);
 assert.match(model, /prefs\.edit\(\)\.putString\(PROJECT_SHOW_COMPLETED_KEY, on\.toString\(\)\)\.apply\(\)/);
 assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/\.projects\(\)|projectDetail\(/g), null);
-// Projects render only core's order: groups, areas, rows, and detail items are walked as parsed, never sorted or dropped.
+
 assert.doesNotMatch(code(projectsUi) + code(model), /\.(sort\w*|sorted\w*|filter(?!Bg\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/);
 assert.match(projectsUi, /val PROJECT_BUCKETS = listOf\("active" to "projects\.activeSection", "deferred" to "projects\.deferredSection", "archived" to "projects\.closed"\)/);
 for (const walk of [/List\(groups\.length\(\)\) \{ index ->/, /List\(rows\.length\(\)\) \{ row ->/, /List\(items\.length\(\)\) \{ index ->/,
     /for \(\(bucket, heading\) in PROJECT_BUCKETS\) \{/, /for \(group in groups\) \{/, /for \(row in group\.projects\) item/,
     /for \(entry in detail\?\.items\.orEmpty\(\)\) when \(entry\)/]) assert.match(projectsUi, walk);
 assert.match(projectsUi, /group\.areaName \?: t\("projects\.noArea"\)/);
-// The project status line is core's text (Completed or Cancelled for a closed project).
+
 assert.match(projectsUi, /Text\(row\.statusLabel, style = rnText\(12, 400\), color = color\)/);
 assert.doesNotMatch(code(projectsUi), /"list\.done"/);
 assert.match(projectsUi, /val open = !collapsible \|\| \(if \(bucket == "deferred"\) projectsView\.showDeferred else projectsView\.showArchived\)/, 'Deferred and Archived start closed (RN\'s default)');
 assert.match(projectsUi, /val areaKey = group\.areaId \?: "no-area"/);
-// A read-only project's rows have no Complete; its cue is core's value, shown with mobile's label.
+
 assert.match(projectsUi, /val completable = detail\?\.readOnly == false/);
 assert.match(projectsUi, /TaskRowItem\(model, entry\.row, status = RowStatus\.Badge, completable = completable,\s*note = entry\.sequenceCue\?\.let\(CUE_KEYS::get\)\?\.let\(::t\), available = entry\.sequenceCue == "available"\)/);
-// A stale window restarts the project from offset 0; it is never shown as an error.
+
 assert.match(model, /if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+return if \(start == null\) view else readProject\(runtime, id, null, depth\)/);
 assert.match(model, /if \(id != openProjectId\) return\s+if \(detail == null\) keepProject\(null\)\s+project = detail/,
     'a reply for a closed project is dropped; a project core no longer has closes');
 assert.match(model, /if \(failure\.message\?\.startsWith\("TASK_NOT_FOUND"\) != true\) throw failure\s+null/);
-// Read on every resume of the Projects tab and after every command, as Focus is.
+
 assert.match(projectsUi, /LaunchedEffect\(owner\) \{\s*owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{ model\.refreshProjects\(\) \}/);
 assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 6, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), RN\'s Show completed and Completed pile (b4a), and a row the clock changes (#1360)');
 assert.match(model, /ProjectsView\.parse\(runtime\.projects\(\)\) else null,\s*at\.project,\s*if \(shown == null \|\| shown == Screen\.Projects\) readOpen\(runtime, at\) else null,/);
-// The open project survives rotation (ViewModel) and process death (SavedStateHandle); Back closes it unless a retry is owed.
+
 assert.match(model, /var openProjectId by mutableStateOf\(saved\.get<String>\("project"\)\)/);
 assert.match(model, /openProjectId = id\s+saved\["project"\] = id/);
 assert.match(projectsUi, /BackHandler\(enabled = failedAction == null\) \{ closeProject\(\) \}/);
 
-// Global search: core's searchTasks is a background read (per-view freshness, and an answer for another query is dropped
-// by core's echoed query); saving a search is a perform(action) with its request UUID kept with the dialog.
+
 assert.match(coreHost, /fun searchTasks\(json: String\): JSONObject = callAsync\("search", json\)/);
 assert.match(coreHost, /fun saveSearch\(json: String\): JSONObject = callAsync\("saveSearch", json\)/);
 assert.match(hostEntry, /search\(json: string\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*const input = JSON\.parse\(json\);\s*return unwrap\(await contract\.searchTasks\(\{ \.\.\.input, filters: input\.filters \?\? DEFAULT_GLOBAL_SEARCH_FILTERS \}\)\);/);
-// Core owns what Kotlin once copied (core batch 4946dca7a): the search defaults (defaultFilters, and core's constant for the first
-// read), each chip's cleared filters, the cancelled flag, the Markdown-free note preview, the More-options edit, and the picked-day edit.
+
+
 assert.doesNotMatch(code(searchUi), /defaultSearchFilters|fun JSONObject\.(cleared|removed)\(|"cancelled"\)? *\}|getString\("kind"\) == "cancelled"|"(includeReference|hideFutureTasks|duePreset|scope|selectedArea)", *(true|false|"all"|"any")\)/,
     'no Kotlin copy of core\'s search defaults, chip clearing, or cancelled detection');
 assert.match(searchUi, /row\.getBoolean\("cancelled"\)/);
@@ -2238,7 +2188,7 @@ assert.match(model, /background\(listOf\(Part\.Search\), \{ runtime -> SearchVie
 assert.equal(model.match(/runtime\.searchTasks\(/g).length, 1);
 assert.match(model, /FailedAction\("saveSearch", current\.saveRequestId, current\.query\.trim\(\), patch = mapOf\("name" to name\.trim\(\)\)\)/);
 assert.match(model, /private fun sendSaveSearch\(action: FailedAction\) = perform\(action\) \{ runtime ->\s+try \{\s+runtime\.saveSearch\([^\n]*\.put\("requestId", action\.id\)\.toString\(\)\)[\s\S]{0,400}?acknowledged\(action\)/);
-// The submitted Save Search request rides the screen state before the call, locks the dialog, and is reconciled after process death.
+
 assert.match(model, /keepSearch\(current\.copy\(submitted = action\.patch\["name"\]\)\)\s+sendSaveSearch\(action\)/);
 assert.match(model, /current\.submitted\?\.let \{ name -> if \(failedAction == null\) saveSearchAction\(current, name\)\.let \{ failedAction = it; sendSaveSearch\(it\) \} \}/);
 assert.match(searchUi, /val owed = failedAction != null \|\| state\.submitted != null/);
@@ -2248,13 +2198,12 @@ assert.match(searchUi, /failedAction == null \|\| failedAction == saveSearchActi
 assert.match(searchUi, /failedAction == null \|\| failedAction == completeAction\(task\.id, task\.taskRevision\)/, 'Mark Done from search is the lists\' Done with its exact retry');
 assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{[\s\S]*?if \(search != null\) readSearch\(\)\s+return\s+\}/, 'search is read again after every sync');
 assert.match(model, /AfterCommandReads\.Read\.Search -> readSearch\(done\)/, 'search is read again after every command, first when open');
-// Search results are core's: core's highlight segments, date line and tone, and tap target; Kotlin never sorts or filters them.
+
 assert.doesNotMatch(code(searchUi), /\.(sort\w*|sorted\w*|groupBy|reversed|shuffled|distinct\w*)\b/);
 assert.match(searchUi, /row\.getJSONArray\("titleSegments"\)\.segments\(\)/);
 assert.match(searchUi, /private val SEARCH_ROUTES = mapOf\("\/inbox" to Screen\.Inbox, "\/focus" to Screen\.Focus, "\/projects-screen" to Screen\.Projects\)/);
 
-// Process Inbox: every read and edit goes to core's session; each answer is a perform(action) with its exact request,
-// written to the no-backup file before the call, re-sent after process death, and refused requests unlock.
+
 for (const [fn, js] of [['startInboxProcessing', 'inboxStart'], ['inboxProcessingStep', 'inboxStep'], ['commitInboxProcessingStep', 'inboxCommit'],
     ['skipInboxProcessingTask', 'inboxSkip'], ['endInboxProcessing', 'inboxEnd']]) {
     assert.match(coreHost, new RegExp(`fun ${fn}\\([^)]*\\): JSONObject = callAsync\\("${js}"`), `CoreHost.${fn} reaches host method ${js}`);
@@ -2269,13 +2218,13 @@ assert.match(model, /val action = stepAction\(current, kind, choice\)\s+if \(bus
 assert.match(model, /current\.pending\?\.takeIf \{ it\.kind == kind && it\.title == choice \}\s+\?: FailedAction\(kind, UUID\.randomUUID\(\)\.toString\(\), choice,/, 'a retry keeps its requestId');
 assert.match(model, /keepProcessing\(restored\.copy\(hidden = true\)\)\s+failedAction = action\s+sendAnswer\(action, reopen = false\)/,
     'after process death the app lands on the Inbox; the record and its request stay on disk while they are sent again');
-// The durable record goes only after core acknowledges (finishAnswer) or conclusively refuses (a stale session, an invalid request).
+
 assert.match(model, /if \(current\.hidden\) \{ keepProcessing\(null\); return \}/);
 assert.match(model, /keepProcessing\(if \(it\.hidden\) null else it\.copy\(pending = null\)\)/);
 assert.match(model, /val started = if \(reopen\) InboxProcessing\.started\([^\n]*\) else null\s+acknowledged\(action\)\s+ui \{ keepProcessing\(started\)/);
 assert.match(activity, /val flow = processing\?\.takeUnless \{ it\.hidden \}/);
 assert.match(processUi, /\.put\("hidden", hidden\)/);
-// Clearing an active chip sends core's clearedFilters for it, so a second tap changes nothing (core's clear).
+
 assert.match(searchUi, /for \(\(label, cleared\) in view\.chips\) FilterChip\(label, label, true, true\) \{ setSearchFilters\(cleared\) \}/);
 assert.match(model, /acknowledged\(action\)\s+ui \{ finishAnswer\(reply\) \}/);
 assert.equal(code(model).match(/runtime\.(commitInboxProcessingStep|skipInboxProcessingTask)\(/g).length, 2);
@@ -2285,28 +2234,28 @@ assert.match(model, /saved\["processing"\] = value != null/);
 assert.doesNotMatch(code(model), /saved\["processing"\] = (?!value != null)/, 'the Bundle holds only whether Process Inbox is open');
 assert.match(model, /ProcessingStore\(File\(app\.noBackupFilesDir, "process-inbox"\)\)/);
 assert.match(processUi, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
-// Edits: one at a time, answered for their own session and still first in the queue; an older reply never resets newer typing.
+
 assert.match(model, /val now = processing\?\.takeIf \{ it\.sessionId == current\.sessionId && it\.edits\.firstOrNull\(\) === next \}/);
 assert.match(processUi, /LaunchedEffect\(key, coreValue, typing, pending\) \{ if \(!typing && !pending && field\.text != coreValue\)/);
 assert.match(processUi, /\.onFocusChanged \{ typing = it\.isFocused \}/, 'a focused draft input keeps its typing over core replies');
-// No Kotlin policy: every chip sends core's own edit; Kotlin builds only the picker's setDate, the typed text, and the disclosure.
+
 assert.match(processUi, /DayPickerDialog\(row\?\.text\("date"\)/, 'the picker starts on core\'s date and hands core only the picked day');
 assert.doesNotMatch(code(processUi), /"(inbox|next|waiting|someday|reference|done)"\s*->/, 'no status decides a Process Inbox control');
 assert.match(processUi, /const val PROCESSING_MODE_KEY = "mindwtr:view:inboxProcessingMode:v1"/);
-// The Inbox's Process button: core's label (99+ above 99), and TalkBack hears core's exact count as RN does; Mind Sweep takes its
-// slot while the Inbox is empty (pass 11: it opens RN's Mind Sweep, as the pill beside the controls does).
+
+
 assert.match(inboxUi, /view\.optJSONObject\("process"\)\?\.let \{ ProcessButton\(model, it\) \}\s+\?: view\.getJSONObject\("mindSweep"\)\.let \{ sweep ->\s+ActionButton\(Lucide\.Brain, sweep\.getString\("label"\), idle, sweep\.getString\("accessibilityLabel"\)\) \{ openMindSweep\(\) \}/);
 assert.match(inboxUi, /ActionButton\(Lucide\.ListChecks, process\.getString\("label"\), writable && !busy && failedAction == null, process\.getString\("accessibilityLabel"\)\) \{ openProcessing\(\) \}/);
 assert.doesNotMatch(code(activity), /"\$inbox · \$total"/, 'the "Inbox · N" count line is gone, as in RN');
 
-// The capture popup (pass 5): core's quick capture contract, every write through perform with its exact request on disk first.
+
 for (const [fn, js] of [['openQuickCapture', 'captureOpen'], ['quickCaptureView', 'captureView'], ['editQuickCapture', 'captureEdit'],
     ['submitQuickCapture', 'captureSubmit'], ['submitQuickCaptureLines', 'captureLines'],
     ['submitQuickCapturePickerQuery', 'capturePicker']]) {
     assert.match(coreHost, new RegExp(`fun ${fn}\\([^)]*\\): JSONObject = callAsync\\("${js}"`), `CoreHost.${fn} reaches host method ${js}`);
 }
-// Pass D1c: the capture's snapshot goes through the data channel (captureSnapshotFile), never as text, on a handle capped at
-// core's 128 MiB backup limit (code review P2), as an operation's recovery snapshot is.
+
+
 assert.match(coreHost, /val handle = data\.openRecoveryWrite\(written\)/);
 assert.match(coreHost, /val recoveryHandle = recovery\?\.let\(data::openRecoveryWrite\)/);
 assert.match(coreHost, /fun createQuickCaptureSnapshot\(snapshots: File, protect: \(\) -> Set<String>\): String\? \{[\s\S]{0,400}?callAsync\("captureSnapshotFile", handle, deadlineMs = sized\(OPERATION_DEADLINE_MS, libraryFileBytes\(\)\)\)/);
@@ -2326,12 +2275,12 @@ for (const [fn, call] of [['sendCapture', 'submitQuickCapture'], ['sendLines', '
 }
 assert.equal(code(model).match(/runtime\.(submitQuickCapture|submitQuickCapturePickerQuery)\(/g).length, 2);
 assert.equal(code(model).match(/runtime\.submitQuickCaptureLines\(/g).length, 1);
-// Each request is on disk before its call; a retry reuses the same capture UUID(s) or request UUID.
+
 for (const [kind, fn] of [['capture', 'sendCapture'], ['captureLines', 'sendLines'], ['capturePicker', 'sendPicker']]) {
     assert.match(model, new RegExp(`current\\.pending\\?\\.takeIf \\{ it\\.kind == "${kind}" \\}`), `${kind}: a retry reuses the pending request`);
     assert.match(model, new RegExp(`keepCapture\\(current\\.copy\\(pending = action[^)]*\\)\\)\\s+${fn}\\(action\\)`), `${kind}: the request is persisted before the call`);
 }
-// The saved request holds core's options, so a retry keeps the draft's project and status.
+
 assert.match(model, /FailedAction\("capture", current\.captureId, current\.text, patch = mapOf\("options" to current\.options\.toString\(\), "openAfterSave" to "\$openAfterSave"\)\)/);
 assert.match(model, /FailedAction\("captureLines", current\.lineIds\.first\(\), current\.linesText \?: current\.text,\s*patch = mapOf\("options" to current\.options\.toString\(\), "captureIds" to current\.lineIds\.joinToString\(","\)\)\)/);
 assert.match(model, /failedAction = action\s+when \(action\.kind\) \{ "capture" -> sendCapture\(action\); "captureLines" -> sendLines\(action\); else -> sendPicker\(action\) \}/,
@@ -2341,27 +2290,26 @@ assert.match(model, /saved\["capturing"\] = value != null/);
 assert.doesNotMatch(code(model), /saved\["capturing"\] = (?!value != null)|saved\["(draft|captureId|submittedTitle)"\]/, 'the Bundle holds only whether the popup is open');
 assert.match(model, /CaptureStore\(File\(app\.noBackupFilesDir, "capture"\)\)/);
 assert.match(captureUi, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
-// Several lines: core's snapshot is written as mobile writes it (a temporary file, a clash number, the 5 newest) before the batch.
-// An open backup operation's snapshot and the last result's Undo snapshot are never pruned by it (pass D1a).
-// Pass D1c: core writes it through the data channel; CoreHost publishes it with RecoverySnapshots' clash and prune rules.
+
+
 assert.match(model, /runtime\.createQuickCaptureSnapshot\(snapshots, menu\.settings\.transfer\.operations::protectedNames\)/);
 assert.match(coreHost, /return RecoverySnapshots\.publishCapture\(snapshots, written, snapshot\.getString\("fileName"\), protect\)/);
 assert.match(model, /private val snapshots = File\(app\.filesDir, "snapshots"\)/);
 assert.match(snapshotsKt, /private const val MAX_SNAPSHOTS = 5/);
 assert.match(snapshotsKt, /name = fileName\.removeSuffix\(SUFFIX\) \+ "\.\$clash\$SUFFIX"/);
-// Pass D1a review: one writer at a time (the name check, the pending file, the rename), and a test seam before the rename.
+
 assert.match(snapshotsKt, /FileOutputStream\(pending\)\.use \{ out -> out\.write\(contents\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+beforePublish\(\)\s+check\(pending\.renameTo\(File\(dir, name\)\)\)/);
 assert.match(snapshotsKt, /beforePublish: \(\) -> Unit = \{\}\): String = synchronized\(this\) \{/);
-// No Kotlin capture policy: every chip, picker row and reset sends core's own edit; Kotlin builds only the typed note and the picked day and time.
+
 assert.deepEqual([...new Set([...code(captureUi).matchAll(/put\("type", "(\w+)"\)/g)].map(([, type]) => type))].sort(), ['setDueDay', 'setDueTime', 'setNote']);
-// The Custom date and due time pickers open on core's values (due.custom.startDay, due.time.start).
+
 assert.match(captureUi, /DayPickerDialog\(due\.getJSONObject\("custom"\)\.getString\("startDay"\), \{ pickDay = false \}\) \{ day ->\s+editCapture\(JSONObject\(\)\.put\("type", "setDueDay"\)\.put\("day", day\)\)\s+\}/);
 assert.match(captureUi, /due\.child\("time"\)\?\.getString\("start"\)/);
-// In landscape the body under the header scrolls with the footer at its end, so Save stays reachable.
+
 assert.match(captureUi, /if \(landscape\) Modifier\.weight\(1f, fill = false\)\.verticalScroll\(rememberScrollState\(\)\)\.testTag\("capture-scroll"\)/);
 assert.match(captureUi, /if \(landscape\) footer\(\)\s+\}\s+if \(!landscape\) footer\(\)/);
-// Durable draft (review of pass 5): an unanswered request comes back without saved state, edits are on disk before
-// they are sent, and the batch sends and persists the snapshot name RecoverySnapshots wrote before the call.
+
+
 assert.match(model, /storedCapture\?\.takeIf \{ saved\.get<Boolean>\("capturing"\) == true \|\| it\.pending != null \}/);
 assert.match(model, /keepCapture\(current\.copy\(requests = current\.requests \+ JSONObject\(\)\.put\("edit", edit\)\)\)\n/, 'an edit is persisted before it is sent');
 assert.match(captureUi, /\.put\("edits", /);
@@ -2370,40 +2318,39 @@ assert.equal(code(model).match(/snapshotFileName/g).length, 1);
 assert.match(model, /\.put\("snapshotFileName", name \?: JSONObject\.NULL\)/);
 assert.match(model, /if \(!taken\) fresh\(\) else try \{ submit\(name\) \} catch \(failure: Exception\) \{\s+if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+fresh\(\)/,
     'a replay sends the persisted snapshot name first; a stale one takes, persists and sends a new one with the same IDs');
-// RN keeps the field focused for the next capture: a save locks (and unfocuses) the field; it takes focus back after.
+
 assert.match(captureUi, /LaunchedEffect\(draft\.session, locked\) \{ if \(!draft\.expanded && !locked\) \{ delay\(120\); runCatching \{ titleFocus\.requestFocus\(\) \} \} \}/);
 assert.match(captureUi, /const val ADD_ANOTHER_KEY = "mindwtr:quickCapture:addAnother"/);
 
-// The Menu tab (pass 6): RN's More sheet and its lists on core's menu view contract, through the shell's command path.
-// Every menu write is a perform(action) with its exact FailedAction; a failure keeps it (the banner's Try again re-sends it).
+
 assert.match(coreHost, /fun menuRead\(name: String, json: String\): JSONObject = callAsync\("menuRead", name, json\)/);
 assert.match(coreHost, /fun menuCommand\(name: String, json: String\): JSONObject = callAsync\("menuCommand", name, json\)/);
-// A project's attachment command copies a picked file, which can outlast the 30 s deadline: it gets a request's deadline, on its
-// first send and on the journal's replay alike, so a slow copy never stops the host (pass A2 review 1).
+
+
 assert.match(coreHost, /fun deadlineOf\(method: String, args: List<Any\?>\): Long = when \{\s*method == "menuCommand" && args\.firstOrNull\(\) in ATTACHMENT_COMMANDS -> NETWORK_DEADLINE_MS\s*method == BackupOperations\.METHOD -> BACKUP_DEADLINE_MS\s*else -> OPERATION_DEADLINE_MS\s*\}/);
 assert.match(coreHost, /answerChecked\(entry\.method, entry\.args\.toTypedArray\(\), deadline\(entry\.method, entry\.args\)\)/);
 assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)[1].matchAll(/"(\w+)"/g)].map((m) => m[1]),
     [.../val ATTACHMENT_KINDS = setOf\(([^)]*)\)/.exec(source('Attachments.kt'))[1].matchAll(/"(\w+)"/g)].map((m) => m[1]), 'CoreHost\'s long-deadline commands are the attachment commands');
 {
-    // Settings' commands (pass 10) join the Menu tab's: MENU_KINDS is its own set plus SettingsModel.kt's SETTINGS_KINDS.
-    // Pass 11's commands (Bulk organize's create, Mind Sweep's Add, a saved search's Delete) close the set.
+
+
     assert.match(menuModel, /"savedSearchDelete", "savedSearchSort"\) \+ SETTINGS_KINDS/);
     const kinds = [...[...new RegExp('val MENU_KINDS = setOf\\(([^)]*)\\)').exec(menuModel)[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind),
         ...[...new RegExp('val SETTINGS_KINDS = setOf\\(([^)]*)\\)').exec(source('SettingsModel.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind)];
     const hostKinds = [...hostEntry.slice(hostEntry.indexOf('const MENU_COMMANDS'), hostEntry.indexOf('};', hostEntry.indexOf('const MENU_COMMANDS'))).matchAll(/^\s+(\w+): \((input)?\) => contract\.\w+\((?:withCalendar\(\2\)|\2)\),$/gm)].map(([, kind]) => kind);
-    // Settings › Sync's screen commands are Menu commands too, sent by SyncSettings.kt through CoreHost.syncCommand, never by send().
+
     const syncKinds = [.../val SYNC_COMMANDS = setOf\(([^)]*)\)/.exec(source('SyncSettings.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    // Settings › AI's screen writes too (its open, a key, a base URL), sent by AISettings.kt; its controls' setAISetting is a Settings kind.
+
     const aiKinds = [.../val AI_COMMANDS = setOf\(([^)]*)\)/.exec(source('AISettings.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    // Attachments' writes (pass A2), sent by Attachments.kt for the editor's draft and a project's list.
+
     const attachmentKinds = [.../val ATTACHMENT_KINDS = setOf\(([^)]*)\)/.exec(source('Attachments.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    // Project details' writes, sent by ProjectDetails.kt: core's prepared commits.
+
     const projectDetailKinds = [.../val PROJECT_DETAIL_KINDS = setOf\(([^)]*)\)/.exec(source('ProjectDetails.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    // The task editor's "..." menu: its one journaled action, sent by EditorMenu.kt.
+
     const editorMenuKinds = [.../val EDITOR_MENU_KINDS = setOf\(([^)]*)\)/.exec(source('EditorMenu.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    // Settings › Calendar's new subscription (pass C3), sent by CalendarSettings.kt; its other writes are the Settings kind calendarSetting.
+
     const calendarKinds = [.../val CALENDAR_COMMANDS = setOf\(([^)]*)\)/.exec(source('CalendarSettings.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    // Settings › Data's rows (pass D1b code review): off while one runs or a sync runs, every entry point and row on that guard.
+
     {
         const transferSource = source('DataTransfer.kt');
         assert.match(transferSource, /val busy get\(\) = dataRowsBusy\(action, shell\.syncActive\)/);
@@ -2416,9 +2363,9 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
         assert.match(readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8'), /active: service\.getMobileSyncActivityState\(\) === 'syncing'/);
         assert.match(source('InboxViewModel.kt'), /syncActive = event\.optBoolean\("active"\)/);
     }
-    // Settings › Data's own (pass D1b): Getting Started's seed, sent by DataTransfer.kt.
+
     const dataKinds = [.../val DATA_COMMANDS = setOf\(([^)]*)\)/.exec(source('DataTransfer.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    // The startup prompts' own (pass O2f): the donation ask's synced record, sent by StartupPrompts.kt.
+
     const promptKinds = [.../val STARTUP_PROMPT_COMMANDS = setOf\(([^)]*)\)/.exec(source('StartupPrompts.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
     assert.deepEqual(hostKinds.sort(), [...kinds, ...syncKinds, ...aiKinds, ...calendarKinds, ...attachmentKinds, ...projectDetailKinds, ...dataKinds, ...promptKinds, ...editorMenuKinds].sort(), 'every menu command kind is one host command, logged as its operation');
     assert.match(hostEntry, new RegExp(`type MenuCommand = ${kinds.map((kind) => `'${kind}'`).join('\\s*\\| ')}\\s*\\| SyncScreenCommand \\| AIScreenCommand \\| CalendarScreenCommand \\| AttachmentCommand \\| ProjectDetailCommand \\| TaskEditorCommand \\| DataCommand \\| StartupPromptCommand;`));
@@ -2427,9 +2374,8 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     assert.match(hostEntry, new RegExp(`type StartupPromptCommand = ${promptKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
     assert.match(hostEntry, new RegExp(`type ProjectDetailCommand = ${projectDetailKinds.map((kind) => `'${kind}'`).join('\\s*\\| ')};`));
     assert.doesNotMatch(menuModel, new RegExp(`"(${projectDetailKinds.join('|')})"`), 'the Menu tab never sends a Project details command itself');
-    // A Project details edit is the user's intent, journaled at once before anything else (CoreHost.journalAhead), then sent
-    // in order when the shell is free; core's runProjectEdit reads, prepares (again after a sync) and commits it, so a death
-    // at any step leaves the edit for the boot's replay (review PD 1, 2; WriteJournalTest, ProjectDetailsTest).
+
+
     {
         const details = code(source('ProjectDetails.kt'));
         assert.match(details, /private fun edit\(projectId: String\?, kind: String, [^{]*fields: JSONObject\.\(\) -> Unit = \{\}\): String\? \{[\s\S]*?journalAhead\("projectEdit", json\)[\s\S]*?writes\.add\(FailedAction\("projectEdit", requestId, json\)\)/, 'an edit is journaled before it is queued');
@@ -2438,33 +2384,32 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
         const journalKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt'), 'utf8');
         for (const fn of ['pending', 'append', 'settle']) assert.match(journalKt, new RegExp(`@Synchronized fun ${fn}\\(`), `the journal's ${fn} is synchronized`);
     }
-    // A Details reply applies only while it answers the newest read of its kind, in the session it was read in: another
-    // project or leaving the screen closes the session; a values read started before a write ended never clears a draft
-    // (review PD 3; ProjectDetailsTest's ReplyGuard).
+
+
     {
         const details = code(source('ProjectDetails.kt'));
-        // Eight reads: the five Details reads, Convert to section's (readConvert, its kind passed in), the view options' sort and
-        // the reorder mode's order.
+
+
         assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 8, 'every Details read takes a ticket');
         assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 8, 'every Details reply checks its ticket');
         assert.match(details, /shell\.fresh\(mine, InboxViewModel\.Part\.ProjectDetails\)/);
         assert.match(details, /fun closeOverlays\(\) \{\s*replies\.close\(\)/);
     }
-    // Back (closeProject) and opening another project store the open project's typed title and notes first (review PD 1;
-    // ProjectDetailsTest's editsOnLeave), as RN's end of editing and blur do on close.
+
+
     assert.match(model, /fun closeProject\(\) \{[\s\S]{0,300}?projectDetails\.follow\(null\)/, 'Back stores the typed edits');
     assert.match(code(source('ProjectDetails.kt')), /fun follow\(id: String\?\) \{\s*if \(id == projectId\) return\s*projectId\?\.let \{ old ->\s*for \(\(kind, text\) in editsOnLeave\(/, 'leaving a project stores its edits before anything resets');
-    // RN's tag picker field (ProjectTagPickerModal): the keyboard's Done only ends editing; only + changes the tags (review PD 5).
+
     const tagField = code(source('ProjectDetails.kt')).split('BasicTextField(tagDraft')[1].split('testTag("project-tag-input")')[0];
     assert.doesNotMatch(tagField, /onDone = \{[^}]*Tag\(/, 'the tag field\'s Done changes no tag');
-    // The picker's + only adds the typed tag (core's `add` intent; dd 2026-10-04): a tag already there stays. A chip toggles.
+
     const detailsKt = code(source('ProjectDetails.kt'));
     assert.match(detailsKt, /fun addTag\(tag: String\) \{\s*setTag\(tag, present = true\)\s*\}/, 'the picker\'s + only adds');
     assert.match(detailsKt, /edit\(projectId, "tag"\) \{ put\("tag", tag\)\.put\("present", present\) \}/);
     assert.match(detailsKt, /testTag\("project-tag-add"\)/);
     assert.match(detailsKt, /\.clickable\(role = Role\.Button\) \{ addTag\(tagDraft\); tagDraft = "" \}/, '+ adds the typed tag');
-    // RN's Notes Preview shows the unsaved draft (dd 2026-10-04): the preview reads core's blocks for the draft text, and
-    // switching to Preview stores nothing; leaving the field for the preview stores nothing either.
+
+
     assert.match(detailsKt, /menuRead\("projectNotesPreview", /, 'the preview reads core\'s blocks for the draft');
     assert.doesNotMatch(detailsKt, /projectNotesView/, 'the preview never reads the stored notes in place of the draft');
     const previewToggles = detailsKt.match(/\{ [^{}]*(notesPreview = !notesPreview|editing = !editing)[^{}]*\}/g) ?? [];
@@ -2472,7 +2417,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     for (const toggle of previewToggles) {
         assert.doesNotMatch(toggle, /commitNotes/, 'switching to Preview stores nothing');
     }
-    // RN's field sets autoCorrect={false} and autoCapitalize="none" (review PD 6).
+
     assert.match(tagField, /KeyboardOptions\(capitalization = KeyboardCapitalization\.None, autoCorrectEnabled = false,/, 'the tag field neither corrects nor capitalizes');
     assert.match(hostEntry, new RegExp(`type AttachmentCommand = ${attachmentKinds.map((kind) => `'${kind}'`).join('\\s*\\| ')};`));
     assert.doesNotMatch(menuModel, new RegExp(`"(${attachmentKinds.join('|')})"`), 'the Menu tab never sends an attachment command itself');
@@ -2482,7 +2427,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     assert.match(hostEntry, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];[\s\S]{0,120}?return taskResult\(name as MenuCommand, await command\(JSON\.parse\(json\) as never\)\);/);
     assert.match(hostEntry, /menuRead\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{[\s\S]{0,300}?if \(name !== 'more'\) requireSaved\(\);\s*const read = MENU_READS\[name\];[\s\S]{0,100}?return unwrap\(read\(JSON\.parse\(json\) as never\)\);/);
     const input = code(menuModel.slice(menuModel.indexOf('private fun input(action: FailedAction)'), menuModel.indexOf('}.toString()', menuModel.indexOf('private fun input('))));
-    // The list actions (Archive, Contexts, Trash, Review, and the Review's project Add task) are core's action with its request UUID.
+
     const LIST_KINDS = ['archiveAction', 'contextsAction', 'trashAction', 'reviewAction', 'reviewTask'];
     for (const kind of kinds.filter((kind) => !LIST_KINDS.includes(kind))) assert.match(input, new RegExp(`"${kind}"(, "\\w+")* ->`), `input() builds the ${kind} request`);
     for (const kind of LIST_KINDS) assert(kinds.includes(kind), `MENU_KINDS has ${kind}`);
@@ -2499,8 +2444,8 @@ assert.match(model, /else -> menu\.retry\(action\)\s+\}\s+\}/, 'retryOwed hands 
 for (const [name, text] of Object.entries(menuScreens)) {
     assert.doesNotMatch(code(text).replace(/^import .*$/gm, ''), /runtime\.|menuCommand\(|menuRead\(/, `${name}: screens reach core only through MenuModel`);
 }
-// A Someday create's exact request (a capture UUID, or a section title core finds again) is on disk, synced, before the call;
-// after process death it is sent before anything else, even without saved state; it goes only after core answers.
+
+
 assert.match(menuModel, /fun saveCreate\(\) \{\s+val action = createAction\(\) \?: return\s+if \(shell\.busy \|\| \(shell\.failedAction != null && shell\.failedAction != action\)\) return\s+store\.write\(action\)\s+send\(action\)/);
 assert.match(menuModel, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
 assert.match(model, /val menu = MenuModel\(this, saved, prefs, File\(app\.noBackupFilesDir, "menu"\)\)/);
@@ -2510,14 +2455,14 @@ assert.match(menuModel, /if \(refused && action\.kind in CREATES\) shell\.ui \{ 
 assert.match(menuModel, /shell\.acknowledged\(action\)\s+shell\.ui \{\s+if \(action\.kind in CREATES\) store\.delete\(\)/, 'an acknowledged create\'s record goes');
 assert.equal(code(menuModel).match(/store\.delete\(\)/g).length, 2, 'only an answer from core removes a pending create');
 assert.match(menuModel, /"addTask" -> FailedAction\("somedayTask", open\.getString\("captureId"\), text,/, 'Add task sends its capture UUID, kept with its dialog');
-// Reads: background refreshes and user reads, with the shell's per-list freshness; paging stays under one revision and a stale
-// window reads the list again from its first window (not an error).
+
+
 assert.match(menuModel, /shell\.background\(listOf\(Part\.Menu\), \{ runtime -> read\(runtime, list, params, depth, deep, bulk = bulk\) \}, done\) \{ next, mine ->\s+if \(shell\.fresh\(mine, Part\.Menu\)\) show\(list, next\)/);
 assert.match(menuModel, /shell\.ui \{ if \(shell\.fresh\(mine, Part\.Menu\)\) show\(list, next\) \}/);
 assert.match(menuModel, /\.put\("offset", page\.items\.size\)\.put\("limit", PAGE\)\.put\("revision", page\.revision\)/, 'later windows carry the view\'s revision');
 assert.match(menuModel, /runtime\.menuRead\("collection", JSONObject\(\)\.put\("view", list\)\.put\("collection", name\)\.put\("params", page\.params\)/, 'collections page through getMenuViewCollection with the accepted params');
-// The Inbox's and Archive's filter tokens page through their own reads (getInboxFilterTokens, getArchiveFilterTokens), with the
-// accepted params and the view's revision; a picker search (query) reads the matches from offset zero.
+
+
 assert.match(menuModel, /"inbox", "archive" -> runtime\.menuRead\(if \(list == "inbox"\) "inboxTokens" else "archiveTokens", JSONObject\(\)\.put\("params", page\.params\)\s+\.put\("offset", offset\)\.put\("limit", WINDOW\)\.put\("revision", page\.revision\)\.apply \{ query\?\.let \{ put\("query", it\) \} \}/);
 assert.equal(code(menuModel).match(/if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure/g).length, 5,
     'read, More, a collection\'s More, the move dialog\'s choices and a picker search treat a stale window as a reread, never an error');
@@ -2526,10 +2471,10 @@ assert.match(menuModel, /private fun readMoveChoices\(depth: Int = WINDOW\) \{[\
 assert.match(menuModel, /fun moreMoveChoices\(\) \{ moveChoices\?\.getJSONObject\("choices"\)\?\.getJSONArray\("items"\)\?\.length\(\)\?\.let \{ readMoveChoices\(it \+ WINDOW\) \} \}/);
 assert.match(model, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, apply = ::showLists\)\s+menu\.refresh\(\)/, 'the open Menu list is read again after every sync');
 assert.match(model, /AfterCommandReads\.Read\.Menu -> menu\.refresh\(done\)/, 'the open Menu list is read again after every command, first when on screen');
-// Filters, sorts and groups: every choice sends the exact edit or value core put on it; only typed text builds an edit.
+
 {
-    // Kotlin names only core's Archive and bulk actions (NativeArchiveAction, NativeBulkAction), the typed text's edits (a filter's
-    // setSearch or setLocation through its `type` variable, Bulk Organize's setText), and nothing else.
+
+
     const bulkSource = readFileSync(resolve(app, '../../packages/core/src/native-host-contract-bulk-actions.ts'), 'utf8');
     const unionOf = (text, type) => [...(new RegExp(`export type ${type} =([\\s\\S]*?);\\n`).exec(text)?.[1] ?? '').matchAll(/type: '(\w+)'/g)].map(([, name]) => name);
     const allowed = new Set([...unionOf(contractSource, 'NativeArchiveAction'), ...unionOf(bulkSource, 'NativeBulkAction'), 'setSearch', 'setText', 'type']);
@@ -2542,26 +2487,25 @@ assert.match(menuModel, /reload\(JSONObject\(\)\.put\("type", type\)\.put\("valu
 assert.match(menuUi, /filterEdit\(option\.getJSONObject\("edit"\)\)/);
 assert.match(menuUi, /filterEdit\(filters\.getJSONObject\("clearEdit"\)\)/);
 assert.match(menuUi, /removeChip\(chip\.getJSONObject\("action"\)\)/);
-// No Kotlin policy in the new files: core's items, headings, collections and options are walked as sent.
+
 for (const [name, text] of Object.entries({ menuModel, ...menuScreens })) {
     assert.doesNotMatch(code(text), /\.(sort\w*|sorted\w*|filter(?!Bg\b|Edit\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/, `${name}: no Kotlin sorting, filtering, or grouping (filterEdit sends core's edit)`);
-    // The date APIs, not a calendar icon or heading (Lucide.Calendar, the reviews' calendar cards).
+
     assert.doesNotMatch(code(text), /SimpleDateFormat|DateTimeFormatter|LocalDate|java\.time|java\.util\.Calendar|Calendar\.getInstance|GregorianCalendar|Instant\b|\.format\(|toLocal/, `${name}: no Kotlin date formatting or parsing`);
     assert.doesNotMatch(code(text), new RegExp(`${STATUS}(?:\\s*,\\s*${STATUS})*\\s*->\\s*${STATUS}`), `${name}: no status-to-status map`);
 }
-// The More sheet: core's destinations (getMoreMenu); a tile this app builds opens, the others are drawn disabled, never a dead tap.
-// One accessibility node holds the label, the role and the state, so TalkBack hears an unbuilt tile as disabled.
+
+
 assert.equal(moreUi.match(/\.clearAndSetSemantics \{\s+contentDescription = label; role = Role\.Button\s+if \(enabled\) onClick \{ model\.menu\.openTile\(id\); true \} else disabled\(\)\s+\}\s+\.clickable\(enabled = enabled\) \{ model\.menu\.openTile\(id\) \}/g)?.length, 2, "an unbuilt tile is disabled and dimmed on its labelled node; a built one is dimmed only while a command runs or a retry is owed");
 assert.equal(moreUi.match(/\.fade\(if \(enabled\) 1f else 0\.45f\)/g)?.length, 2, 'both tile kinds dim at 45% while disabled');
 assert.match(menuModel, /fun opens\(id: String\) = id in setOf\("waiting", "someday", "reference", "history", "projects", "review", "contexts", "trash", "calendar", "board", "settings"\)/);
 assert.match(activity, /if \(menu\.sheet\) MoreSheet\(model\)/);
 assert.match(activity, /else if \(listed != null && writable\) MenuScreenHost\(model, listed\)/);
-// Navigation survives rotation (the model is held by the ViewModel) and process death (the Bundle): the sheet, screen, tab, dialog, session.
+
 for (const key of ['menuSheet', 'menuScreen', 'historyTab', 'menuState', 'menuDialog', 'quickAccess', 'reviewFrom']) assert.match(menuModel, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
 assert.match(menuUi, /BackHandler\(enabled = failedAction == null\) \{ if \(menu\.dialog != null\) menu\.backInDialog\(\) else if \(menu\.page\?\.bulk != null\) menu\.list\?\.let\(menu::endBulk\) else menu\.closeScreen\(\) \}/);
-// Back leaves a screen's mode before the screen (RN's #1415 9f92b0505, ca5eee151, 90a0e079e) on every screen that has one: the
-// selection of the Inbox, Contexts, Review, Trash and Archived, Focus's Reorder, and both captures' several-lines question.
-// check-toolbars-device (Inbox, Reorder, Archived), check-capture-device and check-capture-modal-device press Back on the phone.
+
+
 for (const [file, handler] of [
     ['InboxScreen.kt', /BackHandler\(enabled = model\.failedAction == null && \(dialog != null \|\| page\?\.bulk != null\)\) \{ if \(dialog != null\) backInDialog\(\) else endBulk\("inbox"\) \}/],
     ['ContextsScreen.kt', /BackHandler\(enabled = bulk != null && dialog == null && model\.failedAction == null\) \{ endSelection\(\); reload\(\) \}/],
@@ -2572,20 +2516,19 @@ for (const [file, handler] of [
     ['CaptureScreen.kt', /draft\.confirm != null -> cancelCaptureLines\(\)/],
     ['CaptureModal.kt', /if \(modal\.confirm != null\) cancelLines\(\) else cancel\(leave = false\)/],
 ]) assert.match(source(file), handler, `${file}: Back leaves its mode before the screen`);
-// Search results for the Menu lists open them (review ruling 5 of pass 4).
+
 assert.match(searchUi, /listed != null -> \{ closeSearch\(\); menu\.openRoute\(listed\); highlight\(task\.id\) \}/);
 assert.match(menuModel, /"\/waiting" to \(MenuScreen\.Waiting to null\), "\/someday" to \(MenuScreen\.Someday to null\),\s+"\/reference" to \(MenuScreen\.Reference to null\), "\/done" to \(MenuScreen\.History to "done"\), "\/archived" to \(MenuScreen\.History to "archived"\)/);
-// RN's device view state: Done and Archived under RN's keys, folded groups under RN's per-list key.
+
 assert.match(viewStateKt, /const val DONE_VIEW_KEY = "mindwtr:view:done:v1"/);
 assert.match(viewStateKt, /const val ARCHIVED_VIEW_KEY = "mindwtr:view:archived:v1"/);
 assert.match(viewStateKt, /private fun key\(list: String\) = "mindwtr:view:group-collapse:\$list:v1"/);
 
-// Pass 7: Contexts, Trash, Review, and the Weekly and Daily Review, on core's list views and review views.
-// Reads pass Kotlin's input to core unchanged; every write is core's action through MenuModel.act -> send -> perform(action).
+
 for (const [name, method] of [['contexts', 'getContextsView'], ['trash', 'getTrashView'], ['review', 'getReviewOverview']]) {
     assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuRead ${name} is core's ${method}`);
 }
-// C3: the reviews' reads carry their external calendars (host-calendar.ts), Kotlin's input otherwise unchanged.
+
 for (const [name, method, slot] of [['weekly', 'getWeeklyReview', 'weeklyReview'], ['weeklyList', 'getWeeklyReviewList', 'weeklyReview'], ['daily', 'getDailyReview', 'dailyReview']]) {
     assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(withReview\\('${slot}', input\\)\\),$`, 'm'), `menuRead ${name} is core's ${method} with its calendar`);
 }
@@ -2597,7 +2540,7 @@ assert.match(menuModel, /internal fun act\(kind: String, action: JSONObject\) = 
 for (const [name, text] of Object.entries(reviewScreens)) {
     assert.doesNotMatch(code(text), /\bsend\(|shell\.perform|FailedAction\(/, `${name}: writes go through MenuModel.act or saveCreate, never around perform`);
 }
-// Kotlin names only core's action types (NativeContextsAction, NativeTrashAction, NativeReviewAction) and Review's expansion edits.
+
 {
     const reviewSource = readFileSync(resolve(app, '../../packages/core/src/native-host-contract-review-views.ts'), 'utf8');
     const union = (text, type) => [...(new RegExp(`export type ${type} =([\\s\\S]*?);\\n`).exec(text)?.[1] ?? '').matchAll(/type: '(\w+)'/g)].map(([, name]) => name);
@@ -2609,19 +2552,19 @@ for (const [name, text] of Object.entries(reviewScreens)) {
     for (const type of used) assert(allowed.has(type), `${type} is one of core's list actions or expansion edits`);
     assert.doesNotMatch(code(Object.values(reviewScreens).join('\n')), /put\("type", [^"]/, 'no action type is built from a variable');
 }
-// Destructive actions stay as safe as RN: delete forever, the selection's delete forever, and Clear Trash only after core's question;
-// Clear Trash sends the revision its question showed (core refuses a stale one).
+
+
 for (const call of ['purgeItem(kind, id, revision)', 'purgeItems(view.getJSONObject("selected"))', 'emptyTrash(clear.getString("revision"))']) {
     const at = trashUi.indexOf(call);
     assert(at > 0 && trashUi.slice(Math.max(0, at - 160), at).includes('confirm('), `Trash sends ${call} only from core's confirmation`);
 }
 assert.equal(code(trashUi).match(/\b(purgeItem|purgeItems|emptyTrash)\(/g).length, 3, 'Trash builds each destructive action once, inside its confirmation');
 assert.match(menuUi, /confirmButton = \{ TextButton\(onClick = \{ keepDialog\(null\); act\(open\.optString\("command", "archiveAction"\), open\.getJSONObject\("action"\)\) \}, enabled = idle\)/);
-// Bulk trash (Contexts, Review) asks core's question first too; a row's trash is the recoverable move with core's Undo, as in RN.
+
 assert.match(contextsUi, /confirm\(bulk\.getJSONObject\("deleteConfirmation"\), trashTasks\(selected, revisions\), "contextsAction"\)/);
 assert.match(reviewUi, /"delete" -> confirm\(bulk\.getJSONObject\("deleteConfirmation"\), trashTasks\(selected, bulk\.getJSONObject\("taskRevisions"\)\), "reviewAction"\)/);
-// Every Contexts, Trash and Review action that writes existing rows carries the revision core's view showed: a row's taskRevision,
-// the view's taskRevisions for the selection (Contexts' top-level, Review's bar's), Trash's item revision and selection revisions.
+
+
 for (const [helper, revision] of [['setTaskStatus', 'taskRevision'], ['trashTask', 'taskRevision'], ['trashTasks', 'taskRevisions'], ['moveTasks', 'taskRevisions'],
     ['editTaskTokens', 'taskRevisions'], ['restoreItem', 'revision'], ['purgeItem', 'revision'], ['addTag', 'taskRevisions'], ['removeTags', 'taskRevisions'],
     ['markReviewedTasks', 'taskRevisions'], ['organizeTasks', 'taskRevisions'], ['followUpToday', 'taskRevision']]) {
@@ -2633,14 +2576,13 @@ assert.match(listActionsKt, /\.put\("taskRevisions", selected\.getJSONObject\("t
 for (const text of [contextsUi, reviewUi, weeklyUi, dailyUi]) {
     assert.doesNotMatch(code(text), /setTaskStatus\(row\.id, status\)|trashTask\(row\.id\)/, 'a row action sends the row\'s taskRevision');
 }
-// The status menu's Done is core's completeTask with RN's Undo toast on every list; another status on a list whose contract writes
-// its rows is that list's setTaskStatus, elsewhere updateTask.
-// RN's long-press on Done (canBackdateCompletion, bca5e3e7e): the completion-time picker, for a task not done yet.
+
+
 assert.match(rowUi, /\.combinedClickable\(enabled = enabled, role = Role\.Button, onLongClickLabel = backdate\?\.let \{ t\("task\.completeBackdateHintMobile"\) \},\s+onLongClick = backdate\) \{ chooseStatus\(task, status\) \}/);
 assert.match(rowUi, /val backdate = if \(status == "done" && task\.status != "done" && failedAction == null\) \{ \{ showStatusMenu\(null\); completedAt\.open\(task, "complete"\) \} \} else null/);
 assert.match(model, /if \(status == "done" && task\.status != "done"\) \{ statusMenu = null; complete\(task\.id, task\.taskRevision, askNext = true\) \}\s+else if \(!menu\.rowStatus\(task, status\)\) changeStatus\(task, status\)/);
-// Only a row's Done (its swipe and its status menu, RN's SwipeableTaskItem) asks for the project's next action: Search's Done, the
-// Calendar's, Pomodoro's and the failure banner's retry complete without the prompt (next-action review N5).
+
+
 assert.deepEqual(readdirSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot')).filter((name) => name.endsWith('.kt'))
     .flatMap((name) => (source(name).match(/askNext = true/g) ?? []).map(() => name)).sort(), ['InboxViewModel.kt', 'TaskRowView.kt']);
 assert.match(searchUi, /\{ complete\(task\.id, task\.taskRevision\) \}/);
@@ -2649,11 +2591,11 @@ assert.match(source('Pomodoro.kt'), /shell\.complete\(id, taskRevision\)\n/);
 assert.match(model, /"complete" -> complete\(action\.id, action\.patch\["taskRevision"\]\.orEmpty\(\)\)\n/);
 assert.match(rowUi, /failedAction == if \(status == "done"\) completeAction\(task\.id, task\.taskRevision\) else statusAction\(task, status\)\)/);
 assert.match(menuModel, /private val ROW_KINDS = mapOf\("contexts" to "contextsAction", "review" to "reviewAction", "weekly" to "reviewAction", "daily" to "reviewAction"\)/);
-// The Weekly Review's project Add task creates a task: its exact request (the request UUID core makes the task's id) is on disk first.
+
 assert.match(menuModel, /private val CREATES = setOf\("somedayTask", "somedaySection", "reviewTask", "calendarCreate", "boardCreate", "focusSave", "manageEditor", "bulkCreate", "mindSweepAdd"\)/);
 assert.match(menuModel, /"projectTask" -> FailedAction\("reviewTask", open\.getString\("requestId"\), addProjectTask\(open\.getString\("projectId"\), open\.optString\("text"\)\)\.toString\(\)\)/);
-// The menu inputs send core's revisions (crash-safe writes): a parked project's projectRevision with Activate, the moved tasks'
-// revisions with a Someday move (a row's, or the bulk bar's moveToSection.taskRevisions), and a new section its request UUID.
+
+
 assert.match(menuModel, /"activateProject" -> JSONObject\(\)\.put\("projectId", action\.id\)\.put\("projectRevision", action\.patch\["projectRevision"\]\)/);
 assert.match(menuModel, /\.put\("sectionId", action\.patch\["sectionId"\] \?: JSONObject\.NULL\)\.put\("taskRevisions", JSONObject\(action\.patch\["taskRevisions"\] \?: "\{\}"\)\)/);
 assert.match(menuModel, /"somedaySection" -> JSONObject\(\)\.put\("title", action\.title\)\.put\("requestId", action\.id\)/);
@@ -2663,7 +2605,7 @@ assert.match(bulkUi, /openMove\(it\.getJSONArray\("taskIds"\)\.ids\(\), it\.getJ
 assert.match(rowUi, /setTaskFocus\(task\.id, target, task\.taskRevision\)/);
 assert.match(searchUi, /complete\(task\.id, task\.taskRevision\)/);
 assert.equal(code(weeklyUi).match(/saveCreate\(\)/g).length, 3, 'Return, Save & edit and Add all send the one persisted request');
-// A review's place is core's checkpoint, stored under core's key (RN's session keys) and sent back; Finish deletes it.
+
 {
     const reviewModelSource = readFileSync(resolve(app, '../../packages/core/src/review-views-model.ts'), 'utf8');
     for (const [kotlin, core] of [['WEEKLY_REVIEW_KEY', 'WEEKLY_REVIEW_SESSION_STORAGE_KEY'], ['DAILY_REVIEW_KEY', 'DAILY_REVIEW_SESSION_STORAGE_KEY']]) {
@@ -2673,22 +2615,22 @@ assert.equal(code(weeklyUi).match(/saveCreate\(\)/g).length, 3, 'Return, Save & 
 }
 assert.match(menuModel, /if \(list == "weekly" \|\| list == "daily"\) prefs\.edit\(\)\.putString\(next\.view\.getString\("storageKey"\), next\.view\.getString\("checkpoint"\)\)\.apply\(\)/);
 assert.match(weeklyUi, /prefs\.edit\(\)\.remove\(view\.getString\("storageKey"\)\)\.apply\(\)/);
-// Paging stays under the view's revision: the Weekly Review's nested lists page through getWeeklyReviewList with the view's own inputs.
+
 assert.match(menuModel, /runtime\.menuRead\("weeklyList", JSONObject\(page\.params\.toString\(\)\)\.put\("list", name\.substringBefore\(':'\)\)[\s\S]{0,160}?\.put\("revision", page\.revision\)/);
-// RN's quick-access tab: core's quickAccessView; Review, Contexts and the Calendar (pass 8) are built, anything else shows Projects.
+
 assert.match(menuModel, /val quickView: String get\(\) = quickAccess\?\.takeIf \{ it == "review" \|\| it == "contexts" \|\| it == "calendar" \} \?: "projects"/);
 assert.match(activity, /TabItem\(model, Screen\.Projects, when \(quick\) \{ "review" -> Lucide\.ClipboardCheck; "contexts" -> Lucide\.Circle; "calendar" -> Lucide\.Calendar; else -> Lucide\.Folder \}, model\.menu\.quickLabel\)/);
 assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.getOrNull\(\)/, 'the quick-access view is read on the boot thread, before the first frame');
 
-// Pass 8: the Calendar and the Board, on core's calendar and Board contracts.
+
 {
     const calendarModel = source('CalendarModel.kt');
     const calendarUi = source('CalendarScreen.kt');
     const boardModel = source('BoardModel.kt');
     const boardUi = source('BoardScreen.kt');
     const pass8 = { calendarModel, calendarUi, boardModel, boardUi };
-    // Reads pass Kotlin's input to core unchanged (the composer's open and edit write nothing); writes are core's actions.
-    // C3: the Calendar's reads and actions carry the feed the Calendar shows (host-calendar.ts); Kotlin sends none of its own.
+
+
     for (const [name, method] of [['calendarSheet', 'getCalendarItemSheet'], ['calendarComposer', 'openCalendarComposer'], ['calendarEdit', 'editCalendarComposer']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(withCalendar\\(input\\)\\),$`, 'm'), `menuRead ${name} is core's ${method}`);
     }
@@ -2702,8 +2644,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     for (const [name, method] of [['boardAction', 'runBoardAction'], ['boardCreate', 'runBoardAction']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuCommand ${name} is core's ${method}`);
     }
-    // Every write is MenuModel's send -> perform(action) with its exact FailedAction: an action through command (a new request UUID,
-    // core's whole input its exact retry), a create (the composer's Save, Duplicate) through create, on disk (synced) before the call.
+
+
     assert.match(menuModel, /internal fun command\(kind: String, input: JSONObject\) = send\(FailedAction\(kind, UUID\.randomUUID\(\)\.toString\(\), input\.toString\(\)\)\)/);
     assert.match(menuModel, /internal fun create\(action: FailedAction\) \{\s+if \(shell\.busy \|\| \(shell\.failedAction != null && shell\.failedAction != action\)\) return\s+store\.write\(action\)\s+send\(action\)/);
     assert.match(menuModel, /"calendarAction", "calendarCreate", "boardAction", "boardCreate" -> JSONObject\(action\.title\)\.put\("requestId", action\.id\)/);
@@ -2720,7 +2662,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     for (const [name, text] of Object.entries({ calendarModel, boardModel })) {
         assert.doesNotMatch(code(text), /menuCommand\(|\bsend\(|shell\.perform\(action|\.perform\([A-Za-z]/, `${name}: writes only through MenuModel.command or create`);
     }
-    // Kotlin names only core's actions and edits: NativeCalendarAction, NativeCalendarComposerEdit, NativeBoardAction and BoardFilterEdit.
+
     const calendarSource = readFileSync(resolve(app, '../../packages/core/src/native-host-contract-calendar.ts'), 'utf8');
     const boardSource = readFileSync(resolve(app, '../../packages/core/src/native-host-contract-board.ts'), 'utf8');
     const boardViewSource = readFileSync(resolve(app, '../../packages/core/src/board-view-model.ts'), 'utf8');
@@ -2732,23 +2674,21 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert(typed.length > 10);
     for (const type of typed) assert(allowed.has(type), `${type} is one of core's calendar or Board actions or edits`);
     assert.doesNotMatch(code(Object.values(pass8).join('\n')), /put\("type", (?!if \()[^"]/, 'no action or edit type is built from a variable');
-    // Paging under one revision; STALE_REVISION reads again from the first window (once), never an error.
+
     assert.match(calendarModel, /\.put\("offset", items\.length\(\)\)\.put\("limit", WINDOW\)\s*\.put\("revision", first\.getString\("revision"\)\)/);
     assert.match(calendarModel, /if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+if \(again\) return read\(runtime, sent, sentQuery, again = false\)/);
     assert.match(boardModel, /\.put\("revision", shown\.revision\)/);
     assert.match(boardModel, /if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+if \(again\) return read\(runtime, view\.getJSONObject\("filters"\), null, depth, again = false\)/);
-    // A calendar changes with the clock: read again each minute while it shows, and on resume (the screen hosts' refresh).
+
     assert.match(calendarUi, /owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{ while \(true\) \{ delay\(60_000\); refresh\(\) \} \}/);
     assert.match(menuModel, /if \(list == "calendar"\) return calendar\.refresh\(\)\.also \{ done\(\) \}\s+if \(list == "board"\) return board\.refresh\(\)\.also \{ done\(\) \}/);
-    // Navigation state rides the Bundle: the Calendar's place, search, sheet and composer draft; the Board's filters, search and sheet.
+
     for (const key of ['calendarState', 'calendarQuery', 'calendarSheet', 'calendarComposer']) assert.match(calendarModel, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
     for (const key of ['boardFilters', 'boardSearch', 'boardSheet']) assert.match(boardModel, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
-    // No Kotlin task policy, sorting, filtering, date math or date formatting in the new files.
+
     for (const [name, text] of Object.entries(pass8)) {
-        // Deadline labels consume core's precomputed group identity and first-row
-        // index. These two exact rendering partitions do not decide which tasks
-        // are visible, their order, dates, or grouping policy. Every other filter
-        // call remains forbidden, including any changed predicate here.
+
+
         let policyCode = code(text);
         if (name === 'calendarUi') {
             for (const renderingPartition of [
@@ -2759,25 +2699,25 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
                 policyCode = policyCode.replace(renderingPartition, 'coreProvidedDeadlineRows');
             }
         }
-        // `.filters` is core's filter state (the Board view's), not a filtering call.
+
         assert.doesNotMatch(policyCode, /\.(sort\w*|sorted\w*|filter(?!Bg\b|Edit\b|s\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/, `${name}: no Kotlin sorting, filtering, or grouping`);
         assert.doesNotMatch(code(text), /SimpleDateFormat|DateTimeFormatter|LocalDate|LocalTime|java\.time|java\.util\.Calendar|Calendar\.getInstance|GregorianCalendar|Instant\b|\.format\(|toLocal|currentTimeMillis|\bDate\(|TimeZone/, `${name}: no Kotlin date math, formatting or parsing`);
         assert.doesNotMatch(code(text), new RegExp(`${STATUS}(?:\\s*,\\s*${STATUS})*\\s*->\\s*${STATUS}`), `${name}: no status-to-status map`);
     }
-    // Kotlin turns a finger's place into core's grid cell only: core's minutes (snapped to core's step), core's day keys, core's extent.
+
     const calendarModelSource = readFileSync(resolve(app, '../../packages/core/src/calendar-view-model.ts'), 'utf8');
     for (const [kotlin, core] of [['SNAP_MINUTES', 'CALENDAR_SNAP_MINUTES'], ['TAP_MINUTES', 'CALENDAR_TAP_DURATION_MINUTES']]) {
         const value = new RegExp(`export const ${core} = (\\d+);`).exec(calendarModelSource)[1];
         assert.match(calendarUi, new RegExp(`internal const val ${kotlin} = ${value}\\n`), `${kotlin} is core's ${core}`);
     }
     assert.match(calendarUi, /private fun JSONObject\.extentMinutes\(\): Int = \(getJSONArray\("hourLabels"\)\.length\(\) - 1\) \* 60/, 'the grid\'s extent is core\'s hour labels');
-    // A drop sends exactly one core action: a Calendar block's moveTask; a Board card's moveCard with the moved card's id (a position only inside its column).
+
     assert.equal(code(calendarUi).match(/calendar\.move\(/g).length, 1);
     assert.match(calendarModel, /if \(startMinutes == timed\.getInt\("startMinutes"\)\) return/, 'a block let go where it was sends nothing');
     assert.equal(code(boardUi).match(/board\.move\(/g).length, 3, 'a drop into another column, a drop inside its own, and TalkBack\'s Move to');
     assert.match(boardUi, /if \(after != before\) board\.move\(id, revision, status, after, sameColumn = true\)/, 'a drop that changes nothing sends nothing');
-    // A card's move and Delete, and the Calendar's move, Done, Remove from calendar and Delete, carry the task's revision as core's
-    // view showed it (the card's and the item's row.taskRevision, the sheet's taskRevision); the composer is echoed as core built it.
+
+
     assert.match(boardUi, /val revision = row\.optString\("taskRevision"\)/);
     assert.match(boardModel, /\.put\("type", "moveCard"\)[^\n]*\.put\("taskRevision", taskRevision\)/);
     assert.match(boardModel, /\.put\("type", "trashTask"\)\.put\("taskId", taskId\)\.put\("taskRevision", taskRevision\)/);
@@ -2788,25 +2728,24 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(calendarModel, /val revision = sheet\?\.optString\("taskRevision"\)\.orEmpty\(\)/);
     assert.match(calendarModel, /internal fun JSONObject\.rowRevision\(\): String = optJSONObject\("row"\)\?\.optString\("taskRevision"\)\.orEmpty\(\)/);
     assert.match(boardModel, /if \(sameColumn\) action\.put\("afterId", afterId \?: JSONObject\.NULL\)/);
-    // TalkBack reaches every card action (RN's swipes and a Move to per other column), with core's words, and hears the card
-    // disabled with no actions while a command runs or a retry is owed (one semantics block: label, role and state).
+
+
     assert.match(boardUi, /if \(canEdit\) \{\s+onClick\(t\("common\.edit"\)\) \{ model\.openEditor\(id\); true \}\s+customActions = swipeActions\.map \{ \(side, label\) -> CustomAccessibilityAction\(label\)[^\n]*\+ moveActions\s+\} else disabled\(\)/);
-    // Lines lie exactly at their minute (RN's offsets are RN bugs, fixed there separately): the day's 18-high hour rows and the
-    // 10-high now line are centered on their minute, and the first hour label shows whole in the day and week timelines.
+
+
     assert.match(calendarUi, /Row\(Modifier\.offset\(y = \(index \* 60 \* PPM\)\.dp - 9\.dp\)\.fillMaxWidth\(\)\.height\(18\.dp\)/);
     assert.match(calendarUi, /Box\(Modifier\.fillMaxWidth\(\)\.padding\(vertical = 9\.dp\)\.height\(\(extent \* PPM\)\.dp\)/);
     assert.match(calendarUi, /Row\(Modifier\.offset\(y = \(minutes \* PPM\)\.dp - 5\.dp\)\.then\(modifier\)\.height\(10\.dp\)/);
     assert.match(calendarUi, /Box\(Modifier\.offset\(y = \(index \* 60 \* PPM\)\.dp\)\.fillMaxWidth\(\)\.height\(1\.dp\)/, 'a week hour rule lies at its minute');
     assert.match(calendarUi, /\.verticalScroll\(down\)\.padding\(top = 7\.dp, bottom = 24\.dp\)/, 'the week\'s first hour label shows whole');
-    // The screens open from the More sheet, the Calendar also from the quick-access tab, each read on resume.
+
     assert.match(menuUi, /"calendar" -> CalendarList\(model\)\s+"board" -> BoardList\(model\)/);
     assert.match(menuUi, /"review" -> ReviewList\(model\)\s+"calendar" -> CalendarList\(model\)\s+\}/);
 }
 
-// Pass 9: the Inbox tab on core's Inbox view, selection mode on the Inbox, Waiting, Someday, Reference and Done on core's bulk
-// contract, Archived's filter sheet, stateless Select all and completion time, and Focus's controls.
+
 {
-    // Reads pass Kotlin's input to core unchanged; writes are core's commands, logged as their operation.
+
     for (const [name, method] of [['inbox', 'getInboxView'], ['inboxTokens', 'getInboxFilterTokens'], ['archiveTokens', 'getArchiveFilterTokens'],
         ['bulk', 'getBulkActions'], ['focusList', 'getFocusControlsList']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuRead ${name} is core's ${method}`);
@@ -2815,7 +2754,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         ['focusCriterion', 'removeFocusFilterCriterion'], ['focusDelete', 'deleteFocusFilter'], ['focusReorder', 'reorderFocus']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuCommand ${name} is core's ${method}`);
     }
-    // Every write is MenuModel's send -> perform(action) with its exact FailedAction: core's whole input (with the request UUID).
+
     assert.match(menuModel, /"bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder" -> JSONObject\(action\.title\)\.put\("requestId", action\.id\)/);
     assert.match(menuModel, /"bulkAction" -> bulkDone\(action, reply\)\s+"focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder" -> \{\s+if \(action\.kind == "focusSave" && JSONObject\(action\.title\)\.optString\("view"\) == "contexts"\) \{[\s\S]{0,600}else focusControls\.done\(action, reply\)/);
     assert.match(menuModel, /fun bulkAction\(action: JSONObject, busy: String\) \{\s+bulkBusy = busy\s+act\("bulkAction", bulkPayload\(action\) \?: return\)/);
@@ -2829,10 +2768,10 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     for (const [name, text] of Object.entries({ inboxUi, bulkUi, focusControlsUi })) {
         assert.doesNotMatch(code(text).replace(/^import .*$/gm, ''), /runtime\.|menuCommand\(|menuRead\(|\bsend\(|shell\.perform|FailedAction\(|menu\.command|menu\.create/, `${name}: the screen reaches core only through its model`);
     }
-    // The Inbox is RN's TaskList on core's getInboxView through the menu list machinery (paging, filters, folds); its sort is the
-    // stored task-list sort (setTaskListSort); a heading's fold keeps core's collapseEdit whole under RN's key, for its grouping.
+
+
     assert.match(menuModel, /shell\.screen == Screen\.Inbox -> "inbox"/);
-    // The Inbox reads only core's getInboxView: Kotlin has no getInboxWindow call left, and a full read carries no Inbox part.
+
     assert.doesNotMatch(code(kotlinFiles.join('\n') + inboxUi + bulkUi + focusControlsUi + focusModelKt), /inboxWindow|callAsync\("window"|InboxPage|Part\.Inbox/, 'no getInboxWindow read is left in Kotlin');
     assert.match(model, /private class Lists\(val focus: FocusView\?, val projects: ProjectsView\?, val projectId: String\?, val project: ProjectDetail\?, val areas: AreaFilter\)/);
     assert.match(menuModel, /if \(list != this\.list\) return\s+shell\.readSucceeded\(\)/, 'the Inbox view\'s (or a Menu list\'s) success clears a read\'s failure');
@@ -2842,10 +2781,10 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuUi, /Choice\(option\.getString\("label"\), option\.getBoolean\("selected"\)\) \{ sort\(option\.optJSONObject\("edit"\)\?\.getString\("sortBy"\) \?: option\.getString\("value"\)\) \}/);
     assert.match(activity, /if \(quick \|\| screen == Screen\.Inbox\) MenuDialogs\(model\)\s+if \(screen == Screen\.Focus\) FocusDialogs\(model\)/);
     assert.match(inboxUi, /action\.optJSONObject\("filterEdit"\)\?\.let\(::filterEdit\)\s*\?: model\.openCapture\(if \(action\.optJSONObject\("capture"\)\?\.optBoolean\("autoRecord"\) == true\) AutoRecord\.ON else AutoRecord\.OFF\)/, 'the empty state runs core\'s action');
-    // A page belongs to the list it was read for, so a tab change never draws another list's reply.
+
     assert.match(menuModel, /val page: MenuPage\? get\(\) = loaded\?\.takeIf \{ it\.list == list \}/);
-    // Selection mode: RN's session state (the Bundle), core's bar read with the list's accepted params, a row tap as core's
-    // selectionEdit, Select all as core's stateless one; read-only rows never select.
+
+
     assert.match(menuModel, /bulk\?\.let \{ input -> page = page\.withBulk\(runtime\.menuRead\("bulk", JSONObject\(input\.toString\(\)\)\.put\("params", sent\)\.toString\(\)\)\) \}/);
     assert.match(menuModel, /bulk\.optJSONArray\("except"\)\?\.let \{ put\("selectAll", JSONObject\(\)\.put\("except", it\)\) \} \?: put\("taskIds", bulk\.optJSONArray\("selected"\) \?: JSONArray\(\)\)/);
     assert.match(menuModel, /bulk\.optJSONObject\("selectAll"\)\?\.let \{ put\("selectAll", it\) \}\s+\?: put\("taskIds", bulk\.getJSONArray\("selectedIds"\)\)\.put\("taskRevisions", bulk\.getJSONObject\("taskRevisions"\)\)/,
@@ -2854,69 +2793,68 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuModel, /if \(list !in BULK_LISTS \|\| readOnly\) return null/);
     for (const [name, text] of Object.entries({ inboxUi, statusListUi, waitingUi, somedayUi })) assert.match(text, /actions = bulkRow\(/, `${name}: rows start and show selection mode`);
     assert.match(menuModel, /val BULK_LISTS = setOf\("inbox", "waiting", "someday", "reference", "done"\)/);
-    // Archived: core's filter edits and chips (the deprecated fields are never read), its tokens paged by getArchiveFilterTokens with
-    // the open sheet's filterSheetOpen, stateless Select all, and the completion time from a local day and time with core's start.
+
+
     assert.doesNotMatch(code(kotlinFiles.join('\n') + inboxUi + bulkUi + focusControlsUi + focusModelKt), /"tokenOptions"|"timeEstimateOptions"/, 'Kotlin never reads the deprecated Archive fields');
     assert.doesNotMatch(code(archiveUi + menuUi), /getJSONObject\("filters"\)\.menuObjects\("chips"\)/, 'chips come from the view\'s own `chips`, not the deprecated filters.chips');
     assert.match(menuModel, /if \(dialog\?\.optString\("kind"\) == "filters"\) put\("filterSheetOpen", true\)/);
     assert.match(menuModel, /own\.optJSONArray\("except"\)\?\.let \{ put\("selectAll", JSONObject\(\)\.put\("except", it\)\) \} \?: put\("selectedIds", own\.optJSONArray\("selected"\) \?: JSONArray\(\)\)/);
     assert.match(menuModel, /view\?\.optJSONObject\("selectAll"\)\?\.let \{ put\("selectAll", it\) \}\s+\?: put\("taskIds", view\?\.optJSONArray\("selectedIds"\) \?: JSONArray\(\)\)\.put\("taskRevisions", view\?\.optJSONObject\("taskRevisions"\) \?: JSONObject\(\)\)/);
     assert.match(menuModel, /archive\(JSONObject\(\)\.put\("type", "setCompletedAt"\)\.put\("taskId", open\.getString\("taskId"\)\)\.put\("day", open\.getString\("day"\)\)\.put\("time", time\)\s+\.put\("taskRevision", open\.optString\("taskRevision"\)\)\)/);
-    // Archive's row and project actions carry the revision core's view showed (the row's taskRevision, the item's projectRevision).
+
     for (const type of ['moveToInbox', 'trashTask']) assert.match(archiveUi, new RegExp(`\\.put\\("type", "${type}"\\)\\.put\\("taskId", row\\.id\\)\\.put\\("taskRevision", row\\.taskRevision\\)`));
     for (const type of ['reactivateProject', 'trashProject']) assert.match(archiveUi, new RegExp(`\\.put\\("type", "${type}"\\)\\.put\\("projectId", id\\)\\.put\\("projectRevision", revision\\)`));
     assert.match(menuModel, /\.put\("taskRevision", row\.taskRevision\)\.put\("day", start\.getString\("day"\)\)/, 'the completion time picker keeps the row\'s revision');
     assert.match(archiveUi, /DayPickerDialog\(open\.getString\("day"\), [^\n]*\) \{ pickCompletedDay\(it\) \}/, 'the date dialog starts on core\'s day');
     assert.match(archiveUi, /val \(hour, minute\) = pickerClock\(open\.getString\("time"\)\)/, 'the time dialog starts on core\'s time');
-    // Picker search (menu lists, the Inbox, Archive): core's matches for the typed query, read again when the list changes.
-    // The sheet reads its host's revision (FilterSheetHost: the Menu list's page, or an open project's view, O2f-parity b4b).
+
+
     assert.match(menuUi, /LaunchedEffect\(revision, name\) \{ if \(query\.isNotBlank\(\)\) searchPicker\(name, query,/);
     assert.match(menuUi, /for \(mode in filters\.menuObjects\("matchModes"\)\) MatchModeRow\(mode\.getString\("label"\), mode\.menuObjects\("options"\), idle\) \{ filterEdit\(it\) \}/);
-    // Focus: every read sends the control state (asserted with the Focus bridge above); core's answer becomes the state; the state,
-    // the open sheet and reorder mode ride the Bundle; reorder mode ends once core no longer offers it.
+
+
     for (const key of ['focusControls', 'focusDialog', 'focusReorder']) assert.match(focusModelKt, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
     assert.match(focusModelKt, /keepState\(controls\.getJSONObject\("state"\)\)\s+if \(reordering && controls\.isNull\("reorder"\)\) keepReordering\(false\)/);
     assert.match(model, /private fun showFocus\(view: FocusView\?\) \{[\s\S]{0,400}?\n\s+focus = view\s+view\?\.let\(menu\.focusControls::adopt\)/);
     assert.match(focusControlsUi, /if \(to != index\) reorderTo\(ids\.toMutableList\(\)\.apply \{ add\(to, removeAt\(index\)\) \}, revisions\)/, 'a drop that moves nothing sends nothing; a move sends one reorderFocus');
-    // reorderFocus sends each reorder row's taskRevision as core showed it.
+
     assert.match(focusControlsUi, /val revisions = JSONObject\(\)\.apply \{ rows\.forEach \{ put\(it\.getString\("id"\), it\.optString\("taskRevision"\)\) \} \}/);
     assert.match(focusModelKt, /command\("focusReorder", JSONObject\(\)\.put\("ids", JSONArray\(ids\)\)\.put\("taskRevisions", taskRevisions\)\)/);
     assert.match(focusControlsUi, /row\.optJSONArray\("moveUp"\)\?\.let \{ order -> CustomAccessibilityAction/, 'TalkBack moves a row by core\'s own order');
-    // One node per new control: its label, role and state together (the device checks and TalkBack read it there). A backdrop
-    // keeps a plain label: clearing its semantics would hide the sheet inside it.
+
+
     for (const [name, text] of Object.entries({ inboxUi, bulkUi, focusControlsUi })) {
         assert.doesNotMatch(code(text), /\.clickable\(enabled = [^\n]*\.semantics \{ contentDescription|\.semantics \{ contentDescription[^\n]*\}\s*\.clickable\(enabled/,
             `${name}: no control with a clickable and a separate semantics block`);
         assert(code(text).match(/clearAndSetSemantics \{/g).length >= 3, `${name}: its controls set label, role and state in one block`);
     }
-    // No Kotlin policy in the new models and screens (the gates above also hold them to core's text and edits).
+
     for (const [name, text] of Object.entries({ focusModelKt, focusControlsUi, inboxUi, bulkUi })) {
         assert.doesNotMatch(code(text), /\.(sort\w*|sorted\w*|filter(?!Bg\b|Edit\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/, `${name}: no Kotlin sorting, filtering, or grouping`);
         assert.doesNotMatch(code(text), /SimpleDateFormat|DateTimeFormatter|LocalDate|java\.time|java\.util\.Calendar|Calendar\.getInstance|GregorianCalendar|Instant\b|\.format\(|toLocal/, `${name}: no Kotlin date formatting or parsing`);
     }
 }
 
-// Pass 12: Review's row Mark reviewed and Review in 1 week, its batch Mark reviewed and Organize sheet (compare-and-set on the task
-// revisions core shows), the token and Board pickers' search, and RN's highlight of a task opened from search.
+
 {
     const organizeKt = source('ReviewOrganize.kt');
     const boardModelKt = source('BoardModel.kt');
     const boardUiKt = source('BoardScreen.kt');
-    // A row's links send core's own action (its task revision inside) with a new request UUID; Kotlin builds no row action. Each
-    // link sets its label, role, state and test tag in its one semantics block.
+
+
     assert.match(reviewUi, /item\.json\.optJSONObject\("review"\)\?\.let \{ review ->[\s\S]{0,700}?act\("reviewAction", link\.getJSONObject\("action"\)\)/);
     assert.match(reviewUi, /\.clearAndSetSemantics \{ contentDescription = description; role = Role\.Button; testTag = tag; if \(enabled\) onClick \{ action\(\); true \} else disabled\(\) \}/);
     assert.doesNotMatch(code(reviewUi), /\.testTag\(tag\)/, 'the link\'s tag sits inside its semantics block');
     assert.doesNotMatch(code(Object.values(reviewScreens).join('\n') + organizeKt + menuModel), /put\("type", "markTaskReviewed"\)/, 'Kotlin never builds a row\'s Mark reviewed');
-    // The batch Mark reviewed and Organize's Apply carry the revisions core's bar showed; neither is built without them.
+
     assert.match(listActionsKt, /internal fun markReviewedTasks\(taskIds: List<String>, taskRevisions: JSONObject\): JSONObject =\s+JSONObject\(\)\.put\("type", "markReviewedTasks"\)\.put\("taskIds", JSONArray\(taskIds\)\)\.put\("taskRevisions", taskRevisions\)/);
     assert.match(listActionsKt, /internal fun organizeTasks\(taskIds: List<String>, draft: JSONObject, taskRevisions: JSONObject\): JSONObject =\s+JSONObject\(\)\.put\("type", "organizeTasks"\)\.put\("taskIds", JSONArray\(taskIds\)\)\.put\("draft", draft\)\.put\("taskRevisions", taskRevisions\)/);
     assert.match(reviewUi, /"markReviewed" -> act\("reviewAction", markReviewedTasks\(selected, bulk\.getJSONObject\("taskRevisions"\)\)\)/);
     assert.match(menuModel, /else if \(review != null\) \{ bulkBusy = "organize"; act\("reviewAction", organizeTasks\(review\.getJSONArray\("selectedIds"\)\.ids\(\), organize\.getJSONObject\("draft"\), review\.getJSONObject\("taskRevisions"\)\)\) \}/);
-    // A stale refusal wrote nothing and is never resent: core's view is read again, with its new revisions.
+
     assert.match(menuModel, /if \(refused && action\.kind == "reviewAction" && failure\.message\?\.startsWith\("STALE_REVISION"\) == true\) shell\.ui \{ bulkBusy = null; whenIdle \{ reload\(\) \} \}/);
-    // Review's Organize is the lists' dialog on Review's own bar: the read carries the dialog (its draft, one control's edit, the
-    // picker and its search), later windows go without it, and the page's bar is the view's.
+
+
     assert.match(menuModel, /first\.optJSONObject\("bulk"\)\?\.takeIf \{ list == "review" \}/);
     assert.match(menuModel, /JSONObject\(params\.toString\(\)\)\.apply \{\s+remove\("organize"\); remove\("picker"\)/, 'later windows go without the dialog\'s inputs');
     for (const list of ['review']) assert.match(menuModel, new RegExp(`"${list}" -> kept\\([\\s\\S]{0,240}?\\.also \\{ dialogInputs\\(list, it\\) \\}`), `${list}'s read carries its open dialog`);
@@ -2925,29 +2863,29 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(organizeKt, /into\.put\("organize", JSONObject\(\)\.put\("draft", open\.optJSONObject\("draft"\) \?: JSONObject\(\)\)\)/);
     assert.match(bulkUi, /val bulk = page\?\.bulk\?\.takeIf \{ list in BULK_LISTS \} \?: return/, 'the lists\' bar never draws Review\'s');
     assert.match(menuModel, /if \(type == "organizeTasks"\) \{ bulkBusy = null; closeDialog\("organize"\) \}/);
-    // Core ends Review's selection when a selected row is no longer drawn (RN's review.tsx); the dialogs on it close with it.
+
     assert.match(menuModel, /if \(list == "review" && next\.bulk == null\) closeSelectionDialogs\(list\)/);
-    // The token pickers' search: core's matching tokens (Contexts' picker, Review's and the lists' Remove tag query), the typed text
-    // kept with the dialog and read once typing pauses; a blank search shows core's whole list.
+
+
     assert.match(organizeKt, /into\.put\("picker", \(if \(list == "review"\) JSONObject\(\)\.put\("kind", "removeTag"\) else JSONObject\(\)\.put\("field", open\.getString\("field"\)\)\.put\("mode", open\.getString\("mode"\)\)\)\s+\.put\("query", query\)\)/);
     assert.match(menuModel, /put\("picker", JSONObject\(\)\.put\("kind", "removeTag"\)\.apply \{ tokenQuery\(open\)\?\.let \{ put\("query", it\) \} \}\)/);
     assert.match(contextsUi, /BasicTextField\(text, \{ typed -> typeToken\(/);
-    // The Board's picker search: getBoardList's query at the shown revision, read again whenever the Board changes.
+
     assert.match(boardModelKt, /runtime\.menuRead\("boardList", JSONObject\(\)\.put\("filters", shown\.filters\)\.put\("list", name\)\.put\("query", query\)\s+\.put\("offset", items\.length\(\)\)\.put\("limit", WINDOW\)\.put\("revision", shown\.revision\)\.toString\(\)\)/);
     assert.match(boardUiKt, /LaunchedEffect\(shown\.revision, picker\) \{ if \(query\.isNotBlank\(\)\) board\.searchPicker\(picker, query,/);
-    // RN's highlight of a task opened from search, scoped to the list it opens on (the list under the search for the editor, the
-    // hit's list for a route, the project once it opens): outlined only there, cleared after RN's 3.5 s or on leaving that list.
+
+
     assert.match(searchUi, /task\.editor -> \{ highlight\(task\.id\); openEditor\(task\.id\) \}\s+route != null -> \{ openFromSearch\(route, task\.projectId\); highlight\(task\.id, task\.projectId\) \}\s+listed != null -> \{ closeSearch\(\); menu\.openRoute\(listed\); highlight\(task\.id\) \}/);
     assert.match(model, /private fun listKey\(project: String\? = openProjectId\) = listOf\(menu\.screen\?\.name, menu\.list, screen\.name, project\)\.joinToString\("\|"\)/);
     assert.match(model, /fun isHighlighted\(taskId: String\) = taskId == highlightTaskId && highlightList == listKey\(\)/);
     assert.match(model, /withTimeoutOrNull\(3_500\) \{ snapshotFlow \{ listKey\(\) \}\.dropWhile \{ it != where \}\.first \{ it != where \} \}\s+highlightTaskId = null\s+highlightList = null/);
     assert.match(rowUi, /listed == null && isHighlighted\(task\.id\)/);
     assert.doesNotMatch(code(rowUi), /== highlightTaskId/, 'a row asks the model, which knows the list the highlight belongs to');
-    // The new file holds dialog inputs only: no Kotlin policy, no UI text, no write around perform.
+
     assert.doesNotMatch(code(organizeKt), /\.(sort\w*|sorted\w*|filter\w*|groupBy|distinct\w*)\b|SimpleDateFormat|LocalDate|java\.time|\bText\(|contentDescription|\bsend\(|shell\.perform|FailedAction\(|runtime\./,
         'ReviewOrganize.kt: dialog inputs only');
-    // The device check: English for the run (the original language put back), an owed failure settled first, then this run's
-    // fixtures removed (never while a write is owed), and an Apply that assigns a project; --prune-old removes interrupted runs' data.
+
+
     const check12 = readFileSync(resolve(app, 'scripts/check-review-organize-device.mjs'), 'utf8');
     const restore12 = check12.slice(check12.indexOf('const restore = async () => {'));
     assert(restore12.indexOf('await settleOwed();') > 0 && restore12.indexOf('await settleOwed();') < restore12.indexOf('await removeFixtures();'), 'cleanup settles an owed failure before removing the fixtures');
@@ -2959,13 +2897,12 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(check12, /task\.projectId === injected\.project && task\.areaId === null && task\.dueDate === today\.value/);
     assert.match(readFileSync(resolve(app, 'scripts/check-projects-device.mjs'), 'utf8'), /\/\^76\[0-9\]\{12\}\[1-6\]\$\/[\s\S]{0,900}?\/\^76\[0-9\]\{12\}9\$\/[\s\S]{0,500}?\/\^76\[0-9\]\{12\}\[07\]\$\//,
         '--prune-old removes the Review organize check\'s tasks, project and areas');
-    // Core draws Review's bar in RN's order (Mark reviewed first on Due), so Kotlin keeps core's order.
+
     const reviewContract = readFileSync(resolve(app, '../../packages/core/src/native-host-contract-review-views.ts'), 'utf8');
     assert.match(reviewContract, /actions: \[\s+\.\.\.\(scope === 'due' \? \[\{ id: 'markReviewed' as const, label: text\.markReviewed, enabled: true \}\] : \[\]\),\s+\{ id: 'organize'/);
 }
 
-// Pass 10: Settings (the menu, General, Manage with its Someday sections, and GTD's seven screens) on core's settings contract,
-// and the editor's View tab and checklist editing on core's task view contract.
+
 {
     const settingsModel = source('SettingsModel.kt');
     const settingsUi = source('SettingsScreen.kt');
@@ -2973,20 +2910,19 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const settingsIcons = source('SettingsIcons.kt');
     const pass10 = { settingsModel, settingsUi, taskViewUi, settingsIcons };
     const coreFile = (name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8');
-    // Reads pass Kotlin's input to core unchanged; writes are core's commands, each logged as its operation.
+
     for (const [name, method] of [['settingsMenu', 'getSettingsMenu'], ['gtdSettings', 'getGtdSettings'],
         ['manageSettings', 'getManageSettings'], ['manageList', 'getManageSettingsList'], ['somedaySections', 'getSomedaySections']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuRead ${name} is core's ${method}`);
     }
-    // O2d: General adds only the device's system search state to Kotlin's input.
+
     assert.match(hostEntry, /^\s+generalSettings: \(input\) => contract\.getGeneralSettings\(nativeAppSearch\n\s+\? \{ \.\.\.\(input as Parameters<typeof contract\.getGeneralSettings>\[0\]\), appSearch: nativeAppSearch\.device\(\) \} : input\),$/m);
     for (const [name, method] of [['generalSetting', 'setGeneralSetting'], ['gtdSetting', 'setGtdSetting'], ['manageEditor', 'saveManageEditor'],
         ['manageDelete', 'deleteManageItem'], ['somedayRename', 'renameSomedaySection'], ['somedayReorder', 'reorderSomedaySections'], ['somedayDelete', 'deleteSomedaySection']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuCommand ${name} is core's ${method}`);
     }
-    // Every Settings write is MenuModel's send -> perform(action) with its exact FailedAction: a control's edit through command (a new
-    // request UUID; core's whole input its exact retry), Manage's editor Save through create (its request UUID kept with the dialog, on
-    // disk before the call), a delete through core's question (MenuDialogs' confirm -> act).
+
+
     assert.match(settingsModel, /fun general\(edit: JSONObject\) = menu\.command\("generalSetting", JSONObject\(\)\.put\("edit", edit\)\)/);
     assert.match(settingsModel, /fun gtd\(edit: JSONObject\) = menu\.command\("gtdSetting", JSONObject\(\)\.put\("edit", edit\)\)/);
     assert.match(settingsModel, /fun saveEditor\(action: FailedAction\) = menu\.create\(action\)/);
@@ -2999,15 +2935,14 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     }
     assert.doesNotMatch(code(settingsUi).replace(/^import .*$/gm, ''), /runtime\.|menuCommand\(|menuRead\(|\bsend\(|shell\.perform|FailedAction\(|menu\.command|menu\.create/, 'SettingsScreen reaches core only through SettingsModel');
     assert.doesNotMatch(code(settingsModel), /menuCommand\(|\bsend\(|shell\.perform\(action|\.perform\([A-Za-z]/, 'SettingsModel writes only through MenuModel.command or create');
-    // Core's device writes are stored under RN's keys before the command counts as done; a new language reloads core's words, a theme its colors.
+
     assert.match(menuModel, /if \(action\.kind in SETTINGS_KINDS\) settings\.applied\(runtime, reply\)\s+shell\.acknowledged\(action\)/);
     assert.match(settingsModel, /internal fun applied\(runtime: CoreHost, reply: JSONObject\) \{\s+(?:\/\/[^\n]*\s+)*reply\.optJSONObject\("persistentCapture"\)\?\.let \{ PersistentCapture\.switched\(shell\.getApplication<Application>\(\), it, runtime::logLine\) \}\s+val writes = reply\.optJSONArray\("deviceWrites"\) \?: return\s+val keys = /);
-    // A setting's deviceWrites are stored in CoreHost's one call path (the first send and the journal's replay), durably, before the
-    // write's journal entry settles; the Settings screen only reloads the language and theme after.
+
+
     assert.doesNotMatch(settingsModel.slice(settingsModel.indexOf('internal fun applied(')), /^\s+store\(writes\)/m);
-    // Each device key keeps the journal sequence of the write that set it (DeviceWrites, one commit with the value): a replay
-    // applies a key only when its entry is newer, so an old entry whose delete failed never undoes a newer setting; the journal
-    // numbers new entries above every recorded sequence, so the numbering never goes back after the journal empties.
+
+
     assert.match(settingsModel, /fun deviceStore\(prefs: SharedPreferences\) = DeviceWrites\(\{ prefs\.all \}, \{ changes ->\s+prefs\.edit\(\)\.apply \{[^\n]*\}\.commit\(\)\s+\}\)/);
     assert.match(settingsModel, /fun deviceStore\(app: Context, keyValue: RnKeyValue\): DeviceWrites \{\s+val prefs = app\.getSharedPreferences\(DEVICE_PREFS, Context\.MODE_PRIVATE\)/);
     assert.match(settingsModel, /private fun store\(writes: JSONArray\) = deviceStore\(prefs\)\.store\(writes, null, replay = false\)/);
@@ -3032,66 +2967,65 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         const value = new RegExp(`export const ${core} = '([^']+)'`).exec(coreFile(file))[1];
         assert.match(settingsModel, new RegExp(`const val ${kotlin} = "${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`), `${kotlin} is core's ${core}`);
     }
-    // Kotlin builds only the two text fields' edits (core's GtdSettingsEdit names), from the typed text; every choice sends core's own edit.
+
     const gtdEdits = [...coreFile('gtd-settings-model.ts').matchAll(/type: '(\w+)'/g)].map(([, name]) => name);
     const built = [...code(settingsModel + settingsUi).matchAll(/put\("type", "(\w+)"\)/g)].map(([, name]) => name);
     assert.deepEqual([...new Set(built)].sort(), ['defaultScheduleTime', 'pomodoroDurations'], 'only the typed text fields build an edit');
     for (const name of built) assert(gtdEdits.includes(name), `${name} is one of core's GTD edits`);
     assert(code(settingsUi).match(/getJSONObject\("edit"\)/g).length >= 10, 'the controls send core\'s edits');
-    // Settings' rows come from core as they are: a screen core says is not built here is drawn disabled; the Manage editor's taken-name
-    // line and Save state are core's checkManageEditor for the name as typed (read off the main thread); Kotlin holds no copy of the rule.
+
+
     assert.match(settingsUi, /val enabled = row\.getBoolean\("enabled"\) && idle/);
     assert.match(hostEntry, /^\s+manageCheck: \(input\) => contract\.checkManageEditor\(input\),$/m, 'menuRead manageCheck is core\'s checkManageEditor');
     assert.match(settingsModel, /shell\.background\(listOf\(Part\.MenuDialog\), \{ runtime ->\s+runtime\.menuRead\("manageCheck", JSONObject\(\)\.put\("target", target\)\.put\("name", name\)\.toString\(\)\)/);
     assert.match(settingsUi, /val canSave = owed \|\| \(idle && checked != null && !checked\.getBoolean\("saveDisabled"\)\)/);
     assert.match(settingsUi, /checked\?\.menuText\("message"\)\?\.let \{ Text\(it,/);
     assert.doesNotMatch(code(settingsUi + settingsModel), /lowercase\(\)|nameTaken"\)|isManageAreaNameTaken/, 'no Kotlin copy of core\'s taken-name rule');
-    // Manage's icon buttons name their item as RN's (a6e345eab): "<common.edit>: <name>" and "<common.delete>: <name>"; sections report expanded.
+
     assert.match(settingsUi, /RowButton\(SettingsIonicons\.PencilOutline, "\$\{t\("common\.edit"\)\}: \$\{unassigned\.getString\("label"\)\}"/);
     assert.equal(code(settingsUi).match(/"\$\{t\("common\.(edit|delete)"\)\}: \$(name|value)"/g).length, 4, 'area and value rows name their item');
     assert.match(settingsUi, /if \(open\) collapse \{ settings\.toggleSection\(section\.getJSONObject\("toggle"\)\); true \} else expand \{/);
-    // Navigation: the Settings tile opens, RN's settings stack pops on Back, and the stack, search and screen state ride the Bundle.
+
     assert.match(menuModel, /"settings" -> open\(MenuScreen\.Settings\)/);
     assert.match(menuModel, /if \(screen == MenuScreen\.Settings && settings\.back\(\)\) return/);
     assert.match(menuModel, /if \(list == "settings"\) return settings\.refresh\(\)\.also \{ done\(\) \}/);
     for (const key of ['settingsStack', 'settingsQuery', 'settingsLocal']) assert.match(settingsModel, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
     assert.match(menuUi, /"settings" -> SettingsList\(model\)/);
-    // Manage's lists page under Manage's revision; a list that changed between windows keeps what it read (the next read starts over).
+
     assert.match(settingsModel, /runtime\.menuRead\("manageList", JSONObject\(\)\.put\("list", list\)\.put\("offset", loaded\.size\)\.put\("limit", WINDOW\)\s*\.put\("revision", view\.getString\("revision"\)\)/);
     assert.match(settingsModel, /\.put\("revision", first\.getString\("revision"\)\)/);
     assert.match(settingsModel, /if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure/);
 
-    // The editor's View tab: core's getTaskView for the draft and checklist the editor holds, read in the background with its own
-    // freshness, its checklist paged under the first window's revision; a read-only task shows the saved task.
+
     assert.match(model, /if \(!current\.readOnly\) input\.put\("draft", JSONObject\(draftJson\(current\.fullDraft\(\)\)\)\)\.put\("checklist", JSONArray\(current\.checklistNow\)\)/);
     assert.match(model, /background\(listOf\(Part\.TaskView\), \{ runtime -> readView\(runtime, input, depth\) \}\) \{ view, mine ->\s+if \(fresh\(mine, Part\.TaskView\) && editor\?\.id == current\.id\) taskView = view/);
     assert.match(model, /\.put\("offset", items\.length\(\)\)\.put\("limit", VIEW_WINDOW\)\s*\.put\("revision", first\.getString\("revision"\)\)/);
-    // RN's resolveTaskOpenTab: read-only shows only the View tab; an explicit edit the Form tab; then the device's "Open tasks in";
-    // then the list's own tab: the Inbox list's is the Form tab (defaultEditTab="task"), every other screen's, a search's and a link's View.
+
+
     assert.match(model, /val automatic = routeTab \?: if \(menu\.screen == null && screen == Screen\.Inbox && search == null\) "task" else "view"/);
     assert.match(model, /val tab = if \(opened\.readOnly\) "view" else if \(routeTab == "task"\) "task" else if \(mode == "preview"\) "view" else if \(mode == "edit"\) "task" else automatic/);
-    // RN's explicit edits (openTaskScreen(…, 'task'), the review's Add task and edit): Save & edit, the Board's Duplicate, the Weekly Review's Add task.
+
     assert.match(model, /menu\.whenIdle \{ openEditor\(taskId, "task"\) \}/);
     assert.match(source('BoardModel.kt'), /shell\.openEditor\(open\.getString\("taskId"\), "task"\)/);
     assert.match(menuModel, /shell\.openEditor\(id, "task"\)/);
     assert.match(editorUi, /if \(editor\.readOnly \|\| editor\.tab == "view"\) TaskViewTab\(/);
     assert.match(editorUi, /\.put\("checklist", checklist \?: JSONObject\.NULL\)\.put\("tab", tab\)/, 'the open tab and the checklist ride the draft file');
-    // Every checklist change is one of core's TaskChecklistEdit kinds, queued with the draft's edits; Kotlin never edits an item itself.
+
     const checklistKinds = [...(/export type TaskChecklistEdit =([\s\S]*?);\n\n/.exec(coreFile('task-checklist-model.ts'))?.[1] ?? '').matchAll(/kind: '(\w+)'/g)].map(([, kind]) => kind);
     assert(checklistKinds.includes('toggle') && checklistKinds.includes('append'), 'core\'s checklist edit kinds were read');
     const kinds = [...code(taskViewUi + model).matchAll(/editChecklist\(JSONObject\(\)\.put\("kind", "(\w+)"\)/g)].map(([, kind]) => kind);
     assert(kinds.length >= 7);
     for (const kind of kinds) assert(checklistKinds.includes(kind), `${kind} is one of core's checklist edits`);
     assert.doesNotMatch(code(taskViewUi), /editChecklist\(JSONObject\(\)\.put\("kind", [^"]/, 'no checklist edit kind is built from a variable');
-    // Preview toggles retain ID resolution. Editor rows use session identity and positions so duplicate
-    // stored IDs remain distinct; a queued structural edit freezes stale positional callbacks.
+
+
     assert.equal(code(taskViewUi).match(/put\("itemId", /g).length, 2, 'preview ticks retain ID-based resolution');
     assert.match(editorUi, /if \(checklist != null && \(checklist\.has\("index"\) \|\| checklist\.has\("from"\)\) && checklistStructurePending\) return this/);
     assert.match(editorUi, /"move", "remove", "insertAfter", "add", "append" -> true/);
     assert.match(taskViewUi, /enabled = !locked && !editor\.checklistStructurePending/);
     assert.equal(code(taskViewUi).match(/if \(model\.editor\?\.checklistStructurePending != true\)/g).length, 2, 'typing and IME submit both reject stale positions');
-    // Audit 10-25 gap 4 (RN 9d3a7c87d): the View tab add box binds to the draft's checklistAdd, Save adds it before it saves, and a
-    // refused edit goes through TaskEditor.refused (a refused append puts its text back).
+
+
     assert.match(taskViewUi, /val text = model\.editor\?\.checklistAdd\.orEmpty\(\)\n[\s\S]*?BasicTextField\(text, model::typeChecklistAdd,/,
         'the View tab add box binds to the draft\'s checklistAdd');
     assert.match(model, /fun saveEditor\(\) \{\n(?:\s*\/\/.*\n)*\s+if \(editor\?\.checklistAdd\?\.isNotBlank\(\) == true\) submitChecklistAdd\(\)\n/,
@@ -3101,75 +3035,73 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(model, /val to = index \+ edit\.getInt\("step"\)\s+return if \(to in 0 until items\.length\(\)\) sent\.put\("from", index\)\.put\("to", to\) else null/);
     assert.match(model, /val listEdit = queued\?\.let \{ currentChecklistEdit\(it, current\.checklistNow\) \}/);
     assert.equal(code(model).match(/currentChecklistEdit\(/g).length, 2, 'resolved in one place, in stepEditor, right before the send');
-    // Reset checklist writes at once through perform with its exact retry (its request UUID and the View tab's taskRevision), then the
-    // reset task is the editor's base. A task changed since (STALE_REVISION) wrote nothing: the View tab is read again, with its new revision.
+
+
     assert.match(model, /val revision = taskView\?\.takeIf \{ it\.getString\("id"\) == current\.id \}\?\.optString\("taskRevision"\) \?: return\s+sendReset\(FailedAction\("resetChecklist", current\.id, UUID\.randomUUID\(\)\.toString\(\), patch = mapOf\("taskRevision" to revision\)\)\)/);
     assert.match(model, /private fun sendReset\(action: FailedAction\) = perform\(action\) \{ runtime ->\s+try \{\s+runtime\.resetTaskChecklist\(action\.id, action\.title, action\.patch\["taskRevision"\]\.orEmpty\(\)\)\s+\} catch \(failure: Exception\) \{\s+[^\n]*\n\s+if \(failure\.message\?\.startsWith\("STALE_REVISION"\) == true\) ui \{ menu\.whenIdle \{ readTaskView\(\) \} \}\s+throw failure\s+\}\s+acknowledged\(action\)/);
     assert.match(model, /"resetChecklist" -> sendReset\(action\)/);
-    // A link is core's target: a web, mail or phone link opens outside the app; a project, task, context or tag leaves the editor as
-    // Close does (asking first while edits are unsaved).
+
+
     const followLink = /val follow = \{ target: JSONObject ->([\s\S]*?)\n        Unit\n    \}/.exec(editorUi)?.[1];
     assert(followLink, 'the editor has an explicit link-follow handler');
     assert.match(followLink, /^\s*if \(target\.getString\("kind"\) == "external"\) \{\s+openExternalLink\(context, target\.getString\("href"\), ::t\) \{ outcome -> anyTime\(\{ it\.logLinkHandoff\(outcome, "markdown"\) \}, \{\}\) \}\s+\}\s+else if \(editor\.readOnly \|\| \(!editor\.dirty && !editsPending\)\) go\(target\)\s+else \{ linkAfterLeave = target\.toString\(\); confirmLeave = true \}\s*$/, 'every external link offers Copy link when nothing opens it (UpNote logged), and internal navigation retains the unsaved-edit guard');
     assert.match(taskViewUi, /withLink\(LinkAnnotation\.Clickable\(target\.toString\(\), TextLinkStyles\(SpanStyle\(color = tint, textDecoration = TextDecoration\.Underline\)\)\) \{ follow\(target\) \}\)/);
-    // No Kotlin policy in the new files: core's rows, options and words walked as sent; no dates.
+
     for (const [name, text] of Object.entries(pass10)) {
         assert.doesNotMatch(code(text), /\.(sort\w*|sorted\w*|filter(?!Bg\b|Edit\b|s\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/, `${name}: no Kotlin sorting, filtering, or grouping`);
         assert.doesNotMatch(code(text), /SimpleDateFormat|DateTimeFormatter|LocalDate|LocalTime|java\.time|java\.util\.Calendar|Calendar\.getInstance|GregorianCalendar|Instant\b|\.format\(|toLocal|currentTimeMillis|\bDate\(|TimeZone/, `${name}: no Kotlin date math, formatting or parsing`);
         assert.doesNotMatch(code(text), new RegExp(`${STATUS}(?:\\s*,\\s*${STATUS})*\\s*->\\s*${STATUS}`), `${name}: no status-to-status map`);
         assert.doesNotMatch(code(text), /\bColor\(|Color\.(Black|White|Red|Green|Blue|Gray|Yellow|Cyan|Magenta|DarkGray|LightGray|Transparent)\b|parseColor|"#[0-9A-Fa-f]{3,8}"|0x[0-9A-Fa-f]{8}/, `${name} writes a color; colors live only in Theme.kt`);
-        // No literal text reaches a Text, a content description, or a click label; key literals are label keys.
+
         for (const [, key] of code(text).matchAll(/"([a-z][A-Za-z]*(?:\.[A-Za-z]+)+)"/g)) assert(labelKeys.includes(key), `${name}: ${key} is not in LABEL_KEYS`);
         for (const [, rest] of code(text).matchAll(/(?:\bText\(|contentDescription = |onClickLabel = )([^\n]*)/g)) {
-            // Core's JSON is read by key (getString("label"), getJSONObject("edit")); a key names a field of core's text, it is not text.
+
             for (const [, literal] of rest.replace(/\b(t|testTag|getString|optString|text|getJSONObject|optJSONObject|getBoolean|optBoolean|getInt|menuText|menuObjects)\("[^"]*"\)/g, '').replace(/\btestTag = "[^"]*"/g, '').matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
                 if (labelKeys.includes(literal)) continue;
                 assert.doesNotMatch(literal.replace(/\$\{[^}]*\}|\$\w+/g, ''), /\p{L}/u, `${name}: hard-coded UI text "${literal}"`);
             }
         }
     }
-    // One semantics block per control (label, role and state), as passes 6-8 ruled.
+
     assert(code(settingsUi).match(/\.clearAndSetSemantics \{/g).length >= 15);
     assert(code(taskViewUi).match(/\.clearAndSetSemantics \{/g).length >= 6);
 }
 
-// App lock: RN's MobileAppLockGate and General's switch on core's General row for it (`settings.security.mobileAppLockEnabled`,
-// per device), with RN's device lock prompt and lock screen.
+
 {
     const lockKt = source('AppLock.kt');
-    // RN's 7268108c9: TalkBack hears the lock's title as a heading, and the unlock message (a failed unlock's reason included)
-    // as a polite live region, read out when it changes.
+
+
     assert.match(lockKt, /Text\(t\("appLock\.title"\), [^\n]*\n\s+modifier = Modifier\.padding\(bottom = 10\.dp\)\.semantics \{ heading\(\) \}\)/, 'the app lock title is a heading');
     assert.match(lockKt, /Text\(message, [^\n]*\n\s+modifier = [^\n]*\.testTag\("app-lock-message"\)\.semantics \{ liveRegion = LiveRegionMode\.Polite \}\)/, 'the unlock message is a polite live region');
     const settingsUi = source('SettingsScreen.kt');
     const settingsModel = source('SettingsModel.kt');
     const manifest = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
-    // The gate reads core's row through its own host call, which no failed save blocks: a lock turned on whose save is owed still locks.
-    // It also carries the stored relock delay (#1423), kept while the lock is off.
+
+
     assert.match(hostEntry, /appLock\(\): string \{\s*return submit\(async \(\) => \(\{ \.\.\.unwrap\(contract\.getGeneralSettings\(\{\}\)\)\.privacy\.appLock,\s*relockDelayMinutes: resolveMobileAppLockRelockDelayMinutes\(useTaskStore\.getState\(\)\.settings\?\.security\?\.mobileAppLockRelockDelayMinutes\) \}\)\);/);
     assert.doesNotMatch(hostEntry.slice(hostEntry.indexOf('appLock(): string {'), hostEntry.indexOf('    projects(): string {')), /requireSaved/);
     assert.match(coreHost, /fun appLock\(\): JSONObject = callAsync\("appLock"\)/);
-    // At boot, before any screen reads data (the owed-retry restore included), the app opens locked while core says on.
+
     assert.match(model, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)\s+\/\/[^\n]*\n\s+lock\.boot\(runtime\)\s+ProcessCoreHost\.failure\?\.let/);
     assert.match(lockKt, /val row = runtime\.appLock\(\)\s+val on = row\.getBoolean\("value"\)\s+shell\.ui \{ enabled = on; locked = on; relock\.delayMinutes = row\.optInt\("relockDelayMinutes"\) \}/);
-    // The gate wraps every screen inside the one theme; while locked the lock screen replaces them (RN's gate renders it instead of
-    // its children), and the screens' saved state waits for the unlock.
+
+
     assert.match(activity, /MindwtrTheme\(if \(model\.loading\) null else ThemeChoice\.current\) \{ AppLockGate\(model\) \{ CompositionLocalProvider\(LocalFailureBanners provides banners\) \{ with\(model\) \{/);
     assert.match(lockKt, /if \(model\.lock\.locked && !model\.loading\) AppLockScreen\(model\) else screens\.SaveableStateProvider\("app", content\)/);
-    // RN locks when AppState leaves active (Android's onPause), not for a rotation, not while its own prompt is up; each lock
-    // prompts by itself once, 250 ms after the app is active.
+
+
     assert.match(lockKt, /Lifecycle\.Event\.ON_PAUSE -> model\.lock\.paused\(activity\?\.isChangingConfigurations == true\)/);
     assert.match(lockKt, /if \(!enabled \|\| authenticating \|\| rotating\) return\s+relock\.left\(unlocked = !locked\)\s+locked = true\s+failure = null\s+locks \+= 1/);
-    // RN's relock delay (#1423): a return within it of leaving unlocked opens the app without asking; not while the prompt is up.
+
     assert.match(lockKt, /Lifecycle\.Event\.ON_RESUME -> model\.lock\.resumed\(\)/);
     assert.match(lockKt, /fun resumed\(\) \{\s+if \(!enabled\) return\s+if \(relock\.returned\(authenticating\)\) \{ locked = false; failure = null \}/);
-    // Review note 2: a resume while the prompt is up still uses the leave (AppLockRelockTest.aResumeWhileThePromptIsUpUsesTheLeave).
+
     assert.match(lockKt, /val left = leftUnlockedAt\s+leftUnlockedAt = null\s+return !authenticating && withinRelockDelay\(delayMinutes, left, clock\(\)\)/);
     assert.match(lockKt, /fun shouldPrompt\(resumed: Boolean\) = enabled && locked && !authenticating && resumed && prompted != locks/);
     assert.match(lockKt, /private const val PROMPT_DELAY_MS = 250L/);
-    // The device lock as expo-local-authentication asks it (correction pass, finding 4): AndroidX BiometricPrompt at Expo's version on
-    // a FragmentActivity, weak biometrics or the device credential, confirmation required, no cancel button (Android refuses one
-    // beside the credential); no secure screen lock, or no Activity, is "unavailable".
+
+
     const gradle = readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8');
     assert.match(gradle, /implementation\("androidx\.biometric:biometric:1\.2\.0-alpha04"\)/, 'expo-local-authentication\'s androidx.biometric');
     assert.match(gradle, /implementation\("androidx\.fragment:fragment:1\.8\.\d+"\)/, 'a fragment that knows activity 1.10\'s result registry');
@@ -3177,15 +3109,15 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(lockKt, /^import androidx\.biometric\.BiometricPrompt$/m);
     assert.doesNotMatch(lockKt, /android\.hardware\.biometrics/, 'no platform prompt beside AndroidX\'s');
     assert.match(lockKt, /prompt\(title, Authenticators\.BIOMETRIC_WEAK or Authenticators\.DEVICE_CREDENTIAL\)/);
-    // A debug build's device check (check-app-lock-device.mjs) may answer yes by a debug property; release builds read none.
+
     assert.match(lockKt, /val activity = host\?\.get\(\) \?: return answered\("unavailable"\)\s+\/\/[^\n]*\n\s+if \(debugProperty\("app_lock_answer"\) == "yes"\) return answered\(null\)\s+try \{\s+if \(!activity\.getSystemService\(KeyguardManager::class\.java\)\.isDeviceSecure\) return answered\("unavailable"\)\s+if \(activity\.supportFragmentManager\.isStateSaved\) return answered\("cancelled"\)/);
     assert.match(lockKt, /BiometricPrompt\.PromptInfo\.Builder\(\)\.setTitle\(title\)\.setAllowedAuthenticators\(authenticators\)\.setConfirmationRequired\(true\)\.build\(\)/);
     assert.match(lockKt, /BiometricPrompt\(activity, ContextCompat\.getMainExecutor\(activity\), object : BiometricPrompt\.AuthenticationCallback\(\) \{\s+override fun onAuthenticationSucceeded\(result: BiometricPrompt\.AuthenticationResult\) = answered\(null\)\s+override fun onAuthenticationError\(code: Int, message: CharSequence\) = failed\(title, code\)/);
-    // The Activity on screen is the gate's, weakly held and let go with its composition.
+
     assert.match(lockKt, /main\?\.let\(model\.lock::attach\)[\s\S]{0,400}?onDispose \{\s+owner\.lifecycle\.removeObserver\(observer\)\s+main\?\.let\(model\.lock::detach\)/);
     assert.match(lockKt, /private var host: WeakReference<MainActivity>\? = null/);
-    // Expo's bounded fallback (finding 3): a biometric that cannot be used, on a secure device, asks once for the credential alone:
-    // Android's credential screen before Android 11 (MainActivity.credential answers), a credential-only prompt from 11.
+
+
     assert.match(lockKt, /private val BIOMETRIC_UNUSABLE = setOf\(BiometricPrompt\.ERROR_HW_NOT_PRESENT, BiometricPrompt\.ERROR_HW_UNAVAILABLE, BiometricPrompt\.ERROR_NO_BIOMETRICS,\s+BiometricPrompt\.ERROR_UNABLE_TO_PROCESS, BiometricPrompt\.ERROR_NO_SPACE\)/);
     assert.match(lockKt, /if \(code !in BIOMETRIC_UNUSABLE \|\| fallback\) return answered\(reason\(code\)\)[\s\S]{0,300}?if \(!keyguard\.isDeviceSecure\) return answered\(reason\(code\)\)\s+fallback = true\s+if \(Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.R\) activity\.credential\.launch\(keyguard\.createConfirmDeviceCredentialIntent\(title, null\)\)\s+else prompt\(title, Authenticators\.DEVICE_CREDENTIAL\)/);
     assert.match(lockKt, /internal fun answered\(reason: String\?\) \{\s+authenticating = false\s+fallback = false/);
@@ -3193,38 +3125,37 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(lockKt, /BiometricPrompt\.ERROR_CANCELED, BiometricPrompt\.ERROR_NEGATIVE_BUTTON, BiometricPrompt\.ERROR_USER_CANCELED -> "cancelled"/);
     assert.doesNotMatch(code(lockKt), /setNegativeButton|mobileAppLockEnabled|menuCommand\(/, 'no cancel button, and Kotlin never writes the setting itself');
     assert.match(manifest, /<uses-permission android:name="android\.permission\.USE_BIOMETRIC" \/>/);
-    // Recents keep no picture while App lock is on (finding 2, stronger than RN by ruling): recents screenshots off from Android 13,
-    // FLAG_SECURE before, following core's value on every Activity.
+
+
     assert.match(lockKt, /if \(Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.TIRAMISU\) activity\.setRecentsScreenshotEnabled\(!on\)\s+else if \(on\) activity\.window\.addFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)\s+else activity\.window\.clearFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
     assert.match(lockKt, /val on = model\.lock\.enabled\s+LaunchedEffect\(activity, on\) \{ activity\?\.let \{ protectRecents\(it, on\) \} \}/);
-    // A lock turned on whose save failed (finding 1): core applied it in memory, so the gate follows core's value at once while the
-    // exact retry stays owed (the failure is rethrown to perform, which keeps it).
+
+
     assert.match(menuModel, /if \(!refused && action\.kind == "generalSetting"\) settings\.unsettled\(runtime, action\)\s+throw failure/);
     assert.match(settingsModel, /internal fun unsettled\(runtime: CoreHost, action: FailedAction\) \{\s+when \(JSONObject\(action\.title\)\.getJSONObject\("edit"\)\.getString\("type"\)\) \{\s+"appLock" -> runCatching \{ runtime\.appLock\(\)\.getBoolean\("value"\) \}\.onSuccess \{ on -> shell\.ui \{ shell\.lock\.stored\(on\) \} \}/);
-    // The lock screen stays centered and scrolls when large text does not fit a short landscape window (finding 5).
+
     assert.match(lockKt, /BoxWithConstraints\(Modifier\.fillMaxSize\(\)[^\n]*\.testTag\("app-lock"\)\) \{\s+Column\(Modifier\.fillMaxWidth\(\)\.verticalScroll\(rememberScrollState\(\)\)\.heightIn\(min = maxHeight\)/);
-    // A failed prompt's line is RN's (getMobileAppLockErrorKey) in core's words.
+
     for (const reason of ['unavailable', 'cancelled', 'failed']) assert.match(lockKt, new RegExp(`"${reason}" -> t\\("appLock\\.${reason}"\\)`));
-    // General's switch: off sends core's edit at once; on only after the device lock's yes; a no shows core's errors[reason] under the row.
+
     assert.match(lockKt, /if \(!edit\.getBoolean\("value"\)\) return settings\.general\(edit\)\s+ask\(row\.getJSONObject\("enablePrompt"\)\.getString\("promptMessage"\)\) \{ reason ->\s+if \(reason == null\) shell\.menu\.whenIdle \{ settings\.general\(edit\) \} else settings\.editLocal \{ put\(SWITCH_FAILURE, reason\) \}/);
     assert.match(lockKt, /row\.getJSONObject\("errors"\)\.getString\(it\)/);
     assert.match(settingsUi, /RnSwitch\(lock\.getBoolean\("value"\), model\.failedAction == null && !model\.lock\.authenticating, lock\.getString\("label"\), theme\.generalSwitch\) \{ model\.lock\.toggle\(lock\) \}/);
-    // RN's relock delay row (#1423), only while App lock is on, and its picker (core's appLockRelockDelay).
+
     assert.match(settingsUi, /privacy\.optJSONObject\("appLockRelockDelay"\)\?\.let \{ PressRow\(it\.getString\("label"\), it\.getString\("value"\), true, idle\) \{ open\("appLockRelockDelay"\) \} \}/);
     assert.match(settingsUi, /"appLockRelockDelay" -> view\.getJSONObject\("privacy"\)\.optJSONObject\("appLockRelockDelay"\)/);
-    // RN's "Include start dates in Today" switch (#1325) in Settings › GTD, between the focus limit and the flow mode (review note 3).
+
     assert.match(settingsUi, /for \(name in listOf\("focusTaskLimit", "focusIncludeStartDates", "defaultProjectFlowMode"\)\) \{[\s\S]{0,200}?if \(name == "focusIncludeStartDates"\) \{ ToggleRow\(model, control, true, write = \{ gtd\(it\) \}\); continue \}/);
     assert.match(settingsModel, /"appLock" -> shell\.lock\.stored\(input\.getJSONObject\("edit"\)\.getBoolean\("value"\)\)/);
-    // The phone check (findings 6 and 7): each database change happens with the app's process gone, from an untouched pulled copy,
-    // staged and size-checked beside the database, the old WAL and SHM removed, then renamed over it; the restore proves core's value,
-    // goes back to the tabs, and a failed restore exits 1.
+
+
     const lockCheck = readFileSync(resolve(app, 'scripts/check-app-lock-device.mjs'), 'utf8');
     assert.match(lockCheck, /await device\.stopApp\(\);\s+changes \+= 1;\s+const original = pullDatabase\(`original-\$\{changes\}`\);/);
     assert.match(lockCheck, /const staged = Number\(runAs\(`stat -c %s \$\{next\}`\)\);\s+if \(staged !== statSync\(db\)\.size\) fail\([^\n]*\n\s+if \(pid\(\) !== ''\) fail\([^\n]*\n\s+runAs\(`rm -f files\/\$\{DB\}-wal files\/\$\{DB\}-shm`\);\s+runAs\(`mv -f \$\{next\} files\/\$\{DB\}`\);/);
     assert.doesNotMatch(lockCheck, /runAs\(`cp \$\{STAGED\} files\/\$\{DB\}`\)/, 'never copy over the live database in place');
     assert.match(lockCheck, /const after = core\('read'\);\s+const now = after\.stored === true;\s+if \(now !== original\) fail\(/);
     assert.match(lockCheck, /await toInbox\(\);[\s\S]{0,200}?RESTORE FAILED[^\n]*\n\s+process\.exitCode = 1;/);
-    // No Kotlin policy, dates, colors or literal text; every key a label key; one semantics block per control.
+
     assert.doesNotMatch(code(lockKt), /\.(sort\w*|sorted\w*|filter(?!Bg\b)\w*|groupBy)\b|SimpleDateFormat|java\.time|\bColor\(|"#[0-9A-Fa-f]{3,8}"/);
     for (const [, key] of code(lockKt).matchAll(/"([a-z][A-Za-z]*(?:\.[A-Za-z]+)+)"/g)) assert(labelKeys.includes(key), `AppLock.kt: ${key} is not in LABEL_KEYS`);
     for (const [, rest] of code(lockKt).matchAll(/(?:\bText\(|contentDescription = |onClickLabel = )([^\n]*)/g)) {
@@ -3236,8 +3167,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(lockKt, /\.testTag\("app-lock-unlock"\)\s+\.clearAndSetSemantics \{ contentDescription = label; role = Role\.Button; if \(enabled\) onClick \{ lock\.unlock\(\); true \} else disabled\(\) \}/);
 }
 
-// W1b (#1213): RN's widget list screen. A Tasks widget's header link (core's openUri) opens it with the URI-decoded id; the read is
-// core's getWidgetListView, unchanged; the screen draws core's rows, title and empty line only.
+
 {
     assert.match(hostEntry, /^\s+widgetList: \(input\) => contract\.getWidgetListView\(input\),$/m);
     const entryKt = source('EntryPoints.kt');
@@ -3248,12 +3178,12 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(widgetListKt, /TaskRowItem\(model, it, status = RowStatus\.Badge\)/);
     assert.doesNotMatch(code(widgetListKt), /getString\("(id|status|title)"\)|filter\s*\{|sorted/, 'the screen draws core\'s list, no policy of its own');
 }
-// Pass 11: Mind Sweep and a saved search's screen on core's new contracts; the Focus filter pickers' search;
-// Bulk organize's project and area pickers that create one.
+
+
 {
     const sweepKt = source('MindSweep.kt');
     const pass11 = { sweepKt, savedSearchUi };
-    // Reads pass Kotlin's input to core unchanged; writes are core's commands, each logged as its operation.
+
     for (const [name, method] of [['mindSweep', 'getMindSweep'], ['savedSearch', 'getSavedSearchView']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuRead ${name} is core's ${method}`);
     }
@@ -3261,8 +3191,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         ['savedSearchSort', 'setSavedSearchSort']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuCommand ${name} is core's ${method}`);
     }
-    // Every write is MenuModel's send -> perform(action) with its exact FailedAction: core's whole input with the request UUID. The two
-    // creates (a Mind Sweep capture, Bulk organize's project or area) are on disk before the call and sent again first after process death.
+
+
     assert.match(menuModel, /"bulkCreate", "mindSweepAdd", "savedSearchDelete", "savedSearchSort" -> JSONObject\(action\.title\)\.put\("requestId", action\.id\)/);
     assert.match(sweepKt, /menu\.create\(addAction\(group\.getString\("id"\)\)\)/, 'a Mind Sweep Add is a create: on disk first');
     assert.match(menuModel, /create\(FailedAction\("bulkCreate", UUID\.randomUUID\(\)\.toString\(\), JSONObject\(\)\.put\("list", list\)\.put\("kind", kind\)\.put\("name", name\)/, 'Bulk organize\'s create is a create: on disk first');
@@ -3270,16 +3200,15 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     for (const [name, text] of Object.entries(pass11)) {
         assert.doesNotMatch(code(text), /menuCommand\(|\bsend\(|shell\.perform\(action|FailedAction\((?!"mindSweepAdd")/, `${name}: writes only through MenuModel.command, act or create`);
     }
-    // A write core refused, or whose write did not land (ACTION_FAILED, as core's contracts say for these two), owes nothing: Mind Sweep's
-    // failure line or the picker's line shows instead of the failure message.
-    // C3: Settings › Calendar's writes too (core's ACTION_FAILED: the device refused, or no calendar push yet): its toast shows core's words.
+
+
     assert.match(menuModel, /private val LANDLESS = setOf\("mindSweepAdd", "bulkCreate", "calendarSetting"\)/);
     assert.match(menuModel, /if \(action\.kind == "calendarSetting"\) \{ shell\.acknowledged\(action\); return@perform \}/);
-    // The next-action prompt's ACTION_FAILED did not land either (no receipt kept): its refusal path, not an owed retry (review N2).
+
     assert.match(menuModel, /\|\| \(\(action\.kind in LANDLESS \|\| action\.kind == "projectNextAction"\) && failure\.message\?\.startsWith\("ACTION_FAILED"\) == true\)/);
     assert.match(menuModel, /if \(refused && action\.kind in LANDLESS\) \{\s+shell\.acknowledged\(action\)\s+shell\.ui \{ landless\(action\) \}\s+return@perform/);
-    // Navigation: the Inbox's Mind Sweep (its pill and its empty-Inbox button) and the Weekly Review's open it; the More sheet's saved
-    // searches open their screen; Mind Sweep goes back to the screen it opened over.
+
+
     assert.equal(code(inboxUi).match(/openMindSweep\(\)/g).length, 2);
     assert.equal(code(weeklyUi).match(/openMindSweep\(\)/g).length, 2);
     assert.match(menuModel, /private fun isSavedSearch\(id: String\) = more\?\.collection\("savedSearches"\)\?\.any \{ it\.getString\("id"\) == id && it\.getString\("route"\)\.startsWith\("\/saved-search\/"\) \} == true/);
@@ -3287,8 +3216,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuModel, /leave\(if \(flow \|\| over\) MenuScreen\.entries\.firstOrNull \{ it\.name == saved\.get<String>\(if \(over\) "screenFrom" else "reviewFrom"\) \} else null\)/);
     assert.match(menuUi, /MenuScreen\.MindSweep -> MindSweepScreen\(model\)/);
     assert.match(menuUi, /"savedSearch" -> SavedSearchList\(model\)/);
-    // Mind Sweep: RN's React state in a synced file while the screen is open (the Bundle names the screen), so rotation and process death
-    // keep it; the controls carry core's scope and steps; Add waits for core's view of the text as typed; an answer counts once, for its sweep.
+
+
     assert.match(sweepKt, /var state by mutableStateOf\(if \(menu\.screen == MenuScreen\.MindSweep\) stored\(\) \?: fresh\(\) else fresh\(\)\.also \{ file\.delete\(\) \}\)/);
     assert.match(sweepKt, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(value\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
     for (const control of ['start', 'back', 'next']) assert.match(sweepKt, new RegExp(`\\{ step\\(${control}\\.getInt\\("step"\\)\\) \\}`), `${control} carries core's step`);
@@ -3296,36 +3225,36 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(sweepKt, /if \(viewDraft != state\.getString\("draft"\) \|\| group\.getJSONObject\("add"\)\.getBoolean\("disabled"\)\) return/);
     assert.match(sweepKt, /private fun ours\(action: FailedAction\) = menu\.screen == MenuScreen\.MindSweep && state\.getString\("requestId"\) == action\.id/);
     assert.match(sweepKt, /\.put\("state", sent\.getJSONObject\("sweep"\)\)\.put\("draft", sent\.getString\("draft"\)\)\.put\("addFailed", sent\.getBoolean\("addFailed"\)\)/);
-    // A saved search: the menu list machinery reads core's view for its ID (windows of 50, More); Delete asks core's question, then RN goes back.
+
     assert.match(menuModel, /"savedSearch" -> JSONObject\(\)\.put\("id", own\.optString\("id"\)\)/);
     assert.match(savedSearchUi, /confirm\(delete\.getJSONObject\("confirm"\), JSONObject\(\)\.put\("id", view\.getString\("id"\)\), "savedSearchDelete"\)/);
     assert.match(menuModel, /"savedSearchDelete" -> if \(screen == MenuScreen\.SavedSearch && own\("savedSearch"\)\.optString\("id"\) == JSONObject\(action\.title\)\.getString\("id"\)\) closeScreen\(\)/);
     assert.match(savedSearchUi, /TaskRowItem\(model, it, status = RowStatus\.Badge\)/, 'rows keep the lists\' own commands and editor');
-    // Correction pass 1 (finding 3): a later window that went stale drops the partial view and reads the whole view again from
-    // offset 0, a bounded number of times (then core's failure shows), in Mind Sweep.
+
+
     assert.match(sweepKt, /private fun <T> wholeView\(read: \(\) -> T\): T \{\s+repeat\(STALE_READS - 1\) \{\s+try \{\s+return read\(\)\s+\} catch \(failure: Exception\) \{\s+if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+\}\s+\}\s+return read\(\)/);
     assert.match(sweepKt, /private const val STALE_READS = 3/);
     assert.match(sweepKt, /private fun read\(runtime: CoreHost, sent: JSONObject\): JSONObject = wholeView \{/);
     assert.equal(code(sweepKt).match(/startsWith\("STALE_REVISION"\)/g).length, 1, 'no reader keeps a partial view: only wholeView catches a stale window');
-    // Correction pass 1 (finding 4): the device check settles an injected failure it left owed (the exact request, through the app's
-    // Try again), waits until the retry lock and the request on disk are gone, and fails loudly when it cannot.
+
+
     const sweepCheck = readFileSync(resolve(app, 'scripts/check-sweep-saved-device.mjs'), 'utf8');
     assert.match(sweepCheck, /const restore = async \(\) => \{\s+for \(const name of PROPS\) \{ try \{ setProp\(name, ''\); \} catch \{ \/\* device gone \*\/ \} \}\s+await settleOwed\(\);/);
     assert.match(sweepCheck, /if \(!retry && !pendingOnDisk\(\)\) \{/);
     assert.match(sweepCheck, /RESTORE FAILED: \$\{owed\} is still owed[^\n]*\n\s+process\.exitCode = 1;/);
     assert.equal(sweepCheck.match(/owed = '/g).length, 1, 'the injected failure is named while its retry is owed');
     assert.equal(sweepCheck.match(/(?<!let )owed = null;/g).length, 2, 'and cleared once settled');
-    // Focus's filter pickers search as the Inbox's: core's matches from offset zero at Focus's revision; a changed Focus is read again.
+
     assert.match(focusModelKt, /runtime\.menuRead\("focusList", JSONObject\(\)\.put\("controls", JSONObject\(sent\)\)\.put\("list", name\)\.put\("offset", items\.length\(\)\)\s+\.put\("limit", WINDOW\)\.put\("revision", revision\)\.put\("query", query\)\.toString\(\)\)/);
     assert.match(focusModelKt, /else if \(found == null\) shell\.refreshFocus\(\)/);
     assert.match(focusControlsUi, /LaunchedEffect\(revision, picker\) \{ if \(query\.isNotBlank\(\)\) searchPicker\(picker, query,/);
-    // Bulk organize's pickers: core's create row and the keyboard's Done (core's submit, after the text as typed is read); a create
-    // answers with core's draft, which the dialog keeps.
+
+
     assert.match(bulkUi, /picker\?\.optJSONObject\("create"\)\?\.let \{ create ->/);
     assert.match(bulkUi, /organizeCreate\(create\.getString\("name"\)\)/);
     assert.match(menuModel, /submit\.optJSONObject\("edit"\)\?\.let \{ edit -> organizePicker\(null\); organizeEdit\(edit\) \} \?: submit\.menuText\("create"\)\?\.let\(::organizeCreate\)/);
     assert.match(menuModel, /"bulkCreate" -> dialog\?\.takeIf \{ it\.optString\("kind"\) == "organize" \}\?\.let \{ open ->\s+keepDialog\(JSONObject\(open\.toString\(\)\)\.put\("draft", reply\.getJSONObject\("draft"\)\)/);
-    // No Kotlin policy, dates, colors or literal text in the new files; one semantics block per control.
+
     for (const [name, text] of Object.entries(pass11)) {
         assert.doesNotMatch(code(text), /\.(sort\w*|sorted\w*|filter(?!Bg\b|Edit\b|s\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/, `${name}: no Kotlin sorting, filtering, or grouping`);
         assert.doesNotMatch(code(text), /SimpleDateFormat|DateTimeFormatter|LocalDate|LocalTime|java\.time|java\.util\.Calendar|Calendar\.getInstance|GregorianCalendar|Instant\b|\.format\(|toLocal|currentTimeMillis|\bDate\(|TimeZone/, `${name}: no Kotlin date math, formatting or parsing`);
@@ -3338,7 +3267,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
                 assert.doesNotMatch(literal.replace(/\$\{[^}]*\}|\$\w+/g, ''), /\p{L}/u, `${name}: hard-coded UI text "${literal}"`);
             }
         }
-        // The screens (the composables after each model) reach core only through their model.
+
         const ui = code(text).slice(Math.max(0, code(text).indexOf('@Composable')));
         assert.doesNotMatch(ui, /runtime\.|menuCommand\(|menuRead\(|shell\.perform/, `${name}: the screen reaches core only through its model`);
         assert.doesNotMatch(code(text), /\.clickable\(enabled = [^\n]*\.semantics \{ contentDescription|\.semantics \{ contentDescription[^\n]*\}\s*\.clickable\(enabled/, `${name}: no control with a clickable and a separate semantics block`);
@@ -3347,14 +3276,13 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert(code(savedSearchUi).match(/\.clearAndSetSemantics \{/g).length >= 2);
 }
 
-// Pass B1 (entry points): RN's activity name as an alias with RN's link, share and assistant intents and RN's app shortcuts, the
-// development build's own scheme, and a router that opens what core's resolveNativeEntryPoint names; Import .txt in the popup.
+
 {
     const entryKt = source('EntryPoints.kt');
     const manifest = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
     const gradle = readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8');
-    // The alias is RN's component name (widgets, icons and pinned shortcuts launch it) and carries every public entry point; the
-    // activity itself (singleTask, as RN's) has no filter, and nothing runs in another process (one engine, one writer).
+
+
     const alias = manifest.match(/<activity-alias\s[\s\S]*?<\/activity-alias>/g) ?? [];
     assert.equal(alias.length, 1, 'one activity alias');
     assert.match(alias[0], /android:name="\$\{applicationId\}\.MainActivity"/);
@@ -3364,7 +3292,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const filter = (action) => filters.find((entry) => entry.includes(`android:name="${action}"`));
     assert.match(filter('android.intent.action.MAIN'), /android\.intent\.category\.LAUNCHER/);
     assert.match(filter('android.intent.action.VIEW'), /category\.DEFAULT[\s\S]*category\.BROWSABLE[\s\S]*<data android:scheme="\$\{urlScheme\}" \/>/);
-    // RN's share filters, as app.json's expo-share-intent config lists them: SEND for text and files, SEND_MULTIPLE for files.
+
     const shareConfig = JSON.parse(readFileSync(resolve(app, '../mobile/app.json'), 'utf8')).expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-share-intent')[1];
     const mimeTypes = (entry) => [...entry.matchAll(/<data android:mimeType="([^"]+)" \/>/g)].map((m) => m[1]);
     assert.match(filter('android.intent.action.SEND'), /category\.DEFAULT/);
@@ -3376,8 +3304,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.equal(manifest.match(/category\.LAUNCHER/g).length, 1, 'one launcher entry: the alias');
     const mainActivity = manifest.match(/<activity\s[^>]*android:name="\.MainActivity"[^>]*\/>/)?.[0] ?? assert.fail('MainActivity has no filter of its own');
     assert.match(mainActivity, /android:launchMode="singleTask"/);
-    // The activity is not exported: only the alias, with its filters, can start it from another app or the shell, so the
-    // device checks launch the alias (RN's component name), never the class.
+
+
     assert.match(mainActivity, /android:exported="false"/);
     {
         const { readdirSync } = await import('node:fs');
@@ -3386,16 +3314,15 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         }
     }
     assert.doesNotMatch(manifest, /android:process=/);
-    // D6: each build type's scheme, and the scheme reaches the manifest, the shortcuts and BuildConfig from one map.
+
     assert.match(gradle, /val urlSchemes = mapOf\("debug" to "mindwtr-native-dev", "upgradetest" to "mindwtr-upgradetest", "release" to "mindwtr"\)/);
     assert.match(gradle, /buildConfigField\("String", "URL_SCHEME", "\\"\$scheme\\""\)\s+manifestPlaceholders\["urlScheme"\] = scheme/);
     assert.match(gradle, /getByName\("debug"\) \{ launcherIdentity\(\) \}/);
     assert.match(gradle, /getByName\("release"\) \{[^}]*launcherIdentity\(\)\s+\}/);
     assert.match(gradle, /create\("upgradetest"\) \{[^}]*launcherIdentity\(\)\s+\}/);
     assert.match(gradle, /tasks\.named\("preBuild"\) \{ dependsOn\(buildCoreBundle, buildShortcuts, buildWidgets, rnAttachmentInstaller, rnPersistentCapture, rnFileSync, rnGmail\) \}/);
-    // The bytecode cache's keys (BytecodeCache.kt): the engine version is the QuickJS dependency's, and the bundle carries the
-    // SHA-256 of its own body in its first line, written with it in one file (build-bundle.mjs), so a bundle and a hash from
-    // two builds cannot pair up. Every variant's merged assets are checked by verify-bundle.mjs before packaging.
+
+
     assert.equal(/buildConfigField\("String", "QUICKJS_WRAPPER", "\\"([^"\\]+)\\""\)/.exec(gradle)?.[1],
         /implementation\("wang\.harlon\.quickjs:wrapper-android:([^"]+)"\)/.exec(gradle)?.[1], 'the cache key names the QuickJS wrapper in use');
     {
@@ -3410,7 +3337,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         const scratch = mkdtempSync(resolve(tmpdir(), 'bundle-pair-'));
         try {
             const write = (name, bytes) => { writeFileSync(resolve(scratch, name), bytes); return resolve(scratch, name); };
-            // A body from another build under this hash line, a changed byte, no hash line, and no file all fail the check.
+
             assert(!verifies(write('other-body.js', Buffer.concat([bundle.subarray(0, newline + 1), Buffer.from('globalThis.other = 1;')]))), 'another body under the hash line fails');
             const changed = Buffer.from(bundle); changed[changed.length - 2] ^= 1;
             assert(!verifies(write('changed.js', changed)), 'a changed byte fails');
@@ -3422,17 +3349,15 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.match(gradle, /val verifyBundle = [^\n]*verify-bundle\.mjs[\s\S]{0,300}?tasks\.withType<com\.android\.build\.gradle\.tasks\.MergeSourceSetFolders>\(\)\.configureEach \{\s+if \(name\.startsWith\("merge"\) && name\.endsWith\("Assets"\) && !name\.contains\("Test"\)\) \{[\s\S]{0,300}?commandLine\(listOfNotNull\("node", verifyBundle, outputDir\.get\(\)\.asFile\.resolve\("core-host\.js"\)\.path, traced\)\)\s*\}\.result\.get\(\)\.assertNormalExitValue\(\)/, 'every variant\'s merged assets are verified and a mismatch fails the build');
         assert.match(buildBundle, /renameSync\(/, 'the bundle is written under a temporary name and renamed into place');
     }
-    // The store write gate (store-write-gate.ts gateStoreCommands) wraps a contract method when its constructor is named
-    // AsyncFunction. A bundle that lowers async functions (an older target or another minifier) would ship every native
-    // command ungated, with no error: the shipped bundle keeps saveTaskDraft an async method and the name check intact.
+
+
     {
         const shipped = readFileSync(resolve(app, 'android/app/src/main/assets/core-host.js'), 'utf8');
         assert.match(shipped, /async saveTaskDraft\(/, 'saveTaskDraft stays an async method in the shipped bundle, so the write gate wraps it');
         assert.match(shipped, /constructor\.name\s*!==\s*["']AsyncFunction["']/, 'the write gate still tells a command by its AsyncFunction constructor');
     }
-    // Module instrumentation (build-bundle.mjs --trace-modules) is a measurement build's only: its own output, merged only
-    // into the benchmarkTrace variant. The bundle every other variant ships has no module hook, and no environment variable
-    // can turn one on.
+
+
     {
         const shipped = readFileSync(resolve(app, 'android/app/src/main/assets/core-host.js'), 'utf8');
         assert(!shipped.includes('__mwTraceModule') && !/__MINDWTR_STARTUP_PROFILING__\s*=\s*(true|!0)/.test(shipped), 'the shipped bundle has no module hooks');
@@ -3442,8 +3367,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.match(gradle, /val buildTracedCoreBundle by tasks\.registering\(Exec::class\) \{[\s\S]{0,300}?"--trace-modules", "--out", tracedBundle\.get\(\)\.asFile\.path/);
         assert.equal(gradle.match(/tracedBundleAssets/g)?.length, 3, 'the traced bundle is declared once, written once, and merged once');
         assert.match(gradle, /getByName\("benchmarkTrace"\)\.assets\.srcDir\(tracedBundleAssets\)/, 'only benchmarkTrace merges it');
-        // Both ends refuse a traced bundle anywhere else: build-bundle.mjs will not write one into the shared main assets,
-        // and verify-bundle.mjs fails any variant's bundle with module hooks unless Gradle says it is benchmarkTrace's.
+
+
         const mainBundle = resolve(app, 'android/app/src/main/assets/core-host.js');
         const before = readFileSync(mainBundle);
         const run = (script, args) => spawnSync(process.execPath, [resolve(app, 'scripts', script), ...args], { encoding: 'utf8' }).status;
@@ -3461,11 +3386,11 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
             rmSync(scratch, { recursive: true, force: true });
         }
         assert.equal(gradle.match(/--allow-module-trace/g)?.length, 1, 'one place allows module hooks');
-        // Each channel's benchmarkTrace (mergePlayBenchmarkTraceAssets, mergeFossBenchmarkTraceAssets), no other variant.
+
         assert.match(gradle, /if \(name\.endsWith\("BenchmarkTraceAssets"\)\) "--allow-module-trace"/, 'only benchmarkTrace\'s merged assets may carry them');
     }
-    // RN's shortcuts from RN's own builder: the same ids, capabilities, labels and links, on the build's scheme; Add task opens
-    // RN's quick capture dialog in the build's package, as RN's does (pass W1 brings it).
+
+
     assert.match(gradle, /urlSchemes\.map \{ \(type, scheme\) -> "\$type=\$scheme@\$\{packages\.getValue\(type\)\}" \}/);
     const { createRequire } = await import('node:module');
     const rnShortcuts = createRequire(import.meta.url)('../../mobile/plugins/android-app-shortcuts.js').__testables;
@@ -3482,13 +3407,13 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.equal(xml.replaceAll(`${scheme}:///`, 'mindwtr:///'), rnXml, 'RN\'s shortcuts but for the scheme');
         assert.match(xml, new RegExp(`android:targetPackage="${applicationId.replace(/\./g, '\\.')}"\\s+android:targetClass="tech\\.dongdongbh\\.mindwtr\\.androidwidget\\.QuickCaptureActivity"`), 'Add task opens RN\'s dialog');
     }
-    // Core's buildCreateNoteCapture mirrors RN's MainActivity (the name, else the Assistant's text, else EXTRA_TEXT; the note when
-    // it differs): if RN's rule changes, this fails, and core's mirror must change with it.
+
+
     const startupTrace = readFileSync(resolve(app, '../mobile/plugins/android-startup-trace.js'), 'utf8');
     assert.match(startupTrace, /val rawTitle = intent\.getStringExtra\("com\.google\.android\.gms\.actions\.extra\.NAME"\)\?\.trim\(\)\.orEmpty\(\)\s+val rawText = \(\s+intent\.getStringExtra\("com\.google\.android\.gms\.actions\.extra\.TEXT"\)\s+\?: intent\.getStringExtra\(Intent\.EXTRA_TEXT\)\s+\)\?\.trim\(\)\.orEmpty\(\)\s+val title = when \{\s+rawTitle\.isNotBlank\(\) -> rawTitle\s+rawText\.isNotBlank\(\) -> rawText\s+else -> return\s+\}/);
     assert.match(startupTrace, /if \(rawText\.isNotBlank\(\) && rawText != title\) \{\s+builder\.appendQueryParameter\("note", rawText\)/);
-    // Kotlin reads the intent's data and text extras as strings only (no stream, no parcel), inside runCatching, and sends them to
-    // core unchanged with the build's scheme; the Assistant's extras are RN's.
+
+
     const intentRead = code(entryKt.slice(entryKt.indexOf('fun Intent.entryInput()'), entryKt.indexOf('fun Context.readPickedText')));
     assert.match(intentRead, /= runCatching \{/);
     assert.match(intentRead, /Intent\.ACTION_VIEW -> dataString\?\.let \{ JSONObject\(\)\.put\("kind", "link"\)\.put\("url", it\)\.put\("scheme", BuildConfig\.URL_SCHEME\) \}/);
@@ -3496,81 +3421,77 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(intentRead, /\.extra\("text", getStringExtra\(Intent\.EXTRA_TEXT\)\)\.extra\("title", getCharSequenceExtra\(Intent\.EXTRA_TITLE\)\?\.toString\(\)\)\s+\.extra\("subject", getStringExtra\(Intent\.EXTRA_SUBJECT\)\)/);
     assert.match(intentRead, /\.extra\("text", getStringExtra\(NOTE_TEXT\)\)\.extra\("extraText", getStringExtra\(Intent\.EXTRA_TEXT\)\)/);
     assert.match(entryKt, /private const val NOTE_NAME = "com\.google\.android\.gms\.actions\.extra\.NAME"\s+private const val NOTE_TEXT = "com\.google\.android\.gms\.actions\.extra\.TEXT"/);
-    // A file share reads only EXTRA_STREAM's URIs, typed (IntentCompat), at most RN's six; never another parcel.
+
     assert.match(intentRead, /else -> fileShare\(listOfNotNull\(IntentCompat\.getParcelableExtra\(this, Intent\.EXTRA_STREAM, Uri::class\.java\)\)\)/);
     assert.match(intentRead, /Intent\.ACTION_SEND_MULTIPLE -> fileShare\(IntentCompat\.getParcelableArrayListExtra\(this, Intent\.EXTRA_STREAM, Uri::class\.java\)\.orEmpty\(\)\)/);
     assert.match(code(entryKt), /\.put\("uris", JSONArray\(uris\.take\(SharedFileStager\.MAX_FILES\)\.map \{ it\.toString\(\) \}\)\)/);
     assert.equal(code(entryKt).match(/getParcelable/g).length, 2, 'only the two EXTRA_STREAM reads');
-    // RN's Android share module sends a file share's files only: no text or subject (keeping them is RN bug (d), changed with RN).
+
     assert.match(code(entryKt), /private fun fileShare\(uris: List<Uri>\): JSONObject = JSONObject\(\)\.put\("kind", "files"\)\s+\.put\("uris", [^\n]*\n(?!\s+\.put)/);
     assert.match(entryKt, /\.put\("files", staged\)\.put\("text", JSONObject\.NULL\)\.put\("subject", JSONObject\.NULL\)/);
     assert.doesNotMatch(code(entryKt), /getSerializable|getBundleExtra/);
-    // Entries wait in the persisted FIFO queue (EntryQueue.kt, JVM-tested) from the intent's arrival; the oldest opens only while
-    // the app is free, is read in one perform (a capture's popup view too), and opens once the action ends; the editor opens
-    // through whenIdle, as it refuses while busy.
+
+
     const queueKt = source('EntryQueue.kt');
     assert.match(entryKt, /private val queue = EntryQueue\(dir\)/);
     assert.match(model, /val entries = EntryRouter\(this, File\(app\.noBackupFilesDir, "entries"\), SharedFileStager\(File\(app\.cacheDir, "shared-entries"\), ContentSharedFileSource\(app\)\)\)/);
     assert.doesNotMatch(code(entryKt), /saved\[|SavedStateHandle/, 'the queue lives on disk, not in the saved state');
     assert.match(entryKt, /if \(!queue\.add\(input\.toString\(\)\)\)/);
-    // Any open unsaved work holds the entry back (the capture popup and its draft included): a share never replaces it. An
-    // editor with nothing to save does not (#1410): an entry that goes somewhere closes it first, as RN's editor closes on blur.
-    // RN's whole navigationBlurRef list (review of 79ac32ea9): the Waiting prompt, and anything covering the editor that Close
-    // cannot reach but an entry can (the Add link sheet, an image preview or audio player, the editor's AI request or answer, its
-    // pickers) keep it, as unsaved edits do. EditorNavigationTest drives closesOnNavigation.
+
+
     assert.match(model, /val editorClean get\(\) = editor\?\.closesOnNavigation\(editsPending, covered = editorPickerOpen \|\| attachments\.link != null \|\| attachments\.view != null\s+\|\| ai\.working == "editor" \|\| ai\.answer != null \|\| editorMenu\.promoteTitle != null\) \?: true/);
     assert.match(editorUi, /fun closesOnNavigation\(editsPending: Boolean, covered: Boolean\) = readOnly \|\| \(!dirty && !editsPending && waitingFor == null && !covered\)/);
     assert.match(editorUi, /val pickerOpen = picker != null \|\| pickDate != null \|\| pickTime != null \|\| descriptionExpanded\s+DisposableEffect\(pickerOpen\) \{ editorPickerOpen = pickerOpen; onDispose \{ editorPickerOpen = false \} \}/);
     assert.match(entryKt, /if \(reply\.menuText\("route"\) != null \|\| reply\.has\("capture"\) && !reply\.isNull\("capture"\) \|\| reply\.has\("captureModal"\) && !reply\.isNull\("captureModal"\)\) \{/);
-    // The tester's line for #1410, as RN's v1.3.7/mobile-editor-navigation closed-clean.
+
     assert.match(entryKt, /if \(editor != null\) anyTime\(\{ it\.logLine\("Native Android task editor dismissed on navigation releaseCheck=v1\.3\.8\/native-editor-navigation", JSONObject\(\)\.put\("releaseCheck", "v1\.3\.8\/native-editor-navigation"\)\.put\("outcome", "closed-clean"\)\) \}, \{\}\)\s+closeEditor\(\)/);
-    // Not ready (no store, a command, an owed retry) holds every entry; open work holds every entry but a context automation link.
+
     assert.match(entryKt, /private val ready: Boolean get\(\) = with\(shell\) \{ writable && !busy && failedAction == null \}/);
     assert.match(entryKt, /val blocked: Boolean get\(\) = !ready \|\| locked \|\| workOpen/);
-    // RN b7bccbbc3 (#1475): while the app lock covers the app nothing is read or opened (EntryLockHoldTest); the unlock changes
-    // `blocked`, so MainActivity pumps again and the held entry opens.
+
+
     assert.match(entryKt, /private val locked: Boolean get\(\) = shell\.lock\.enabled && shell\.lock\.locked/);
     assert.match(entryKt, /fun pump\(\): Unit = with\(shell\) \{\s+if \(hold\.holds\(locked, queue\.head\(\), ::held\)\) return\s+val entry = lifecycle\.next\(!ready, workOpen\)/);
     assert.match(entryKt, /val entry = lifecycle\.next\(!ready, workOpen\) \?: return\s+if \(workOpen\) return peek\(entry\)/);
-    // A link read over open work: core's entry read only (it writes nothing), off the busy path, and only an automation link opens.
+
     assert.match(entryKt, /private fun peek\(entry: EntryQueue\.Entry\) \{[\s\S]{0,400}runtime\.menuRead\("entryPoint", entry\.input\)[\s\S]{0,300}\?\.takeIf \{ it\.optJSONObject\("contextAutomation"\) != null \}/);
     assert.match(entryKt, /val workOpen: Boolean get\(\) = with\(shell\) \{\s+!editorClean \|\| processing\?\.hidden == false \|\| capture != null \|\| captureModal\.open != null\s+\|\| menu\.dialog != null \|\| menu\.focusControls\.dialog != null \|\| menu\.calendar\.composer != null \|\| search\?\.saveName != null\s+\|\| menu\.screen == MenuScreen\.MindSweep/);
-    // Typed text not yet sent holds entries back too: the Add new project field while the Projects list shows it, and a
-    // Settings field before its commit (a GTD text field, a Someday section's inline rename).
+
+
     assert.match(entryKt, /\|\| \(menu\.screen == MenuScreen\.Settings && menu\.settings\.uncommitted\)\s+\|\| \(projectDraft\.isNotBlank\(\) && openProjectId == null && \(menu\.screen == MenuScreen\.Projects\s+\|\| \(menu\.screen == null && screen == Screen\.Projects && menu\.quickView == "projects"\)\)\)/);
     assert.match(source('SettingsModel.kt'), /val uncommitted: Boolean get\(\) = local\.has\("renaming"\) \|\| local\.keys\(\)\.asSequence\(\)\.any \{ it\.startsWith\("typed:"\) \}/);
     assert.match(entryKt, /val reply = if \(staged == null\) runtime\.menuRead\("entryPoint", entry\.input\) else runtime\.attachmentRequest\("prepareSharedFiles",/);
-    // A file share is queued before any copy, staged off the main thread while its grant holds, read once staged (prepareSharedFiles
-    // with the entry's id as its request UUID), and its staged files go once the entry opened or was refused.
+
+
     assert.match(entryKt, /if \(!queue\.add\(input\.toString\(\)\)\) [^\n]*\s+else if \(input\.optString\("kind"\) == "files"\) queue\.all\(\)\.lastOrNull\(\)\?\.let \{ stage\(it\) \}/);
     assert.match(entryKt, /threads\.background \{\s+val failure = runCatching \{ stager\.stage\(entry\.id, uris\) \}\.exceptionOrNull\(\)/);
-    // A failed staging waits as a failed read does (EntryLifecycle's back-off), never a loop; the router stops staging with its ViewModel.
+
     assert.match(entryKt, /if \(failure != null && lifecycle\.head == entry\.id\) failed\(entry, "Staging failed"\) else pump\(\)/);
     assert.match(entryKt, /shell\.coreHost\(\)\?\.logLine\("Native file share staging failed releaseCheck=v1\.3\.7\/native-share-files", context\)/);
     assert.match(entryKt, /override fun authority\(uri: String\): String\? = Uri\.parse\(uri\)\.authority/);
     assert.match(model, /entries\.close\(\)\s+routeWrites\.shutdown\(\)\s+prompts\.shutdown\(\)\s+super\.onCleared\(\)/);
-    // Closing stops staging and drops every main-thread job of the router (a retry, a staging's completion): EntryThreads, JVM-tested.
+
     assert.match(entryKt, /fun close\(\) \{\s+threads\.close\(\)\s+\}/);
     assert.match(entryKt, /EntryThreads\(\{ delayMs, job -> main\.postDelayed\(\{ job\(\) \}, delayMs\) \}, \{ main\.removeCallbacksAndMessages\(null\) \}\)/);
-    // The staging's completion, a core read's answer and its failure all run through EntryThreads; no other handler post.
+
     assert.match(entryKt, /threads\.later \{\s+staging\.remove\(entry\.id\)/);
-    // (Focus's editor opens through whenIdle once the entry opened: it takes nothing from the queue.)
+
     const routerJobs = code(entryKt).replace('{ delayMs, job -> main.postDelayed({ job() }, delayMs) }', '').replace('menu.whenIdle { openEditor(id, "view") }', '');
     assert.doesNotMatch(routerJobs, /\bpost(Delayed)?\(|\bui \{|\bui\((?!threads\.guarded \{)|whenIdle \{|whenIdle\((?!threads\.guarded \{)|\.execute\(|Executors/, 'every router job goes through EntryThreads');
     assert.match(source('EntryLifecycle.kt'), /fun later\(delayMs: Long = 0, job: \(\) -> Unit\) = post\(delayMs, guarded\(job\)\)\s+[^\n]*\s+fun guarded\(job: \(\) -> Unit\): \(\) -> Unit = \{ if \(!closed\) job\(\) \}/);
     assert.match(source('EntryLifecycle.kt'), /fun close\(\) \{\s+closed = true\s+cancelPosts\(\)\s+worker\.shutdownNow\(\)\s+\}/);
     assert.match(readFileSync(resolve(app, 'android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/EntryLifecycleTest.kt'), 'utf8'), /fun aStagingThatEndsAfterTheRouterClosedNeverPumpsOrRetries\(\)[\s\S]*fun aCoreReadThatAnswersAfterTheRouterClosedLeavesTheShareForTheNextRouter\(\)/);
-    // Only another app's content:// file is opened (a file:// URI or this app's own provider would attach the app's private files).
+
     assert.match(entryKt, /override fun ownProvider\(authority: String\): Boolean = context\.packageManager\.resolveContentProvider\(authority, 0\)\?\.packageName == context\.packageName\s+&& !\(BuildConfig\.DEBUG && authority == "\$\{context\.packageName\}\.sharetest"\)/);
     assert.match(entryKt, /JSONObject\(\)\.put\("requestId", entry\.id\)\.put\("files", staged\)/);
     assert.match(entryKt, /lifecycle\.dismissed\(entry\)\s+stager\.discard\(entry\.id\)/);
     assert.match(entryKt, /lifecycle\.opened\(entry\)\s+\/\/[^\n]*\s+stager\.discard\(entry\.id\)/);
     assert.match(entryKt, /runtime\.openQuickCapture\(\)\s+runtime\.quickCaptureView\(JSONObject\(\)\.put\("text", open\.getString\("text"\)\)\.put\("options", open\.getJSONObject\("options"\)\)\.toString\(\)\)/);
-    // An entry leaves the queue only after it opened, or when core refused its input; a failed read keeps it for a later try.
+
     assert.match(entryKt, /private val lifecycle = EntryLifecycle\(queue\) \{ SystemClock\.uptimeMillis\(\) \}/);
     assert.match(entryKt, /\} catch \(failure: Throwable\) \{\s+ui\(threads\.guarded \{ failed\(entry, failure\.message\) \}\)\s+\/\/[^\n]*\s+if \(!entryRetryable\(failure\.message\)\) return@perform\s+throw failure\s+\}\s+\/\/[^\n]*\s+ui\(threads\.guarded \{ menu\.whenIdle\(threads\.guarded \{ opened\(entry, reply, view\) \}\) \}\)/);
     assert.match(entryKt, /is EntryLifecycle\.Failure\.Retry -> threads\.later\(outcome\.delayMs\) \{ pump\(\) \}\s+is EntryLifecycle\.Failure\.Refused -> \{\s+shell\.showToast\(null, outcome\.notice, \"warning\"\)\s+lifecycle\.dismissed\(entry\)/, 'a refused entry shows its notice before it leaves');
-    // A context automation link opens nothing, so only it goes on over open work.
+
     assert.match(entryKt, /if \(blocked && reply\.optJSONObject\("contextAutomation"\) == null\) \{\s+lifecycle\.deferred\(entry\)\s+return\s+\}\s+open\(reply, view, runCatching \{ JSONObject\(entry\.input\)\.optString\("url"\)\.ifEmpty \{ null \} \}\.getOrNull\(\)\)\s+lifecycle\.opened\(entry\)/);
     assert.doesNotMatch(code(entryKt), /queue\.remove\(/, 'only EntryLifecycle takes an entry out of the queue');
     assert.equal(code(source('EntryLifecycle.kt')).match(/queue\.remove\(/g).length, 2, 'an entry leaves only after it opened, or when core refused its input');
@@ -3584,53 +3505,52 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(activity, /LaunchedEffect\(entries\.head, entries\.blocked\) \{ entries\.pump\(\) \}/);
     assert.match(activity, /LaunchedEffect\(leaveApp\) \{ if \(leaveApp\) \{ leftApp\(\); moveTaskToBack\(true\) \} \}/);
     assert.match(hostEntry, /^\s+entryPoint: \(input\) => logEntryPoint\(input, isNotificationTap\(input\) \? notificationEntry\(input\) : contract\.resolveNativeEntryPoint\(input\)\),$/m);
-    // A notification tap (pass R1): core routes it (routeNotificationOpen); only this app's notifications carry the extra.
+
     assert.match(hostEntry, /const result = contract\.routeNotificationOpen\(payload\);/);
     assert.match(entryKt, /getStringExtra\(CoreNotifications\.EXTRA_OPEN\)\?\.let \{ data -> return@runCatching JSONObject\(\)\.put\("kind", "notification"\)\.put\("data", JSONObject\(data\)\) \}/);
     assert.match(hostEntry, /^\s+captureImport: \(input\) => contract\.planQuickCaptureImport\(input\),$/m);
     assert.ok(hostEntry.includes("releaseCheck: 'v1.3.3/native-android-entry-point', kind, outcome }"));
-    // A system capture (RN's origin=system) opens the capture screen, which puts the app behind the previous one; the popup opens
-    // only in the app (the + button, the capture feature), so it carries no such flag.
+
+
     assert.doesNotMatch(code(captureUi + model + entryKt), /returnToPreviousApp(?!"\))/, 'the popup has no return-to-previous-app path');
     assert.doesNotMatch(readFileSync(resolve(app, '../../packages/core/src/native-host-contract-entry-points.ts'), 'utf8'), /returnToPreviousApp/);
-    // Import .txt: RN's text/plain picker; the file is read inside the action (off the main thread) and core plans it; Create tasks
-    // sends the file's text, on disk with the question.
+
+
     assert.match(captureUi, /rememberLauncherForActivityResult\(ActivityResultContracts\.OpenDocument\(\)\) \{ uri -> uri\?\.let\(::importCaptureText\) \}/);
     assert.match(captureUi, /ImportTextButton\(!locked\) \{ importText\.launch\(arrayOf\("text\/plain"\)\) \}/);
     assert.match(captureUi, /\.clearAndSetSemantics \{ contentDescription = label; role = Role\.Button; testTag = "capture-import-text"; if \(enabled\) onClick \{ pick\(\); true \} else disabled\(\) \}/);
     assert.match(model, /perform \{ runtime ->\s+val text = getApplication<Application>\(\)\.readPickedText\(uri\)\s+val plan = runtime\.menuRead\("captureImport"/);
     assert.match(model, /FailedAction\("captureLines", current\.lineIds\.first\(\), current\.linesText \?: current\.text,/);
     for (const key of ['quickAdd.bulkImportTextFile', 'quickAdd.bulkImportTextFileLabel']) assert(labelKeys.includes(key), `LABEL_KEYS lacks ${key}`);
-    // No Kotlin policy, dates, colors or literal text in the new file; RN's route names map to this app's screens only.
+
     const entryCode = code(entryKt).replace(/private const val \w+ = "[^"]*"/g, '');
     assert.doesNotMatch(entryCode, /\.(sort\w*|sorted\w*|filter\w*|groupBy|reversed|distinct\w*|partition)\b/, 'EntryPoints.kt: no Kotlin sorting, filtering, or grouping');
     assert.doesNotMatch(entryCode, /SimpleDateFormat|DateTimeFormatter|java\.time|Calendar\.getInstance|currentTimeMillis|\bDate\(|\bColor\(|"#[0-9A-Fa-f]{3,8}"/);
     for (const [, key] of entryCode.matchAll(/"([a-z][A-Za-z]*(?:\.[A-Za-z]+)+)"/g)) assert(labelKeys.includes(key), `EntryPoints.kt: ${key} is not in LABEL_KEYS`);
     assert.doesNotMatch(entryCode, /\bText\(|contentDescription|showToast\("/, 'EntryPoints.kt: every word is core\'s');
-    // RN's quiet context automation link: core's payload goes to the broadcast's job, nothing opens, and the app leaves (exitApp).
+
     assert.match(entryKt, /reply\.optJSONObject\("contextAutomation"\)\?\.let \{ trigger ->\s+val outcome = queueTrigger\(trigger\.getString\("action"\), trigger\.getString\("context"\)\) \{ CoreWork\.enqueue\(getApplication\(\), CoreJob\.CONTEXT, it\) \}[\s\S]{0,600}leaveApp = true\s+return\s+\}/);
-    // The tester's line: the link's real outcome (queued, too-long or failed), never the context's name.
+
     assert.match(entryKt, /JSONObject\(\)\.put\("releaseCheck", "v1\.3\.8\/native-context-link"\)\.put\("outcome", outcome\)\.put\("action", trigger\.getString\("action"\)\)\.put\("overWork", workOpen\)/);
     assert.match(entryKt, /anyTime\(\{ it\.logLine\("Native Android context link ran releaseCheck=v1\.3\.8\/native-context-link", fields\) \}, \{\}\)/);
     assert.match(hostEntry, /const outcome = !entry \? 'refused' : entry\.contextAutomation \? 'contextAutomation' : entry\.captureModal/);
 }
 
-// Pass A4 (L1): RN's diagnostics log (files/logs/mindwtr.log) written by core's diagnostics-log.ts through Kotlin's file bridge,
-// and Settings › Data's Diagnostics card on core's getDataSettings.
+
 {
     const coreLog = readFileSync(resolve(app, '../../packages/core/src/diagnostics-log.ts'), 'utf8');
     const relative = /export const DIAGNOSTICS_LOG_RELATIVE_PATH = '([^']+)'/.exec(coreLog)[1];
     assert.equal(relative, 'logs/mindwtr.log', 'RN\'s log path, relative to its documents directory (Android files/)');
     assert.match(logFileKt, new RegExp(`const val RELATIVE_PATH = "${relative}"`), 'Kotlin\'s log path is core\'s');
     assert.match(owner, /File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\)/);
-    // Plain IO only: one unbuffered append per line (a kill keeps every returned line), a replace through a synced rename.
+
     assert.match(logFileKt, /"append" -> \{\s+FileOutputStream\(file, true\)\.use \{ it\.write\(text\.toByteArray\(\)\) \}/);
     assert.match(logFileKt, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(text\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
     assert.doesNotMatch(code(logFileKt), /[Bb]uffered|appendText|JSONObject|loggingEnabled|500_?000|mindwtr-native-dev/, 'Kotlin holds no log policy');
     assert.match(coreHost, /val logs = DiagnosticsLogFile\(logFile\)\s+bridge\.setProperty\("logFile", guarded \{ args -> logs\.run\(/);
     assert.match(coreHost, /fun logShare\(\): JSONObject = callAsync\("logShare"\)/);
     assert.match(coreHost, /fun logClear\(\): JSONObject = callAsync\("logClear"\)/);
-    // Core's logger writes through the file port; the gate reads the store's setting, as RN's isLoggingEnabled does.
+
     assert.match(hostEntry, /setLogger\(\(payload\) => \{\s+consoleLogger\(payload\);\s+try \{\s+void diagnosticsLog\.append\(diagnosticsEntryFromLogPayload\(payload\), \{ force: payload\.force \}\);/);
     assert.match(hostEntry, /isEnabled: \(\) => isDiagnosticsLoggingEnabled\(useTaskStore\.getState\(\)\.settings\),\s+files: \[nativeLogFile\],/);
     const shareBody = hostEntry.slice(hostEntry.indexOf('    logShare(): string {'), hostEntry.indexOf('    logClear(): string {'));
@@ -3644,7 +3564,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(clearBody, /logInfo\(|logWarn\(|diagnosticsLog\.append\(/, 'Clear cannot append a line that recreates its target');
     assert.match(clearBody, /logClearChecked\(\): string \{\s+return submit\(\(\) => diagnosticsLog\.clearChecked\(\)\);/);
     assert.match(hostEntry, /logClear\(\): string \{\s+return submit\(async \(\) => \{\s+await diagnosticsLog\.clear\(\);/);
-    // Direct log payloads require context; the shared entry builder accepts extra and sanitizes it into context.
+
     const checkDiagnosticFields = (source) => {
         const visit = (node) => {
             if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) && node.name.getText() === 'extra') {
@@ -3661,8 +3581,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     checkDiagnosticFields(hostEntry);
     assert.match(hostEntry, /^\s+dataSettings: \(\) => contract\.getDataSettings\(\),$/m);
     assert.match(hostEntry, /^\s+dataSetting: \(input\) => contract\.setDataSetting\(input\),$/m);
-    // Share log: only the logs folder is shareable, through a private FileProvider and the system share sheet; nothing is sent by the app.
-    // Pass D1a adds the export share fallback's own cache folder, emptied before each export (DataTransfer.kt).
+
+
     const manifest = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
     assert.match(manifest, /<provider\s+android:name="androidx\.core\.content\.FileProvider"\s+android:authorities="\$\{applicationId\}\.diagnostics"\s+android:exported="false"\s+android:grantUriPermissions="true">/);
     const paths = readFileSync(resolve(app, 'android/app/src/main/res/xml/diagnostics_paths.xml'), 'utf8');
@@ -3675,24 +3595,24 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.equal(share.match(/startActivity\(/g).length, 1);
     assert.match(share, /activity\.startActivity\(Intent\.createChooser\(send, null\)\)/, 'the share sheet from the activity, as RN\'s expo-sharing: the user picks where it goes');
     assert.doesNotMatch(share, /FLAG_ACTIVITY_NEW_TASK|getApplication/, 'never a new task from the application context');
-    // The made file waits as screen state; the Data screen opens the sheet from its own activity, so a rotation keeps it.
+
     assert.match(share, /logToShare = path/);
     for (const word of ['logMissing', 'shareUnavailable']) assert.match(share, new RegExp(`words\\.getString\\("${word}"\\)`), `RN's ${word} toast, core's words`);
     assert.match(settingsModelKt, /fun data\(edit: JSONObject\) = menu\.command\("dataSetting", JSONObject\(\)\.put\("edit", edit\)\)/);
-    // The Data screen draws core's view: the switch sends core's edit; Share and Clear show only when core sends them.
+
     const settingsUiKt = source('SettingsScreen.kt');
     const data = code(settingsUiKt.slice(settingsUiKt.indexOf('private fun DataSettings('), settingsUiKt.indexOf('private fun ActionRow(')));
-    // The Debug logging switch takes ToggleRow's default: SettingToggleRow's pair, which RN's switch sets itself (checked below).
+
     assert.match(data, /ToggleRow\(model, diagnostics\.getJSONObject\("debugLogging"\), true\) \{ settings\.data\(it\) \}/);
     assert.match(data, /diagnostics\.optJSONObject\("shareLog"\)\?\.let/);
     assert.match(data, /val activity = LocalActivity\.current\s+LaunchedEffect\(settings\.logToShare\) \{ if \(settings\.logToShare != null\) activity\?\.let\(settings::openShareSheet\) \}/);
     assert.match(data, /diagnostics\.optJSONObject\("clearLog"\)\?\.let/);
     assert.doesNotMatch(data, /\bt\(|"settings\./, 'every word is the view\'s');
-    // Review 2026-09-28. (1) RN draws this heading in tc.text (General's are secondaryText).
+
     const rnDataCard = readFileSync(resolve(app, '../../apps/mobile/components/settings/sync-settings-sections.tsx'), 'utf8');
     assert.match(rnDataCard, /style=\{\[styles\.sectionTitle, \{ color: tc\.text, marginTop: 24 \}\]\}>\{t\('settings\.diagnostics'\)\}/);
     assert.match(data, /SectionTitle\(diagnostics\.getString\("title"\), top = 24, color = c\.text\)/);
-    // (3) Share and Clear touch no app data: they run in every state, as RN's do (a tester needs the log most after a failed save).
+
     assert.match(data, /ActionRow\(share\.getString\("label"\), share\.getString\("description"\), c\.tint, true, "settings-share-log"\)/);
     assert.match(data, /ActionRow\(clear\.getString\("label"\), null, c\.secondaryText, true, "settings-clear-log"\)/);
     const clear = code(settingsModelKt.slice(settingsModelKt.indexOf('fun clearLog()'), settingsModelKt.indexOf('\n    }\n', settingsModelKt.indexOf('fun clearLog()'))));
@@ -3701,66 +3621,63 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.doesNotMatch(body, /perform|background\(/);
     }
     assert.match(model, /internal fun anyTime\(work: \(CoreHost\) -> Unit, failed: \(Throwable\) -> Unit\) \{\s+val runtime = host \?: return/);
-    // (6) A Share answered after the Data screen closed opens nothing on a later visit.
+
     assert.match(share, /screen == "data" && menu\.list == "settings" -> logToShare = path/);
     for (const fn of ['fun reset()', 'fun push(', 'fun back()']) {
         const at = settingsModelKt.indexOf(fn);
         assert.match(settingsModelKt.slice(at, settingsModelKt.indexOf('\n    }\n', at)), /logToShare = null/, `${fn} drops a pending share`);
     }
-    // (5) RN's settingInfo keeps 16dp to its right.
+
     const actionRow = code(settingsUiKt.slice(settingsUiKt.indexOf('private fun ActionRow('), settingsUiKt.indexOf('\n}\n', settingsUiKt.indexOf('private fun ActionRow('))));
     assert.match(actionRow, /Column\(Modifier\.padding\(end = 16\.dp\)\)/);
-    // (2, 7) Kotlin's file: a file core cannot read is moved aside whole; a folder where the log should be is removed, as RN does.
+
     assert.match(logFileKt, /"moveAside" -> \{\s+val aside = File\(file\.parentFile, "\$\{file\.name\}\.unreadable"\)\s+aside\.delete\(\)\s+check\(file\.renameTo\(aside\)\)/);
     assert.match(logFileKt, /if \(file\.isDirectory\) file\.deleteRecursively\(\)\s+file\.createNewFile\(\)/);
     assert.match(logFileKt, /file\.isDirectory -> \{ file\.deleteRecursively\(\); "" \}/);
     assert.match(hostEntry, /moveAside: async \(\) => \{ logFile\('moveAside'\); \},/);
 }
 
-// Every native switch draws RN's Switch on Android (ReactSwitch over AppCompat 1.7.0's SwitchCompat) for the props its RN call
-// site sets. RN multiplies SwitchCompat's opaque track image by trackColor, so the track is that color, solid. Without
-// thumbColor the thumb is AppCompat's (colorAccent on, colorSwitchThumbNormal off, the disabled color when disabled), by the
-// system's night mode. Nothing fades.
+
 {
     const rnSource = (file) => readFileSync(resolve(app, '../../apps/mobile', file), 'utf8');
     const props = (name) => new RegExp(`val ${name} = RnSwitchProps\\(([^\\n]*)\\)\\n`).exec(themeKt)?.[1] ?? '';
-    // SettingToggleRow's default: GTD's switches, and Data's Debug logging, which sets the same pair itself.
+
     const legacy = /LEGACY_SWITCH_TRACK_COLOR = \{ false: '(#\w{6})', true: '(#\w{6})' \}/.exec(rnSource('components/settings/setting-row.tsx'));
     assert.equal(props('settingsSwitch'), `rgb("${legacy[1].toUpperCase()}"), rgb("${legacy[2].toUpperCase()}")`);
     const rnDebug = /<Switch value=\{loggingEnabled\} onValueChange=\{toggleDebugLogging\} ([^/]*)\/>/.exec(rnSource('components/settings/sync-settings-sections.tsx'))?.[1] ?? '';
     assert.equal(rnDebug.trim(), `trackColor={{ false: '${legacy[1]}', true: '${legacy[2]}' }}`, 'RN\'s Debug logging switch sets only SettingToggleRow\'s pair');
     const gtd = rnSource('components/settings/gtd-settings-screen.tsx');
     assert(gtd.includes('<SettingToggleRow') && !/trackColor|thumbColor/.test(gtd), 'RN\'s GTD switches keep SettingToggleRow\'s default');
-    // General's three switches: trackColor { false: secondaryText, true: tint }, no thumbColor.
+
     const general = rnSource('components/settings/general-settings-screen.tsx');
     assert.equal(general.match(/trackColor=\{\{ false: tc\.secondaryText, true: tc\.tint \}\}/g)?.length, 3);
     assert.doesNotMatch(general, /thumbColor/);
     assert.equal(props('generalSwitch'), 'colors.secondaryText, colors.tint');
-    // The capture popup's Add another sets both.
+
     assert.match(rnSource('components/quick-capture-sheet/QuickCaptureSheetBody.tsx'), /thumbColor=\{addAnother \? tc\.tint : tc\.border\}\s+trackColor=\{\{ false: tc\.border, true: `\$\{tc\.tint\}55` \}\}/);
     assert.equal(props('captureSwitch'), 'colors.border, tintTrack, colors.border, colors.tint');
     assert.match(themeKt, /val tintTrack = colors\.tint\.copy\(alpha = 0x55 \/ 255f\)/);
-    // Reference's filter sheet (task-list.tsx).
+
     assert.match(rnSource('components/task-list.tsx'), /trackColor=\{\{ false: themeColors\.border, true: themeColors\.tint \}\}/);
     assert.equal(props('referenceSwitch'), 'colors.border, colors.tint');
-    // AppCompat 1.7.0's thumb: switch_thumb_disabled_material, colorAccent (material_deep_teal_500 / _200), colorSwitchThumbNormal.
+
     assert.match(themeKt, /!enabled -> if \(systemDark\) rgb\("#616161"\) else rgb\("#BDBDBD"\)\s+on -> if \(systemDark\) rgb\("#80CBC4"\) else rgb\("#008577"\)\s+else -> if \(systemDark\) rgb\("#BDBDBD"\) else rgb\("#F1F1F1"\)/);
-    // The drawing: the track solid in RN's color, the thumb RN's or AppCompat's, and no fade.
+
     const graphicAt = captureUi.indexOf('internal fun RnSwitchGraphic(');
     const graphic = code(captureUi.slice(graphicAt, captureUi.indexOf('\n}\n', graphicAt)));
     assert.match(graphic, /background\(if \(on\) props\.trackOn else props\.trackOff\)/);
     assert.match(graphic, /theme\.switchThumbShade\(\(if \(on\) props\.thumbOn else props\.thumbOff\) \?: theme\.switchThumb\(on, enabled, isSystemInDarkTheme\(\)\)\)/);
-    // SwitchCompat's thumb image is #FAFAFA (AppCompat 1.7.0's abc_btn_switch_to_on_mtrl), multiplied by the thumb color.
+
     assert.match(themeKt, /private const val THUMB_IMAGE = 250f \/ 255f/);
     assert.match(themeKt, /Color\(red = color\.red \* THUMB_IMAGE, green = color\.green \* THUMB_IMAGE, blue = color\.blue \* THUMB_IMAGE, alpha = color\.alpha\)/);
     const rnSwitch = code(captureUi.slice(captureUi.indexOf('internal fun RnSwitch('), graphicAt));
     assert.doesNotMatch(rnSwitch + graphic, /fade\(|alpha/, 'RN never fades a disabled switch');
-    // RN's SwitchCompat as measured on the S23 (3x, parity pairs popup-another and popup-empty): a 140x81px view, a 71px x 42px
-    // track, a 60px thumb whose center moves 59px.
+
+
     assert.match(graphic, /Box\(Modifier\.size\(46\.67\.dp, 27\.dp\), contentAlignment = Alignment\.Center\)/);
     assert.match(graphic, /Box\(Modifier\.size\(24\.dp, 14\.dp\)/);
     assert.match(graphic, /offset\(x = if \(on\) 10\.dp else \(-10\)\.dp\)\.size\(20\.dp\)/);
-    // Each call site passes its RN props: General's three, the capture popup, Reference's sheet; GTD and Data take the default.
+
     const settingsUiKt = code(source('SettingsScreen.kt'));
     assert.equal(settingsUiKt.match(/theme\.generalSwitch/g)?.length, 3);
     assert.match(settingsUiKt, /props: RnSwitchProps = LocalTheme\.current\.settingsSwitch/);
@@ -3769,8 +3686,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(code(menuUi), /fun RnSwitch\(/, 'one switch drawing');
 }
 
-// RN dims the capture popup's Save and Save and edit to half, the whole button, and makes them inert while the text is
-// blank. The fade is a layer over the whole pill, so it comes before the pill's background and border, not after them.
+
 {
     const rnSheet = readFileSync(resolve(app, '../../apps/mobile/components/quick-capture-sheet/QuickCaptureSheetBody.tsx'), 'utf8');
     assert.equal(rnSheet.match(/opacity: value\.trim\(\) && !saving \? 1 : 0\.5/g)?.length, 2);
@@ -3781,7 +3697,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(readFileSync(resolve(app, '../../packages/core/src/quick-capture-model.ts'), 'utf8'), /canSave: Boolean\(text\.trim\(\)\)/);
 }
 
-// RN's settingRow is alignItems 'flex-start': a row's switch, chevron or field sits at the top beside its label, not centered.
+
 {
     const rnStyles = readFileSync(resolve(app, '../../apps/mobile/components/settings/settings.styles.ts'), 'utf8');
     assert.match(rnStyles, /settingRow: \{[^}]*alignItems: 'flex-start',/);
@@ -3790,8 +3706,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(row, /\.padding\(16\.dp\),\s+verticalAlignment = Alignment\.Top\)/, 'SettingRow aligns its trailing control to the top, as RN');
 }
 
-// A fade is a layer over what comes after it in a modifier chain. A fade after a background or border leaves them at full
-// strength (the capture popup's Save stayed full blue), while RN's opacity dims the whole button. Every fade comes first.
+
 {
     const pilot = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
     const blank = (text) => text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (comment) => comment.replace(/[^\n]/g, ' '));
@@ -3799,7 +3714,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     for (const name of readdirSync(pilot).filter((file) => file.endsWith('.kt'))) {
         const text = blank(readFileSync(resolve(pilot, name), 'utf8'));
         for (const match of text.matchAll(/\.fade\(/g)) {
-            // Walk back to the start of this chain: an open bracket, or a comma, `=` or `;` outside brackets.
+
             let depth = 0;
             let at = match.index;
             while (--at >= 0) {
@@ -3814,10 +3729,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.deepEqual(late, [], `a fade after a background or border: ${late.join(', ')}`);
 }
 
-// The capture screen (pass B1b): RN's capture-modal.tsx on core's capture screen contract (native-host-contract-capture-modal.ts).
-// Links, shares, assistant notes and capture-quick open it with the route params core's entry answer carries (a link's tags and
-// project stay the screen's props); the + button keeps the popup, as RN. Its open, edits and Cancel are Menu reads; Save and
-// Create tasks are journaled task commands, each request on disk before its call and sent again exactly after process death.
+
 {
     const modalKt = captureModalModel;
     const entryKt = source('EntryPoints.kt');
@@ -3831,74 +3743,73 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.match(modalKt, new RegExp(`runtime\\.${call}\\(request\\)`));
     }
     assert.match(hostEntry, /entry\.captureModal \? 'captureModal'/, 'the entry-point line says the capture screen opened');
-    // The entry's screen opens in the same perform as core's answer, on the answer's own params; an open screen holds entries back.
+
     assert.match(entryKt, /reply\.optJSONObject\("captureModal"\)\?\.let \{ modal ->\s+runtime\.menuRead\("captureModalOpen", JSONObject\(\)\.put\("params", modal\.getJSONObject\("params"\)\)\.toString\(\)\)/);
     assert.match(entryKt, /reply\.optJSONObject\("captureModal"\)\?\.let \{ captureModal\.opened\(it\.getJSONObject\("params"\), view \?: return\) \}/);
-    // Save and Create tasks: the exact request on disk before the call; a retry reuses it; a refusal frees the capture UUIDs.
+
     assert.match(modalKt, /private fun send\(action: FailedAction\) = shell\.perform\(action\) \{ runtime ->/);
     assert.equal(code(modalKt).match(/keep\(current\.copy\(pending = action, [^\n]*\)\)\s+send\(action\)/g)?.length, 2, 'Save and Create tasks persist their request first');
-    // While a request is owed, Save and Create tasks send that exact request again, whichever it was.
+
     assert.equal(code(modalKt).match(/val action = current\.pending \?: FailedAction\(/g)?.length, 2, 'a retry reuses the pending request');
-    // A failed save closes the several-lines question, as RN's does; the card shows the failure, and the banner's Try again the retry.
+
     assert.match(modalKt, /keep\(if \(refused\) current\.copy\(pending = null, captureId = UUID\.randomUUID\(\)\.toString\(\), confirm = null, lineIds = emptyList\(\)\) else current\.copy\(confirm = null\)\)/);
     assert.match(modalKt, /shell\.acknowledged\(action\)/);
     assert.match(modalKt, /val refused = UPDATE_REFUSALS\.any \{ failure\.message\?\.startsWith\(it\) == true \}/);
-    // ACTION_FAILED: core wrote no task and the journal dropped the entry, so, as RN, the card shows the failure and the next Save
-    // is a fresh attempt (as MenuModel's LANDLESS); nothing is owed.
+
+
     assert.match(modalKt, /if \(failure\.message\?\.startsWith\("ACTION_FAILED"\) == true\) \{\s+shell\.acknowledged\(action\)\s+shell\.ui \{ failed\(refused = true\) \}\s+return@perform\s+\}/);
-    // Cancel (and Back) stay usable while a save is owed: the screen closes, and the exact retry stays owed on the tabs' banner
-    // (the journal replays it at the next boot anyway, so it is never dropped).
+
+
     assert.match(modalKt, /if \(shell\.failedAction != null\) \{ keep\(null\); inFlight = null; return \}/);
     assert.match(captureModalUi, /control\(actions\.getString\("cancel"\), "capture-modal-cancel", !model\.busy\)/);
     assert.match(captureModalUi, /BackHandler \{\s+if \(model\.busy\) return@BackHandler/);
-    // A refusal wrote nothing, so a refused retry of an owed save settles it: the screen unlocks (as the popup's freeCapture).
+
     assert.match(modalKt, /if \(refused\) shell\.acknowledged\(action\)\s+shell\.ui \{ failed\(refused\) \}/);
-    // The Bundle holds only whether the screen is open; the screen itself is on disk, each write synced and renamed into place.
+
     assert.match(modalKt, /saved\["captureModal"\] = value != null/);
     assert.match(modalKt, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(text\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
     assert.match(model, /val captureModal = CaptureModalModel\(this, saved, File\(app\.noBackupFilesDir, "capture-modal"\)\)/);
-    // After process death the screen comes back (an owed request is sent again first); an owed failure in this process reopens it.
+
     assert.match(model, /menu\.start\(sheet\)\s+captureModal\.resume\(\)/);
-    // A screen restored from disk shows core's view as core reads it now (the data, the language or the minute may have moved).
+
     assert.match(modalKt, /keep\(restored\.copy\(edits = restored\.edits \+ READ\)\)/);
     assert.match(modalKt, /runtime\.menuRead\(if \(read\) "captureModalView" else "captureModalEdit", request\.toString\(\)\)/);
     assert.match(model, /if \(action\.kind in CAPTURE_MODAL_KINDS\) captureModal\.restored\(action\)/);
     assert.match(model, /"captureModal", "captureModalLines" -> captureModal\.retry\(action\)/);
-    // Every control sends core's own edit; Kotlin builds only the typed fields' edits.
+
     assert.deepEqual([...new Set([...code(modalKt + captureModalUi).matchAll(/put\("type", "(\w+)"\)/g)].map(([, type]) => type))].sort(), ['setDescription', 'setText']);
     assert.match(captureModalUi, /edit\(help\.getJSONObject\("edit"\)\)/, 'the ? button sends core\'s toggleHelp');
-    // Full screen over every other screen, as RN presents its modal route; a system capture ends behind the previous app.
+
     assert.match(activity, /if \(modal != null && writable\) CaptureModalScreen\(model, modal\)\s+else if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)/);
     assert.match(modalKt, /if \(leave && close\.getBoolean\("returnToPreviousApp"\)\) shell\.leaveApp = true/);
-    // Back pops the screen as RN's Back pops its route: the app stays; Cancel and a save end a system capture behind the previous app.
+
     assert.match(captureModalUi, /if \(modal\.confirm != null\) cancelLines\(\) else cancel\(leave = false\)/);
-    // Edge to edge the window no longer shrinks for the keyboard: the screen lifts its card and buttons above it, as RN's
-    // KeyboardAvoidingView ('height' on Android) does.
+
+
     assert.match(captureModalUi, /Box\(Modifier\.fillMaxSize\(\)\.background\(c\.bg\)\.imePadding\(\)\.semantics \{ testTagsAsResourceId = true \}\.testTag\("capture-modal"\)\)/);
     assert.match(readFileSync(resolve(app, '../mobile/app/capture-modal.tsx'), 'utf8'), /behavior=\{Platform\.OS === 'ios' \? 'padding' : 'height'\}/);
-    // Save & edit, on the capture screen and the popup, goes where RN's openTaskScreen goes: the task's project on RN's Projects
-    // screen, else Focus (outlined), and the task's editor opens there on its Task tab.
+
+
     assert.match(model, /internal fun openSavedTask\(taskId: String, projectId: String\?\) = menu\.whenIdle \{\s+closeSearch\(\)\s+menu\.closeSheet\(\)\s+if \(projectId != null\) openFromSearch\(Screen\.Projects, projectId\) else \{ menu\.toTabs\(\); show\(Screen\.Focus\); highlight\(taskId\) \}\s+menu\.whenIdle \{ openEditor\(taskId, "task"\) \}/);
     assert.match(model, /"open" -> \{\s+keepCapture\(null\)\s+openSavedTask\(reply\.getString\("taskId"\), reply\.menuText\("projectId"\)\)/);
     assert.match(modalKt, /shell\.openSavedTask\(reply\.getString\("taskId"\), reply\.menuText\("projectId"\)\)/);
     assert.doesNotMatch(code(model + modalKt), /openEditor\(id, "task"\)/, 'Save & edit never opens the editor over the screen it was on');
-    // The project next-action prompt's Save & edit is RN's ProjectNextActionEditor: over the screen the row was on, once idle.
+
     assert.match(model, /openEditor = \{ taskId -> menu\.whenIdle \{ openEditor\(taskId, "task"\) \} \}/);
-    // An owed failure (the screen's own save's, or any other command's) shows the app's failure banner with its exact retry, as
-    // every screen's does: without it every control stayed disabled with no Try again.
+
+
     assert.match(captureModalUi, /if \(model\.failedAction != null\) FailureBanner\(model\.error\.orEmpty\(\)\) \{ OwedRetry\(model\) \}/);
-    // RN's multi-line text keeps the font's own line pitch (font padding adds space only above the first line and below the last):
-    // the syntax help, the title and the description lines match RN's on the S23 with no line height set (parity pair modal-help).
+
+
     assert.match(captureModalUi, /view\.getJSONObject\("help"\)\.text\("text"\)\?\.let \{ Text\(it, style = rnText\(12, 400\), color = c\.secondaryText\) \}/);
-    // RN's Save is its fixed blue (capture-modal.tsx styles.save), in every theme.
+
     assert.match(themeKt, /val captureSave = rgb\("#3B82F6"\)/);
     assert.match(captureModalUi, /background\(theme\.captureSave\)/);
 }
 
-// Pass B2 (E2 native): CoreWork, the queue's ports, RN's capture intent and context automation receivers under RN's class names,
-// RN's capture intent Kotlin compiled as it is, and GTD › Capture's automation card.
+
 {
-    // The main manifest and the debug build's widget overlay (RN's plugins' entries, scripts/build-widgets.mjs; pass W1).
+
     const { buildManifest } = await import('./build-widgets.mjs');
     const manifest = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8') + buildManifest('tech.dongdongbh.mindwtr.nativeclient.dev', 'Mindwtr Native Dev');
     const gradle = readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8');
@@ -3906,9 +3817,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const rnWidget = (name) => readFileSync(resolve(app, '../mobile/modules/android-widget/android/src/main/java/tech/dongdongbh/mindwtr/androidwidget', name), 'utf8');
     const nativeKt = (path) => readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr', path), 'utf8');
     const widgetKt = (name) => readFileSync(resolve(app, 'android/widget/src/main/java/tech/dongdongbh/mindwtr/androidwidget', name), 'utf8');
-    // Exported: RN's activity alias, RN's two automation receivers (plugins/android-widget.js, android-manifest-fixes.js), the
-    // reminders' reschedule receiver in place of RN's exported AlarmBootReceiver (patch-alarm-notification-gradle.js), and RN's
-    // widget components (pass W1's block lists them), nothing else.
+
+
     const exported = [...manifest.matchAll(/<(?:activity-alias|activity|receiver|service|provider)\s[^>]*?android:name="([^"]+)"[^>]*?android:exported="true"/g)].map((m) => m[1]).sort();
     assert.deepEqual(exported.filter((name) => !/Widget|TasksWidget|CaptureTileService/.test(name)), ['${applicationId}.MainActivity', '.ReminderRescheduleReceiver', 'tech.dongdongbh.mindwtr.androidwidget.CaptureIntentReceiver',
         'tech.dongdongbh.mindwtr.contextautomation.ContextAutomationReceiver'], 'only RN\'s exported components');
@@ -3929,8 +3839,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(contextFilters[0], /<data /);
     assert.match(contextFilters[1], /<data android:scheme="mindwtr" \/>/);
     assert.match(manifest, /<uses-permission android:name="android\.permission\.POST_NOTIFICATIONS" \/>/);
-    // RN's capture intent Kotlin, its receiver included, compiled as it is in the widget module (pass W1), with RN's tests. No
-    // native copy of an RN file: a queued capture wakes CoreWork through the headless task's stand-in, which watches the queue.
+
+
     const allowedExclusions = /val rnExcluded = listOf\("AndroidWidgetModule", "CaptureSyncHeadlessService"\)/;
     assert.match(widgetGradle, allowedExclusions, 'only the Expo bridge and the headless task stay out');
     assert.deepEqual(readdirSync(resolve(app, 'android/widget/src/main/java/tech/dongdongbh/mindwtr/androidwidget')), ['CaptureSyncHeadlessService.kt'], 'the module\'s one native file is the headless task\'s stand-in');
@@ -3939,7 +3849,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(shim, /CaptureIntentReceiver\.queuedHook = queued\?\.let \{ \{ context: Context -> start\(context\) \} \}/, 'RN\'s receiver waits for the stored job before its broadcast finishes');
     assert.match(shim, /internal fun queueEvent\(context: Context, event: Int, path: String\?\) \{\s+if \(event and FileObserver\.MOVED_TO != 0 && path\?\.endsWith\("\.json"\) == true\) start\(context\)\s+\}/);
     assert(!existsSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/androidwidget')), 'RN\'s CheckoffStore.kt is compiled in; no native copy is left');
-    // The context receiver reads the intent as RN's does; where RN starts its headless task, CoreWork asks core.
+
     const rnContext = readFileSync(resolve(app, '../mobile/modules/context-automation/android/src/main/java/tech/dongdongbh/mindwtr/contextautomation/ContextAutomationReceiver.kt'), 'utf8');
     const nativeContext = nativeKt('contextautomation/ContextAutomationReceiver.kt');
     const payload = (text) => text.slice(text.indexOf('private data class ContextAutomationPayload('));
@@ -3949,20 +3859,20 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.equal(value(nativeContext), value(rnContext));
     }
     assert.match(nativeContext, /val payload = runCatching \{ ContextAutomationPayload\.fromIntent\(intent\) \}\.getOrNull\(\) \?: return\s+val outcome = queueTrigger\(payload\.action, payload\.context\) \{ CoreWork\.enqueue\(context\.applicationContext, CoreJob\.CONTEXT, it\) \}/);
-    // A trigger is bounded as core bounds it before WorkManager sees it (its Data.build() throws past 10,240 bytes), and an
-    // enqueue that throws drops it (ContextTriggerTest).
+
+
     const coreTextBound = /const isOptionalText = \(value: unknown\) => value === undefined \|\| value === null \|\| isText\(value, (\d+)\);/
         .exec(readFileSync(resolve(app, '../../packages/core/src/native-host-contract-capture-ingest.ts'), 'utf8'))[1];
     assert.equal(/internal const val MAX_TRIGGER_TEXT = (\d+)/.exec(nativeContext)[1], coreTextBound, 'the trigger bound is core\'s');
     assert.match(nativeContext, /if \(context\.length > MAX_TRIGGER_TEXT\) return "too-long"\s+return if \(runCatching \{ enqueue\(mapOf\("action" to action, "context" to context\)\) \}\.isSuccess\) "queued" else "failed"/);
-    // Every job recovers first, as the boot orders it: an owed journal replay, then the drain; a job runs only on finished state.
+
     const coreJob = source('CoreJob.kt');
     assert.match(coreJob, /val host = boot\(\)\s+if \(!host\.recover\(\) \|\| !host\.drain\(\)\) Outcome\.Retry/);
     assert.match(owner, /fun recover\(runtime: CoreHost\): Boolean \{\s+val owed = failure \?: return true\s+if \(owed\.action\.kind != "journal"\) return false\s+runtime\.replayJournal\(\)\.owed\?\.let \{ return false \}\s+clearFailure\(owed\.action\)\s+return true\s+\}/);
     assert.match(source('CoreWork.kt'), /override fun recover\(\) = ProcessCoreHost\.recover\(host\)\s+override fun drain\(\) = ProcessCoreHost\.recovered\(app, host\)/, 'CoreWork drains through the start order');
-    // A drain's owed save (an item stored but not saved or recorded) holds a screen's newer edits back until its replay.
+
     assert.match(model, /if \(failedAction == null\) ProcessCoreHost\.failure\?\.takeIf \{ it\.action\.kind == "journal" \}\?\.let \{ owed ->\s+failedAction = owed\.action\s+error = owed\.error\s+\}\s+if \(busy \|\| runtime == null/);
-    // CoreWork: WorkManager at RN's version, in the app's process; expedited on Android 12+; a debug build's delay only.
+
     const rnWork = /androidx\.work:work-runtime(?:-ktx)?:([\d.]+)/.exec(readFileSync(resolve(app, '../../node_modules/expo-background-task/android/build.gradle'), 'utf8'))[1];
     assert.match(gradle, new RegExp(`implementation\\("androidx\\.work:work-runtime:${rnWork.replace(/\./g, '\\.')}"\\)`), 'WorkManager at RN\'s version');
     const coreWork = source('CoreWork.kt');
@@ -3971,25 +3881,23 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(coreWork, /fun enqueue\(context: Context, job: String, input: Map<String, String> = emptyMap\(\)\): Operation = enqueue\(context, job, input, ExistingWorkPolicy\.REPLACE\)/, 'a new drain request never waits behind a back-off');
     assert.match(coreWork, /work\.enqueueUniqueWork\(INGEST_WORK, policy, request\)/);
     assert.match(coreWork, /val host = ProcessCoreHost\.get\(app, language\)/, 'the job runs on this process\'s one host');
-    // The queue's paths: RN's writer's folder is core's.
+
     const pendingTs = readFileSync(resolve(app, '../../packages/core/src/pending-captures.ts'), 'utf8');
     assert.equal(/const val DIRECTORY = "([^"]+)"/.exec(rnWidget('PendingCaptureWriter.kt'))[1], /export const PENDING_CAPTURES_DIRECTORY = '([^']+)'/.exec(pendingTs)[1]);
     assert.match(hostEntry, /const QUEUE = `files\/\$\{PENDING_CAPTURES_DIRECTORY\}`;/);
     assert.match(hostEntry, /ingest\(requestId: string\): string \{\s+return submit\(async \(\) => taskResult\('ingest', await contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)\)\);/);
-    // GTD › Capture: core gets only whether the stored config is on; the token stays in Kotlin.
+
     const settingsModel = source('SettingsModel.kt');
     assert.match(settingsModel, /input\.put\("captureIntent", JSONObject\(\)\.put\("enabled", it\.getOrNull\(\)\?\.enabled \?: JSONObject\.NULL\)\)/);
     assert.doesNotMatch(settingsModel + hostEntry, /put\("token"|captureToken[^\n]*menuRead|menuCommand[^\n]*token/, 'the token never goes to core');
     assert.match(settingsModel, /CaptureIntentConfigStore\.setEnabled\(shell\.getApplication<Application>\(\), enabled\)/);
-    // No Kotlin policy in the runner's files.
+
     for (const [name, text] of [['CoreJob.kt', source('CoreJob.kt')], ['CoreWork.kt', coreWork], ['HostFiles.kt', nativeKt('pilot/core/HostFiles.kt')]]) {
         assert.doesNotMatch(code(text), /\.(sort\w*|sorted\w*|groupBy|reversed|distinct\w*|partition)\b/, `${name}: no Kotlin ordering`);
     }
 }
 
-// Pass W1 (widgets native): the engine's widget publisher on real core. The payload Kotlin receives is core's own Android
-// publication for the store, the device's inputs and the device language; an unchanged payload is not sent again; nothing is
-// sent before the boot's validated load; the Focus screen's filter reaches the widget with core's null sortOrder as RN's absent one.
+
 {
     const harness = await build({
         stdin: { contents: `
@@ -4024,12 +3932,12 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.equal(widgets.publish(), false, 'nothing is published before the validated load');
         ready = true;
         assert.equal(widgets.publish(), true);
-        // The device language (zh-CN) wins over 'system', as RN's resolveWidgetLanguage(saved, setting, getSystemDefaultLanguage()).
+
         const expected = (filter) => JSON.stringify(core.buildAndroidWidgetPublication(data, 'zh', { ...inputs, focusFilter: filter }));
         assert.equal(published[0], expected(core.getFocusWidgetFilter()), 'the payload is core\'s publication with the device\'s inputs');
         assert.equal(widgets.publish(), false, 'an unchanged payload is not sent again');
         assert.equal(published.length, 1);
-        // Kotlin stores and draws off the engine thread; one that failed (or never finished) is sent again, the same payload too.
+
         inputs.stale = true;
         assert.equal(widgets.publish(), true, 'a publication that did not reach the widgets is sent again');
         assert.equal(published[1], published[0]);
@@ -4047,9 +3955,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         widgets.focusFilter(undefined);
         core.useTaskStore.setState({ lastDataChangeAt: 2 });
         assert.deepEqual(timers, [1000, 1000], 'a store change republishes after the delay');
-        // RN's storage widget refresh (storage-adapter.ts, #766: a redraw costs seconds): while the app is in front, a store change
-        // republishes at most once per five minutes; leaving the app publishes at once (Kotlin's background refresh). The Focus
-        // screen's filter and the Focus start-date setting publish at once, as RN's direct calls do. Away from the front: one second.
+
+
         active = true;
         const sent = published.length;
         core.useTaskStore.setState({ _allTasks: [...data.tasks, task('d', 'Delta', { status: 'inbox' })], lastDataChangeAt: 3 });
@@ -4070,13 +3977,12 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     } finally {
         globalThis.setTimeout = realSetTimeout;
     }
-    // RN's widget components from RN's plugins (build-widgets.mjs): the four providers with their info XML, the dialog, the
-    // configure, tap and peek activities, the list service, the capture receiver and the tile, under RN's names, in the app's one
-    // process. Exported: exactly RN's, plus the debug build's two entries for the device check.
+
+
     const { buildManifest, buildTileSource, TILE_PACKAGE } = await import('./build-widgets.mjs');
-    // The debug build's entries: one more manifest of each variant, so the debug build type's own manifest stays.
+
     const overlay = buildManifest('tech.dongdongbh.mindwtr.nativeclient.dev', 'Mindwtr Native Dev');
-    // RN's widget components (buildWidgets) and its shortcuts' target activity (buildShortcuts), both registered for every variant.
+
     assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /onVariants \{ variant ->\s+listOf\("widgets", "shortcuts"\)\.forEach \{ set ->\s+variant\.sources\.manifests\?\.addStaticManifestFile\(layout\.buildDirectory\.file\("generated\/\$set\/\$\{variant\.buildType\}\/AndroidManifest\.xml"\)/);
     const { buildShortcutsManifest } = await import('./build-shortcuts.mjs');
     const merged = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8') + overlay + buildShortcutsManifest();
@@ -4099,7 +4005,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.equal(TILE_PACKAGE, 'tech.dongdongbh.mindwtr', 'the tile keeps RN\'s release class name');
     assert.equal(buildTileSource().replace('import tech.dongdongbh.mindwtr.pilot.R\n', 'import tech.dongdongbh.mindwtr.R\n'),
         (await import('node:module')).createRequire(import.meta.url)('../../mobile/plugins/android-quick-settings-tile.js').__testables.buildCaptureTileServiceSource(TILE_PACKAGE), 'the tile is RN\'s but for its R');
-    // RN's check-off request codes and sweep action stay in RN's files, which compile as they are.
+
     const rnWidgetKt = (name) => readFileSync(resolve(app, '../mobile/modules/android-widget/android/src/main/java/tech/dongdongbh/mindwtr/androidwidget', name), 'utf8');
     assert.match(rnWidgetKt('WidgetRenderer.kt'), /REQUEST_CAPTURE = 4612[\s\S]*REQUEST_ROW = 4613/);
     assert.match(rnWidgetKt('CheckoffStore.kt'), /ACTION_SWEEP = "tech\.dongdongbh\.mindwtr\.androidwidget\.CHECKOFF_SWEEP"[\s\S]*REQUEST_SWEEP = 4614/);
@@ -4107,32 +4013,30 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(widgetGradle, /namespace = "tech\.dongdongbh\.mindwtr\.androidwidget"/, 'RN\'s R and namespace');
     assert.match(widgetGradle, /val rnExcluded = listOf\("AndroidWidgetModule", "CaptureSyncHeadlessService"\)/, 'only the Expo bridge and the headless task stay out');
     assert.equal(realpathSync(resolve(app, 'android/widget/src/main/res')), realpathSync(resolve(app, '../mobile/modules/android-widget/android/src/main/res')), 'the module\'s resources are RN\'s');
-    // Capture and selection refresh each await their durable CoreWork enqueue before any component runs.
+
     assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MindwtrApplication.kt'), 'utf8'),
         /CaptureSyncHeadlessService\.install\(this,\s+queued = \{ context -> CoreWork\.enqueue\(context, CoreJob\.INGEST\)\.result\.get\(DURABLE_WAIT_SECONDS, TimeUnit\.SECONDS\) \},\s+widgetRefresh = \{ context -> CoreWork\.enqueue\(context, CoreJob\.WIDGET_REFRESH\)\.result\.get\(DURABLE_WAIT_SECONDS, TimeUnit\.SECONDS\) \}\)/,
         'capture and widget-selection wakes return once WorkManager stored their distinct jobs');
     assert.match(readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8'), /android:name="\.MindwtrApplication"/);
-    // The Android bridge's two calls are guarded in CoreHost and published off the engine thread (HostWidgets).
+
     const coreHostKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
     assert.match(coreHostKt, /bridge\.setProperty\("widgetInputs", guarded \{ _ -> widgets\.inputs\(\) \}\)/);
     assert.match(coreHostKt, /bridge\.setProperty\("widgetPublish", guarded \{ args -> widgets\.publish\(args\[0\] as String\); null \}\)/);
     assert.match(coreHostKt, /bridge\.setProperty\("widgetAppState", guarded \{ _ -> widgets\.appState\(\) \}\)/, 'the publisher reads whether the app is in front');
-    // A boot publishes once it finished (its load, replay and drain), whatever the store's own changes did meanwhile: one that
-    // came before the validated load was not sent. It waits with the boot's sync start for the first screen's content (startup
-    // pass). Resume publishes through the same call, off the engine's callers.
+
+
     const ownerKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8');
     assert.match(ownerKt, /private fun refreshWidgets\(runtime: CoreHost, leave: Boolean = false\) = widgetThread\.execute \{\s+runCatching \{ runtime\.refreshWidgets\(leave\) \}\.onFailure \{ Log\.w\(CoreHost\.TAG, "Native Android widget refresh failed", it\) \}\s+\}/);
-    // Coming to the front publishes (RN's resume refresh); leaving flushes only a change still waiting (RN's flush on leaving:
-    // host-widgets.ts flush builds nothing otherwise, host-widgets.test.ts). Coming to the front, it
-    // waits for the screen's first content (startDeferredSync runs it) or the fallback, so a warm start draws first.
+
+
     assert.match(ownerKt, /if \(!changed\) return\s+(?:\/\/[^\n]*\s+)*boot\?\.takeIf \{ it\.isDone \}\?\.let \{ task -> runCatching \{ task\.get\(\) \}\.getOrNull\(\) \}\?\.let \{ runtime ->\s+if \(state == "active"\) \{\s+(?:\/\/[^\n]*\s+)*val generation = deferredWidgets\.hold\(runtime\)\s+widgetThread\.schedule\(\{ deferredWidgets\.takeIf\(generation\)\?\.let \{ publishHeldWidgets\(it, "resume-fallback"\) \} \},\s+WIDGET_FALLBACK_MS, TimeUnit\.MILLISECONDS\)\s+\} else \{\s+(?:\/\/[^\n]*\s+)*refreshWidgets\(runtime, leave = !deferredWidgets\.leave\(\)\)\s+\}\s+\}/, 'a resume\'s fallback publishes only its own hold (HeldPublicationTest)');
-    // Kotlin says when a publication did not reach the widgets (its store or redraw failed), so the publisher sends it again.
+
     const hostWidgetsKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostWidgets.kt'), 'utf8');
     assert.match(hostWidgetsKt, /\.put\("stale", stale\)/);
     assert.match(hostWidgetsKt, /check\(WidgetPayloadStore\.write\(app, payload\)\) \{ "[^"]+" \}/, 'a payload that did not reach the disk keeps the publication stale');
     assert.match(hostWidgetsKt, /\}\.onSuccess \{ stale = false \}\.onFailure \{\s+stale = true/);
-    // The upgrade check allows the native app's one other file write only as RN's payload store: before, no file or exactly RN's
-    // one `payload` key; after, exactly that key. Any other key added, changed type or removed fails.
+
+
     const { isRnPayloadPrefsWrite, widgetPrefs } = await import('./widget-payload.mjs');
     const prefs = (...entries) => widgetPrefs(`<map>${entries.join('')}</map>`);
     const payloadEntry = '<string name="payload">{}</string>';
@@ -4837,11 +4741,8 @@ export function setSha256HexProvider() {
   globalThis.localShaInstallCount++;
 }
 `;
-// host-sync.ts's and host-reminders.ts's core imports: bound only on a host with the key-value or the alarm bridges, which the
-// stand-in bridge below lacks, so they are bundled and never run here. Each one the fake does not define throws if anything calls it.
-// host-attachments.ts's too: host-sync.ts binds them on the same host only. host-widgets.ts's are bound only on a host with RN's
-// widget module (Android), which the stand-in bridge lacks too. host-calendar.ts's are bound only on a host with the device
-// calendar bridge (C3), which it lacks as well. host-gmail.ts's need Kotlin's Gmail calls (G3), which it lacks too.
+
+
 const hostSyncTs = readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-attachments.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-reminders.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-widgets.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8')
@@ -4849,9 +4750,8 @@ const hostSyncTs = readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8') + r
 const syncOnly = [...new Set([...hostSyncTs.matchAll(/^import \{([\s\S]*?)\} from '@mindwtr\/core';/gm)].flatMap((m) => [...m[1].matchAll(/^\s+(\w+),$/gm)].map((n) => n[1])))]
     .filter((name) => !new RegExp(`export (?:async )?(?:function|const|class) ${name}\\b|export \\{[^}]*\\b${name}\\b`).test(fakeCore));
 assert(syncOnly.includes('createMobileSyncService') && syncOnly.includes('createMobileSyncTriggers'), 'host-sync.ts\'s core imports parsed');
-// S4b final pass: core's partly-encrypted rule runs only when the host gives the sync service the location probe; without it a
-// device with encryption off would upload plain attachments beside ciphertext. The card's "Check this location again" needs recheck.
-// The cycle names its own folder (an activation's candidate is not the stored one), passed through as it is.
+
+
 assert(/probeLocationCiphertext: \(target\) => transitions\.probeSyncLocationCiphertext\(target\),/.test(hostSyncTs), 'the native sync service asks whether the location holds ciphertext');
 assert(/recheck: async \(\) => \{\s*const outcome = await transitions\.recheckPartlyEncryptedLocation\(\);/.test(hostSyncTs), 'the native encryption card rechecks a partly encrypted location');
 const fakeCoreWithSync = `${fakeCore}\n${syncOnly.map((name) => `export const ${name} = () => { throw new Error('${name}: sync is not bound in the gates'); };`).join('\n')}\n`;
@@ -4874,7 +4774,7 @@ const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, c
         events: [], planInputs: [], plan: null, sqliteHasData: true, saveError: null, afterSave: null, lastLoaded: null, commitResult: null,
         createCount: 0, completeCount: 0, persistenceFailure: null, captureInputs: [],
         snapshotResult: { ok: true, value: { fileName: 'data.2026-09-24T10-00-00.000.snapshot.json', contents: '{}' } }, editorInputs: [], updateInputs: [], focusInputs: [],
-        // host-polyfills.js gives QuickJS these; the harness runs host-entry alone.
+
         AbortController, setTimeout, clearTimeout, TextEncoder, URL,
         languageInputs: [], projectInputs: [], settings: undefined, persistenceStatus: null, aiInputs: [],
         settingsReadFailure: false, afterLanguage: null, newInputs: [], menuInputs: [],
@@ -4909,7 +4809,7 @@ const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, c
                 }
                 if (sql === 'SELECT COUNT(*) AS n FROM settings WHERE id = 1')
                     return JSON.stringify([{ n: state.fakeData.settings ? 1 : 0 }]);
-                // 'auto': the tasks count matches the load, as a real database would.
+
                 if (sql.includes('COUNT(*)') && sql.includes('tasks')) {
                     return JSON.stringify([{ n: taskCount === 'auto' ? state.lastLoaded.tasks.length : taskCount }]);
                 }
@@ -4919,7 +4819,7 @@ const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, c
             },
             sqlRun() {}, sqlExec() {},
             rnStateCommit(change) { state.events.push(`commit:${change}`); return state.commitResult; },
-            // Kotlin's DiagnosticsLogFile on one in-memory file (logText null: no file).
+
             logFile(operation, text) {
                 state.logOps.push(operation);
                 if (state.logFailure) return `!MindwtrNativeError:${state.logFailure}`;
@@ -4936,7 +4836,7 @@ const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, c
                     default: throw new Error(`unknown log operation ${operation}`);
                 }
             },
-            // Kotlin's HostFiles and RnKeyValue: a marked string is a Kotlin failure.
+
             fileList(path) { state.fileCalls.push(`list ${path}`); return state.queueFiles ? JSON.stringify(Object.keys(state.queueFiles)) : 'null'; },
             fileRead(path) { state.fileCalls.push(`read ${path}`); return state.queueFiles[path.split('/').pop()]; },
             fileDelete(path) { state.fileCalls.push(`delete ${path}`); return state.deleteResult; },
@@ -4956,8 +4856,8 @@ const poll = async (state, id) => {
     await new Promise((resolveTick) => setImmediate(resolveTick));
     return JSON.parse(state.MindwtrHost.poll(id));
 };
-// Task587: production host dispatch and the real shared projection. Storage is
-// a stand-in here; NativeAISettingsProjectionTests owns actual JSC/SQLite proof.
+
+
 {
     const read = (state, input = '{}', owner = () => '') => poll(state, state.MindwtrHost.iosAISettingsProjection(input, owner));
     const ready = async (settings = {}) => {
@@ -5038,8 +4938,8 @@ const poll = async (state, id) => {
     assert.match(swift, /\n    public func readAISettingsProjection\(\) async throws -> NativeAISettingsProjection/);
     console.log('Task587: private AI projection routing, bounds, saved baseline, authority, secret omission and no-write gates passed; Apple execution pending');
 }
-// Task590: invoke the production private routes. Core write/SQLite semantics have
-// their own actual-module tests; these stand-ins prove dispatch and argument wiring.
+
+
 {
     const state = makeState(0, [], 'ios');
     assert.equal((await poll(state, state.MindwtrHost.boot())).ok, true);
@@ -5079,7 +4979,7 @@ const poll = async (state, id) => {
     const swift = readFileSync(resolve(app, '../ios-native/Sources/MindwtrNativeCore/CoreHost.swift'), 'utf8');
     assert.match(swift, /guard !Engine\.aiRequestTimeoutMethods\.contains\(method\)/);
     assert.match(swift, /func setAIRequestTimeout\(_ request: NativeAIRequestTimeoutRequest,/);
-    // Task601 exposes the existing typed timeout facade to App, never raw requests or private fields.
+
     const requireTypedAITimeoutFacade = source => {
         assert.match(source, /public func readAIRequestTimeoutOptions\(\) async throws -> NativeAIRequestTimeoutOptions/);
         assert.match(source, /public func setAIRequestTimeout\(_ request: NativeAIRequestTimeoutRequest,\s*readmission:/);
@@ -5117,8 +5017,8 @@ const poll = async (state, id) => {
     }
     console.log('Task590: production private timeout invocation, exact arguments, owner refusal and receipt registration passed; Apple execution pending');
 }
-// Task678: production private reasoning routes; shared real-module/SQLite
-// tests own state semantics. This VM proves wiring, owner fences and receipt scope.
+
+
 {
     const ready = async (platform = 'ios') => {
         const state = makeState(0, [], platform);
@@ -5209,8 +5109,8 @@ const poll = async (state, id) => {
     assert.equal(count, 1, 'generic route cannot emit marker');
     console.log('Task678: private reasoning routing, saved minimal, choices, bounds, platform/owner/cancellation, receipts and fixed acknowledgment gates passed; Swift/Apple pending');
 }
-// Task698: production private Gemini thinking budget routes; shared real-module/SQLite
-// tests own state semantics. This VM proves wiring, owner fences and receipt scope.
+
+
 {
     const ready = async (platform = 'ios') => {
         const state = makeState(0, [], platform);
@@ -5310,8 +5210,8 @@ const poll = async (state, id) => {
     assert.equal(count, 1, 'generic route cannot emit marker');
     console.log('Task698: private Gemini thinking budget routing, saved custom123, four presets, bounds, platform/owner/cancellation, receipts and fixed acknowledgment gates passed; Swift/Apple pending');
 }
-// Task592: actual private route and real selected-provider helper; device metadata
-// is a native stand-in here. Apple tests own actual Keychain/KV/SQLite evidence.
+
+
 {
     const marker = 'v1.3.5/ios-ai-device-state', sentinel = 'PRIVATE592-SENTINEL';
     const ready = async (settings = {}) => {
@@ -5382,7 +5282,7 @@ const poll = async (state, id) => {
             return JSON.stringify({ consentRecorded: false, secureItem: 'absent', legacyItemPresent: false });
         });
     }
-    // A value-free checkpoint can land before a concurrent retirement; final delivery must still refuse.
+
     const late = await ready(), originalLog = late.__mindwtrNative.logFile;
     let retired = false;
     late.__mindwtrNative.logFile = (operation, text) => {
@@ -5423,9 +5323,8 @@ const poll = async (state, id) => {
     assert.doesNotMatch(selected, /mutate\(|multiGet\(|get\(|current\.values\[Data\("mindwtr-ai-key/);
     console.log('Task592: actual private metadata route, exact DTO/input/mappings, saved identity/refusal and value-free checkpoint gates passed; Apple execution pending');
 }
-// Task502: the production facades forward the original request/envelope and
-// shared full selection once. This VM uses a core stand-in; actual JSC/SQLite
-// native journal/replay proof belongs to NativeTrashBulkRestoreHostTests.
+
+
 {
     const state = makeState(0, [], 'ios');
     const request = { requestId: '0bfaf47b-9fa9-4c53-af66-3c9a8a582278', taskIds: ['t'],
@@ -5459,9 +5358,8 @@ const poll = async (state, id) => {
     assert.equal((await poll(state, state.MindwtrHost.trashItemsRestorePrepare(JSON.stringify({ text: 'x'.repeat(2_000_001) })))).ok, false);
     assert.equal(state.menuInputs.length, before, 'existing completion transport length refusal never reaches core');
 }
-// Task507: the production facades forward the original request/envelope and
-// shared full selection once. This VM uses a core stand-in; actual JSC/SQLite
-// native journal/replay proof belongs to NativeTrashPurgeHostTests.
+
+
 {
     const state = makeState(0, [], 'ios');
     const request = { requestId: '0bfaf47b-9fa9-4c53-af66-3c9a8a582278', taskIds: ['t'],
@@ -5498,8 +5396,8 @@ const poll = async (state, id) => {
     assert.equal((await poll(state, state.MindwtrHost.trashItemsPurgePrepare(JSON.stringify({ text: 'x'.repeat(2_000_001) })))).ok, false);
     assert.equal(state.menuInputs.length, before, 'existing completion transport length refusal never reaches core');
 }
-// Task548: private settings facade keeps the existing saved-state gate and core errors.
-// The stand-in proves transport only; the native tests exercise the actual contract.
+
+
 {
     const state = makeState(0, [], 'ios');
     state.gtdPomodoroResult = { ok: false, error: { code: 'NOT_READY', message: 'core is not ready' } };
@@ -5519,8 +5417,8 @@ const poll = async (state, id) => {
     assert.equal((await poll(state, state.MindwtrHost.gtdPomodoroOptions('{'))).ok, false);
     assert.equal(state.menuInputs.length, count);
 }
-// Task575: production Reminders bridge preparation uses the shared literal factory.
-// This adapter stand-in proves routing/guards, not SQLite or native journal settlement.
+
+
 {
     const source = { version: 1, requestId: '11111111-1111-4111-8111-111111111111',
         list: { id: 'selected-list', sourceId: 'selected-source' },
@@ -5568,9 +5466,8 @@ const poll = async (state, id) => {
     assert.equal((await poll(fresh, fresh.MindwtrHost.appleReminderItemAdmission(claim.value.planJSON))).ok, false);
     assert.equal((await poll(fresh, fresh.MindwtrHost.appleReminderItemCommit(claim.value.planJSON, true))).ok, false);
 }
-// Task520: actual shared pure preparation/validation with the production five
-// private facades. This storage stand-in proves routing/admission only; the
-// receipt suite and pending native tests own real SQLite journal/fault proof.
+
+
 {
     const request = JSON.stringify({ action: 'initialize', requestId: '11111111-1111-4111-8111-111111111111',
         observedAtMs: 1791590400000, localDayKey: '2026-10-10', durations: { focusMinutes: 25, breakMinutes: 5 } });
@@ -5587,7 +5484,7 @@ const poll = async (state, id) => {
     const planJSON = prepared.value.planJSON, plan = JSON.parse(planJSON);
     assert.deepEqual(plan.request, JSON.parse(request)); assert.equal(plan.sessionBefore, null);
     assert.equal(JSON.parse(plan.sessionAfter).session.timerState.isRunning, false);
-    // Saved panel/alarm reads must refuse an external commit, including one during the timer read.
+
     for (const method of ['pomodoroAlarmRead', 'pomodoroPanelRead']) {
         const args = method === 'pomodoroPanelRead' ? [JSON.stringify({ collapsed: false, lastEvent: null })] : [];
         for (const during of [false, true]) {
@@ -5614,7 +5511,7 @@ const poll = async (state, id) => {
         current.pomodoroSession = { raw: plan.sessionAfter, state: JSON.parse(plan.sessionAfter) };
         assert.equal((await poll(current, current.MindwtrHost[method](...args))).ok, true);
     }
-    // Task586: production private facade, pure repeated probes and saved-state authority.
+
     const scope586 = 'tech.test.native:' + 'a'.repeat(64);
     const prepare586 = (owner, granted = true) => poll(owner,
         owner.MindwtrHost.iosPomodoroAlarmPrepare('alarm586', granted, null, scope586, '[]', '[]'));
@@ -5697,7 +5594,7 @@ const poll = async (state, id) => {
     assert.equal(state.pomodoroInputs.length, before, 'countdown/paused observation commits nothing');
     state.pomodoroReadError = true;
     assert.equal((await poll(state, state.MindwtrHost.pomodoroTransitionPrepare(reconcile))).ok, false, 'read failure never means native absence');
-    // R2b: native Android reads the same durable session, and plans its own alarms (iOS's notification turn stays iOS's).
+
     const android = await ready520('android');
     const androidRead = await poll(android, android.MindwtrHost.pomodoroSessionRead());
     assert.equal(androidRead.ok, true, 'native Android reads the durable Pomodoro session');
@@ -5758,8 +5655,7 @@ const poll = async (state, id) => {
     assert.equal((await poll(uncertain, uncertain.MindwtrHost.pomodoroTransitionCommit(prep.value.planJSON, false))).error,
         'Pomodoro transition could not be proven', 'arbitrary provider text is never a refusal witness');
 
-    // Task529: controls use the same five private routes and actual shared524
-    // algebra. The adapter above is a routing stand-in, never atomic SQL proof.
+
     const controls = ['toggle', 'reset', 'switchPhase', 'setDurations', 'selectTask'];
     const at = 1791590400000;
     const options = { autoStartFocus: false, autoStartBreaks: false };
@@ -5828,16 +5724,14 @@ const poll = async (state, id) => {
         control('selectTask', { taskId: ' task' }), control('selectTask', { taskId: '😀'.repeat(251) }),
         control('selectTask', { taskId: null, localDayKey: '2026-02-31' })];
     for (const value of requests) assert.equal((await poll(invalid, invalid.MindwtrHost.pomodoroTransitionPrepare(JSON.stringify(value)))).ok, false, JSON.stringify(value));
-    // Duplicate textual keys are refused by the Swift private transport before
-    // this JS facade; NativePomodoroActionsHostTests covers that native boundary.
+
+
     assert.equal(invalid.pomodoroInputs.length, count, 'invalid controls never reach the storage stand-in');
     const maximum = await poll(invalid, invalid.MindwtrHost.pomodoroTransitionPrepare(JSON.stringify(control('selectTask', { taskId: '😀'.repeat(250) }))));
     assert.equal(maximum.ok, true, '500 UTF-16 units remain byte-exact');
     assert.equal(JSON.parse(maximum.value.planJSON).request.taskId, '😀'.repeat(250));
 
-    // Task541: only native Engine supplies this augmentation. These actual
-    // shared535 helpers prove routing/pure validation, not KV source authority
-    // or atomic storage (owned by the authored real JSC/SQLite native cases).
+
     const adoption = (sessionRaw = null, collapsedRaw = null) => control('adoptLegacy', {
         legacy: { version: 1, namespace: 'NativeUITests.fixture', sessionRaw, collapsedRaw },
     });
@@ -5858,7 +5752,7 @@ const poll = async (state, id) => {
         'existing native session cannot fall back to legacy');
     assert.equal((await poll(absent, absent.MindwtrHost.pomodoroTransitionCommit(absence.value.planJSON, true))).value.replayed, true);
     assert.deepEqual(JSON.parse(absent.pomodoroInputs.at(-1)), [absentPlan, { replayOnly: true }]);
-    // R2b: native Android adopts RN's stored session too (its first start).
+
     assert.equal((await poll(android, android.MindwtrHost.pomodoroTransitionPrepare(JSON.stringify(adoption())))).ok, true);
     for (const autoStartFocus of [false, true]) for (const autoStartBreaks of [false, true]) {
         const active = await ready520('ios', 'auto');
@@ -5890,9 +5784,8 @@ const poll = async (state, id) => {
     assert.equal((await poll(oversizedLegacy, oversizedLegacy.MindwtrHost.pomodoroTransitionPrepare(
         JSON.stringify(adoption(null, '\\'.repeat(1_000_000)))))).ok, false, 'encoded private request budget remains bounded');
 }
-// Task499: production private facades, saved-generation/row identity and stale
-// accepted-baseline ordering. The core stand-in is deliberate: native JSC tests
-// own actual prepared-row/SQLite/file/replay semantics.
+
+
 {
     const input = JSON.stringify({ text: 'One\nTwo', options: {}, captureIds: [
         '164f0a4c-6fb4-4385-b1db-3c55a651f161', 'f8ca0ea6-c084-48fb-8dcc-7bdcc1196d42'] });
@@ -5951,8 +5844,8 @@ const poll = async (state, id) => {
     assert.equal(refused.captureInputs.filter((entry) => JSON.parse(entry)[0] === 'linesCommit').length, 0);
     console.log('Task499: private saved-base admission, await identity, stale epoch ordering and owed replay facades (Node VM; no native proof)');
 }
-// Task362: real pure route/projection and the production private-entry Off/admission path.
-// Native363 separately proves actual HTTP/receipt/intent/recovery with the real core bundle.
+
+
 {
     const AT = '2026-10-07T00:00:00.000Z', taskID = 'task362';
     const selected = { id: 'baseline362', kind: 'file', title: 'Fixture.txt', uri: '', cloudKey: 'attachments/baseline362.txt',
@@ -5962,7 +5855,7 @@ const poll = async (state, id) => {
         identity: '' };
     const beforePayloadJSON = JSON.stringify({ version: 2, taskID, attachmentsOwned: true,
         attachmentsBase: [selected], attachments: [selected], opaque: 'Retain 文' });
-    // Use the actual shared identity grammar, not an independently guessed tuple.
+
     const identityBuild = await build({ stdin: { contents: `export { getAttachmentDownloadIdentity } from './mobile-attachment-availability';`,
         resolveDir: resolve(app, '../../packages/core/src'), loader: 'ts' }, bundle: true, write: false, format: 'iife', globalName: 'identity362' });
     const identityState = {}; vm.runInNewContext(identityBuild.outputFiles[0].text, identityState);
@@ -6008,8 +5901,8 @@ const poll = async (state, id) => {
     assert.match((await poll(android, android.MindwtrHost.attachmentDraftAvailabilityPreflight(JSON.stringify(route)))).error, /^NOT_READY:/);
     assert.match((await poll(android, android.MindwtrHost.iosTaskDraftPrepareAvailability(JSON.stringify({ ...base, rawConfigJSON }), () => ''))).error, /^NOT_READY:/);
 }
-// HTTP transport alone enables no KV/sync/AI binding. Its private fixed
-// receipt uses the existing forced Diagnostics writer, without request input.
+
+
 {
     const configureHTTP = (state) => {
         state.httpCalls = 0;
@@ -6027,7 +5920,7 @@ const poll = async (state, id) => {
     assert.equal(local.httpCalls, 0, 'Installing transport starts no request');
     local.settings = { diagnostics: { loggingEnabled: false } };
     local.MindwtrHost.nativeHTTPDelivered();
-    await poll(local, local.MindwtrHost.logShare()); // Existing append/share barrier.
+    await poll(local, local.MindwtrHost.logShare());
     const lines = local.logText.split('\n').filter((line) => line.includes('v1.3.5/ios-http-transport'));
     assert.equal(lines.length, 1, 'Forced marker survives disabled logging');
     assert.deepEqual(JSON.parse(lines[0]).context, {
@@ -6048,8 +5941,8 @@ const poll = async (state, id) => {
         assert.equal(other.httpCalls, 0);
     }
 }
-// Secret and crypto ports alone leave KV/sync/AI absent. Their fixed receipts
-// use the existing forced Diagnostics writer without executing a primitive.
+
+
 for (const [bridge, receipt, operation] of [
     ['secretCall', 'nativeSecretDelivered', 'secure-storage'],
     ['cryptoCall', 'nativeCryptoDelivered', 'sync-crypto'],
@@ -6090,8 +5983,8 @@ for (const [bridge, receipt, operation] of [
         assert.equal(other.primitiveCalls, 0);
     }
 }
-// Explicit iOS KV presence remains a transport capability, not Sync activation.
-// Its fixed successful-delivery sink is forced, but never records settings data.
+
+
 {
     const receipts = [
         ['nativeDeviceStorageDelivered', 'ios-device-storage', 'device-storage'],
@@ -6141,8 +6034,8 @@ for (const [bridge, receipt, operation] of [
         assert.equal(typeof other.__mindwtrNative.kvMultiGet, 'undefined');
     }
 }
-// Task346 and selected encryption exercise the production entry with narrow factory/core stand-ins.
-// Actual contract state admission and availability/installer/crypto/JSC acceptance have separate suites.
+
+
 {
     const syncFixture = `
 export function createHostSyncCrypto() { return {}; }
@@ -6177,9 +6070,9 @@ export function createNativeSync() {
         state.__mindwtrFileCall = async () => null; state.__mindwtrInstallerCall = async () => null;
         state.syncFactoryCalls = 0; state.secretReads = 0; state.storedReads = 0; state.downloadHosts = [];
         state.remoteAttachmentHost = { selected: 'remote-346' };
-        state.ownerProjects = []; // Install the selected row only after the empty VM boot verifies.
+        state.ownerProjects = [];
         state.storedBackend = 'webdav';
-        // On non-iOS, avoid eager normal Sync so the explicit entry itself is tested.
+
         if (platform === 'ios') state.__mindwtrNative.kvMultiGet = () => { throw new Error('Unexpected multi-read'); };
         state.__mindwtrNative.kvGet = (key) => { state.storedReads++; return JSON.stringify([
             key === '@mindwtr_cloud_provider' ? state.storedProvider ?? null : state.storedBackend ?? null]); };
@@ -6195,7 +6088,7 @@ export function createNativeSync() {
     const command = (state, value = input) => poll(state,
         state.MindwtrHost.iosForegroundSync('projectAttachmentDownload', JSON.stringify(value), () => ''));
     const markerLines = (state) => (state.logText ?? '').split('\n').filter((line) => line.includes('v1.3.5/ios-project-file-download'));
-    // Selected encryption admission runs before any configured service or secret read.
+
     const encrypted = create();
     const unlock = { revision: 'saved-location', action: { type: 'open', flow: 'unlock' } };
     const unlockCommand = (value) => poll(encrypted,
@@ -6229,7 +6122,7 @@ export function createNativeSync() {
     assert.equal(encrypted.syncFactoryCalls, 0);
     assert.equal(encrypted.secretReads, 0);
     assert.equal(encrypted.encryptionInputs?.length ?? 0, 0, 'Unsupported providers never reach the selected contract');
-    // This entry routes Off/missing envelopes to core; it does not decide local state, revision or transition admission.
+
     const localEncryptionActions = [{ type: 'open', flow: 'enable' },
         ...['next', 'confirm'].map((field) => ({ type: 'typed', field, value: 'synthetic-local-388' })),
         { type: 'submit', flow: 'enable' }, { type: 'open', flow: 'disable' }, { type: 'submit', flow: 'disable' }];
@@ -6325,8 +6218,8 @@ export function createNativeSync() {
     }
     foreground.incompleteTransition = false;
     assert.equal((await foregroundCommand('selectSyncBackend', { requestId: request.requestId, option: 'selfhosted' })).value.ok, true);
-    // Ordinary cloud Project requests refuse independently at entry, even when
-    // configuration is valid. They never reach options, factory or availability.
+
+
     const ordinaryCloudProject = create(); assert.equal((await boot(ordinaryCloudProject)).ok, true);
     ordinaryCloudProject.storedBackend = 'cloud';
     const ordinaryLogs = ordinaryCloudProject.logText;
@@ -6479,9 +6372,8 @@ export function createNativeSync() {
     assert.equal(markerLines(fatal).length, 0);
     console.log('Task346: strict selected Project Download admission, archived eligibility, scoped host restoration and durable availability acknowledgment (NodeVM)');
 }
-// Production host-entry selects independent local attachment policy only for
-// complete iOS file capabilities. No kvMultiGet, sync settings, AI or backend
-// constructor is supplied; readiness and diagnostic acknowledgments are real.
+
+
 {
     const configureLocal = (state) => {
         state.localAttachmentTest = true;
@@ -6490,8 +6382,8 @@ export function createNativeSync() {
         state.__mindwtrFileCall = async () => null;
         state.__mindwtrInstallerCall = async () => null;
     };
-    // Stored Sync's empty/Off admission must not construct the throwing Sync
-    // stand-ins, read secrets, or open a form. Actual configured runs use JSC tests.
+
+
     const stored = makeState(0, [], 'ios', (state) => {
         configureLocal(state);
         state.storedReads = 0; state.secretReads = 0;
@@ -6601,8 +6493,8 @@ export function createNativeSync() {
         assert.equal((await poll(unavailable, unavailable.MindwtrHost.boot())).ok, true, 'optional local failure does not fail boot');
     }
 }
-// Task257: actual V3 pure helpers through production submit/poll. Save stand-ins
-// prove routing/transport only; the real 254 factory/CAS is covered in core tests.
+
+
 {
     const configureLocal = (state) => {
         state.localAttachmentTest = true;
@@ -6701,7 +6593,7 @@ export function createNativeSync() {
         const wrong = structuredClone(full); wrong.priorOperations[0].operation.sourceSha256 = 'b'.repeat(64);
         assert.equal((await call(local, 'attachmentDraftValidateLineageV4', wrong)).ok, false);
     });
-    // Selected availability metadata retains a baseline ID while acquiring a different URI.
+
     await check(async () => {
         const missing = { ...baseline, uri: '', cloudKey: 'attachments/baseline.pdf',
             fileHash: 'a'.repeat(64), localStatus: 'missing' };
@@ -6738,7 +6630,7 @@ export function createNativeSync() {
         forged.priorOperations[0].operation.afterPayloadJSON = afterPayloadJSON.replace('Retain opaque checkpoint', 'forged');
         assert.equal((await call(local, 'attachmentDraftValidateLineageV5', forged)).ok, false);
     });
-    // Historical retry has no optional capability, current editable task or fresh clock.
+
     const historical = makeState(0, [], 'ios'); historical.localTaskReadOnly = true;
     historical.sandbox = true; historical.workspaceTransition = true;
     historical.persistenceFailure = { message: 'not used by pure historical validation' };
@@ -6763,7 +6655,7 @@ export function createNativeSync() {
         }
         if (variant !== 'readOnly' && variant !== 'taskMissing') {
             for (const method of ['attachmentFileEditSavePrepare', 'attachmentFileEditSaveCommit']) {
-                if (variant === 'persistence' && method.endsWith('Commit')) continue; // Commit delegates persistence/CAS readiness to the real core factory.
+                if (variant === 'persistence' && method.endsWith('Commit')) continue;
                 await check(async () => assert.equal((await call(state, method, {})).ok, false, `${variant}/${method}`));
             }
             assert.equal(state.fileEditSaveInputs.length, 0, 'fresh admission refusal does not reach the Save stand-in');
@@ -6788,7 +6680,7 @@ export function createNativeSync() {
         }
         assert.equal(local.fileEditSaveInputs.length, before, 'actual UTF8 byte limit refuses before contract dispatch');
     });
-    // Complete frozen changed/noop plans and outcomes travel untouched; no plan clipping.
+
     for (const kind of ['changed', 'noop']) {
         const request = { version: 1, kind: 'owned-editor-file-edit-save', opaque: kind };
         const prepared = { version: 1, kind: 'owned-editor-file-edit-save', request, decision: { kind } };
@@ -6824,8 +6716,8 @@ export function createNativeSync() {
     });
     console.log(`Task257: ${cases} private mixed-draft binding/transport checks (real pure V3 helpers; Save dispatch stand-ins only)`);
 }
-// Task259: direct Save fence with real254 pure file-only validation and actual
-// shared reference/revision policy. No native proof owner or JSC claim.
+
+
 {
     const configureLocal = (state) => {
         state.localAttachmentTest = true;
@@ -6899,8 +6791,8 @@ export function createNativeSync() {
         assert.deepEqual(invoke(state, input(f, f.plan.length - 1)), { value: { outcome: 'removed' }, seen: ['retire'] });
         assert.equal(state.fileEditSaveInputs.length - before, 1, 'full frozen envelope is validated once before candidate selection');
     });
-    // Task263: reuse only the exact immutable envelope/plan, with current gates
-    // and branch selection exercised again on each cache hit.
+
+
     const reuse = await fixture(3), validations = (state) => state.fileEditSaveInputs.filter(([method]) => method === 'validate').length;
     let memoCases = 0;
     const checkMemo = async (work) => { await check(work); memoCases++; };
@@ -7000,8 +6892,8 @@ export function createNativeSync() {
         const kept = ['task', 'project', 'archived'].includes(where);
         assert.deepEqual(invoke(state), { value: { outcome: kept ? 'referenced' : 'removed' }, seen: [kept ? 'referenced' : 'retire'] });
     });
-    // Task276: extra lexical system-alias comparisons can only keep a file.
-    // Full pure envelopes and the same mutable generation fence remain in use.
+
+
     let aliasCases276 = 0;
     const checkAlias276 = async (work) => { await check(work); aliasCases276++; };
     const aliasSuffix276 = 'mobile/Containers/Data/Application/27600000-0000-4000-8000-000000000001/Library/attachment-files/documents/attachments/';
@@ -7020,7 +6912,7 @@ export function createNativeSync() {
             const state = await make(f); let reads = 0, entered = 0;
             const owner = { id: 'alias-generation-change' };
             Object.defineProperty(owner, 'attachments', { get() {
-                // Core matches the container alias in its first comparison pass (6f47ea57e).
+
                 if (++reads === 1) state.persistenceStatus.generation++;
                 return [{ kind: 'file', uri: aliasURI }];
             } });
@@ -7190,8 +7082,8 @@ export function createNativeSync() {
     });
     console.log(`Task259: ${cases} synchronous mixed Save fence checks (real254 file-only pure validation + shared references/revision; NodeVM only)`);
 }
-// Task268: the real bound complete factory prepares/commits against SQLite;
-// the existing VM bridge still owns platform dispatch and same-turn callbacks.
+
+
 {
     const { DatabaseSync } = await import('node:sqlite');
     const AT = '2026-10-05T10:00:00.000Z', ROOT = 'file:///library/documents/attachments/';
@@ -7431,8 +7323,8 @@ export function createNativeSync() {
             assert.deepEqual(reusable.state.order268, ['retire', 'returned']); await new Promise((done) => setImmediate(done));
             assert.deepEqual(reusable.state.order268, ['retire', 'returned', 'microtask']);
         });
-        // Task276: current URI is fresh per call, never part of the immutable
-        // complete plan memo. These callbacks test policy, not physical IO.
+
+
         let relocationCases276 = 0;
         const checkRelocation276 = async (work) => { await check(work); relocationCases276++; };
         const oldRoot276 = 'file:///private/var/mobile/Containers/Data/Application/27600000-0000-4000-8000-000000000001/Library/attachment-files/documents/attachments/';
@@ -7474,7 +7366,7 @@ export function createNativeSync() {
         await checkRelocation276(async () => {
             reset276(); let reads = 0, entered = 0; const owner = {};
             Object.defineProperty(owner, 'attachments', { get() {
-                // Core matches the container alias in one pass (6f47ea57e), so three reads remain; mutate on the last.
+
                 if (++reads === 3) relocated.state.persistenceStatus.generation++;
                 return [{ kind: 'file', uri: refs276[3] }];
             } });
@@ -7515,7 +7407,7 @@ export function createNativeSync() {
     } finally { for (const db of databases) db.close(); }
     console.log(`Task268: ${cases} complete Save/Undo/retire checks (real bound266 factory + SQLite, fresh refs and same-turn callbacks; Node VM)`);
 }
-// Task270: private iOS resume dispatch reaches the actual bound269 factory and raw SQLite reader.
+
 {
     const { DatabaseSync } = await import('node:sqlite');
     const AT = '2026-10-05T10:00:00.000Z', ROOT = 'file:///library/documents/attachments/';
@@ -7547,7 +7439,7 @@ export function createNativeSync() {
         const ownedDraft = { version: 3, taskID: source.id, initialPayloadJSON, beforePayloadJSON: initialPayloadJSON,
             priorOperations: [], managedDirectoryURI: ROOT };
         if (mixed) {
-            // Actual shared producers validate the retained history; no file capability is installed in the resume VM.
+
             const producer = makeState(0, [], 'ios', (value) => {
                 value.localAttachmentTest = true;
                 for (const name of ['fileCall', 'installerCall', 'fileAbort', 'fileDeleteNow', 'ioNext', 'ioBody']) value.__mindwtrNative[name] = () => '';
@@ -7568,7 +7460,7 @@ export function createNativeSync() {
         }
         const request = { version: 1, kind: 'owned-editor-resume', checkpoint: { version: 1, sessionID: SESSION, taskID: source.id,
             generation: ownedDraft.priorOperations.length + 1, payloadJSON: ownedDraft.beforePayloadJSON }, ownedDraft };
-        // The existing lazy real-contract fixture activates before the read-only assertion baseline.
+
         assert.equal((await call(state, 'attachmentDraftResumeCheckV3', request)).ok, true);
         writes = 0; state.resumeReads = 0; state.resumeInputs.length = 0;
         return { state, db, request, source, writes: () => writes,
@@ -7664,8 +7556,8 @@ export function createNativeSync() {
     } finally { for (const db of databases) db.close(); }
     console.log(`Task270: ${cases} private owned resume checks (real bound269 factory + SQLite, exact retained inputs, ordinary sealed and iOS-only; Node VM)`);
 }
-// Task244: production direct handoff plus actual RN live-reference helper.
-// Native proof/lease/filesystem and real-JSC ordering acceptance are Task243.
+
+
 {
     const configureLocal = (state) => {
         state.localAttachmentTest = true;
@@ -7770,7 +7662,7 @@ export function createNativeSync() {
         ['deleted owner', [{ deletedAt: 'at', attachments: [{ kind: 'file', uri: TARGET }] }], 'removed'],
         ['deleted attachment', [{ attachments: [{ kind: 'file', uri: TARGET, deletedAt: 'at' }] }], 'removed'],
         ['link is not a file owner', [{ attachments: [{ kind: 'link', uri: TARGET }] }], 'removed'],
-        // An equivalent percent-encoded spelling is the same file and keeps it (6f47ea57e).
+
         ['URI equivalent spelling', [{ attachments: [{ kind: 'file', uri: TARGET.replace('café', 'caf%C3%A9') }] }], 'referenced'],
     ]) await check(name, () => {
         state.lastLoaded.tasks = owners;
@@ -7805,7 +7697,7 @@ export function createNativeSync() {
             let reads = 0, entered = 0;
             const owner = {};
             Object.defineProperty(owner, 'attachments', { get() {
-                // Core matches the container alias in its first comparison pass (6f47ea57e).
+
                 if (++reads === 1) local.persistenceStatus.generation++;
                 return [{ kind: 'file', uri: aliasURI }];
             } });
@@ -7934,8 +7826,8 @@ export function createNativeSync() {
         assert.equal(call(state, input, () => '{"outcome":"referenced"}', () => result), result);
     });
     await check('direct handoff creates no flush/write/file bridge/diagnostic work', () => {
-        // Reset only harness document dispatch bookkeeping from the deliberate
-        // held-Promise test; direct calls never touched these domain arrays.
+
+
         const before = JSON.stringify({ events: state.events, data: state.fakeData, fileCalls: state.fileCalls, logOps: state.logOps });
         assert.equal(call(state), '{"outcome":"removed"}');
         assert.equal(JSON.stringify({ events: state.events, data: state.fakeData, fileCalls: state.fileCalls, logOps: state.logOps }), before);
@@ -8443,7 +8335,7 @@ assert.match((await poll(state, state.MindwtrHost.languageSaved('', 'en-US'))).e
 
 const full = { tasks: [{ id: 'first' }], projects: [], sections: [], areas: [], people: [], settings: {} };
 const partial = { ...full, tasks: [] };
-// Startup #4: a non-legacy boot reads whole rows first in the activation, whose validated read fails the boot before any save.
+
 const secondRead = makeState(1, [partial]);
 const secondResult = await poll(secondRead, secondRead.MindwtrHost.boot());
 assert.equal(secondResult.ok, false);
@@ -8453,9 +8345,8 @@ assert.equal(secondRead.saveCount, 0);
 
 const ready = makeState(0);
 assert.equal((await poll(ready, ready.MindwtrHost.boot())).ok, true);
-// Task202: all six bridge callbacks settle through submit's Promise slots. The
-// service's persistence/policy is tested separately; these gates pin transport,
-// localized interpolation, normal admission and recovery-safe admission.
+
+
 {
     const backup = makeState(0, [], 'ios');
     const metadata = { fileName: 'owned.json', lastModified: 1791115200000, appVersion: '1.3.4' };
@@ -8549,8 +8440,8 @@ assert.equal((await poll(ready, ready.MindwtrHost.boot())).ok, true);
         assert.deepEqual(await poll(backup, call()), { ok: false, error: 'INVALID_INPUT: Invalid backup document input' });
     }
 }
-// Task195: real shared tag-input policy, bounded wrappers and exact raw payload
-// transport. Store/receipt/CAS behavior runs in core and real Swift/JSC tests.
+
+
 {
     const tag195 = makeState('auto');
     assert.equal((await poll(tag195, tag195.MindwtrHost.boot())).ok, true);
@@ -8572,8 +8463,8 @@ assert.equal((await poll(ready, ready.MindwtrHost.boot())).ok, true);
         assert.equal((await poll(tag195, tag195.MindwtrHost[method]('x'.repeat(2000001)))).ok, false);
     }
 }
-// Task741: real shared tag-input policy, bounded wrappers and exact raw payload
-// transport. Store/receipt/CAS behavior runs in core and real Swift/JSC tests.
+
+
 {
     const tag741 = makeState('auto');
     assert.equal((await poll(tag741, tag741.MindwtrHost.boot())).ok, true);
@@ -8595,7 +8486,7 @@ assert.equal((await poll(ready, ready.MindwtrHost.boot())).ok, true);
         assert.equal((await poll(tag741, tag741.MindwtrHost[method]('x'.repeat(2000001)))).ok, false);
     }
 }
-// Task196: Remove tag uses its own exact envelope family and whole-payload bound.
+
 {
     const remove196 = makeState('auto');
     assert.equal((await poll(remove196, remove196.MindwtrHost.boot())).ok, true);
@@ -8611,7 +8502,7 @@ assert.equal((await poll(ready, ready.MindwtrHost.boot())).ok, true);
         assert.deepEqual(JSON.parse(remove196.menuInputs.at(-1)), ['referenceRemoveTag' + phase, envelope]);
         assert.equal((await poll(remove196, remove196.MindwtrHost[method]('x'.repeat(2000001)))).ok, false);
     }
-}// Task742: Remove tag uses its own exact envelope family and whole-payload bound.
+}
 {
     const remove742 = makeState('auto');
     assert.equal((await poll(remove742, remove742.MindwtrHost.boot())).ok, true);
@@ -8628,7 +8519,7 @@ assert.equal((await poll(ready, ready.MindwtrHost.boot())).ok, true);
         assert.equal((await poll(remove742, remove742.MindwtrHost[method]('x'.repeat(2000001)))).ok, false);
     }
 }
-// Task743: independent Apply/create wires preserve captured inputs and reject oversized envelopes.
+
 {
     const organize743 = makeState('auto');
     assert.equal((await poll(organize743, organize743.MindwtrHost.boot())).ok, true);
@@ -8656,12 +8547,11 @@ assert.equal((await poll(ready, ready.MindwtrHost.boot())).ok, true);
     }
 }
 assert.equal(ready.activationCount, 1);
-// Startup #4: a non-legacy boot sets the schema up, and the activation's validated read is its first full read. Activation may
-// write (core backfills a person per assignee): the store is checked against the database after its save, by id, from core's
-// row-version read, which also refreshes the deletion baseline (rowids of rows the save created) under the accepted epoch.
+
+
 assert.deepEqual(ready.events, ['schema', 'activate', 'load', 'flush', 'baseline']);
 {
-    // Ids, not counts: a lost row and a duplicated one leave the count equal.
+
     const lost = makeState(2);
     lost.fakeData = { ...full, tasks: [{ id: 'a' }, { id: 'b' }] };
     lost.rowBaseline = { ids: { tasks: ['a', 'c'], projects: [], sections: [], areas: [], people: [] }, settings: {} };
@@ -8670,13 +8560,13 @@ assert.deepEqual(ready.events, ['schema', 'activate', 'load', 'flush', 'baseline
     twice.fakeData = { ...full, tasks: [{ id: 'a' }, { id: 'a' }] };
     twice.rowBaseline = { ids: { tasks: ['a', 'b'], projects: [], sections: [], areas: [], people: [] }, settings: {} };
     assert.match((await poll(twice, twice.MindwtrHost.boot())).error, /Incomplete tasks activation/);
-    // Another connection committed since the activation's read: a full validated read instead (today's check).
+
     const moved = makeState(0);
     moved.rowBaselineNull = true;
     assert.equal((await poll(moved, moved.MindwtrHost.boot())).ok, true);
     assert.deepEqual(moved.events, ['schema', 'activate', 'load', 'flush', 'baseline', 'load']);
-    // The settings row is compared with what core maps from it, never with the store: a recovery load that drops ai.apiKey
-    // from the store (unsaved) still boots; a row that maps differently does not.
+
+
     const stripped = makeState(0);
     stripped.fakeData = { ...full, tasks: [], settings: { ai: { provider: 'openai', apiKey: 'stored' } } };
     stripped.settings = { ai: { provider: 'openai' } };
@@ -8685,8 +8575,8 @@ assert.deepEqual(ready.events, ['schema', 'activate', 'load', 'flush', 'baseline
     remapped.fakeData = { ...full, tasks: [], settings: { theme: 'dark' } };
     remapped.rowBaseline = { ids: { tasks: [], projects: [], sections: [], areas: [], people: [] }, settings: { theme: 'light' } };
     assert.match((await poll(remapped, remapped.MindwtrHost.boot())).error, /Incomplete settings load/);
-    // Saved filters keep their mapping check: a blank id maps to nothing, so 3 rows mapping to 2 filters fail the boot.
-    // The activation loaded 3 (the store's list); then one row's id went blank: the table still counts 3, core now maps 2.
+
+
     const blank = makeState(0);
     const three = { savedFilters: [{ id: 'f1' }, { id: 'f2' }, { id: 'f3' }] };
     blank.fakeData = { ...full, tasks: [], settings: three };
@@ -8695,8 +8585,8 @@ assert.deepEqual(ready.events, ['schema', 'activate', 'load', 'flush', 'baseline
     blank.rowBaseline = { ids: { tasks: [], projects: [], sections: [], areas: [], people: [] }, settings: { savedFilters: [{ id: 'f1' }, { id: 'f2' }] } };
     assert.match((await poll(blank, blank.MindwtrHost.boot())).error, /Incomplete saved filters load/);
 }
-// Replay tokens and durable receipts: iOS keeps tokens optional but loads only App lock's exact receipts; Android's
-// journaled boot requires tokens and loads all receipts before the validated load, activation, and replay.
+
+
 assert.equal(ready.replayTokens, 'optional');
 assert.equal(ready.receiptsLoadedAt, 0);
 assert.deepEqual([...ready.receiptScope], ['appLock', 'notificationSetting', 'aiRequestTimeout', 'aiReasoningEffort', 'aiGeminiThinkingBudget', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'boardTaskCompletion', 'boardTaskCompletionUndo', 'boardTaskReactivate', 'boardTaskOrder', 'archivedTaskRestore', 'archivedTasksRestore', 'trashItemsRestore', 'trashItemsPurge', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'inboxTasksDelete', 'inboxTasksDeleteUndo', 'referenceTasksMove', 'inboxTasksMove', 'inboxTasksAddTag', 'inboxTasksRemoveTag', 'inboxTasksOrganize', 'inboxOrganizeDestinationCreate', 'inboxPreparedCommit', 'inboxUndo', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument', 'pomodoroTransition', 'appleReminderImportItem'], 'the VM array, compared in this realm');
@@ -8707,14 +8597,14 @@ assert.deepEqual([...ready.receiptScope], ['appLock', 'notificationSetting', 'ai
     assert.equal(journaled.receiptsLoadedAt, 0);
     assert.equal(journaled.receiptScope, null);
 }
-// A revision a host leaves out ("") is none: core requires one only from a journaling host.
+
 for (const [method, call] of [['complete', 'completeTask({ id, taskRevision: taskRevision || undefined })'],
     ['taskFocus', 'setTaskFocus({ id, focused, taskRevision: taskRevision || undefined })'],
     ['projectFocus', 'setProjectFocus({ id, focused, projectRevision: projectRevision || undefined })']]) {
     assert(hostEntry.includes(`contract.${call}`), `${method} sends no revision for ""`);
 }
 assert.deepEqual(await poll(ready, ready.MindwtrHost.pruneReceipts()), { ok: true, value: { pruned: 3 } });
-// The capture popup: every call passes Kotlin's JSON to core unchanged; the snapshot comes wrapped, null in sandbox mode.
+
 {
     const draft = { text: 'Call @phone', options: { addAnother: false } };
     const submitInput = { ...draft, captureId: '123', openAfterSave: false };
@@ -8735,7 +8625,7 @@ assert.deepEqual(await poll(ready, ready.MindwtrHost.pruneReceipts()), { ok: tru
         JSON.stringify(['edit', { ...draft, edit: { type: 'toggleFocus' } }]), 'snapshot', 'snapshot', JSON.stringify(['lines', linesInput]), JSON.stringify(['picker', pickerInput])]);
     ready.captureInputs.length = 0;
 }
-// The capture screen: its reads are Menu reads, its Save and Create tasks journaled task commands; each passes Kotlin's JSON unchanged.
+
 {
     const params = { initialValue: 'Buy%20milk', project: 'Home' };
     const draft = { text: 'Buy milk', description: '', showHelp: false, suggestion: null, applied: { tags: [] }, failed: false };
@@ -8751,9 +8641,8 @@ assert.deepEqual(await poll(ready, ready.MindwtrHost.pruneReceipts()), { ok: tru
         JSON.stringify(['modalSubmit', submitInput]), JSON.stringify(['modalLines', linesInput])]);
     ready.captureInputs.length = 0;
 }
-// The queue drain: core's ingestPendingCaptures lists, reads and deletes the app's files/pending-captures through Kotlin's file
-// calls, and keeps its last-applied record under RN's RKStorage key; the request UUID is the journal's. A Kotlin failure (a
-// marked string) reaches core as a thrown error, so core keeps that file; a missing folder lists as null.
+
+
 {
     const key = 'mindwtr:pending-captures:last-applied:v1';
     ready.queueFiles = { 'a.json': '{"id":"1","title":"Grüße ✓ 😀"}' };
@@ -8769,7 +8658,7 @@ assert.deepEqual(await poll(ready, ready.MindwtrHost.pruneReceipts()), { ok: tru
     ready.kv = {};
     assert.deepEqual(await poll(ready, ready.MindwtrHost.ingest('r-3')), { ok: true, value: { ingested: 0 } });
     assert.deepEqual(JSON.parse(ready.ingestInputs.pop()), ['r-3', null, [], null]);
-    // A trigger: core's notification as RN's alarm library's details with the channel's name; none for a deactivation or in sandbox mode.
+
     const trigger = { action: 'activate', context: '@home' };
     assert.deepEqual(await poll(ready, ready.MindwtrHost.contextAutomation(JSON.stringify(trigger))), { ok: true, value: { notification: {
         title: '@home next action', message: 'Call', channel: 'mindwtr_reminders_v2', data: { kind: 'context-automation', context: '@home' }, channelName: 'Mindwtr reminders' } } });
@@ -8781,7 +8670,7 @@ assert.deepEqual(await poll(ready, ready.MindwtrHost.pruneReceipts()), { ok: tru
     ready.ingestInputs.length = 0;
     ready.fileCalls.length = 0;
 }
-// update passes Kotlin's { id, base, patch } to core unchanged, and a refusal keeps its code prefix.
+
 const updateInput = JSON.stringify({ id: 't', base: { title: 'a', dueDate: null }, patch: { title: 'b', dueDate: '2026-09-15' } });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.update(updateInput)), { ok: true, value: { id: 't', changed: true } });
 assert.deepEqual(ready.updateInputs, [updateInput]);
@@ -8789,7 +8678,7 @@ ready.updateResult = { ok: false, error: { code: 'STALE_REVISION', message: 'Tas
 assert.deepEqual(await poll(ready, ready.MindwtrHost.update(updateInput)),
     { ok: false, error: 'STALE_REVISION: Task changed while editing: title' });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.editorModel('t')), { ok: true, value: { version: 1, id: 't' } });
-// The View tab and the checklist edit pass Kotlin's input to core unchanged; Reset checklist is a command (no requireSaved).
+
 assert.deepEqual(await poll(ready, ready.MindwtrHost.taskView('{"id":"t"}')),
     { ok: true, value: { version: 1, id: 't', readOnly: false, rows: [], checklistBase: [{ id: 'c', title: 'Milk', isCompleted: true }] } });
 const checklistInput = { id: 't', draft: { title: 'a' }, checklist: [{ id: 'c', title: 'Milk', isCompleted: true }], edit: { kind: 'toggle', index: 0 } };
@@ -8800,8 +8689,8 @@ const editInput = { id: 't', draft: { title: 'a', dueDate: '' }, edit: { type: '
 assert.deepEqual(await poll(ready, ready.MindwtrHost.editDraft(JSON.stringify(editInput))), { ok: true, value: { version: 1, id: 't', draft: editInput.draft } });
 assert.deepEqual(ready.editorInputs, ['{"id":"t"}', '["view",{"id":"t"}]', JSON.stringify(['checklist', checklistInput]), '["suggest",{"id":"t","field":"contexts","query":"home","limit":4}]',
     JSON.stringify(['edit', editInput])]);
-// saveDraft passes Kotlin's { id, base, patch } to core's saveTaskDraft, on Android with mergeSyncedChanges (a change synced
-// meanwhile merges, RN f06e5d1f9), and a refusal keeps its code prefix.
+
+
 const draftInput = JSON.stringify({ id: 't', base: { title: 'a', dueDate: '', relativeStartOffset: null }, patch: { title: 'b', dueDate: '2026-09-15T14:05', relativeStartOffset: null } });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.saveDraft(draftInput)), { ok: true, value: { id: 't', draft: { title: 'b' } } });
 ready.saveDraftResult = { ok: false, error: { code: 'STALE_REVISION', message: 'Task changed while editing: title' } };
@@ -8810,17 +8699,17 @@ const draftSent = { ...JSON.parse(draftInput), mergeSyncedChanges: true };
 assert.deepEqual(ready.updateInputs.slice(-2), [JSON.stringify(['draft', draftSent]), JSON.stringify(['draft', draftSent])]);
 ready.updateInputs.length = 2;
 ready.saveDraftResult = { ok: true, value: { id: 't', draft: { title: 'b' } } };
-// Focus queries pass Kotlin's arguments to core unchanged; a stale window keeps its code prefix for Kotlin.
+
 assert.deepEqual(await poll(ready, ready.MindwtrHost.focus(50)), { ok: true, value: { version: 1, revision: 'f', sections: [] } });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.focusWindow('next', 50, 50, 'f')),
     { ok: false, error: 'STALE_REVISION: Focus changed; restart paging' });
 assert.deepEqual(ready.focusInputs, ['{"limit":50}', '{"key":"next","offset":50,"limit":50,"revision":"f"}']);
-// With Focus's control state (and a control's edit), both pass them to core as parsed JSON.
+
 await poll(ready, ready.MindwtrHost.focus(50, '{"sortBy":"due"}', '{"type":"sort","sortBy":"title"}'));
 await poll(ready, ready.MindwtrHost.focusWindow('next', 50, 50, 'f', '{"sortBy":"due"}'));
 assert.deepEqual(ready.focusInputs.slice(2), ['{"limit":50,"controls":{"sortBy":"due"},"controlEdit":{"type":"sort","sortBy":"title"}}',
     '{"key":"next","offset":50,"limit":50,"revision":"f","controls":{"sortBy":"due"}}']);
-// A command is accepted while a read is still in flight: the host neither serializes nor refuses them.
+
 {
     const completesBefore = ready.completeCount;
     const read = ready.MindwtrHost.focus(50);
@@ -8830,30 +8719,30 @@ assert.deepEqual(ready.focusInputs.slice(2), ['{"limit":50,"controls":{"sortBy":
     assert.equal((await poll(ready, read)).ok, true);
     ready.focusInputs.pop();
 }
-// Language: "" is no stored language; the keys pass to core unchanged.
+
 assert.deepEqual(await poll(ready, ready.MindwtrHost.language('', 'en-US')), { ok: true, value: { language: 'en' } });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.language('zh', 'en-US')), { ok: true, value: { language: 'zh' } });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.strings('["tab.inbox"]')),
     { ok: true, value: { language: 'zh', strings: { 'tab.inbox': '收集箱' }, missing: [] } });
 assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"en-US"}', '{"storedLanguage":"zh","systemLocale":"en-US"}',
     '{"keys":["tab.inbox"]}']);
-// RN b5bf5e5fb and b8e2ebdeb: a language or theme synced from another device applies on Android at once, after boot's load and
-// after each finished sync cycle: languageSaved (the settled synced language wins, mirrored to RN's key) and the theme read again.
+
+
 {
     const settingsKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsModel.kt'), 'utf8');
     const viewModelKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt'), 'utf8');
     assert.match(settingsKt, /fun applySyncedChoices\(runtime: CoreHost, prefs: SharedPreferences\) \{[\s\S]*?runtime\.languageSaved\([\s\S]*?ThemeChoice\.load\(runtime\.theme\(/);
     assert.match(viewModelKt, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)/, 'boot applies synced choices after the device ones');
     assert.match(viewModelKt, /if \(cycles != syncCycles && content != syncContent\) \{[\s\S]{0,400}?refreshAll\(synced = true\)/, 'a finished sync cycle that changed the store content applies synced choices');
-    // A cycle that replaced nothing in the store (host-sync.ts contentRevision) reads no list again; an event without the count does.
+
     assert.match(viewModelKt, /val content = event\.optInt\("contentRevision", syncContent \+ 1\)/);
     assert.match(readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8'), /if \(contentAfter\.some\(\(reference, index\) => reference !== contentBefore\[index\]\)\) contentRevision \+= 1;/);
     assert.match(viewModelKt, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\);/);
-    // The labels follow core's language, not only a device key write: languageSaved can switch core's language with none.
+
     assert.match(settingsKt, /if \(reply\.optString\("language"\) != Labels\.language\) Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);
     assert.match(coreHost, /fun languageSaved\(stored: String, system: String\): JSONObject = callAsync\("languageSaved", stored, system\)/);
 }
-// languageSaved reads the settled Settings row (iOS, and Android after boot and each sync). The two-arg route above keeps its device-key semantics.
+
 {
     const savedLanguage = async (stored = 'zh', system = 'en-US') => await poll(ready, ready.MindwtrHost.languageSaved(stored, system));
     assert.deepEqual(await savedLanguage(), { ok: true, value: { language: 'zh', deviceWrites: [] } });
@@ -8896,7 +8785,7 @@ assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"
     ready.settings = undefined;
     ready.fakeData.settings = {};
 }
-// Theme: the synced setting wins over RN's device-local choice, then the system; core classifies it and sends its hues.
+
 {
     const theme = async (stored) => (await poll(ready, ready.MindwtrHost.theme(stored))).value;
     assert.deepEqual(await theme(''), { mode: 'system', deviceWrites: [], preset: 'default', presets: { light: 'default', dark: 'default' }, material: false, scheme: null,
@@ -8928,7 +8817,7 @@ assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"
     assert.equal((await theme('')).deviceWrites[0].value, 'nord', 'a settled Settings read may retry');
     ready.settings = undefined;
 }
-// Projects pass Kotlin's arguments to core unchanged; the first window has no revision, and a stale one keeps its code prefix.
+
 assert.deepEqual(await poll(ready, ready.MindwtrHost.projects()),
     { ok: true, value: { version: 1, revision: 'p', active: [], deferred: [], archived: [] } });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.projectDetail('p1', 50, 50, 'r')),
@@ -8936,7 +8825,7 @@ assert.deepEqual(await poll(ready, ready.MindwtrHost.projectDetail('p1', 50, 50,
 ready.projectDetailResult = { ok: true, value: { version: 1, revision: 'r', projectId: 'p1', readOnly: false, total: 0, items: [] } };
 assert.equal((await poll(ready, ready.MindwtrHost.projectDetail('p1', 0, 50, ''))).ok, true);
 assert.deepEqual(ready.projectInputs, ['projects', '{"projectId":"p1","offset":50,"limit":50,"revision":"r"}', '{"projectId":"p1","offset":0,"limit":50}']);
-// The new commands pass Kotlin's arguments to core unchanged: the star's target and the row's revision, the request UUID, "" as no area, a `next` selection.
+
 assert.deepEqual(await poll(ready, ready.MindwtrHost.taskFocus('t', true, 'rt')), { ok: true, value: { blocked: 'Max 5 focus items.', blockedTitle: 'Focus' } });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.projectFocus('p', false, 'rp')), { ok: true, value: { blocked: '' } });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.createProject('New', '', '123')), { ok: true, value: { id: 'p' } });
@@ -8947,8 +8836,8 @@ assert.deepEqual(ready.newInputs, ['["taskFocus",{"id":"t","focused":true,"taskR
 ready.taskFocusResult = { ok: false, error: { code: 'SAVE_FAILED', message: 'disk full' } };
 assert.deepEqual(await poll(ready, ready.MindwtrHost.taskFocus('t', true)), { ok: false, error: 'SAVE_FAILED: disk full' });
 ready.newInputs.length = 0;
-// Search and Process Inbox pass Kotlin's JSON to core unchanged (Android's start adds mergeSyncedChanges, RN 2093d9f1d); a
-// failed answer keeps its code prefix; end answers an object.
+
+
 {
     const searchInput = { query: ' milk ', filters: { scope: 'all' }, limit: 50 };
     const stepInput = { sessionId: 'x', taskId: 't', step: 'actionable', edit: { type: 'set', field: 'title', value: 'a' } };
@@ -8963,12 +8852,12 @@ ready.newInputs.length = 0;
     assert.deepEqual(ready.newInputs, [JSON.stringify(['search', searchInput]), '["saveSearch",{"query":"milk","name":"Milk","requestId":"r"}]',
         '["inboxStart",{"mode":"quick","mergeSyncedChanges":true}]', JSON.stringify(['inboxStep', stepInput]), JSON.stringify(['inboxCommit', commitInput]),
         '["inboxSkip",{"sessionId":"x","taskId":"t","requestId":"s"}]', '["inboxEnd",{"sessionId":"x"}]']);
-    // The screen's first read sends no filters: the host fills in core's defaults.
+
     await poll(ready, ready.MindwtrHost.search('{"query":"","filters":null,"limit":50}'));
     assert.deepEqual(ready.newInputs.slice(-1), [JSON.stringify(['search', { query: '', filters: { scope: 'all' }, limit: 50 }])]);
     ready.newInputs.length = 0;
 }
-// The Menu tab's reads and commands pass Kotlin's JSON to core unchanged; a refusal keeps its code prefix; an unknown name is refused.
+
 {
     const somedayInput = { sortBy: 'title', filters: { tokens: ['#home'] }, filterEdit: { type: 'toggleToken', value: '#home' }, offset: 0, limit: 50 };
     const moveInput = { taskIds: ['a', 'b'], sectionId: null, requestId: 'r' };
@@ -8986,7 +8875,7 @@ ready.newInputs.length = 0;
         JSON.stringify(['somedayTask', { title: 't', sectionId: null, captureId: 'c' }])]);
     ready.menuInputs.length = 0;
 }
-// Pass 7: Contexts, Trash, Review and the reviews pass Kotlin's JSON to core unchanged; a failed save keeps its code prefix.
+
 {
     const reads = [['contexts', { tokens: ['@home'], matchMode: 'all', searchQuery: '', selectedIds: [], offset: 0, limit: 50 }],
         ['trash', { selected: { taskIds: [], projectIds: [] }, offset: 0, limit: 50 }],
@@ -9006,29 +8895,29 @@ ready.newInputs.length = 0;
     ready.menuInputs.length = 0;
 }
 ready.persistenceFailure = { message: 'disk full' };
-// A blocked read keeps the SAVE_FAILED code and never quotes the store's failure text.
+
 const readRefusal = { ok: false, error: 'SAVE_FAILED: Previous changes could not be saved; retry before continuing' };
 const queriesBeforeFailure = ready.queryCount;
 const blockedRefresh = await poll(ready, ready.MindwtrHost.window(0, 50, ''));
 assert.equal(blockedRefresh.ok, false);
 assert.match(blockedRefresh.error, /SAVE_FAILED/);
 assert.equal(ready.queryCount, queriesBeforeFailure);
-// The editor cannot load unsaved in-memory values as if they were stored.
+
 for (const blocked of [ready.MindwtrHost.editorModel('t'), ready.MindwtrHost.taskView('{"id":"t"}'), ready.MindwtrHost.editChecklist(JSON.stringify(checklistInput)),
     ready.MindwtrHost.editorSuggestions('t', 'tags', 'x', 4), ready.MindwtrHost.editDraft(JSON.stringify(editInput))]) {
     assert.deepEqual(await poll(ready, blocked), readRefusal);
 }
 assert.equal(ready.editorInputs.length, 5);
-// Focus cannot show unsaved in-memory values as stored either.
+
 for (const blocked of [ready.MindwtrHost.focus(50), ready.MindwtrHost.focusWindow('next', 0, 50, 'f')]) {
     assert.deepEqual(await poll(ready, blocked), readRefusal);
 }
 assert.equal(ready.focusInputs.length, 4);
-// Commands never wait on requireSaved: the exact retry of a failed command must reach core, which retries the save.
+
 const commandsBefore = ready.completeCount + ready.createCount + ready.updateInputs.length;
 assert.equal((await poll(ready, ready.MindwtrHost.complete('t'))).ok, true);
 assert.equal((await poll(ready, ready.MindwtrHost.captureSubmit('{"text":"Retry","options":{},"captureId":"123"}'))).ok, true);
-// The popup's reads wait for the retry; its commands (a capture, several lines, a picker create) reach core so the retry can save.
+
 for (const blocked of [ready.MindwtrHost.captureOpen(), ready.MindwtrHost.captureView('{"text":"a","options":{}}'), ready.MindwtrHost.captureEdit('{"text":"a","options":{},"edit":{}}')]) {
     assert.deepEqual(await poll(ready, blocked), readRefusal);
 }
@@ -9040,12 +8929,12 @@ ready.updateResult = { ok: true, value: { id: 't', changed: false } };
 assert.equal((await poll(ready, ready.MindwtrHost.update(updateInput))).ok, true);
 assert.equal((await poll(ready, ready.MindwtrHost.saveDraft(draftInput))).ok, true);
 assert.equal(ready.completeCount + ready.createCount + ready.updateInputs.length, commandsBefore + 4);
-// Projects cannot show unsaved in-memory values as stored either; labels still load.
+
 for (const blocked of [ready.MindwtrHost.projects(), ready.MindwtrHost.projectDetail('p1', 0, 50, '')]) {
     assert.deepEqual(await poll(ready, blocked), readRefusal);
 }
 assert.equal(ready.projectInputs.length, 3);
-// The area filter is a read: it waits for the retry. Its commands, like every command, reach core so the retry can save.
+
 assert.deepEqual(await poll(ready, ready.MindwtrHost.areaFilter()), readRefusal);
 ready.taskFocusResult = { ok: true, value: { id: 't', focused: true } };
 for (const command of [ready.MindwtrHost.taskFocus('t', true), ready.MindwtrHost.projectFocus('p', true),
@@ -9053,7 +8942,7 @@ for (const command of [ready.MindwtrHost.taskFocus('t', true), ready.MindwtrHost
     assert.equal((await poll(ready, command)).ok, true);
 }
 assert.equal(ready.newInputs.length, 4);
-// Search and Process Inbox reads wait for the retry; their commands reach core so the retry can save.
+
 for (const blocked of [ready.MindwtrHost.search('{"query":"a","filters":{},"limit":50}'), ready.MindwtrHost.inboxStart('guided'),
     ready.MindwtrHost.inboxStep('{"sessionId":"x","taskId":"t","step":"actionable"}')]) {
     assert.deepEqual(await poll(ready, blocked), readRefusal);
@@ -9066,8 +8955,8 @@ for (const command of [ready.MindwtrHost.saveSearch('{"query":"a","requestId":"r
     assert.equal((await poll(ready, command)).ok, true);
 }
 assert.equal(ready.newInputs.length, 7);
-// Menu screen reads wait for the retry; the More sheet's tiles (navigation) do not, so Menu never opens empty;
-// menu commands reach core so the retry can save.
+
+
 assert.deepEqual(await poll(ready, ready.MindwtrHost.menuRead('archive', '{"offset":0,"limit":50}')), readRefusal);
 assert.equal(ready.menuInputs.length, 0);
 assert.equal((await poll(ready, ready.MindwtrHost.menuRead('more', '{}'))).ok, true);
@@ -9076,27 +8965,27 @@ assert.equal((await poll(ready, ready.MindwtrHost.menuCommand('archiveAction', '
 assert.equal(ready.menuInputs.length, 2);
 assert.equal((await poll(ready, ready.MindwtrHost.language('', 'zh-CN'))).ok, true);
 assert.equal((await poll(ready, ready.MindwtrHost.strings('["tab.inbox"]'))).ok, true);
-// The RN legacy import runs after the validated load and before activation. RN state changes only
-// after the saved import is read back, and a failed RN state change never fails the boot.
+
+
 const bootBody = hostEntry.slice(hostEntry.indexOf('const boot = '), hostEntry.indexOf('globalThis.MindwtrHost ='));
 const bootOrder = ['legacyState ? await adapter.getData() : null', 'await importLegacyJson(adapter, loaded,', 'loaded = null;', 'await activateAndVerify(adapter, recoveryLoad)'].map((text) => bootBody.indexOf(text));
 assert(bootOrder.every((index, i) => index > (i ? bootOrder[i - 1] : -1)), `boot order ${bootOrder}`);
 assert.match(hostEntry, /boot\(legacyState: string, legacyBackup: string, writeJournal = '', budgetJSON = ''\): string \{\s*return boot\(legacyState, legacyBackup, false, writeJournal === 'journaled', budgetJSON\);/);
 const importBody = hostEntry.slice(hostEntry.indexOf('const importLegacyJson'), hostEntry.indexOf('// After a failed save'));
-// The import plans from the boot's own validated read; the adapter caches no document (pass D1c, cut i).
+
 assert.doesNotMatch(hostEntry, /latestData/);
 const importOrder = ['planLegacyJsonImport(', 'legacyImportMismatch(plan.merged, loaded)', 'await adapter.saveData(plan.merged)',
     'legacyImportMismatch(plan.merged, await adapter.getData())', 'Legacy import not confirmed', 'native().rnStateCommit(',
     "if (rnState === 'failed') throw new Error("].map((text) => importBody.indexOf(text));
 assert(importOrder.every((index, i) => index > (i ? importOrder[i - 1] : -1)), `import order ${importOrder}`);
-// A failed RN state change fails the boot closed: the catch only records it, and the throw is unconditional on the log.
+
 assert.match(importBody, /catch \(error\) \{\s*rnState = 'failed';\s*rnFailure = [^\n]*\s*\}/);
 assert.equal(importBody.match(/rnState = 'failed'/g).length, 1);
 assert.equal(hostEntry.match(/saveData\(/g).length, 1, 'the import is the host\'s only direct save');
 assert.equal(hostEntry.match(/rnStateCommit\(/g).length, 2, 'bridge type and one call');
 const legacyLine = /extra: Record<string, string> = \{([\s\S]*?)\};/.exec(importBody)?.[1] ?? '';
 assert(legacyLine.includes("releaseCheck: ios ? 'v1.3.3/native-ios-legacy-json-import' : 'v1.3.3/native-android-legacy-json-import'"));
-// Field names (the counts come from core's plan) are listed in packages/core/src/release-diagnostics-fields.test.ts.
+
 for (const [, name] of legacyLine.matchAll(/(\w+):/g)) assert.doesNotMatch(name, /key|pass|user/i);
 
 const legacyState = (overrides = {}) => JSON.stringify({ jsonAhead: true, reconciled: true, backupVersion: '2', backupPresent: true, ...overrides });
@@ -9137,14 +9026,14 @@ assert.equal(ready.events.includes('plan'), false, 'the dev database never plans
     assert.deepEqual(legacy.events, ['load', 'plan', 'save', 'load'], 'an unconfirmed import changes no RN state and never activates');
 }
 {
-    // Every id is there, but one imported field did not persist.
+
     const lost = { ...merged, tasks: [{ id: 'rn' }, { id: 'json-only', title: 'lost' }] };
     const { legacy, result } = await legacyBoot({ setup: (state) => { state.afterSave = lost; } });
     assert.match(result.error, /Legacy import not confirmed/);
     assert.deepEqual(legacy.events, ['load', 'plan', 'save', 'load'], 'a content mismatch changes no RN state and never activates');
 }
 {
-    // The retry after a failed RN state change: the import is already saved, so only the RN state change runs.
+
     const { legacy, result } = await legacyBoot({ setup: (state) => { state.fakeDataSequence = [merged]; state.fakeData = merged; } });
     assert.equal(result.ok, true, result.error);
     assert.deepEqual(legacy.events.slice(0, 4), ['load', 'plan', commitOf(true, false), 'activate']);
@@ -9155,7 +9044,7 @@ assert.equal(ready.events.includes('plan'), false, 'the dev database never plans
     assert.deepEqual(legacy.events, ['load', 'plan', 'save']);
 }
 {
-    // A failed RN state change (the RKStorage checkpoint included) fails closed: the import stays, nothing activates.
+
     const { legacy, result } = await legacyBoot({ setup: (state) => { state.commitResult = '!MindwtrNativeError:Cannot create the RN state checkpoint'; } });
     assert.equal(result.ok, false);
     assert.match(result.error, /^Cannot update the previous app version's saved state: Cannot create the RN state checkpoint$/);
@@ -9180,8 +9069,8 @@ const brokenBoot = await poll(brokenStorage, brokenStorage.MindwtrHost.boot());
 assert.equal(brokenBoot.ok, false);
 assert.match(brokenBoot.error, /disk I\/O error/);
 assert.equal(brokenStorage.activationCount, 0);
-// Review 2: MindwtrHost.cancel, as CoreHost calls it past a deadline, cancels the host's calls and fires the operation's
-// signal, so the operation ends at once (here runNetDeadline in "drain" mode): its fetch rejects and its write is refused.
+
+
 {
     const deadlineState = makeState(0);
     const fetches = [];
@@ -9202,8 +9091,8 @@ assert.equal(brokenStorage.activationCount, 0);
         'Native Android net deadline drain events=["signal","fetch:AbortError","write:AbortError"]']);
     assert.equal(deadlineState.cancelled, 'The host operation timed out');
 }
-// Review C1 5: MindwtrHost.abort, as CoreHost.cancel(LongCall) calls it, aborts one AI request's signal: its provider call
-// stops and the operation answers at once; no other host call is refused (unlike cancel, which drains everything).
+
+
 {
     const ai = makeState(0);
     assert.equal((await poll(ai, ai.MindwtrHost.boot())).ok, true);
@@ -9217,8 +9106,8 @@ assert.equal(brokenStorage.activationCount, 0);
     assert.deepEqual(await poll(ai, id), { ok: false, error: 'The AI request was cancelled' });
     assert.equal(refused, false, 'abort refuses no other host call');
 }
-// Review 6: check-net-device.mjs cleans up once, whether it ends, is interrupted (Ctrl-C) or is terminated, and a signal
-// exits with 128 + its number. A failing step (the phone gone) does not stop the steps after it.
+
+
 {
     const { spawnSync } = await import('node:child_process');
     const script = (ending) => `import { cleanupOnExit } from ${JSON.stringify(resolve(app, 'scripts/check-net-device.mjs'))};
@@ -9230,7 +9119,7 @@ assert.equal(brokenStorage.activationCount, 0);
         assert.deepEqual([child.status, child.stdout], [status, 'props\nreverse\n'], ending);
     }
 }
-// Core's logger on the file bridge, with core's real diagnostics-log.ts: RN's gate, force, line and sanitizer; one append per line.
+
 {
     const log = makeState(0);
     assert.equal((await poll(log, log.MindwtrHost.boot())).ok, true);
@@ -9243,7 +9132,7 @@ assert.equal(brokenStorage.activationCount, 0);
     log.coreLogger({ level: 'warn', message: 'forced token=secret-value', scope: 'diagnostics', force: true });
     await tick();
     assert.deepEqual(lines().map(({ ts: _ts, ...line }) => line), [{ level: 'warn', scope: 'diagnostics', message: 'forced token=[redacted]' }]);
-    // Review S3 2 and 3 through the real bundle: core's sanitizer on the polyfill's URL.
+
     log.coreLogger({ level: 'warn', message: 'GET https://alice:p@ss@nas.local/dav failed; GET https://nas.local/dav?token=first&token=second failed', scope: 'sync', force: true });
     await tick();
     const sanitized = lines().at(-1).message;
@@ -9261,13 +9150,13 @@ assert.equal(brokenStorage.activationCount, 0);
     assert.deepEqual(await poll(log, log.MindwtrHost.logShare()), { ok: true, value: { path: 'files/logs/mindwtr.log' } });
     assert.deepEqual(await poll(log, log.MindwtrHost.logClear()), { ok: true, value: {} });
     assert.equal(log.logText, null);
-    // A failing bridge never reaches the caller: the line is dropped, and Share gets no path.
+
     log.logFailure = 'disk full';
     assert.doesNotThrow(() => log.coreLogger({ level: 'error', message: 'lost', force: true }));
     await tick();
     assert.deepEqual(await poll(log, log.MindwtrHost.logShare()), { ok: true, value: { path: null } });
 }
-// iOS uses the real shared logger/queue and strict native probe, including while a domain retry is owed.
+
 {
     const log = makeState(0, [], 'ios');
     assert.equal((await poll(log, log.MindwtrHost.boot())).ok, true);
@@ -9323,22 +9212,21 @@ console.log('Settings and the editor\'s View tab: core\'s settings and task view
 console.log('Mind Sweep and saved searches: core\'s views through CoreHost, captures and Bulk organize creates on disk first, stale windows read again whole, Focus picker search, no Kotlin policy');
 console.log('App lock: core\'s General row read at boot and after a failed save, locked on each leave but a rotation, no recents picture while on, AndroidX BiometricPrompt with Expo\'s credential fallback, General\'s switch on only after a yes, a scrolling lock screen in core\'s words, and a phone check that swaps the database atomically and restores loudly');
 console.log('Diagnostics log: core\'s rules on Kotlin\'s file bridge (RN\'s path, gate, force, line, sanitizer), Share through a private FileProvider and the share sheet, Clear, Data\'s card from core');
-// One run per phone: every device check waits for its phone's lock before anything else (device-lock.mjs).
+
 for (const file of ['device.mjs', 'check-net-device.mjs']) {
     assert.match(readFileSync(resolve(app, `scripts/${file}`), 'utf8'), /^import '\.\/device-lock\.mjs';$/m, `${file} waits for the phone's lock first`);
 }
 console.log('Entry points: RN\'s alias, links on the build\'s scheme, text shares and Assistant notes read as strings into core\'s resolveNativeEntryPoint, RN\'s shortcuts from RN\'s builder, Import .txt through core');
-// Pass B3 (R1 native): core's reminder planner and timers in the engine (host-reminders.ts); Kotlin applies each plan in core's
-// order (ReminderPlanTest), posts what a fired alarm carries, sends Done and Snooze to CoreWork as journaled core commands, plans
-// again after a reboot, a clock change or an update, and cancels RN's alarms once.
+
+
 {
     const remindersKt = source('Reminders.kt');
     const notificationsKt = source('CoreNotifications.kt');
     const manifest = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
-    // Alarms and the buttons come only from this app's PendingIntents; the reschedule receiver takes only actions the system sends.
+
     assert.match(manifest, /<receiver\s+android:name="\.ReminderAlarmReceiver"\s+android:exported="false" \/>/);
     assert.match(manifest, /<receiver\s+android:name="\.ReminderActionReceiver"\s+android:exported="false" \/>/);
-    // R2b: the Pomodoro's completion alarms come only from this app's AlarmManager (PomodoroAlarms.kt).
+
     assert.match(manifest, /<receiver\s+android:name="\.PomodoroAlarmReceiver"\s+android:exported="false" \/>/);
     const reschedule = manifest.match(/<receiver\s+android:name="\.ReminderRescheduleReceiver"[\s\S]*?<\/receiver>/)[0];
     assert.deepEqual([...reschedule.matchAll(/<action android:name="([^"]+)"/g)].map((m) => m[1]), ['android.intent.action.BOOT_COMPLETED',
@@ -9346,41 +9234,39 @@ console.log('Entry points: RN\'s alias, links on the build\'s scheme, text share
         'android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED']);
     assert.doesNotMatch(manifest, /android:process=/, 'one process: two hosts on one database reject each other\'s writes');
     assert.match(remindersKt, /action == DEBUG_RESCHEDULE && BuildConfig\.DEBUG\)\) return/, 'the debug reschedule only in a debug build');
-    // Kotlin decides no alarm: no timer, no reason and no id of its own (core's id is the request code and the notification's id).
+
     assert.doesNotMatch(code(remindersKt + notificationsKt), /postDelayed|Handler\(|Timer\(|"expired"|hashCode\(\)|Random\(/);
     assert.match(remindersKt, /PendingIntent\.getBroadcast\(context, alarm\.getInt\("id"\), fireIntent\(context\)/);
     assert.match(notificationsKt, /val id = alarm\.getInt\("id"\)/);
     for (const text of [remindersKt, notificationsKt]) {
         for (const call of code(text).matchAll(/PendingIntent\.get(?:Broadcast|Activity)\([\s\S]{0,240}/g)) assert.match(call[0], /^[^]*?FLAG_IMMUTABLE/, 'every PendingIntent is immutable');
     }
-    // Exact when Android allows it, else allowed while idle, as RN's patched library sets an alarm.
+
     assert.match(remindersKt, /if \(Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.S \|\| manager\.canScheduleExactAlarms\(\)\) \{\s+manager\.setExactAndAllowWhileIdle\(AlarmManager\.RTC_WAKEUP, at, intent\)\s+\} else \{\s+manager\.setAndAllowWhileIdle\(AlarmManager\.RTC_WAKEUP, at, intent\)/);
-    // RN's alarms through RN's receiver's name and its request codes (the row's alarmId), before the maps go, then the table.
+
     assert.match(remindersKt, /RN_RECEIVER = "com\.emekalites\.react\.alarm\.notification\.AlarmReceiver"/);
-    // RN's release builds shrink AlarmModel's field names: every whole number in a row is a candidate request code.
+
     assert.match(remindersKt, /data\.optInt\("alarmId", Int\.MIN_VALUE\)/);
     assert.match(remindersKt, /PendingIntent\.getBroadcast\(context, id, intent, PendingIntent\.FLAG_NO_CREATE or PendingIntent\.FLAG_IMMUTABLE\)/, 'a candidate that names no RN alarm cancels nothing');
-    // Done and Snooze: CoreWork jobs, unique per request, journaled host methods (WriteJournal.SHAPES), the tap's time with Snooze.
+
     assert.match(source('CoreWork.kt'), /requestId != null -> work\.enqueueUniqueWork\("mindwtr-core-\$job-\$requestId", ExistingWorkPolicy\.KEEP, request\)/);
     assert.match(remindersKt, /"requestedAt" to System\.currentTimeMillis\(\)\.toString\(\)/);
-    // A receiver's job is stored before its notification goes and before its process may end (goAsync until WorkManager answered).
+
     assert.doesNotMatch(code(remindersKt), /CoreWork\.enqueue\(/, 'every reminder receiver queues durably');
     assert.equal([...code(remindersKt).matchAll(/CoreWork\.enqueueDurably\(this, context,/g)].length, 4, 'Done, Snooze, the reschedule and a repeat that fired');
-    // A daily or weekly alarm that fired is made again by core's plan, never at a time Kotlin works out; a delivery checks, under the
-    // lock each plan's apply holds, that no plan cancelled or moved its alarm meanwhile.
+
+
     assert.doesNotMatch(code(remindersKt), /Calendar|TimeZone|nextRepeat/);
     assert.match(remindersKt, /CoreJob\.REMINDERS, mapOf\("mode" to "fired", "key" to alarm\.getString\("key"\)\)/);
     assert.match(remindersKt, /synchronized\(ReminderAlarms\.LOCK\) \{\s+ReminderLedger\.of\(context\)\.deliver\(/);
-    // The ledger is on disk and written before any alarm changes, so a cancel holds across a process death.
+
     assert.match(remindersKt, /port\.record\(cancelled = [\s\S]{0,260}\)\s+for \(index in 0 until cancel\.length\(\)\)/);
     assert.match(remindersKt, /synchronized\(LOCK\) \{ applyLocked\(parsed\) \}/);
     assert.match(hostEntry, /reminderDone\(requestId: string, taskId: string\): string \{\s+return submit\(async \(\) => taskResult\('reminderDone', await contract\.completeReminderTask\(\{ requestId, taskId \}\)\)\);/);
-    // Snooze's alarm is made in the engine against the native state (core's planReminderSnooze), before the journaled reply.
+
     assert.match(hostEntry, /reminderSnooze\(json: string\): string \{\s+return submit\(async \(\) => \{\s+const result = await contract\.snoozeReminder\(JSON\.parse\(json\)\);\s+if \(result\.ok\) await requireReminders\(\)\.snooze\(result\.value\);\s+return taskResult\('reminderSnooze', result\);/);
-    // RN's look (react-native-alarm-notification's sendNotification and channel, patched): private on the lock screen (#823), a
-    // reminder at default priority with the notification sound; the channel at default importance, lights, no vibration, no DnD
-    // bypass. Only reminder notifications are cleared without permission (the quick-capture one is not, #819). Snooze and Done
-    // take the notification away once their job is stored (RN's snooze dismissal).
+
+
     assert.match(notificationsKt, /\.setPriority\(NotificationCompat\.PRIORITY_DEFAULT\)/);
     assert.match(notificationsKt, /\.setVisibility\(NotificationCompat\.VISIBILITY_PRIVATE\)/);
     assert.match(notificationsKt, /\.setCategory\(NotificationCompat\.CATEGORY_REMINDER\)/);
@@ -9390,16 +9276,15 @@ console.log('Entry points: RN\'s alias, links on the build\'s scheme, text share
     assert.match(remindersKt, /override fun clearDelivered\(\) \{\s+for \(shown in notifications\.activeNotifications\) \{\s+if \(NotificationCompat\.getChannelId\(shown\.notification\) == CoreNotifications\.REMINDER_CHANNEL\)/);
     assert.doesNotMatch(code(remindersKt + notificationsKt), /cancelAll\(\)/, 'nothing clears the whole tray');
     assert.equal([...code(remindersKt).matchAll(/\), done = dismiss\)/g)].length, 2, 'Done and Snooze dismiss once stored');
-    // RN's start-time permission question waits for the reminder alarms' start (they start with sync, after first content).
+
     assert.match(source('InboxViewModel.kt'), /suspend fun askNotifications\(\): Boolean \{\s+ProcessCoreHost\.remindersStarted\.await\(\)/);
     assert.equal([...source('ProcessCoreHost.kt').matchAll(/remindersStarted\.complete\(Unit\)/g)].length, 2, 'a start, or a resume\'s start after a failed one');
-    // The debug-only stops and the short snooze read a debug property (empty in a release build).
+
     assert.match(remindersKt, /if \(debugProperty\("reminder_stop"\) == point\)/);
     assert.match(remindersKt, /debugProperty\("snooze_minutes"\)\.toDoubleOrNull\(\)/);
 }
-// host-reminders.ts with a stand-in core and bridge: RN's alarms cancelled once before the first plan (a failed cleanup plans
-// nothing), cycles one at a time, the plan applied with the channel's name, the store timer after the last change, the top-up, the
-// exact rebuild's pending mark, the tap's re-plan, and nothing at all in sandbox mode.
+
+
 {
     const stand = `
 export const REMINDER_NOTIFICATION_CHANNEL_NAME = 'Mindwtr reminders';
@@ -9451,18 +9336,18 @@ globalThis.standStore = useTaskStore;
     const started = await reminders.start();
     assert.equal(started.rnCancelled, 2);
     assert.equal(started.ask, true, 'a feature on and no permission: RN asks at start');
-    // The process's first plan remakes every held alarm: Android dropped them if exact-alarm access was revoked (it stops the app)
-    // or the app was force-stopped, and the stored map still says each is held.
+
+
     assert.deepEqual(calls, ['cleanup', `plan ${stored} false remake all`, 'apply Mindwtr reminders']);
-    // Cycles run one at a time; the cleanup ran once.
+
     calls.length = 0;
     await Promise.all([reminders.cycle(false), reminders.cycle(false)]);
     assert.deepEqual(calls, [`plan ${stored} false`, 'apply Mindwtr reminders', `plan ${stored} false`, 'apply Mindwtr reminders']);
-    // The rebuild (a reboot, a clock change, exact alarms allowed) marks every held alarm pending.
+
     calls.length = 0;
     await reminders.cycle(true);
     assert.deepEqual(calls, [`plan ${stored} false remake all`, 'apply Mindwtr reminders']);
-    // Store changes: one plan, REMINDER_STORE_RESCHEDULE_DELAY_MS after the last accepted change; other changes plan nothing.
+
     calls.length = 0;
     globalThis.standStore.setState({ tasks: [] });
     await sleep(10);
@@ -9475,7 +9360,7 @@ globalThis.standStore = useTaskStore;
     globalThis.standStore.setState({ settings: { on: true } });
     await sleep(50);
     assert.equal(calls.length, 2, 'a change the rule does not accept plans nothing');
-    // The tap's re-plan and the top-up, each one plan.
+
     calls.length = 0;
     reminders.event();
     await sleep(40);
@@ -9486,11 +9371,11 @@ globalThis.standStore = useTaskStore;
     topUp = null;
     await sleep(60);
     assert.deepEqual(calls, [`plan ${stored} false`, 'apply Mindwtr reminders', `plan ${stored} false`, 'apply Mindwtr reminders'], 'the top-up plans once more');
-    // A daily or weekly alarm that fired: core makes that one again (its next time, or cancels it when turned off).
+
     calls.length = 0;
     await reminders.fired('digest:morning');
     assert.deepEqual(calls, [`plan ${stored} false remake digest:morning`, 'apply Mindwtr reminders']);
-    // A Snooze: core's answer against the stored state, applied in the queue as a plan that only stores that state and makes it.
+
     applied.length = 0;
     calls.length = 0;
     storedState = '{"x":1}';
@@ -9500,7 +9385,7 @@ globalThis.standStore = useTaskStore;
     assert.deepEqual(applied, [{ mode: 'active', cancel: [], schedule: [snoozeAlarm], writeAhead: null, stateAhead: '{"ahead":1}', alarms: stored,
         unchanged: true, state: '{"after":1}', topUpDelayMs: null, clearDelivered: false, channelName: 'Mindwtr reminders' }]);
     storedState = null;
-    // The native state goes in and comes back; stored again only when it changed (none stored reads as an empty state).
+
     applied.length = 0;
     await reminders.cycle(false);
     storedState = '{"task:b":{"kind":"delivered","id":8,"firedAtMs":1}}';
@@ -9511,17 +9396,17 @@ globalThis.standStore = useTaskStore;
     assert.deepEqual(applied.map((plan) => plan.state), [null, '{}', null], 'the state is stored only when it changed');
     storedState = null;
     planState = '{}';
-    // Sandbox mode: no plan at all.
+
     calls.length = 0;
     globalThis.reminderSandbox = true;
-    // (A fresh controller further below: a store change during the first cycle plans again.)
+
     assert.deepEqual(await reminders.start(), { mode: 'sandbox', ask: false });
     await reminders.cycle(false);
     reminders.event();
     await sleep(20);
     assert.deepEqual(calls, []);
     globalThis.reminderSandbox = false;
-    // The store subscription is armed before the first cycle: a change while it plans (a sync, a Done) plans again after it.
+
     const early = [];
     const fresh = mod.createNativeReminders({
         plan: async () => { early.push('plan'); await sleep(20); return { ok: true, value: { mode: 'active', cancel: [], schedule: [], alarms: '{}', state: '{}', topUpDelayMs: null } }; },
@@ -9531,7 +9416,7 @@ globalThis.standStore = useTaskStore;
         apply: () => early.push('apply'),
         cleanupRn: () => 0,
     });
-    // What a receiver dropped or could not queue since the last plan goes in that plan's summary line.
+
     const counted = mod.createNativeReminders({
         plan: async () => ({ ok: true, value: { mode: 'active', cancel: [], schedule: [], alarms: '{}', state: '{}', topUpDelayMs: null } }),
         planSnooze: () => { throw new Error('no snooze here'); },
@@ -9542,8 +9427,8 @@ globalThis.standStore = useTaskStore;
         receiverCounts: () => ({ dropped: 2, notQueued: 1 }),
     });
     assert.deepEqual(await counted.cycle(false), { mode: 'active', rebuild: true, scheduled: 0, withdrawn: 0, expired: 0, held: 0, dropped: 2, notQueued: 1 });
-    // RN 271fb6be2 (audit gap 8): one alarm Android refused is skipped, the plan finishes, the top-up is still set, and a warning
-    // line says how many were refused.
+
+
     let partialPlans = 0;
     const partialRemakes = [];
     const partial = mod.createNativeReminders({
@@ -9554,8 +9439,8 @@ globalThis.standStore = useTaskStore;
         apply: () => (partialPlans === 1 ? 1 : 0),
         cleanupRn: () => 0,
     });
-    // RN's reconcileLocalMobileNotificationsInBackground (#1398, #1424; audit gap 7): a capture or sync job plans once and the tester's
-    // line says it ran (forced, as RN's), or that it failed without failing the job.
+
+
     globalThis.reminderInfos = [];
     assert.equal((await counted.background('sync')).outcome, 'cycle-completed');
     const receipt = globalThis.reminderInfos.find(([message]) => message === '[Local Notifications] Background reminder reconciliation');
@@ -9576,9 +9461,9 @@ globalThis.standStore = useTaskStore;
     assert.equal((await partial.cycle(false)).refused, 1, 'the cycle finishes and reports the refused alarm');
     await sleep(40);
     assert.equal(partialPlans, 2, 'the top-up still plans again after a refusal');
-    // Review P3-3: core makes an already-made Snooze again only in a rebuild, so the plan after a refusal is a rebuild.
+
     assert.deepEqual(partialRemakes, ['all', 'all'], 'the plan after a refusal remakes every alarm');
-    // Review P3-2: a refused Snooze throws, so its job retries from the stored not-yet-made state.
+
     const refusedSnooze = mod.createNativeReminders({
         plan: async () => ({ ok: true, value: { mode: 'active', cancel: [], schedule: [], alarms: '{}', state: '{}', topUpDelayMs: null } }),
         planSnooze: (input) => ({ ok: true, value: { schedule: [input.alarm], stateAhead: '{"ahead":1}', state: '{"after":1}' } }),
@@ -9590,7 +9475,7 @@ globalThis.standStore = useTaskStore;
     await assert.rejects(refusedSnooze.snooze({ key: 'snooze:u', id: 1073741900, fireAtMs: 5, repeat: 'once', details: {}, replacing: null }), /ALARM_REFUSED/);
     assert.deepEqual(globalThis.reminderWarns.map(([message, payload]) => [message, payload.context.releaseCheck, payload.context.count]),
         [['[Local Notifications] Reminder cycle finished with refused alarms', 'v1.3.8/native-reminder-cycle-partial', 1]]);
-    // The ledger (Kotlin): what showed and what is still in the tray go into every plan and every Snooze.
+
     const ledgerInputs = [];
     const withLedger = mod.createNativeReminders({
         plan: async (input) => { ledgerInputs.push(['plan', input.fired, input.shown]); return { ok: true, value: { mode: 'active', cancel: [], schedule: [], alarms: '{}', state: '{}', topUpDelayMs: null } }; },
@@ -9613,11 +9498,11 @@ globalThis.standStore = useTaskStore;
 }
 console.log('Reminders: core plans and times every alarm in the engine, Kotlin applies each plan in core\'s order, the buttons and the reschedule go through CoreWork as core\'s commands, RN\'s alarms cancelled once before the first plan');
 console.log('Runner: CoreWork on the one host after the app\'s boot order, the queue drain after the journal replay, the queue\'s file and RKStorage ports, RN\'s capture intent and context receivers under RN\'s names, RN\'s capture intent Kotlin compiled in, the token only in Kotlin');
-// Review finding 3 (A2): a failure on a path that can carry a URI (attachments, links, sync, the shared log, core actions) is logged
-// by its class and core's code (failureForLog, attachmentLaunchLog), never with its message or stack, which can hold a credential URI.
+
+
 {
     const pilot = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
-    // A Log call whose last argument, after its message string, is the throwable itself.
+
     const rawThrowable = /Log\.[weid]\([^\n]*"\s*,\s*(it|failure|error|e|t)\)/;
     for (const file of ['Attachments.kt', 'SyncSettings.kt', 'SettingsModel.kt', 'AISettings.kt']) {
         assert.doesNotMatch(readFileSync(resolve(pilot, file), 'utf8'), rawThrowable, `${file} logs no raw throwable`);
@@ -9630,9 +9515,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         }
     }
 }
-// Review finding 2 (A2): a project file command whose copy hangs (a stalled document provider) ends at its deadline. The host's
-// cancel rejects every open file call and asks the host to abort it (HostIo.fileAbort), so the operation drains and the host never
-// stops; the call's late answer settles nothing.
+
+
 {
     const aborted = [];
     const answers = [];
@@ -9658,7 +9542,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.equal(refused, 'AbortError', 'no new file call starts while the operation drains');
     files.__resumeHostCalls();
 }
-// Passive calendar reads share the value pump, but cancellation targets only the calendar provider.
+
 {
     const polyfills = readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8');
     const answers = [], aborted = [], submitted = [];
@@ -9712,8 +9596,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         assert.equal(absent.__mindwtrCalendarCall, undefined, 'calendar capability absent stays unavailable');
     }
 }
-// Review finding 1 (A2): a managed attachment's delete asks core's keep() in the same engine turn as the delete itself, after every
-// file call queued before it. Here a delete waits behind a held file call while the attachment is restored: the bytes stay.
+
+
 {
     const bundled = await build({
         stdin: { contents: "export { createNativeAttachments } from './host-attachments';", resolveDir: resolve(app, 'bundle'), loader: 'ts' },
@@ -9753,14 +9637,14 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
             return { result: await outcome, deleted };
         };
         assert.deepEqual(await deleteRace(true), { result: false, deleted: [] }, 'an attachment restored while its delete waited keeps its bytes');
-        // The unlink in the turn that asked keep(), then the folder's sync on the files thread.
+
         assert.deepEqual(await deleteRace(false), { result: true, deleted: ['file:///data/user/0/app/files/attachments/a1.pdf',
             'synced file:///data/user/0/app/files/attachments/a1.pdf'] }, 'an unowned copy is deleted once, then its folder synced');
     } finally {
         rmSync(scratch, { recursive: true, force: true });
     }
 }
-// Task261: real pure V3 Discard candidate routing, without native cleanup authority.
+
 {
     const AT = '2026-10-05T00:00:00.000Z', ROOT = 'file:///library/documents/attachments/';
     const baseline = { id: 'baseline261', kind: 'file', title: 'Retain', uri: ROOT + 'baseline.pdf', createdAt: AT, updatedAt: AT };
@@ -9790,17 +9674,16 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.equal(historical.attachmentInputs.length, 0, 'private mixed candidates do not enter generic attachment commands');
     console.log('Task261: real pure mixed Discard candidates retain iOS-only historical routing, sealed grammar and no generic file-command admission (NodeVM)');
 }
-// Android's MindwtrHost table (android-host-table.mjs): exactly the methods Android calls. Every name Kotlin calls, and every
-// name the Node harness calls on the shipped bundle, is in it; every name in it is a host-entry.ts method; and the shipped
-// bundle exposes exactly those names, while host-entry.ts as iOS builds it keeps every method.
+
+
 {
     const { ANDROID_HOST_METHODS, hostTable, kotlinHostCalls, journalReplayMethods } = await import('./android-host-table.mjs');
     const kotlinFiles = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory()
         ? (entry.name === 'build' ? [] : kotlinFiles(resolve(dir, entry.name))) : entry.name.endsWith('.kt') ? [resolve(dir, entry.name)] : []));
     const named = (files, pattern) => [...new Set(files.flatMap((file) => [...readFileSync(file, 'utf8').matchAll(pattern)].map((match) => match[1])))].sort();
     const sources = kotlinFiles(resolve(app, 'android')).map((path) => ({ path, text: readFileSync(path, 'utf8') }));
-    // A method name that reaches the table through a variable is caught too: only CoreHost's own forwarding and the journal's
-    // replay may pass one (KOTLIN_FORWARDING_SITES), and the replay's names are the journal's SHAPES, checked below.
+
+
     const coreHost = sources.find((source) => source.path.endsWith('/core/CoreHost.kt'));
     const withCoreHost = (text) => sources.map((source) => (source === coreHost ? { ...source, text: source.text + text } : source));
     const adversarial = kotlinHostCalls(withCoreHost('\nfun inboxView(): JSONObject { val method = "inboxView"; return callAsync(method) }\n'));
@@ -9835,7 +9718,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         } finally {
             shipped.stop();
         }
-        // G3: the shipped bundle with Kotlin's Gmail calls loads, boots, starts Gmail with sync, and Settings reads it unavailable.
+
         const withGmail = await hostDevice({ bundle: resolve(app, 'android/app/src/main/assets/core-host.js'), name: 'gmail', filesRoot, gmail: true });
         try {
             await withGmail.boot('journaled');
@@ -9855,41 +9738,38 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert(names.length > ANDROID_HOST_METHODS.length * 4, 'host-entry.ts keeps every platform\'s methods');
     console.log(`Android host table: ${ANDROID_HOST_METHODS.length} of host-entry.ts's ${names.length} methods, every Kotlin, journal-replay and harness call among them, no unlisted variable dispatch`);
 }
-// Pass O2f: RN's welcome sheet and startup prompts (StartupPrompts.kt), pinned to RN's past fixes.
+
 {
     const prompts = source('StartupPrompts.kt');
-    // c4e52382d: while Start seeds, Back, the X, Skip, Set up sync and Import tasks do nothing; a failed seed leaves the sheet usable.
+
     assert.match(prompts, /val skip = \{ if \(!prompts\.seeding\) prompts\.close\("dismiss"\) \}/);
     assert.match(prompts, /fun handoff\(screen: String\) \{\s+if \(seeding\) return/);
     assert.match(prompts, /fun startFresh\(\) \{\s+val open = prompt\?\.takeIf \{[^}]*\} \?: return\s+if \(seeding\) return/);
     assert.equal(prompts.match(/, 0\.58f, busy, "welcome-(sync|import)"|disabled = busy, tag = "welcome-start"/g)?.length, 3, 'the three options are off while seeding');
     assert.match(prompts, /\.clickable\(enabled = !busy, role = Role\.Button, onClick = skip\)/);
     assert.match(prompts, /shell\.ui \{\s+seeding = false\s+val projectId = result\.getOrNull\(\)/);
-    // 1f84a52c0 (#632): at font scale 1.5 and above the footer note and Skip stack.
+
     assert.match(prompts, /val stackFooter = LocalDensity\.current\.fontScale >= 1\.5f/);
-    // The donation ask only in a release built with RN's DONATION_PROMPT_ENABLED (473fed225, 5a3f55e87); off in debug and benchmarks.
+
     const gradle = readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8');
     assert.match(gradle, /val rnDonationPrompt = System\.getenv\("DONATION_PROMPT_ENABLED"\) in setOf\("1", "true"\)/);
     assert.equal(gradle.match(/buildConfigField\("boolean", "DONATION_PROMPT", "false"\)/g)?.length, 2, 'off in defaultConfig and the benchmarks');
     assert.equal(gradle.match(/buildConfigField\("boolean", "DONATION_PROMPT", rnDonationPrompt\.toString\(\)\)/g)?.length, 1, 'read only in release');
-    // Prompt activity has one writer: the startup prompts' first ask (review O2e P3-A).
+
     assert.doesNotMatch([source('ProcessCoreHost.kt'), hostEntry].join('\n'), /recordAboutPromptActivity/);
-    // RN's guide links are accessibilityRole="link" and its help toggle carries accessibilityState={{ expanded }} (review O2f P3-5).
+
     const editor = source('TaskEditor.kt'), details = source('ProjectDetails.kt');
     assert.match(editor, /Text\(guideLink\(help\.getString\("readGuide"\)/);
     assert.match(details, /Text\(guideLink\(guide\.getString\("label"\)/);
-    // The help (?) now sits in the section header (RN #1450): still a button with its label and its expanded state.
+
     assert.match(editor, /\.clickable\(role = Role\.Button\) \{ helpOpen = !helpOpen \}\s+\.semantics \{ contentDescription = help\.getString\("label"\); stateDescription = /);
-    // RN's editor Focus star sits in the Title row beside the layout help (15c42df63), not in the top bar (O2f-parity pairs).
+
     assert.match(editor, /FieldHeading\(Lucide\.Type, t\("taskEdit\.titleLabel"\)[\s\S]{0,1500}testTag\("task-edit-focus-star"\)[\s\S]{0,400}FocusStar\(focused, !starEnabled, 18, Modifier\)[\s\S]{0,300}val helpLabel = t\("taskEdit\.editorLayoutHelpLabel"\)/);
     assert.doesNotMatch(editor, /FocusStar\(focused, !starEnabled, 22/);
-    // RN's row statusBadge has a borderColor but no borderWidth: a plain fill (O2f-parity pairs).
+
     assert.match(source('TaskRowView.kt'), /\.heightIn\(min = 44\.dp\)\.clip\(shape\)\.background\(colors\.bg\)\s+\.then\(tap\)/);
-    // A picked local .ics stays readable after a reboot (RN's 5bfa6bf6b): its picker is ACTION_OPEN_DOCUMENT, the only pick whose
-    // grant can persist (GetContent's cannot), and addFile persists it (keepPickedFileReadable, CalendarVisitTest).
-    // RN's openExternalLink (c2e30c2e5): a description's or project notes' external link, any scheme, opens through
-    // openExternalLink, which offers Copy link when nothing opens it (UpNoteLinkTest); none fails silently.
-    // An attachment link too (RN's attachment hooks call openExternalLink): Copy link when nothing opens it, not core's message.
+
+
     const attachmentLink = /if \(plan\.getString\("kind"\) == "link"\) \{([\s\S]*?)\n    \}/.exec(source('Attachments.kt'))?.[1] ?? '';
     assert.match(attachmentLink, /openExternalLink\(context, uri, t, \{ failure -> Log\.w\(CoreHost\.TAG, attachmentLaunchLog\("link", uri, failure\)\) \}, diagnostic\)/, 'a failed attachment link offers Copy link');
     assert.doesNotMatch(attachmentLink, /failedMessage/);
@@ -9897,7 +9777,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         assert.match(source(file), /openExternalLink\(context, target\.getString\("href"\)/, `${file}'s external links offer Copy link`);
         assert.doesNotMatch(source(file), /runCatching \{ context\.startActivity\(Intent\(Intent\.ACTION_VIEW, (?:original|target\.getString\("href"\))/);
     }
-    // A stored Done or Archive view value falls back alone (RN's 57271148e, ListViewStateTest): Kotlin's option lists are core's.
+
     const coreList = (file, name) => [.../=\s*\[([^\]]*)\]/.exec(readFileSync(resolve(app, '../../packages/core/src', file), 'utf8')
         .split(`export const ${name}`)[1])[1].matchAll(/'([\w-]+)'/g)].map((m) => m[1]);
     const kotlinSet = (name) => [...new RegExp(`val ${name} = setOf\\(([^)]*)\\)`).exec(source('ViewState.kt'))[1].matchAll(/"([\w-]+)"/g)].map((m) => m[1]);
@@ -9912,42 +9792,41 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.doesNotMatch(calendar, /ActivityResultContracts\.GetContent/);
     assert.match(calendar, /fun addFile\(uri: Uri, revision: String\) \{[^}]*keepPickedFileReadable \{ flags -> resolver\.takePersistableUriPermission\(uri, flags\) \}/);
 }
-// Pass O2f-parity b1: RN's project header "..." (ProjectDetailModal's actions sheet) on core's runProjectEdit, in RN's row order;
-// Delete closes the project and its Undo is core's deleteUndo of that very Delete.
+
+
 {
     const header = source('ProjectsScreen.kt'), details = source('ProjectDetails.kt');
     assert.match(header, /ProjectTitleField\([^\n]*\n[\s\S]{0,800}\{ projectDetails\.openActions\(\) \}[\s\S]{0,200}testTag\("project-actions-menu-button"\)/);
     assert.match(details, /"project-duplicate-button"[\s\S]{0,500}"project-convert-to-section-button"[\s\S]{0,300}"project-reactivate-button"[\s\S]{0,300}"project-archive-button"[\s\S]{0,300}"project-cancel-button"[\s\S]{0,300}"project-delete-button"/);
     assert.match(details, /deleteId = edit\(id, "delete", refused = [^\n]*answer = \{[\s\S]{0,400}shell\.closeProject\(\)[\s\S]{0,300}edit\(id, "deleteUndo", refused = [^\n]*\) \{ put\("deleteRequestId", deleteId\) \}/);
-    // A reply's follow-up (open the copy, the destination, the restored project) waits for the action to settle: the action still
-    // holds busy when its reply is posted, and a perform started then is dropped (phone run 3: Duplicate never opened the copy).
+
+
     assert.match(details, /answers\.remove\(action\.id\)\?\.let \{ answer -> shell\.ui \{ shell\.menu\.whenIdle \{ answer\(reply\) \} \} \}/);
-    // Review of b1+b2: the sheet stores a typed title and notes before any action (RN's onBeforeConvertToSection), and a refused
-    // action shows RN's failure line (core's STALE_REVISION is otherwise silent); Convert sends the preview Next confirmed.
+
+
     assert.match(details, /fun openActions\(\) \{\s+storeTyped\(\)\s+actionsOpen = true/);
     assert.match(details, /if \(message\.startsWith\("STALE_REVISION"\)\) \{\s+answers\.remove\(action\.id\)\s+refusals\.remove\(action\.id\)\?\.let \{ refused -> shell\.ui \{ refused\(message\.substringAfter\(": "\)\) \} \}/);
     assert.match(details, /put\("destinationProjectId", destination\)\.put\("title", title\)\.put\("expected", expected\)/);
-    // RN resets the detail list for each project and shows Getting Started's actions at the top again after Reactivate.
+
     assert.match(header, /val listState = remember\(openProjectId\) \{ LazyListState\(\) \}[\s\S]{0,300}listState\.scrollToItem\(0\)[\s\S]{0,2600}LazyColumn\([^\n]*state = listState/);
-    // A toast with an action (Undo) honors Android's "Time to take action" (TalkBack and switch users), never below RN's time.
+
     assert.match(source('InboxViewModel.kt'), /if \(action != null\) actionTimeout\(shown\) else shown/);
     assert.match(source('InboxViewModel.kt'), /getRecommendedTimeoutMillis\(shown\.toInt\(\),\s+android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_TEXT or android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_CONTROLS\)/);
-    // A highlighted task's project list scrolls to it once (#916); every follow-up that opens a project after another write waits
-    // for it to settle (phone runs 3 and 6).
+
+
     assert.match(header, /LaunchedEffect\(highlightTaskId, detail\) \{[\s\S]{0,600}listState\.animateScrollToItem\(/);
     assert.match(source('DataTransfer.kt'), /else if \(openProject\) \{ menu\.whenIdle \{ menu\.openProjects\(projectId\) \}/);
     assert.match(source('StartupPrompts.kt'), /shell\.menu\.whenIdle \{ shell\.menu\.openProjects\(projectId\) \}/);
-    // The pinned "+" is RN's openProjectQuickAdd: RN routes a capture with returnTo through its capture screen (the compact card),
-    // so the project closes and that screen opens on the project's preset (the project, status Next) with the project as returnTo;
-    // core's close answer names the project (returnToProjectId) and the screen opens it again. RN's card Save highlights nothing.
+
+
     assert.match(header, /\{ openProjectId\?\.let\(::openProjectCapture\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
     assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String\) \{[\s\S]{0,200}put\("initialProps", JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ closeProject\(\); captureModal\.opened\(params, reply\) \}/);
     assert.match(source('CaptureModalModel.kt'), /private fun end\(close: JSONObject, leave: Boolean = true\) \{\s+keep\(null\)\s+inFlight = null\s+(?:\/\/.*\n\s+)?close\.menuText\("returnToProjectId"\)\?\.let \{ id -> shell\.menu\.whenIdle \{ shell\.openProject\(id\) \} \}/);
-    // The popup has no opener preset any more: the project "+" was its only opener.
+
     assert.doesNotMatch(source('CaptureScreen.kt') + source('InboxViewModel.kt'), /presetPatch|withPreset|val preset: JSONObject/);
 }
-// Pass O2f-parity b4a: RN's pinned row "..." (More options) with Sort (core's choices, the prepared sort through runProjectEdit)
-// and Show completed (RN's device key), washed while either is on; the Completed pile folds under RN's chevron heading.
+
+
 {
     const header = source('ProjectsScreen.kt'), details = source('ProjectDetails.kt');
     assert.match(header, /\{ projectDetails\.openViewOptions\(\) \}[\s\S]{0,200}testTag\("project-task-view-options-button"\)/);
@@ -9957,8 +9836,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /edit\(projectId, "sort", answer = \{ readSort\(\) \}\) \{ put\("sortBy", sortBy\) \}/);
     assert.match(hostEntry, /projectTaskSortOptions: \(input\) => contract\.getProjectTaskSortOptions\(input\)/);
 }
-// Pass O2f-parity b4b: the project's task filters drive the Menu's own filter sheet through FilterSheetHost; core's project
-// filter view and token picker answer them, a project starts with none, and core's "Filters · N" chip opens the sheet.
+
+
 {
     const details = source('ProjectDetails.kt'), header = source('ProjectsScreen.kt'), menuModelKt = source('MenuModel.kt');
     assert.match(details, /class ProjectDetailsModel\(private val shell: InboxViewModel\) : FilterSheetHost \{/);
@@ -9969,60 +9848,59 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(header, /testTag\("project-task-filter-button"\)/);
     assert.match(details, /"project-view-filter-option"[\s\S]{0,800}"project-view-sort-option"/);
 }
-// Pass O2f-parity b4c: RN's reorder mode on core's project order view; a drop or TalkBack's move sends core's prepared move
-// (runProjectEdit taskOrder) with the order token the view showed; real sections keep RN's arrows; Reorder is the last row.
+
+
 {
     const details = source('ProjectDetails.kt'), header = source('ProjectsScreen.kt');
     assert.match(details, /runtime\.menuRead\("projectTaskOrderView", /);
     assert.match(details, /edit\(projectId, "taskOrder", refused = \{ readOrder\(\) \}, answer = \{ readOrder\(\) \}\) \{\s+put\("taskId", taskId\)\.put\("after", after \?: JSONObject\.NULL\)[\s\S]{0,200}\.put\("expectedOrder", token\)/);
     assert.match(details, /"project-view-completed-option"[\s\S]{0,1200}"project-view-reorder-option"/);
     assert.match(header, /if \(projectDetails\.reorderMode\) \{[\s\S]{0,400}LazyColumn\([^\n]*userScrollEnabled = false\) \{\s+openProjectId\?\.let \{ id -> projectDetailsItems\(model, id, detail\) \}\s+\}\s+ProjectReorderList\(model, Modifier\.weight\(1f\)\)\s+return@Column/);
-    // Review rb4c 2: the order reads again with every read of the project (view options, filter chip, Details, sync), not only
-    // after its own moves, so a drop never meets an order the screen no longer shows.
+
+
     assert.match(header, /if \(projectDetails\.reorderMode\) \{\s+(?:\/\/[^\n]*\n\s+)*LaunchedEffect\(detail\) \{ projectDetails\.readOrder\(\) \}/);
     assert.doesNotMatch(details, /if \(reorderMode\) readOrder\(\)/);
     assert.match(details, /customActions = moves/);
-    // Review rb4c 3/4, RN's DraggableFlatList: rows keyed by task id (TalkBack stays on its task), the scroll offset held when
-    // the rows change (FlatList keeps it; Compose would follow the first visible key and scroll a row dropped above it away),
-    // the drop slot from the measured rows (a row's middle crossed), live neighbour shifts, and RN's autoscroll (80, 120).
+
+
     assert.match(details, /itemsIndexed\(shown, key = \{ _, item -> reorderKey\(item\) \}\)/);
     assert.match(details, /SideEffect \{\s+if \(seen\[0\] != null && seen\[0\] !== shown\) listState\.requestScrollToItem\(listState\.firstVisibleItemIndex, listState\.firstVisibleItemScrollOffset\)/);
     assert.match(details, /val target = if \(dragFrom < 0\) -1 else dropTarget\(listState\.layoutInfo, dragFrom, dragTop, dragSize\)/);
     assert.match(details, /if \(item\.index > from && top \+ size >= middle\) after\+\+\s+if \(item\.index < from && top < middle\) before\+\+/);
     assert.match(details, /dragFrom < index && index <= target -> -dragSize\s+target <= index && index < dragFrom -> dragSize/);
     assert.match(details, /val threshold = with\(LocalDensity\.current\) \{ 80\.dp\.toPx\(\) \}\s+val speed = with\(LocalDensity\.current\) \{ 120\.dp\.toPx\(\) \}/);
-    // A drag a list update or a busy change restarts lets go of its row; TalkBack's Move up only past a task or a later header.
+
     assert.match(details, /\} finally \{\s+dragFrom = -1\s+\}/);
-    // RN's reorder headers: the title, then core's task count.
+
     assert.match(details, /Text\(item\.optInt\("count"\)\.toString\(\), style = rnText\(11, 600\), color = c\.secondaryText\)/);
     assert.match(details, /val canUp = index > 0 && \(shown\[index - 1\]\.getString\("type"\) == "task" \|\| index - 1 > 0\)/);
 }
-// Editor parity part 2 (task editor-parity-20261026-02), RN's TaskEditScheduleField, TaskEditHeader and TaskEditContentField:
+
 {
-    // (1) Every date field is RN's: its heading over its date box, whether set or not; no compact row.
+
     assert.doesNotMatch(editorUi, /CompactRow/, 'RN draws no compact date row: every date field is its heading over its box');
     assert.match(editorUi, /"dueDate", "startTime", "reviewAt" -> FormGroup \{[\s\S]{0,600}FieldHeading\(icon, label\)\s+\/\/[^\n]*\n\s+Row\(verticalAlignment = Alignment\.CenterVertically\) \{\s+DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);
-    // (2) RN's header: 12 above and below its 44 controls, and its 1 bottom border, which takes room as RN's borderBottomWidth does.
+
     assert.match(editorUi, /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 60\.dp\)\.background\(c\.cardBg\)\.rnBorderBottom\(c\.border\)\.padding\(start = 16\.dp, end = 16\.dp, top = 12\.dp, bottom = 12\.dp\)/);
-    // (3) RN's Description: the preview switch (Eye, then Pencil while previewing) and Expand beside its heading; the preview is
-    // core's rendered draft (the View tab's read), and Expand opens RN's ExpandedMarkdownEditor, an overlay as RN's descriptionExpanded.
+
+
     assert.match(editorUi, /val previewLabel = t\(if \(previewing\) "markdown\.edit" else "markdown\.preview"\)/);
     assert.match(editorUi, /Icon\(if \(previewing\) Lucide\.Pencil else Lucide\.Eye, null, tint = c\.tint, modifier = Modifier\.size\(18\.dp\)\)/);
     assert.match(editorUi, /val expandLabel = t\("markdown\.expand"\)[\s\S]{0,300}Icon\(Ionicons\.ExpandOutline, null, tint = c\.tint, modifier = Modifier\.size\(20\.dp\)\)/);
     assert.match(editorUi, /testTag\("task-description-fullscreen"\)/);
-    // RN lays out the bare 18 and 20 icons, right-aligned 8 apart, with a 10 hitSlop: one 66-wide box shifted 10 to the right
-    // centers each touch box on its icon (the phone pair had them 90 px left of RN's).
+
+
     assert.match(editorUi, /Box\(Modifier\.offset\(x = 10\.dp\)\.size\(66\.dp, 38\.dp\)\) \{/);
     assert.match(editorUi, /val pickerOpen = picker != null \|\| pickDate != null \|\| pickTime != null \|\| descriptionExpanded/);
 }
-// The task editor's "..." menu (task editor-menu-20261026-03): RN's TaskEditHeader rows (EditorMenuTest), each action as RN's
-// use-task-edit-actions.ts runs it. Writes are core's one journaled taskEditorAction (runTaskEditorAction); Share is core's read.
+
+
 {
     const menuKt = source('EditorMenu.kt');
     assert.match(editorUi, /EditorMoreButton\(model, editor\)/);
     assert.match(menuKt, /Icon\(Lucide\.MoreHorizontal, null, tint = c\.tint, modifier = Modifier\.size\(24\.dp\)\)/);
-    // Copy task link: this build's own scheme, so a development build's link opens the development build. The status menu's
-    // Copy task link and Copy task ID run the same copyTaskReference (43479990e).
+
+
     assert.match(menuKt, /val text = if \(link\) "\$\{BuildConfig\.URL_SCHEME\}:\/\/open\?task=\$\{Uri\.encode\(taskId\)\}" else taskId/);
     assert.match(menuKt, /EditorMenuAction\.CopyLink -> shell\.copyTaskReference\(context, editor\.id, link = true\)/);
     assert.match(source('TaskRowView.kt'), /copyTaskReference\(context, task\.id, link = true\)[\s\S]{0,200}copyTaskReference\(context, task\.id, link = false\)/);
@@ -10034,16 +9912,16 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(menuKt, /logLine\("Native task converted to a section releaseCheck=v1\.3\.8\/native-convert-to-section"/);
     assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt'), 'utf8'), /"taskEditorAction" to "\{requestId,taskId,kind\}"/);
     assert.match(model, /in EDITOR_MENU_KINDS -> editorMenu\.run\(action\)/);
-    // RN's preserved-draft list holds projectConversionOpen: Create project's dialog keeps the editor from an entry (#1410).
+
     assert.match(model, /editorMenu\.promoteTitle != null/);
-    // The device check's three: RN's toasts over the editor (the copy rows'), the project opened once the action ended, and
-    // Skip and Cancel's recurrence baseline only with a recurrence edit (EditorActionSaveTest).
+
+
     assert.match(activity, /else if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)\s+(?:\/\/[^\n]*\s+)*ToastCard\(model, /);
     assert.match(menuKt, /shell\.menu\.whenIdle \{ shell\.menu\.openProjects\(projectId\) \}/);
     assert.match(menuKt, /if \(editor\.patch\.keys\.any \{ it in RECURRENCE_FIELDS \}\) editor\.model\.recurrenceBase/);
 }
-// The first save's one-time work (the store tasks' save rows, the boot read's fingerprints) is done once per process after first
-// content, in slices while the engine is quiet; its own calls never count as activity for the quiet rule.
+
+
 {
     const coreHostKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
     const processKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8');
@@ -10051,17 +9929,16 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(coreHostKt, /if \(callAsync\("saveWarm", SAVE_WARM_SLICE\)\.optBoolean\("done", true\)\) return/);
     assert.match(processKt, /if \(runtime != null && saveWarmStarted\.compareAndSet\(false, true\)\) Thread\(\{\s+runCatching \{ runtime\.warmFirstSave\(\) \}/);
 }
-// Editor follow-ups (task editor-followups-20261027-04). Item 2: RN's (?) help sits in the section header right after the title
-// (RN #1450, CollapsibleSection + ContextualHelpButton), before the badge; its text opens under the header, the section open or
-// folded, with no label row and no close X (RN's ContextualHelpBody).
+
+
 {
     const header = /private fun CollapsibleSection\([\s\S]*?\n\}\n/.exec(editorUi)?.[0] ?? '';
     assert.match(header, /Text\(title\.uppercase\(\)[^\n]*\n\s+section\.help\?\.let \{ help ->[\s\S]*?Icon\(Lucide\.CircleHelp, null, tint = c\.secondaryText, modifier = Modifier\.size\(16\.dp\)\)[\s\S]*?Spacer\(Modifier\.weight\(1f\)\)\s+if \(section\.filledCount > 0\)/);
     assert.match(header, /section\.help\?\.let \{ if \(helpOpen\) ContextualHelpBody\(editorId, section\.id, it\) \}\s+if \(open\) Column/);
     assert.doesNotMatch(editorUi, /help\.getString\("dismiss"\)/);
 }
-// Item 1: RN's expanded editor (description and project notes) opens with the keyboard up and RN's MarkdownFormatToolbar over
-// it: core's actions and labels (markdownToolbarActions), each action core's applyMarkdownToolbarAction (markdownToolbarApply), Undo.
+
+
 {
     const toolbarKt = source('MarkdownToolbar.kt');
     assert.match(toolbarKt, /LaunchedEffect\(draft, enabled\) \{ if \(enabled\) \{ draft\.focus\.requestFocus\(\); keyboard\?\.show\(\) \} \}/);
@@ -10073,8 +9950,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(projectsUi + source('ProjectDetails.kt'), /MarkdownInput\(draft, store, raw != null[\s\S]*?MarkdownToolbar\(model, draft, store\)/);
     assert.match(hostEntry, /markdownToolbarActions: \(\) => contract\.getMarkdownToolbarActions\(\),\s+markdownToolbarApply: \(input\) => contract\.applyMarkdownToolbar\(input\),/);
 }
-// Item 3: Create project's Expand checklist switch (RN's TaskProjectConversionModal): core's block reason for the draft, the
-// expandChecklist kind with its Undo toast, the project opened once the action ended, and the tester's line.
+
+
 {
     const menuKt = source('EditorMenu.kt');
     assert.match(menuKt, /runtime\.menuRead\("taskChecklistProjectBlock", input\.toString\(\)\)/);
@@ -10082,44 +9959,43 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(menuKt, /JSONObject\(\)\.put\("kind", "expandChecklistUndo"\)\.put\("expandRequestId", input\.getString\("requestId"\)\)/);
     assert.match(menuKt, /logLine\("Native checklist expanded into a project releaseCheck=v1\.3\.8\/native-checklist-to-project"/);
     assert.match(menuKt, /RnSwitch\(editorMenu\.expand, /);
-    // RN's undo() opens the task with openTaskScreen(source.id, source.projectId, 'task'): its project (else Focus), then the editor.
+
     assert.match(menuKt, /"expandChecklistUndo" -> shell\.openSavedTask\(taskId, expandedFrom\.remove\(input\.getString\("expandRequestId"\)\)\)/);
     assert.match(hostEntry, /taskChecklistProjectBlock: \(input\) => contract\.getTaskChecklistProjectBlock\(input\),/);
 }
-// A resume's reminder cycle (37 ms at 5,000 tasks) waits for core to be quiet, bounded, so the new screen's first read goes first;
-// the widget build waits the same way (CoreHost.awaitQuiet).
+
+
 {
     const coreHostKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
     const processKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8');
     assert.match(processKt, /if \(state == "active"\) syncThread\.execute \{\s+(?:\/\/[^\n]*\n\s+)*resumedRuntime\(\)\?\.let \{ runtime ->\s+(?:\/\/[^\n]*\n\s+)*val ended = runtime\.awaitQuiet\(resumedAt, quietSince = resumedAt\) \{ appState != "active" \}[\s\S]{0,900}?\}\s+\}\s+runCatching \{ reminders\.resume\(\) \}/);
-    // The tester's line: a process's first resume, and any wait that did not end quiet; not every quiet resume.
+
     assert.match(processKt, /if \(ended != "quiet" \|\| resumeCycleLogged\.compareAndSet\(false, true\)\) \{/);
-    // Leaving the front ends the wait, so the state is set before the cycle is posted.
+
     assert.match(processKt, /val changed = state != appState\s+appState = state\s+val resumedAt = SystemClock\.uptimeMillis\(\)\s+if \(state == "active"\) syncThread\.execute \{/);
-    // The sync thread carries only sync's start, network and app-state triggers and the resume cycle; a local change's upload is
-    // core's own trigger on the engine (host-sync.ts), so it never queues behind the cycle's wait.
+
+
     assert.equal(processKt.match(/syncThread\.execute/g)?.length, 5);
     assert.match(readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8'), /useTaskStore\.subscribe\(nameNotifyListener\('auto-sync-trigger'/);
     assert.match(coreHostKt, /if \(leave\) callAsync\("widgetsRefresh", "leave"\) else \{\s+(?:\/\/[^\n]*\n\s+)*awaitQuiet\(\)\s+callAsync\("widgetsRefresh"\)/);
 }
-// Parity-small item 2 (parity-small-20261027-05): RN's capture popup shows its Add notes field under the title, always (#1406),
-// not inside More: no heading, RN's noteInput (8 above, 44 to 96 high, radius 12, 12 by 10).
+
+
 {
     const popup = source('CaptureScreen.kt');
-    // Voice pass V5: the title sits in RN's input row with the mic beside it; the notes field still comes next.
+
     assert.match(popup, /TitleField\(draft\.text, [^\n]*\n\s+MicButton\(voice\.state\) \{ voice\.toggle\(draft\.text, draft\.options\) \}\n\s+\}\n\s+\/\/[^\n]*\n\s+NoteField\(draft, copy\.getString\("notePlaceholder"\), copy\.getString\("noteLabel"\), !locked\)/);
     assert.doesNotMatch(popup, /Text\(noteLabel, style = rnText\(12, 600\)/);
     assert.match(popup, /\.padding\(top = 8\.dp\)\.fillMaxWidth\(\)\.heightIn\(min = 44\.dp, max = 96\.dp\)\.clip\(shape\)/);
 }
-// Parity-small item 3: the project header is RN's height (modalHeader: 10 above, 8 below Android's 18/bold EditText, then a 1 dp
-// border), measured on the S23 at 64.3 dp (193 px at 3 px per dp); native drew it 60 dp with a 1 px line.
+
+
 {
     const projects = source('ProjectsScreen.kt');
     assert.match(projects, /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 64\.3\.dp\)\.background\(c\.cardBg\)\.bottomBorder\(c\.border\)\.padding\(horizontal = 8\.dp\),/);
 }
-// Tab bar (tabbar-borders-20261027-06), measured against RN on the S23 in both themes: RN's bar reaches the screen bottom and
-// pads only a navigation inset of 20 dp or more, less 12 (tabBarBottomInset); its items sit 2 dp up (tabItemTopOffset) and press
-// with TouchableOpacity's 0.2 fade; an idle icon draws at 64% (0.8 twice); the top line is a whole pixel of the border color.
+
+
 {
     const activity = source('MainActivity.kt');
     const more = source('MoreSheet.kt');
@@ -10130,18 +10006,16 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     for (const kt of [activity, more]) assert.match(kt, /fade\(if \((active|open)\) 1f else RN_TAB_ICON_IDLE\)/);
     assert.match(activity, /fun Modifier\.hairline\(color: Color, top: Boolean\) = drawBehind \{\s+(?:\/\/[^\n]*\s+)*drawRect\(color, Offset\(0f, if \(top\) 0f else size\.height - 1f\), Size\(size\.width, 1f\)\)/);
 }
-// Borders (tabbar-borders-20261027-06): RN's borderBottomWidth/borderTopWidth 1 is 1 dp that takes layout space, so native's
-// rnBorderBottom/rnBorderTop draw the 1 dp line and pad by it. The project's pinned toolbar (projectTaskPinnedToolbar) first.
+
+
 {
     const theme = source('Theme.kt');
     assert.match(theme, /fun Modifier\.rnBorderBottom\(color: Color\): Modifier = drawBehind \{[\s\S]{0,200}\}\.padding\(bottom = 1\.dp\)/);
     assert.match(theme, /fun Modifier\.rnBorderTop\(color: Color\): Modifier = drawBehind \{[\s\S]{0,200}\}\.padding\(top = 1\.dp\)/);
     assert.match(source('ProjectsScreen.kt'), /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 56\.dp\)\.background\(c\.cardBg\)\.rnBorderBottom\(c\.border\)\.padding\(horizontal = 12\.dp, vertical = 8\.dp\)/);
 }
-// The border sweep (tabbar-borders-20261027-06): a 1 px hairline only where RN draws StyleSheet.hairlineWidth (17 sites: the tab
-// and title bars, the menu and filter-sheet rows, the Markdown toolbar, review area and project headers, history tabs, project
-// metadata and option rows, the expanded editors' headers, the capture-intent token row); the failure banner is RN's card;
-// every RN borderWidth 1 is rnBorderBottom / rnBorderTop. Organize's picker rows and Manage's create row draw none, as RN.
+
+
 {
     const { readdirSync } = await import('node:fs');
     const dir = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
@@ -10149,8 +10023,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.equal(all.match(/\.hairline\(/g)?.length, 18 + 1, 'the 17 hairline sites, the Gmail section\'s body (G4), and the helper itself');
     assert.ok((all.match(/\.rnBorder(Bottom|Top)\(/g)?.length ?? 0) >= 68, 'RN\'s borderWidth 1 lines are rnBorderBottom / rnBorderTop');
 }
-// The failure banner is RN's persistence-failure-banner card (tabbar-borders ruling): radius 12 with a 1 dp danger border, 12 from
-// the sides and 8 below the bar, the 20 dp warning glyph, the message in the text color, and RN's filled tint Retry (radius 8).
+
+
 {
     const activity = source('MainActivity.kt');
     assert.match(activity, /fun FailureBannerCard\(message: String, action: @Composable RowScope\.\(\) -> Unit\) \{[\s\S]{0,900}\.shadow\(8\.dp, shape\)\.clip\(shape\)\.background\(c\.cardBg\)\.rnBorder\(1\.dp, c\.danger, shape\)/);
@@ -10158,10 +10032,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const all = ['MainActivity.kt', 'DailyReviewScreen.kt', 'MenuWidgets.kt', 'MindSweep.kt', 'TaskEditor.kt', 'WeeklyReviewScreen.kt'].map(source).join('\n');
     assert.doesNotMatch(all, /TextButton\([^\n]*\) \{ Text\(t\("common\.retry"\)\) \}/);
 }
-// Native Gmail capture, passes G2 and G3 (native-gmail-capture design rev 2): RN's controller on this host, started after the
-// validated load in front only, outside sandbox mode, on the polyfill's timers (CoreHost.schedulePump wakes for them); the flush
-// that throws on a failed save (the lost-mail rule); Kotlin's fixed codes as RN's rejection codes; no token, mail or account in a
-// log, and nothing of Gmail in SecretStore; FOSS answers unavailable.
+
+
 {
     const gmailTs = readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8');
     const play = readFileSync(resolve(app, 'android/app/src/play/java/tech/dongdongbh/mindwtr/pilot/GmailAuthorization.kt'), 'utf8');
@@ -10182,10 +10054,10 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(hostEntry, /const state = requireSync\(\)\.start\(appState\);\s*\/\/[^\n]*\s*gmailLifecycle\(\(\) => nativeGmail\?\.start\(appState\)\);/);
     assert.match(hostEntry, /gmailLifecycle\(\(\) => nativeGmail\?\.appState\(appState\)\);\s*return requireSync\(\)\.appState\(appState\);/);
     assert.match(coreHost, /fun gmailRequest\(name: String, json: String\): JSONObject = callLong\("gmailRequest", name, json\)/);
-    // Mail captured outside any host call shows: a cycle with a new time that saved mail or failed partway reads the lists again (GmailCycleTest).
+
     assert.match(source('InboxViewModel.kt'), /"gmailStatus" -> event\.optJSONObject\("status"\)\?\.let \{ status ->\s*menu\.settings\.gmail\.statusChanged\(status\)\s*gmailCycleToShow\(gmailShown, status\)\?\.let \{ at -> gmailShown = at; menu\.whenIdle \{ if \(writable\) refreshAll\(synced = true\) \} \}/);
     assert.match(hostEntry, /statusChanged: \(status\) => \{ checked\(native\(\)\.hostEvent\(JSON\.stringify\(\{ type: 'gmailStatus', status \}\)\)\); \},/);
-    // The polyfill's channel: a failure rejects with Kotlin's text, RN's fixed code, which host-gmail.ts reads as the code.
+
     const answers = [];
     const sent = [];
     const bridge = { log() {}, nowMs: () => 0, gmailCall: (text) => { sent.push(JSON.parse(text)); return String(sent.length); }, ioNext: () => answers.shift() ?? '', ioBody: () => '' };
@@ -10197,8 +10069,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     state.__pumpTimers();
     assert.equal(JSON.stringify(await read), '{"labels":[]}');
     assert.equal(await refused, 'E_GMAIL_AUTH');
-    // Another operation's deadline cancels the host's calls (__cancelHostCalls); a Connect waiting on the user is not that
-    // operation's, and Kotlin bounds every Gmail call itself, so it settles with Kotlin's answer, as the lock release does.
+
+
     const connecting = state.__mindwtrGmailCall({ op: 'connect' }).then((value) => JSON.stringify(value), (error) => `${error.name}: ${error.message}`);
     state.__cancelHostCalls('Core netCheck timed out');
     const whileDraining = state.__mindwtrGmailCall({ op: 'status' }).then(() => 'resolved', (error) => error.name);
@@ -10207,10 +10079,10 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.equal(await connecting, '{"connected":true}', 'a pending Connect is not failed by another call\'s timeout');
     assert.equal(await whileDraining, 'resolved');
     state.__resumeHostCalls();
-    // A five-minute poll timer is the idle pump's next wake (CoreHost.schedulePump), not a busy loop.
+
     vm.runInContext('setTimeout(() => {}, 300000)', state);
     assert.equal(state.__nextTimerDelay(), 300000);
-    // No token or mail leaves Kotlin, and none reaches a log: the authorization logs nothing and keeps nothing in SecretStore.
+
     for (const [name, text] of [['GmailAuthorization.kt (Play)', play], ['GmailAuthorization.kt (FOSS)', foss], ['HostGmailReceipts.kt', receiptsKt]]) {
         assert.doesNotMatch(text, /\bLog\.|logLine|SecretStore|println/, `${name} logs nothing and stores no secret`);
     }
@@ -10219,16 +10091,16 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(foss, /put\("available", false\)/);
     assert.match(foss, /Result\.failure\(IllegalStateException\("E_GMAIL_CONFIG"\)\)/);
     assert.doesNotMatch(foss, /^import com\.google/m);
-    // RN's Kotlin core compiled as it is, Play only; Google's library in the Play channel only (checkFossDependencies proves it).
+
     assert.match(gradle, /"playImplementation"\("com\.google\.android\.gms:play-services-auth:22\.0\.0"\)/);
     assert.doesNotMatch(gradle, /(?<!")implementation\("com\.google\.android\.gms/);
     assert.match(gradle, /getByName\("play"\)\.java\.srcDir\(layout\.buildDirectory\.dir\("generated\/rnGmail\/main\/java"\)\)/);
     assert.match(gradle, /getByName\("testPlay"\)\.java\.srcDir\(layout\.buildDirectory\.dir\("generated\/rnGmail\/test\/java"\)\)/);
-    // RN's receipts file, in place: the same folder and name, so an RN user who upgrades keeps every receipt.
+
     assert.match(source('ProcessCoreHost.kt'), /gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\)/);
     assert.match(receiptsKt, /BundledSQLiteDriver\(\)\.open\(file\.path\)/);
-    // minSdk 24 with no library desugaring: an API 26 call (java.nio.file, java.time, File.toPath) throws NoSuchMethodError on
-    // Android 7, so a receipts reset there would fail every start (review rgmail, medium). A rename never replaces a file.
+
+
     for (const [name, text] of [['GmailAuthorization.kt (Play)', play], ['GmailAuthorization.kt (FOSS)', foss], ['HostGmailReceipts.kt', receiptsKt],
         ['GmailConsentPrompt.kt', readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/GmailConsentPrompt.kt'), 'utf8')],
         ['GmailCapture.kt', source('GmailCapture.kt')]]) {
@@ -10239,9 +10111,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const gmailTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-gmail.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(gmailTested.status, 0, `bundle/host-gmail.test.ts: ${gmailTested.stderr.slice(-1500)}`);
 }
-// G4: RN's Gmail section (GmailCapture.kt): every word one of RN's keys (gmail-capture-section.tsx and the failure keys core's
-// gmailCaptureErrorTranslation gives host-gmail.ts), each in LABEL_KEYS, no Kotlin literal standing in for one (RN's 73d3f7ab6
-// wording fix reaches it through the keys), RN's order, and the section placed under the capture intent card as RN places it.
+
+
 {
     const gmailKt = source('GmailCapture.kt');
     const rnSection = readFileSync(resolve(app, '../mobile/components/settings/gmail-capture-section.tsx'), 'utf8');
@@ -10250,14 +10121,14 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const nativeKeys = new Set([...gmailKt.matchAll(/"(settings\.gmailCapture[A-Za-z]*)"/g)].map((m) => m[1]));
     const errorKeys = [...coreGmail.matchAll(/'(settings\.gmailCapture[A-Za-z]*Failed|settings\.gmailCaptureCancelled)'/g)].map((m) => m[1]);
     assert.equal(rnKeys.size, 30, 'RN\'s section and core\'s failure keys were read');
-    // The failure keys reach Kotlin as host-gmail.ts's errorKey and lastErrorKey; every other key is named in GmailCapture.kt.
+
     assert.deepEqual([...rnKeys].filter((key) => !nativeKeys.has(key) && !errorKeys.includes(key)).sort(), [], 'every RN key the section shows is GmailCapture.kt\'s');
     assert.deepEqual([...nativeKeys].filter((key) => !rnKeys.has(key)).sort(), [], 'GmailCapture.kt shows no key RN\'s section lacks');
     for (const key of rnKeys) assert(labelKeys.includes(key), `LABEL_KEYS lacks ${key}`);
     const shown = gmailKt.replace(/\/\*\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
     for (const [, literal] of shown.matchAll(/Text\("([^"$]*)"/g)) assert.fail(`GmailCapture.kt draws the literal "${literal}"`);
     assert.match(shown, /Text\(if \(gmail\.open\) "▾" else "▸"/, 'RN\'s disclosure glyphs');
-    // RN's order: the disclosure, unavailable or (account, label, hint, active) then the buttons, last checked, error, notice.
+
     const order = ['settings.gmailCaptureDisclosure', 'settings.gmailCaptureUnavailable', 'settings.gmailCaptureAccount', 'settings.gmailCaptureLabelHint',
         'settings.gmailCaptureActive', 'settings.gmailCaptureConnecting', 'settings.gmailCaptureCancel"', 'settings.gmailCaptureDisconnect"',
         'settings.gmailCaptureChecking', 'settings.gmailCaptureSaving', 'settings.gmailCaptureLastChecked', 'gmail.shownError', 'gmail.notice?.let'].map((text) => shown.indexOf(text));
@@ -10265,11 +10136,11 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const settingsKt = source('SettingsScreen.kt');
     assert.match(settingsKt, /capture\.optJSONObject\("captureIntent"\)\?\.let \{ CaptureIntentCard\(model, it\) \}\s*GmailCaptureSection\(model\)/);
     assert.match(settingsKt, /if \(settings\.screen == "gtd-capture"\) GmailLabelPicker\(model\)/);
-    // Back leaves the section (RN unmounts it): an answer on its way counts for nothing.
+
     assert.match(source('SettingsModel.kt'), /if \(screen == "gtd-capture"\) gmail\.leave\(\)/);
 }
-// A Focus read that draws the same as shown moves only the revision every pager and search uses (focusRevision); the list
-// is not drawn again and the Pomodoro card is not read again.
+
+
 {
     const viewModelKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt'), 'utf8');
     assert.match(viewModelKt, /private fun showFocus\(view: FocusView\?\) \{\s+focusRevision = view\?\.revision\.orEmpty\(\)\s+(?:\/\/[^\n]*\n\s+)*if \(view != null && focus\?\.sameShown\(view\) == true\) return/);
@@ -10278,29 +10149,27 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         assert.doesNotMatch(readFileSync(resolve(app, `android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/${name}`), 'utf8'), /focus\?\.revision(?!\.orEmpty\(\)\s*$)/m, `${name} pages at focusRevision`);
     }
 }
-// widget-audio-20261028-05: the widget's queued recordings become tasks as RN's foreground drain makes them (core's
-// ingestPendingAudio with RN's audio port), apart from the journaled ingest (a transcription waits on the network), after the sync
-// start and on each resume; Gemini reaches its provider, any other provider leaves the recording queued, as RN without speech.
+
+
 {
     const audioTs = readFileSync(resolve(app, 'bundle/host-widget-audio.ts'), 'utf8');
     const processHost = source('ProcessCoreHost.kt');
     assert.match(coreHost, /fun ingestPendingAudio\(\): JSONObject = callLong\("ingestAudio"\)/);
     assert.match(hostEntry, /ingestAudio\(\): string \{\s*return submit\(async \(\) => \{\s*if \(!widgetAudioPort\) return \{ ingested: 0 \};\s*const result = unwrap\(await contract\.ingestPendingAudio\(\{ queue: pendingCaptureQueue, lastApplied: lastAppliedRecord, audio: widgetAudioPort \}\)\);/);
-    // The journaled ingest still passes no audio port: a transcription must never run inside its deadline.
+
     assert.match(hostEntry, /contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)/);
     assert.match(processHost, /syncHost = runtime\s*network\.start\(\)\s*drainAudio\(app, runtime, SystemClock\.uptimeMillis\(\)\)/);
     assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime, resumedAt, quietSince = resumedAt\) \{ appState != "active" \} \}/);
-    // A resume counts as a call (W1b): after a long idle the gate would hold at once, before the screen's first read. The sync
-    // start's drain keeps quietSince 0: the boot's own reads are its calls.
+
+
     assert.match(processHost, /private fun drainAudio\(app: Application, runtime: CoreHost, askedAt: Long, quietSince: Long = 0, stop: \(\) -> Boolean = \{ false \}\)/);
-    // The resume path is tuned for hot start: with no recording queued, a drain costs the queue's listing and a read of its small
-    // items (no store read, no fingerprint, no core call); with one, it waits behind the same quiet gate as the widget build and the
-    // resume reminder cycle. The queue's audio items, never the WAV folder, start it: an orphan WAV costs nothing (core deletes it).
+
+
     assert.match(processHost, /audioDrainQueued\.set\(false\)\s*WidgetAudioDrain\.run\(\{ WidgetAudioDrain\.hasQueuedRecording\(queue\(app\)\) \}, \{ runtime\.awaitQuiet\(askedAt, quietSince, stop\) \},\s*\{\s*Log\.i\(CoreHost\.TAG, "Native Android widget audio drain after its quiet wait waitedMs=[^"]*"\)\s*runCatching \{ runtime\.ingestPendingAudio\(\) \}/);
     assert.match(source('core/WidgetAudioDrain.kt'), /val ended = awaitQuiet\(\)\s*if \(ended != "left"\) ingest\(\)/);
     assert.match(source('core/WidgetAudioDrain.kt'), /queue\.listFiles \{ file -> file\.name\.endsWith\(".json"\) \}\s*\?\.any \{ item -> runCatching \{ JSONObject\(item\.readText\(\)\)\.optString\("kind"\) == "audio" \}/);
     assert.doesNotMatch(processHost, /AUDIO_DIRECTORY/, 'the WAV folder never starts a drain');
-    // Voice pass V3: the provider is core's resolver (no inline copy), the dispatch core's; only local Whisper waits (V4).
+
     assert.match(audioTs, /const runtime = resolveSpeechToTextRuntimeSettings\(settings\.ai\?\.speechToText, \{ isFossBuild: bindings\.isFossBuild \}\);/);
     assert.match(audioTs, /if \(runtime\.provider === 'whisper'\) \{ bindings\.logWaiting\('provider-unsupported'\); return null; \}/);
     assert.doesNotMatch(audioTs, /speech\?\.provider \?\? 'gemini'|provider !== 'parakeet'/, 'no inline provider resolution');
@@ -10308,9 +10177,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const audioTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-widget-audio.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(audioTested.status, 0, `bundle/host-widget-audio.test.ts: ${audioTested.stderr.slice(-1500)}`);
 }
-// voice-v3-20261028-15: the capture popup's voice calls (host-voice.ts). Kotlin's microphone answers like a fetch (HostVoice over
-// HostIo.voice, never refused by a host deadline); the popup's requests take the long path; the save is the capture contract's;
-// local Whisper is not ready until V4, so no stored model path counts (RN bug 1 is not carried); the log lines hold fixed fields.
+
+
 {
     const hostEntrySource = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');
     const polyfills = readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8');
@@ -10321,13 +10189,13 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(hostEntrySource, /voiceRequest\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*if \(!nativeVoice\) throw new Error\('Voice capture is not available on this host'\);\s*return nativeVoice\.request\(name, JSON\.parse\(json\) as Record<string, unknown>\);/);
     assert.match(hostEntrySource, /whisperModelReady: \(\) => false,/);
     assert.match(hostEntrySource, /submit: \(input\) => contract\.submitQuickCaptureAudio\(input\),/);
-    // Review N3/N9: the managed-copy check is host-voice's tested persistIntoManagedStorage under core's ATTACHMENTS_DIR_NAME, and
-    // one AI key store serves the widget and voice capture. Review N4: a save, an applied transcript and a failure are forced.
+
+
     assert.match(hostEntrySource, /const managed = managedAttachmentsDirectory\(documents\);/);
     assert.match(hostEntrySource, /persistAttachment: \(attachment\) => persistIntoManagedStorage\(attachment, \{\s*persist: \(entry\) => host\.persistAttachmentLocally\(entry\),/);
     assert.match(voiceTs, /export const managedAttachmentsDirectory = \(documents: string\): string => `\$\{documents\}\$\{ATTACHMENTS_DIR_NAME\}\/`;/);
     assert.equal((hostEntrySource.match(/createAIKeyStore\(\{/g) ?? []).length, 1, 'one AI key store for speech');
-    // Voice V5 review N7: a refused save that kept its recording is forced too.
+
     assert.match(hostEntrySource, /const force = failed \|\| line\.outcome === 'saved' \|\| line\.outcome === 'applied' \|\| line\.outcome === 'kept';/);
     const voiceCallBlock = polyfills.slice(polyfills.indexOf('global.__mindwtrVoiceCall = function'), polyfills.indexOf('__mindwtrCalendarPushCall'));
     assert(voiceCallBlock.includes("native().voiceCall(JSON.stringify(request))") && !voiceCallBlock.includes('refuseIfCancelled'), 'a microphone call is never refused by a host deadline');
@@ -10337,10 +10205,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const voiceTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-voice.test.ts', 'apps/android-native/bundle/host-multipart.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(voiceTested.status, 0, `bundle/host-voice.test.ts: ${voiceTested.stderr.slice(-1500)}`);
 }
-// voice-v5-20261029-22: RN's microphone in the capture popup. The record button is RN's recordButton (40 square, radius 12, a
-// border; danger with the Square while recording, filterBg with the Mic; 0.6 and disabled while busy), the recording row RN's
-// (an 8 dot and 12/600 danger text), the processing row while busy. The popup's open and close are the voice session's; leaving
-// the app tells the bundle (review N5); a refused save's kept recording rides the next Save (review N2).
+
+
 {
     const popup = source('CaptureScreen.kt');
     const viewModel = source('InboxViewModel.kt');
@@ -10351,9 +10217,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(popup, /Text\(t\("quickAdd\.audioProcessing"\), style = rnText\(12, 600\), color = c\.secondaryText, maxLines = 2\)/);
     assert.match(viewModel, /if \(value == null && capture != null\) voice\.closed\(\)/);
     assert.match(viewModel, /keepCapture\(CaptureDraft\.opened\(view\)\.copy\(text = text\)\)\s*voice\.opened\(auto\)/);
-    // Voice V5 review B1: RN's saving || recordingBusy: the microphone starting, stopping or saving locks the popup (Back, the
-    // backdrop, X, Save, Save and edit and the fields), and Save waits. N1: a kept recording saves after the edit queue, with
-    // Save and edit, and its queued Save is spent; core's answer goes where a text save's does. N4: the center +'s label.
+
+
     assert.match(popup, /val voiceBusy = voice\.state\.busy\s+val locked = busy \|\| failed \|\| voiceBusy\s+val canSave = [^\n]*&& !busy && !voiceBusy &&/);
     assert.match(popup, /val closable = !busy && !failed && !voiceBusy/);
     assert.match(popup, /BackHandler\(enabled = !failed\) \{\s+if \(busy \|\| voiceBusy\) return@BackHandler/);

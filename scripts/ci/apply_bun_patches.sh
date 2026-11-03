@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-# Bun applies the root package.json `patchedDependencies` itself, but the FOSS
-# release recipe (and F-Droid-style rebuilds) install apps/mobile with npm ci,
-# which knows nothing about bun patches. v1.2.0 shipped its FOSS APK without
-# the expo-share-intent subject patch this way (#1016). Patched behavior must
-# not depend on which package manager built the app, so this applies the same
-# patch files to an npm-installed tree — loudly: a patch that no longer
-# applies, or a version drift, fails the build instead of shipping unpatched.
+
+
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -27,7 +22,7 @@ while IFS=$'\t' read -r key patch_file; do
         continue
     fi
 
-    # The package may be hoisted or nested; patch every installed copy.
+
     found=0
     while IFS= read -r pkg_json; do
         pkg_dir="$(dirname "${pkg_json}")"

@@ -13,7 +13,7 @@ final class AppleImageAnalysisCoordinatorTests: XCTestCase {
             }
             XCTFail("Expected cancellation")
         } catch AppleImageCaptureError.cancelled {
-            // Expected bridge ordering.
+
         } catch {
             XCTFail("Unexpected error: \(error)")
         }

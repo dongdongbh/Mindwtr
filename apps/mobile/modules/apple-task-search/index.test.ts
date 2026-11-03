@@ -16,7 +16,7 @@ vi.mock('expo-modules-core', () => {
   return { requireOptionalNativeModule: mocks.requireOptionalNativeModule };
 });
 
-// Module initialization must observe the hoisted native-module mock above.
+
 // eslint-disable-next-line import/first
 import {
   cancelAppleTaskSearch,

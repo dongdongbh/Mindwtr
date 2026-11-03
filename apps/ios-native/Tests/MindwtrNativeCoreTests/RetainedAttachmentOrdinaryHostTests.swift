@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Actual bundled JSC, SQLite, retained sidecar and independent ordinary editor.
+
 final class RetainedAttachmentOrdinaryHostTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private var root: URL!
@@ -139,8 +139,8 @@ final class RetainedAttachmentOrdinaryHostTests: XCTestCase {
         let first = try await seed(detach: false, published: true); await first.close()
         let retained = try evidence(includeStage: false) + [(editor.url, try Data(contentsOf: editor.url), try inode(editor.url))]
         let parked = root.appendingPathComponent("owner-before-older-capture.json")
-        // Model the already-owed journal arriving alongside a real producer's
-        // active record, preserving that record's original bytes and inode.
+
+
         try FileManager.default.moveItem(at: store.url, to: parked)
         defer {
             if FileManager.default.fileExists(atPath: parked.path) {

@@ -187,7 +187,7 @@ describe('project-utils', () => {
         const sectionProject: Project = { ...projects[0], id: 'seq', isSequential: true, sequentialScope: 'section' };
         expect(getProjectNextActionPromptData(completedTask, projectTasks, [sectionProject])).toBeNull();
 
-        // Section stalls but the project is parallel, or sequential over the whole project: no prompt.
+
         const stalledTasks = projectTasks.filter((task) => task.id !== 'a-next');
         const parallelProject: Project = { ...projects[0], id: 'seq' };
         const projectScoped: Project = { ...projects[0], id: 'seq', isSequential: true, sequentialScope: 'project' };
@@ -448,7 +448,7 @@ describe('project-utils', () => {
             row('a-gone', 'active', 0, 'gone'),
         ];
         const grouped = groupProjectsForPicker(projects, areas);
-        // Areas in their order, projects without a live area last, then each project's stored order (not A-Z).
+
         expect(grouped.active.map((project) => project.id)).toEqual(['a-home-1', 'a-home-2', 'a-work', 'a-gone', 'a-none']);
         expect(grouped.deferred.map((project) => project.id)).toEqual(['s-home', 'w-work']);
         expect(sortProjectsForPicker(projects, areas).map((project) => project.id))

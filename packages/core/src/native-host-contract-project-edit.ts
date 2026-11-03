@@ -16,16 +16,13 @@ import { getProjectFlowMode } from './task-utils';
 import { planProjectMove } from './project-grouping';
 import type { Project, ProjectFlowMode } from './types';
 
-/**
- * One Project details edit as the user made it: the field and its new value (a target state), under the request UUID the
- * native host journals before anything else runs. A section's create uses the request UUID as the new section's id.
- */
+
 export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'title'; title: string }
     | { kind: 'status'; status: 'active' | 'waiting' | 'someday' }
     | { kind: 'type'; sequential: boolean }
     | { kind: 'scope'; scope: 'project' | 'section' }
-    // RN's Flow Mode picker (#1429); 'type' stays for edits journaled before it.
+
     | { kind: 'flowMode'; mode: ProjectFlowMode }
     | { kind: 'area'; areaId: string | null }
     | { kind: 'color'; colorOverride: string | null }
@@ -36,29 +33,29 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'sectionRename'; sectionId: string; title: string }
     | { kind: 'sectionDelete'; sectionId: string }
     | { kind: 'sectionMove'; sectionId: string; direction: 'up' | 'down'; order: string[] }
-    // RN's section manager Parallel/Sequential button, shown while the project is Per section (#1429).
+
     | { kind: 'sectionFlow'; sectionId: string; sequential: boolean }
-    // RN's Projects screen long-press Move up / Move down (#1263): [order] is the project's area group as the list showed it.
+
     | { kind: 'move'; direction: 'up' | 'down'; order: string[] }
-    // The header's actions sheet (RN's "..."): Complete, Cancel or Reactivate, Duplicate, Delete and that Delete's Undo.
+
     | { kind: 'lifecycle'; action: 'complete' | 'cancel' | 'reactivate' }
     | { kind: 'duplicate' }
     | { kind: 'delete' }
     | { kind: 'deleteUndo'; deleteRequestId: string }
-    // RN's Convert to section… (the request UUID names the new section) and that conversion's Undo.
+
     | { kind: 'toSection'; destinationProjectId: string; title: string; expected: string }
     | { kind: 'toSectionUndo'; convertRequestId: string }
-    // RN's view options Sort: the project's task sort (core's choices).
+
     | { kind: 'sort'; sortBy: string }
-    // RN's view options Reorder: [taskId] moved after [after] (a task or section row, or the top) on the reorder view's order.
+
     | { kind: 'taskOrder'; taskId: string; after: { type: 'task' | 'section'; id: string } | null; showCompleted: boolean;
         filters: Record<string, unknown>; expectedOrder: string });
-/** [reply] is the prepared command's own answer when it wrote: the copy and its toast (duplicate), RN's Undo toast (delete). */
+
 export type NativeProjectEditResult = { id: string; kind: NativeProjectEdit['kind']; outcome: 'saved' | 'unchanged' | 'blocked'; reply?: unknown };
 
 type Reply = NativeHostResult<unknown>;
 type Json = Record<string, unknown>;
-/** The prepared project commands this runs: core's own options, preparation and commit methods, called on the contract. */
+
 type Port = Record<string, unknown>;
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -106,7 +103,7 @@ const valid = (input: unknown): input is NativeProjectEdit => {
                 && (after === null || (typeof after === 'object' && !Array.isArray(after) && Object.keys(after).length === 2
                     && (after.type === 'task' || after.type === 'section') && id(after.id)))
                 && typeof edit.showCompleted === 'boolean' && !!edit.filters && typeof edit.filters === 'object' && !Array.isArray(edit.filters)
-                // The view offers reorder up to the host's 2 MB message cap, so the token it hands out passes the same byte check.
+
                 && typeof edit.expectedOrder === 'string' && edit.expectedOrder.length > 0 && isNativeJsonWithinBytes(edit.expectedOrder);
         }
         case 'sort': return keys(edit, ['sortBy']) && (PROJECT_TASK_SORT_OPTIONS as readonly string[]).includes(edit.sortBy as string);
@@ -116,7 +113,7 @@ const valid = (input: unknown): input is NativeProjectEdit => {
     }
 };
 
-/** The section order [order] would have after moving [sectionId] one step [direction]; null when it cannot move. */
+
 const moved = (order: string[], sectionId: string, direction: 'up' | 'down'): string[] | null => {
     const from = order.indexOf(sectionId);
     const to = from + (direction === 'up' ? -1 : 1);
@@ -127,13 +124,7 @@ const moved = (order: string[], sectionId: string, direction: 'up' | 'down'): st
 };
 const same = (a: string[], b: string[] | null) => b !== null && a.length === b.length && a.every((value, index) => value === b[index]);
 
-/**
- * Project details' journaled edit (Android's `projectEdit` Menu command): core's options for the project as it is now, the
- * request built from them, core's preparation and the prepared commit, all inside one command, so the native journal holds
- * only the user's intent and its boot replay or retry redoes the whole edit. Each edit is a target state: one already applied
- * (a replay) answers `unchanged` and writes nothing. A sync landing between the steps (STALE_REVISION) prepares the edit
- * again against the project as it is then. A save that failed before is finished first, and every answer waits for the save.
- */
+
 export function createProjectEditMethods(deps: {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
@@ -150,19 +141,19 @@ export function createProjectEditMethods(deps: {
         return expected;
     };
     type Plan = { outcome: 'unchanged' | 'blocked'; reply?: Json } | { command: string; request: Json } | { conflict: string }
-        // A store command run as is (Convert to section and its Undo): its answer is final, never prepared again.
+
         | { run: () => Promise<NativeHostResult<Json>> };
-    // The Deletes this process confirmed, by request UUID: their Undo needs the confirmed Delete. RN's Undo lives as long as its
-    // toast and is gone after a restart; these are gone after a restart too.
+
+
     const deletes = new Map<string, Json>();
-    // The conversions this process made, by request UUID, for their Undo (RN keeps the receipt for its toast's Undo).
+
     const conversions = new Map<string, ProjectToSectionReceipt>();
-    // The envelope a request prepared while its save is owed, by request UUID: the retry (Try again) commits that same envelope, so
-    // its receipt answers with the first reply (the toast, the Undo) instead of a plan that finds the work already done.
+
+
     const preparedBy = new Map<string, { command: string; request: Json; prepared: Json }>();
-    // Each conversion's plan, by request UUID, so its retry sends the same command (RN retries the same prepared conversion).
+
     const convertPlans = new Map<string, Parameters<ReturnType<typeof useTaskStore.getState>['convertProjectToSection']>[0]>();
-    /** What the preview showed: the counts and titles, and every row the conversion moves, at their revisions. */
+
     const convertToken = (projectId: string, destinationId: string): string => {
         const state = useTaskStore.getState();
         const rows = [state._projectsById.get(projectId), state._projectsById.get(destinationId),
@@ -176,10 +167,7 @@ export function createProjectEditMethods(deps: {
         if (map.size > 20) map.delete(map.keys().next().value as string);
     };
 
-    /**
-     * The Projects list as Kotlin reads it (core's getProjects, called synchronously): the area group that holds [projectId] and its
-     * ids as shown, or null when the list no longer shows it.
-     */
+
     type ShownGroup = { areaId: string | null; shown: string[] };
     const shownGroup = (projectId: string): NativeHostResult<ShownGroup | null> => {
         const port = deps.contract();
@@ -190,14 +178,14 @@ export function createProjectEditMethods(deps: {
             .find((entry) => entry.projects.some((row) => row.id === projectId));
         return { ok: true, value: group ? { areaId: group.areaId, shown: group.projects.map((row) => row.id as string) } : null };
     };
-    /** Core's planProjectMove on the store as it is now, for a group as shown. */
+
     const planShownMove = (group: ShownGroup, projectId: string, direction: 'up' | 'down') => {
         const state = useTaskStore.getState();
         const projects = group.shown.map((id) => state._projectsById.get(id)).filter((row): row is Project => Boolean(row));
         return planProjectMove({ areaId: group.areaId ?? undefined, projects }, state._allProjects, projectId, direction);
     };
 
-    /** The request one edit makes from core's options for the project as it is now. */
+
     const plan = async (edit: NativeProjectEdit): Promise<NativeHostResult<Plan>> => {
         const base = { requestId: edit.requestId, projectId: edit.projectId };
         const project = { projectId: edit.projectId };
@@ -230,7 +218,7 @@ export function createProjectEditMethods(deps: {
                 if (!read.ok) return read;
                 if (read.value.canChange === false) return { ok: true, value: { outcome: 'blocked' } };
                 if (read.value.flowMode === edit.mode) return { ok: true, value: { outcome: 'unchanged' } };
-                // RN's setProjectFlowMode: entering Per section also gives each section without a choice its current flow.
+
                 return { ok: true, value: { run: async () => {
                     const result = await useTaskStore.getState().setProjectFlowMode(edit.projectId, edit.mode);
                     return result.success ? { ok: true, value: {} } : fail('STALE_REVISION', result.error ?? 'Project flow could not be changed');
@@ -240,7 +228,7 @@ export function createProjectEditMethods(deps: {
                 const state = useTaskStore.getState();
                 const parent = state._projectsById.get(edit.projectId);
                 if (!parent || parent.deletedAt || parent.purgedAt) return { ok: true, value: { conflict: 'The Project is no longer there' } };
-                // An archived project's sections are its history (archived with it): RN's manager offers no flow there.
+
                 if (parent.status === 'archived' || getProjectFlowMode(parent) !== 'perSection') return { ok: true, value: { outcome: 'blocked' } };
                 const current = state._allSections.find((row) => row.id === edit.sectionId);
                 if (!current || current.deletedAt || current.projectId !== edit.projectId) return { ok: true, value: { conflict: 'The Section is no longer there' } };
@@ -267,7 +255,7 @@ export function createProjectEditMethods(deps: {
                 const tag = normalizeProjectTag(edit.tag);
                 const has = ((read.value.project as Json).tagIds as string[]).includes(tag);
                 if (!tag || has === edit.present) return { ok: true, value: { outcome: 'unchanged' } };
-                // Core's add adds; its toggle of a tag the project has removes it.
+
                 return { ok: true, value: { command: 'ProjectTagsWrite', request: { ...base,
                     intent: { kind: edit.present ? 'add' : 'toggle', input: tag }, expected: token(read.value) } } };
             }
@@ -278,7 +266,7 @@ export function createProjectEditMethods(deps: {
                     : { command: 'ProjectNotesWrite', request: { ...base, text: edit.text, expected: token(read.value) } } };
             }
             case 'date': {
-                // A review date picked on Android: the picked day at the hour and minute the picker opened on (RN's picker).
+
                 const value = edit.value !== null && edit.opened !== null ? projectReviewPickerValue(edit.value, edit.opened) : edit.value;
                 if (edit.value !== null && value === null) return fail('INVALID_INPUT', 'A picked review day and the picker instant are required');
                 const read = await options('getProjectDateOptions', { ...project, field: edit.field });
@@ -287,7 +275,7 @@ export function createProjectEditMethods(deps: {
                     : { command: 'ProjectDate', request: { ...base, field: edit.field, value, expected: token(read.value) } } };
             }
             case 'sectionCreate': {
-                // The section takes the request UUID as its id: once it exists, the edit is done.
+
                 if (useTaskStore.getState()._allSections.some((row) => row.id === edit.requestId)) return { ok: true, value: { outcome: 'unchanged' } };
                 const read = await options('getProjectSectionOptions');
                 if (!read.ok) return read;
@@ -316,8 +304,8 @@ export function createProjectEditMethods(deps: {
                 if (!same(first.value.shown, edit.order)) return { ok: true, value: { conflict: 'The Projects changed since they were shown' } };
                 if (!planShownMove(first.value, edit.projectId, edit.direction)) return { ok: true, value: { outcome: 'blocked' } };
                 return { ok: true, value: { run: async () => {
-                    // Read, plan and start the write in one synchronous step (review NOTE 2): a sync landing after the read above is
-                    // seen here and refused, never overwritten by an order planned on the older list.
+
+
                     const read = shownGroup(edit.projectId);
                     if (!read.ok) return read;
                     const planned = read.value && same(read.value.shown, edit.order) ? planShownMove(read.value, edit.projectId, edit.direction) : null;
@@ -345,7 +333,7 @@ export function createProjectEditMethods(deps: {
                 const request = { ...base, taskId: edit.taskId, after: edit.after, showCompleted: edit.showCompleted, filters: edit.filters,
                     expectedOrder: current ?? edit.expectedOrder };
                 if (current === edit.expectedOrder) return { ok: true, value: { command: 'ProjectTaskOrder', request } };
-                // The order moved since the view: this move already in place (a replay) answers unchanged; any other change refuses.
+
                 const probe = await call('prepareProjectTaskOrder', request) as NativeHostResult<Json>;
                 return { ok: true, value: probe.ok && probe.value.kind === 'noop' ? { outcome: 'unchanged' }
                     : { conflict: 'Project task order changed; refresh before moving' } };
@@ -361,13 +349,13 @@ export function createProjectEditMethods(deps: {
             case 'toSection': {
                 const converted = (destinationProjectId: string, sectionId: string) => ({ destinationProjectId, sectionId,
                     title: word('common.done'), message: word('projects.convertSuccess'), undoLabel: word('common.undo') });
-                // The section named by this request exists: the conversion landed (a retry or a replay); its toast again while its Undo
-                // is still known (this process).
+
+
                 if (useTaskStore.getState()._allSections.some((row) => row.id === edit.requestId)) {
                     return { ok: true, value: { outcome: 'unchanged', ...(conversions.has(edit.requestId) ? { reply: converted(edit.destinationProjectId, edit.requestId) } : {}) } };
                 }
                 const cached = convertPlans.get(edit.requestId);
-                // RN converts what its preview showed: a change since (a sync, another edit) refuses with RN's message.
+
                 if (!cached && convertToken(edit.projectId, edit.destinationProjectId) !== edit.expected) return { ok: true, value: { conflict: word('projects.convertFailure.conflict') } };
                 return { ok: true, value: { run: async () => {
                     const state = useTaskStore.getState();
@@ -401,7 +389,7 @@ export function createProjectEditMethods(deps: {
                 const current = useTaskStore.getState()._projectsById.get(edit.projectId);
                 const gone = !current || Boolean(current.deletedAt) || Boolean(current.purgedAt);
                 if (edit.kind === 'deleteUndo') {
-                    // Back in place (a replay, or the Undo already ran): nothing to restore.
+
                     return { ok: true, value: !gone ? { outcome: 'unchanged' }
                         : !deletes.has(edit.deleteRequestId) ? { conflict: 'The Delete can no longer be undone' }
                             : { command: 'ProjectDeleteUndo', request: { requestId: edit.requestId, deleteRequestId: edit.deleteRequestId } } };
@@ -409,9 +397,9 @@ export function createProjectEditMethods(deps: {
                 if (gone) return { ok: true, value: edit.kind === 'delete' ? { outcome: 'unchanged' } : { conflict: 'The Project is no longer there' } };
                 const request = { ...base, projectRevision: revisionOf(current) };
                 if (edit.kind === 'delete') return { ok: true, value: { command: 'ProjectDelete', request } };
-                // ponytail: a duplicate's replay after it landed is refused by its receipt (new ids, another payload), never written twice.
+
                 if (edit.kind === 'duplicate') {
-                    // A replay after a restart: the copy this request made (its ids come from the request UUID) answers it.
+
                     const made = new Set(Array.from({ length: (current.attachments?.length ?? 0) + 1 }, (_, index) => projectDuplicateId(edit.requestId, index)));
                     const copy = useTaskStore.getState()._allProjects.find((row) => made.has(row.id));
                     return { ok: true, value: copy ? { outcome: 'unchanged', reply: { id: copy.id, message: word('projects.duplicated') } }
@@ -425,10 +413,8 @@ export function createProjectEditMethods(deps: {
     };
 
     return {
-        /**
-         * RN's Convert to section… for [projectId]: the actions row (its eligibility, or why not), the destinations core allows,
-         * and for a picked destination the preview's lines in the app language (or why that destination is refused). A read.
-         */
+
+
         getProjectToSectionOptions(input: { projectId: string; destinationId: string | null; title: string }): NativeHostResult<Json> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -459,7 +445,7 @@ export function createProjectEditMethods(deps: {
                     word('projects.convertArea', { area: area?.name ?? word('projects.noArea') }),
                     word('projects.convertDestinationColor'), word('projects.convertColor'), word('projects.convertSettings'), word('projects.convertTrash')],
                     color: getProjectAccentColor(destination, areaById) ?? null,
-                    // Sent back with Convert: core converts only what this preview showed.
+
                     token: convertToken(input.projectId, destination.id),
                 } : null,
                 blocked: preview && !preview.ok ? word(`projects.convertBlocked.${preview.reason}`) : null,
@@ -471,7 +457,7 @@ export function createProjectEditMethods(deps: {
             if (!ready.ok) return ready;
             if (!valid(input)) return fail('INVALID_INPUT', 'A bounded Project details edit is required');
             const answer = (outcome: NativeProjectEditResult['outcome']) => ({ id: input.projectId, kind: input.kind, outcome });
-            // A save that failed before (this edit's first send, say) is finished first, so `unchanged` never hides a lost write.
+
             try {
                 if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
             } catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
@@ -483,7 +469,7 @@ export function createProjectEditMethods(deps: {
                 if (committed.ok || committed.error.code === 'SAVE_FAILED') {
                     if (entry.command === 'ProjectDelete') remember(deletes, input.requestId, { request: entry.request, prepared: entry.prepared });
                 }
-                // Only a save owed keeps the envelope: once settled, a replay is a plan that finds the work done (unchanged).
+
                 if (committed.ok || committed.error.code !== 'SAVE_FAILED') preparedBy.delete(input.requestId);
                 return committed;
             };

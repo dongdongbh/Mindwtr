@@ -22,17 +22,10 @@ import android.widget.ArrayAdapter
 import android.widget.AdapterView
 import androidx.appcompat.app.AppCompatActivity
 
-/**
- * Picks which list a Tasks widget shows (#1173): the fixed GTD lists, then
- * saved filters, contexts and tags, and its background (Default, or transparent with light or dark text).
- * A Compact widget gets the background row only. Runs on placement (`android:configure`),
- * from the launcher's edit action (`reconfigurable`), and, for Tasks, as a list-only
- * dropdown sheet when the widget's own header chevron is tapped. OK stores the choice
- * for this widget id and redraws it; Cancel on first placement cancels the placement.
- */
+
 class WidgetConfigureActivity : AppCompatActivity() {
   private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
-  // Opened from the widget's header chevron: a top-anchored sheet, tap = pick.
+
   private var dropdown = false
   private var pendingSelection = WidgetListStore.DEFAULT_LIST
   private var groupingOptions = WidgetListStore.GROUPINGS
@@ -45,9 +38,8 @@ class WidgetConfigureActivity : AppCompatActivity() {
     setResult(Activity.RESULT_CANCELED)
     appWidgetId = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
       ?: AppWidgetManager.INVALID_APPWIDGET_ID
-    // Exported for the launcher's configure flow, so trust nothing in the
-    // intent: the id must name a widget already bound to one of this app's
-    // providers (the launcher binds before it starts the configure activity).
+
+
     val info = AppWidgetManager.getInstance(this)?.getAppWidgetInfo(appWidgetId)
     if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID || info?.provider?.packageName != packageName) {
       finish()
@@ -122,7 +114,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
       setTextColor(textColor)
     }
     findViewById<Spinner>(R.id.mindwtr_widget_configure_background).apply {
-      // Spinner positions follow WidgetBackground's order.
+
       this.adapter = spinnerAdapter(listOf(payload.listTitles["groupDefault"] ?: "Default",
         payload.listTitles["backgroundLightText"] ?: "Transparent, light text",
         payload.listTitles["backgroundDarkText"] ?: "Transparent, dark text"), textColor, palette)
@@ -164,7 +156,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   private fun save() {
     if (kind == WidgetKind.TASKS) WidgetListStore.write(this, appWidgetId, pendingSelection)
-    // The dropdown sheet does not show the option, so it leaves the stored choice alone.
+
     if (kind == WidgetKind.TASKS && !dropdown) WidgetListStore.writeFocusAvailable(this, appWidgetId, pendingFocusAvailable)
     WidgetListStore.writeBackground(this, appWidgetId, pendingBackground)
     val manager = AppWidgetManager.getInstance(this)
@@ -178,7 +170,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
     val focus = WidgetListStore.baseListId(pendingSelection) == WidgetListStore.DEFAULT_LIST
     findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility =
       if (dropdown || focus || kind != WidgetKind.TASKS) View.GONE else View.VISIBLE
-    // INVISIBLE keeps Cancel and Save where they are when the list changes.
+
     findViewById<View>(R.id.mindwtr_widget_configure_available).visibility =
       if (!dropdown && focus && kind == WidgetKind.TASKS) View.VISIBLE else View.INVISIBLE
     findViewById<Spinner>(R.id.mindwtr_widget_configure_grouping).setSelection(
@@ -207,7 +199,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-  /** Only visible rows are inflated; filtering never discards the pending widget selection. */
+
   internal class ChooserAdapter(
     private val context: Context,
     private val groups: List<Pair<String?, List<Pair<String, String>>>>,
@@ -265,7 +257,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
   companion object {
     const val EXTRA_DROPDOWN = "tech.dongdongbh.mindwtr.androidwidget.dropdown"
 
-    /** Tasks for the current and legacy Tasks providers (and any unknown class); Compact and Quick capture by their class. */
+
     internal fun kindFor(applicationPackage: String, providerClassName: String): WidgetKind =
       WidgetProviderRegistry.identities(applicationPackage).firstOrNull { it.className == providerClassName }?.kind ?: WidgetKind.TASKS
 

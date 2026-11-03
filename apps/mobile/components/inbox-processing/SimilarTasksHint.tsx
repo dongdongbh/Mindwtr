@@ -12,7 +12,7 @@ type Props = {
   projectTitles: ReadonlyMap<string, string>;
 };
 
-/** A quiet, read-only warning that a capture may already exist. */
+
 export function SimilarTasksHint({ t, tc, tasks, projectTitles }: Props) {
   if (tasks.length === 0) return null;
 

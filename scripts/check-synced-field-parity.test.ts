@@ -3,10 +3,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 
-// This script is a CLI entry point (top-level code runs the whole check suite
-// and may call process.exit), not a library, so it can't be imported directly
-// in a test. Mirrors scripts/mindwtr-cli.test.ts: spawn the real script and
-// assert on exit code + output instead.
+
 const REPO_ROOT = join(import.meta.dir, '..');
 const SCHEMA_PATH = join(REPO_ROOT, 'packages/core/src/cloudkit-production-schema.json');
 const DESKTOP_RUST_STORAGE_PATH = join(REPO_ROOT, 'apps/desktop/src-tauri/src/storage.rs');
@@ -18,8 +15,7 @@ const originalDesktopRustStorage = readFileSync(DESKTOP_RUST_STORAGE_PATH, 'utf8
 type ProductionRecord = { deployed: string[]; pendingProduction: string[] };
 type ProductionSchema = { records: Record<string, ProductionRecord> };
 
-// Safety net: restore the real, checked-in schema file even if a test throws
-// before its own try/finally runs.
+
 afterEach(() => {
     writeFileSync(SCHEMA_PATH, originalSchema);
     writeFileSync(DESKTOP_RUST_STORAGE_PATH, originalDesktopRustStorage);

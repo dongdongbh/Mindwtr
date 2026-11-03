@@ -30,7 +30,7 @@ struct NativeCalendarPushMapping: Equatable, Sendable {
     }
 }
 
-/// Frozen recovery state only; a matching identity does not authorize a provider or storage write.
+
 struct NativeCalendarPushEffect: Sendable {
     enum Phase: String, Sendable { case prepared, started, saved, acknowledging }
     enum Result: Equatable, Sendable {

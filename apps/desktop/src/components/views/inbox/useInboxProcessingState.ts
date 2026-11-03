@@ -41,8 +41,6 @@ import {
 type ProcessingMode = 'guided' | 'quick';
 
 
-/** Nothing being processed: an all-empty draft built by the same core factory
- *  that hydrates a real task, so reset and hydrate cannot drift apart. */
 const EMPTY_PROCESSING_DRAFT: TaskDraft = createTaskDraft({
     id: '',
     title: '',
@@ -71,10 +69,8 @@ export function useInboxProcessingState({
     const [quickActionability, setQuickActionability] = useState<QuickActionabilityChoice>('actionable');
     const [quickTwoMinuteChoice, setQuickTwoMinuteChoice] = useState<QuickTwoMinuteChoice>('no');
     const [quickExecutionChoice, setQuickExecutionChoice] = useState<QuickExecutionChoice>('defer');
-    // Every task field the flow edits lives in one core draft (title,
-    // description, contexts, tags, priority, energy, assignee, estimate,
-    // project, area). The date fields keep their own draft/committed pairs
-    // below because their inputs commit on blur.
+
+
     const [draft, setDraft] = useState<TaskDraft>(EMPTY_PROCESSING_DRAFT);
     const [delegateWho, setDelegateWho] = useState('');
     const [delegateFollowUp, setDelegateFollowUp] = useState('');
@@ -157,12 +153,7 @@ export function useInboxProcessingState({
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
-    /**
-     * The one write path into the processing draft: the core reducer applies
-     * the field descriptor cascades, and the inbox adds its own container rule
-     * on top — picking an area drops a project that lives outside it, and a
-     * section belongs to its project, so another project drops it (#1461).
-     */
+
     const setField = useCallback<TaskDraftSetter>((field, value) => {
         setDraft((current) => {
             let next = setTaskDraftField(current, field, value);
@@ -234,9 +225,9 @@ export function useInboxProcessingState({
         setDirtyScheduleFieldKeys(new Set());
     }, [defaultProcessingMode]);
 
-    // The task the draft was hydrated from: a step's write merges against it.
+
     const processingBaseRef = useRef<Task | null>(null);
-    // Read at hydrate time only, so a settings change never re-hydrates an open draft.
+
     const defaultAreaIdRef = useRef<string | undefined>(undefined);
     defaultAreaIdRef.current = resolveDefaultNewTaskAreaId(settings, areas);
     const hydrateProcessingTask = useCallback((
@@ -248,9 +239,8 @@ export function useInboxProcessingState({
         setQuickActionability('actionable');
         setQuickTwoMinuteChoice('no');
         setQuickExecutionChoice('defer');
-        // Keep an area assigned while the task sat in the inbox; a project home
-        // outranks the direct area (container exclusivity). A capture with neither
-        // starts in the default area (#1445).
+
+
         const taskDraft = createTaskDraft(task);
         const defaultAreaId = defaultAreaIdRef.current;
         setDraft(task.projectId

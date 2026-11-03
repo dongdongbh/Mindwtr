@@ -1,6 +1,6 @@
-// Full-parity Spanish translation. Split from i18n-translations.ts to make community
-// translation contributions easier. Every English key is translated here (mode: overrides,
-// floor: all), so new English UI copy cannot silently fall back in Spanish.
+
+
+
 export const esOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "Antes del inicio",
     "taskEdit.advanceReminderLabel": "Recordatorio anticipado",

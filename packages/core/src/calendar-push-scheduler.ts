@@ -1,12 +1,6 @@
-/**
- * Shared scheduling shell for the one-way calendar push on desktop and mobile.
- *
- * Both platforms serialize every calendar write so a full sync (fired on mount)
- * and the debounced partial sync (or two rapid manual refreshes) cannot race on
- * the check-then-create path and create duplicate events (#743). The runs
- * themselves live in `calendar-push-run.ts`; provisioning the managed calendar
- * stays platform-side.
- */
+
+
+
 export const CALENDAR_PUSH_SYNC_DEBOUNCE_MS = 2500;
 export const CALENDAR_PUSH_SYNC_CONCURRENCY = 4;
 
@@ -14,16 +8,16 @@ export type CalendarPushSchedulerOptions = {
     debounceMs?: number;
     runFull: () => Promise<void>;
     runPartial: (taskIds: string[]) => Promise<void>;
-    /** Synchronous, nonthrowing admission notification; the owner later calls runPartial. */
+
     onPartialDue?: (taskIds: string[]) => void;
 };
 
 export type CalendarPushScheduler = {
-    /** Drops the pending debounce without running it (store unsubscribe / stop). */
+
     cancelPending: () => void;
-    /** Runs arbitrary calendar work on the same queue (e.g. recreating the managed calendar). */
+
     enqueue: (run: () => Promise<void>) => Promise<void>;
-    /** Clears the queue and any pending work; for tests. */
+
     reset: () => void;
     runFull: () => Promise<void>;
     runPartial: (taskIds: readonly string[]) => Promise<void>;

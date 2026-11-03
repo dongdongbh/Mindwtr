@@ -8,8 +8,7 @@ import type { SettingsSyncPageProps } from './types';
 
 type SyncEncryptionSectionProps = Pick<SettingsSyncPageProps, 't' | 'encryption'>;
 
-// One flow open at a time. The section is a settings row, not a wizard: the form
-// opens in place under the button that asked for it and closes when it is done.
+
 type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock';
 
 const INPUT_CLS = 'w-full bg-muted p-2 rounded text-sm border border-border focus:outline-none focus:ring-2 focus:ring-primary';
@@ -74,8 +73,7 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
         if (done) closeFlow();
     };
 
-    // Rendered after the hooks so the component's hook order never depends on the
-    // backend: `supported` flips whenever the user changes the sync backend.
+
     if (!supported) return null;
     if (state === null) {
         if (!encryption.stateUnavailable) return null;
@@ -237,8 +235,8 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                         </p>
                         {flow === 'none' && (
                             <div className="flex flex-wrap items-center justify-end gap-2">
-                                {/* Changing the passphrase would run against a location that no
-                                    longer holds ciphertext — disabling here is the only remedy. */}
+                                {
+                                                                                                     }
                                 {state === 'enabled' && (
                                     <button type="button" onClick={() => openFlow('change')} className={SECONDARY_BUTTON_CLS}>
                                         {t.syncEncryptionChange}

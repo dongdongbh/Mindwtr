@@ -54,11 +54,11 @@ describe('unreachable attachment record', () => {
 
     it('labels a row from the record and location this process last saw', () => {
         rememberUnreachableAttachments({ s: ['a1'] });
-        // The location is not known yet: any location counts.
+
         expect(isAttachmentKeptWithoutFile(file())).toBe(true);
         rememberUnreachableAttachments({ s: ['a1'] }, 'other');
         expect(isAttachmentKeptWithoutFile(file())).toBe(false);
-        // The on-demand download refreshes the record and keeps the location.
+
         rememberUnreachableAttachments({ other: ['a1'] });
         expect(isAttachmentKeptWithoutFile(file())).toBe(true);
         rememberUnreachableAttachments({}, 'other');

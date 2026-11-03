@@ -208,7 +208,7 @@ describe('prepared native Person create', () => {
         failSave = false;
         expect(await writer.methods.commitPreparedPersonCreate(frozen)).toMatchObject({ ok: true });
         expect(writer.data().people?.[0]).toEqual(frozen.prepared.effect.person.after);
-        // A recreated host discards the writer's in-memory target and retries the retained journal.
+
         const cold = await open(beforeWrite);
         expect(await cold.methods.commitPreparedPersonCreate(frozen)).toMatchObject({ ok: true });
         const saved = structuredClone(cold.data());

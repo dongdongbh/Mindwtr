@@ -33,16 +33,7 @@ const waitForRetry = async (delayMs: number): Promise<void> => {
 
 export const getMcpWriteLockPath = (dbPath: string): string => `${dbPath}.mcp-write-lock.sqlite`;
 
-/**
- * Serializes MCP read-modify-write transactions across processes that share a
- * Mindwtr database. The sidecar SQLite transaction is intentionally separate
- * from the data connection: holding BEGIN IMMEDIATE on the data database would
- * prevent the core adapter from flushing through its own connection.
- *
- * SQLite owns the process lock, so an operating-system process exit releases it
- * without a stale lease file that another process would need to guess is safe
- * to remove.
- */
+
 export async function withMcpWriteLock<T>(dbPath: string, operation: () => Promise<T>): Promise<T> {
   const lockPath = getMcpWriteLockPath(dbPath);
   const startedAt = Date.now();
@@ -73,7 +64,7 @@ export async function withMcpWriteLock<T>(dbPath: string, operation: () => Promi
     try {
       lockDatabase.exec('ROLLBACK;');
     } catch {
-      // Closing the connection below still releases SQLite's OS-backed lock.
+
     } finally {
       lockDatabase.close();
     }

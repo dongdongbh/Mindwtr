@@ -40,9 +40,7 @@ const PARAKEET_MODEL_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases
 const PARAKEET_MODEL_ARCHIVE_SHA256: &str =
     "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf";
 const PARAKEET_INSTALL_DIR_NAME: &str = "parakeet-model";
-// Download hosts, tried in order. huggingface.co is unreachable on some networks (mainland
-// China); hf-mirror.com serves the same files. Every download is still gated by the pinned
-// sha256, so a mirror cannot substitute a model. Keep in step with core's whisper-models.ts.
+
 const WHISPER_MODEL_BASE_URLS: [&str; 2] = [
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main",
     "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main",
@@ -158,12 +156,11 @@ fn validate_managed_audio_path(data_dir: &Path, audio_path: &Path) -> Result<Pat
     Ok(audio_file)
 }
 
-// The model path is stored as an absolute path in device-local settings and
-// wins over a fresh lookup, so #1245 (an installed profile's folders moved down
-// into `data/`) left every stored path naming a file that is no longer there.
-// Retry the same file name under the current install dir; the caller's managed
-// check still has to pass, so this opens no location the app did not install.
-fn rehomed_managed_model_path(data_dir: &Path, install_dir_name: &str, model_path: &Path) -> PathBuf {
+fn rehomed_managed_model_path(
+    data_dir: &Path,
+    install_dir_name: &str,
+    model_path: &Path,
+) -> PathBuf {
     model_path
         .file_name()
         .map(|name| data_dir.join(install_dir_name).join(name))
@@ -825,7 +822,6 @@ pub(crate) async fn transcribe_whisper(
     language: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        // Models are device-level; captures belong to the active workspace (#1473).
         let model_root = crate::storage::get_device_data_dir(&app);
         let capture_root = get_data_dir(&app);
         transcribe_whisper_blocking(&model_root, &capture_root, model_path, audio_path, language)
@@ -841,8 +837,6 @@ fn transcribe_whisper_blocking(
     audio_path: String,
     language: Option<String>,
 ) -> Result<String, String> {
-    // Packaged Windows builds compile whisper with an AVX baseline (#1008).
-    // Refuse cleanly on older CPUs instead of dying with an illegal instruction.
     #[cfg(target_arch = "x86_64")]
     if cfg!(windows) && !std::arch::is_x86_feature_detected!("avx") {
         return Err(
@@ -938,7 +932,6 @@ fn download_parakeet_model_blocking(
         return Err("Unsupported Parakeet model".into());
     }
 
-    // Speech models are large, device-level downloads shared by every workspace.
     let data_dir = crate::storage::get_device_data_dir(&app);
     fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
     let target_dir = parakeet_model_dir(&data_dir);
@@ -1019,7 +1012,7 @@ fn download_whisper_model_blocking(app: tauri::AppHandle, model: String) -> Resu
         .tempdir_in(&data_dir)
         .map_err(|error| error.to_string())?;
     let temp_path = temp_dir.path().join(file_name);
-    // The first host's error is the one reported: it names the usual download source.
+
     let mut first_error: Option<String> = None;
     for base_url in WHISPER_MODEL_BASE_URLS {
         let url = format!("{base_url}/{file_name}");
@@ -1182,11 +1175,6 @@ mod tests {
         );
     }
 
-    // #1245 moved an installed Windows/macOS profile's managed folders from
-    // <root>/ down into <root>/data/. The speech model path is stored as an
-    // absolute path in device-local settings and wins over a fresh lookup, so
-    // after the upgrade every transcription failed with "model not found" —
-    // and a voice note recorded in that state was deleted unheard.
     #[test]
     fn whisper_model_recorded_at_the_flat_root_resolves_under_the_current_data_dir() {
         let temp_dir = tempfile::tempdir().expect("should create temp dir");
@@ -1203,8 +1191,6 @@ mod tests {
             fs::canonicalize(&model_file).expect("canonicalize")
         );
 
-        // The result must still be a model Mindwtr installed: an unmanaged file
-        // name never resolves, wherever it was recorded.
         let unmanaged = root.join(WHISPER_INSTALL_DIR_NAME).join("evil.bin");
         fs::write(model_dir.join("evil.bin"), b"weights").expect("should write file");
         assert!(validate_managed_whisper_model_path(&data_dir, &unmanaged).is_err());
@@ -1224,7 +1210,6 @@ mod tests {
             fs::canonicalize(&model_dir).expect("canonicalize")
         );
 
-        // A directory that is neither the recorded one nor the managed one stays refused.
         let elsewhere = root.join("somewhere-else");
         fs::create_dir_all(&elsewhere).expect("should create dir");
         assert!(validate_managed_parakeet_model_dir(&data_dir, &elsewhere).is_err());
@@ -1330,9 +1315,7 @@ mod tests {
     fn audio_capture_file_name_uses_subsecond_precision() {
         let first = audio_capture_file_name(UNIX_EPOCH + Duration::from_secs(1))
             .expect("should format first capture name");
-        // Windows SystemTime is backed by 100 ns ticks, so a 1 ns delta can be
-        // rounded away before duration_since observes it. A microsecond remains
-        // subsecond precision while being representable on every target.
+
         let second =
             audio_capture_file_name(UNIX_EPOCH + Duration::from_secs(1) + Duration::from_micros(1))
                 .expect("should format second capture name");

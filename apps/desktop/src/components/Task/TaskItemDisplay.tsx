@@ -70,7 +70,7 @@ interface TaskItemDisplayProps {
     showProjectBadgeInActions?: boolean;
     showProjectBadgeInMetadata?: boolean;
     readOnly: boolean;
-    /** Stronger than completed-row read-only: viewing historical project data must expose no mutations. */
+
     interactionDisabled?: boolean;
     compactMetaEnabled?: boolean;
     dense?: boolean;
@@ -78,19 +78,16 @@ interface TaskItemDisplayProps {
     dragHandle?: ReactNode;
     showTaskAge?: boolean;
     showHoverHint?: boolean;
-    /** Focus "Upcoming": the date the deferred task surfaces on. */
+
     appearsAtLabel?: string;
     projectDeadlineLabel?: string;
     renameRequestToken?: number;
-    /** Active theme, for the context swatch palette only (#974). */
+
     theme?: string;
     t: (key: string) => string;
 }
 
-// Red is reserved for a date that has passed. A due date coming up is a
-// warning, not a failure — and mobile already reads that way, so painting
-// "due within 24h" destructive here made the same task look overdue on one
-// device and not the other (#640).
+
 export const getUrgencyColor = (task: Task) => {
     const urgency = getTaskUrgency(task);
     switch (urgency) {
@@ -188,9 +185,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
         () => getInlineMarkdownPreview(task.description ?? ''),
         [task.description],
     );
-    // The age badge nudges about work that has been sitting unfinished, so it stays
-    // off completed rows — archived as well as done, which Archive started showing
-    // when its rows became the shared read-only row (#968).
+
+
     const showAgeBadge = !isReference
         && showTaskAge
         && !isTaskFinished(task)
@@ -208,11 +204,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const dateIssueLabel = getTaskDateCoherenceIssues(task).some((issue) => issue.code === 'start_after_due')
         ? tFallback(t, 'task.dateIssue.startAfterDue', 'Starts after due date')
         : '';
-    // A timed start (e.g. "starts 17:00") is the row's whole reason for being
-    // in Focus's Today today, so the details-off fallback row keeps it even
-    // though the rest of the start/due metadata is hidden. A date-only start
-    // carries no information the fallback row's date context doesn't already
-    // give, so it stays out.
+
+
     const hasTimedStart = Boolean(task.startTime && hasTimeComponent(task.startTime));
     const hasMetadata = isReference
         ? Boolean((showProjectBadgeInMetadata && project) || area || assignedTo || task.tags.length > 0)
@@ -281,8 +274,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     }, []);
     const [renameDraft, setRenameDraft] = useState<string | null>(null);
     const canInlineRename = !readOnly && !selectionMode && Boolean(onRenameTitle);
-    // Rename is requested from the quick-actions menu (TaskItem bumps the token);
-    // double-click stays reserved for opening the full editor.
+
+
     const lastRenameTokenRef = useRef(renameRequestToken);
     useEffect(() => {
         if (renameRequestToken === lastRenameTokenRef.current) return;
@@ -307,7 +300,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
             onToggleSelect?.({ range: event.shiftKey });
             return;
         }
-        // Keyboard activation should not be delayed.
+
         if (event.detail === 0) {
             onToggleView();
             return;
@@ -336,8 +329,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
         onOpenProject?.(projectId);
     };
     const handleProjectKeyDown = (event: KeyboardEvent<HTMLSpanElement>, projectId: string) => {
-        // Shift+Enter belongs to the list shortcut layer (edit selected task);
-        // swallowing it here made the chip activate instead (#847).
+
+
         if (event.shiftKey) return;
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
@@ -444,9 +437,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const canEditCompletedAt = Boolean(taskIsCompleted && completionLabel && onEditCompletedAt)
         && !selectionMode
         && !interactionDisabled;
-    // A read-only row restores to where the task belongs: an archived task goes
-    // back to the Inbox to be re-clarified, which is what Archive's bulk action
-    // and mobile already do; anything else picks up as the next action.
+
+
     const readOnlyRestoreStatus: TaskStatus = task.status === 'archived' ? 'inbox' : 'next';
     const readOnlyRestoreLabel = task.status === 'archived'
         ? tFallback(t, 'archived.restoreToInbox', 'Restore to Inbox')
@@ -462,8 +454,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     : tFallback(t, 'list.done', 'Completed')}: ${completionLabel}`}
             />
         );
-        // Done/archived rows are readOnly by design, but correcting the completion
-        // timestamp is exactly for those rows — only selection mode disables it.
+
+
         if (!canEditCompletedAt || !onEditCompletedAt) return badge;
         const editCompletedAtLabel = tFallback(t, 'task.editCompletedAt', 'Edit completion time');
         return (
@@ -503,11 +495,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
             />
         );
     };
-    // Inside the full metadata row the start chip already names this exact day,
-    // so a start-derived "appears on" chip would render the same date twice
-    // (Upcoming section, Discord report). Recurring projections have no
-    // startTime on the visible instance and keep the chip; the details-off
-    // fallback row below has no start chip and always keeps it.
+
+
     const appearsAtDuplicatesStart = Boolean(
         appearsAtLabel
         && task.startTime
@@ -663,10 +652,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
             )}
         </div>
     );
-    // Focused Next tasks stay marked even where no toggle renders or the
-    // hover-gated actions cluster is hidden (it collapses entirely below 560px
-    // containers, e.g. board columns), so the indicator rides the title. Views
-    // with an always-visible toggle (Focus page) already show the state.
+
+
     const showPinnedFocusStar = task.isFocusedToday === true
         && task.status === 'next'
         && !focusToggle?.alwaysVisible;
@@ -675,10 +662,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const inlineLeftControls = !actionsOverlay && (showQuickDoneButton || showCompletedIndicator || dragHandle);
     const showActionTags = !isReference && !actionsOverlay && !isViewOpen && task.tags.length > 0;
 
-    // Someday tasks promote to Next instead of completing — the natural
-    // transition when an item unblocks, matching the mobile swipe action.
-    // Waiting For completes: the other person delivered, so the item is done
-    // rather than back on your plate (#1164). The status menu still offers Next.
+
     const quickActionIsPromote = task.status === 'someday';
     const canBackdateComplete = !quickActionIsPromote && Boolean(onRequestBackdatedComplete);
     const quickDoneButton = (
@@ -714,16 +698,13 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
         : quickDoneButton;
 
     return (
-        // `isolate` keeps the row's internal z-10/z-20 layers (overlays, the
-        // hover action cluster) from joining the page stacking context, where
-        // they painted over open toolbar menus in views whose toolbar sits at
-        // a lower z-index (#1040).
+
+
         <div className={cn("task-item-display isolate relative flex-1 min-w-0 flex items-start gap-3")}>
-            {/*
-              * Priority strip: out of flow, so a task without a priority is not
-              * offset by a hair against one that has it, in any density.
-              * `start-0` keeps it on the leading edge under RTL.
-              */}
+            {
+
+
+                }
             {!isReference && prioritiesEnabled && task.priority && (
                 <span
                     aria-hidden="true"
@@ -766,12 +747,10 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                         selectionMode ? "cursor-pointer hover:bg-muted/40" : "cursor-default",
                     )}
                 >
-                    {/*
-                      * What the list's `e` shortcut clicks. A read-only row has no
-                      * editor to open, but correcting the completion timestamp is
-                      * the one edit it does allow — without this `e` is silently
-                      * dead on every Done and Archived row.
-                      */}
+                    {
+
+
+                        }
                     <button
                         type="button"
                         data-task-edit-trigger
@@ -853,7 +832,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                     <Repeat aria-hidden="true" className="h-3.5 w-3.5" />
                                 </span>
                             )}
-                            {/* Hidden details keep one cue that the task has more to read (#1287). */}
+                            {                                                                         }
                             {!isViewOpen && !showCompactMeta && !isReference && descriptionPreview && (
                                 <span title={tFallback(t, 'taskEdit.descriptionLabel', 'Description')} className="ms-1 inline-block align-[-2px]">
                                     <AlignLeft aria-hidden="true" className="h-3.5 w-3.5" />
@@ -879,9 +858,9 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             )}
                             dir={resolvedDirection}
                         >
-                            {/* A sibling of the toggle button, so its links can be real
-                              * controls: they stop propagation and open like the opened
-                              * description's links instead of toggling the row (#1425). */}
+                            {
+
+                                                                                           }
                             <InlineMarkdown markdown={descriptionPreview} />
                         </div>
                     )}
@@ -897,8 +876,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             (overlayDragHandle || overlayQuickDone) && "pl-12"
                         )}>
                             {renderCompletionMetadataBadge()}
-                            {/* Upcoming's whole purpose is the reveal date, so it survives
-                                "show list details" off along with the completion timestamp. */}
+                            {
+                                                                                               }
                             {renderAppearsAtMetadataBadge()}
                             {renderProjectDeadlineMetadataBadge()}
                             {waitingAssignee && renderAssignedToBadge()}
@@ -1004,12 +983,10 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                     className="mt-3 space-y-1 pl-1"
                                     onPointerDown={(e) => e.stopPropagation()}
                                 >
-                                    {/* The row used to be one <button>, which forced links inside
-                                      * item titles to render dead — an anchor nested in a button is
-                                      * invalid and any click toggled the item (#1048). The checkbox
-                                      * button is now the real (keyboard-reachable) toggle, the row is
-                                      * a mouse convenience, and links handle their own clicks with
-                                      * stopPropagation, so a URL click opens instead of toggling. */}
+                                    {
+
+
+                                                                                                     }
                                     {(task.checklist || []).map((item, index) => (
                                         <div
                                             key={item.id || index}
@@ -1148,12 +1125,10 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     >
                         <Link2 className="w-4 h-4" />
                     </button>
-                    {/*
-                      * A read-only row's menu holds only Duplicate and Delete, and both
-                      * are buttons right here — "More options" with nothing more in it is
-                      * noise (#968). Right-click still opens the menu. Restore the trigger
-                      * if the read-only menu ever gains an action this cluster lacks.
-                      */}
+                    {
+
+
+                        }
                     {onOpenQuickActions && !readOnly && (
                         <button
                             type="button"

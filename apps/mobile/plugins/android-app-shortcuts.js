@@ -13,8 +13,7 @@ const DEFAULT_CATEGORY = 'android.intent.category.DEFAULT';
 const BROWSABLE_CATEGORY = 'android.intent.category.BROWSABLE';
 const VOICE_CATEGORY = 'android.intent.category.VOICE';
 
-// The native quick-capture dialog (modules/android-widget, #1169): saves to the
-// Inbox queue and closes without bringing the app forward.
+
 const QUICK_CAPTURE_ACTIVITY = 'tech.dongdongbh.mindwtr.androidwidget.QuickCaptureActivity';
 const DETAILED_CAPTURE_ACTIVITY = 'tech.dongdongbh.mindwtr.androidwidget.DetailedCaptureActivity';
 
@@ -340,7 +339,7 @@ const ensureManifestAppActions = (androidManifest) => {
     detailedCaptureActivity = { $: {} };
     application.activity.push(detailedCaptureActivity);
   }
-  // Static shortcuts clear their first intent's task; isolate that from MainActivity.
+
   detailedCaptureActivity.$ = {
     'android:name': DETAILED_CAPTURE_ACTIVITY,
     'android:exported': 'false',

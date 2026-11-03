@@ -120,32 +120,7 @@ const isRetryableSqliteWriteError = (error: unknown): boolean => {
   );
 };
 
-/**
- * Retries the WHOLE callback, which is safe even for multi-write callbacks (quickAdd can mint
- * a project and then a task) because of two invariants. Break either and retries start
- * duplicating:
- *
- *  1. Completed writes are flushed by the end of the capture — core-adapter's addProject and
- *     writeTask both await flushPendingSave (flushCoreSave), and any write still pending when
- *     a later write flushes rides along. So whatever a failed attempt completed is in SQLite
- *     by the time the next attempt re-reads. (This is a per-capture guarantee, not a strict
- *     per-call durability barrier — service.test.ts's fault-injection test is sensitive to
- *     invariant 2, which is the one that actually prevents duplication.)
- *  2. The callback re-derives its plan from storage on EVERY attempt — it reloads the core
- *     snapshot and re-runs parseQuickAdd inside the retried body, never from values captured
- *     outside it. So the retry sees the project attempt 1 created and resolves `+Launch` to
- *     that id instead of minting a second one.
- *
- * Verified against a real database by injecting one retryable SQLITE_BUSY at each write point
- * (R-08, 2026-08-13): failing addProject, failing addTask, or neither all end with exactly one
- * project and one task, correctly linked.
- *
- * NOTE for anyone writing that fault-injection test: `queries.ts` exports its own narrowing
- * `parseQuickAdd` that DROPS `projectTitle`, while this file imports the real one from
- * '@mindwtr/core'. A test whose deps spread `...queries` silently swaps the parser, the
- * capture then never creates the project at all, and the result looks like a persistence bug
- * that isn't one. Always run the no-fault control first.
- */
+
 const runCoreWriteWithRetries = async <T>(
   options: DbOptions,
   deps: ServiceDeps,
@@ -237,12 +212,7 @@ const validateAddTaskInput = (input: AddTaskInput): AddTaskInput => {
   };
 };
 
-// Fields already normalized onto `normalizedInput` by validateAddTaskInput (contexts, tags,
-// relativeStartOffset, timeSpentMinutes, repeatReminderMinutes) plus every other
-// create-writable field TASK_CREATE_FIELD_NAMES derives (checklist, areaId, reviewAt,
-// isFocusedToday, taskMode, ...) — recurrence is handled by its own call site above since it
-// needs `core`-scoped normalization timing the others don't. Adding a synced field to
-// TASK_CREATE_FIELD_NAMES needs no edit here.
+
 const generatedCreateTaskProps = (input: AddTaskInput): Partial<Task> => (
   { ...pickDefinedTaskFields(TASK_CREATE_FIELD_NAMES, input), viewSectionIds: normalizeViewSectionIds(input.viewSectionIds) }
 );
@@ -265,9 +235,8 @@ const buildTaskUpdates = (input: UpdateTaskInput): Partial<Task> => {
   if (input.energyLevel !== undefined) updates.energyLevel = input.energyLevel ?? undefined;
   if (input.assignedTo !== undefined) updates.assignedTo = input.assignedTo ?? undefined;
   if (input.timeEstimate !== undefined) updates.timeEstimate = input.timeEstimate ?? undefined;
-  // Every other patch-writable Task field (reviewAt, isFocusedToday, checklist, areaId,
-  // order, boardOrder, focusOrder, ...) is derived from TASK_PATCH_FIELD_NAMES — see
-  // task-write-fields.ts. Adding a synced field there needs no edit here.
+
+
   for (const name of TASK_PATCH_FIELD_NAMES) {
     const value = input[name as keyof UpdateTaskInput];
     if (value === undefined) continue;
@@ -284,9 +253,8 @@ const buildTaskUpdates = (input: UpdateTaskInput): Partial<Task> => {
     } else if (name === 'repeatReminderMinutes') {
       updates.repeatReminderMinutes = normalizeNullableTaskRepeatReminderMinutes(value as number | null) ?? undefined;
     } else if (typeof value === 'boolean') {
-      // Booleans (showFutureRecurrence/isFocusedToday/suppressMindwtrReminders) have no
-      // "clear it" state distinct from false, so — unlike every other generated field —
-      // they're never nullable on input (see task-field-schemas.ts) and pass through as-is.
+
+
       (updates as Record<string, unknown>)[name] = value;
     } else {
       (updates as Record<string, unknown>)[name] = value ?? undefined;
@@ -423,21 +391,8 @@ const validateSectionTitle = (title: string): string => {
 };
 
 export type MindwtrService = {
-  /**
-   * Both adapters (local SQLite in queries.ts, cloud REST in cloud-service.ts) must satisfy
-   * the same sort/filter semantics — see `service-conformance.test.ts`, which runs one
-   * fixture table against both. Stated rules:
-   * - `sortBy: 'priority'` ranks by @mindwtr/core's `PRIORITY_RANK` (urgent > high > medium >
-   *   low), never the raw text column. A task with no priority ranks as 0 (below 'low') in
-   *   both directions.
-   * - Equal sort keys break ties by `id` ascending, and that tie-break does not flip with
-   *   `sortOrder` (a stable sort shouldn't reverse just because the primary key did).
-   * - `limit`/`offset` clamp to 1..1000 / >=0 identically on both adapters.
-   * - `search` runs @mindwtr/core's `filterTasksBySearch` operator language (status:/context:/
-   *   due:<=7d/negation/quotes/free text) identically on both adapters.
-   * - `view` (`available`/`deferred`/`blocked`) runs @mindwtr/core's `getTaskFocusEligibility`
-   *   against the whole task/project set on both adapters, not a paginated slice.
-   */
+
+
   listTasks: (input: ListTasksInput) => Promise<TaskRow[]>;
   listProjects: () => Promise<Project[]>;
   listViewSections: (input?: ListViewSectionsInput) => Promise<ViewSectionEntry[]>;
@@ -755,9 +710,8 @@ export const createService = (
         });
       }),
     deletePerson: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deletePerson(id)),
-    // `close` above only closes the read-path db accessor (createDbAccessor/openMindwtrDb);
-    // writes go through core-adapter's separate module-level write client, which needs its
-    // own close call too (BUG-15) or its WAL checkpoint never runs at shutdown.
+
+
     close: async () => {
       await close();
       await deps.closeCoreAdapter();

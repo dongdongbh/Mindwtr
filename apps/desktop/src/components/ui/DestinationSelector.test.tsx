@@ -203,7 +203,7 @@ describe('DestinationSelector', () => {
         const names = () => getAllByRole('option').map((option) => option.textContent);
         const highlighted = () => getAllByRole('option').filter((option) => option.className.includes('bg-primary/10'));
 
-        // With no search the order stays as it was: None first.
+
         expect(names()[0]).toBe('None');
 
         setInputValue(search, 'ba');

@@ -30,7 +30,7 @@ const renderQueue = (options: Partial<UseStartupPromptQueueOptions> & { descript
     });
 };
 
-// Advance fake timers and flush the microtask chain that `present()` resolves on.
+
 const flush = async (ms: number) => {
     await act(async () => {
         vi.advanceTimersByTime(ms);
@@ -75,7 +75,7 @@ describe('useStartupPromptQueue', () => {
         await flush(100);
         expect(result.current.openId).toBe('a');
 
-        // While 'a' is open, 'b' must not also open even after more time passes.
+
         await flush(1000);
         expect(result.current.openId).toBe('a');
     });
@@ -134,7 +134,7 @@ describe('useStartupPromptQueue', () => {
         act(() => result.current.dismiss('a'));
         expect(result.current.openId).toBeNull();
 
-        // It must not reopen even though it is still nominally eligible.
+
         await flush(1000);
         expect(result.current.openId).toBeNull();
     });
@@ -165,8 +165,8 @@ describe('useStartupPromptQueue', () => {
             ],
         });
 
-        await flush(100); // update runs its delay, present() returns false → retired
-        await flush(100); // donation now selected and its delay elapses
+        await flush(100);
+        await flush(100);
         expect(result.current.openId).toBe('donation');
     });
 
@@ -180,18 +180,18 @@ describe('useStartupPromptQueue', () => {
                     delayMs: 100,
                     presentTimeoutMs: 1000,
                     present: () => new Promise<boolean>(() => {
-                        // never resolves — simulates a hung network call
+
                     }),
                 }),
                 makeDescriptor({ id: 'donation', priority: 10, delayMs: 100, present: donationPresent }),
             ],
         });
 
-        await flush(100); // update's delay elapses, present() hangs
+        await flush(100);
         expect(result.current.openId).toBeNull();
 
-        await flush(1000); // present() times out → update retired
-        await flush(100); // donation's delay elapses
+        await flush(1000);
+        await flush(100);
         expect(result.current.openId).toBe('donation');
         expect(donationPresent).toHaveBeenCalledTimes(1);
     });
@@ -253,7 +253,7 @@ describe('useStartupPromptQueue', () => {
         });
 
         await flush(100);
-        await flush(5000); // no timeout configured → still pending, not retired
+        await flush(5000);
         expect(result.current.openId).toBeNull();
 
         await act(async () => {
@@ -298,12 +298,7 @@ describe('useStartupPromptQueue', () => {
         expect(result.current.openId).toBeNull();
     });
 
-    // The update reminder records "an update check happened" (a once-per-day
-    // timestamp) in onSelect. Mobile used to record it before its delay and its
-    // network fetch, so a donation prompt racing it burned the timestamp for a
-    // reminder that never ran and suppressed the reminder for a full day. These
-    // two cases pin the property that makes that impossible: onSelect runs once,
-    // and only for the descriptor that actually won selection.
+
     it('does not run onSelect for a prompt that loses selection', async () => {
         const recordUpdateCheck = vi.fn();
         const { result } = renderQueue({
@@ -334,18 +329,18 @@ describe('useStartupPromptQueue', () => {
                     priority: 20,
                     delayMs: 1750,
                     onSelect: recordUpdateCheck,
-                    present: () => false, // no update turned out to be available
+                    present: () => false,
                 }),
                 makeDescriptor({ id: 'donation', priority: 10, delayMs: 2000, present: donationPresent }),
             ],
         });
 
-        // Update won, so the check is recorded — before donation is even considered.
+
         expect(recordUpdateCheck).toHaveBeenCalledTimes(1);
         expect(donationPresent).not.toHaveBeenCalled();
 
-        await flush(1750); // update declines → retired
-        await flush(2000); // donation takes the slot
+        await flush(1750);
+        await flush(2000);
         expect(result.current.openId).toBe('donation');
         expect(recordUpdateCheck).toHaveBeenCalledTimes(1);
     });

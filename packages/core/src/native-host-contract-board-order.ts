@@ -105,7 +105,7 @@ export const boardOrderWritable = (task: Task, scope: Pick<NativeBoardOrderScope
     && boardReactivationContainerAllowed(task, scope.projects, scope.sections)
     && (!task.areaId || scope.areas.filter(row => row.id === task.areaId && !row.deletedAt).length === 1);
 
-/** Preindex relational admission so deriving all read intents stays linear. */
+
 export const boardOrderWritability = (scope: Pick<NativeBoardOrderScope, 'projects' | 'sections' | 'areas'>) => {
     const projects = new Map(scope.projects.map(row => [row.id, row]));
     const sections = new Map(scope.sections.map(row => [row.id, row]));
@@ -204,7 +204,7 @@ export function createBoardOrderMethods(deps: { readiness: () => NativeHostResul
         projects: data.projects.filter(row => !row.deletedAt && !row.purgedAt), areas: (data.areas ?? []).filter(row => !row.deletedAt), settings: data.settings });
     const check = (p: NativePreparedBoardOrder, authority: PreparedAreaAuthority): boolean => {
         const state = fromData(authority.snapshot); const live = snapshot(p.request.action.filters, p.request.action.status, new Date(), state);
-        // Only adopted lossless RN hydration forms bridge raw BEFORE to the displayed scope.
+
         return Boolean(live && state.settings.deviceId === p.deviceIdBefore && same(live.filters, p.request.action.filters)
             && live.scope.columnTasks.length === p.scope.columnTasks.length
             && live.scope.columnTasks.every((row, index) => samePreparedBoardOrderBefore(row, p.scope.columnTasks[index]))

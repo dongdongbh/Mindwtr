@@ -63,7 +63,7 @@ const readRequest = (value: unknown): NativeProjectTaskOrderRequest | null => {
         ? input as NativeProjectTaskOrderRequest : null;
 };
 
-/** The frozen flat list may be filtered, but every row must be a real ordered subset of the source. */
+
 const validItems = (scope: PreparedProjectTaskOrder['scope'], request: NativeProjectTaskOrderRequest): boolean => {
     const sectionIds = scope.sections.map((row) => row.id);
     const syntheticIds = getProjectSyntheticSectionIds(scope.sections);
@@ -112,7 +112,7 @@ const validItems = (scope: PreparedProjectTaskOrder['scope'], request: NativePro
     return true;
 };
 
-/** Pure cold-journal validation before any mutable store or SQLite access. */
+
 const readPrepared = (value: unknown): NativePreparedProjectTaskOrder | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

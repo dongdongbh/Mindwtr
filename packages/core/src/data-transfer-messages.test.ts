@@ -5,7 +5,7 @@ import { getTranslator, resolveI18nText } from './i18n';
 const t = getTranslator('en');
 const tr = (key: string, values?: Record<string, string | number>) => resolveI18nText(t, key, { values });
 
-// RN meant a blank line between a summary and its project list or warnings (it pushes '' there), but filter(Boolean) dropped it.
+
 describe('Data transfer messages: the blank line before a list', () => {
     it('keeps the blank line before the project list and before the warnings', () => {
         const preview = buildTodoistPreviewSummary({ taskCount: 3, projectCount: 1, sectionCount: 0, checklistItemCount: 0,
@@ -22,7 +22,7 @@ describe('Data transfer messages: the blank line before a list', () => {
     });
 });
 
-// The phone toast shows four lines; a skip reason below the snapshot name was cut off (#1447).
+
 describe('Data transfer messages: import results', () => {
     it('puts the warnings right after the counts and the snapshot line last', () => {
         const result = buildMindwtrCsvResultMessage({ importedTaskCount: 0, importedProjectCount: 0, importedSectionCount: 0,

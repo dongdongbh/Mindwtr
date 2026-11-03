@@ -27,7 +27,7 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message:
     ({ ok: false, error: { code, message } });
 const same = taskEditValuesEqual;
 
-/** Non-JSON values, unknown prototypes, and oversized UTF-8 journals never reach a write. */
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number): boolean => {
         if (depth > 24) return false;
@@ -39,7 +39,7 @@ const detach = <T>(value: unknown): T | null => {
     };
     return isNativeJsonWithinBytes(value) && valid(value, 0) ? JSON.parse(JSON.stringify(value)) as T : null;
 };
-/** Deletion preserves legacy metadata beyond the editor's current field limits. */
+
 const livePerson = (value: unknown): value is Person => record(value)
     && Object.keys(value).every((key) => ['id', 'name', 'note', 'referenceLink', 'rev', 'revBy', 'createdAt', 'updatedAt'].includes(key))
     && id(value.id) && text(value.name) && stamp(value.createdAt) && stamp(value.updatedAt)
@@ -54,7 +54,7 @@ const readRequest = (value: unknown): NativePersonDeleteRequest | null => {
         ? input as NativePersonDeleteRequest : null;
 };
 
-/** Pure cold validation: derive the sole allowed Person effect before opening SQLite. */
+
 const readPrepared = (value: unknown): NativePreparedPersonDelete | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -97,7 +97,7 @@ export function createPersonDeleteMethods(deps: {
             return detached ? { ok: true, value: detached } : fail('INVALID_INPUT', 'Person delete options exceed the bounded response');
         },
 
-        /** Observation after the host confirms no journal remains; no historical UUID attribution. */
+
         probePersonDeleteOutcome(input: NativePersonDeleteRequest): NativeHostResult<NativePersonDeleteResult> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

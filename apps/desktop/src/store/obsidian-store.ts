@@ -173,8 +173,8 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
     },
     updateConfig: async (nextConfig) => {
         const merged = normalizeObsidianConfig({ ...get().config, ...nextConfig });
-        // Invalidate reads immediately, then let an older timestamp write finish
-        // before persisting the new filter. It must never restore old settings.
+
+
         configRevision += 1;
         pendingConfigChanges += 1;
         try {

@@ -1,23 +1,6 @@
-/**
- * The native host contract for the Board screen. Kept in its own file and spread
- * into createNativeHostContract: other changes edit native-host-contract.ts in
- * parallel. The view is the React Native Board's, from board-view-model.ts.
- *
- * getBoardView reads the five columns under one revision, each with its first
- * `limit` cards; getBoardList pages a column's cards, or the filter sheet's tokens
- * and projects (searched by a picker `query`), under that revision. The host keeps
- * the filter state the view returns and sends it back, with a `filterEdit` to change it.
- *
- * runBoardAction writes with a request UUID: while a save is owed, a retry only
- * saves (native-request-receipts.ts). A move and Delete are target-state and
- * compare-and-set on the revision the card showed, so a replay after a restart
- * writes nothing, and never undoes a later change (STALE_REVISION); Duplicate uses
- * its request UUID as the copy ID and checks unchanged copy fields. Success means
- * the change is saved.
- *
- * Only functions read this module's imports from native-host-contract.ts, so the
- * import cycle between the two files is safe.
- */
+
+
+
 import {
     BOARD_CARD_SWIPES,
     BOARD_DUE_DATE_PRESETS,
@@ -80,15 +63,15 @@ type Translate = (key: string) => string;
 export type BoardViewDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
-    /** Data plus display revision: tasks, projects, settings, language and the minute. */
+
     revision: (now: Date) => string;
     t: () => Translate;
-    /** Rows with core meta, as the other contract lists build them. */
+
     rows: (tasks: readonly Task[], now: Date) => NativeTaskRow[];
     requestIdPattern: RegExp;
 };
 
-/** The Board's filter state; missing keys are the empty state's. */
+
 export type NativeBoardFilters = Partial<BoardFilterState>;
 export type NativeBoardWindow<T> = { total: number; items: T[] };
 export type NativeBoardCard = { row: NativeTaskRow; card: BoardCard; boardOrder: number | null; moveAllowed: boolean; completeAllowed: boolean; orderActions?: NativeBoardOrderActions };
@@ -97,50 +80,50 @@ export type NativeBoardColumn = {
     order?: NativeBoardColumnOrder;
     label: string;
     tone: BoardColumnTone;
-    /** The header badge: every card in the column. */
+
     count: number;
-    /** The first `limit` cards; getBoardList pages the rest ('cards', status). */
+
     cards: NativeBoardCard[];
-    /** "No tasks" in place of cards. */
+
     empty: string | null;
 };
 export type NativeBoardView = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
     revision: string;
-    /** The effective filter state after `filterEdit`: send it back with reads, moves and paging. */
+
     filters: BoardFilterState;
     bar: {
         searchPlaceholder: string;
         searchQuery: string;
-        /** The search box's clear button shows. */
+
         searchActive: boolean;
-        /** The Clear button shows and the Filters button is tinted; Clear sends { type: 'clear' }. */
+
         active: boolean;
         clearLabel: string;
-        /** "Filters" or "Filters (2)". */
+
         filterLabel: string;
     };
     sheet: {
-        /** Tap sends { type: 'toggleToken', value } (none → included → excluded → none). */
+
         tokens: NativeBoardWindow<{ value: string; state: 'included' | 'excluded' | 'none' }>;
-        /** Tap sends { type: 'toggleProject', value: id }. */
+
         projects: NativeBoardWindow<{ id: string; title: string; selected: boolean }>;
-        /** The Any/All control shows once two tokens of a kind are included. */
+
         showContextMatchMode: boolean;
         showTagMatchMode: boolean;
-        /** The sheet's chips (getBoardList pages 'chips'), then the Board's own (search and due date); pressing one sends its edit. */
+
         chips: NativeBoardWindow<NativeBoardChip>;
         additionalChips: { id: string; label: string; edit: BoardFilterEdit }[];
-        /** The due-date section; a preset sends { type: 'toggleDuePreset', preset } and folds the section. */
+
         due: { label: string; summary: string; accessibilityLabel: string; presets: { preset: BoardDuePreset; label: string; selected: boolean }[] };
     };
     columns: NativeBoardColumn[];
     cardActions: {
-        /** A tap opens the task editor on this tab. */
+
         editorTab: 'view';
-        /** A swipe opens a panel and runs its actions in order, each as its own runBoardAction. */
+
         swipes: Record<'left' | 'right', { label: string; actions: readonly BoardCardAction[] }>;
-        /** A failed duplicate's error toast: this title, the error's message. */
+
         errorTitle: string;
         complete: { label: string };
         moveTo: { label: string; destinations: { status: NativeBoardMoveStatus; label: string }[] };
@@ -151,34 +134,30 @@ export type NativeBoardChip = { id: string; label: string; excluded: boolean; ed
 export type NativeBoardList = 'cards' | 'tokens' | 'projects' | 'chips';
 
 export type NativeBoardAction =
-    /**
-     * A drop. Into another column, leave `afterId` out: only the status changes and the
-     * card keeps its board order, as on mobile. Inside its column, `afterId` is the card
-     * it lands after (null: first) in the column as `filters` show it.
-     * `taskRevision` is the card's `row.taskRevision`, as for Delete.
-     */
+
+
     | { type: 'moveCard'; taskId: string; status: BoardStatus; afterId?: string | null; filters?: NativeBoardFilters; taskRevision: string }
     | { type: 'duplicateTask'; taskId: string }
     | { type: 'trashTask'; taskId: string; taskRevision: string };
 
 export type NativeBoardMoveStatus = Extract<BoardStatus, 'inbox' | 'next' | 'waiting' | 'someday'>;
 
-/** Durable native stage: Move admits only the frozen one-row status planner. */
+
 export type NativeBoardWriteRequest = {
     requestId: string;
     action: { type: 'duplicateTask' | 'trashTask'; taskId: string }
         | { type: 'moveCard'; taskId: string; status: NativeBoardMoveStatus; taskRevision: string; filters: NativeBoardFilters };
 };
 export type NativePreparedBoardAction = {
-    /** Version 2 duplicates preserve checklist progress; version 1 journals retain their frozen reset effect. */
+
     version: 1 | 2;
     request: NativeBoardWriteRequest;
-    /** Duplicate: a before-only source guard. Trash: the target preimage. */
+
     before: Task;
-    /** The sole row written and checked before mutable source/container guards. */
+
     after: Task;
     deviceIdToInitialize: string | null;
-    /** Present only on Move; old Duplicate/Trash envelopes keep exactly six fields. */
+
     move?: PreparedBoardMove;
     result: NativeBoardActionResult;
 };
@@ -187,9 +166,9 @@ export type NativeBoardPrepareResult =
     | { kind: 'noop'; result: NativeBoardActionResult };
 
 export type NativeBoardActionResult = {
-    /** False when the action had nothing to write. */
+
     changed: boolean;
-    /** Duplicate: open the copy in the task editor. */
+
     open: { taskId: string; projectId: string | null; tab: 'task' } | null;
 };
 
@@ -263,7 +242,7 @@ const FILTER_CHECKS: Record<keyof BoardFilterState, (value: unknown) => boolean>
     tagMatchMode: isMatchMode,
     duePreset: (value) => value === null || isDuePreset(value),
 };
-/** A partial state is completed from the empty one; unknown keys are refused. */
+
 const readFilters = (value: unknown): BoardFilterState | null => {
     if (value === undefined) return EMPTY_BOARD_FILTER_STATE;
     if (!isObjectRecord(value)) return null;
@@ -298,7 +277,7 @@ const isWindow = (input: Record<string, unknown>) => (
     Number.isSafeInteger(input.offset) && (input.offset as number) >= 0
     && Number.isSafeInteger(input.limit) && (input.limit as number) >= 1 && (input.limit as number) <= NATIVE_HOST_MAX_WINDOW
 );
-/** A short, stable key for the view's filters, so a page of one filter never continues another. */
+
 const paramsKey = (params: unknown): string => {
     const text = JSON.stringify(params);
     let hash = 2166136261;
@@ -308,7 +287,7 @@ const paramsKey = (params: unknown): string => {
     }
     return hash.toString(36);
 };
-/** A list the view pages: its total, and one window built only for the items it holds. */
+
 const pagedList = <T, Item>(all: readonly T[], toItem: (entry: T) => Item) => ({
     total: all.length,
     page: (offset: number, limit: number): Item[] => all.slice(offset, offset + limit).map(toItem),
@@ -316,11 +295,11 @@ const pagedList = <T, Item>(all: readonly T[], toItem: (entry: T) => Item) => ({
 const firstPage = <Item,>(list: { total: number; page: (offset: number, limit: number) => Item[] }): NativeBoardWindow<Item> => (
     { total: list.total, items: list.page(0, NATIVE_HOST_MAX_WINDOW) }
 );
-// ponytail: the last 200 request IDs that entered the receipts; the receipts keep 50.
+
 const ENTERED_LIMIT = 200;
 
 export function createBoardViewMethods(deps: BoardViewDeps) {
-    // Exact retries through the shared helper: a retry finishes a failed save and never writes twice.
+
     const receipts = createNativeRequestReceipts({
         save: async () => {
             if (useTaskStore.getState().persistenceFailure) {
@@ -333,17 +312,17 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             return deps.save();
         },
     });
-    // ponytail: one cached build, keyed by the revision and the filters; paging rebuilds nothing.
+
     let cache: { key: string; value: ReturnType<typeof buildBoard> } | null = null;
 
-    /** The Board for a filter state, as mobile derives it from the store. */
+
     function buildBoard(input: BoardFilterState, now: Date, state = useTaskStore.getState(), includeOrdering = true) {
         const t = deps.t();
         const areas = sortAreasForDisplay(state.areas);
         const areaById = new Map(areas.map((area) => [area.id, area]));
         const projectById = new Map(state.projects.map((project) => [project.id, project]));
         const resolvedAreaFilter = resolveAreaFilterSelection(state.settings.filters, areas);
-        // What useVisibleTaskContext shows, without Reference.
+
         const tasks = selectBoardTasks(state.tasks.filter((task) => isTaskVisibleInArea(task, { areaById, projectById, resolvedAreaFilter })));
         const badges = getBoardProjectBadges(state.projects, areaById);
         const options = getBoardFilterOptions({ tasks, projects: state.projects, areaFilter: resolvedAreaFilter, areaById, badges, t });
@@ -364,7 +343,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             projects: pagedList(options.projects, projectItem),
             chips: pagedList(resolved.chips, (chip): NativeBoardChip => ({ id: chip.id, label: chip.label, excluded: chip.excluded, edit: chip.edit as BoardFilterEdit })),
         };
-        // The sheet's pickers narrowed by their search (the Inbox tokens' rule): a token by its text, a project by its title.
+
         const search = {
             tokens: (query: string) => pagedList(options.tokens.filter((value) => matchesPickerQuery(value, query)), tokenItem),
             projects: (query: string) => pagedList(options.projects.filter((project) => matchesPickerQuery(project.title, query)), projectItem),
@@ -410,7 +389,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             try {
                 const snapshot = orderMethods.snapshot(filters, column.status, now, state, { filters, columns });
                 const scope = snapshot?.scope;
-                // A complete snapshot is optional metadata; its failure never blocks browsing.
+
                 token = snapshot?.token ?? null;
                 if (token && scope && typeof state.settings.deviceId === 'string' && state.settings.deviceId.trim()) {
                     const writable = boardOrderWritability(scope);
@@ -432,7 +411,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         snapshot: (filters, now, state) => { const board = buildBoard(filters, now, state, false);
             return { filters: board.view.filters, columns: board.columns }; } });
 
-    /** The Board for these filters (after an edit), with its revision; null for invalid input. */
+
     const readBoard = (input: Record<string, unknown>) => {
         const read = readFilters(input.filters);
         if (!read || (input.filterEdit !== undefined && !isFilterEdit(input.filterEdit))) return null;
@@ -442,7 +421,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         const base = deps.revision(now);
         const key = `${base}:${paramsKey(edited)}`;
         if (cache?.key !== key) cache = { key, value: buildBoard(edited, now) };
-        // The resolved filters (selections no longer offered dropped) name the revision.
+
         return { now, board: cache.value, revision: `${base}:${paramsKey(cache.value.view.filters)}` };
     };
 
@@ -459,8 +438,8 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
     const cards = (board: ReturnType<typeof buildBoard>, tasks: readonly Task[], now: Date): NativeBoardCard[] => {
         const rows = deps.rows(tasks, now);
         const state = useTaskStore.getState();
-        // Index once for this bounded page, retaining duplicates so admission
-        // fails closed instead of hiding them behind the store's ID maps.
+
+
         const projects = new Map<string, Project[]>(); const sections = new Map<string, Section[]>();
         for (const row of state._allProjects) projects.set(row.id, [...(projects.get(row.id) ?? []), row]);
         for (const row of state._allSections) sections.set(row.id, [...(sections.get(row.id) ?? []), row]);
@@ -480,15 +459,14 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         }));
     };
 
-    // ---- Actions ---------------------------------------------------------------
 
     type Outcome = NativeHostResult<NativeBoardActionResult> | NativeUnsavedWrite<NativeBoardActionResult>;
-    /** An action's checks: a refusal or nothing to write (`result`), or the write to run. */
+
     type Prepared = { result: Outcome } | { write: () => Promise<Outcome> };
-    /** Nothing to write: the request's target state already holds (a replay after a restart lands here). */
+
     const unchanged: Prepared = { result: { ok: true, value: { changed: false, open: null } } };
     const refuse = (code: NativeHostErrorCode, message: string): Prepared => ({ result: fail(code, message) });
-    /** Compare-and-set: a card that changed since the view showed it is not written. */
+
     const stale = (task: Task, taskRevision: string): Prepared | null => {
         const refused = refuseStale([task], [taskRevision], 'The card changed since the Board showed it; read the Board again');
         return refused ? { result: refused } : null;
@@ -497,10 +475,8 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         const task = typeof id === 'string' ? useTaskStore.getState()._tasksById.get(id) : undefined;
         return task && !task.deletedAt && !task.purgedAt ? task : undefined;
     };
-    /**
-     * Runs a store call. `changed` says whether the tasks changed: a reorder the store
-     * reads as its current order writes nothing, and says so.
-     */
+
+
     const written = async (call: Parameters<typeof runStoreWrite>[0], open: () => NativeBoardActionResult['open'] = () => null): Promise<Outcome> => {
         const before = useTaskStore.getState()._allTasks;
         const landed = await runStoreWrite(call);
@@ -551,7 +527,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 if (!task) return refuse('TASK_NOT_FOUND', 'Task not found');
                 const copy = store._tasksById.get(requestId);
                 if (copy) {
-                    // An edited copy cannot acknowledge a lost reply.
+
                     if (!matchesDuplicateSource(task, copy)) {
                         return refuse('INVALID_INPUT', 'The duplicate request ID does not match this source');
                     }
@@ -559,7 +535,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 }
                 const { duplicateFailed } = getBoardCardText(deps.t());
                 let createdId: string | undefined;
-                // Mobile's toast: the store's refusal, else "could not duplicate".
+
                 return {
                     write: () => written(async () => {
                         try {
@@ -668,7 +644,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 if (!ids.every((id) => typeof id === 'string' && deps.requestIdPattern.test(id) && !sourceIds.has(id))
                     || new Set([after.id, ...ids]).size !== ids.length + 1) return null;
                 let index = 0;
-                // Retained v1 journals must validate their original effect before native startup opens SQLite.
+
                 const sourceTask = prepared.version === 1
                     ? { ...before, checklist: before.checklist?.map((item) => ({ ...item, isCompleted: false })) } : before;
                 expected = buildDuplicateTask({ sourceTask, copyId: request.requestId, now: after.createdAt, deviceId: after.revBy,
@@ -864,7 +840,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             return taskEditValuesEqual(after, expected) ? envelope as NativeTrashTaskRestoreEnvelope : null;
         } catch { return null; }
     };
-    // Object order changes when a native host encodes its journal; array order never does.
+
     const canonicalJSON = (input: unknown): string => JSON.stringify(input, (_name, value) =>
         isObjectRecord(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value);
 
@@ -939,10 +915,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         })
     );
 
-    // Done-only sibling to the existing history-row save owner. Retained for
-    // this contract's lifetime so exact warm Retry owns the failed raw overlay.
-    // The real native host creates its contract before boot installs SQLite.
-    // Bind only after activation validates storage; never rebind this owner.
+
     let reactivationAdapter: NativeReceiptSqliteAdapter | null = null;
     const boundReactivationAdapter = (): NativeReceiptSqliteAdapter | null => {
         if (!deps.readiness().ok) return null;
@@ -1011,19 +984,19 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 && current._allAreas === state._allAreas && current._allPeople === state._allPeople
                 && current.settings === state.settings && current.lastDataChangeAt === state.lastDataChangeAt;
         };
-        // Readiness means this contract's activation initialized this exact
-        // adapter. A replacement must activate a new host before proof reads.
+
+
         if (!adapter || !settled())
             return fail('SAVE_FAILED', 'Board reactivation saved outcome is not available');
         try {
-            // No flush/save/retry. getData and readRowBaseline refresh the
-            // existing read-baseline cache but never mutate domain rows.
+
+
             const data = await adapter.getData({ rawTasks: true });
             if (!settled()) return fail('STALE_REVISION', 'Board reactivation changed during saved outcome read');
             const receipt = await adapter.readDurableReceipt(prepared.request.requestId, reactivationPayload(prepared), { committedOnly: true });
             if (!receipt.ok) return receipt;
-            // This keeps the raw row and committed receipt in one accepted
-            // external epoch; a later read must not silently adopt a new one.
+
+
             const baseline = await adapter.readRowBaseline();
             if (!baseline || !settled()) return fail('STALE_REVISION', 'Board reactivation durable proof changed');
             if (receipt.value === null) return { ok: true, value: null };
@@ -1045,8 +1018,8 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         }
         let readFailure: NativeHostResult<never> | null = null;
         const result = await reactivationReceipts.run(prepared.request.requestId, payload, async () => {
-            // SAVE_FAILED would mean an effect landed to the receipt engine.
-            // Remove a prewrite reservation through ACTION_FAILED instead.
+
+
             if (useTaskStore.getState().persistenceFailure) {
                 readFailure = fail('SAVE_FAILED', 'Board reactivation has an unresolved persistence failure');
                 return fail('ACTION_FAILED', 'Board reactivation has an unresolved persistence failure');
@@ -1066,14 +1039,12 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         return readFailure ?? result;
     };
 
-    // Request IDs that entered the receipts, with their payloads, so a retry reaches its receipt first.
+
     const entered = new Map<string, string>();
 
     return {
-        /**
-         * The Board: five columns with their first `limit` cards, the filter bar and the
-         * filter sheet. Send the returned `filters` back, with a `filterEdit` to change them.
-         */
+
+
         getBoardView(input: { filters?: NativeBoardFilters; filterEdit?: BoardFilterEdit; limit: number }): NativeHostResult<NativeBoardView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1102,11 +1073,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             return { ok: true, value };
         },
 
-        /**
-         * A later window of a column's cards ('cards' with its status), or of the filter
-         * sheet's 'tokens', 'projects' or 'chips'. Send the view's filters and its revision.
-         * A picker's search goes in as `query` ('tokens' and 'projects' only), from offset zero.
-         */
+
         getBoardList(input: {
             filters?: NativeBoardFilters;
             list: NativeBoardList;
@@ -1143,13 +1110,12 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             return { ok: true, value };
         },
 
-        /** Pure planning for the bounded native Trash/Duplicate journal. */
+
         prepareBoardAction(input: NativeBoardWriteRequest | NativeBoardOrderRequest) {
             return input?.action?.type === 'orderCard' ? orderMethods.prepare(input) : prepareBoardActionBody(input as NativeBoardWriteRequest);
         },
 
-        /** Pure immutable authority check, including before activation/SQLite open.
-         * Terminal cleanup must never rerun a mutation or mutable source checks. */
+
         validatePreparedBoardAction(input: { request: NativeBoardWriteRequest; prepared: NativePreparedBoardAction } | { request: NativeBoardOrderRequest; prepared: NativePreparedBoardOrder }): NativeHostResult<NativeBoardActionResult> {
             if (input?.request?.action?.type === 'orderCard') {
                 const envelope = orderMethods.readEnvelope(input);
@@ -1159,7 +1125,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             return prepared ? { ok: true, value: prepared.result } : fail('INVALID_INPUT', 'Prepared Board request or journal does not match');
         },
 
-        /** Pure Done-only durable effect/owner proof for native terminal retirement. */
+
         async boardMoveOutcome(input: { request: NativeBoardWriteRequest; prepared: NativePreparedBoardAction }): Promise<NativeHostResult<NativeBoardActionResult | null>> {
             const prepared = readPreparedCommand(input);
             return prepared && prepared.request.action.type === 'moveCard' && prepared.before.status === 'done'
@@ -1181,12 +1147,12 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             if (result.ok && prepared.request.action.type === 'duplicateTask') {
                 try { logInfo('Native duplicate checklist state confirmed', { scope: 'native-host', category: 'storage', force: true,
                     context: { releaseCheck: 'v1.3.8/duplicate-checklist-state', version: prepared.version, outcome: 'confirmed' } }); }
-                catch { /* Diagnostics must not change the saved duplicate result. */ }
+                catch {                                                               }
             }
             return result;
         },
 
-        /** Calendar's Delete uses the Board Trash journal, with a visible-row revision and read-only parent guard. */
+
         prepareCalendarDelete(input: NativeCalendarDeleteRequest): NativeHostResult<NativeCalendarDeletePreparation> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1209,7 +1175,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 : fail('INVALID_INPUT', 'Calendar Delete could not produce a valid prepared journal');
         },
 
-        /** Pure authority check for the journal before native storage opens. */
+
         validatePreparedCalendarDelete(input: { request: NativeCalendarDeleteRequest; prepared: NativePreparedCalendarDelete }): NativeHostResult<NativeBoardActionResult> {
             const prepared = readPreparedCalendarDelete(input);
             return prepared ? { ok: true, value: prepared.board.prepared.result }
@@ -1224,7 +1190,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             return commitPreparedBoard(prepared.board.prepared, 'preparedCalendarDelete', true);
         },
 
-        /** Task editor Delete ignores the unsaved draft and binds the saved row the editor showed. */
+
         prepareTaskDelete(input: NativeTaskDeleteRequest): NativeHostResult<NativeTaskDeletePreparation> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1261,7 +1227,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 : fail('INVALID_INPUT', 'Prepared Task Delete request or journal does not match');
         },
 
-        /** Exact UUID and prepared effect only; current target equality is not a receipt. */
+
         taskDeleteOutcome(input: NativeTaskDeleteEnvelope): NativeHostResult<NativeTaskDeleteResult | null> {
             const envelope = readPreparedTaskDelete(input);
             if (!envelope) return fail('INVALID_INPUT', 'Prepared Task Delete request or journal does not match');
@@ -1295,17 +1261,17 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             if (confirmed.ok && envelope.request.source === 'archive' && !alreadySaved?.ok) {
                 try { logInfo('Native archived Task delete confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-archive-task-trash', outcome: 'confirmed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             if (confirmed.ok && envelope.request.source === 'done' && !alreadySaved?.ok) {
                 try { logInfo('Native Done Task delete confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-done-task-trash', outcome: 'confirmed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             if (confirmed.ok && envelope.request.source === 'reference' && !alreadySaved?.ok) {
                 try { logInfo('Native Reference Task delete confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-reference-task-trash', outcome: 'deleted' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },
@@ -1341,7 +1307,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 : fail('INVALID_INPUT', 'Prepared Task Delete Undo is malformed');
         },
 
-        /** Exact durable Undo receipt; target equality cannot attribute an unseen UUID. */
+
         taskDeleteUndoOutcome(input: NativeTaskDeleteUndoEnvelope): NativeHostResult<{ id: string } | null> {
             const envelope = readPreparedTaskDeleteUndo(input);
             if (!envelope) return fail('INVALID_INPUT', 'Prepared Task Delete Undo is malformed');
@@ -1372,12 +1338,12 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             if (confirmed.ok && envelope.prepared.delete.request.source === 'reference' && !alreadySaved?.ok) {
                 try { logInfo('Native Reference Task restore confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-reference-task-trash', outcome: 'restored' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },
 
-        /** Trash Restore uses the same sanitizer and guarded one-row writer as Delete Undo, without a Delete prerequisite. */
+
         prepareTrashTaskRestore(input: NativeTrashTaskRestoreRequest): NativeHostResult<NativeTrashTaskRestorePreparation> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1426,14 +1392,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             });
         },
 
-        /**
-         * One Board action. Reuse `requestId` to retry: a completed request writes nothing
-         * again. A move and Delete are target-state, so a replay after a restart finds the
-         * card where it asked and writes nothing; they send the card's `row.taskRevision`,
-         * and a card that changed since is refused (STALE_REVISION). `changed` is false when
-         * the store did not change; a request with nothing to write neither saves nor keeps
-         * a receipt.
-         */
+
         async runBoardAction(input: { requestId: string; action: NativeBoardAction }): Promise<NativeHostResult<NativeBoardActionResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1443,8 +1402,8 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             const action = input.action as NativeBoardAction;
             const requestId = input.requestId;
             const payload = JSON.stringify(['board', action]);
-            // The receipts come first: a request that is running or owes its save only saves.
-            // A new request that is refused or has nothing to write returns at once: no save, no receipt.
+
+
             const known = entered.get(requestId);
             if (known === undefined) {
                 const prepared = prepare(action, requestId);
@@ -1456,7 +1415,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 const prepared = prepare(action, requestId);
                 return 'result' in prepared ? Promise.resolve(prepared.result) : prepared.write();
             });
-            // A write that did not land leaves no receipt; another payload under a known ID was refused and changes nothing.
+
             if (!outcome.ok && outcome.error.code !== 'SAVE_FAILED' && (known === undefined || known === payload)) entered.delete(requestId);
             return outcome;
         },

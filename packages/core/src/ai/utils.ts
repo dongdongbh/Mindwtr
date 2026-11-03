@@ -8,13 +8,7 @@ import type { AIProvider, AIProviderConfig, AIRequestStopReason } from './types'
 const MAX_JSON_REPAIR_BOUNDARIES = 50;
 const MAX_AI_RESPONSE_BYTES = 16 * 1024 * 1024;
 
-/**
- * Repair candidates for a truncated JSON document (e.g. the model hit its output
- * token limit mid-array). Walks the text tracking string state and the bracket
- * stack, recording every point where a value just completed, then closes the
- * still-open brackets. Returns candidates longest-first so the most complete
- * salvage that passes the caller's validator wins.
- */
+
 function repairTruncatedJson(input: string): string[] {
     const stack: string[] = [];
     let inString = false;
@@ -30,7 +24,7 @@ function repairTruncatedJson(input: string): string[] {
                 escaped = true;
             } else if (ch === '"') {
                 inString = false;
-                // A string just closed; it may be a value or an element worth keeping.
+
                 if (stack.length > 0) boundaries.push({ len: i + 1, stack: [...stack] });
             }
             continue;
@@ -102,7 +96,7 @@ export function parseJson<T>(raw: string, validator?: (value: unknown) => value 
                 throw new Error('AI response failed validation.');
             }
             if (index >= strictCandidateCount) {
-                // Strict parsing failed; this came from the truncation-repair path.
+
                 logAiParseDiagnostic('recovered-from-truncated-response', raw);
             }
             return parsed as T;
@@ -116,12 +110,7 @@ export function parseJson<T>(raw: string, validator?: (value: unknown) => value 
     throw new Error(`AI JSON parse error: ${message}.`);
 }
 
-/**
- * Logs when strict parsing fails, so a truncated or malformed payload can be
- * diagnosed. Only fires on the degraded path, never on a clean parse. Avoids
- * dumping full task content; the unrecoverable case keeps a short tail so a
- * hard failure can still be inspected.
- */
+
 function logAiParseDiagnostic(stage: 'recovered-from-truncated-response' | 'unrecoverable', raw: string): void {
     if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
     if (stage === 'recovered-from-truncated-response') {
@@ -159,13 +148,7 @@ export function normalizeTimeEstimate(value?: string): string | undefined {
     return TIME_ESTIMATE_MAP[key];
 }
 
-/**
- * Drops review suggestions whose id was not among the analyzed items. The model
- * is free to echo any string back, and both platforms map suggestion ids
- * straight into a status write, so only ids we actually sent may reach one.
- * Ids keep the shape `getStaleItems` emitted (`project:<id>` for projects), so
- * the item list is a complete allow-list for task and project suggestions alike.
- */
+
 export function filterReviewSuggestionsToKnownIds<T extends { id: string }>(
     suggestions: readonly T[],
     knownIds: Iterable<string>
@@ -183,10 +166,7 @@ export function normalizeTags(tags?: string[] | null): string[] {
     return Array.from(new Set(normalized));
 }
 
-// The generic "AI request failed, try again" alert hid the provider's actual
-// error, so failures like Gemini retiring a model (404 "no longer available")
-// produced unreproducible reports. Append a truncated single-line detail; API
-// keys never appear in provider error bodies, but cap length defensively.
+
 export function formatAIErrorAlertBody(genericBody: string, error: unknown): string {
     const raw = error instanceof Error ? error.message : String(error ?? '');
     const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -255,7 +235,7 @@ export const runAIProviderOperation = async <T>(
             try {
                 config.onRequestStop?.(error.reason);
             } catch {
-                // Diagnostics must never replace the request's terminal error.
+
             }
         }
         throw error;

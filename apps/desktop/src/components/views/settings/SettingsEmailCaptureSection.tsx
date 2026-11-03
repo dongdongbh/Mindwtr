@@ -76,7 +76,7 @@ export function SettingsEmailCaptureSection({ t, isTauri, showSaved }: SettingsE
                 setFolder(config.folder || DEFAULT_EMAIL_CAPTURE_FOLDER);
                 setHasPassword(config.hasPassword);
             } catch {
-                // Leave the defaults; the section stays editable.
+
             }
         })();
         return () => {
@@ -107,7 +107,7 @@ export function SettingsEmailCaptureSection({ t, isTauri, showSaved }: SettingsE
             showSaved();
         } catch (error) {
             const info = toEmailCaptureError(error);
-            // An enable that fails its connection check is persisted disabled.
+
             setEnabled(false);
             showToast(info.message || t.emailCaptureSaveFailed, 'error', 6000);
         } finally {

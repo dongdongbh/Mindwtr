@@ -1,11 +1,6 @@
-/**
- * Settings › About as React Native draws and runs it (apps/mobile/components/settings/about-settings-screen.tsx and
- * feedback-settings-modal.tsx): the header and its rows, the silent update check when the screen opens and the manual one
- * behind Check for updates (Google Play's update answer, GitHub's latest release, the App Store lookup on iOS), the update dot
- * under RN's AsyncStorage keys, the Rate row, and the feedback modal's rules and submission. Shared by RN and the native host
- * contract (native-host-contract-about.ts); each host brings its device (storage, fetch, links, alerts and toasts). The update dot's
- * keys, the version order and the App Store lookup are app-store-update.ts's (the iOS host's too).
- */
+
+
+
 import {
     compareAppVersions as compareVersions,
     fetchAppStoreInfo,
@@ -16,7 +11,7 @@ import {
 } from './app-store-update';
 import { isValidFeedbackEmail, type FeedbackCategory, type FeedbackSubmissionInput } from './feedback';
 
-/** RN's settings `tr`: a key's text (English when the language lacks it), with template values filled. */
+
 export type AboutTranslate = (key: string, values?: Record<string, string>) => string;
 
 export const ABOUT_GITHUB_ISSUES_URL = 'https://github.com/dongdongbh/Mindwtr/issues/new/choose';
@@ -32,24 +27,20 @@ export const ABOUT_LINKS = {
 } as const;
 export const ABOUT_LICENSE = 'AGPL-3.0';
 
-/** How the Android app was installed, as RN reads it: the Play install referrer is non-empty for a Play install. */
+
 export type AndroidInstallerSource = 'play-store' | 'sideload' | 'unknown';
 
-/** Google Play's package: the installer of every Play install, testing tracks included. */
+
 export const ANDROID_PLAY_INSTALLER_PACKAGE = 'com.android.vending';
 
-/**
- * How the app was installed: Google Play as its installer (PackageManager's installing package) is a Play install, else a
- * non-empty install referrer (expo-application's getInstallReferrerAsync) is. A testing-track install has an empty referrer, so
- * the referrer alone read it as a sideload and sent its update check to GitHub. A rejected referrer call reads as 'unknown'.
- */
+
 export const resolveAndroidInstallerSource = (referrer: string | null | undefined, installerPackageName?: string | null): AndroidInstallerSource => {
     if ((installerPackageName ?? '').trim() === ANDROID_PLAY_INSTALLER_PACKAGE) return 'play-store';
     const normalized = (referrer || '').trim().toLowerCase();
     return normalized ? 'play-store' : 'sideload';
 };
 
-/** The feedback's installChannel. */
+
 export const getAboutInstallChannel = (input: { isFossBuild: boolean; platform: string; androidInstallerSource: AndroidInstallerSource }): string => {
     if (input.isFossBuild) return 'fdroid';
     if (input.platform === 'ios') return 'app-store';
@@ -59,21 +50,18 @@ export const getAboutInstallChannel = (input: { isFossBuild: boolean; platform: 
 
 export type AboutRowId = 'checkForUpdates' | 'rate' | 'feedback' | 'website' | 'tutorials' | 'privacy' | 'terms' | 'sponsor' | 'license';
 
-/** One About row: its label and the text at its right (`link` rows draw it in RN's link blue and are pressable). */
+
 export type AboutRow = { id: AboutRowId; label: string; value: string; tone: 'link' | 'value'; url: string | null };
 
 export type AboutSettingsModel = {
     title: string;
     appName: string;
-    /** `v` and the display version, under the name. */
+
     versionText: string;
     rows: AboutRow[];
 };
 
-/**
- * RN's About card: the header, Check for updates (not in a FOSS build), Rate (Android and iOS store builds), Send feedback, the
- * four links, Sponsor and the license. `t` is RN's language `t`, `tr` its settings `tr`; each row uses the one RN's does.
- */
+
 export function buildAboutSettingsModel(input: {
     t: (key: string) => string;
     tr: AboutTranslate;
@@ -103,21 +91,21 @@ export function buildAboutSettingsModel(input: {
     };
 }
 
-/** Google Play's in-app update answer, as RN's PlayStoreUpdates module gives it (the fields RN reads). */
+
 export type PlayStoreUpdateAnswer = { updateAvailable: boolean; availableVersionCode: number | null };
 
 type AboutResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
 
 export type AboutToast = { title: string; message: string; tone: 'info' | 'success' | 'warning'; durationMs?: number };
-/** An alert's button: `url` is the link it opens; a `cancel` button only closes. */
+
 export type AboutAlertButton = { text: string; style?: 'cancel'; url?: string };
 
-/** The host's device for the update checks and the Rate row. */
+
 export type AboutUpdateDevice = {
     platform: string;
     isFossBuild: boolean;
     isExpoGo: boolean;
-    /** The app's version (app.json) and the one shown (resolveMobileAnalyticsVersion: an RC tag when it extends it). */
+
     currentVersion: string;
     displayVersion: string;
     androidInstallerSource: AndroidInstallerSource;
@@ -139,7 +127,7 @@ export type AboutUpdateDevice = {
     logWarn: (message: string, error: unknown) => void;
     logError: (message: string, error: unknown) => void;
     now?: () => number;
-    /** GitHub's latest-release API (a device check points it at a local stub). */
+
     githubReleasesApi?: string;
 };
 
@@ -149,7 +137,7 @@ type AndroidComparableVersionResult =
 
 type GithubRelease = { tag_name?: string; html_url?: string; body?: string };
 
-/** RN's update checks and Rate row on [device]: the silent check when About opens, Check for updates, and Rate our app. */
+
 export function createAboutUpdateChecks(device: AboutUpdateDevice) {
     const { tr, storage } = device;
     const now = device.now ?? Date.now;
@@ -186,7 +174,7 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
         return response.json() as Promise<GithubRelease>;
     };
 
-    // The App Store lookup (app-store-update.ts) through the host's fetch.
+
     const fetchLatestAppStoreInfo = () => fetchAppStoreInfo(device.iosBundleId, device.fetcher as unknown as typeof globalThis.fetch);
 
     const fetchAndroidComparableVersion = async (): Promise<AndroidComparableVersionResult> => {
@@ -218,10 +206,8 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
     };
 
     return {
-        /**
-         * The check when About opens: at most once a day it asks the channel (Play or GitHub) and stores the dot; within the day
-         * it reports the stored dot. Silent: a failure is only logged. `cancelled` ends it once the screen closed.
-         */
+
+
         async runSilentCheck(cancelled: () => boolean = () => false): Promise<void> {
             if (device.isExpoGo || device.isFossBuild) return;
             try {
@@ -248,7 +234,7 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
             }
         },
 
-        /** Check for updates: the channel's answer as RN's alert (an update) or toast, and the dot stored. */
+
         async runManualCheck(): Promise<void> {
             if (device.isFossBuild) {
                 device.showToast({
@@ -356,7 +342,7 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
             }
         },
 
-        /** Rate our app: Google Play's listing (the market link, else the web page), or the App Store's review page. */
+
         async rateApp(): Promise<void> {
             try {
                 if (device.platform === 'android') {
@@ -391,7 +377,6 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
     };
 }
 
-// ---- The feedback modal ----
 
 export const FEEDBACK_LOCATIONS = [
     'inbox',
@@ -411,7 +396,7 @@ export const FEEDBACK_MESSAGE_MAX_LENGTH = 4000;
 
 export type FeedbackModalText = {
     title: string;
-    /** The header's GitHub line around its link, per category (RN splits settings.feedbackGitHubDesc at `{channel}`). */
+
     gitHub: Record<FeedbackCategory, { before: string; link: string; after: string; url: string }>;
     close: string;
     category: string;
@@ -436,7 +421,7 @@ export type FeedbackModalText = {
     sending: string;
 };
 
-/** The modal's words, as RN's FeedbackSettingsModal reads them. */
+
 export function buildFeedbackModalText(tr: (key: string) => string): FeedbackModalText {
     const [before, after] = tr('settings.feedbackGitHubDesc').split('{channel}');
     const gitHubLine = (category: FeedbackCategory) => ({
@@ -490,7 +475,7 @@ export function buildFeedbackModalText(tr: (key: string) => string): FeedbackMod
     };
 }
 
-/** The header link: GitHub Discussions for Other, the issue templates for a bug or a feature. */
+
 export const getFeedbackGitHubUrl = (category: FeedbackCategory): string => (
     category === 'other' ? ABOUT_GITHUB_DISCUSSIONS_URL : ABOUT_GITHUB_ISSUES_URL
 );
@@ -505,13 +490,10 @@ export type FeedbackDraft = {
 
 export type FeedbackStatus = 'idle' | 'sending' | 'sent' | 'error';
 
-// The endpoint's own rule (feedback.ts: the shape and at most 254 characters), so the modal never sends an email it refuses.
+
 const isFeedbackEmailShapeValid = (trimmedEmail: string) => isValidFeedbackEmail(trimmedEmail);
 
-/**
- * The modal's state as RN derives it from the draft: whether Send is on, and the error line (the screen's own error first,
- * else the invalid-email line while the typed email is not one).
- */
+
 export function getFeedbackDraftState(input: {
     tr: (key: string) => string;
     isConfigured: boolean;
@@ -529,23 +511,19 @@ export function getFeedbackDraftState(input: {
     return { canSubmit, emailValid, visibleError };
 }
 
-/** A bug's place as it leads the message ("Where: Sync" and a blank line); '' without one. */
+
 const feedbackPlacePrefix = (draft: Pick<FeedbackDraft, 'category' | 'location'>, tr: (key: string) => string): string => (
     draft.category === 'bug' && draft.location
         ? `${tr('settings.feedbackWhereMessagePrefix')}: ${buildFeedbackModalText(tr).locations[draft.location]}\n\n`
         : ''
 );
 
-/** The message field's limit: the endpoint's 4,000 characters less the place that leads it. */
+
 export const getFeedbackMessageMaxLength = (draft: Pick<FeedbackDraft, 'category' | 'location'>, tr: (key: string) => string): number => (
     FEEDBACK_MESSAGE_MAX_LENGTH - feedbackPlacePrefix(draft, tr).length
 );
 
-/**
- * Send: the refusal RN shows for a blank message or an invalid email (`error`), else what it submits. A bug's place, when one
- * is chosen, leads the message ("Where: Sync" and a blank line), within the endpoint's 4,000 characters (a place picked after
- * a full message shortens its end); diagnostics go only with a bug.
- */
+
 export function planFeedbackSubmit(draft: FeedbackDraft, tr: (key: string) => string):
     | { error: string }
     | { input: { category: FeedbackCategory; email?: string; includeDiagnostics: boolean; message: string } } {
@@ -567,7 +545,7 @@ export function planFeedbackSubmit(draft: FeedbackDraft, tr: (key: string) => st
     };
 }
 
-/** What About sends for the modal's input: the app's metadata, and the diagnostics a bug asked for. */
+
 export function buildAboutFeedbackSubmission(input: {
     category: FeedbackCategory;
     email?: string;

@@ -657,7 +657,7 @@ describe('useTaskEditState', () => {
             renderer.create(React.createElement(Probe));
         });
         renderer.act(() => state.setAttachments([file, link]));
-        // While the editor is open, sync records the file's upload.
+
         const uploaded = { ...file, cloudKey: 'attachments/file-1.pdf' };
         const previous = useTaskStore.getState()._allTasks;
         useTaskStore.setState({ _allTasks: [{ ...withFile, attachments: [uploaded] }] });
@@ -677,7 +677,7 @@ describe('useTaskEditState', () => {
 
     it('merges the draft\'s attachments over the row a sync save published while the save waited behind it', async () => {
         let state!: ReturnType<typeof useTaskEditState>;
-        // onSave as the store runs it: a command behind the write gate (store-write-gate.ts).
+
         const onSave = vi.fn((_id: string, _updates: Partial<Task>) => runStoreCommand(async () => ({ success: true })));
         const at = '2026-08-27T00:00:00.000Z';
         const file = { id: 'file-1', kind: 'file' as const, title: 'report.pdf', uri: 'file:///documents/attachments/file-1.pdf', createdAt: at, updatedAt: at };
@@ -709,7 +709,7 @@ describe('useTaskEditState', () => {
             renderer.act(() => state.setAttachments([file, link]));
             let release!: () => void;
             const held = new Promise<void>((resolve) => { release = resolve; });
-            // The save is issued while a sync save holds the gate; the save then publishes another device's attachment.
+
             const save = runSyncStoreSave(async () => {
                 await held;
                 useTaskStore.setState({ _allTasks: [{ ...withFile, rev: 3, attachments: [file, remote] }] });
@@ -727,7 +727,7 @@ describe('useTaskEditState', () => {
         expect(onSave).toHaveBeenCalledWith(task.id, expect.objectContaining({ attachments: [file, remote, link] }));
     });
 
-    // The editor's tags come from the task it opened; the save merges them by token onto the row a sync save published.
+
     it('keeps a tag another device synced while a tag save waited behind a sync save', async () => {
         let state!: ReturnType<typeof useTaskEditState>;
         const onSave = vi.fn((_id: string, _updates: Partial<Task>) => runStoreCommand(async () => ({ success: true })));
@@ -804,7 +804,7 @@ describe('useTaskEditState', () => {
             nativeActivityState.destroyed.set(201, { activityId: 201, isChangingConfigurations: true });
             nativeActivityState.current = { activityId: 202, isChangingConfigurations: false };
             renderer.act(() => { firstTree.unmount(); });
-            // Another device's tag lands while the activity is recreated.
+
             shown = { ...tagged, rev: 3, tags: ['#a', '#remote'] };
             useTaskStore.setState({ _allTasks: [shown] });
             renderer.act(() => { renderer.create(React.createElement(Probe)); });
@@ -816,7 +816,7 @@ describe('useTaskEditState', () => {
         expect(onSave.mock.calls[0][1].tags).toEqual(['#a', '#remote', '#b']);
     });
 
-    // The task has a stored reminder policy, so core's draft patch carries it; the save writes it only when changed.
+
     it('does not write an unchanged reminder policy over one another device synced', async () => {
         let state!: ReturnType<typeof useTaskEditState>;
         const onSave = vi.fn((_id: string, _updates: Partial<Task>) => runStoreCommand(async () => ({ success: true })));
@@ -894,7 +894,7 @@ describe('useTaskEditState', () => {
         try {
             renderer.act(() => { saved = state.draftLifecycle.save(); });
             await renderer.act(async () => { for (let tick = 0; tick < 10; tick += 1) await Promise.resolve(); });
-            // The modal's onSave ran without waiting for the sync save, so the modal can close.
+
             expect(onSave).toHaveBeenCalledWith(task.id, expect.objectContaining({ title: 'Renamed' }));
         } finally {
             release();
@@ -935,9 +935,9 @@ describe('useTaskEditState', () => {
         renderer.act(() => {
             renderer.create(React.createElement(Probe));
         });
-        // The editor's download put the file at Y.
+
         renderer.act(() => state.setAttachments([{ ...x, uri: 'file:///documents/attachments/file-1-y.pdf' }]));
-        // Meanwhile sync installed newer bytes at X.
+
         const newer = { ...x, contentRev: 2, updatedAt: '2026-08-28T00:00:00.000Z' };
         const previous = useTaskStore.getState()._allTasks;
         useTaskStore.setState({ _allTasks: [{ ...withFile, attachments: [newer] }] });
@@ -1219,11 +1219,11 @@ describe('useTaskEditState', () => {
             activityId: 101,
             isChangingConfigurations: true,
         });
-        // The replacement can already be foreground when Fabric tears down the
-        // old surface; source-id lookup must still classify Activity 101.
+
+
         nativeActivityState.current = { activityId: 102, isChangingConfigurations: false };
-        // Native TextInput can emit blur while the old React surface is being
-        // detached. That teardown blur must not erase the active editor field.
+
+
         renderer.act(() => { state.trackActivityInputFocus('title', false); });
         renderer.act(() => { firstTree.unmount(); });
         expect(settleAttachmentDraft).not.toHaveBeenCalled();

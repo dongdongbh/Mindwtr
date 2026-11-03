@@ -8,16 +8,15 @@ import { getTaskDateCoherenceIssues, type TaskDateCoherenceIssue } from './task-
 import { isTaskActionable } from './task-status';
 import type { Area, CustomTimeEstimate, Project, Task, TimeEstimate, TimeEstimatePreset } from './types';
 
-/** Shared translate-function shape for the localization seam below — same shape as
- *  recurrence.ts's `formatRecurrenceLabel`. */
+
 type TranslateFn = (key: string) => string;
 
 type CalendarLabelOptions = {
-    /** Defaults to English (this module's existing hardcoded strings) when omitted, so
-     *  every call site that predates this seam keeps its exact current output. */
+
+
     t?: TranslateFn;
-    /** BCP-47 tag (e.g. 'en-US', 'vi-VN'); only affects the decimal separator in a
-     *  fractional-hours duration label. Defaults to the runtime's locale. */
+
+
     locale?: string;
 };
 
@@ -39,16 +38,13 @@ export const CALENDAR_TIME_ESTIMATE_OPTIONS: Array<{ estimate: TimeEstimatePrese
     { estimate: '4hr', minutes: 240 },
 ];
 
-// Every choice a time-estimate picker offers. The preset editor that trimmed
-// this list was removed from both apps, so `settings.gtd.timeEstimatePresets`
-// is no longer read: a list saved by an older version would otherwise narrow
-// the choices forever, with no screen left to widen them again.
+
 export const TIME_ESTIMATE_OPTIONS: TimeEstimate[] = [
     ...CALENDAR_TIME_ESTIMATE_OPTIONS.map((option) => option.estimate),
     '4hr+',
 ];
 
-/** Picker choices, keeping an estimate the task already carries selectable. */
+
 export function resolveTimeEstimateOptions(current?: TimeEstimate | null): TimeEstimate[] {
     return current && !TIME_ESTIMATE_OPTIONS.includes(current)
         ? [...TIME_ESTIMATE_OPTIONS, current]
@@ -82,7 +78,7 @@ type CalendarQuickAddTaskDraftOptions = {
     areas?: Area[];
     durationMinutes: number;
     now?: Date;
-    /** The capture surface's parse bag; without it `@John Smith` splits at the space. */
+
     parseOptions?: QuickAddParseOptions;
     projects?: Project[];
     start: Date;
@@ -186,8 +182,8 @@ export function formatTimeEstimateLabel(estimate: TimeEstimate, options?: Calend
         case '4hr': return formatI18nTemplate(t('units.hoursShort'), { hours: 4 });
         case '4hr+': return formatI18nTemplate(t('units.hoursPlusShort'), { hours: 4 });
         default: {
-            // custom:NN — every duplicate re-roll of this function (#Part C) collapsed this
-            // branch to the same '4hr+' case as above, losing the exact hours/minutes split.
+
+
             const minutes = timeEstimateToMinutes(estimate);
             const hours = Math.floor(minutes / 60);
             const remainder = minutes % 60;
@@ -236,7 +232,7 @@ export function buildCalendarQuickAddTaskDraft(
         status: 'next',
         ...parsed.props,
         startTime: options.start.toISOString(),
-        // The calendar duration control owns the scheduled block, including its estimate.
+
         timeEstimate: minutesToTimeEstimate(options.durationMinutes),
     };
 
@@ -346,10 +342,8 @@ export function formatCalendarTimeInputValue(date: Date): string {
 export function parseCalendarTimeOnDate(
     date: Date,
     value: string,
-    // Accepted for API symmetry with formatTimeEstimateLabel/formatCalendarDurationLabel
-    // above (a real caller needs this once a UI feeds it non-English am/pm text); not yet
-    // consumed — every current caller feeds ASCII HH:MM / English am-pm text regardless of
-    // locale, so there's nothing to route through timeFormat/locale here today.
+
+
     _options?: { timeFormat?: string; locale?: string },
 ): Date | null {
     const trimmed = value.trim();
@@ -385,8 +379,8 @@ export function formatCalendarDurationLabel(minutes: number, options?: CalendarL
     const hours = minutes / 60;
     const hoursValue = Number.isInteger(hours)
         ? String(hours)
-        // toFixed(1) always uses '.'; Intl.NumberFormat gives the locale's own decimal
-        // separator (e.g. ',' for de/fr/pl/pt/tr/vi/cs/it) for the same one-decimal rounding.
+
+
         : new Intl.NumberFormat(options?.locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(hours);
     return formatI18nTemplate(t('units.hoursShort'), { hours: hoursValue });
 }
@@ -496,10 +490,7 @@ export function isSlotFreeForDay(options: IsSlotFreeOptions): boolean {
     return !intervals.some((interval) => overlaps(startMs, endMs, interval.start, interval.end));
 }
 
-// MARK: - Calendar push event content (shared by mobile + desktop push)
 
-// Only external schemes resolve from an external calendar (e.g. Outlook/Exchange);
-// internal `mindwtr://` links are dropped from pushed events.
 const CALENDAR_PUSH_LINK_SCHEME_RE = /^(?:https?|mailto):/i;
 const CALENDAR_PUSH_MIRROR_START = '[Mindwtr Calendar Mirror]';
 const CALENDAR_PUSH_MIRROR_END = '[/Mindwtr Calendar Mirror]';
@@ -524,13 +515,11 @@ function formatCalendarPushTaskMarker(taskId: string): string {
     }
 }
 
-/** Exact, delimited marker emitted by the shared push builder; prose mentions do not count. */
+
 export function hasCalendarPushTaskMarker(description: unknown): boolean {
     if (typeof description !== 'string') return false;
-    // Calendar services append a newline or pad a line on the way through, and only some
-    // readers trim the notes (the macOS bridge does, expo-calendar does not). Trailing
-    // whitespace is not prose, so drop it before the exact match; one stray newline used
-    // to be enough to show every pushed task a second time.
+
+
     const normalized = description.replace(/\r\n?/g, '\n').replace(/[ \t\u00a0]+$/gm, '').trim();
     CALENDAR_PUSH_MIRROR_RE.lastIndex = 0;
     for (const match of normalized.matchAll(CALENDAR_PUSH_MIRROR_RE)) {
@@ -538,7 +527,7 @@ export function hasCalendarPushTaskMarker(description: unknown): boolean {
             const decoded = decodeURIComponent(match[1]!);
             if (decoded && decoded.trim() === decoded && !hasCalendarPushControlCharacter(decoded)
                 && encodeURIComponent(decoded) === match[1]) return true;
-        } catch { /* Malformed percent escapes are ordinary notes. */ }
+        } catch {                                                     }
     }
     return false;
 }
@@ -580,30 +569,21 @@ function formatCalendarPushEffortLabel(timeEstimate: Task['timeEstimate']): stri
 export interface CalendarPushEventContext {
     projectName?: string | null;
     sectionName?: string | null;
-    /** Prepended note, e.g. the projected-recurrence explanation. */
+
     leadingNote?: string | null;
-    /** Localized status label; falls back to a capitalized status token. */
+
     statusLabel?: string | null;
-    /** Localized effort label; falls back to a minutes/hours label. */
+
     effortLabel?: string | null;
 }
 
 export interface CalendarPushEventFields {
     notes: string;
-    /** Primary external link for the event URL field (platforms that support it). */
+
     url: string | null;
 }
 
-/**
- * Builds the shared notes body and primary URL for a task pushed to an external
- * calendar. Both the mobile (expo-calendar) and desktop (system calendar) push
- * paths consume this so event content stays identical across platforms (#743).
- *
- * Metadata (project › section, status, effort) plus any external links are
- * surfaced in the notes; status/effort are omitted when not meaningful. The
- * primary external link is also returned for the native URL field where
- * supported.
- */
+
 export function buildCalendarPushEventFields(
     task: Pick<Task, 'id' | 'attachments' | 'description' | 'status' | 'timeEstimate'>,
     context: CalendarPushEventContext = {},
@@ -618,8 +598,8 @@ export function buildCalendarPushEventFields(
     }
     const statusLabel = context.statusLabel?.trim() || formatCalendarPushStatusLabel(task.status);
     if (statusLabel) metaLines.push(`Status: ${statusLabel}`);
-    // timeEstimateToMinutes defaults to 30 for an undefined estimate, so only
-    // emit an effort line when the task actually carries one.
+
+
     if (task.timeEstimate) {
         const effortLabel = context.effortLabel?.trim() || formatCalendarPushEffortLabel(task.timeEstimate);
         if (effortLabel) metaLines.push(`Effort: ${effortLabel}`);

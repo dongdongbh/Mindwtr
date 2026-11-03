@@ -34,8 +34,8 @@ describe('completed sort (#945)', () => {
     });
 
     it('does not fall back to updatedAt the way the Done default order does', () => {
-        // sortDoneTasksForListView ranks these by updatedAt; the named sort must
-        // not, or an archived task never completed sorts in among real completions.
+
+
         const sorted = sortTasksBy([
             task('archived-never', { updatedAt: '2026-09-09T00:00:00.000Z' }),
             task('completed', { completedAt: '2026-03-01T09:00:00.000Z' }),
@@ -55,13 +55,13 @@ describe('completed sort (#945)', () => {
 });
 
 describe('getCompletionDateGroup (#945)', () => {
-    // Late enough in the day that a rolling 24h window would disagree with
-    // calendar days for every case below.
+
+
     const now = new Date('2026-03-10T23:30:00');
 
     it('buckets on local calendar days, not rolling 24-hour windows', () => {
         expect(getCompletionDateGroup({ completedAt: '2026-03-10T00:05:00' }, now)).toBe('today');
-        // 23h55m earlier, but the previous calendar day.
+
         expect(getCompletionDateGroup({ completedAt: '2026-03-09T23:35:00' }, now)).toBe('yesterday');
         expect(getCompletionDateGroup({ completedAt: '2026-03-08T12:00:00' }, now)).toBe('previous7Days');
         expect(getCompletionDateGroup({ completedAt: '2026-03-03T12:00:00' }, now)).toBe('previous7Days');
@@ -79,11 +79,8 @@ describe('getCompletionDateGroup (#945)', () => {
 });
 
 describe('sortTasksBy case coverage', () => {
-    // Adding the 'completed' case initially deleted 'created-desc' outright, and
-    // no core test noticed — a dropped case falls through to `default`, which
-    // still returns a plausible order. Pinning the direction of each date sort
-    // explicitly is the only thing that catches that; iterating the roster
-    // cannot, because a missing case still produces sorted output.
+
+
     const tasks = [
         task('mid', { createdAt: '2026-02-02T00:00:00.000Z' }),
         task('newest', { createdAt: '2026-02-03T00:00:00.000Z' }),
@@ -98,9 +95,7 @@ describe('sortTasksBy case coverage', () => {
         expect(sortTasksBy(tasks, 'created-desc').map((item) => item.id)).toEqual(['newest', 'mid', 'oldest']);
     });
 
-    // #1107: shortest estimate first, no estimate last, createdAt breaking ties.
-    // Two unestimated tasks both rank +Infinity, so this also pins that the
-    // comparator reaches the createdAt tie-break instead of returning NaN.
+
     it('sorts timeEstimate shortest first and leaves unestimated tasks last', () => {
         const estimated = [
             task('none-later', { createdAt: '2026-02-04T00:00:00.000Z' }),
@@ -120,8 +115,7 @@ describe('sortTasksBy case coverage', () => {
         expect(sortTasksBy(sameEstimate, 'timeEstimate').map((item) => item.id)).toEqual(['first', 'second']);
     });
 
-    // #1415: the shared list's Priority sort uses Focus's rank (urgent, high,
-    // medium, low, none) and Focus's tie order: due, then start, then created.
+
     it('sorts priority high to low, no priority last', () => {
         const ranked = [
             task('none', { createdAt: '2026-02-01T00:00:00.000Z' }),
@@ -180,7 +174,7 @@ describe('resolveTaskGroupByForFeatures', () => {
         expect(resolveTaskGroupByForFeatures('priority', { features: { priorities: false } })).toBe('none');
         expect(resolveTaskGroupByForFeatures('priority', { features: {} })).toBe('priority');
         expect(resolveTaskGroupByForFeatures('priority', undefined)).toBe('priority');
-        // Energy carries no feature flag — it must never be gated here.
+
         expect(resolveTaskGroupByForFeatures('energy', { features: { priorities: false } })).toBe('energy');
         expect(resolveTaskGroupByForFeatures('project', { features: { priorities: false } })).toBe('project');
     });

@@ -1,20 +1,6 @@
-// "Continue without these files" check for the isolated native Android development app, on this computer and the test phone only.
-//
-//   node apps/android-native/scripts/check-continue-without-files-device.mjs <adb-serial> [apk]
-//
-// It starts a local WebDAV server (sync-harness.mjs, reached through `adb reverse`; never a real server) with two folders, A
-// and B, and a second device on this computer (the same native bundle in a Node VM). Then:
-//   (1) the phone syncs to folder A; the second device adds a project with a file there, and A then loses that file, so the
-//       phone holds the attachment (a missing file) but never its bytes;
-//   (2) the phone's WebDAV form switches to folder B, which has nothing: Save asks RN's question, listing the file;
-//   (3) Cancel leaves the stored setting on folder A and writes nothing to B;
-//   (4) Save again, then Continue: folder B is stored and written, and the project's attachment shows "Missing file";
-//   (5) Remove on that attachment soft-deletes it (a file that exists nowhere goes by hand), and sync Off again.
-// A leftover attachment of an earlier cut-off run (a file that exists nowhere would stall every later check's switch of sync
-// location) is removed first the same way.
-// A screenshot of the question is saved for the RN-vs-native pair. It installs with `install -r` (development data stays),
-// touches only the development package, removes the port mapping, and leaves the phone on its home screen.
-// Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -49,7 +35,7 @@ const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/continue-without-files-check');
 const { en } = await import(resolve(repo, 'packages/core/src/i18n/locales/en.ts'));
 
-// This run's names: digits and plain letters only (the phone types them through an English layout).
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const WEBDAV_PORT = Number(process.env.MINDWTR_CONTINUE_WEBDAV_PORT ?? 18774);
 const USER = `cwfuser${run}`;
@@ -66,7 +52,7 @@ const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
 const logs = () => device.logs(pid(), TAG);
 
-// ---- The phone's storage ----
+
 const pullFile = (remote, name) => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -86,19 +72,19 @@ const projectAttachments = () => {
     const row = sqlite(pullFile(`files/${DB}`, 'db'), `SELECT attachments FROM projects WHERE title = ${quote(names.project)} AND deletedAt IS NULL`)[0];
     return row?.attachments ? JSON.parse(row.attachments) : [];
 };
-/** RN's AsyncStorage on the phone (databases/RKStorage): the stored sync settings. */
+
 const storedUrl = () => Object.fromEntries(sqlite(pullFile('databases/RKStorage', 'rk'), 'SELECT key, value FROM catalystLocalStorage')
     .map((row) => [row.key, row.value]))['@mindwtr_webdav_url'];
 
-// ---- UI (core's English) ----
+
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
 const onSync = (nodes) => Boolean(tagged(nodes, 'settings-sync'));
 const onInbox = (nodes) => !tagged(nodes, 'quick-capture') && !tagged(nodes, 'menu-screen') && !inEditor(nodes)
     && tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes));
 const withPrefix = (nodes, prefix) => nodes.find((node) => (node['content-desc'] ?? '').startsWith(prefix));
 const question = (nodes) => nodes.some((node) => node.text === en['settings.syncMissingFilesTitle']);
-// The dialog is its own window, so its buttons carry no resource ids: they are found by their words, drawn in capitals as
-// RN's Android Alert draws them.
+
+
 const continueButton = (nodes) => nodes.find((node) => node.text === en['settings.syncMissingFilesContinue'].toUpperCase());
 const cancelButton = (nodes) => nodes.find((node) => node.text === en['common.cancel'].toUpperCase());
 const hideKeyboard = async () => {
@@ -154,11 +140,11 @@ const runCommand = async (tag, operation, description, timeoutMs = 240_000) => {
     const since = logStamp(logs());
     await tapTag(tag, () => commands(operation, since) > 0, description, timeoutMs);
 };
-/** Projects showing its list (Back from an open project: the tab keeps the last project open). */
+
 const projectList = async () => {
     let nodes = await toTabs();
     nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
-    // An open project shows its title field and Details controls (scrolled: not always its Details toggle).
+
     const inProject = (current) => current.some((node) => /(^|\/)project-(title-input|details-[a-z]+|attachment-add-link)$/.test(node['resource-id'] ?? ''));
     for (let step = 0; step < 4 && inProject(nodes); step += 1) {
         await hideKeyboard();
@@ -169,7 +155,7 @@ const projectList = async () => {
     }
     return inProject(nodes) ? fail('the project list did not come back') : nodes;
 };
-/** Opens [project] in Projects with its Details, and taps Remove beside [file]; answers once the row is gone. */
+
 const removeProjectFile = async (project, file) => {
     await projectList();
     let nodes = await device.reveal(project);
@@ -207,7 +193,7 @@ try {
     const beforeInstall = front();
     if (!beforeInstall.includes(`${PKG}/`) && !beforeInstall.includes(`${home}/`)) throw new Stopped(`another app is in front: ${beforeInstall.trim()}`);
     dav = await serveWebdav({ port: WEBDAV_PORT, username: USER, password: PASSWORD });
-    try { execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${WEBDAV_PORT}`], { stdio: 'ignore' }); } catch { /* none mapped */ }
+    try { execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${WEBDAV_PORT}`], { stdio: 'ignore' }); } catch {                   }
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
     await device.stopApp();
     await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
@@ -217,7 +203,7 @@ try {
     await removeNowhereFiles({ query: (sql) => sqlite(pullFile(`files/${DB}`, 'db'), sql), removeProjectFile });
     check(true, 'no file that exists nowhere is left from an earlier run (it would stall a switch of sync location)');
 
-    // (1) Folder A: the phone, then the second device's project file, which A then loses.
+
     let nodes = await openSync();
     if (!nodes.some((node) => node.text === en['settings.syncOff'])) {
         console.log('note - a backend left by an earlier run is set Off before the check maps its port');
@@ -254,7 +240,7 @@ try {
     check(!kept.deletedAt && Boolean(kept.cloudKey) && kept.localStatus !== 'available',
         '(1) the phone holds the attachment as a missing file (live, keyed, no bytes) after folder A lost it');
 
-    // (2) Folder B, which has nothing: Save asks RN's question, listing the file.
+
     await openSync();
     await fill('sync-url', urlOf(folderB));
     await hideKeyboard();
@@ -267,13 +253,13 @@ try {
     writeFileSync(shot, device.adbRaw('exec-out', 'screencap', '-p'));
     console.log(`info - native question screenshot: ${shot}`);
 
-    // (3) Cancel: the stored setting stays on folder A, and folder B gets nothing.
+
     await tapExpecting(cancelButton(nodes), (current) => !question(current), 'Cancel');
     await sleep(2_000);
     check(storedUrl() === fieldsA.url && ![...dav.state.files.keys()].some((path) => path.startsWith(`${folderB}/`) && path.endsWith('data.json')),
         '(3) Cancel left the stored URL on folder A and wrote no document to folder B');
 
-    // (4) Save again, then Continue: folder B is stored and written; the attachment shows "Missing file".
+
     nodes = await tapTag('sync-save', question, 'the missing-files question again', 240_000);
     await tapExpecting(continueButton(nodes), (current) => !question(current), 'Continue without these files');
     await until('folder B stored and written', () => storedUrl() === urlOf(folderB) && dav.state.files.has(`${folderB}/data.json`), 240_000, 3_000);
@@ -289,7 +275,7 @@ try {
         && current.some((node) => (node.text ?? '') === names.file || (node['content-desc'] ?? '').includes(names.file)), 20_000);
     check(!nodes.some((node) => node.text === en['attachments.download']), `(4) the attachment shows "${en['attachments.missing']}", not "${en['attachments.download']}"`);
 
-    // (5) Remove by hand, then sync Off again.
+
     await removeProjectFile(names.project, names.file);
     await until('the attachment soft-deleted', () => projectAttachments().find((a) => a.id === fileId)?.deletedAt, 30_000, 2_000);
     check(true, '(5) Remove soft-deleted the attachment whose file exists nowhere');
@@ -301,7 +287,7 @@ try {
     try {
         console.log(`evidence - app log (sync):\n${logs().split('\n').filter((line) => /sync|Sync|attachment/.test(line))
             .slice(-60).map((line) => line.slice(0, 300)).join('\n')}`);
-    } catch { /* the app is gone */ }
+    } catch {                       }
     evidenced(error);
     console.error(error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
     process.exitCode = error instanceof Stopped ? 3 : 1;

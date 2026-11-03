@@ -70,7 +70,7 @@ describe('prepared General preferences', () => {
         expect(await env.host.commitPreparedGeneralPreference(envelope)).toEqual({ ok: true, value: prepared.result });
         expect(env.saves()).toBe(1);
         expect(env.data().tasks).toEqual(initial().tasks);
-        // The store's existing secure-storage rule strips API keys on every SQLite save.
+
         expect(env.data().settings.ai).toEqual({ apiKey: undefined, baseUrl: 'https://private.invalid/x' });
         expect(env.data().settings.gtd).toEqual(initial().settings.gtd);
         expect(env.data().settings.calendarSystem).toBe('gregorian');
@@ -569,7 +569,7 @@ describe('prepared General preferences', () => {
         expect(await commit()).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         env.changeSaved((data) => ({ ...data, settings: { ...data.settings, timeFormat: '24h',
             syncPreferencesUpdatedAt: { ...data.settings.syncPreferencesUpdatedAt, language: prepared.after.stamp } } }));
-        // The exact planned scalar/stamp is the only persisted receipt this bounded command permits.
+
         expect(await commit()).toMatchObject({ ok: true });
         expect(env.saves()).toBe(0);
     });

@@ -1,4 +1,4 @@
-// Ukrainian app strings. Keep placeholders and slash-command syntax in sync with en.ts.
+
 export const ukOverrides: Record<string, string> = {
     "review.projectDeferred": "Заплановано",
     "taskEdit.startAdvanceReminderLabel": "До початку",

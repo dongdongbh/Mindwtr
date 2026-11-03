@@ -60,9 +60,7 @@ function TransferActionButton({
     );
 }
 
-// Backup and migration are both rare errands, so each card stays folded until
-// asked for. Search reveals a row by clicking its card's header (see
-// expandSettingsSection); nothing persists the choice.
+
 export function BackupSection({
     onExportBackup,
     onExportCsv,

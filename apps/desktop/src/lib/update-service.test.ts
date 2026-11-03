@@ -235,7 +235,7 @@ describe("update-service channel selection", () => {
     expect(result.hasUpdate).toBe(true);
     expect(result.source).toBe("github-release");
     expect(result.latestVersion).toBe("1.9.0");
-    // Only the GitHub API is contacted; no per-bucket guessing.
+
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

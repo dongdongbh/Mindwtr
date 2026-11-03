@@ -40,7 +40,7 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean, failAf
     useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
         settings: {}, error: null, persistenceFailure: null, isLoading: false, lastDataChangeAt: 0 } as never);
     await useTaskStore.getState().fetchData({ throwOnError: true }); await flushPendingSave();
-    // Raw post-load/sync rows expose policy without a lossy loader projection.
+
     useTaskStore.setState({ _allPeople: structuredClone(initial.people ?? [person()]),
         _allTasks: structuredClone(initial.tasks ?? []) });
     const matureSettings = structuredClone(data.settings);
@@ -61,7 +61,7 @@ const freeze = async (methods: ReturnType<typeof createPersonEditMethods>, input
     return structuredClone({ request: input, prepared: plan.value.prepared });
 };
 const withTimes = (frozen: Awaited<ReturnType<typeof freeze>>, first = updateAt, second: string | null = renameAt) => {
-    // Controlled clocks are supplied by prepare in differential tests, not a forged effect patch.
+
     expect(frozen.prepared.updateAt).toBe(first);
     expect(frozen.prepared.renameAt).toBe(second);
 };
@@ -221,7 +221,7 @@ describe('prepared native Person edit', () => {
 
     it('normal load preserves legacy terminal focus in durable baselines through failed saves and cold original-request replay', async () => {
         let failing = false;
-        // A day old: a done task older than the auto-archive window would be archived (and saved) on load.
+
         const stamp = new Date(Date.now() - 86_400_000).toISOString();
         const legacy = ['done', 'archived'].map((status, index) => ({ id: `legacy-${index}`, title: 'Retained task', status,
             assignedTo: person().name, tags: ['#keep'], contexts: ['@keep'], description: 'Keep metadata',
@@ -243,7 +243,7 @@ describe('prepared native Person edit', () => {
             for (const row of useTaskStore.getState()._allTasks) expect(row.focusOrder).toBeUndefined();
             expect(env.data().tasks).toEqual(legacy);
         }
-        // Recreate the store and adapter against the exact unchanged durable before rows.
+
         failing = false;
         const savedBefore = structuredClone(env.data());
         const cold = await open(savedBefore);
@@ -286,7 +286,7 @@ describe('prepared native Person edit', () => {
         for (const mutation of ['source', 'destination', 'device']) {
             const env = await open({ people: [person(), target], tasks: tasks() });
             const frozen = await freeze(env.methods, request(person(), { name: 'Morgan Lee' }));
-            // Keep UI state stale: only durable data advances inside the async read.
+
             env.onRead(() => env.setData(mutation === 'device' ? { settings: { deviceId: 'new-device' } }
                 : { people: env.data().people!.map((row) => row.id === (mutation === 'source' ? 'source' : 'target')
                     ? { ...row, note: 'Intervening durable edit', rev: (row.rev ?? 0) + 1 } : row) }));
@@ -344,7 +344,7 @@ describe('prepared native Person edit', () => {
         const rn = JSON.parse(JSON.stringify({ people: useTaskStore.getState()._allPeople, tasks: useTaskStore.getState()._allTasks }));
         vi.useRealTimers();
         const native = await open(initial);
-        // Freeze two independently supplied operation clocks through the real preparation route.
+
         let clock = 0;
         const RealDate = Date;
         class FrozenDate extends RealDate {
@@ -362,7 +362,7 @@ describe('prepared native Person edit', () => {
         expect(native.methods.validatePreparedPersonEdit(frozen)).toEqual({ ok: true, value: frozen.prepared.result });
         expect(await native.methods.commitPreparedPersonEdit(frozen)).toEqual({ ok: true, value: frozen.prepared.result });
         const expectedRN = rn;
-        // RN rename-only uses its sole clock as updateAt in native; both preserve two clocks.
+
         if (frozen.prepared.renameAt === updateAt) {
             for (const row of [...expectedRN.people, ...expectedRN.tasks]) if (row.updatedAt === renameAt) row.updatedAt = updateAt;
         }

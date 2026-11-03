@@ -6,7 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Voice pass V5: the popup's microphone states (RN's recording, recordingBusy and recordingReady) over stand-in voice requests. */
+
 class CaptureVoiceTest {
     private class Harness(var defaultAudio: Boolean = false, var sandbox: Boolean = false) {
         val calls = mutableListOf<String>()
@@ -42,7 +42,7 @@ class CaptureVoiceTest {
         voice.toggle("", JSONObject())
         assertEquals(VoiceUi(session = 7, recording = true), voice.state)
         voice.toggle("Call mom", JSONObject())
-        // While the stop and save run: not recording, busy (RN's processing row and faded mic).
+
         assertEquals(VoiceUi(session = 7, recording = false, busy = true), h.duringStop)
         assertEquals(listOf("t1"), h.saved)
         assertEquals(listOf("open", "start", "stop:Call mom"), h.calls)
@@ -61,14 +61,14 @@ class CaptureVoiceTest {
         assertFalse(voice.state.recording)
     }
 
-    // RN 4dea768a2: the automatic start runs once per open popup, never again after it records nothing.
+
     @Test fun theAutomaticStartRunsOncePerOpenPopupAndFollowsTheDefaultMethod() {
         val h = Harness(defaultAudio = true)
         h.answer("start", """{"status":"not-configured"}""", """{"status":"not-configured"}""")
         val voice = h.make()
         voice.opened(AutoRecord.DEFAULT)
         assertEquals(listOf("open", "start"), h.calls)
-        // Its notice changed the state; nothing starts again by itself.
+
         assertEquals(1, h.calls.count { it == "start" })
         voice.closed()
         voice.opened(AutoRecord.OPPOSITE)
@@ -78,7 +78,7 @@ class CaptureVoiceTest {
         assertEquals(2, h.calls.count { it == "start" })
     }
 
-    // Voice V5 review N3: RN skips the automatic start in Sandbox mode (no recording, no notice each time the popup opens).
+
     @Test fun theAutomaticStartWaitsOutSandboxMode() {
         val h = Harness(defaultAudio = true, sandbox = true)
         val voice = h.make()
@@ -88,7 +88,7 @@ class CaptureVoiceTest {
         assertTrue(h.notices.isEmpty())
     }
 
-    // Voice V5 review N4: the center + says RN's audio capture label while Audio is the default capture method.
+
     @Test fun theDefaultCaptureMethodIsReadForTheCenterButton() {
         val h = Harness(defaultAudio = true)
         val voice = h.make()
@@ -100,7 +100,7 @@ class CaptureVoiceTest {
         assertFalse(voice.defaultAudio)
     }
 
-    // Voice V3 review N5: leaving the app ends the recording; the bundle forgets it and the next tap starts again.
+
     @Test fun leavingTheAppDuringARecordingClearsItAndTellsTheBundle() {
         val h = Harness()
         h.answer("start", """{"status":"recording"}""", """{"status":"recording"}""")
@@ -114,7 +114,7 @@ class CaptureVoiceTest {
         assertEquals(listOf("open", "start", "leave", "start"), h.calls)
     }
 
-    // Voice V3 review N2: a refused save keeps its recording; the next Save sends the fixed draft with it.
+
     @Test fun aRefusedSaveKeepsTheRecordingAndTheNextSaveSendsIt() {
         val h = Harness()
         h.answer("start", """{"status":"recording"}""")
@@ -128,13 +128,13 @@ class CaptureVoiceTest {
         assertEquals("Unreadable", (h.notices.single() as VoiceNotice.Core).notice.getString("message"))
         assertTrue(voice.saveHeld("Call mom", JSONObject(), openAfterSave = true))
         assertEquals(listOf("t9"), h.saved)
-        // Review N1: Save and edit reaches the bundle (core then answers next = open).
+
         assertTrue(h.inputs.last().getBoolean("openAfterSave"))
         assertFalse(voice.state.held)
         assertFalse(voice.saveHeld("Again", JSONObject(), openAfterSave = false))
     }
 
-    // RN's capture-quick route: a mode decides, else autoRecord, else the default capture method.
+
     @Test fun aCaptureLinkRecordsByItsModeThenItsAutoRecordThenTheDefault() {
         assertEquals(AutoRecord.OFF, AutoRecord.forCaptureLink("mindwtr:///capture-quick?mode=text&entry=details"))
         assertEquals(AutoRecord.ON, AutoRecord.forCaptureLink("mindwtr://capture-quick?mode=audio"))

@@ -43,11 +43,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     };
     const [syncedTheme, setSyncedTheme] = useState<ThemeMode | undefined>(() => readSyncedTheme());
 
-    // System OLED takes its preset from the current appearance; fixed themes
-    // keep their own preset, and ordinary light/dark use the default palette.
+
     const themePreset: ThemePreset = resolveThemeStatusPreset(themeMode, systemColorScheme) ?? 'default';
 
-    // Determine actual color scheme based on mode and system
+
     const colorScheme: ColorScheme = resolveThemeColorScheme(themeMode, systemColorScheme);
     const isDark = colorScheme === 'dark';
 

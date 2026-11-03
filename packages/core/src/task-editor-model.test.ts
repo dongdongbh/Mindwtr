@@ -131,7 +131,7 @@ describe('backdated completion picker policy', () => {
     });
 });
 
-// Mirrors the capture: the edit's draft ops, list buffers and typed inputs.
+
 const applyEdit = (task: Task, edit: Edit) => {
     let draft = createTaskDraft(task);
     for (const [field, value] of edit.ops ?? []) draft = setTaskDraftField(draft, field, (value ?? undefined) as never);
@@ -272,7 +272,7 @@ describe('task editor model parity with the mobile editor', () => {
                 fields: fields.split('|')[index].split(',').filter(Boolean),
                 filledCount: filled[index],
                 open: open[id] || filled[index] > 0,
-                // RN's ContextualHelp sits in Scheduling and Details only (8184ce172), with the mobile guide's section link.
+
                 ...(id === 'scheduling' || id === 'details'
                     ? { help: expect.objectContaining({ guideUrl: getOnboardingGuideUrl(id, 'mobile', undefined) }) }
                     : {}),
@@ -338,7 +338,7 @@ describe('task editor model parity: Someday sections and suggestions', () => {
             ]];
         }));
         expect(tokens).toEqual(snapshot.tokens);
-        // Case, prefix and the typed-token rules, spelled out.
+
         expect(tokens['contexts|@o'][1].map(([value]) => value)).toEqual(['@office', '@office-2', '@outdoors', '@home']);
         expect(tokens['contexts|'][1]).toEqual([]);
         expect(tokens['contexts|@O'][1].map(([value]) => value)).toEqual(tokens['contexts|@o'][1].map(([value]) => value));
@@ -416,7 +416,7 @@ describe('task editor model rules', () => {
         const hidden = { hidden: ['section' as TaskEditorFieldId] };
         expect(layoutOf({ taskPatch: { projectId: 'p' }, hasProjectSections: true, taskEditor: hidden }).all).not.toContain('section');
         expect(layoutOf({ taskPatch: { projectId: 'p', sectionId: 's' }, taskEditor: hidden }).all).toContain('section');
-        // Migrated defaults are not a choice to hide sections.
+
         const migrated = { defaultsVersion: 5, hidden: [...DEFAULT_TASK_EDITOR_HIDDEN] };
         expect(layoutOf({ taskPatch: { projectId: 'p' }, hasProjectSections: true, taskEditor: migrated }).all).toContain('section');
     });
@@ -476,10 +476,10 @@ describe('task editor model rules', () => {
         const draft = createTaskDraft(task);
         expect(applyTaskDraftPatch(draft, { completedAt: '2026-09-20T10:00:00.000Z', status: 'done' }))
             .toMatchObject({ status: 'done', completedAt: '2026-09-20T10:00:00.000Z' });
-        // Key order in the patch does not matter.
+
         expect(applyTaskDraftPatch(draft, { status: 'done', completedAt: '2026-09-20T10:00:00.000Z' }))
             .toMatchObject({ status: 'done', completedAt: '2026-09-20T10:00:00.000Z' });
-        // The star wins over Inbox, as in the store.
+
         expect(applyTaskDraftPatch(draft, { focusedToday: true, status: 'inbox' }))
             .toMatchObject({ status: 'next', focusedToday: true });
         const done = createTaskDraft({ ...task, status: 'done', completedAt: '2026-09-20T10:00:00.000Z' });

@@ -16,7 +16,7 @@ import {
   type MobileHeartbeatDevice,
 } from '@mindwtr/core';
 
-// Core's (analytics-heartbeat.ts), shared with the native hosts.
+
 export { isMobileAnalyticsHeartbeatConfigured, resolveMobileAnalyticsVersion, type MobileAnalyticsHeartbeatConfig };
 
 type PlatformExtras = typeof Platform & {
@@ -36,7 +36,7 @@ export function getDeviceLocale(): string {
   }
 }
 
-/** This device for core's heartbeat: RN's Platform, AsyncStorage and fetch. */
+
 function mobileHeartbeatDevice(): MobileHeartbeatDevice {
   return {
     platform: Platform.OS,

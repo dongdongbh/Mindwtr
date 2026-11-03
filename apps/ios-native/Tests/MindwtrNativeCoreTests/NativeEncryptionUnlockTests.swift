@@ -5,8 +5,7 @@ import Security
 import XCTest
 @testable import MindwtrNativeCore
 
-/// A private DAV endpoint, not a claim of compatibility with a real backend.
-/// Every request is intercepted, including unknown destinations.
+
 private final class EncryptionDAVProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var stores: [String: EncryptionDAVStore] = [:]
@@ -92,8 +91,8 @@ private final class EncryptionDAVStore: @unchecked Sendable {
             requests.append(Request(method: method, path: path, condition: condition, status: status, serverDate: serverDate, responseEtag: headers["ETag"], encryptedBody: encryptedBody, encryptedBytes: encryptedBody ? body : nil))
             return Reply(status: status, headers: headers, body: method == "HEAD" ? Data() : bytes)
         }
-        // Never retain or report a received credential. Every accepted DAV
-        // operation must carry the exact synthetic account configured by setup.
+
+
         guard request.value(forHTTPHeaderField: "Authorization") == expectedAuthorization else { return reply(401) }
         guard url.scheme == "https", path.hasPrefix("/sync/"), request.url?.query == nil else {
             unexpected += 1; return reply(400)
@@ -159,7 +158,6 @@ private final class EncryptionDAVStore: @unchecked Sendable {
 }
 
 
-/// Existing DEBUG worker hook; all mutable state stays off the Engine queue.
 private final class EncryptionKDFGate: @unchecked Sendable {
     let reached: XCTestExpectation
     init(_ boundary: String = "Native Unlock KDF admitted") { reached = XCTestExpectation(description: boundary) }
@@ -177,8 +175,7 @@ private final class EncryptionKDFGate: @unchecked Sendable {
     var completed: Bool { lock.lock(); defer { lock.unlock() }; return finished }
 }
 
-/// Actual JSC + native HTTP/Argon2/AES/KV; macOS uses only the existing
-/// durable synthetic secret decorator. iOS uses exact isolated Security items.
+
 final class NativeEncryptionUnlockTests: XCTestCase {
     private var root: URL!, bundle: URL!, hostname: String!, namespace: String!, service: String!
     private var remote: EncryptionDAVStore!
@@ -188,7 +185,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
     private let at = "2026-10-07T12:00:00.000Z", password = "synthetic-dav-370"
     private let passphrase = "correct horse battery staple"
     private let nextPassphrase = "synthetic next generation 382"
-    // Independent RN/Noble Argon2id reference: salt 01..10, m64/t1/p1.
+
     private let keyHex = "fcd175b0b1aa6e9995ec57b1a0678fa481c471f2f894ebe20426c324f6ff7aeb"
     private let localBytes = Data("Untouched local file370".utf8)
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -346,7 +343,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         let network = remote.recorded.count; _ = try await host.start(); XCTAssertEqual(remote.recorded.count, network)
         let db = try SQLiteBridge(url: database); defer { db.close() }
         _ = try db.execute("INSERT INTO tasks(id,title,status,contexts,tags,description,createdAt,updatedAt,rev,revBy,isFocusedToday,pushCount,showFutureRecurrence,suppressMindwtrReminders) VALUES (?,'Preserve local370','inbox','[]','[]','Preserve notes370',?,?,1,'fixture',0,0,0,0)", parametersJSON: json([taskID, at, at]))
-        // Use a fresh host so its memory and durable ordinary writer agree with seed.
+
         await host.close()
         try FileManager.default.createDirectory(at: localFile.deletingLastPathComponent(), withIntermediateDirectories: true); try localBytes.write(to: localFile)
     }
@@ -371,7 +368,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         _ = try await action(host, ["type": "typed", "field": "current", "value": value])
     }
     private func plaintextHost(_ faults: HostIOFaults = HostIOFaults(), pendingLocal: Bool = true) async throws -> CoreHost {
-        // Setup happens before Enable; no fixture repairs its interrupted journal or artifacts.
+
         remote = EncryptionDAVStore(expectedAuthorization: "Basic " + Data(("synthetic:" + password).utf8).base64EncodedString())
         EncryptionDAVProtocol.install(hostname, store: remote)
         let document: [String: Any] = ["tasks": [["id": remoteTaskID, "title": "Plain remote379", "status": "inbox", "contexts": [], "tags": [], "createdAt": at, "updatedAt": at, "rev": 1, "revBy": "fixture"]], "projects": [], "sections": [], "areas": [], "settings": [:]]
@@ -511,8 +508,8 @@ final class NativeEncryptionUnlockTests: XCTestCase {
                 } else if requests.last?.method == "GET", requests.last?.path == "/sync/.mindwtr-sync-fence-v1.json", requests.last?.status == 200,
                           let write = requests.lastIndex(where: { $0.method == "PUT" && $0.path == "/sync/data.json.enc.bak" && $0.status == 204 }),
                           let verify = requests.lastIndex(where: { $0.method == "GET" && $0.path == "/sync/data.json.enc.bak" && $0.status == 200 }), verify > write {
-                    // This next guarded read occurs after shared backup decrypt verification,
-                    // before the base document's conditional rewrite.
+
+
                     gate.hold()
                 }
             }
@@ -668,8 +665,8 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         let renewed = try XCTUnwrap(record["renewedAt"] as? NSNumber).doubleValue
         let expires = try XCTUnwrap(record["expiresAt"] as? NSNumber).doubleValue
         XCTAssertGreaterThan(expires, renewed + 1_000)
-        // The provider's clock proves the retained holder is live, not presumed
-        // abandoned. A new UUID cannot consume that holder or produce a key.
+
+
         remote.advanceServerTime(to: Date(timeIntervalSince1970: (renewed + 1_000) / 1_000))
         try await enter(host, passphrase)
         _ = try await action(host, ["type": "submit", "flow": "unlock"], requestID: UUID().uuidString.lowercased())
@@ -679,8 +676,8 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertTrue(denied.contains { ($0["action"] as? [String: Any])?["type"] as? String == "submit" && $0["enabled"] as? Bool == false },
             "A settled attempt retires its passphrase before another submission")
         XCTAssertEqual(remote.bytes(path), bytes); assertRemoteDomainUnchanged(before); XCTAssertEqual(try markers(), 0); assertDrained()
-        // Expiry is established by the same authority; no fixture deletes the
-        // lease. Shared conditional acquisition performs its ordinary CAS.
+
+
         remote.advanceServerTime(to: Date(timeIntervalSince1970: (expires + 1_000) / 1_000))
         _ = try await action(host, ["type": "typed", "field": "current", "value": passphrase])
         _ = try await action(host, ["type": "submit", "flow": "unlock"], requestID: UUID().uuidString.lowercased())
@@ -776,7 +773,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertEqual(first.path, "/sync/data.json.enc"); XCTAssertEqual(first.status, 201); XCTAssertEqual(first.condition, "none:*")
         XCTAssertTrue(writes.allSatisfy { ["/sync/data.json.enc", "/sync/data.json.enc.bak"].contains($0.path) && $0.encryptedBody })
         XCTAssertFalse(remote.recorded.contains { $0.method == "PUT" && ["/sync/data.json", "/sync/data.json.bak"].contains($0.path) })
-        // First Save uses the shared ordinary-sync writer reservation before its ciphertext write.
+
         let requests = remote.recorded
         let acquired = try XCTUnwrap(requests.firstIndex { $0.path == "/sync/.mindwtr-sync-fence-v1.json" && $0.method == "PUT" && $0.status == 201 })
         let published = try XCTUnwrap(requests.firstIndex { $0.path == "/sync/data.json.enc" && $0.method == "PUT" })
@@ -852,7 +849,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
             let document = try object(String(decoding: independentlyDecrypted(XCTUnwrap(request.encryptedBytes), key: material), as: UTF8.self))
             XCTAssertEqual(try json(XCTUnwrap(document["tasks"])), try json([expectedTask]))
             for name in ["projects", "sections", "areas", "people"] { XCTAssertEqual(try json(document[name] ?? []), try json(expected[name] ?? [])) }
-            // Every publishing snapshot must follow a successful ciphertext upload of the exact referenced bytes.
+
             XCTAssertLessThan(firstBlob.offset, index)
         }
         let finalDocument = try object(String(decoding: independentlyDecrypted(XCTUnwrap(remote.bytes("/sync/data.json.enc")), key: material), as: UTF8.self))
@@ -1017,8 +1014,8 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         _ = try await action(host, ["type": "recheck"], requestID: UUID().uuidString.lowercased())
         XCTAssertEqual(try storedState()["partlyEncryptedScope"] as? String, scope)
         XCTAssertEqual(remote.snapshot, partial); XCTAssertEqual(try rows(), before); XCTAssertNil(try cachedKey())
-        // A peer's external completion is only the fixture precondition for Recheck,
-        // not native Enable evidence; the interrupted native run above supplied that.
+
+
         for (path, bytes) in remote.snapshot where path != "/sync/.mindwtr-sync-fence-v1.json" && bytes.prefix(6) != Data("MWENC1".utf8) {
             let encryptedPath = path == "/sync/data.json" ? "/sync/data.json.enc"
                 : path == "/sync/data.json.bak" ? "/sync/data.json.enc.bak" : path
@@ -1036,7 +1033,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 3); assertDrained(); await host.close()
         let cold = core(), count = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
         XCTAssertEqual(remote.recorded.count, count); XCTAssertNil(try cachedKey()); XCTAssertEqual(remote.snapshot, whole)
-        // Whole ciphertext clears quarantine, but it cannot authorize plaintext publication.
+
         remote.advanceServerTime(to: Date().addingTimeInterval(3_600))
         let fencePath = "/sync/.mindwtr-sync-fence-v1.json", expiredFenceVersion = try XCTUnwrap(remote.etag("/sync/.mindwtr-sync-fence-v1.json"))
         let discovery = remote.recorded.count, outcome = try await command(cold, "syncStored")
@@ -1268,8 +1265,8 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         let abandoned = try await abandonInterruptedTransition("change"), host = abandoned.host, count = remote.recorded.count
         XCTAssertTrue(artifacts(abandoned.partial).values.allSatisfy { $0.prefix(6) == Data("MWENC1".utf8) })
         _ = try await action(host, ["type": "recheck"], requestID: UUID().uuidString.lowercased())
-        // Recheck classifies encryption posture, not uniform passphrase generation.
-        // This real partial rotation is all ciphertext and may clear quarantine.
+
+
         XCTAssertNil(try stored()["@mindwtr_sync_encryption_state_v1"]); XCTAssertNil(try cachedKey())
         XCTAssertEqual(remote.snapshot, abandoned.partial); assertNoArtifactMutation(since: count)
         XCTAssertEqual(try markers("v1.3.5/encryption-recheck-posture"), 1); XCTAssertEqual(try rows(), abandoned.domain)
@@ -1302,7 +1299,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
     func testPeerPlaintextDiscoveryAllowsSelectedDisableToClearOnlyLocalEncryptionPair() async throws {
         let enabled = try await enabledHost(pendingLocal: false), host = enabled.host, oldKey = try XCTUnwrap(cachedKey())
         for (path, plaintext) in enabled.original {
-            // External peer precondition; native Disable evidence starts after discovery.
+
             remote.seed(path, bytes: plaintext)
             if encryptedPath(path) != path { remote.removeAsPeer(encryptedPath(path)) }
         }
@@ -1326,8 +1323,8 @@ final class NativeEncryptionUnlockTests: XCTestCase {
     func testOffRefusesSeededIncompleteEnableAndColdHostRetainsSavedWebDAVTarget() async throws {
         let saved = try await lockedHost()
         await saved.close()
-        // This manually staged, fixture-only sidecar proves selection admission.
-        // It is not evidence of actual interrupted Enable conversion/recovery.
+
+
         var configuration = try stored()
         configuration["@mindwtr_sync_encryption_state_v1"] = try json(["state":"off","incompleteTransition":"enable"])
         try Data(json(configuration).utf8).write(to: manifest, options: .atomic)
@@ -1589,8 +1586,8 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertEqual(try markers(), 0); XCTAssertEqual(try rows(), before); assertRemoteDomainUnchanged(initial); assertDrained(); await host.close()
         let cold = core(); _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
         XCTAssertEqual(try cachedKey(), key()); XCTAssertEqual(try storedState()["state"] as? String, "enabled")
-        // The uncertain owner's retained remote lease expires under the provider's
-        // authority clock. This never deletes or fabricates a native success receipt.
+
+
         remote.advanceServerTime(to: Date().addingTimeInterval(3_600))
         let result = try await command(cold, "syncStored")
         XCTAssertEqual(result["success"] as? Bool, true); XCTAssertEqual(result["skipped"] as? Bool, false)

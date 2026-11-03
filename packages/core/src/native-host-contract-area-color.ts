@@ -64,7 +64,7 @@ const hasObservableChange = (effect: PreparedAreaColor['effect']): boolean =>
     !sameAreaAdditionRow.area(effect.area.before, effect.area.after)
     || effect.projects.some(({ before, after }) => !sameAreaAdditionRow.project(before, after));
 
-/** Pure cold-journal validation. Swift may call this before opening SQLite. */
+
 const readPrepared = (value: unknown): NativePreparedAreaColor | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -120,7 +120,7 @@ export function createAreaColorMethods(deps: {
                 : fail('INVALID_INPUT', 'Area list exceeds the bounded native response');
         },
 
-        /** A cleaned journal cannot prove the old color write; observe only and require refresh. */
+
         probeAreaColorOutcome(input: NativeAreaColorRequest): NativeHostResult<NativeAreaColorResult> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -144,7 +144,7 @@ export function createAreaColorMethods(deps: {
                 deviceIdBefore: state.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null,
                 updateAt, result: { id: request.areaId, color: request.color } };
-            // A receipt identical to its before state cannot prove that the write happened.
+
             if (!hasObservableChange(prepared.effect))
                 return fail('STALE_REVISION', 'Area color revision did not advance; refresh before saving again');
             const frozen = detach<NativePreparedAreaColor>(JSON.parse(JSON.stringify(prepared)));
@@ -172,11 +172,7 @@ export function createAreaColorMethods(deps: {
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
 
-        /**
-         * Android's Manage areas sheet (#1263): the area's color as RN's swatch row sets it (a preset, or null for None), prepared and
-         * committed here (Android journals the request). The color already in place (a replay) answers unchanged; a sync landing
-         * between the steps prepares again. A save owed from before is finished first.
-         */
+
         async runAreaColor(input: { requestId: string; areaId: string; color: string | null }): Promise<NativeHostResult<{ outcome: 'saved' | 'unchanged' } & NativeAreaColorResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

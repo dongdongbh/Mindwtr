@@ -21,8 +21,7 @@ import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 
-// Correctness gate, deliberately separate from timing measurements. No settings,
-// permissions, input method, task data, or compilation state are changed.
+
 @RunWith(AndroidJUnit4::class)
 class CaptureKeyboardReadinessTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -98,8 +97,8 @@ class CaptureKeyboardReadinessTest {
                 val inbox = find(By.descStartsWith("Process Inbox (")).contentDescription
                 for (kind in listOf("cold", "warm")) {
                     phase = "$kind-$iteration"
-                    // Negative control on every cycle: the predicate must not
-                    // confuse the nav bar or a stale hidden IME with a keyboard.
+
+
                     assertTrue("Keyboard must be absent before capture", waitForKeyboard(false))
                     find(By.desc("Add Task")).click()
                     find(By.desc("Task title").focused(true))
@@ -114,7 +113,7 @@ class CaptureKeyboardReadinessTest {
             report.put("status", "passed")
         } catch (failure: Throwable) {
             report.put("status", "failed").put("phase", phase)
-            // Never capture another foreground app's contents after interference.
+
             if (device.currentPackageName == target) {
                 device.takeScreenshot(File(output, "failure.png"))
                 device.dumpWindowHierarchy(File(output, "failure.xml"))

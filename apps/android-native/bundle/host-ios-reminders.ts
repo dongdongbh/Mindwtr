@@ -31,7 +31,7 @@ const signature = (value: unknown, marked: boolean) => {
             && ['once', 'daily', 'weekly'].includes(String(raw.repeatInterval)) && typeof raw.hasSnoozeAction === 'boolean'
             && signedTime(raw.fireAt, raw.repeatInterval)
             && (!Object.hasOwn(raw, 'hasCompleteAction') || raw.hasCompleteAction === true) && textMap(raw.data)
-            // The shared builder signs a repeating alarm's IANA zone (452a9d59d), so a time zone change re-arms it.
+
             && (!Object.hasOwn(raw, 'timeZone') || raw.repeatInterval !== 'once' && typeof raw.timeZone === 'string' && raw.timeZone !== '');
     } catch { return false; }
 };
@@ -44,7 +44,7 @@ const parsed = (raw: string | null) => {
     return value;
 };
 
-/** Strict effects admission, separate from the shared deliberately permissive preview parser. */
+
 export function readOwnedIosReminderMaps(alarms: string | null, state: string | null) {
     const map = parsed(alarms), native = parsed(state), taken = new Map<number, string>();
     for (const [name, entry] of Object.entries(map)) {
@@ -92,7 +92,7 @@ type SnoozeDependencies = {
     }>;
 };
 
-/** Pure publication planning; native alone owns receipts, journal, CAS, and OS effects. */
+
 export function createIosReminderSnoozeMethods(deps: SnoozeDependencies) {
     const alarmFor = (raw: string): NativeReminderAlarm => {
         if (typeof raw !== 'string' || raw.length > 65_536 || new TextEncoder().encode(raw).byteLength > 65_536) {
@@ -113,7 +113,7 @@ export function createIosReminderSnoozeMethods(deps: SnoozeDependencies) {
         if (!matches(target, alarm)) throw unavailable();
         const held = before.state[alarm.key];
         if (held) {
-            // Saved-receipt preflight: accept either armed state, but never change it or any other entry.
+
             if (!matches(held, alarm) || !sameJson(before.state, after.state)) throw unavailable();
         } else {
             if ((target as Record<string, unknown>).armed !== false
@@ -150,10 +150,10 @@ type Dependencies = {
     observation?: { subscribe: (changed: () => void) => () => void; ready: () => boolean; rescheduleDelayMs: number };
 };
 
-/** Only the native no-argument facade supplies observations and owns the map CAS/effects. */
+
 export function createIosReminderMethods(deps: Dependencies) {
     let owner: { token: string; current: () => void } | null = null;
-    // Saved repeating alarms whose signature carries a time zone, from the last prepare; its acknowledgment logs the count.
+
     let zoned = 0;
     let advanceScheduled = false;
     let startAdvanceScheduled = 0;
@@ -179,7 +179,7 @@ export function createIosReminderMethods(deps: Dependencies) {
         observation() {
             if (!unsubscribe || !deps.observation || !Number.isSafeInteger(revision) || revision < 1) throw unavailable();
             let ready = false;
-            try { ready = deps.observation.ready() === true; } catch { /* A wake is never savedness authority. */ }
+            try { ready = deps.observation.ready() === true; } catch {                                            }
             return { revision, ready, rescheduleDelayMs: deps.observation.rescheduleDelayMs };
         },
         disposeObservation() { const dispose = unsubscribe; unsubscribe = null; dispose?.(); return null; },
@@ -206,10 +206,10 @@ export function createIosReminderMethods(deps: Dependencies) {
             const owned = readOwnedIosReminderMaps(storedAlarms, storedState);
             zoned = Object.values(owned.map).filter((entry) => record(entry)
                 && Object.hasOwn(JSON.parse(String(entry.signature).slice(7)) as object, 'timeZone')).length;
-            // Repeating UN requests persist. Remake only ordinary IDs proved missing, never infer that they fired.
+
             const remake = Object.entries(owned.map).filter(([, entry]) => record(entry)
                 && !pending.has(Number(entry.id))).map(([name]) => name);
-            // Restore only an armed future Snooze proved absent from both inventories; keep its original identity/time.
+
             const nowMs = Date.now();
             if (granted) remake.push(...Object.entries(owned.state).filter(([, entry]) => record(entry)
                 && entry.kind === 'snooze' && entry.armed === true && Number(entry.fireAtMs) > nowMs
@@ -221,7 +221,7 @@ export function createIosReminderMethods(deps: Dependencies) {
             readOwnedIosReminderMaps(result.value.alarms, result.value.state);
             if (result.value.writeAhead !== null) readOwnedIosReminderMaps(result.value.writeAhead, storedState);
             advanceScheduled = result.value.schedule.some((alarm) => record(alarm.details.data) && alarm.details.data.kind === 'task-due-advance');
-            // A successful full batch proves every queued start prealert was accepted.
+
             startAdvanceScheduled = result.value.schedule.some((alarm) => record(alarm.details.data) && alarm.details.data.kind === 'task-start-advance')
                 ? result.value.schedule.length : 0;
             return { storedAlarms, storedState, plan: result.value };
@@ -233,7 +233,7 @@ export function createIosReminderMethods(deps: Dependencies) {
                 || !Number.isInteger(collapsed) || collapsed < 0 || collapsed > 4096
                 || !Number.isInteger(rearmed) || rearmed < 0 || rearmed > scheduled || rearmed > 64) throw unavailable();
             const admitted = zoned; zoned = 0;
-            try { await deps.acknowledged(mode, scheduled, cancelled, collapsed, rearmed, admitted); } catch { /* Confirmed persistence survives logging failure. */ }
+            try { await deps.acknowledged(mode, scheduled, cancelled, collapsed, rearmed, admitted); } catch {                                                       }
             const advanceConfirmed = advanceScheduled && scheduled > 0; advanceScheduled = false;
             const startAdvanceConfirmed = startAdvanceScheduled > 0 && scheduled >= startAdvanceScheduled; startAdvanceScheduled = 0;
             try {
@@ -241,7 +241,7 @@ export function createIosReminderMethods(deps: Dependencies) {
                     context: { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'scheduled' } });
                 if (startAdvanceConfirmed) logInfo('Start advance reminder scheduled', { scope: 'notifications', force: true,
                     context: { releaseCheck: 'v1.3.8/start-advance-reminder', outcome: 'scheduled' } });
-            } catch { /* Confirmed scheduling survives logging failure. */ }
+            } catch {                                                      }
             return null;
         },
     };

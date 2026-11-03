@@ -1,21 +1,6 @@
-/**
- * React Native's capture popup (the quick capture sheet the tab bar's center +
- * opens), replayed against the frozen parity fixture that core's
- * quick-capture-model and the native host contract are tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit or stash every other change first, then run
- *   MINDWTR_CAPTURE_QUICK_CAPTURE=1 MINDWTR_CAPTURE_QUICK_CAPTURE_COMMIT=$(git rev-parse HEAD) bunx vitest run components/quick-capture-sheet/quick-capture-parity.test.tsx
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code, so the provenance always names the code that ran.
- * To recapture only the scenarios a deliberate RN change affects, also set
- *   MINDWTR_CAPTURE_QUICK_CAPTURE_SCENARIOS='<name>|<name>' MINDWTR_CAPTURE_QUICK_CAPTURE_REASON='<why>'
- * The other scenarios keep their frozen observations, and `provenance.recaptured`
- * records the commit, the reason and the names.
- * Each scenario renders the real sheet (its real body and pickers) with the real
- * core store, drives it through the props the sheet hands its body and pickers,
- * and records what a user sees and what the store is asked to write.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -79,7 +64,7 @@ vi.mock('react-native-safe-area-context', () => ({
 vi.mock('@/hooks/use-android-activity-session', () => ({
   useAndroidActivitySession: () => ({ clear: vi.fn(), rearm: vi.fn(), sourceActivityId: null }),
 }));
-// Audio capture is out of scope; the sheet's audio hook reports an idle recorder.
+
 vi.mock('../use-quick-capture-audio', () => ({
   useQuickCaptureAudio: () => ({
     recording: false,
@@ -110,8 +95,6 @@ vi.mock('@react-native-community/datetimepicker', () => ({
   default: (props: Record<string, unknown>) => React.createElement('DateTimePicker', props),
 }));
 
-// ---------------------------------------------------------------------------
-// Inputs
 
 export const TIME_ZONE = 'America/New_York';
 export const NOW = '2026-09-23T14:00:00.000Z';
@@ -162,9 +145,9 @@ export type QuickCaptureAction =
   | ['focus']
   | ['more']
   | ['quickDate', 'today' | 'tomorrow' | 'next_week']
-  /** The native date picker returns this local day at an unrelated time of day. */
+
   | ['pickDue', string]
-  /** The native time picker returns this local time on an unrelated day. */
+
   | ['pickDueTime', string]
   | ['clearDueTime']
   | ['clearDue']
@@ -177,25 +160,25 @@ export type QuickCaptureAction =
   | ['selectPriority', TaskPriority | null]
   | ['toggleContext', string]
   | ['removeContext', string]
-  /** The context picker's Clear row: clears and closes. */
+
   | ['clearContexts']
-  /** The context picker's "Add: <query>" row. */
+
   | ['addContexts']
-  /** A long press on a chip. */
+
   | ['reset', 'project' | 'area' | 'priority' | 'contexts']
   | ['confirmBulk']
   | ['cancelBulk']
   | ['close']
   | ['reopen']
-  /** Another writer (a sync) adds a task while the sheet is open. */
+
   | ['elsewhere', { title: string; contexts?: string[] }];
 export type QuickCaptureScenario = {
   name: string;
   settings: string;
-  /** The sheet's `initialProps`, as the project screen's add button passes them. */
+
   initialProps?: Partial<Task>;
   initialValue?: string;
-  /** The stored "Add another" device preference. */
+
   addAnotherPreference?: boolean;
   actions: QuickCaptureAction[];
 };
@@ -541,13 +524,11 @@ export const scenarios: QuickCaptureScenario[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Harness
 
 const t = (key: string) => english.strings[key] ?? key;
 const writeLog: unknown[] = [];
 const createdIds = new Map<string, string>();
-/** Created ids are random, so they read as `<created:title>` (or `<uuid>`, like a link's id) wherever they appear. */
+
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
   entry === undefined ? '<undefined>' : entry
 )).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, (match) => (
@@ -714,7 +695,7 @@ async function runScenario(scenario: QuickCaptureScenario) {
   await settle();
   const observations: unknown[] = [];
   const step = () => {
-    // The tab bar unmounts the sheet as soon as it asks to close.
+
     const closed = closes > 0;
     if (closed && open) {
       open = false;
@@ -834,10 +815,7 @@ async function runScenario(scenario: QuickCaptureScenario) {
   return observations;
 }
 
-/**
- * The commit a recapture runs at. It must be declared, equal HEAD, and the checkout
- * must hold no other change than this harness and its fixture.
- */
+
 function captureProvenance() {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: new URL('.', import.meta.url).pathname, encoding: 'utf8' });
   const head = git('rev-parse', 'HEAD').trim();

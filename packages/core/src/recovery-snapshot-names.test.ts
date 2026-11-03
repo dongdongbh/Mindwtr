@@ -8,7 +8,7 @@ import {
     sortRecoverySnapshotNames,
 } from './recovery-snapshot-names';
 
-// Frozen from apps/mobile/lib/recovery-snapshot.ts and the backup actions hook at 9972f29f6, before they moved here.
+
 describe('recovery snapshot names (mobile parity)', () => {
     const tz = process.env.TZ;
     afterEach(() => { process.env.TZ = tz; });

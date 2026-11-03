@@ -12,7 +12,7 @@ const iso = (value: unknown): value is string => typeof value === 'string' && va
 export const legacyGeneralPreferenceNumber = (value: unknown): value is number =>
     typeof value === 'number' && Number.isSafeInteger(value) && Math.abs(value) <= 1_000_000;
 
-/** The one raw value and sync-group stamp that may enter a General journal. */
+
 export const generalPreferenceWitness = (settings: AppSettings, type: GeneralPreferenceType): GeneralPreferenceWitness | null => {
     const appearanceKey = type === 'showTaskAge' ? 'showTaskAge'
         : type === 'quickAccessView' ? 'mobileQuickAccessView' : null;

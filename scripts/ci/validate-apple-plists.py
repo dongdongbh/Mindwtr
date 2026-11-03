@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Validate every tracked Apple property list as XML or binary plist data."""
 
 from __future__ import annotations
 

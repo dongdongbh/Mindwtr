@@ -194,7 +194,7 @@ describe('atomic native complete-document receipts over real SQLite', () => {
         await expect(env.adapter.saveDocumentWithReceipt(env.input)).rejects.toThrow('Document receipt persistence failed');
         expect(await env.state()).toEqual(before);
         expect(JSON.stringify(warn.mock.calls)).not.toContain('private-driver-payload');
-        // An ordinary save after the failed direct context cannot carry its receipt.
+
         const ordinary = await env.adapter.getData();
         await env.adapter.saveData(ordinary);
         expect(await env.sql.client.all('SELECT * FROM native_request_receipts')).toEqual([]);

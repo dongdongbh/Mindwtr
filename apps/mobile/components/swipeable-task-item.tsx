@@ -43,66 +43,61 @@ import { settleStoreAction } from './store-action-result';
 import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
 import { ChecklistTargetPicker } from './swipeable-task-item/ChecklistTargetPicker';
 
-/**
- * Everything a row can mutate, on one object whose identity never changes
- * (#766). Rows bind their own task into these, so a list can hand every row the
- * same object instead of a fresh arrow per row per render — a fresh arrow is
- * what defeats the memo boundary below.
- */
+
 export type TaskRowActions = {
     edit: (task: Task) => void;
     changeStatus: (task: Task, status: TaskStatus) => void | Promise<unknown>;
     remove: (task: Task) => void | Promise<unknown>;
     moveToSection?: (task: Task) => void;
-    /** Omitted by lists without multi-select. */
+
     toggleSelect?: (task: Task) => void;
 };
 
 export interface SwipeableTaskItemProps {
     task: Task;
     isDark: boolean;
-    /** Theme colors object from useThemeColors hook */
+
     tc: ThemeColors;
-    /** Preferred over the per-row `onPress`/`onStatusChange`/`onDelete` arrows. */
+
     actions?: TaskRowActions;
     onPress?: () => void;
     onStatusChange?: (status: TaskStatus) => void | Promise<unknown>;
     onDelete?: () => void | Promise<unknown>;
     onMoveToSection?: () => void;
-    /** Receives the row's task so callers can pass one stable handler. */
+
     onLongPressAction?: (task: Task) => void;
     onLongPressActionLabel?: string;
-    /** Hide context tags (useful when viewing a specific context) */
+
     hideContexts?: boolean;
-    /** Multi-select mode for bulk actions */
+
     selectionMode?: boolean;
     isMultiSelected?: boolean;
     onToggleSelect?: () => void;
     isHighlighted?: boolean;
     showFocusToggle?: boolean;
-    /** Announce-and-disable the star instead of offering a tap that can only refuse
-     *  (Focus "Upcoming": every row there is deferred by construction). */
+
+
     focusToggleDisabledLabel?: string;
-    /** Keep the focus star while allowing context-specific lists to avoid a redundant card outline. */
+
     showFocusHighlight?: boolean;
     hideStatusBadge?: boolean;
-    /** Render the status control as a compact icon button (no status-name label) for single-status lists */
+
     statusBadgeAsIcon?: boolean;
     sequenceCue?: ProjectSequenceTaskCue;
     sequenceLabel?: string;
     disableSwipe?: boolean;
     interactionDisabled?: boolean;
-    /** Keep the primary row press available for historical inspection only. */
+
     allowInspectionWhenDisabled?: boolean;
     hideChecklistProgress?: boolean;
     hideProjectMeta?: boolean;
-    /** Title-only row: suppress the description preview and metadata parts row. */
+
     hideDetails?: boolean;
     onProjectPress?: (projectId: string) => void;
     onContextPress?: (context: string) => void;
     onTagPress?: (tag: string) => void;
     projectDeadlineLabel?: string;
-    /** Optional compact content rendered inside the task card below its metadata. */
+
     footerContent?: React.ReactNode;
     rowContext?: SwipeableTaskItemRowContext;
 }
@@ -157,7 +152,7 @@ type SwipeableTaskItemInnerProps = Omit<SwipeableTaskItemResolvedProps, 'rowCont
 
 const noop = () => {};
 
-/** Binds this row's task into the shared `actions`, inside the memo boundary. */
+
 function resolveRowCallbacks(props: SwipeableTaskItemProps): ResolvedRowCallbacks {
     const { actions, task } = props;
     const toggleSelect = actions?.toggleSelect;
@@ -172,21 +167,12 @@ function resolveRowCallbacks(props: SwipeableTaskItemProps): ResolvedRowCallback
     };
 }
 
-// Renders of task rows, read by TaskList to report how many rows a commit
-// actually re-rendered (#766). Shared across lists on purpose: it is a diff
-// taken around one list's render, and a second list rendering in the same pass
-// is itself the thing worth seeing.
+
 let taskRowRenderCount = 0;
 
 export const readTaskRowRenderCount = (): number => taskRowRenderCount;
 
-// The memo boundary for a single row (#766). Any store change re-renders the
-// list, but a row re-renders only when the task object it draws — or one of the
-// flags it draws — actually changed. Every prop is compared by identity, which
-// is why per-row callbacks belong in `actions`. `tc` included: resolveThemeTokens
-// hands out one object per distinct theme, so it only changes when the theme does.
-// Not core's `shallow`: that one is stubbed out in several suites, which would
-// quietly turn the boundary off under test.
+
 function areRowPropsEqual(prev: SwipeableTaskItemProps, next: SwipeableTaskItemProps): boolean {
     const keys = Object.keys(prev) as (keyof SwipeableTaskItemProps)[];
     if (keys.length !== Object.keys(next).length) return false;
@@ -227,11 +213,7 @@ function StoreBackedSwipeableTaskItem(props: Omit<SwipeableTaskItemInnerProps, '
     return <SwipeableTaskItemInner {...props} rowContext={rowContext} />;
 }
 
-/**
- * A task row whose swipes reveal a fixed tray of actions (#1464), from core's buildTaskRowSwipeActions:
- * swipe right shows Done and Focus, swipe left shows Organize, Dates and Delete. A done task keeps
- * Restore; Reference keeps Next (plus Organize) and Archived keeps Done. Nothing runs until a button is tapped.
- */
+
 function SwipeableTaskItemInner({
     task,
     isDark,
@@ -297,7 +279,7 @@ function SwipeableTaskItemInner({
         toggleChecklist,
         toggleChecklistItem,
     } = useSwipeableChecklist(task, updateTask, interactionDisabled);
-    // The lookups scan the project and area lists, so they rerun only when a container changes.
+
     const lookup = useMemo(() => resolveTaskRowLookup(
         { projectId: task.projectId, areaId: task.areaId, sectionId: task.sectionId },
         projects,
@@ -305,7 +287,7 @@ function SwipeableTaskItemInner({
         sectionById,
     ), [areas, projects, sectionById, task.areaId, task.projectId, task.sectionId]);
     const displayRevision = useTaskDisplayClock(isTaskActionable(task) && Boolean(task.dueDate || showTaskAge));
-    // The configuration the root layout applied, so labels match the rest of the app.
+
     const dateFormatting = getDateFormattingConfig();
     const meta = useMemo(() => {
         void displayRevision;
@@ -432,10 +414,8 @@ function SwipeableTaskItemInner({
                     return;
                 }
                 if (status === 'done' && previousStatus !== 'done') {
-                    // Completing mirrors deleting: immediate, with an undo toast
-                    // instead of a confirmation (matches the desktop undo).
-                    // No title: the one-line message plus Undo is the whole point,
-                    // and a "Notice" header just makes the toast taller (#1044).
+
+
                     showToast({
                         message: formatTaskMarkedDoneMessage(t, task.title),
                         tone: 'info',
@@ -514,8 +494,8 @@ function SwipeableTaskItemInner({
         if (interactionDisabled || !projectNextActionPrompt || isProjectNextActionSubmitting) return;
         const { projectId } = projectNextActionPrompt;
         setIsProjectNextActionSubmitting(true);
-        // Archiving completes the project's remaining tasks in core and is
-        // reversible (Reactivate); no confirmation, matching the Archive button.
+
+
         void settleStoreAction(() => useTaskStore.getState().updateProject(projectId, { status: 'archived' }))
             .then((outcome) => {
                 if (!outcome.ok) {
@@ -589,8 +569,7 @@ function SwipeableTaskItemInner({
         showActionFailure,
     ]);
 
-    // promoteInbox is the swipe tray's Focus only (#1464): an Inbox task is judged as Next and the
-    // patch makes it Next; a refusal writes nothing. The row star keeps the plain rule (Inbox refuses).
+
     const toggleFocus = (promoteInbox: boolean) => {
         if (interactionDisabled || selectionMode) return;
         const action = useTaskStore.getState().getFocusStarAction(task, { promoteInbox });
@@ -633,7 +612,7 @@ function SwipeableTaskItemInner({
         });
     };
 
-    // One handler for a tray button and its accessibility action.
+
     const runSwipeAction = (action: TaskRowSwipeAction) => {
         if (interactionDisabled || selectionMode || !action.enabled) return;
         switch (action.id) {
@@ -663,13 +642,13 @@ function SwipeableTaskItemInner({
     };
 
     const canBackdateCompletion = !interactionDisabled && !selectionMode && task.status !== 'done';
-    // Long-press on the revealed Done opens the completion-time picker, as the status menu's Done does.
+
     const longPressTrayDone = canBackdateCompletion ? () => {
         swipeableRef.current?.close();
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
         setCompletedAtPicker('complete');
     } : undefined;
-    // Past this text scale a tray label no longer fits its button, so the buttons show icons only.
+
     const showTrayLabels = fontScale <= TRAY_LABEL_MAX_FONT_SCALE;
 
     const renderLeftActions = () => (
@@ -708,9 +687,7 @@ function SwipeableTaskItemInner({
         onPress();
     };
 
-    // Deleting is a recoverable move to Trash, so it happens immediately with
-    // an undo toast instead of a confirmation alert. Permanent purge (in Trash)
-    // keeps its confirmation.
+
     const handleDelete = () => {
         if (interactionDisabled) return;
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
@@ -738,7 +715,7 @@ function SwipeableTaskItemInner({
             });
     };
 
-    // Add to checklist (#1467): one store write; Undo is one write back.
+
     const handleMoveToChecklist = (targetId: string) => {
         if (interactionDisabled) return;
         void settleStoreAction(() => useTaskStore.getState().moveTaskToChecklist(task.id, targetId))
@@ -765,7 +742,7 @@ function SwipeableTaskItemInner({
     const handleLongPress = () => {
         if (interactionDisabled) return;
         ignorePressUntil.current = Date.now() + 500;
-        // Note: onDragStart is handled by the drag handle directly, not here
+
         if (onLongPressAction) {
             onLongPressAction(task);
             return;

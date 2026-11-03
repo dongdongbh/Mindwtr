@@ -141,7 +141,7 @@ describe('native Pomodoro legacy adoption', () => {
             session: { raw: null, state: null }, target: null, deviceId: null })).toThrow();
         expect(prepareNativePomodoroTransition({ request: request(null, 'é'.repeat(500_000)),
             session: { raw: null, state: null }, target: null, deviceId: null })!.request).toEqual(request(null, 'é'.repeat(500_000)));
-        // Each source fits; adding the normalized history to the complete plan cannot.
+
         const counts = Object.fromEntries(Array.from({ length: 2000 }, (_, i) => ['x'.repeat(400) + i, 1]));
         const raw = JSON.stringify({ sessionHistory: { completedFocusSessionsByTaskId: counts } });
         expect(raw.length).toBeLessThan(1_000_000);
@@ -172,7 +172,7 @@ describe('native Pomodoro legacy adoption', () => {
         it('adopts a session with owed credits and credits each once: the selected task in its patch, another task in owed', () => {
             const other = rowFor('other', { timeSpentMinutes: 10 });
             const plan = adopt(owing([{ taskId: 'task', from: 4, to: 29 }, { taskId: 'other', from: 10, to: 35 }]), rowFor('task'), [other]);
-            // The owed 25 minutes land first; the expired focus adds its own 25 on top.
+
             expect(plan.taskPatch).toEqual(patch(54));
             expect(plan.owed).toEqual([{ target: other, taskPatch: patch(35) }]);
             expect(plan.result).toMatchObject({ creditedMinutes: 25, creditDisposition: 'credited' });
@@ -192,12 +192,12 @@ describe('native Pomodoro legacy adoption', () => {
                 expect(plan.taskPatch).toBeNull(); expect(plan.deviceId).toBeNull();
             }
             expect(adopt(owing([{ taskId: 'task', from: 4, to: 29 }], paused), { id: 'task', row: null }).taskPatch).toBeNull();
-            // RN reads a stored 0 as no time, so its credit has no `from`; a `from: null` reads the same way.
+
             for (const credit of [{ taskId: 'task', to: 25 }, { taskId: 'task', from: null, to: 25 }]) {
                 expect(adopt(owing([credit], paused), rowFor('task', { timeSpentMinutes: 0 })).taskPatch).toEqual(patch(25));
                 expect(adopt(owing([credit], paused), rowFor('task', { timeSpentMinutes: null })).taskPatch).toEqual(patch(25));
             }
-            // The first credit is already on the task (its save landed before the stop); the second still takes it.
+
             expect(adopt(owing([{ taskId: 'task', from: 4, to: 29 }, { taskId: 'task', from: 29, to: 54 }], paused),
                 rowFor('task', { timeSpentMinutes: 29 })).taskPatch).toEqual(patch(54));
         });
@@ -219,14 +219,14 @@ describe('native Pomodoro legacy adoption', () => {
         });
     });
     it('documents both historical independent-write variants without inferring repair from task minutes', () => {
-        // Saved history landed, task credit failed: the historical session is never recredited.
+
         const historyLanded = prepare(running({ timerState: { isRunning: false, completedFocusSessions: 3 },
             sessionHistory: { totalCompletedFocusSessions: 3, completedFocusSessionsByTaskId: { task: 3 } } }));
         expect(historyLanded.taskPatch).toBeNull(); expect(historyLanded.result.creditedMinutes).toBe(0);
-        // Task credit landed, history save failed: the same beyond-saved interval may already be in these minutes.
+
         const taskLanded = prepareNativePomodoroTransition({ request: request(JSON.stringify(running())),
             session: { raw: null, state: null }, target: selectedRow({ timeSpentMinutes: 79 }), deviceId: 'device' })!;
         expect(taskLanded.taskPatch!.timeSpentMinutes).toBe(104); expect(taskLanded.result.creditedMinutes).toBe(25);
-        // This is the approved RN hydration delta, not a promise of historical crash repair.
+
     });
 });

@@ -72,7 +72,7 @@ describe('durable Project task sort', () => {
         }
     });
 
-    // Project.taskSortBy syncs, and older clients erase a project sort they do not know (#1415).
+
     it('never offers or accepts the shared-list-only priority sort', async () => {
         const { methods, request } = await open();
         const options = methods.getProjectTaskSortOptions({ projectId: 'target' });

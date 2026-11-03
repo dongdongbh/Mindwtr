@@ -61,11 +61,11 @@ export default function SavedSearchScreen() {
 
   const savedSearch = findSavedSearch(savedSearches, id);
   const query = savedSearch?.query || '';
-  // The saved search's own sort, else the global one (#1453). Opening the screen writes nothing.
+
   const sortBy = resolveSavedSearchSortBy(savedSearch, settings);
   const ownSortBy = getSavedSearchOwnSortBy(savedSearch, settings);
   const [sortModalVisible, setSortModalVisible] = useState(false);
-  // The header, the delete confirmation and the empty state come from core, as the native host shows them.
+
   const screenText = buildSavedSearchScreenText({ savedSearch, savedSearches, t });
 
   const filteredTasks = useMemo(() => selectSavedSearchTasks({
@@ -99,8 +99,8 @@ export default function SavedSearchScreen() {
           text: deleteAction.confirm.confirmLabel,
           style: 'destructive',
           onPress: async () => {
-            // Delete by ID against the saved searches as they are now: one added or
-            // changed while the confirmation was open stays.
+
+
             await deleteSavedSearchById(id);
             goBackOrInbox();
           },
@@ -121,8 +121,7 @@ export default function SavedSearchScreen() {
     void setSavedSearchSortById(id, option);
   };
 
-  // One actions object for every row, reading the current store handlers from a
-  // ref, so a result-list re-render leaves untouched rows alone (#766).
+
   const rowSourcesRef = useRef({ updateTask, deleteTask });
   rowSourcesRef.current = { updateTask, deleteTask };
   const rowActions = useMemo<TaskRowActions>(() => ({

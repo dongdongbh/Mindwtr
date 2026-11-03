@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => {
     updateTask,
     storeState: {
       tasks: [] as Task[],
-      // Bulk organize reads the stored rows by id when its write is admitted.
+
       get _tasksById() { return new Map(this.tasks.map((task) => [task.id, task])); },
       projects: [] as Project[],
       areas: [] as Area[],
@@ -132,7 +132,7 @@ vi.mock('../contexts/language-context', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: rows compare `tc` by identity (#766).
+
   const themeColors = {
     bg: '#ffffff',
     border: '#d1d5db',
@@ -348,7 +348,7 @@ describe('ReviewScreen bulk organize', () => {
     ]);
   });
 
-  // RN runs Back listeners newest first and stops at the first that returns true.
+
   it('keeps selection on Android Back while a review dialog is open, then leaves it (#1415)', async () => {
     let tree!: ReactTestRenderer;
     await act(async () => {
@@ -407,8 +407,7 @@ describe('ReviewScreen bulk organize', () => {
     ]);
   });
 
-  // Rows carry the #766 memo boundary, which only holds while the screen hands
-  // untouched rows the same references back.
+
   it('hands rows stable prop references across a re-render', async () => {
     mocks.storeState.tasks = [
       makeTask('task-1', 'Loose next action'),

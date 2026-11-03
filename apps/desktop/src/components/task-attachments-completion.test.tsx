@@ -117,8 +117,7 @@ describe('task attachments survive completion (#836)', () => {
         });
         await waitFor(() => expect(getByDisplayValue('Repro Task')).toBeInTheDocument());
 
-        // Open the collapsed Details section, then add a link attachment (buffer-only until save)
-        // The contextual Help: Details button is a separate control.
+
         const detailsToggle = getByRole('button', { name: /^details\b/i, expanded: false });
         await act(async () => {
             fireEvent.click(detailsToggle);
@@ -137,10 +136,10 @@ describe('task attachments survive completion (#836)', () => {
             fireEvent.click(within(dialog).getByRole('button', { name: /save/i }));
         });
 
-        // Attachment should now be listed in the editor draft
+
         await waitFor(() => expect(container.ownerDocument.body.textContent).toContain('example.com'));
 
-        // Press the editor's Done check instead of Save
+
         await act(async () => {
             fireEvent.click(getAllByRole('button', { name: 'Done' })[0]);
         });

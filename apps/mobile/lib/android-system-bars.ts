@@ -62,15 +62,15 @@ export async function applyAndroidSystemBars(colors: Pick<ThemeColors, 'bg'>, is
 
   const style = resolveAndroidSystemBarStyle(colors, isDark);
   try {
-    // Older development clients can still run this JS bundle; only the new
-    // native method can prove that the version-aware path actually ran.
+
+
     if (!systemBarsModule.applyNavigationBarStyleAsync) {
       await systemBarsModule.setNavigationBarColorAsync(style.navigationBarColor, style.darkNavigationButtons);
       return;
     }
     const backend = await systemBarsModule.applyNavigationBarStyleAsync(style.navigationBarColor, style.darkNavigationButtons);
-    // A startup call can precede hydration of the logging preference. Do not
-    // suppress later theme acknowledgements just because that first log was gated.
+
+
     if (backend === 'edge-to-edge' || backend === 'legacy-color') {
       void logInfo('Android navigation bar style applied', {
         scope: 'theme',

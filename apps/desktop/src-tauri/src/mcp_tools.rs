@@ -1,4 +1,3 @@
-//! MCP argument adaptation only; all data operations execute in local_api.
 use crate::local_api::{self, LocalOperation};
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;

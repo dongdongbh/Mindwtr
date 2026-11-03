@@ -8,12 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.FrameLayout
 
-/**
- * Debug builds only (scripts/check-widgets-device.mjs): hosts one of this app's widgets (extra `provider`, a provider class name,
- * default RN's Tasks widget) in this activity's own AppWidgetHost, at the size a launcher gives a 4x4 widget, so the check draws,
- * reads and taps it with no launcher involved. Binding needs `appwidget grantbind` for this package; the widget id goes when the
- * activity is destroyed, and a start with `release` lets go of every id a killed run left.
- */
+
 class WidgetHostActivity : Activity() {
     private lateinit var host: AppWidgetHost
     private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
@@ -22,7 +17,7 @@ class WidgetHostActivity : Activity() {
         super.onCreate(savedInstanceState)
         val manager = AppWidgetManager.getInstance(this)
         host = AppWidgetHost(this, HOST_ID)
-        // A recreated activity's old ids (and a killed run's) go first: the check only ever sees one widget.
+
         host.appWidgetIds.forEach(host::deleteAppWidgetId)
         if (intent.getBooleanExtra("release", false)) {
             finish()

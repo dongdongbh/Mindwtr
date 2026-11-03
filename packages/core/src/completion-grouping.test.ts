@@ -3,7 +3,7 @@ import { buildCompletionDateSections } from './completion-grouping';
 
 const task = (id: string, completedAt?: string) => ({ id, completedAt });
 
-// English fallbacks; month titles never route through `t`.
+
 const t = (key: string) => key;
 
 describe('buildCompletionDateSections (#945, #959)', () => {
@@ -20,7 +20,7 @@ describe('buildCompletionDateSections (#945, #959)', () => {
             now,
         });
 
-        // No Yesterday or Previous 7 days heading, because nothing landed there.
+
         expect(sections.map((section) => section.id)).toEqual([
             'completedDate:today',
             'completedDate:2026-01',
@@ -34,7 +34,7 @@ describe('buildCompletionDateSections (#945, #959)', () => {
                 task('jan', '2026-01-31T23:00:00'),
                 task('feb', '2026-02-01T00:30:00'),
                 task('dec', '2025-12-24T10:00:00'),
-                // Same month as `now`, but far enough back to leave the fixed buckets.
+
                 task('mar', '2026-03-01T10:00:00'),
             ],
             t,
@@ -47,7 +47,7 @@ describe('buildCompletionDateSections (#945, #959)', () => {
             ['completedDate:2026-01', ['jan']],
             ['completedDate:2025-12', ['dec']],
         ]);
-        // The old single catch-all is gone: nothing may fall back to it.
+
         expect(sections.some((section) => section.id === 'completedDate:earlier')).toBe(false);
     });
 
@@ -63,7 +63,7 @@ describe('buildCompletionDateSections (#945, #959)', () => {
     it('mutes the not-completed section the way other axes mute their catch-all', () => {
         const sections = buildCompletionDateSections({ tasks: [task('never')], t, now });
         expect(sections[0].muted).toBe(true);
-        // tFallback treats an echoed key as untranslated and uses the fallback.
+
         expect(sections[0].title).toBe('Not completed');
     });
 

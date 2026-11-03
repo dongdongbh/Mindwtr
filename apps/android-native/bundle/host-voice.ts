@@ -25,14 +25,7 @@ import {
     type SpeechToTextConfig,
 } from '@mindwtr/core';
 
-/**
- * Voice capture on this host (voice pass V3): RN's use-quick-capture-audio.ts start and stop, over core's quick-capture-audio
- * rules, Kotlin's recorder (VoiceRecorder.kt through `__mindwtrVoiceCall`), the capture contract's save and the polyfill's
- * fetch. The popup (V5) opens a session, starts, then stops with its draft: the task saves first with the recording, and the
- * transcript reaches it later, as in RN. Local Whisper comes with V4: until then Whisper is not ready, so it records nothing.
- */
 
-/** Kotlin's microphone (HostVoice.kt). A start rejects with E_VOICE_START_FAILED, E_VOICE_BUSY or E_VOICE_CANCELLED. */
 export type VoiceRecorderCalls = {
     permission(): Promise<'granted' | 'denied'>;
     start(format: 'm4a' | 'wav'): Promise<{ id: string }>;
@@ -42,9 +35,9 @@ export type VoiceRecorderCalls = {
 
 export type VoiceCaptureLine =
     | { kind: 'capture'; outcome: 'saved' | 'cancelled' | 'permission-denied' | 'not-configured'; provider: string; durationMs?: string }
-    /** A save refused for its draft kept the recording for the next Save (review N2); `copied` false: only the recording itself. */
+
     | { kind: 'capture'; outcome: 'kept'; provider: string; copied: boolean }
-    /** A stop that saved no durable task: `save-pending` landed in the store and its save is retried; the others saved nothing. */
+
     | { kind: 'capture'; outcome: 'failed'; provider: string; errorKind: 'recorder' | 'attachment' | 'save' | 'save-pending' }
     | { kind: 'transcribe'; outcome: 'applied' | 'empty' | 'skipped' | 'failed'; provider: string; errorKind?: string };
 
@@ -53,34 +46,34 @@ export type NativeVoiceBindings = {
     settings: () => AppSettings;
     store: QuickCaptureAudioStore;
     isFossBuild: boolean;
-    /** RN's loadAIKey: the provider's key, '' when none. */
+
     loadKey: (provider: AIProviderId) => Promise<string>;
-    /** Local Whisper's model is on the device (pass V4). */
+
     whisperModelReady: () => boolean;
-    /** RN's cacheAudioAttachmentOrThrow: the recording copied into managed attachment storage and checked there. */
+
     persistAttachment: (attachment: Attachment) => Promise<Attachment>;
-    /** The capture contract's submitQuickCaptureAudio. */
+
     submit: (input: { text: string; options: QuickCaptureOptions; captureId: string; fallbackTitle: string; attachments: Attachment[];
         openAfterSave?: boolean }) =>
         Promise<NativeHostResult<NativeQuickCaptureSubmitResult>>;
     readBytes: (uri: string) => Promise<Uint8Array>;
-    /** Deletes a recording or its managed copy; a file already gone is no error. */
+
     deleteFile: (uri: string) => void;
-    /** quickAdd.audioNoteTitle in the app's language. */
+
     label: () => string;
     newId: () => string;
-    /** Fixed fields only: never audio, transcript, titles, keys, paths or a provider's error text. */
+
     log: (line: VoiceCaptureLine) => void;
     fetcher?: typeof fetch;
     formatDate?: (value: Date, pattern: string) => string;
     now?: () => Date;
-    /** core's isSandboxMode unless set: a sandboxed capture records nothing, as RN's. */
+
     sandbox?: () => boolean;
 };
 
-/** Core's next step after a save (submitQuickCaptureAudio): close, open the task, or a fresh draft for Add another. */
+
 type SavedNext = { projectId?: string; next: string; reset: unknown };
-/** A save whose task landed: core's own next step, or close when its save is still owed (RN closes after addTask). */
+
 const nextOf = (saved: NativeHostResult<NativeQuickCaptureSubmitResult>): SavedNext => (saved.ok && saved.value.kind === 'saved'
     ? { projectId: saved.value.projectId, next: saved.value.next, reset: saved.value.reset }
     : { next: 'close', reset: null });
@@ -89,21 +82,21 @@ type Active = { id: string; session: number; format: 'm4a' | 'wav'; provider: st
 
 const errorCode = (error: unknown) => (error instanceof Error ? error.message : '');
 
-/** RN's processAudioCapture ports for one recording: its bytes, an OpenAI multipart part (the polyfill's Blob), no local Whisper yet. */
+
 export const createNativeSpeechPorts = (bindings: { readBytes: (uri: string) => Promise<Uint8Array> }, uri: string, mimeType: string,
     logWarn: (message: string) => void): SpeechCapturePorts => ({
     readBytes: async () => ({ bytes: await bindings.readBytes(uri), mimeType }),
     withOpenAIUpload: async (send) => {
         const bytes = await bindings.readBytes(uri);
-        // The recording's own bytes: the file port answers them on a plain ArrayBuffer, so no copy is needed.
+
         return send({ part: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mimeType }), fileName: uri.slice(uri.lastIndexOf('/') + 1) });
     },
     transcribeLocal: async () => { throw new Error('Local Whisper is not available on this host yet'); },
-    // Core's warning carries the provider's error text in `extra`: only the message goes to the log.
+
     logWarn: (message) => { logWarn(message); },
 });
 
-/** RN's speech config for a capture (use-quick-capture-audio.ts speechConfig, watch-audio.ts transcribePendingAudio). */
+
 export const speechConfigFor = (runtime: ResolvedSpeechToTextRuntimeSettings, apiKey: string, settings: AppSettings, now: Date): SpeechToTextConfig => ({
     provider: runtime.provider,
     apiKey,
@@ -119,7 +112,7 @@ export const speechConfigFor = (runtime: ResolvedSpeechToTextRuntimeSettings, ap
     timeZone: typeof Intl === 'object' && typeof Intl.DateTimeFormat === 'function' ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
 });
 
-/** A failure's fixed kind for the log, never its text. */
+
 const transcribeErrorKind = (error: unknown) => {
     if (error instanceof Error && error.message === REMOTE_SPEECH_TO_TEXT_FOSS_ERROR) return 'foss-refused';
     if (error instanceof Error && error.name === 'AbortError') return 'aborted';
@@ -135,21 +128,17 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
     let active: Active | null = null;
     let starting: { session: number } | null = null;
     let stopping = false;
-    /**
-     * Review N2: a save refused for its draft (an unreadable date command) keeps its recording, as RN's recovery attachment: the
-     * managed copy waits for the popup's next Save, and goes with the session when the popup closes.
-     */
+
+
     let held: {
         session: number; attachments: Attachment[]; recordings: string[];
-        /** Review N6: recordings whose managed copy failed, kept as themselves (RN's recovery attachment); copied before a save. */
+
         uncopied: Attachment[];
         title: string; provider: string;
     } | null = null;
     const heldFor = (session: number) => held !== null && held.session === session;
-    /**
-     * The session whose stop or save is submitting now. The coordinator forgets it when the popup closes, so it is kept here:
-     * a kept recording that submission hands to its task stays until it ends (review B1, RN's handleClose waits for it).
-     */
+
+
     let submitting: number | null = null;
     const dropHeld = (keep: (session: number) => boolean) => {
         const kept = held;
@@ -157,10 +146,8 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         held = null;
         [...kept.attachments, ...kept.uncopied].map((attachment) => attachment.uri).concat(kept.recordings).forEach(deleteQuietly);
     };
-    /**
-     * The kept recordings a save hands to its task, each a managed copy: one whose copy failed is copied now, so a task never
-     * points into voice-captures/ (swept at start). A copy that fails again throws, and the recording stays kept.
-     */
+
+
     const copyHeld = async (kept: NonNullable<typeof held>) => {
         while (kept.uncopied.length > 0) {
             const raw = kept.uncopied[0]!;
@@ -171,19 +158,19 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         return kept.attachments;
     };
     const defaultAudio = () => bindings.settings().gtd?.defaultCaptureMethod === 'audio';
-    /** A submission ended: a recording it still keeps goes now if its popup closed meanwhile. */
+
     const settleSubmission = (session: number) => {
         if (submitting === session) submitting = null;
         if (!coordinator.isCurrent(session)) dropHeld((owner) => owner !== session);
     };
-    /** Transcriptions still running after their task saved (RN's detached speech promise). */
+
     const transcriptions = new Set<Promise<void>>();
 
     const runtimeOf = (settings: AppSettings) => resolveSpeechToTextRuntimeSettings(settings.ai?.speechToText, { isFossBuild: bindings.isFossBuild });
     const keyFor = (runtime: ResolvedSpeechToTextRuntimeSettings) => (runtime.provider === 'whisper'
         ? Promise.resolve('') : bindings.loadKey(runtime.provider).catch(() => ''));
-    // RN's isQuickCaptureSpeechReady with this host's Whisper: ready only with a model on the device (V4). No stored model path
-    // counts, so a path whose file is gone never reads as ready (RN bug 1, rn-voice-bugs, is not carried here).
+
+
     const readiness = (runtime: ResolvedSpeechToTextRuntimeSettings, apiKey: string) => {
         const whisperModelReady = runtime.provider === 'whisper' && bindings.whisperModelReady();
         return {
@@ -193,7 +180,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             }),
         };
     };
-    const deleteQuietly = (uri: string) => { try { bindings.deleteFile(uri); } catch { /* best effort, as RN's safeDeleteFile */ } };
+    const deleteQuietly = (uri: string) => { try { bindings.deleteFile(uri); } catch {                                           } };
 
     const start = async (session: number): Promise<{ status: string; format?: 'm4a' | 'wav' }> => {
         if ((bindings.sandbox ?? isSandboxMode)()) return { status: 'sandbox' };
@@ -207,7 +194,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             const apiKey = await keyFor(runtime);
             if (!current()) return { status: 'stale' };
             const { ready, whisperModelReady } = readiness(runtime, apiKey);
-            // RN 767dca040 (#886): no speech set up, no recording: the popup shows quickAdd.speechNotConfigured.
+
             if (!ready) {
                 bindings.log({ kind: 'capture', outcome: 'not-configured', provider: runtime.provider });
                 return { status: 'not-configured' };
@@ -223,7 +210,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             try {
                 started = await bindings.recorder.start(format);
             } catch (error) {
-                // RN falls back to an m4a recording when its Whisper start fails ('Whisper realtime start failed, falling back').
+
                 if (format !== 'wav' || errorCode(error) !== 'E_VOICE_START_FAILED' || !current()) throw error;
                 format = 'm4a';
                 started = await bindings.recorder.start(format);
@@ -235,7 +222,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             active = { id: started.id, session, format, provider: runtime.provider, startedAt: now().getTime() };
             return { status: 'recording', format };
         } catch (error) {
-            // The app left before the microphone opened: nothing recorded, nothing to retry or show, as RN's stale start.
+
             if (errorCode(error) === 'E_VOICE_CANCELLED') return { status: 'stale' };
             return { status: 'failed' };
         } finally {
@@ -281,19 +268,19 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         active = null;
         stopping = true;
         if (input.save) submitting = input.session;
-        // Files this stop made: deleted at the end unless a saved task adopted them (RN 47b2f11a1).
+
         const owned = new Set<string>();
         let adopted = false;
         let stage: 'recorder' | 'attachment' | 'save' = 'recorder';
         try {
-            // RN d596ecce6: the recorder is stopped and released before anything reads the file.
+
             const stopped = await bindings.recorder.stop(current.id);
             owned.add(stopped.uri);
             if (!input.save) {
                 bindings.log({ kind: 'capture', outcome: 'cancelled', provider: current.provider });
                 return { status: 'cancelled' };
             }
-            // RN 9604387e4 / c5fc870fe: a closed or reopened popup's recording saves nothing.
+
             if (!coordinator.isCurrent(input.session)) return { status: 'stale' };
             const at = now();
             const title = buildAudioNoteTitle(bindings.label(), at, bindings.formatDate);
@@ -301,16 +288,16 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             const runtime = runtimeOf(settings);
             const apiKey = await keyFor(runtime);
             const { ready } = readiness(runtime, apiKey);
-            // Whisper transcribes on the device (V4): until then a Whisper recording keeps its audio and no transcript.
+
             const canTranscribe = runtime.provider === 'whisper' ? false : ready;
             const mimeType = getAudioMimeType(`.${current.format}`);
             const recovery = buildQuickCaptureAudioAttachment({ title, uri: stopped.uri, mimeType, size: stopped.size || undefined, now: at, newId: bindings.newId });
-            // RN 763c5192c / 67b707e3e / a11bc850d (#788): the attachment is durable in managed storage before the task saves.
+
             stage = 'attachment';
             const attachment = shouldSaveQuickCaptureAudio(settings, canTranscribe) ? await bindings.persistAttachment(recovery) : null;
             if (attachment) owned.add(attachment.uri);
             if (!coordinator.isCurrent(input.session)) return { status: 'stale' };
-            // RN's initialAttachments: a refused save's kept recordings ride this save too (review N2).
+
             const prior = held !== null && held.session === input.session ? held : null;
             const priorAttachments = prior ? await copyHeld(prior) : [];
             stage = 'save';
@@ -320,8 +307,8 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 attachments: [...priorAttachments, ...(attachment ? [attachment] : [])],
             });
             if (saved.ok && saved.value.kind === 'refused') {
-                // Review N2: the recording stays for the fixed draft's Save (a managed copy, made now if save audio is off). Review
-                // N6: a copy that fails keeps the recording itself, as RN's recovery attachment; the next save copies it.
+
+
                 let kept = attachment;
                 if (!kept) kept = await bindings.persistAttachment(recovery).catch(() => null);
                 held = {
@@ -335,8 +322,8 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 bindings.log({ kind: 'capture', outcome: 'kept', provider: runtime.provider, copied: kept !== null });
                 return { status: 'refused', notice: saved.value.notice };
             }
-            // Review B1: a task with this capture ID in the store points to these files, saved or not (core's addTask landed it and
-            // the store retries its save), so they stay, as RN keeps them once addTask succeeded.
+
+
             const landed = bindings.store.getState().tasks.find((task) => task.id === captureId.toLowerCase());
             const taskId = saved.ok && saved.value.kind === 'saved' && saved.value.taskId ? saved.value.taskId : landed?.id;
             if (!taskId) {
@@ -354,7 +341,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 bindings.log({ kind: 'capture', outcome: 'failed', provider: runtime.provider, errorKind: 'save-pending' });
             }
             const cleanupSource = !attachment || attachment.uri !== stopped.uri;
-            // The title as it saved: a title the user types before the transcript arrives stays (voice V3 review N11).
+
             const titleAtSave = bindings.store.getState().tasks.find((task) => task.id === taskId)?.title;
             if (canTranscribe) transcribe(taskId, titleAtSave, stopped.uri, attachment, cleanupSource, runtime, apiKey, settings, mimeType);
             else if (cleanupSource) deleteQuietly(stopped.uri);
@@ -370,7 +357,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         }
     };
 
-    /** The popup's Save while a refused save holds its recording: the draft saves with it (RN's recovery attachment). */
+
     const save = async (input: { session: number; text: string; options?: QuickCaptureOptions; openAfterSave?: boolean }): Promise<
         | ({ status: 'saved'; taskId: string } & SavedNext)
         | { status: 'idle' | 'busy' | 'failed' }
@@ -395,7 +382,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 bindings.log({ kind: 'capture', outcome: 'kept', provider: kept.provider, copied: true });
                 return { status: 'refused', notice: saved.value.notice };
             }
-            // As a stop's save (review B1): a task with this capture ID in the store has the recording, saved or not.
+
             const landed = bindings.store.getState().tasks.find((task) => task.id === captureId.toLowerCase());
             const taskId = saved.ok && saved.value.kind === 'saved' && saved.value.taskId ? saved.value.taskId : landed?.id;
             if (!taskId) {
@@ -418,10 +405,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         }
     };
 
-    /**
-     * Review N5: the app left the front. Kotlin's recorder already ended the recording; this forgets it, and a start still
-     * waiting for the microphone records nothing (it cancels what it gets), so the next start or stop behaves as RN's.
-     */
+
     const leave = async (): Promise<{ status: 'left' }> => {
         starting = null;
         await cancelRecording(() => true);
@@ -429,15 +413,15 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
     };
 
     return {
-        /** The popup opened: a new session; an older session's recording, or a refused save's kept one, goes without saving. */
+
         async open(): Promise<{ session: number; defaultAudio: boolean; sandbox: boolean }> {
             const session = coordinator.beginSession();
             await cancelRecording((owner) => owner !== session);
             dropHeld((owner) => owner === session);
-            // RN's center + records at once when Settings › GTD's default capture method is Audio, never in Sandbox mode (review N3).
+
             return { session, defaultAudio: defaultAudio(), sandbox: (bindings.sandbox ?? isSandboxMode)() };
         },
-        /** The popup closed: its session ends, and its recording with it, unsaved (RN's sheet close), and a kept one too. */
+
         async close(session: number): Promise<{ status: 'closed' }> {
             coordinator.invalidateSession(session);
             await cancelRecording((owner) => owner === session);
@@ -449,7 +433,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         save,
         leave,
         state: () => ({ recording: active !== null, busy: starting !== null || stopping, format: active?.format ?? null, held: held !== null }),
-        /** Tests and the boot: every transcription still running has ended. */
+
         settled: () => Promise.all([...transcriptions]).then(() => undefined),
         async request(name: string, input: Record<string, unknown>): Promise<unknown> {
             const session = typeof input.session === 'number' ? input.session : -1;
@@ -457,21 +441,21 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 case 'open': return this.open();
                 case 'close': return this.close(session);
                 case 'start': return start(session);
-                // A stop's and a save's answer say whether a refused save's recording is still kept (the popup's next Save sends it).
+
                 case 'stop': return { ...await stop({ session, save: input.save === true, text: typeof input.text === 'string' ? input.text : '',
                     options: input.options as QuickCaptureOptions | undefined }), held: heldFor(session) };
                 case 'save': return { ...await save({ session, text: typeof input.text === 'string' ? input.text : '',
                     options: input.options as QuickCaptureOptions | undefined, openAfterSave: input.openAfterSave === true }), held: heldFor(session) };
                 case 'leave': return leave();
                 case 'state': return this.state();
-                // The center +'s label (review N4): RN's quickAdd.audioCaptureLabel while Audio is the default capture method.
+
                 case 'defaults': return { defaultAudio: defaultAudio() };
                 default: throw new Error(`Unknown voice request ${name}`);
             }
         },
     };
 
-    /** Ends the recording of a closed or replaced popup's session ([ends] picks it), with no file left. */
+
     async function cancelRecording(ends: (session: number) => boolean) {
         const current = active;
         if (!current || !ends(current.session) || stopping) return;
@@ -483,13 +467,10 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
 
 export type NativeVoice = ReturnType<typeof createNativeVoice>;
 
-/** RN's getAttachmentsDir: core's ATTACHMENTS_DIR_NAME under the app's documents folder (`file:///…/files/`). */
+
 export const managedAttachmentsDirectory = (documents: string): string => `${documents}${ATTACHMENTS_DIR_NAME}/`;
 
-/**
- * RN's cacheAudioAttachmentOrThrow: the recording copied into managed attachment storage (the attachment port), then checked
- * there, a file under [managedDirectory], before any task points to it (#788).
- */
+
 export const persistIntoManagedStorage = async (attachment: Attachment, ports: {
     persist: (attachment: Attachment) => Promise<Attachment>;
     getInfo: (uri: string) => Promise<{ exists?: boolean; isDirectory?: boolean } | null>;

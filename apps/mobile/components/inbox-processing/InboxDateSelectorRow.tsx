@@ -20,9 +20,9 @@ type Props = {
   dateOnly?: boolean;
   onDateOnly?: () => void;
   onUseDefaultTime?: () => void;
-  /** A clock time ("HH:mm") the user picked for this row; shown after the date. */
+
   time?: string;
-  /** Opens the time picker, as the task editor's clock button does. */
+
   onOpenTime?: () => void;
   defaultScheduleTime?: string | null;
   dateOnlyLabel: string;

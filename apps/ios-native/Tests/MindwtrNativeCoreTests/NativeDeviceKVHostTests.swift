@@ -16,7 +16,7 @@ private final class DeviceKVHostState: @unchecked Sendable {
     }
 }
 
-/// Every unexpected request terminates here; there is no external fallback.
+
 private final class DeviceKVHTTPFixtureProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var requests = 0
@@ -72,7 +72,7 @@ final class NativeDeviceKVHostTests: XCTestCase {
     private func literal(_ value: String) throws -> String { try json([value]) + "[0]" }
     private func seed(_ entries: [(String, Any)]) throws {
         try FileManager.default.createDirectory(at: storage, withIntermediateDirectories: true)
-        // NSDictionary preserves byte-distinct canonical Unicode keys.
+
         let values = NSMutableDictionary()
         for (key, value) in entries { values.setObject(value, forKey: key as NSString) }
         try JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]).write(to: manifest)
@@ -270,7 +270,7 @@ final class NativeDeviceKVHostTests: XCTestCase {
         try await start(host); let before = try rows(), result = try await probe(host)
         XCTAssertEqual(result["single"] as? Int, 1024 * 1024); XCTAssertEqual(result["seven"] as? Int, 7)
         XCTAssertEqual(result["value"] as? String, unavailable)
-        // Keys are returned strings too: eight 1MiB values plus their keys exceed 8MiB.
+
         XCTAssertEqual(result["decoded"] as? String, unavailable)
         XCTAssertEqual(result["serialized"] as? String, unavailable)
         XCTAssertEqual(try Data(contentsOf: manifest), bytes); XCTAssertEqual(try rows(), before)
@@ -369,7 +369,7 @@ final class NativeDeviceKVHostTests: XCTestCase {
         try await start(contender); let refused = try await probe(contender)
         XCTAssertEqual(refused["value"] as? String, unavailable, "The namespace lease remains held during the write")
         release.signal(); await closing.value
-        // Close may fence the query's later poll, but it cannot undo the native accepted mutation.
+
         _ = try? await request.value
         XCTAssertEqual(state.counts.promotions, 1); XCTAssertEqual(state.counts.receipts, 0, "Delivery queued behind close is stale")
         XCTAssertEqual(try rows(), before); await contender.close()
@@ -391,8 +391,8 @@ final class NativeDeviceKVHostTests: XCTestCase {
         XCTAssertEqual(result["guarded"] as? [String], [String](repeating: unavailable, count: 6))
         XCTAssertEqual(try Data(contentsOf: manifest), bytes); XCTAssertEqual(state.counts.promotions, 0)
         XCTAssertEqual(state.counts.receipts, 0)
-        // The synthetic ordinary command is forwarded unchanged, so its own
-        // expected Task write remains distinct from the refused KV operations.
+
+
         let sql = try SQLiteBridge(url: database); defer { sql.close() }
         let saved = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute("SELECT status FROM tasks WHERE id=?", parametersJSON: json([id])).utf8)) as? [[String: Any]])
         XCTAssertEqual(saved.first?["status"] as? String, "done")

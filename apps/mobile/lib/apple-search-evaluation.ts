@@ -50,16 +50,11 @@ export type AppleSearchEvaluationState = {
 };
 
 export type AppleSearchEvaluationRun = AppleSearchRevalidation & {
-  /** Stable-ID candidates retained so callers can revalidate future state. */
+
   nativeMatches: AppleTaskSearchNativeMatch[];
 };
 
-/**
- * Treats Spotlight output as an ordered set of candidate ids only. Current
- * hydrated tasks supply every displayed field and shared global-search logic
- * applies every explicit filter. A stale/deleted id is dropped; a duplicate
- * title never resolves to a different task.
- */
+
 export function revalidateAppleSearchMatches(params: {
   query: string;
   nativeMatches: AppleTaskSearchNativeMatch[];
@@ -112,7 +107,7 @@ export function revalidateAppleSearchMatches(params: {
 
 export async function runAppleSearchEvaluation(params: {
   query: string;
-  /** Read only after native work completes; never capture pre-await Task objects. */
+
   getCurrentState: () => AppleSearchEvaluationState;
   signal?: AbortSignal;
 }): Promise<AppleSearchEvaluationRun> {

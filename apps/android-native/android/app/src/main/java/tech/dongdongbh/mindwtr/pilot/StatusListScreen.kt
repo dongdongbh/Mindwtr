@@ -20,19 +20,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 
-/**
- * RN's task list for Reference (app/(drawer)/reference.tsx) and History's Done (done.tsx), on core's getReferenceView and
- * getDoneView: the "Filters · N" button and the active chips with Clear under the header (whose list menu holds Filters,
- * Sort and Group), core's headings (folding ones fold, kept on the device as RN keeps them), core's rows with RN's status
- * glyph, read-only rows (an archived project's) without a swipe or selection, a long-press that starts selection mode
- * (core's bulk bar), and core's empty state with its Clear.
- */
+
 @Composable
 fun StatusList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
     val view = shown.view
     val clear = view.getJSONObject("filters").getJSONObject("clearEdit")
-    // RN's pull down to sync (TaskList, 5bb0ea8f).
+
     PullToSync(model, Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
             if (view.getBoolean("hasActiveFilters")) item(key = "filters") {
@@ -62,7 +56,7 @@ fun StatusList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's History tab bar: core's two tabs, the selected one in the tint over a 2 underline. */
+
 @Composable
 fun HistoryTabs(model: InboxViewModel) = with(model.menu) {
     val tabs = history?.menuObjects("tabs") ?: return

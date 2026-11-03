@@ -10,7 +10,7 @@ type InboxSimilarTasksProps = {
     projects: readonly Project[];
 };
 
-/** A quiet, read-only warning that the current Inbox title may already exist. */
+
 export function InboxSimilarTasks({ t, tasks, projects }: InboxSimilarTasksProps) {
     const projectTitleById = useMemo(
         () => new Map(projects.map((project) => [project.id, project.title])),

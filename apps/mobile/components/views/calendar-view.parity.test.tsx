@@ -1,15 +1,6 @@
-/**
- * React Native's Calendar screen, replayed against the calendar views parity
- * fixture (packages/core/src/calendar-views-parity.fixtures.json).
- * MINDWTR_CAPTURE_CALENDAR_VIEWS=1 rewrites it.
- *
- * Each scenario renders the real screen with the real core store, presses,
- * swipes, drags and types, and records what a user sees (the visible text in
- * screen order, the text inputs, a hash of every drawn color and position),
- * what the store is asked to write, the toasts, the alerts and the ranges the
- * screen asks the external calendar for. The task editor is a stand-in that
- * records its props: it is another screen's component.
- */
+
+
+
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import React from 'react';
@@ -37,7 +28,7 @@ import { CalendarView } from './calendar-view';
 const FIXTURE_PATH = new URL('../../../../packages/core/src/calendar-views-parity.fixtures.json', import.meta.url).pathname;
 const CAPTURE = process.env.MINDWTR_CAPTURE_CALENDAR_VIEWS === '1';
 const TIME_ZONE = 'America/New_York';
-/** Wednesday 2026-10-28, 10:00 in New York (EDT). The week of Sunday Nov 1 leaves daylight time. */
+
 const NOW = '2026-10-28T14:00:00.000Z';
 const DEVICE_LOCALE = 'en-US';
 const CALENDAR_ERROR = 'Calendar feed unreachable';
@@ -49,7 +40,7 @@ const harness = vi.hoisted(() => ({
   fetches: [] as [string, string][],
   opened: [] as string[],
   feed: { calendars: [] as unknown[], events: [] as unknown[] },
-  /** How each fetch answers, in order; the last one repeats. */
+
   fetchPlan: ['ready'] as ('ready' | 'loading' | 'error' | 'none')[],
   appStateListener: null as ((state: AppStateStatus) => void) | null,
 }));
@@ -58,7 +49,7 @@ vi.mock('@react-navigation/native', () => ({ useFocusEffect: () => undefined }))
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 0, left: 0, right: 0, top: 0 }) }));
 vi.mock('expo-haptics', () => ({ selectionAsync: async () => undefined }));
 vi.mock('react-native-gesture-handler', () => {
-  // A builder that keeps its callbacks, so the harness can play a gesture.
+
   const gesture = (kind: string) => {
     const handlers: Record<string, unknown> = { kind };
     const builder: any = new Proxy(handlers, {
@@ -147,8 +138,6 @@ vi.mock('react-native', async (importOriginal) => {
   };
 });
 
-// ---------------------------------------------------------------------------
-// The data set.
 
 const at = (iso: string) => `${iso}.000Z`;
 const CREATED = at('2026-10-01T12:00:00');
@@ -172,7 +161,7 @@ const projects: Project[] = [
 ];
 
 const tasks: Task[] = [
-  // Wednesday Oct 28: timed blocks (two overlap), one past midnight, an all-day start, a deadline.
+
   task('t-standup', 'Standup prep', 'next', { startTime: at('2026-10-28T13:00:00'), timeEstimate: '30min', areaId: 'a-work' }),
   task('t-deep', 'Deep work', 'next', { startTime: at('2026-10-28T17:00:00'), timeEstimate: '2hr', projectId: 'p-launch' }),
   task('t-review', 'Review PR', 'next', { startTime: at('2026-10-28T17:30:00'), timeEstimate: '1hr', projectId: 'p-launch' }),
@@ -181,28 +170,28 @@ const tasks: Task[] = [
   task('t-rent', 'Pay rent', 'next', { dueDate: '2026-10-28', priority: 'high', areaId: 'a-home' }),
   task('t-trashed', 'Trashed thing', 'next', { dueDate: '2026-10-28', deletedAt: at('2026-10-20T12:00:00') }),
   task('t-parked', 'Parked step', 'next', { dueDate: '2026-10-28', projectId: 'p-parked' }),
-  // Thursday Oct 29: a timed deadline, a task scheduled and due that day, other statuses.
+
   task('t-report', 'Submit report', 'next', { dueDate: at('2026-10-29T19:00:00'), projectId: 'p-launch' }),
   task('t-form', 'Dentist form', 'next', { startTime: at('2026-10-29T14:00:00'), dueDate: '2026-10-29' }),
   task('w-vendor', 'Hear back from vendor', 'waiting', { dueDate: '2026-10-29' }),
   task('s-trip', 'Trip ideas', 'someday', { dueDate: '2026-10-29' }),
   task('i-idea', 'Inbox idea', 'inbox', { startTime: '2026-10-29' }),
   task('t-sink', 'Fix sink', 'next', { dueDate: '2026-10-29', areaId: 'a-home' }),
-  // Friday Oct 30: six items, so the month cell shows none and the counts.
+
   ...['Call bank', 'Renew visa', 'Order parts', 'Send invoice'].map((title, index) => (
     task(`t-busy-${index}`, title, 'next', { dueDate: '2026-10-30' })
   )),
   task('t-busy-timed', 'Gym', 'next', { startTime: at('2026-10-30T22:00:00'), timeEstimate: '1hr' }),
-  // A weekly series that shows its future occurrences.
+
   task('t-water', 'Water plants', 'next', { dueDate: '2026-10-24', recurrence: 'weekly', showFutureRecurrence: true }),
-  // Across the month, the daylight-saving change and the year.
+
   task('t-q3', 'Close Q3', 'next', { dueDate: '2026-09-30' }),
   task('t-sunday', 'Clocks back brunch', 'next', { startTime: at('2026-11-01T13:00:00'), timeEstimate: '1hr' }),
   task('t-run', 'Morning run', 'next', { startTime: at('2026-11-02T14:00:00'), timeEstimate: '1hr' }),
   task('t-flights', 'Book flights', 'next', { dueDate: '2026-11-02' }),
   task('t-nye', 'New Year prep', 'next', { dueDate: '2026-12-31' }),
   task('t-resolutions', 'Resolutions', 'next', { startTime: at('2027-01-01T15:00:00'), timeEstimate: '15min' }),
-  // Unscheduled next actions for the planning list and the search.
+
   task('n-email', 'Answer email', 'next', { priority: 'low' }),
   task('n-plumber', 'Call plumber', 'next', { timeEstimate: '15min', areaId: 'a-home' }),
   task('n-chapter', 'Write chapter', 'next', { timeEstimate: '3hr', projectId: 'p-launch' }),
@@ -212,12 +201,12 @@ const tasks: Task[] = [
   task('n-bills', 'Sort bills', 'next', { areaId: 'a-home' }),
   task('n-photos', 'Back up photos', 'next', {}),
   task('n-mentor', 'Email mentor', 'next', { areaId: 'a-work' }),
-  // Finished work for the completed look-back.
+
   task('d-done', 'Filed taxes', 'done', { completedAt: at('2026-10-27T20:00:00'), updatedAt: at('2026-10-27T20:00:00'), dueDate: '2026-10-27' }),
   task('d-shipped', 'Shipped v1', 'archived', { projectId: 'p-shipped', completedAt: at('2026-10-26T15:00:00'), updatedAt: at('2026-10-26T15:00:00') }),
   task('d-home', 'Painted fence', 'done', { areaId: 'a-home', completedAt: at('2026-10-27T15:00:00'), updatedAt: at('2026-10-27T15:00:00') }),
   task('r-manual', 'Manual', 'reference', { dueDate: '2026-10-28' }),
-  // A whole booked day, for "no free time".
+
   task('t-booked', 'Conference', 'next', { startTime: at('2026-10-28T14:00:00'), timeEstimate: 'custom:780' }),
 ];
 
@@ -250,9 +239,9 @@ const settingsVariants: Record<string, AppSettings> = {
 type Scenario = {
   name: string;
   settings: string;
-  /** Only these tasks (default: all but t-booked). */
+
   taskIds?: string[];
-  /** How the external calendar answers each fetch, in order (default: always ready). */
+
   calendar?: ('ready' | 'loading' | 'error' | 'none')[];
   actions: [string, ...unknown[]][];
   extraTasks?: Task[];
@@ -350,7 +339,7 @@ const scenarios: Scenario[] = [
       ['press', 'Previous day'], ['swipe', 'day', 100], ['press', 'Today'],
     ],
   },
-  // #1462: the all-day card shows four chips and "+N more", which expands it in place.
+
   { name: 'day: all-day overflow expands and folds', settings: 'day', actions: [['press', 'Next day'], ['press', '+1 more'], ['press', 'Less']] },
   {
     name: 'day: across the year',
@@ -389,8 +378,6 @@ const scenarios: Scenario[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Seeding the store and recording the writes.
 
 const writeLog: unknown[][] = [];
 const createdIds = new Map<string, string>();
@@ -433,8 +420,6 @@ async function seedStore(settings: AppSettings, seededTasks: Task[]) {
   }])) as never);
 }
 
-// ---------------------------------------------------------------------------
-// Reading the rendered screen.
 
 const deepText = (node: ReactTestInstance | string | number | null | undefined | boolean): string => {
   if (node === null || node === undefined || typeof node === 'boolean') return '';
@@ -442,7 +427,7 @@ const deepText = (node: ReactTestInstance | string | number | null | undefined |
   return node.children.map((child) => deepText(child as ReactTestInstance | string)).join('');
 };
 
-/** Hidden modals render their children in the test shim; skip them, as a user would. */
+
 function visibleNodes(root: ReactTestInstance): ReactTestInstance[] {
   const out: ReactTestInstance[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -454,7 +439,7 @@ function visibleNodes(root: ReactTestInstance): ReactTestInstance[] {
   return out;
 }
 
-/** The visible text, one entry per outermost Text, in screen order. */
+
 function textsIn(root: ReactTestInstance): string[] {
   const out: string[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -480,13 +465,13 @@ const usesStyle = (style: unknown, target: unknown): boolean => (
 const hostsStyled = (root: ReactTestInstance, target: unknown) => (
   visibleNodes(root).filter((node) => typeof node.type === 'string' && usesStyle(node.props.style, target))
 );
-/** Where a box is drawn from: its top, moved by a margin or a vertical translate. */
+
 const drawnTop = (style: unknown): number => {
   const flat = flattenStyle(style);
   const translateY = ((flat.transform ?? []) as { translateY?: number }[]).reduce((sum, step) => sum + (step.translateY ?? 0), 0);
   return Number(flat.top ?? 0) + Number(flat.marginTop ?? 0) + translateY;
 };
-/** Where a line centered in its box is drawn. */
+
 const drawnCenter = (style: unknown): number => drawnTop(style) + Number(flattenStyle(style).height) / 2;
 const edgePadding = (style: unknown, edge: 'Top' | 'Bottom'): number => {
   const flat = flattenStyle(style);
@@ -498,7 +483,7 @@ const STYLE_KEYS = [
   'top', 'height', 'left', 'right', 'marginLeft', 'marginRight', 'width', 'paddingVertical', 'justifyContent',
 ];
 
-/** Every drawn color, position and size, with the node it belongs to, hashed. */
+
 function styleDigest(root: ReactTestInstance): string {
   const rows = visibleNodes(root)
     .filter((node) => typeof node.type === 'string' && node.props.style !== undefined)
@@ -568,7 +553,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
     case 'press':
     case 'mode': {
       const node = findPressable(root, String(target));
-      // A disabled control does not answer a press.
+
       return run(`press ${String(target)}`, node && (() => (node.props.disabled ? undefined : node.props.onPress(pressEvent()))));
     }
     case 'day': {
@@ -578,7 +563,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
       return run(`day ${String(target)}`, cell && (() => cell.props.onPress(pressEvent())));
     }
     case 'untitledEvent': {
-      // An event without a title draws an empty title line above its time.
+
       const node = visibleNodes(root).find((entry) => String(entry.type) === 'Pressable' && typeof entry.props.onPress === 'function'
         && textsIn(entry)[0] === '' && textsIn(entry).length > 1);
       return run('untitled event', node && (() => node.props.onPress(pressEvent())));
@@ -602,7 +587,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
       return run(`alert ${String(target)}`, button ? button.onPress ?? (() => undefined) : undefined);
     }
     case 'type': {
-      // An open composer takes the typing; the screen behind it shares a placeholder.
+
       const modal = hostsOf(root, 'Modal').find((node) => node.props.visible);
       const matches = (node: ReactTestInstance) => node.props.accessibilityLabel === target || node.props.placeholder === target;
       const input = (modal ? hostsOf(modal, 'TextInput').find(matches) : undefined) ?? hostsOf(root, 'TextInput').find(matches);
@@ -685,7 +670,7 @@ describe('React Native Calendar screen parity fixture', () => {
     process.env.TZ = TIME_ZONE;
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(NOW));
-    // The device locale the screen reads.
+
     Intl.DateTimeFormat.prototype.resolvedOptions = function resolved(this: Intl.DateTimeFormat) {
       return { ...resolvedOptions.call(this), locale: DEVICE_LOCALE };
     };
@@ -791,13 +776,13 @@ describe('React Native Calendar screen parity fixture', () => {
     expect((observations[1].texts as string[]).filter((text) => text === 'Dentist form')).toHaveLength(1);
   });
 
-  // PIXELS_PER_MINUTE is 1.4; NOW is 10:00 in New York.
+
   it('draws each Day hour line on its hour, with room for the first and last labels', async () => {
     await runScenario({ name: 'day hour lines', settings: 'day', actions: [] }, (root) => {
       const rows = hostsStyled(root, styles.hourLine);
       expect(rows).toHaveLength(25);
       rows.forEach((row, hour) => expect(drawnCenter(row.props.style)).toBeCloseTo(hour * 60 * 1.4));
-      // A block at 9:00 starts on the 9 AM line.
+
       const standup = hostsStyled(root, styles.taskBlock).find((node) => textsIn(node)[0] === 'Standup prep')!;
       expect(drawnTop(standup.props.style)).toBeCloseTo(drawnCenter(rows[9].props.style));
       const card = hostsStyled(root, styles.timelineCard)[0];

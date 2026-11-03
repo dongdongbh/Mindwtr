@@ -42,7 +42,7 @@ describe('native prepared Board nonterminal moves', () => {
         await flushPendingSave();
         const rnSettings = clone(useTaskStore.getState().settings);
         const { host, recorder } = await open();
-        // Reuse the same freshly initialized device and analytics identities for both writers.
+
         useTaskStore.setState({ settings: initialSettings });
         const tasks = clone(useTaskStore.getState()._allTasks); const settings = clone(useTaskStore.getState().settings);
         const prepared = prepare(host); expect(recorder.log).toEqual([]);
@@ -154,12 +154,12 @@ describe('native prepared Board nonterminal moves', () => {
         };
         change(); const before = clone(useTaskStore.getState()._allTasks);
         expect(await commit(host, prepared)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } }); expect(useTaskStore.getState()._allTasks).toEqual(before);
-        // Restore only test state; execute the exact request once, then change dependencies again.
+
         useTaskStore.setState({ settings: state.settings, _allProjects: state._allProjects, _allTasks: state._allTasks });
         expect(value(await commit(host, prepared))).toEqual(prepared.result); change();
         await useTaskStore.getState().persistSnapshot(); await flushPendingSave();
         const cold = createNativeHostContract(); value(await cold.activate({ writeSafetyReady: true, recoveryLoad: true }));
-        // A changed target itself is a later edit, not a replay. Other dependencies cannot revoke the exact row receipt.
+
         if (dependency !== 'visibility') expect(value(await commit(cold, prepared))).toEqual(prepared.result);
         else expect(await commit(cold, prepared)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
     });

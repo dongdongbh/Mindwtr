@@ -28,12 +28,7 @@ export function resolveTaskViewSection(
     return definitions?.find((definition) => definition.id === storedId);
 }
 
-/**
- * Build an explicit assignment map while preserving future scope keys written by
- * newer clients. Clearing the last known assignment returns {}, not undefined:
- * presence distinguishes an intentional clear from an old-client payload that
- * never carried this field.
- */
+
 export function setTaskViewSectionId(
     current: ViewSectionIds | undefined,
     scope: ViewSectionScope,
@@ -55,7 +50,7 @@ export function setTaskViewSectionId(
 
 type TaskViewSectionUpdate = { id: string; updates: Pick<Task, 'viewSectionIds'> };
 
-/** Assign one view's section without touching task containers or other view scopes. */
+
 export function buildTaskViewSectionUpdates(
     tasks: readonly Task[],
     scope: ViewSectionScope,
@@ -74,10 +69,7 @@ export function buildTaskViewSectionUpdates(
     });
 }
 
-/**
- * Undo against the latest tasks, preserving intervening edits and skipping tasks
- * moved elsewhere since this action. Callers capture only the ids actually moved.
- */
+
 export function buildTaskViewSectionUndoUpdates(
     tasks: readonly Task[],
     scope: ViewSectionScope,
@@ -99,17 +91,12 @@ export interface ViewSectionTaskGroup {
     id: string;
     title: string;
     tasks: Task[];
-    /** Deferred projects placed in this section; drawn before the tasks (#1319). */
+
     projects?: Project[];
     muted?: boolean;
 }
 
-/**
- * The project update that places one project in a view section, or null when it
- * is already there. Uses the task field's semantics: other scopes are kept and a
- * clear writes {} (see setTaskViewSectionId). Save it with updateProject, which
- * stamps rev/revBy/updatedAt. The project's own tasks are never touched.
- */
+
 export function buildProjectViewSectionUpdate(
     project: Pick<Project, 'viewSectionIds'>,
     scope: ViewSectionScope,
@@ -120,11 +107,7 @@ export function buildProjectViewSectionUpdate(
     return { viewSectionIds: setTaskViewSectionId(project.viewSectionIds, scope, destination) };
 }
 
-/**
- * Projects keyed by the group id groupTasksByViewSection gives their section.
- * A project with no section, or with an id no definition has, goes to the
- * "No section" key so it never disappears. Input order is kept.
- */
+
 export function groupProjectsByViewSection(
     projects: readonly Project[],
     scope: ViewSectionScope,

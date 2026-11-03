@@ -7,7 +7,7 @@ import {
   type WebdavSyncCompatibility,
 } from '@mindwtr/core';
 
-// The proof cache lives in core (webdav-capability-proof.ts); this module binds it to AsyncStorage.
+
 export {
   WEBDAV_CAPABILITY_PROOF_STORAGE_KEY,
   WEBDAV_LEGACY_PROOF_STORAGE_KEY,
@@ -15,7 +15,7 @@ export {
 } from '@mindwtr/core';
 export type { EnsureWebdavCapabilityProofOptions, WebdavCapabilityProofConfig };
 
-// Created on first use: tests that replace @mindwtr/core as a whole still import this module.
+
 let store: WebdavCapabilityProofStore | null = null;
 const proofStore = (): WebdavCapabilityProofStore => {
   store ??= createWebdavCapabilityProofStore({

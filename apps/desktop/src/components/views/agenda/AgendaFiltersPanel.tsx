@@ -198,9 +198,7 @@ export function AgendaFiltersPanel({
         setProjectQuery('');
     }, [showFiltersPanel]);
 
-    // Only Escape raised inside the panel folds it. A window listener also ate
-    // the Escape that closed a dialog or cancelled an edit, and stole focus to
-    // the Filters button one frame later.
+
     const handlePanelKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
         if (event.key !== 'Escape' || !showFiltersPanel) return;
         event.preventDefault();

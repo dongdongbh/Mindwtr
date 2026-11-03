@@ -56,8 +56,8 @@ describe('capture-deeplink', () => {
         expect(isShortcutCaptureUrl('mindwtr://capture?title=')).toBe(true);
         expect(isShortcutCaptureUrl('mindwtr:///capture?note=Missing%20title')).toBe(true);
         expect(isShortcutCaptureUrl('mindwtr://focus')).toBe(false);
-        // capture-quick is its own Expo Router route, not a capture payload:
-        // no matcher may claim it or it never reaches the screen (#1066).
+
+
         expect(isShortcutCaptureUrl('mindwtr:///capture-quick?mode=text')).toBe(false);
         expect(isOpenFeatureUrl('mindwtr:///capture-quick?mode=text')).toBe(false);
         expect(isShortcutCaptureUrl('https://mindwtr.app/capture?title=Test')).toBe(false);

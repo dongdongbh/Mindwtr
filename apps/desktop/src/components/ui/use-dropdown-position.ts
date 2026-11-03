@@ -10,8 +10,8 @@ const MIN_LIST_HEIGHT = 120;
 const MAX_LIST_HEIGHT = 320;
 const VIEWPORT_MARGIN_PX = 8;
 const DROPDOWN_GAP_PX = 4;
-// A small trigger (the bulk toolbar's Destination button) still gets a menu wide
-// enough for project and area names (#1470).
+
+
 const MIN_DROPDOWN_WIDTH_PX = 240;
 const DROPDOWN_CHROME_PX = 84;
 const MIN_DROPDOWN_SPACE = MIN_LIST_HEIGHT + DROPDOWN_CHROME_PX;

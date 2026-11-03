@@ -61,7 +61,7 @@ describe('strict native iOS reminder ownership admission', () => {
             const signature = `native:${JSON.stringify({ ...JSON.parse(signed), repeatInterval, fireAt })}`;
             expect(() => readOwnedIosReminderMaps(JSON.stringify({ 'task:one': { id: 123, signature } }), '{}')).toThrow(unavailable);
         }
-        // The shared builder's repeating signature carries the device time zone; a once alarm or an empty zone does not.
+
         for (const repeatInterval of ['daily', 'weekly'] as const) {
             const signature = `native:${buildReminderAlarmSignature({ fireAt: new Date(now), title: 'Private', message: 'Private', repeatInterval }, 'America/New_York')}`;
             expect(signature).toContain('"timeZone":"America/New_York"');

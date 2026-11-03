@@ -172,7 +172,7 @@ export const resolveWhisperModelDownloadUrl = async (
             return manualRedirectUrl;
         }
     } catch (error) {
-        // Some mobile fetch implementations do not support manual redirects for HEAD.
+
         await emitDownloadLog(logger, 'resolve-url-head-error', { redirect: 'manual', ...describeError(error) });
     }
 
@@ -187,7 +187,7 @@ export const resolveWhisperModelDownloadUrl = async (
             return followedUrl;
         }
     } catch (error) {
-        // Fall back to the original URL; the native downloader will surface any HTTP failure.
+
         await emitDownloadLog(logger, 'resolve-url-head-error', { redirect: 'follow', ...describeError(error) });
     }
     await emitDownloadLog(logger, 'resolve-url-complete', {
@@ -215,11 +215,8 @@ export const downloadWhisperModelFile = async <TFile extends WhisperModelDownloa
 }: {
     url: string;
     targetFile: TFile;
-    // Native fs (react-native-fs) wants a bare, percent-decoded filesystem path, not
-    // a file:// URI. Callers own URI<->path normalization (apps/mobile/lib/
-    // whisper-model-store.ts is the one implementation) and pass the result in here,
-    // so this module stays a pure download primitive with no path-normalization
-    // logic of its own.
+
+
     nativeTargetPath: string;
     nativeFs?: WhisperModelNativeFs | null;
     resolveDownloadUrl?: WhisperModelResolveDownloadUrl;

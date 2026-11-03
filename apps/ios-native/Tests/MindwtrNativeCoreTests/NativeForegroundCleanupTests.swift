@@ -114,8 +114,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
             .filter { $0.contains("v1.3.5/ios-cleanup-owned-retirement") }.map { try object(String($0)) }
     }
 
-    // Only the supplied test bundle is extended. All cleanup preparation,
-    // retirement, native binding and file jobs remain the production paths.
+
     private func probeBundle(absent: Bool = false) throws -> URL {
         let suffix = """
         ;(() => {
@@ -263,7 +262,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
         await assertFailure(cleanupFailure) { try await value.foregroundSync(command: "syncSettings", requestJSON: "{}") }
         await assertFailure(cleanupFailure) { try await value.call("menuRead", argumentsJSON: self.json(["dataSettings", "{}"])) }
         XCTAssertEqual(try Data(contentsOf: journal), frozen); XCTAssertEqual(try rows(), before); XCTAssertEqual(try markers().count, 0)
-        // Only an exact existing cleanup retry releases the original owner.
+
         try assertReply(object(await value.retireAttachmentCleanup(selected)), input: selected, outcome: "removed")
         let state = try await probeState(value), last = try XCTUnwrap(state["last"] as? [String: Any])
         XCTAssertEqual(last["refused"] as? [Bool], Array(repeating: true, count: 12))

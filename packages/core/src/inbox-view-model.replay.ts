@@ -1,10 +1,6 @@
-/**
- * Test support only (imported by the Inbox tests; not exported). Replays the
- * frozen React Native Inbox scenarios (inbox-view-parity.fixtures.json, captured
- * by apps/mobile/components/task-list/inbox-view-parity.test.tsx) through core:
- * either core's models directly, or the native host contract. Both produce the
- * observations the mobile harness recorded, laid out the way mobile draws them.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import { resolveAreaFilterSelection } from './area-filter';
 import { applyListFilterEdit, EMPTY_LIST_FILTER_STATE, resolveListFilterState, type ListFilterEdit, type ListFilterState } from './list-filter-state';
@@ -41,7 +37,7 @@ export type InboxViewFixture = {
 type Translate = (key: string) => string;
 type Contract = ReturnType<typeof createNativeHostContract>;
 
-/** Where mobile keeps the Inbox's folded group headings (device-local). */
+
 export const INBOX_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:group-collapse:inbox:v1';
 
 export const loadInboxViewFixture = (): InboxViewFixture => JSON.parse(
@@ -54,7 +50,7 @@ const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, 
 
 let realUpdateSettings: ReturnType<typeof useTaskStore.getState>['updateSettings'] | null = null;
 
-/** Load the scenario's data through the store and record its settings writes, as the harness does. */
+
 export async function seedInboxStore(
     fixture: InboxViewFixture,
     scenario: Pick<InboxViewScenario, 'settings' | 'omit' | 'extra'>,
@@ -99,7 +95,7 @@ const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: str
 };
 
 type Chip = { id: string; label: string; excluded: boolean; accessibilityLabel: string };
-/** What either path yields for one read, before it is laid out the way mobile draws it. */
+
 type Parts = {
     items: unknown[][];
     count: number;
@@ -120,11 +116,7 @@ type Parts = {
     group: unknown[][];
 };
 
-/**
- * Mobile's layout: the header row holds Sort, Group and Filters, then the Mind
- * Sweep pill while the Inbox has tasks, then each chip and a Clear chip; the
- * primary slot holds Process Inbox, or Mind Sweep when the Inbox is empty.
- */
+
 const layout = (parts: Parts, first: boolean, extra: Observation): Observation => ({
     items: parts.items,
     header: {
@@ -158,7 +150,7 @@ const layout = (parts: Parts, first: boolean, extra: Observation): Observation =
 
 type Session = { groupBy: TaskGroupBy; filters: ListFilterState; collapsed: Record<string, string[]> };
 
-/** Replays one scenario. With `contract`, every read and write goes through the native host contract. */
+
 export async function replayInboxScenario(options: {
     scenario: InboxViewScenario;
     writes: unknown[];
@@ -227,7 +219,7 @@ export async function replayInboxScenario(options: {
             resolvedAreaFilter: resolveAreaFilterSelection(state.settings.filters, areas),
             areaById: new Map(areas.map((area) => [area.id, area])),
         });
-        // Mobile's TaskList passes its time-filter prop (on by default); the Inbox ignores it.
+
         const options = buildStatusListFilterOptions({ kind: 'inbox', tasks, allProjects: state._allProjects, settings: state.settings, t, timeEstimateFilters: true });
         const resolved = resolveListFilterState(session.filters, { visibility: options.visibility, t });
         session.filters = resolved.state;
@@ -326,7 +318,7 @@ export async function replayInboxScenario(options: {
             } else {
                 session.collapsed[session.groupBy] = ids.includes(first as string) ? ids.filter((id) => id !== first) : [...ids, first as string];
             }
-            // Mobile writes every grouping's folds under one device-local key.
+
             stored = { [INBOX_GROUP_COLLAPSE_STORAGE_KEY]: JSON.stringify(session.collapsed) };
         } else if (kind === 'filter') {
             const value = second as string;
@@ -336,7 +328,7 @@ export async function replayInboxScenario(options: {
                 const type = ({ token: 'toggleToken', priority: 'togglePriority', energy: 'toggleEnergyLevel' } as const)[first as 'token' | 'priority' | 'energy'];
                 applyFilterEdit({ type, value } as ListFilterEdit);
             } else {
-                // The option's own edit, as the filter sheet sends it.
+
                 const { filters } = read();
                 const option = first === 'token'
                     ? filters.tokens.items.find((entry) => entry.value === value)

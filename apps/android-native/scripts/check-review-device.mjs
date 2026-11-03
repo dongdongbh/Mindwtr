@@ -1,19 +1,6 @@
-// Contexts, Trash and Review check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-review-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays), captures four tasks with titles unique to this
-// run (three with the fixed context @6700, one plain), and checks the screens against core's own views on a copy of the app's
-// database: (a) Contexts: the @6700 chip (found through the chip search) narrows the rows as core does; two rows go to Trash
-// with the swipe left (one write each); a bulk Add tag whose commit fails keeps its exact retry, and Try again stores the tag
-// once; (b) Trash: Restore stores once, and Delete permanently on this run's own trashed capture leaves core's tombstone
-// (deletedAt and purgedAt), one write each (Clear Trash is never pressed here: the dev data is dd's fixture); (c) Weekly Review
-// opens on core's step for the checkpoint the app keeps, Back leads to core's first step, the swipe on this run's Inbox task
-// stores core's status once, and Next shows core's next step; (d) rotation and process death keep the Weekly Review on that
-// step; (e) the Daily Review opens on core's step. Review opens from the quick-access tab or the More sheet, whichever core's
-// quickAccessView gives. It touches only the development package (it refuses any other APK), never launches over another
-// app, restores rotation and clears its debug properties on exit. Leave the device on its home screen. It needs host `bun`.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -45,10 +32,10 @@ const PREFS = 'shared_prefs/mindwtr-view-state.xml';
 const work = resolve(app, 'android/build/review-check');
 const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
-// Digits for titles and tokens: the keyboard guard allows only an English layout, and digits never compose.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const titles = { kept: `67${run}1`, restored: `67${run}2`, purged: `67${run}3`, inbox: `67${run}4` };
-// One fixed context and tag, so runs add no new chips (the captures are pruned by check-projects-device --prune-old).
+
 const CONTEXT = '@6700';
 const TAG_TYPED = '6701';
 const TAG_STORED = '#6701';
@@ -59,7 +46,7 @@ const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${val
 const commands = (operation, outcome = 'saved') => device.logs(pid(), TAG).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = () => {
     const dir = resolve(work, 'db');
     rmSync(dir, { recursive: true, force: true });
@@ -68,18 +55,15 @@ const pullDatabase = () => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/** A review checkpoint the app keeps on the device (its SharedPreferences, under core's key), or null. */
+
 const storedCheckpoint = (key) => {
     let xml = '';
     try { xml = sh(`run-as ${PKG} cat ${PREFS}`); } catch { return null; }
     const raw = new RegExp(`<string name="${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}">([^<]*)</string>`).exec(xml)?.[1];
     return raw === undefined ? null : raw.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 };
-/**
- * Core's views on a copy, in the phone's time zone (the reviews read the clock and the week): the More sheet, Contexts for
- * @6700, Trash's labels, the Weekly Review at the app's checkpoint (and its first step, and the step after it), the Daily Review
- * at the app's checkpoint, this run's Inbox task's row meta, and the stored tasks titled as this run's.
- */
+
+
 const core = (ids = []) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -142,18 +126,18 @@ const core = (ids = []) => JSON.parse(execFileSync('bun', ['-e', `
         CHECK_WEEKLY: storedCheckpoint('mindwtr:weeklyReview:currentStep') ?? '', CHECK_DAILY: storedCheckpoint('mindwtr:dailyReview:currentStep') ?? '' },
 }).trim().split('\n').pop());
 
-// ---- UI (core's English) ----
+
 const inPopup = (nodes) => Boolean(tagged(nodes, 'quick-capture'));
 const onInbox = (nodes) => !inPopup(nodes) && !tagged(nodes, 'menu-screen') && Number.isFinite(inboxCount(nodes));
 const inScreen = (title) => (nodes) => Boolean(tagged(nodes, 'menu-screen')) && hasText(nodes, title);
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
-// A clickable row's label can sit on a child node with the row's own bounds (dd's phone): read it there.
+
 const rowLabel = (nodes, row) => row.text || row['content-desc']
     || nodes.find((node) => node !== row && node.bounds === row.bounds && (node.text || node['content-desc']))?.['content-desc'] || '';
 const rowTitles = (nodes) => taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1]).map((node) => rowLabel(nodes, node));
 const stepTitle = (nodes) => tagged(nodes, 'review-step-title')?.text;
 const stepIndicator = (nodes) => tagged(nodes, 'review-step-indicator')?.text;
-/** Opens the popup from + and saves [text] ('%s' is a space for `input text`); the popup closes on Save, as in RN. */
+
 const capture = async (text, shown) => {
     let nodes = await screen();
     if (!inPopup(nodes)) nodes = await device.openCapture();
@@ -163,14 +147,14 @@ const capture = async (text, shown) => {
     await waitFor(`"${shown}" in the capture field`, (current) => tagged(current, 'capture-title')?.text === shown, 15_000);
     await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), onInbox, 'the capture to close the popup');
 };
-/** The More sheet from the Menu tab, then the tile labelled [label], until [done]. */
+
 const openTile = async (label, done, description) => {
     let nodes = await screen();
     if (!sheetOpen(nodes)) nodes = await tapExpecting(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
     nodes = await device.settle(nodes);
     return tapExpecting(withDescription(nodes, label) ?? fail(`no ${label} tile`), done, description);
 };
-/** Closes the keyboard only when it shows (a Back with no keyboard would leave the screen). */
+
 const hideKeyboard = async () => {
     if (!/mInputShown=true/.test(sh('dumpsys input_method'))) return;
     requireAppFront();
@@ -183,18 +167,16 @@ const back = async (done, description = 'Back') => {
     sh('input keyevent KEYCODE_BACK');
     return waitFor(description, done, 15_000);
 };
-/** A row titled [title]: a task row's title node, or a Trash row (its TalkBack text is the title, as Archive's). */
+
 const rowNode = (nodes, title) => taskRow(nodes, title) ?? withDescription(nodes, title);
-/**
- * Drags the row titled [title] ([dx] > 0: right, < 0: left) and returns RN's revealed button labelled [label]. A task row is
- * scrolled into the list first; Trash's newest items are at its top.
- */
+
+
 const drag = async (title, dx, label, scroll = true) => {
     const nodes = scroll ? await device.reveal(title) : await waitFor(`${title} in the list`, (current) => Boolean(rowNode(current, title)), 15_000);
     const row = rowNode(nodes, title) ?? fail(`no row ${title} on screen`);
     const [x1, y1, x2, y2] = box(row);
     const y = Math.round((y1 + y2) / 2);
-    // Start well inside the row: gesture navigation takes a swipe from either screen edge as Back (pass 6, run 29).
+
     const [start, end] = dx > 0 ? [x1 + 150, x1 + 150 + dx] : [Math.max(x2 - 150, x1 + 20), Math.max(x2 - 150 + dx, 10)];
     requireAppFront();
     sh(`input swipe ${start} ${y} ${end} ${y} 400`);
@@ -206,8 +188,8 @@ const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const timeZone = sh('getprop persist.sys.timezone') || undefined;
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
-    // Leave the app on its Inbox tab: the other checks start there.
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
+
     try {
         for (let step = 0; step < 4 && front().includes(`${PKG}/`); step += 1) {
             const nodes = await screen();
@@ -217,11 +199,11 @@ const restore = async () => {
         }
         const nodes = await screen();
         if (front().includes(`${PKG}/`) && tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE}`); } catch {                   }
 };
 
 try {
@@ -238,13 +220,13 @@ try {
     sh('settings put system user_rotation 0');
     await waitFor('the Inbox', onInbox, 60_000);
 
-    // The run's own captures: three with the fixed context, one plain Inbox task.
+
     for (const key of ['kept', 'restored', 'purged']) await capture(`${titles[key]}%s${CONTEXT}`, `${titles[key]} ${CONTEXT}`);
     await capture(titles.inbox, titles.inbox);
     let seen = core();
     check(Object.values(titles).every((title) => seen.stored[title].length === 1), 'the four captures are stored once each');
 
-    // (a) Contexts: the chip search finds @6700, the chip narrows the rows as core does.
+
     const onContexts = (nodes) => Boolean(tagged(nodes, 'contexts-list'));
     if (seen.quickAccess === 'contexts') await tapExpecting(tab(await screen(), en['nav.contexts']) ?? fail('no Contexts tab'), onContexts, 'the Contexts tab');
     else await openTile(seen.tiles.contexts, onContexts, 'Contexts');
@@ -253,14 +235,14 @@ try {
     requireAppFront();
     sh(`input text '${CONTEXT.slice(1)}'`);
     nodes = await waitFor(`core's chip "${seen.chip}"`, (current) => Boolean(seen.chip && withDescription(current, seen.chip)), 15_000);
-    await hideKeyboard(); // the rows show below the chips
+    await hideKeyboard();
     nodes = await tapExpecting(withDescription(await screen(), seen.chip), (current) => chipOn(current, seen.chip), `${CONTEXT} chosen`);
     nodes = await waitFor('core\'s rows for the chip', (current) => rowTitles(current).length > 0
         && JSON.stringify(rowTitles(current)) === JSON.stringify(seen.contexts.slice(0, rowTitles(current).length)), 15_000);
     check([titles.kept, titles.restored, titles.purged].every((title) => seen.contexts.includes(title)),
         `(a) the ${CONTEXT} chip narrows Contexts to core's ${seen.contexts.length} rows, in core's order`);
 
-    // (a) Two rows to Trash with RN's swipe left: core's trashTask, one write each (the toast offers core's Undo).
+
     for (const key of ['restored', 'purged']) {
         const before = commands('contextsAction');
         const del = await drag(titles[key], -450, en['task.aria.delete']);
@@ -270,7 +252,7 @@ try {
     seen = core();
     check(seen.stored[titles.restored][0].deletedAt && seen.stored[titles.purged][0].deletedAt, '(a) the swipe left moved two rows to Trash, one write each');
 
-    // (a) A bulk Add tag whose commit fails keeps its exact retry; Try again stores the tag once.
+
     nodes = await device.reveal(titles.kept);
     const kept = taskRow(nodes, titles.kept) ?? fail(`no row ${titles.kept}`);
     {
@@ -298,7 +280,7 @@ try {
     if (seen.quickAccess === 'contexts') await tapExpecting(tab(await screen(), en['tab.inbox']), onInbox, 'the Inbox');
     else await back(onInbox);
 
-    // (b) Trash: Restore stores once; Delete permanently asks core's question and leaves core's tombstone.
+
     const purgedId = seen.stored[titles.purged][0]?.id ?? fail(`no stored ${titles.purged} before the delete`);
     const onTrash = inScreen(en['trash.title']);
     await openTile(seen.tiles.trash, onTrash, 'Trash');
@@ -318,7 +300,7 @@ try {
     check(Boolean(purged?.deletedAt && purged?.purgedAt), '(b) Delete permanently left core\'s tombstone (deletedAt and purgedAt), one write');
     await back(onInbox);
 
-    // (c) The Weekly Review: core's step for the app's checkpoint, Back to core's first step, one swipe stored once, Next.
+
     const onReview = (current) => Boolean(tagged(current, 'review-list'));
     if (seen.quickAccess === 'review') await tapExpecting(tab(await screen(), en['tab.review']) ?? fail('no Review tab'), onReview, 'the Review tab');
     else await openTile(seen.tiles.review, onReview, 'Review');
@@ -351,7 +333,7 @@ try {
     nodes = await tapExpecting(withDescription(await screen(), seen.inboxStep.next) ?? fail('no Next'), (current) => stepTitle(current) === next.title, 'core\'s next step');
     check(stepIndicator(nodes) === next.indicator, `(c) Next shows core's next step ("${next.title}", ${next.indicator})`);
 
-    // (d) Rotation and process death keep the Weekly Review on that step.
+
     const onStep = (current) => onWeekly(current) && stepTitle(current) === next.title;
     sh('settings put system user_rotation 1');
     await waitFor('the step in landscape', onStep, 20_000);
@@ -369,7 +351,7 @@ try {
     check(true, `(d) rotation and process death keep the Weekly Review on "${next.title}"`);
     await tapExpecting(withDescription(nodes, next.close) ?? fail('no Close'), onReview, 'Review again');
 
-    // (e) The Daily Review opens on core's step for the app's checkpoint.
+
     seen = core();
     const onDaily = (current) => Boolean(tagged(current, 'daily-review')) && Boolean(stepTitle(current));
     nodes = await startReview(en['dailyReview.title'], onDaily);

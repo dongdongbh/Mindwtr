@@ -10,9 +10,7 @@ import {
     SECTION_SYNC_SCHEMA_VERSION,
 } from './section-sync-schema';
 
-// Frozen snapshot of the hand-written literals these lists replaced (as of the
-// generative-schema refactor, 2026-07-20; parity-entities follow-up to f7ac5a0a). See the
-// equivalent comment in project-sync-schema.test.ts — same rules apply here.
+
 const PRE_REFACTOR_SECTION_SQLITE_COLUMNS = [
     'id', 'projectId', 'title', 'description', 'orderNum', 'isCollapsed', 'rev', 'revBy',
     'createdAt', 'updatedAt', 'deletedAt', 'deletedAtBeforeProjectArchive', 'projectArchivedAt', 'isSequential',
@@ -72,9 +70,7 @@ describe('Section sync schema contract', () => {
         expect(sorted(SECTION_SQLITE_COLUMNS)).toEqual(sorted(expectedColumns));
     });
 
-    // Snapshot-equality guards: SECTION_SQLITE_COLUMNS, SECTION_SQLITE_MIGRATION_COLUMNS, and
-    // SECTION_UPSERT_UPDATE_CLAUSE are all generated from SECTION_SYNC_FIELD_SCHEMA now
-    // instead of hand-maintained literals.
+
     it('derives SECTION_SQLITE_COLUMNS identical to the pre-refactor literal, in order', () => {
         expect(SECTION_SQLITE_COLUMNS).toEqual(PRE_REFACTOR_SECTION_SQLITE_COLUMNS);
     });

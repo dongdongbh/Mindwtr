@@ -158,7 +158,7 @@ function saveCollapsedAreas(state: Record<string, boolean>) {
     try {
         getWorkspaceCache()?.setItem(COLLAPSED_AREAS_STORAGE_KEY, JSON.stringify(state));
     } catch {
-        // storage unavailable — fall back to in-memory only
+
     }
 }
 
@@ -443,7 +443,7 @@ export function ProjectsView() {
     }, [duplicateProject, setSelectedProjectId, showToast, t]);
 
     const handleConvertProjectToSection = useCallback(async (projectId: string) => {
-        // The title and notes editors commit on blur. Flush them before freezing the preview.
+
         if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
         try {
             await flushPendingSave();
@@ -523,15 +523,13 @@ export function ProjectsView() {
     }, [NO_AREA, projects, selectedArea, selectedTag, sortedAreas]);
 
     useEffect(() => {
-        // Keep persisted tag selections through the empty startup frame; reset only after we have a real tag inventory.
+
         if (tagOptions.list.length === 0 && !tagOptions.hasNoTags) return;
         if (selectedTag === ALL_TAGS || selectedTag === NO_TAGS || tagOptions.list.includes(selectedTag)) return;
         setSelectedTag(ALL_TAGS);
     }, [selectedTag, tagOptions.hasNoTags, tagOptions.list, setSelectedTag]);
 
-    // One DndContext spans the sidebar and the workspace so task rows can be
-    // dropped on sidebar projects/areas; drags carry typed data and handlers
-    // branch on it (ADR 0023).
+
     const dndSensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: { distance: 5 },
@@ -651,10 +649,8 @@ export function ProjectsView() {
                         .catch(failTaskMove);
                 };
                 if (settings?.undoNotificationsEnabled === false) {
-                    // Undo toasts are off, but Ctrl+Z should still work, and
-                    // a move still needs *some* confirmation — just not one
-                    // dressed up as an undo notification the setting asked
-                    // to hide.
+
+
                     registerUndoableAction(undo);
                     showToast(message, 'success');
                 } else {
@@ -922,7 +918,7 @@ export function ProjectsView() {
                         onChangeNewAreaName={(event) => setNewAreaName(event.target.value)}
                         onCreateArea={async () => {
                             const name = newAreaName.trim();
-                            // A live area has this name: nothing to create, and the typed name stays.
+
                             if (!name || isManageAreaNameTaken('newArea', name, areas)) return;
                             setIsAreaCreating(true);
                             try {

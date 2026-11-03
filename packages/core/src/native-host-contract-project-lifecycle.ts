@@ -165,7 +165,7 @@ export function createProjectLifecycleMethods(deps: {
             if (confirmed.ok && envelope.request.action === 'reactivate') {
                 try { logInfo('Native archived Project restore confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-archive-project-restore', outcome: 'confirmed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },

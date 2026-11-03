@@ -18,6 +18,6 @@ Pod::Spec.new do |s|
     'SWIFT_COMPILATION_MODE' => 'wholemodule'
   }
 
-  # Keep the Swift Package test manifest and XCTest sources out of the pod.
+
   s.source_files = 'AttachmentFileInstallerModule.swift'
 end

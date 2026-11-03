@@ -1,11 +1,6 @@
-/**
- * The desktop side of the shared calendar composer.
- *
- * Core's `calendar-composer` owns the state machine and returns save *intents*;
- * this hook holds the state, adds the two raw inputs the desktop types into
- * (`startDateValue`/`startTimeValue`), maps error codes to localized strings and
- * performs the write through the normal store actions.
- */
+
+
+
 import { useMemo, useState } from 'react';
 import {
     formatCalendarTimeInputValue,
@@ -36,7 +31,7 @@ import { reportError } from '../../../lib/report-error';
 import { combineDateAndTime, formatDateInputValue } from './calendar-primitives';
 
 export type CalendarTaskComposerMode = CalendarComposerMode;
-/** Shared composer state plus the desktop date/time inputs the user types into. */
+
 export type CalendarTaskComposerState = CalendarComposerState & {
     startDateValue: string;
     startTimeValue: string;
@@ -46,17 +41,17 @@ export type CalendarComposerOptions = {
     addProject: (name: string, color: string, initialProps?: Partial<Project>) => Promise<Pick<Project, 'id'> | null>;
     addTask: (title: string, props?: Partial<Task>) => Promise<StoreActionResult>;
     areas: Area[];
-    /** Desktop free-slot search, already bound to the visible external events. */
+
     findFreeSlot: (day: Date, durationMinutes: number, excludeTaskId?: string) => Date | null;
     isSlotFree: (start: Date, durationMinutes: number, excludeTaskId?: string) => boolean;
-    /** Runs after a successful save, with the slot the task landed on. */
+
     onSaved: (start: Date | null) => void;
-    /** The shared quick-add parse bag, so the composer resolves tokens like quick add. */
+
     parseOptions?: QuickAddParseOptions;
     projects: Project[];
-    /** Translator with an English fallback, for keys a locale may not carry yet. */
+
     resolveText: (key: string, fallback: string) => string;
-    /** Candidates offered in "existing task" mode. */
+
     schedulableTasks: Task[];
     t: (key: string) => string;
     tasks: Task[];
@@ -177,7 +172,7 @@ export function useCalendarComposer({
             return {
                 ...prev,
                 ...setComposerStart(prev, combineDateAndTime(inputs.startDateValue, inputs.startTimeValue)),
-                // Last: the raw values the user just typed always win over the resolved start.
+
                 ...updates,
             };
         });

@@ -1,4 +1,4 @@
-// Built only with --attachment-upload-test; never the application resource.
+
 import '../../android-native/bundle/host-entry';
 import { createNativeAttachments, createNativeLocalAttachmentConfiguration, nativeFileChannels } from '../../android-native/bundle/host-attachments';
 import { createHostSyncCrypto } from '../../android-native/bundle/host-sync';
@@ -17,8 +17,7 @@ const host = globalThis as typeof globalThis & {
     attachmentCleanupGate?: unknown;
 };
 
-// A private factory proof only: read the real loaded store, never persist the
-// returned cleanup document or bind the ordinary host's Sync configuration.
+
 host.attachmentCleanupGate = {
     async run() {
         const channels = nativeFileChannels();

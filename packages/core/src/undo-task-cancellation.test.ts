@@ -66,12 +66,12 @@ describe('createTaskCancellationUndo', () => {
     });
 
     it('checks the cancelled row on the state a sync save published while the Undo waited', async () => {
-        // updateTask as the store runs it: a command behind the write gate.
+
         const apply = mocks.state.updateTask;
         mocks.state.updateTask = vi.fn((id: string, patch: Partial<Task>) => runStoreCommand(() => apply(id, patch)));
         let release!: () => void;
         const held = new Promise<void>((resolve) => { release = resolve; });
-        // Another device moved the task on; the sync save publishes it before the Undo is admitted.
+
         const save = runSyncStoreSave(async () => {
             await held;
             mocks.state._tasksById.set(before.id, { ...mocks.state._tasksById.get(before.id), status: 'waiting', cancelledAt: undefined });

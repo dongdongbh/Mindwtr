@@ -16,11 +16,7 @@ type UseAndroidActivitySessionOptions<T> = {
   value?: T | null | undefined;
 };
 
-/**
- * Restores component state across a verified Android Activity replacement.
- * It intentionally has no disk fallback: process death uses the existing
- * route/session behavior and never leaves unfinished drafts at rest.
- */
+
 export function useAndroidActivitySession<T>({
   enabled = true,
   getValue,
@@ -49,8 +45,7 @@ export function useAndroidActivitySession<T>({
     clearAndroidActivitySession(ownerId);
   }, [ownerId]);
 
-  // A durable action can disarm retention before it starts, then rearm the
-  // same mounted owner if the action fails and leaves its draft editable.
+
   const rearm = React.useCallback(() => {
     explicitlyClearedRef.current = false;
   }, []);

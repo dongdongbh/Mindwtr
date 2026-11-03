@@ -1,15 +1,6 @@
-/**
- * Settings › Advanced › Calendar's rules, as React Native's
- * `apps/mobile/components/settings/calendar-settings-screen.tsx` applies them:
- * the push card's calendar choices and hints, the device calendar selection,
- * the ICS subscription list edits, the Area choice (#1305), and the screen's
- * texts and toasts. React Native's screen and the native host contract
- * (native-host-contract-settings-calendar.ts) both call these.
- *
- * The device side lives in external-calendar-feeds.ts (feeds, device calendar
- * reads and choices) and calendar-push-service.ts (push options, the Mindwtr
- * calendar).
- */
+
+
+
 import { CALENDAR_PUSH_COLOR_OPTIONS, normalizeCalendarPushColor, type CalendarPushTargetCalendar } from './calendar-push-service';
 import {
     EXTERNAL_CALENDAR_COLORS,
@@ -27,18 +18,16 @@ type TranslateText = (key: string, values?: I18nTemplateValues) => string;
 
 export type CalendarSettingsToast = { title: string; message: string; tone: 'success' | 'warning' | 'info'; durationMs?: number };
 
-// ---------------------------------------------------------------------------
-// Push: the calendar choices.
 
 export type CalendarPushTargetOption = { id: string | null; name: string; description: string; color?: string };
 
 export type CalendarPushTargetChoices = {
     options: CalendarPushTargetOption[];
-    /** "Local calendar targets stay on this device…": the Mindwtr calendar or a local calendar is chosen. */
+
     localHint: boolean;
-    /** "For a separate color in Google Calendar…": a shared account calendar is chosen. */
+
     sharedAccountHint: boolean;
-    /** The Mindwtr calendar's colors: the Mindwtr calendar the app manages is chosen. */
+
     showColors: boolean;
 };
 
@@ -53,22 +42,13 @@ export function describeCalendarPushTarget(calendar: CalendarPushTargetCalendar,
     return calendar.sourceName ? `${kind} · ${calendar.sourceName}` : kind;
 }
 
-/**
- * The calendars a user may push to, in React Native's order: "Mindwtr calendar"
- * (the one the app makes; `id` null) unless an account calendar named Mindwtr
- * exists, then the writable calendars, without the managed one or a local
- * Mindwtr calendar beside an account one unless it is the chosen target.
- *
- * "Mindwtr calendar" says where that calendar is: where the one the app made
- * lives, else where the app will make it (calendar-push-service.ts): on Android
- * on the account of the first calendar the phone owns, on iOS on the local source.
- */
+
 export function buildCalendarPushTargetChoices(input: {
     targets: readonly CalendarPushTargetCalendar[];
     targetId: string | null;
     color: string;
     tr: TranslateText;
-    /** 'android' or 'ios'. */
+
     platform: string;
 }): CalendarPushTargetChoices {
     const { targets, targetId, color, tr } = input;
@@ -109,15 +89,12 @@ export function buildCalendarPushTargetChoices(input: {
     };
 }
 
-/** The color to store, or null when `picked` is the stored one: re-picking must not recreate the Mindwtr calendar (Android). */
+
 export const planCalendarPushColor = (current: string, picked: string): string | null => (
     normalizeCalendarPushColor(picked) === normalizeCalendarPushColor(current) ? null : picked
 );
 
-/**
- * Whether Delete Mindwtr calendar left the chosen push calendar (and the events pushed to it):
- * the stored choice before the delete and after it. The delete clears a choice it removed.
- */
+
 export const keptPushTargetEvents = (before: string | null, after: string | null): boolean => before !== null && after === before;
 
 export const getCalendarPushColorLabel = (t: Translate): string => (
@@ -136,13 +113,7 @@ export const getCalendarPushColorOptions = (current: string, t: Translate) => CA
     accessibilityLabel: `${getCalendarPushColorLabel(t)} ${color}`,
 }));
 
-// ---------------------------------------------------------------------------
-// Device calendars.
 
-/**
- * The selection after one calendar's switch: "all" again once every calendar is
- * on. Null when the device lists no calendar.
- */
 export function nextDeviceCalendarSelection(input: {
     calendarIds: readonly string[];
     selectAll: boolean;
@@ -162,7 +133,7 @@ export function nextDeviceCalendarSelection(input: {
     return { selectAll, selectedCalendarIds: selectAll ? [] : nextSelection };
 }
 
-/** The stored selection without calendars the device no longer has; null when nothing drops. */
+
 export function pruneDeviceCalendarSelection(
     stored: Pick<SystemCalendarSettings, 'selectAll' | 'selectedCalendarIds'>,
     calendarIds: readonly string[],
@@ -181,17 +152,15 @@ export const toggleCalendarAreaId = (current: readonly string[], areaId: string)
     current.includes(areaId) ? current.filter((id) => id !== areaId) : [...current, areaId]
 );
 
-// ---------------------------------------------------------------------------
-// The Area choice (#1305).
 
 export type CalendarAreaChoice = {
-    /** "Show in Areas: Work, Home" (all Areas while none is chosen). */
+
     label: string;
-    /** `label` leads with a ☑/☐ glyph; `accessibilityLabel` is the Area name alone, since the checked state is announced. */
+
     options: { areaId: string; label: string; accessibilityLabel: string; checked: boolean }[];
 };
 
-/** Null while there is no Area: the screen then shows no choice. */
+
 export function buildCalendarAreaChoice(selectedIds: readonly string[], areas: readonly Area[], t: Translate): CalendarAreaChoice | null {
     const areaOptions = areas.filter((area) => !area.deletedAt);
     if (areaOptions.length === 0) return null;
@@ -207,10 +176,7 @@ export function buildCalendarAreaChoice(selectedIds: readonly string[], areas: r
     };
 }
 
-// ---------------------------------------------------------------------------
-// ICS subscriptions.
 
-/** Which list the screen shows on open, and whether it rewrites the device copy (the synced list wins). */
 export function resolveCalendarFeedsOnLoad(
     synced: ExternalCalendarSubscription[] | undefined,
     stored: readonly ExternalCalendarSubscription[],
@@ -221,7 +187,7 @@ export function resolveCalendarFeedsOnLoad(
     return { feeds: [...stored], saveDeviceCopy: false };
 }
 
-/** A new subscription (no color: an unset color lets a feed hint or the default apply, #974); null without a URL. */
+
 export function addCalendarFeed(
     feeds: readonly ExternalCalendarSubscription[],
     input: { id: string; name: string; url: string; defaultName: string },
@@ -232,7 +198,7 @@ export function addCalendarFeed(
     return [...feeds, { id: input.id, name, url, enabled: true }];
 }
 
-/** A picked local .ics file: named as typed, else after the file. */
+
 export function addCalendarFile(
     feeds: readonly ExternalCalendarSubscription[],
     input: { id: string; name: string; fileName: string | null | undefined; uri: string; defaultName: string },
@@ -247,10 +213,7 @@ export const setCalendarFeedEnabled = (feeds: readonly ExternalCalendarSubscript
     feeds.map((feed) => (feed.id === id ? { ...feed, enabled } : feed))
 );
 
-/**
- * `undefined` is the Auto swatch: the pick is dropped so a feed hint or the default applies (#974).
- * Null for a color no swatch has, and for the color the subscription already has (nothing to write).
- */
+
 export function setCalendarFeedColor(
     feeds: readonly ExternalCalendarSubscription[],
     id: string,
@@ -275,11 +238,7 @@ export const removeCalendarFeed = (feeds: readonly ExternalCalendarSubscription[
     feeds.filter((feed) => feed.id !== id)
 );
 
-/**
- * A subscription's URL as the list shows it: its scheme and host only, then "/..." when
- * more follows. Never a user name or password, and never the path or query, which can
- * hold a private feed's token.
- */
+
 export const maskCalendarFeedUrl = (url: string): string => {
     const trimmed = url.trim();
     if (!trimmed) return '';
@@ -289,14 +248,14 @@ export const maskCalendarFeedUrl = (url: string): string => {
     return trimmed.length > origin[0].length ? `${scheme}${host}/...` : `${scheme}${host}`;
 };
 
-/** A subscription's swatches: Auto, then each pickable color (filled in the theme's stand-in). */
+
 export function getCalendarFeedColorOptions(feed: ExternalCalendarSubscription, t: Translate, themePreset?: string) {
     const explicit = hasExplicitExternalCalendarColor(feed.id, feed.color);
     return [
         { color: null as string | null, fill: null as string | null, selected: !explicit, accessibilityLabel: `${feed.name} ${t('taskEdit.textDirection.auto')}` },
         ...EXTERNAL_CALENDAR_COLORS.map((color) => ({
             color: color as string | null,
-            // Fill only — the stored pick stays canonical (#974).
+
             fill: themeExternalCalendarDisplayColor(color, themePreset) as string | null,
             selected: explicit && feed.color === color,
             accessibilityLabel: `${feed.name} ${color}`,
@@ -304,8 +263,6 @@ export function getCalendarFeedColorOptions(feed: ExternalCalendarSubscription, 
     ];
 }
 
-// ---------------------------------------------------------------------------
-// Test: this month's events.
 
 export function getCalendarTestRange(now: Date): { start: Date; end: Date } {
     return {
@@ -316,8 +273,6 @@ export function getCalendarTestRange(now: Date): { start: Date; end: Date } {
 
 export const isChineseCalendarSettingsLanguage = (language: string): boolean => language === 'zh' || language === 'zh-Hant';
 
-// ---------------------------------------------------------------------------
-// Toasts, as React Native shows them.
 
 export const calendarSettingsToasts = (tr: TranslateText, t: Translate) => ({
     loadWritableCalendarsFailed: (): CalendarSettingsToast => ({
@@ -349,8 +304,8 @@ export const calendarSettingsToasts = (tr: TranslateText, t: Translate) => ({
         tone: 'success',
         durationMs: 3000,
     }),
-    /** After Delete Mindwtr calendar; `keptTargetEvents` (keptPushTargetEvents): the chosen calendar, not the app's, kept its pushed events. */
-    /** The device refused the new color: nothing was stored. */
+
+
     pushColorFailed: (): CalendarSettingsToast => ({
         title: tr('settings.syncMobile.error'),
         message: tr('settings.calendarMobile.calendarColorUpdateFailed'),
@@ -377,7 +332,7 @@ export const calendarSettingsToasts = (tr: TranslateText, t: Translate) => ({
         tone: 'success',
         durationMs: 3500,
     }),
-    /** Test's answer: the events loaded, or a failure when a subscription could not be read. */
+
     testResult: (count: number, failedFeeds: number, language: string): CalendarSettingsToast => (
         failedFeeds > 0 ? calendarSettingsToasts(tr, t).testFailed() : calendarSettingsToasts(tr, t).testLoaded(count, language)
     ),

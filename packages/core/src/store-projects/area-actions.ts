@@ -19,7 +19,7 @@ import { actionFail, actionOk, mutateEntities } from './shared';
 
 export type AreaAdditionRows = { areas: Area[]; projects: Project[]; sections: Section[]; tasks: Task[] };
 
-/** The existing deleteArea detach policy, including trashed directly linked Tasks. */
+
 export function planAreaDeletion(area: Area, projects: Project[], tasks: Task[], deviceId: string, now: string, version: 1 | 2 = 2):
     { area: Area; projects: Project[]; tasks: Task[] } {
     return {
@@ -51,7 +51,7 @@ export function areaDeleteEffect(scope: PreparedAreaDelete['scope'], deviceId: s
             ({ before, after: planned.projects[index] })) } : {}) };
 }
 
-/** Preserve the direct store action's historical partial-ID and unknown-ID behavior. */
+
 export function selectAreaOrderRows(activeAreas: Area[], orderedIds: string[]): Area[] {
     const areaById = new Map(activeAreas.map((area) => [area.id, area]));
     const seen = new Set<string>();
@@ -92,7 +92,7 @@ export function areaColorEffect(scope: PreparedAreaColor['scope'], color: string
         }) };
 }
 
-/** The final rows of addArea, including restoreArea followed by updateArea for a tombstone. */
+
 export function planAreaAddition(rows: AreaAdditionRows, name: string, props: Partial<Area> | undefined,
     id: string, deviceId: string, restoreAt: string, updateAt: string, version: 1 | 2 = 2):
     { kind: 'live' | 'fresh' | 'restored'; area: Area; rows: AreaAdditionRows } | null {
@@ -139,8 +139,7 @@ export function planAreaAddition(rows: AreaAdditionRows, name: string, props: Pa
             updatedAt: restoreAt, rev: nextRevision(task.rev), revBy: deviceId };
     });
 
-    // A restored Area receives the same second updateArea revision when the
-    // caller supplies props or changes the trimmed spelling.
+
     const update = Boolean(props && Object.keys(props).length > 0) || restored.name !== trimmed;
     let area = restored;
     if (update) {
@@ -208,7 +207,7 @@ const areaDurableState = (state: TaskStore, data: AppData): TaskStore => ({ ...s
     _allTasks: data.tasks, _allProjects: data.projects, _allSections: data.sections ?? [],
     _allAreas: data.areas ?? [], _allPeople: data.people ?? [], settings: data.settings });
 
-/** Apply only the Area policy changes to the current Task display projection. */
+
 const areaMemoryTasks = (memory: Task[], durable: Task[], effects: Array<{ before: Task; after: Task }>): Task[] => {
     const existing = new Map(memory.map((row) => [row.id, row]));
     const changes = new Map(effects.map((pair) => [pair.before.id, pair]));
@@ -238,7 +237,7 @@ export const createAreaActions = ({
         persist(set, debouncedSave, areaDurableState(memory, durable), next);
         const taskReference = areaMemoryTasks(memory._allTasks, next.tasks, effects);
         const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
-        // Capture the intended write before Zustand notifies synchronous or microtask subscribers.
+
         authority.saveBoundary = { taskReference, lastDataChangeAt,
             generation: getPersistenceStatus().generation, failure: memory.persistenceFailure };
         return { _allAreas: next.areas ?? [], _allProjects: next.projects.map(normalizeProjectLifecycleFields), _allSections: next.sections ?? [],
@@ -280,11 +279,11 @@ export const createAreaActions = ({
         return area;
     },
 
-    /** A first raw creation effect only; a completed retry is answered by its typed receipt, never target equality. */
+
     commitPreparedInboxOrganizeDestinationCreate: async (input, authority): Promise<PreparedTaskEditResult> => {
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict', error: 'Inbox destination creation conflicts with saved data' };
         const adapter = getStorageAdapter();
-        // Match the existing registered prepared-batch seam and recheck every authority after yielding.
+
         await Promise.resolve();
         const shared = referenceBatchModules.shared;
         const checks = referenceBatchModules.inboxOrganizeCreate?.(input);
@@ -346,7 +345,7 @@ export const createAreaActions = ({
                     const current = rows.tasks.find((item) => item.id === row.id);
                     return current && sameAreaAdditionRow.task(current, row);
                 });
-            // A complete persisted effect is the receipt, even after mutable inputs changed.
+
             if (after) { result = { success: true, id: target!.id, outcome: 'replayed' }; return memory; }
             if ((input.kind === 'fresh' && target) || (state.settings.deviceId ?? null) !== input.deviceIdBefore
                 || (input.deviceIdBefore === null ? !input.deviceIdToInitialize : input.deviceIdToInitialize !== null)) return memory;
@@ -390,7 +389,7 @@ export const createAreaActions = ({
                 const before = beforeProjects.get(row.id);
                 return !before || !sameAreaAdditionRow.project(row, before);
             })) return state;
-            // SQLite defaults can hide omitted fields; derive the write only from live rows.
+
             const planned = areaColorEffect({ area: target, projects: linked }, request.color ?? undefined,
                 input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt, input.version ?? 1);
             if (!taskEditValuesEqual(planned, effect)) return state;
@@ -566,11 +565,8 @@ export const createAreaActions = ({
                 ? planAreaColorChange(area, state._allProjects, updates.color, deviceState.deviceId, now) : null;
             let projectsChanged = false;
             let newAllProjects = state._allProjects;
-            // Project.color is required, so clearing the area color repaints its
-            // projects back to the neutral default rather than leaving them stuck
-            // on the color the area just lost. `areaTitle` is the denormalized
-            // copy of the area name: leaving it stale would make the next sync
-            // merge repair every child project (sync-normalization.ts).
+
+
             const repaintColor = 'color' in updates;
             const nextAreaColor = updates.color ?? DEFAULT_PROJECT_COLOR;
             const nextAreaTitle = nextName.trim() || undefined;
@@ -724,7 +720,7 @@ export const createAreaActions = ({
                 .map((item) => item.id === id ? planned.area : item)
                 .sort((a, b) => a.order - b.order);
             const newAllProjects = planned.projects;
-            // Trashed tasks are detached too: sync clears links to non-live Areas.
+
             const newAllTasks = planned.tasks;
             clearDerivedCache();
             persist(set, debouncedSave, state, {
@@ -768,12 +764,8 @@ export const createAreaActions = ({
                 return state;
             }
             const deviceState = ensureDeviceId(state.settings);
-            // deleteArea DETACHES children (clears areaId, keeps them live), so
-            // under the current model nothing below ever matches this timestamp.
-            // The cascade-restore sweep exists only for data written by old app
-            // versions whose area delete cascaded deletedAt onto children — do
-            // not read it as the current delete model (see P2: detach, never
-            // cascade).
+
+
             const cascadeDeletedAt = area.deletedAt;
             const newAllAreas = state._allAreas
                 .map((item) => (

@@ -600,14 +600,14 @@ describe('TaskEditFormTab keyboard handling', () => {
     });
     mockScrollTo.mockClear();
 
-    // Android focuses before the keyboard opens: the focus scroll is deferred, not run.
+
     act(() => {
       findScrollContainer(tree).props.onScroll({ nativeEvent: { contentOffset: { y: 420 } } });
       registeredHandlers.at(-1)?.(42);
     });
     expect(mockScrollTo).not.toHaveBeenCalled();
 
-    // keyboardDidShow alone should replay the pending scroll — no second focus event needed.
+
     act(() => {
       listeners.get('keyboardDidShow')?.({ endCoordinates: { screenY: keyboardTop } });
     });
@@ -618,7 +618,7 @@ describe('TaskEditFormTab keyboard handling', () => {
     const measuredOverlap = (targetY + targetH) - (visibleBottom - bottomClearance);
     expect(mockScrollTo).toHaveBeenCalledWith({ y: 420 + measuredOverlap, animated: false });
 
-    // Hiding the keyboard clears the pending handle so a later show does not re-scroll.
+
     mockScrollTo.mockClear();
     act(() => {
       listeners.get('keyboardDidHide')?.();
@@ -642,7 +642,7 @@ describe('TaskEditFormTab keyboard handling', () => {
     }) as any);
     mockFindNodeHandle.mockReturnValue(9001);
     const targetY = 700;
-    const targetH = 400; // taller than the reveal cap
+    const targetH = 400;
     const scrollY = 0;
     const scrollH = 800;
     const keyboardTop = 520;
@@ -683,7 +683,7 @@ describe('TaskEditFormTab keyboard handling', () => {
     const reveal = Math.min(targetH, visibleHeight * 0.4);
     const cappedOverlap = (targetY + reveal) - (keyboardTop - bottomClearance);
     expect(mockScrollTo).toHaveBeenCalledWith({ y: 420 + cappedOverlap, animated: false });
-    // A full-height target would have scrolled further and buried the input's top.
+
     const uncappedOverlap = (targetY + targetH) - (keyboardTop - bottomClearance);
     expect(mockScrollTo).not.toHaveBeenCalledWith({ y: 420 + uncappedOverlap, animated: false });
   });
@@ -862,7 +862,7 @@ describe('TaskEditFormTab copilot chips', () => {
 
     expect(findButton(tree, '15min')).toBeTruthy();
     expect(findButton(tree, '@phone')).toBeUndefined();
-    // A lone remaining part needs no "apply all".
+
     expect(findButton(tree, 'copilot.applyAll')).toBeUndefined();
     expect(JSON.stringify(tree.toJSON())).toContain('copilot.applied');
   });

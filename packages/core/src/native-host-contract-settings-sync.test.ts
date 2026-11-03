@@ -31,27 +31,18 @@ import type { SyncEncryptionState } from './sync-encryption';
 import type { AppSettings, Project, Task } from './types';
 import { generateUUID } from './uuid';
 
-/**
- * The frozen React Native Settings › Sync screen (sync-settings-parity.fixtures.json,
- * captured by apps/mobile/components/settings/sync-settings-screen.parity.test.tsx),
- * replayed through the native host contract. The replay plays the native screen: it
- * keeps the screen's own state (the form drafts, the encryption fields, which cards
- * are open), reads the view, sends each control's command, and lays the view out in
- * the order React Native draws it. The device answers from the scenario's queues
- * exactly as the React Native harness's stubs do.
- */
 
 const device = vi.hoisted(() => ({
     queues: {} as Record<string, unknown[]>,
     held: [] as (() => void)[],
     holdStarted: null as null | (() => void),
     calls: [] as unknown[][],
-    /** What the host's error log received. */
+
     logged: [] as string[],
     encryption: { state: 'off' as string, unavailable: false, pending: false, incomplete: null as string | null, partly: false },
 }));
 
-/** The next answer for `name`, or `fallback` when the scenario queued none. */
+
 const next = (name: string, fallback: unknown) => {
     const queue = device.queues[name];
     return queue && queue.length > 0 ? queue.shift() : fallback;
@@ -62,7 +53,7 @@ const hold = () => new Promise<void>((resolve) => {
     device.holdStarted?.();
 });
 
-/** The React Native harness's `answer`: a string answers itself, `{ error }` rejects, `{ value }` answers, 'hold' waits. */
+
 const answer = async (name: string, fallback: unknown): Promise<any> => {
     const entry = next(name, fallback);
     if (entry === 'hold') {
@@ -128,8 +119,6 @@ const value = <T,>(result: NativeHostResult<T>): T => {
 };
 const normalize = (entry: unknown): unknown => JSON.parse(JSON.stringify(entry, (_key, item) => (item === undefined ? '<undefined>' : item)));
 
-// ---------------------------------------------------------------------------
-// The store: the fixture's data, with settings writes recorded as the harness records them.
 
 const writes: unknown[][] = [];
 let realUpdateSettings: ((...args: unknown[]) => Promise<unknown>) | null = null;
@@ -164,8 +153,6 @@ async function seed(settings: AppSettings, titled: boolean) {
     writes.length = 0;
 }
 
-// ---------------------------------------------------------------------------
-// The device: RN's key-value store and secret store, and the stubs the harness has.
 
 type DeviceState = {
     os: 'android' | 'ios';
@@ -176,7 +163,7 @@ type DeviceState = {
     secrets: Map<string, string>;
     dropboxTokens: Record<string, unknown> | null;
     log: unknown[][];
-    /** Keys whose writes fail, as a full or broken store does. */
+
     failKeys: Set<string>;
 };
 
@@ -205,7 +192,7 @@ function createDevice(input: Device): { state: DeviceState; host: NativeSyncSett
     device.calls.length = 0;
     device.logged.length = 0;
     const calls = device.calls;
-    /** A transition: 'ok' moves the state to `after`, `{ cleanup }` commits it and defers the cleanup. */
+
     const transition = async (name: string, after: string, onProgress?: (progress: { phase: 'attachments' | 'documents'; completed: number; total: number }) => void): Promise<void> => {
         const entry = next(name, 'ok');
         if (entry === 'hold') {
@@ -367,7 +354,7 @@ function createDevice(input: Device): { state: DeviceState; host: NativeSyncSett
         },
         listRecoverySnapshots: async () => [],
     };
-    // React Native offers iCloud only on iOS; the host binds CloudKit there.
+
     Object.defineProperty(host, 'cloudKit', {
         enumerable: true,
         get: () => (state.os === 'ios' ? {
@@ -387,8 +374,6 @@ async function openHost(host: NativeSyncSettingsHost, language = 'en'): Promise<
     return contract;
 }
 
-// ---------------------------------------------------------------------------
-// The native screen.
 
 type Control = { label: string; tinted: boolean; disabled: boolean; busy: boolean; press: () => Promise<unknown> | void };
 type Input = { label: string | null; placeholder: string | null; shown: string; secure: boolean; type: (text: string) => Promise<unknown> | void };
@@ -400,7 +385,7 @@ const dots = (text: string) => '•'.repeat(text.length);
 function syncDriver(contract: Host, scenario: Scenario, dev: ReturnType<typeof createDevice>) {
     const log = { toasts: [] as unknown[][], device: 0, writes: 0, calls: 0 };
     let view!: NativeSyncSettings;
-    // Screen state.
+
     let open = { preferences: false, history: false, snapshots: false };
     let forms: { kind: string | null; url: string; username: string; password: string | null; token: string | null; insecure: boolean } = {
         kind: null, url: '', username: '', password: null, token: null, insecure: false,
@@ -415,7 +400,7 @@ function syncDriver(contract: Host, scenario: Scenario, dev: ReturnType<typeof c
 
     const draft = () => (forms.kind === 'webdav' ? { url: forms.url } : forms.kind === 'selfhosted' ? { url: forms.url, token: forms.token } : {});
 
-    /** Re-reads the view and applies React Native's effects on the screen state. */
+
     const refresh = () => {
         const before = view;
         view = value(contract.getSyncSettings({ draft: draft() }));
@@ -424,7 +409,7 @@ function syncDriver(contract: Host, scenario: Scenario, dev: ReturnType<typeof c
         if (!panel || (panel.kind !== 'webdav' && panel.kind !== 'selfhosted')) {
             forms = { kind: panel?.kind ?? null, url: '', username: '', password: null, token: null, insecure: false };
         } else if (forms.kind !== panel.kind || !prior || prior.kind !== panel.kind) {
-            // A form mounts with the stored values.
+
             forms = {
                 kind: panel.kind,
                 url: panel.url.value,
@@ -434,7 +419,7 @@ function syncDriver(contract: Host, scenario: Scenario, dev: ReturnType<typeof c
                 insecure: panel.allowInsecureHttp.value,
             };
         } else {
-            // A form takes a stored value again whenever it changes.
+
             if (panel.url.value !== prior.url.value) forms.url = panel.url.value;
             if (panel.allowInsecureHttp.value !== prior.allowInsecureHttp.value) forms.insecure = panel.allowInsecureHttp.value;
             if (panel.kind === 'webdav' && prior.kind === 'webdav') {
@@ -444,7 +429,7 @@ function syncDriver(contract: Host, scenario: Scenario, dev: ReturnType<typeof c
             if (panel.kind === 'selfhosted' && prior.kind === 'selfhosted' && panel.token.mask !== prior.token.mask) forms.token = null;
         }
         view = value(contract.getSyncSettings({ draft: draft() }));
-        // The card's fields read its own passphrases: a closed flow empties them.
+
         const shownFields = new Set((view.encryption?.rows ?? []).flatMap((row) => (row.kind === 'field' ? [row.field] : [])));
         for (const name of Object.keys(fields)) if (!shownFields.has(name as never)) fields[name] = '';
     };
@@ -453,7 +438,7 @@ function syncDriver(contract: Host, scenario: Scenario, dev: ReturnType<typeof c
     const selfHostedFields = () => ({ url: forms.url, token: forms.token, allowInsecureHttp: forms.insecure });
     const formFields = () => (forms.kind === 'webdav' ? { webdav: webdavFields() } : forms.kind === 'selfhosted' ? { selfHosted: selfHostedFields() } : {});
 
-    /** Sends a command; a held device answer leaves it running, as a tap does on React Native. */
+
     const send = async (command: () => Promise<NativeHostResult<any>>) => {
         let holdStarted!: () => void;
         const held = new Promise<void>((resolve) => { holdStarted = resolve; });
@@ -463,7 +448,7 @@ function syncDriver(contract: Host, scenario: Scenario, dev: ReturnType<typeof c
         void running.finally(() => pending.delete(running));
         await Promise.race([running, held]);
         device.holdStarted = null;
-        // Let a held command's reads settle as React Native's renders would.
+
         for (let index = 0; index < 30; index += 1) await Promise.resolve();
     };
 
@@ -744,12 +729,7 @@ describe('native host contract: Settings › Sync', () => {
     );
 });
 
-// ---------------------------------------------------------------------------
-// Replays after a restart. A restart is a new host over the same store and the same
-// device (RN's key-value store and secret store keep what the first run stored),
-// with Settings › Sync opened again; the request replays with its first UUID.
 
-// Shared by the tests below: a screen over a seeded store and a device, and a restart.
 const WEBDAV_STORED = {
     storage: { [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com/mindwtr', [WEBDAV_USERNAME_KEY]: 'alice' },
     secrets: { [WEBDAV_PASSWORD_KEY]: 'hunter22' },
@@ -999,7 +979,7 @@ describe('native Settings › Sync unlock-only admission', () => {
         expect(rows(contract)).toEqual(before.map((row) => row.kind === 'action' && row.action.type === 'submit' ? { ...row, enabled: false } : row));
         expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
         expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([]);
-        // The owned refusal retires the staged text; a retry requires explicit retyping.
+
         value(await act(contract, { type: 'typed', field: 'current', value: 'changed phrase' }, revision));
         value(await act(contract, { type: 'submit', flow: 'unlock' }, revision, generateUUID()));
         expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([['provideSyncEncryptionPassphrase', 'changed phrase']]);
@@ -1103,7 +1083,7 @@ describe('native Settings › Sync unlock-only admission', () => {
         device.holdStarted = null;
         value(await act(contract, { type: 'typed', field: 'current', value: 'second phrase' }));
         expect(await contract.runSyncEncryptionAction(request)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // Restoring the original field still cannot reuse the UUID with a different revision.
+
         value(await act(contract, { type: 'typed', field: 'current', value: 'first phrase' }));
         expect(await contract.runSyncEncryptionAction({ ...request, revision: 'different-revision' }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -1455,7 +1435,7 @@ describe.each(['saved-webdav', 'saved-webdav-or-local'] as const)('native Settin
         expect(rows(contract)).toContainEqual(expect.objectContaining({ kind: 'text', tone: 'danger', text: en['settings.syncEncryptionErrorMismatch'] }));
         expect(device.calls.filter((call) => call[0] === 'changeSyncEncryptionPassphrase')).toEqual([]);
         expect(submit(contract)).toMatchObject({ enabled: false });
-        // Refilling the other two must leave this retired field missing.
+
         for (const [field, phrase] of Object.entries(phrases)) {
             if (field !== retired) await type(contract, field, phrase);
         }
@@ -1656,7 +1636,7 @@ describe('native Settings › Sync selected local-only Enable and Disable', () =
 
     it.each(['', ' ', 'unsupported', 'cloud'])('refuses actual persisted backend %j despite stale local card proof', async (backend) => {
         const { dev, contract } = await start(local);
-        // Capture the new revision by reopening, without changing the test host's stale pending-first-sync report.
+
         dev.state.storage.set(SYNC_BACKEND_KEY, backend);
         value(await contract.openSyncSettings());
         const stored = storedConfig(dev);
@@ -1760,7 +1740,7 @@ describe('native Settings › Sync selected local-only Enable and Disable', () =
         let settled = false;
         const enable = act(contract, { type: 'submit', flow: 'enable' }, revision, generateUUID()).then((result) => { settled = true; return result; });
         try {
-            // An independent configuration read gives the encryption continuation time to reach its pending-write boundary.
+
             await dev.host.storage.multiGet([SYNC_BACKEND_KEY]);
             await dev.host.secrets.get(WEBDAV_PASSWORD_KEY);
             await dev.host.secrets.get(CLOUD_TOKEN_KEY);
@@ -1816,7 +1796,7 @@ describe('native Settings › Sync final selected encryption configuration proof
             let fullReads = 0, once = true;
             dev.host.storage.multiGet = async (keys) => {
                 if (keys.length > 1) fullReads += 1;
-                // The previous guard read just the backend; the corrected guard reads the full configuration here.
+
                 if (once && (keys.length === 1 && keys[0] === SYNC_BACKEND_KEY || keys.length > 1 && fullReads === 2)) {
                     once = false; entered(); await held;
                 }
@@ -2009,7 +1989,7 @@ describe('native Settings › Sync Off durable acknowledgement', () => {
         });
         try {
             await appending;
-            // A full event-loop turn lets an unawaited action incorrectly finish.
+
             await new Promise<void>((resolve) => setImmediate(resolve));
             expect(acknowledged).toBe(false);
             expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: false, failed: false });
@@ -2067,7 +2047,7 @@ describe('native Settings › Sync Off durable acknowledgement', () => {
             expect(device.calls.filter((call) => call[0] === 'logInfo')).toEqual([]);
             expect(getPersistenceStatus().queued).toBeGreaterThan(0);
         } finally {
-            // Test teardown only; the fatal action itself never drains or retries.
+
             useTaskStore.setState({ persistenceFailure: null, retryPersistence });
             await flushPendingSave();
         }
@@ -2109,7 +2089,7 @@ describe('native Settings › Sync fatal cleanup boundary', () => {
         expect(value(contract.getSyncSettings()).busy.syncing).toBe(true);
         expect(dev.state.storage.get(SYNC_BACKEND_KEY)).toBe(phase === 'verification' ? undefined : 'webdav');
         expect(dev.state.secrets.get(WEBDAV_PASSWORD_KEY)).toBe(phase === 'verification' ? undefined : 'hunter22');
-        // A fatal action did not produce a completed success receipt for its UUID.
+
         const retry = await (phase === 'sync now' ? contract.syncNow(input) : contract.saveSyncBackend(input)).catch((error: unknown) => error);
         if (phase === 'verification') expect(retry).toBe(fatal);
         else expect(retry).toMatchObject({ ok: false, error: { code: phase === 'first sync' ? 'STALE_REVISION' : 'ACTION_FAILED' } });
@@ -2193,7 +2173,7 @@ describe('native host contract: Settings › Sync commands replayed after a rest
         value(await restarted.syncNow(input));
         expect(storedConfig(dev)).toEqual(stored);
         expect(since(dev, at).writes).toEqual([]);
-        // The folder is proven and unchanged: one normal sync, no activation probe.
+
         expect(since(dev, at).calls.filter((call) => call[0] === 'performMobileSync')).toEqual([
             ['performMobileSync', null, { manual: true, ignorePendingRemoteWriteBackoff: false }],
         ]);
@@ -2295,7 +2275,7 @@ describe('native host contract: Settings › Sync commands replayed after a rest
         const abandon = (await rows()).find((row) => row.kind === 'action' && row.label === t('settings.syncEncryptionAbandon'));
         expect(abandon).toMatchObject({ action: { type: 'open', flow: 'abandon' }, enabled: true });
         expect((await rows()).some((row) => row.kind === 'text' && row.text === t('settings.syncEncryptionErrorTransitionIncomplete'))).toBe(true);
-        // Also in an open flow, right where a retry just failed.
+
         value(await contract.runSyncEncryptionAction({ action: { type: 'open', flow: 'enable' } }));
         expect((await rows()).some((row) => row.kind === 'action' && row.label === t('settings.syncEncryptionAbandon'))).toBe(true);
         value(await contract.runSyncEncryptionAction({ action: { type: 'cancel' } }));
@@ -2471,7 +2451,7 @@ describe('native host contract: Settings › Sync keeps secrets out of its views
         expect(contract.getSyncSettings()).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
         expect(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'off' })).toMatchObject({ ok: false });
         value(await opening);
-        // No app key: the build offers Dropbox, but choosing it shows no Dropbox panel.
+
         value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'dropbox' }));
         expect(value(contract.getSyncSettings()).panel).toBeNull();
         device.calls.length = 0;
@@ -2481,8 +2461,6 @@ describe('native host contract: Settings › Sync keeps secrets out of its views
     });
 });
 
-// ---------------------------------------------------------------------------
-// Correction pass (review.md findings 1-7).
 
 describe('native host contract: Settings › Sync correction pass', () => {
     const TOKEN = 'abcdefghijklmnopqrstuvwxyz012345';
@@ -2496,7 +2474,7 @@ describe('native host contract: Settings › Sync correction pass', () => {
         expect(storedConfig(dev).storage).toEqual(coerced);
         ({ dev } = await start({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit', [CLOUD_PROVIDER_KEY]: 'cloudkit' } }));
         expect(storedConfig(dev).storage).toEqual(coerced);
-        // The build supports Dropbox; only the host's Dropbox port is missing.
+
         dev = createDevice({ dropboxAppKey: 'app-key', storage: { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' } });
         delete (dev.host as { dropbox?: unknown }).dropbox;
         value(await (await openHost(dev.host)).openSyncSettings());
@@ -2599,8 +2577,6 @@ describe('native host contract: Settings › Sync correction pass', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Correction pass (verification of e43ac25eb, review.md).
 
 describe('native host contract: Settings › Sync verification pass', () => {
     const TOKEN = 'abcdefghijklmnopqrstuvwxyz012345';
@@ -2676,8 +2652,6 @@ describe('native host contract: Settings › Sync verification pass', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Final pass: the redaction set holds every credential the transport knows.
 
 describe('native host contract: Settings › Sync redaction set', () => {
     it('7: keeps stored and refreshed Dropbox tokens out of a failure toast', async () => {
@@ -2701,9 +2675,6 @@ describe('native host contract: Settings › Sync redaction set', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// The native Android pass (S3): the Sync row opens, the screen's commands never reach the
-// journal or durable receipts, and dates follow the device locale as React Native's do.
 
 describe('native host contract: Settings › Sync on the native host (S3)', () => {
     const originalTz = process.env.TZ;
@@ -2777,7 +2748,7 @@ describe('native host contract: Settings › Sync activation without some attach
         continueLabel: en['settings.syncMissingFilesContinue'],
         cancelLabel: en['common.cancel'],
     };
-    /** The activation probe answers "these files are missing" until they are accepted; [again] is found on the accepted rerun. */
+
     const refusing = (dev: Awaited<ReturnType<typeof start>>['dev'], again: typeof files = [], probeMs = 0) => {
         const probes: (readonly string[] | null)[] = [];
         dev.host.performSync = async (_path, options) => {
@@ -2791,12 +2762,12 @@ describe('native host contract: Settings › Sync activation without some attach
         };
         return probes;
     };
-    /** The Android host answers the question (it registers answerSyncMissingFiles and draws `missingFiles`). */
+
     const answering = <T extends { dev: Awaited<ReturnType<typeof start>>['dev'] }>(started: T): T => {
         started.dev.host.answersMissingFilesQuestion = true;
         return started;
     };
-    /** The view's question once the running command's activation asks it. */
+
     const asked = async (contract: Awaited<ReturnType<typeof start>>['contract']) => {
         for (let turn = 0; turn < 200; turn += 1) {
             const question = value(contract.getSyncSettings()).missingFiles;
@@ -2820,7 +2791,7 @@ describe('native host contract: Settings › Sync activation without some attach
         value(contract.answerSyncMissingFiles({ questionId: question.questionId, continue: true }));
         value(await saving);
 
-        // One check, then the accepted activation: never a third probe (React Native runs two).
+
         expect(probes).toEqual([null, ['att-1']]);
         expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBe(webdavFields.url);
         expect(value(contract.getSyncSettings()).missingFiles).toBeNull();
@@ -2925,7 +2896,7 @@ describe('native host contract: Settings › Sync activation without some attach
         try {
             const { dev, contract } = answering(await start({}));
             value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
-            // A slow first probe: 10 minutes before the question.
+
             const probes = refusing(dev, [], 10 * 60 * 1000);
             const saving = contract.saveSyncBackend({
                 requestId: generateUUID(), revision: value(contract.getSyncSettings()).configRevision, webdav: { ...webdavFields, password: 'pw' },
@@ -2934,7 +2905,7 @@ describe('native host contract: Settings › Sync activation without some attach
             for (let turn = 0; turn < 200 && !value(contract.getSyncSettings()).missingFiles; turn += 1) await vi.advanceTimersByTimeAsync(0);
             expect(value(contract.getSyncSettings()).missingFiles).not.toBeNull();
 
-            // CoreHost waits 30 minutes on the whole command; the question ends first.
+
             await vi.advanceTimersByTimeAsync(19 * 60 * 1000);
             value(await saving);
 

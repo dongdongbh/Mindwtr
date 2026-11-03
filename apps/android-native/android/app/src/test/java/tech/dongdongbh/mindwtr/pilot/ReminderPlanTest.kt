@@ -6,11 +6,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
-/** Core's reminder plan applied in core's order (native-host-contract-reminders.ts), and React Native's old alarms cancelled once. */
+
 class ReminderPlanTest {
     private val events = mutableListOf<String>()
     private var scheduleFailure: Throwable? = null
-    /** Only the alarm with this id is refused (null: every alarm, with [scheduleFailure]). */
+
     private var refusedId: Int? = null
 
     private val port = object : ReminderPlan.Port {
@@ -88,7 +88,7 @@ class ReminderPlanTest {
         assertEquals(listOf("remove 7", "cancel 7", "clear", "store {after}"), events)
     }
 
-    // RN 271fb6be2: one refused alarm (a revoked exact-alarm grant, Android's 500 cap) is skipped and the rest are made.
+
     @Test fun aRefusedAlarmIsSkippedAndTheRestAreMade() {
         scheduleFailure = SecurityException("Too many alarms")
         refusedId = 11
@@ -99,9 +99,7 @@ class ReminderPlanTest {
         assertEquals(listOf("store $ahead", "cancel 7", "refused 11", "cancel 11", "schedule 12 task:b"), events.dropLast(1))
     }
 
-    // RN 271fb6be2's map: the final map is stored with only the refused alarm put back as not yet made (its write-ahead entry), so a
-    // cancel in that plan stays cancelled and a moved alarm is judged by its new version; the refused one is made again next time.
-    // Its replacement never armed, so the alarm it was replacing is cancelled too: it must not fire at its old time with the new payload.
+
     @Test fun aRefusalStoresTheFinalMapWithTheRefusedAlarmPendingAndCancelsWhatItWasReplacing() {
         scheduleFailure = SecurityException("Too many alarms")
         refusedId = 11
@@ -122,7 +120,7 @@ class ReminderPlanTest {
         assertEquals(listOf("remove 7", "cancel 7", "remove 11", "refused 11", "cancel 11", "schedule 12 task:b"), events.drop(1).dropLast(1))
     }
 
-    // A refused Snooze (its own plan: no map, `stateAhead` says not yet made) keeps that state, so the retry makes it once.
+
     @Test fun aRefusedSnoozeKeepsItsNotYetMadeState() {
         scheduleFailure = SecurityException("Too many alarms")
         val snooze = plan(null, emptyList(), listOf(alarm("snooze:u", 1073741900, null))).put("stateAhead", "{ahead-state}")
@@ -148,7 +146,7 @@ class ReminderPlanTest {
         assertEquals(listOf("store {ahead}", "checkpoint write-ahead", "schedule 11 task:a", "checkpoint scheduled", "store {after}"), events)
     }
 
-    /** A ledger on [store], as a new process would open it (SharedPreferences in the app). */
+
     private fun ledger(store: MutableMap<Int, String>) = ReminderLedger(read = { store.toMap() },
         write = { changes -> changes.forEach { (id, value) -> if (value == null) store.remove(id) else store[id] = value }; true })
 
@@ -157,7 +155,7 @@ class ReminderPlanTest {
         val failing = ReminderLedger(read = { disk.toMap() }, write = { false })
         assertThrows(IllegalStateException::class.java) { failing.record(cancelled = listOf(5), armed = listOf(6 to 2_000L)) }
         assertThrows(IllegalStateException::class.java) { failing.clear() }
-        // Through a plan: the write-ahead is stored, then the ledger write fails, and no alarm is cancelled or made.
+
         val port = object : ReminderPlan.Port by port {
             override fun record(cancelled: List<Int>, armed: List<Pair<Int, Long>>) = failing.record(cancelled, armed)
         }
@@ -165,23 +163,23 @@ class ReminderPlanTest {
             ReminderPlan.apply(plan("{ahead}", listOf(5 to "expired"), listOf(alarm("task:a", 6, null))), port)
         }
         assertEquals(listOf("store {ahead}"), events)
-        // A one-shot whose fired mark cannot be written still shows once: silence is worse than a rare second showing.
+
         assertEquals(true, failing.deliver(5, 1000, "once", 1001))
     }
 
     @Test fun aDeliveryShowsOnlyWhileTheLedgerOnDiskHoldsItsAlarmAtItsTimeAcrossProcesses() {
         val disk = mutableMapOf<Int, String>()
         val hour = 3_600_000L
-        // Unknown to the ledger (cancelled, or never this app's): nothing shows.
+
         assertEquals(false, ledger(disk).deliver(5, 10 * hour, "once", 10 * hour + 1))
         ledger(disk).record(cancelled = emptyList(), armed = listOf(5 to 10 * hour, 6 to 8 * hour, 7 to 9 * hour))
-        // Made again for 11:00 (the task moved) while the 10:00 delivery was queued: that one shows nothing.
+
         ledger(disk).record(cancelled = emptyList(), armed = listOf(5 to 11 * hour))
         assertEquals(false, ledger(disk).deliver(5, 10 * hour, "once", 10 * hour + 1))
-        // Cancelled, then the process died: the queued delivery in the next process shows nothing (a disabled digest too).
+
         ledger(disk).record(cancelled = listOf(6), armed = emptyList())
         assertEquals(false, ledger(disk).deliver(6, 8 * hour, "daily", 8 * hour + 1))
-        // A one-shot shows once and is recorded as fired, on disk; a repeating one stays armed until core makes it again.
+
         assertEquals(true, ledger(disk).deliver(5, 11 * hour, "once", 11 * hour + 1))
         assertEquals(false, ledger(disk).deliver(5, 11 * hour, "once", 11 * hour + 2))
         assertEquals(listOf(5), ledger(disk).fired())
@@ -212,9 +210,8 @@ class ReminderPlanTest {
         val done = RnAlarmCleanup.run(rows = { listOf(listOf(1_790_000_001), listOf(3, 1_790_000_002)) }, cancel = { events += "cancel $it" },
             cancelNative = { events += "native" }, stripButtons = { events += "strip" }, forgetMaps = { events += "forget" }, deleteTable = { events += "delete" })
         assertEquals(2, done)
-        // RN's delivered reminders lose their buttons (they target RN's receiver, which is gone) while RN's inventory still exists.
-        // An RN build ran since this app's last start (native → RN → native): every alarm this app made before goes too, so one
-        // whose task was completed in RN never shows.
+
+
         assertEquals(listOf("cancel 1790000001", "cancel 3", "cancel 1790000002", "native", "strip", "forget", "delete"), events)
     }
 
@@ -228,8 +225,8 @@ class ReminderPlanTest {
 
     @Test fun aReactNativeRowThatCannotBeReadFailsTheCleanupAndKeepsEverything() {
         assertEquals(listOf(listOf(1_790_000_001)), RnAlarmCleanup.requestCodes(listOf("""{"alarmId":1790000001,"id":3}""")))
-        // RN's release builds shrink AlarmModel's field names (R8): every whole number in the row is a candidate request code. A code
-        // that names no RN alarm finds no PendingIntent and cancels nothing (FLAG_NO_CREATE).
+
+
         assertEquals(listOf(listOf(3, 1_790_000_001)), RnAlarmCleanup.requestCodes(listOf("""{"A":3,"B":"Pay rent","q":1790000001,"r":true,"s":1.5,"t":99999999999}""")))
         for (row in listOf(null, "{not json", """{"A":"x","B":true}""")) {
             assertThrows(IllegalStateException::class.java) { RnAlarmCleanup.requestCodes(listOf("""{"alarmId":1}""", row)) }
@@ -248,7 +245,7 @@ class ReminderPlanTest {
     }
 
     @Test fun theCleanupForgetsOnlyReactNativesAlarmMapNeverItsPomodoroRecord() {
-        // The upgrade allows exactly one RKStorage key to change; RN's Pomodoro record belongs to the Pomodoro pass (R2).
+
         assertEquals(listOf("mindwtr:local:alarms:v1"), RnAlarmCleanup.FORGOTTEN_KEYS)
     }
 

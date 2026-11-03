@@ -18,13 +18,12 @@ export function getImageExtension(file: File): string {
     return types[file.type.toLowerCase()] || (extension === 'jpeg' ? 'jpg' : extension) || 'png';
 }
 
-/** A paste that carried nothing at all: how WebKitGTK (Linux) delivers a clipboard image. */
+
 export function isEmptyPasteEvent(data: DataTransfer | null): boolean {
     return !data?.getData?.('text/plain') && (data?.types?.length ?? 0) === 0;
 }
 
-// The async clipboard API still reads that image; the Rust side allows WebKit's clipboard
-// permission request (#690). Permission denied or unsupported reads as no images.
+
 export async function readAsyncClipboardImageFiles(): Promise<File[]> {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.read) return [];
     try {

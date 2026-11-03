@@ -1,10 +1,6 @@
 import * as chrono from 'chrono-node';
 
-/**
- * chrono-node's locales quick-add parses with, each behind a call. The native bundles replace this file with a require per
- * locale subpath (apps/android-native/scripts/lazy-chrono.mjs), so a locale's parsers initialize on its first parse, not at
- * every start (about 18 ms for all of them on the S23). Elsewhere this is the one static import.
- */
+
 export const chronoLocale = {
     de: (): typeof chrono.de => chrono.de,
     en: (): typeof chrono.en => chrono.en,

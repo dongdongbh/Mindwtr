@@ -182,9 +182,7 @@ describe('TaskEditScheduleField', () => {
             );
         });
 
-        // The picker being closed (showDatePicker null) must no longer hide the
-        // chips: on Android that same state opens the native dialog on top of
-        // the sheet, so gating chips on it made them unreachable (issue #901).
+
         expect(hiddenTree.root.findAllByProps({ testID: 'quick-date-chips-row' }).length).toBeGreaterThan(0);
 
         let activeTree!: renderer.ReactTestRenderer;
@@ -1059,8 +1057,7 @@ describe('TaskEditScheduleField', () => {
     });
 });
 
-// Frozen from the original RN caller at 2d62a09a, before preview extraction.
-// Source hashes and exact oracle inputs/outputs: ios-recurrence-preview-20260927-19.
+
 describe('RN recurrence calendar preview parity', () => {
     const originalTZ = process.env.TZ;
     beforeAll(() => {

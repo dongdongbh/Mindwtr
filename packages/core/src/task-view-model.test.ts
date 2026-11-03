@@ -22,13 +22,7 @@ import { formatTaskEditorDate } from './task-editor-schedule';
 import { buildTaskViewModel, type TaskViewRow } from './task-view-model';
 import type { Area, ChecklistItem, Project, Section, Task } from './types';
 
-/**
- * The frozen React Native View tab, Markdown preview, checklist field and checklist
- * rules (task-view-parity.fixtures.json, captured by
- * apps/mobile/components/task-edit/TaskEditViewTab.parity.test.tsx), replayed through
- * core's models. Each model's output is read the way the harness read React Native's
- * rendered tree.
- */
+
 type Handlers = { project: boolean; context: boolean; tag: boolean; status: boolean };
 type Fixture = {
     now: string;
@@ -51,7 +45,7 @@ const lookup = createMarkdownLinkLookup(fixture.store.tasks, fixture.store.proje
 let t: (key: string) => string = (key) => key;
 const originalTimezone = process.env.TZ;
 beforeAll(async () => {
-    // Match the frozen RN harness instead of the developer machine's timezone.
+
     process.env.TZ = 'UTC';
     const english = await loadTranslations('en');
     t = (key) => english[key] || key;
@@ -61,8 +55,6 @@ afterAll(() => {
     else process.env.TZ = originalTimezone;
 });
 
-// ---------------------------------------------------------------------------
-// Reading core's models as the harness read React Native's tree.
 
 const readInline = (inline: MarkdownInline[]) => inline.map((node) => {
     if (node.type === 'deletedReference') return ['deleted', node.text, ` (${t(node.entityType === 'task' ? 'markdown.referenceDeletedTask' : 'markdown.referenceDeletedProject')})`];
@@ -149,7 +141,6 @@ const ids = () => {
     return () => `uuid-${++next}`;
 };
 
-// ---------------------------------------------------------------------------
 
 describe('task view parity with the frozen React Native editor', () => {
     it('covers every scenario the fixture froze', () => {

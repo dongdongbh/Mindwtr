@@ -3,14 +3,14 @@ import { runManualPullSync, type ManualPullSyncDeps } from './manual-pull-sync';
 import { getSyncConflictCount } from './mobile-sync-utils';
 import { isLikelyOfflineSyncError } from './sync-service-utils';
 
-// Mobile's useManualPullSync rules (5bb0ea8f asked for pull to sync on native too); the hook's own test covers RN's timing.
+
 const deps = (overrides: Partial<ManualPullSyncDeps> = {}): ManualPullSyncDeps => ({
     getConfigurationStatus: async () => ({ configured: true, backend: 'webdav', cloudProvider: undefined }),
     getActivityState: () => 'idle',
     performSync: async () => ({ success: true }),
     isLikelyOfflineSyncError,
     getSyncConflictCount,
-    // No translation: core's English fallbacks.
+
     t: (key) => key,
     ...overrides,
 });

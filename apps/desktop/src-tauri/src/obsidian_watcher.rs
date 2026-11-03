@@ -229,8 +229,6 @@ fn run_watch_event_loop<FChange, FError>(
     }
 }
 
-// Recursive notify-watch setup (and stop's worker-thread join) off the UI
-// thread; the shared watcher handle is already Mutex-guarded (B1).
 #[tauri::command(async)]
 pub(crate) fn start_obsidian_watcher(
     app: AppHandle,

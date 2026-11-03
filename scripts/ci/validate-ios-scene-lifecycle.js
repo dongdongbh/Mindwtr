@@ -4,9 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { DOMParser } = require('@xmldom/xmldom');
 
-// react-native-quick-crypto 1.1.7 raises the host app and Pods to iOS 16.4
-// for Nitro. This validator guards against the scene migration changing that
-// existing effective floor; widget/extension targets may remain at 15.1.
+
 const expectedHostDeploymentTarget = '16.4';
 const expectedSceneDelegate = 'MindwtrSceneDelegate';
 const launchScreenKeys = [

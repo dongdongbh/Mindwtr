@@ -10,11 +10,7 @@ import {
     type ExternalCalendarFeedsHost,
 } from './external-calendar-feeds';
 
-/**
- * The feed and device calendar ports as a native host binds them. React Native's
- * own suite (apps/mobile/tests/external-calendar.test.ts) runs the same code
- * through its binding.
- */
+
 const ics = (events: [string, string, string][]) => [
     'BEGIN:VCALENDAR', 'VERSION:2.0',
     ...events.flatMap(([uid, start, summary]) => ['BEGIN:VEVENT', `UID:${uid}`, `DTSTART:${start}`, `DURATION:PT1H`, `SUMMARY:${summary}`, 'END:VEVENT']),
@@ -108,7 +104,7 @@ describe('external calendar feeds behind the host ports', () => {
             ['readLocalFile', 'content://downloads/42'],
             ['fetch', 'https://example.com/broken.ics'],
         ]);
-        // The list still names every stored subscription, the failed one included.
+
         expect(result.calendars.map((calendar) => calendar.id)).toEqual(['team', 'local', 'broken', 'off']);
     });
 
@@ -260,7 +256,7 @@ describe('external calendar feeds behind the host ports', () => {
             ],
             events: [
                 { id: 'e1', calendarId: 'work', title: 'Secret meeting', startDate: '2026-09-10T09:00:00.000Z', endDate: '2026-09-10T10:00:00.000Z' },
-                // Android's provider stores an all-day event at UTC midnights.
+
                 { id: 'e2', calendarId: 'work', title: 'Holiday', startDate: '2026-09-14T00:00:00.000Z', endDate: '2026-09-15T00:00:00.000Z', allDay: true },
                 { id: 'e3', calendarId: 'work', title: 'Pushed by marker', notes: '[Mindwtr Calendar Mirror]\nMindwtr-Task-ID: t1\n[/Mindwtr Calendar Mirror]', startDate: '2026-09-11T09:00:00.000Z', endDate: '2026-09-11T10:00:00.000Z' },
                 { id: 'e4', calendarId: 'work', title: 'Pushed by map', startDate: '2026-09-12T09:00:00.000Z', endDate: '2026-09-12T10:00:00.000Z' },
@@ -276,9 +272,9 @@ describe('external calendar feeds behind the host ports', () => {
             ['Secret meeting', '2026-09-10T09:00:00.000Z', '2026-09-10T10:00:00.000Z', false],
             ['Holiday', new Date(2026, 8, 14).toISOString(), new Date(2026, 8, 15).toISOString(), true],
         ]);
-        // Android's query is widened by 92 days on each side, then clipped to the window.
+
         expect(calls.find(([name]) => name === 'getEvents')).toEqual(['getEvents', ['work'], '2026-06-01T00:00:00.000Z', '2027-01-01T00:00:00.000Z']);
-        // Logs carry counts only.
+
         expect(JSON.stringify(logs)).not.toMatch(/Secret meeting|Holiday|Pushed by|Copy in Mindwtr/);
         expect(logs.map(([message]) => message)).toContain('Mirrored device calendar events excluded');
     });

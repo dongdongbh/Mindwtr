@@ -1,6 +1,6 @@
-// Full-parity Hungarian translation. Split from i18n-translations.ts to make community
-// translation contributions easier. Every English key is translated here (mode: overrides,
-// floor: all), so new English UI copy cannot silently fall back in Hungarian.
+
+
+
 export const huOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "Kezdés előtt",
     "taskEdit.advanceReminderLabel": "Előzetes emlékeztető",

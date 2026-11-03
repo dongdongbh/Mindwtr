@@ -9,7 +9,7 @@ import {
   type UserPromptState,
 } from '@mindwtr/core';
 
-// Core's (user-prompts.ts) on RN's AsyncStorage, shared with the native hosts.
+
 export { LOCAL_USER_PROMPT_STATE_KEY };
 
 export async function readLocalUserPromptState(): Promise<UserPromptState> {

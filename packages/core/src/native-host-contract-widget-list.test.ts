@@ -4,7 +4,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import type { AppData, Project, Task } from './types';
 import { resolveWidgetListDestination } from './widget-list-destination';
 
-// RN's widget list screen (app/(drawer)/widget-list/[id].tsx and widget-list-screen.test.tsx), through the native host contract.
+
 const now = new Date().toISOString();
 const task = (id: string, fields: Partial<Task> = {}): Task => ({
     id, title: id, status: 'next', tags: [], contexts: [], createdAt: now, updatedAt: now, ...fields,
@@ -38,14 +38,14 @@ afterEach(async () => {
 });
 
 describe('native host contract: widget list screen', () => {
-    // e5c0ca45e (#1396): RN reads an open widget list again at midnight (its day key); #1360 (8b4c4e447): a row's due color and
-    // age change as time passes. The view names the first instant either can change, so the screen reads again then.
+
+
     it('names the next instant to read again: the next local midnight, or a row that changes first (#1360)', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 9, 17, 12));
         const host = await open({ tasks: [task('later', { dueDate: '2026-11-30' })] });
         expect(value(host.getWidgetListView({ id: 'next' })).validUntil).toBe(new Date(2026, 9, 18).getTime());
-        // Due 73 hours from now: its due color turns dueSoon in an hour, before midnight.
+
         const dueSoon = new Date(2026, 9, 20, 13);
         const created = new Date(2026, 9, 1).toISOString();
         const soon = await open({ tasks: [task('soon', { dueDate: dueSoon.toISOString(), createdAt: created, updatedAt: created })] });
@@ -118,7 +118,7 @@ describe('native host contract: widget list screen', () => {
 
     it('retains canonical parent tombstones so the list matches widget visibility', async () => {
         const host = await open({});
-        // As RN's screen test: the canonical pools hold the deleted parent; the visible pools do not.
+
         const deleted: Project = { id: 'deleted-project', title: 'Deleted', status: 'active', color: '#000000', order: 0, tagIds: [],
             createdAt: now, updatedAt: now, deletedAt: now };
         const tasks = [task('visible'), task('hidden-child', { projectId: 'deleted-project' })];

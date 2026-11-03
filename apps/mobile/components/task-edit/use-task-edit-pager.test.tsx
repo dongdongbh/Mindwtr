@@ -46,8 +46,7 @@ describe('useTaskEditPager focus scroll target (#921)', () => {
       api.current!.registerScrollTaskFormToEnd(scrollToEnd);
     });
 
-    // Description focus provides an anchor handle, then its caret-placement selection
-    // change immediately reports undefined. The target must survive until the keyboard opens.
+
     act(() => {
       api.current!.handleInputFocus(4242);
       api.current!.handleInputFocus(undefined);
@@ -80,8 +79,7 @@ describe('useTaskEditPager focus scroll target (#921)', () => {
     });
     scrollToEnd.mockClear();
 
-    // Subsequent selection changes while typing report undefined and must now clear the
-    // target so the view does not keep snapping back to the description on every keystroke.
+
     act(() => {
       api.current!.handleInputFocus(undefined);
       listeners.get('keyboardDidShow')?.();

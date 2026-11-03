@@ -1,7 +1,5 @@
-// Standard base64 (RFC 4648 alphabet, `=` padding) for byte arrays, without atob/btoa or
-// Buffer: QuickJS and Hermes have neither. Decoding skips characters outside the alphabet
-// and stops at the first `=`. Same code as RN's attachment-sync-utils, so a key stored by
-// either decodes to the same bytes.
+
+
 
 const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const BASE64_LOOKUP = (() => {

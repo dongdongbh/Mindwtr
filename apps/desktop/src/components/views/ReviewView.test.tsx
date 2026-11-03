@@ -15,7 +15,7 @@ const renderWithProviders = (ui: React.ReactElement) => {
     );
 };
 
-// Keep review calendar stages genuinely empty unless a test seeds calendar work.
+
 vi.mock('../../lib/external-calendar-events', () => ({
     fetchExternalCalendarEvents: vi.fn(async () => ({ calendars: [], events: [], warnings: [] })),
     summarizeExternalCalendarWarnings: vi.fn((warnings: string[]) => warnings[0] ?? null),
@@ -284,7 +284,7 @@ describe('ReviewView', () => {
         const tasks = [target, due];
         useTaskStore.setState({ tasks, _allTasks: tasks });
         expect(resolveTaskNavigationView(target)).toBe('review');
-        // App applies the search highlight when its destination is displayed.
+
         useTaskStore.getState().setHighlightTask(target.id);
         const { getByRole, getByText, queryByText } = renderWithProviders(<ReviewView />);
 
@@ -306,7 +306,7 @@ describe('ReviewView', () => {
         act(() => useTaskStore.setState({ tasks: [...tasks] }));
         expect(getByRole('button', { name: 'Due for review' })).toHaveAttribute('aria-pressed', 'true');
 
-        // A second selection of the same result is a new navigation request.
+
         const highlightAt = useTaskStore.getState().highlightTaskAt!;
         const clock = vi.spyOn(Date, 'now').mockReturnValue(highlightAt + 1);
         act(() => useTaskStore.getState().setHighlightTask(target.id));

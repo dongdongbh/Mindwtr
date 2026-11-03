@@ -116,8 +116,7 @@ describe('useTaskEditDerivedState', () => {
         expect(derived?.showStatusField).toBe(false);
     });
 
-    // #1155: Reference is a destination for any task, not a status you can only
-    // keep once you are already there.
+
     it('offers Reference in the status list for a next-action task', () => {
         let derived: ReturnType<typeof useTaskEditDerivedState> | undefined;
 
@@ -489,8 +488,8 @@ describe('useTaskEditDerivedState', () => {
         expect(derived?.detailsFields).toContain('checklist');
         renderer.act(() => view.unmount());
     });
-    // The preset editor is gone from Settings, so a one-item list saved by an
-    // older version must not narrow the task editor's choices any more.
+
+
     it('offers every time estimate although an old preset list is stored', () => {
         let derived: ReturnType<typeof useTaskEditDerivedState> | undefined;
         const task: Task = { ...baseTask, timeEstimate: '15min' };

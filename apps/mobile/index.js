@@ -1,8 +1,6 @@
 require('./polyfills');
 
-// Background task modules import Expo packages at module scope. Load Metro's
-// runtime first so React Native installs globals like FormData before Expo
-// patches them.
+
 require('@expo/metro-runtime');
 
 const startupProfiler = require('./lib/startup-profiler');

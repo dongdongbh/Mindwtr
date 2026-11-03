@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Repo and metadata governance checks. The CI governance job (.github/workflows/ci.yml)
-# and `bun run verify` both run this script, so they always run the same checks.
-# On a contributor machine, a check whose tool is not installed is skipped with a
-# message. In CI (CI is set), a missing tool fails the run; it never passes silently.
+
+
 set -euo pipefail
 
 skipped=()
 
-# run <name> <tool>... -- <command> [args...]
+
 run() {
   local name="$1"
   shift
@@ -71,7 +69,7 @@ main() {
   fi
 }
 
-# Sourcing the script (its test does) defines `run` without running the checks.
+
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   main "$@"
 fi

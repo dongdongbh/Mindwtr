@@ -23,8 +23,7 @@ import { DELETE_VS_LIVE_AMBIGUOUS_WINDOW_MS } from './sync-types';
 
 export const BACKUP_FILE_PREFIX = 'mindwtr-backup-';
 
-// Backups legitimately include tombstones and attachment metadata, so they get a larger ceiling
-// than third-party imports. The cap still bounds the single JSON string each client must allocate.
+
 export const MAX_BACKUP_SOURCE_BYTES = 128 * 1024 * 1024;
 const MAX_BACKUP_SOURCE_MEBIBYTES = MAX_BACKUP_SOURCE_BYTES / (1024 * 1024);
 
@@ -84,9 +83,7 @@ export type ActiveRecordCounts = {
     tasks: number;
 };
 
-// Both desktop's and mobile's data-transfer.ts carried byte-identical copies of this for their
-// own export/restore/snapshot logging — and both omitted `people`, a first-class synced entity,
-// undercounting it in every backup/restore log line on both platforms.
+
 export const countActiveRecords = (data: AppData): ActiveRecordCounts => ({
     tasks: data.tasks.filter((task) => !task.deletedAt).length,
     projects: data.projects.filter((project) => !project.deletedAt).length,
@@ -130,9 +127,8 @@ type BackupEnvelope = {
 
 type BackupRestoreSyncPreparationOptions = {
     restoredAt?: string | number | Date | null;
-    // The data being replaced. Anything it holds that the backup does not is
-    // carried over as a tombstone so the restore survives the next merge — see
-    // carryForwardEntitiesMissingFromBackup.
+
+
     previousData?: AppData | null;
 };
 
@@ -258,19 +254,7 @@ const prepareRestoredEntityForSync = <T extends RestorableEntity>(
     };
 };
 
-/**
- * Restoring replaces local data wholesale, which silently drops the tombstones
- * this device was holding for anything deleted since the backup was taken. The
- * remote still has those records, so the next merge reads their absence as
- * "new over there" and hands them all back — the restore appears to work and
- * then undoes itself (#939).
- *
- * So every id the replaced data knows about but the backup does not is carried
- * over as a tombstone, at a revision above the one it was last seen at, making
- * the restored snapshot authoritative rather than merely newer in places.
- * Records this device never saw are untouched: absence here is ignorance, not a
- * deletion, and another device's work is not ours to erase.
- */
+
 const carryForwardEntitiesMissingFromBackup = <T extends RestorableEntity>(
     restored: T[],
     previous: T[] | undefined,
@@ -287,7 +271,7 @@ const carryForwardEntitiesMissingFromBackup = <T extends RestorableEntity>(
     return carried.length > 0 ? [...restored, ...carried] : restored;
 };
 
-// The whole security group (App Lock and its relock delay) belongs to this device, as in sync.
+
 const stripDeviceLocalRestoreSettings = (settings: AppData['settings']): AppData['settings'] => {
     if (settings.security === undefined) return settings;
     const nextSettings: AppData['settings'] = { ...settings };
@@ -295,7 +279,7 @@ const stripDeviceLocalRestoreSettings = (settings: AppData['settings']): AppData
     return nextSettings;
 };
 
-// A restore never takes App Lock from the file (above) and never changes this device's App Lock.
+
 const keepDeviceLocalRestoreSettings = (
     restored: AppData['settings'],
     previous: AppData['settings'] | undefined,
@@ -325,7 +309,7 @@ const restoreTimestampAfter = (
     knownValues: unknown[],
     minimumGapMs = 0,
 ): string => {
-    // A reduction, not Math.max(...values): QuickJS (native Android) refuses a call with more than 65535 arguments.
+
     const knownLatest = knownValues.reduce<number>((latest, value) => Math.max(latest, timestampMs(value) ?? latest), Number.NEGATIVE_INFINITY);
     const restoreFloor = new Date(Math.max(
         Date.parse(restoredAt) - 1,
@@ -406,25 +390,12 @@ const prepareRestoredSettingsForSync = (
     };
 };
 
-/**
- * A backup file is user-supplied bytes, and restore stamps fresh revisions so its records
- * win the next merge — without this, an attachment path the sync-merge sanitizer would have
- * rejected gets published to every device from here. Bad values are cleared, never dropped:
- * the attachment degrades to "missing locally" instead of vanishing from the user's task.
- */
+
 const sanitizeRestoredAttachments = <T extends { attachments?: Attachment[] }>(item: T): T => (
     item.attachments ? { ...item, attachments: normalizeAttachmentsForSyncMerge(item.attachments) } : item
 );
 
-/**
- * Attachments merge as child records, independently of the task/project revision.
- * A restore therefore has to make the backup authoritative at the child seam too:
- * refresh the backup children and explicitly tombstone children the replaced local
- * parent knew about but the backup omitted. Otherwise the next sync can immediately
- * resurrect an omitted attachment or let a stale remote tombstone re-delete a file
- * the user just restored. Every live file also remains a durable upload candidate
- * until the transfer lifecycle proves and publishes those exact restored bytes.
- */
+
 const prepareRestoredAttachmentsForSync = <T extends { attachments?: Attachment[]; deletedAt?: string }>(
     item: T,
     restoredAt: string,
@@ -454,7 +425,7 @@ const prepareRestoredAttachmentsForSync = <T extends { attachments?: Attachment[
                 )),
             } : {}),
             ...(shouldPublishRestoredBytes ? { pendingContentUpload: true } : {}),
-            // Device-local state of another install: the restored bytes are this device's own content now.
+
             staleContentHash: undefined,
             ...(attachment.deletedAt ? { deletedAt: restoredAt } : {}),
             updatedAt: restoredAt,
@@ -515,7 +486,7 @@ export const prepareRestoredBackupDataForSync = (
             context: { releaseCheck: 'v1.3.3/restore-settings-sync' },
         });
     } catch {
-        // Diagnostics must never make a valid restore fail.
+
     }
     return {
         ...data,

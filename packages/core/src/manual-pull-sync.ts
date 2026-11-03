@@ -1,12 +1,10 @@
-/**
- * Pull down to sync (mobile's useManualPullSync): the rules of one manual sync a list's pull starts, React-free so React Native
- * and the native Android host run the same ones. The host keeps the "one at a time" guard and the indicator's timing; this
- * says how the run ends: the indicator's last state and the toast to show.
- */
+
+
+
 import { tFallback } from './i18n';
 import type { MobileSyncService } from './mobile-sync-service';
 
-/** How the indicator ends: a success or error flash, or 'idle' at once (a deferred result whose toast says what to do). */
+
 export type ManualPullSyncIndicator = 'success' | 'error' | 'idle';
 export type ManualPullSyncToast = { title: string; message: string; tone: 'warning' | 'info' | 'error'; durationMs?: number };
 export type ManualPullSyncOutcome = { indicator: ManualPullSyncIndicator; toast: ManualPullSyncToast | null };
@@ -17,7 +15,7 @@ type ConfigurationStatus = Awaited<ReturnType<MobileSyncService['getMobileSyncCo
 export type ManualPullSyncDeps = {
     getConfigurationStatus: () => Promise<Pick<ConfigurationStatus, 'configured' | 'backend' | 'cloudProvider'>>;
     getActivityState: () => string;
-    /** The manual cycle: `performMobileSync(undefined, { manual: true })`. */
+
     performSync: () => Promise<SyncResult>;
     isLikelyOfflineSyncError: (error: unknown) => boolean;
     getSyncConflictCount: (stats: SyncResult['stats']) => number;
@@ -47,14 +45,13 @@ const getErrorMessage = (error: unknown) => {
     return 'Sync failed';
 };
 
-/** One pull's manual sync and how it ends. Never throws: a failure is the error indicator with RN's "Sync failed" toast. */
+
 export async function runManualPullSync(deps: ManualPullSyncDeps): Promise<ManualPullSyncOutcome> {
     const { t } = deps;
     try {
         const status = await deps.getConfigurationStatus();
-        // The persisted config lags while a sync-settings activation probe is
-        // proving new credentials (e.g. the Dropbox OAuth continuation, #1033).
-        // If a sync is already running, join it instead of toasting setup advice.
+
+
         if ((!status.configured || status.backend === 'off') && deps.getActivityState() !== 'syncing') {
             return { indicator: 'error', toast: {
                 title: tFallback(t, 'common.notice', 'Notice'),
@@ -66,8 +63,8 @@ export async function runManualPullSync(deps: ManualPullSyncDeps): Promise<Manua
 
         const result = await deps.performSync();
         if (result.skipped === 'offline' || deps.isLikelyOfflineSyncError(result.error)) {
-            // 'request' means the OS says the device is online but the app's own
-            // requests failed — telling the user they are offline would be false.
+
+
             const serverUnreachable = result.skipped === 'offline' && result.offlineCause === 'request';
             return { indicator: 'error', toast: {
                 title: serverUnreachable

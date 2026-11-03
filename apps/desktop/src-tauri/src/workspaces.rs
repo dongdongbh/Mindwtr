@@ -1,17 +1,3 @@
-//! Isolated desktop workspaces (#1473).
-//!
-//! A workspace is a whole local profile: its own database, attachments,
-//! `config.toml`/`secrets.toml`, keyring entries and caches. One workspace is
-//! active per process. Switching writes the new active id to the registry and
-//! restarts the app, so nothing that belongs to the old workspace (a sync, an
-//! upload, a poller, the local API) can finish inside the new one.
-//!
-//! The default workspace is today's profile, at today's paths, with no
-//! migration. Every other workspace lives one level down:
-//! `<config root>/workspaces/<id>/` and `<data root>/workspaces/<id>/`.
-//! `storage::get_config_dir` / `get_data_dir` are the single place that applies
-//! this; device-level files go through the `get_device_*` accessors instead.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,11 +15,9 @@ const MAX_NAME_CHARS: usize = 64;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Registry {
-    /// `None` (or `"default"`) means the default workspace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     active: Option<String>,
-    /// Non-default workspaces, plus an optional `default` entry that only
-    /// carries the default workspace's name and color.
+
     #[serde(default, rename = "workspace", skip_serializing_if = "Vec::is_empty")]
     workspaces: Vec<WorkspaceEntry>,
 }
@@ -47,8 +31,6 @@ pub(crate) struct WorkspaceEntry {
     pub(crate) color: Option<String>,
 }
 
-/// Generated ids only: 16 lowercase hex characters. Never derived from the
-/// user's name, and strict enough that an id can be joined to a path safely.
 pub(crate) fn is_workspace_id(id: &str) -> bool {
     id.len() == ID_BYTES * 2 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
@@ -59,8 +41,6 @@ fn new_workspace_id() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The directory a workspace uses under a device-level root. `None` is the
-/// default workspace, which is the root itself.
 pub(crate) fn workspace_dir(device_dir: &Path, workspace: Option<&str>) -> PathBuf {
     match workspace {
         Some(id) => device_dir.join(WORKSPACES_DIR_NAME).join(id),
@@ -68,9 +48,6 @@ pub(crate) fn workspace_dir(device_dir: &Path, workspace: Option<&str>) -> PathB
     }
 }
 
-/// The device-level config dir a workspace config dir belongs to, or `None`
-/// when `config_dir` is not a non-default workspace's dir. Used by the config
-/// layer to route device-level keys to the default root's `config.toml`.
 pub(crate) fn device_dir_of_workspace_dir(config_dir: &Path) -> Option<PathBuf> {
     let id = config_dir.file_name()?.to_str()?;
     let parent = config_dir.parent()?;
@@ -84,8 +61,6 @@ fn registry_path(device_config_dir: &Path) -> PathBuf {
     device_config_dir.join(REGISTRY_FILE_NAME)
 }
 
-/// A missing file is the default workspace alone. Unknown or malformed ids are
-/// dropped so a hand-edited file can never point a path outside `workspaces/`.
 pub(crate) fn read_registry(device_config_dir: &Path) -> Result<Registry, String> {
     let raw = match fs::read_to_string(registry_path(device_config_dir)) {
         Ok(raw) => raw,
@@ -113,8 +88,6 @@ fn write_registry(device_config_dir: &Path, registry: &Registry) -> Result<(), S
     )
 }
 
-/// The active non-default workspace id, or `None` for the default one. An
-/// active id that is not in the list falls back to the default workspace.
 pub(crate) fn resolve_active(registry: &Registry) -> Option<String> {
     let id = registry.active.as_deref()?;
     (is_workspace_id(id) && registry.workspaces.iter().any(|entry| entry.id == id))
@@ -194,8 +167,6 @@ pub(crate) fn update_workspace_entry(
     Ok(())
 }
 
-/// `running` is the workspace this process opened. Deleting it, the one the
-/// registry will open next, or the default workspace is refused.
 pub(crate) fn remove_workspace_entry(
     registry: &mut Registry,
     id: &str,
@@ -237,14 +208,10 @@ struct ActiveWorkspace {
 
 static ACTIVE: OnceLock<ActiveWorkspace> = OnceLock::new();
 
-/// Read once per process, at the first path lookup: the active workspace
-/// only changes through a restart.
 fn active() -> &'static ActiveWorkspace {
     ACTIVE.get_or_init(|| {
         let (config_dir, data_dir) = crate::storage::device_dirs_for_startup();
-        // A failed standard-layout migration leaves this run on the flat root,
-        // where config and data share one folder. Workspaces are off for that
-        // run rather than built somewhere the next start will not look.
+
         if config_dir == data_dir {
             return ActiveWorkspace {
                 id: None,
@@ -280,9 +247,6 @@ fn active() -> &'static ActiveWorkspace {
     })
 }
 
-/// The workspace this process opened: `None` is the default workspace.
-/// Tests never read the real registry; they pass a workspace explicitly to the
-/// pure helpers instead.
 pub(crate) fn active_workspace_id() -> Option<&'static str> {
     if cfg!(test) {
         return None;
@@ -290,9 +254,6 @@ pub(crate) fn active_workspace_id() -> Option<&'static str> {
     active().id.as_deref()
 }
 
-/// Startup receipt for the diagnostic log. Never logs the workspace name.
-/// Written straight to the log file as well, because the log plugin is
-/// optional and Settings > Diagnostics exports read that file.
 pub(crate) fn log_workspace_opened(app: &tauri::AppHandle) {
     let state = active();
     let workspace = if state.id.is_some() {
@@ -313,7 +274,6 @@ pub(crate) fn log_workspace_opened(app: &tauri::AppHandle) {
     crate::logging::append_native_log_line(app, &diagnostic);
 }
 
-/// `Mindwtr — <name>` while a non-default workspace is open.
 pub(crate) fn window_title() -> Option<String> {
     if cfg!(test) {
         return None;
@@ -328,8 +288,6 @@ pub(crate) fn window_title() -> Option<String> {
     })
 }
 
-/// Runs before any page script in every webview, so the renderer knows which
-/// workspace's cache keys to use before its first `localStorage` read.
 pub(crate) fn init_script_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let id = active_workspace_id().unwrap_or(DEFAULT_WORKSPACE_ID);
     let script = format!(
@@ -369,7 +327,7 @@ pub(crate) struct WorkspaceInfo {
 pub(crate) struct WorkspaceList {
     active_id: String,
     available: bool,
-    /// `workspaces.toml` exists but could not be parsed.
+
     unreadable: bool,
     workspaces: Vec<WorkspaceInfo>,
 }
@@ -437,7 +395,7 @@ pub(crate) fn list_workspaces(app: tauri::AppHandle) -> Result<WorkspaceList, St
             let _guard = registry_lock();
             Ok(match read_registry(&config_dir) {
                 Ok(registry) => list_for(&app, &registry, true),
-                // The default workspace opened instead; Settings says why.
+
                 Err(_) => WorkspaceList {
                     unreadable: true,
                     ..list_for(&app, &Registry::default(), false)
@@ -473,9 +431,6 @@ pub(crate) fn update_workspace(
     })
 }
 
-/// Removes the workspace from the list first, then its two folders and its
-/// keyring entries. A failure after the first step leaves orphaned files, never
-/// a listed workspace that points at half-deleted data.
 #[tauri::command(async)]
 pub(crate) fn delete_workspace(app: tauri::AppHandle, id: String) -> Result<(), String> {
     mutate_registry(&app, |registry| {
@@ -505,9 +460,6 @@ pub(crate) fn delete_workspace(app: tauri::AppHandle, id: String) -> Result<(), 
     Ok(())
 }
 
-/// Records the new active workspace and restarts. The renderer has already
-/// flushed its pending local saves; no network sync is awaited, so an
-/// unreachable server never blocks opening another workspace.
 #[tauri::command(async)]
 pub(crate) fn switch_workspace(app: tauri::AppHandle, id: String) -> Result<(), String> {
     if active_workspace_id().unwrap_or(DEFAULT_WORKSPACE_ID) == id {
@@ -531,9 +483,6 @@ pub(crate) fn switch_workspace(app: tauri::AppHandle, id: String) -> Result<(), 
 
 static RELAUNCH: AtomicBool = AtomicBool::new(false);
 
-/// Renderer variables `run()` may set for this process from the hardware
-/// acceleration setting. A relaunch gets them as the user launched the app,
-/// so it applies the setting afresh.
 const RENDERER_ENV_NAMES: [&str; 3] = [
     "WEBKIT_DISABLE_DMABUF_RENDERER",
     "WEBKIT_DISABLE_COMPOSITING_MODE",
@@ -541,7 +490,6 @@ const RENDERER_ENV_NAMES: [&str; 3] = [
 ];
 static LAUNCH_ENV: OnceLock<Vec<(&'static str, Option<std::ffi::OsString>)>> = OnceLock::new();
 
-/// Called first in `run()`, before anything sets the renderer variables.
 pub(crate) fn remember_launch_environment() {
     LAUNCH_ENV.get_or_init(|| {
         RENDERER_ENV_NAMES
@@ -551,11 +499,6 @@ pub(crate) fn remember_launch_environment() {
     });
 }
 
-/// Called last in `RunEvent::Exit`, after the plugins have released the
-/// single-instance lock. Relaunches without the original arguments: a launch
-/// from autostart (`--startup`) or Quick Add must not make the new workspace
-/// open hidden or straight into Quick Add. Tauri's restart resolves the
-/// AppImage path and the macOS bundle binary.
 pub(crate) fn relaunch_if_switching(app: &tauri::AppHandle) {
     if !RELAUNCH.load(Ordering::SeqCst) {
         return;
@@ -578,21 +521,13 @@ mod tests {
 
     const WORK: &str = "0123456789abcdef";
 
-    /// Who owns a file or folder the app writes in a profile root.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Scope {
-        /// Shared by every workspace; always at the device-level root.
         Device,
-        /// Inside the active workspace's folder.
+
         Workspace,
     }
 
-    /// The checklist of `storage_layout`'s entries (plus this module's own), each
-    /// classified once. Device-level code reaches these through
-    /// `storage::get_device_config_dir` / `get_device_data_dir`; everything else
-    /// through `get_config_dir` / `get_data_dir`. Note `config.toml` is
-    /// per-workspace, but its device-level keys are routed to the default root by
-    /// `config::is_device_config_key`.
     fn entry_scope(name: &str) -> Option<Scope> {
         use Scope::{Device, Workspace};
         Some(match name {
@@ -610,7 +545,6 @@ mod tests {
         })
     }
 
-    /// Where an entry of `scope` lives while `workspace` is open.
     fn scoped_dir(scope: Scope, device_dir: &Path, workspace: Option<&str>) -> PathBuf {
         match scope {
             Scope::Device => device_dir.to_path_buf(),
@@ -647,25 +581,20 @@ mod tests {
             Some(root.to_path_buf())
         );
         assert_eq!(device_dir_of_workspace_dir(root), None);
-        // A user folder that merely looks similar is not a workspace dir.
+
         assert_eq!(
             device_dir_of_workspace_dir(Path::new("/home/me/workspaces/mindwtr")),
             None
         );
     }
 
-    /// The AppHandle accessors cannot be built in a unit test (the mock runtime
-    /// is a different type), so this pins the wiring the pure tests rely on:
-    /// the two workspace accessors apply the active workspace, every derived
-    /// per-workspace path is built on them, and device-level files use the
-    /// device roots.
     #[test]
     fn the_accessors_apply_the_workspace_and_device_files_use_the_device_roots() {
         fn body<'a>(source: &'a str, signature: &str) -> &'a str {
             let start = source
                 .find(signature)
                 .unwrap_or_else(|| panic!("missing {signature}"));
-            // Windows checkouts use CRLF, so match the column-0 brace only.
+
             let end = source[start..].find("\n}").expect("function end") + start;
             &source[start..end]
         }
@@ -737,12 +666,11 @@ mod tests {
         assert_eq!(resolve_active(&reread).as_deref(), Some(work.id.as_str()));
         assert_eq!(workspace_count(&reread), 2);
 
-        // The active workspace and the default one are never deleted.
         assert!(remove_workspace_entry(&mut reread, &work.id, None).is_err());
         assert!(remove_workspace_entry(&mut reread, DEFAULT_WORKSPACE_ID, None).is_err());
 
         set_active_workspace(&mut reread, DEFAULT_WORKSPACE_ID).expect("switch back");
-        // Still refused while this process runs inside it.
+
         assert!(remove_workspace_entry(&mut reread, &work.id, Some(&work.id)).is_err());
         remove_workspace_entry(&mut reread, &work.id, None).expect("delete");
         write_registry(dir.path(), &reread).expect("write");
@@ -782,7 +710,7 @@ mod tests {
                     )
                 }
             }
-            // The default workspace keeps today's path for every entry.
+
             assert_eq!(
                 scoped_dir(scope, root, None).join(name),
                 root.join(name),

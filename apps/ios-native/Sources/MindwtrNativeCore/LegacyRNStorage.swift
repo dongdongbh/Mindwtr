@@ -2,11 +2,10 @@ import CryptoKit
 import CoreFoundation
 import Foundation
 
-/// Constructing this snapshot is read-only. The upgrade coordinator must stop
-/// legacy writers and hold exclusive ownership through any authority-marker commit.
+
 public struct LegacyRNStorage {
-    // Fail explicitly, never truncate: iOS backups are not limited by Android's
-    // CursorWindow. These caps bound manifest parsing and total snapshot input.
+
+
     private static let manifestLimit = 64 * 1024 * 1024
     private static let snapshotLimit = 256 * 1024 * 1024
     private static let jsonAhead = "mindwtr-data:json-ahead-of-sqlite"
@@ -14,7 +13,7 @@ public struct LegacyRNStorage {
     private struct Store {
         let manifestURL: URL
         let manifest: Data
-        // NSString keys in RN distinguish different UTF-8 normalizations.
+
         let values: [Data: String]
     }
     private let containerURL: URL
@@ -73,8 +72,7 @@ public struct LegacyRNStorage {
 
     public func value(forKey key: String) throws -> String? { values[Data(key.utf8)] }
 
-    // Read-only reuse for the internal current-namespace settings store. This
-    // grants no legacy migration or authority-marker mutation permission.
+
     struct DeviceNamespaceSnapshot {
         let manifest: Data?
         let values: [Data: String]
@@ -90,8 +88,7 @@ public struct LegacyRNStorage {
             consumedBytes: consumedSnapshotBytes)
     }
 
-    /// Exact wire shape consumed by the shared host's LegacyState. Empty strings
-    /// still count as present; backup parsing and import decisions belong to core.
+
     public func bootState() throws -> (stateJSON: String, backupJSON: String) {
         let backup = ["mindwtr-data", "focus-gtd-data", "gtd-todo-data", "gtd-data"]
             .lazy.compactMap { self.values[Data($0.utf8)] }.first
@@ -105,8 +102,7 @@ public struct LegacyRNStorage {
         return (String(decoding: data, as: UTF8.self), backup ?? "")
     }
 
-    /// Called only after core has validated the imported SQLite readback. This
-    /// changes authority markers, never backup data or referenced external files.
+
     func commit(changeJSON: String, checkpointURL: URL) throws {
         guard changeJSON.utf8.count <= 4096,
               let change = try? NativeJSON.jsonObject(with: Data(changeJSON.utf8)) as? NSDictionary,
@@ -128,13 +124,13 @@ public struct LegacyRNStorage {
             nextValues.removeValue(forKey: Data(Self.jsonAhead.utf8))
         }
         if reconcile.boolValue {
-            next[Self.reconciled] = "1" // RN storage-adapter.ts writes this exact string.
+            next[Self.reconciled] = "1"
             nextValues[Data(Self.reconciled.utf8)] = "1"
         }
         let updated = try JSONSerialization.data(withJSONObject: next, options: [.sortedKeys])
         guard updated.count <= Self.manifestLimit else { throw HostFailure("Legacy storage exceeds the safe read limit; recovery is required") }
         _ = try verifiedCurrent(updated: updated, nextValues: nextValues)
-        // Fresh snapshots after success need no second checkpoint or marker write.
+
         if Self.equalValues(values, nextValues) {
             try DurableFile.sync(source.manifestURL)
             try DurableFile.sync(source.manifestURL.deletingLastPathComponent(), directory: true)
@@ -168,7 +164,7 @@ public struct LegacyRNStorage {
         if try verifiedCurrent(updated: updated, nextValues: nextValues) != updated {
             try DurableFile.write(updated, to: source.manifestURL)
         } else {
-            // A previous promotion may have succeeded before acknowledgment failed.
+
             try DurableFile.sync(source.manifestURL)
             try DurableFile.sync(source.manifestURL.deletingLastPathComponent(), directory: true)
         }
@@ -196,8 +192,7 @@ public struct LegacyRNStorage {
         left.count == right.count && left.allSatisfy { key, value in right[key]?.utf8.elementsEqual(value.utf8) == true }
     }
 
-    // RN's NSString file reader consumes one UTF-8 encoding marker. Foundation's
-    // String(data:) differs by OS; use it only to reject malformed input here.
+
     static func decodeExternalUTF8(_ data: Data) -> String? {
         guard String(data: data, encoding: .utf8) != nil else { return nil }
         if data.starts(with: [0xEF, 0xBB, 0xBF]) {
@@ -243,7 +238,7 @@ public struct LegacyRNStorage {
             if let inline = value as? String {
                 result[Data(key.utf8)] = inline
             } else if value is NSNull {
-                // Format compatibility with RNCAsyncStorage, not a security hash.
+
                 let name = Insecure.MD5.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
                 let data = try readFile(directory.appendingPathComponent(name), limit: snapshotLimit, remaining: &remaining)
                 guard let text = decodeExternalUTF8(data) else {
@@ -287,7 +282,7 @@ public struct LegacyRNStorage {
 }
 
 #if DEBUG
-// IO boundaries only; absent from release builds.
+
 final class LegacyRNStorageCommitFaults {
     var beforeCheckpoint: (() throws -> Void)?
     var beforePromotion: (() throws -> Void)?

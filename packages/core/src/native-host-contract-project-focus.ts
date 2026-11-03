@@ -45,7 +45,7 @@ const readRequest = (value: unknown): NativeProjectFocusRequest | null => {
         && iso(expected.updatedAt) ? input as NativeProjectFocusRequest : null;
 };
 
-/** Pure validation is callable before SQLite opens during cold journal recovery. */
+
 const readPrepared = (value: unknown): NativePreparedProjectFocus | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

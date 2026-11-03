@@ -5,13 +5,13 @@ import { ArrowUpDown } from 'lucide-react-native';
 import { styles } from './task-list.styles';
 
 type TaskListSortButtonProps = {
-  /** Core's "Sort: <current>" label (getTaskListHeaderText's sortAccessibilityLabel). */
+
   accessibilityLabel: string;
   onPress: () => void;
   themeColors: { border: string; filterBg: string; secondaryText: string };
 };
 
-/** The direct Sort control (Inbox's header, Contexts' search row): opens TaskListSortModal. */
+
 export function TaskListSortButton({ accessibilityLabel, onPress, themeColors }: TaskListSortButtonProps) {
   return (
     <TouchableOpacity

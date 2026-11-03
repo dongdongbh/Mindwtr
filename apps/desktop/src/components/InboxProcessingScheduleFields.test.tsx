@@ -88,8 +88,8 @@ describe('InboxProcessingScheduleFields calendar system', () => {
     const originalLanguages = navigator.languages;
 
     afterEach(() => {
-        // Unmount before restoring the store, or the settings write lands on a
-        // still-mounted DateField outside act().
+
+
         cleanup();
         useTaskStore.setState({ settings: originalSettings });
         Object.defineProperty(navigator, 'languages', {
@@ -99,8 +99,8 @@ describe('InboxProcessingScheduleFields calendar system', () => {
     });
 
     it('renders Jalali dates when the calendarSystem setting is jalali', () => {
-        // resolveCalendarSystemSetting only honours 'jalali' for a Persian
-        // language or system locale, so the setting alone is not enough.
+
+
         Object.defineProperty(navigator, 'languages', {
             value: ['fa-IR'],
             configurable: true,

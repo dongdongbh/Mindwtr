@@ -11,8 +11,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 
 import { asTaskStatus, createMindwtrAutomationService } from './mindwtr-automation-core';
 
-// Core's default logger sink writes to stdout; stdout here is the machine-readable
-// contract (`ok`, ids, JSON). Route core log lines to stderr as JSON, like the MCP server.
+
 setLogger((event: LogPayload) => {
     const context = sanitizeLogContext({
         ...event.context,

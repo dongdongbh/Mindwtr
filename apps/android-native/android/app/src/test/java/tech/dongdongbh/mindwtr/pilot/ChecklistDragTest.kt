@@ -14,7 +14,7 @@ class ChecklistDragTest {
         val renamed = listOf(item("Second"), item("Second", true), item("Third"))
         assertEquals(identities, session.sync(renamed).map { it.identity })
         session.expectMove(1, 0)
-        // An old response while the move waits must not remount either input.
+
         assertEquals(identities, session.sync(renamed).map { it.identity })
         val moved = listOf(renamed[1], renamed[0], renamed[2])
         session.settle(moved, true)

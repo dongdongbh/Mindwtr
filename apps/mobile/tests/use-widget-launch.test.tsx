@@ -94,7 +94,7 @@ describe('widget launch destination handoff', () => {
         expect(tree.toJSON()).toBeNull();
         paint();
         expect(harness.complete).not.toHaveBeenCalled();
-        // No useIncomingUrl key change: Router's independent repeated delivery wakes the hook.
+
         act(() => recordWidgetLaunchRouting('mindwtr:///focus'));
         layout(tree);
         await act(async () => paint());

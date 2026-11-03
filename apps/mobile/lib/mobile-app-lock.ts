@@ -85,11 +85,7 @@ export function shouldAttemptMobileAppLockAuthentication({
   );
 }
 
-/**
- * Whether a return to the app may skip the prompt: only when the app was unlocked when it
- * left (`leftUnlockedAt`, null otherwise or on a cold start) and came back within the delay.
- * A clock that moved back reads as a negative time away and asks.
- */
+
 export function isWithinMobileAppLockRelockDelay({
   delayMinutes,
   leftUnlockedAt,

@@ -1,18 +1,6 @@
-/**
- * The native host contract for the Menu tab's More sheet and the Waiting,
- * Someday, Reference and Done screens. Kept in its own file and spread into
- * createNativeHostContract: other changes edit native-host-contract.ts in
- * parallel. Every view is the React Native screen's, from the same core models
- * (menu-views-model.ts, someday-sections-model.ts, more-menu-model.ts).
- *
- * Every collection a view carries (rows, filter options, people, parked
- * projects, sections, saved searches) is windowed by NATIVE_HOST_MAX_WINDOW.
- * A view returns the first window of each; getMenuViewCollection pages the rest
- * under the same revision.
- *
- * Only functions read this module's imports from native-host-contract.ts, so
- * the import cycle between the two files is safe.
- */
+
+
+
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from './area-filter';
 import type { DateFormatter } from './date';
 import type { FilterCriteria } from './types';
@@ -103,27 +91,27 @@ type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['erro
 export type MenuViewDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
-    /** Data plus display revision: tasks, projects, settings, language and the minute. */
+
     revision: (now: Date) => string;
     t: () => (key: string) => string;
-    /** The user's date formatting (createDateFormatter); the only formatter this block uses. */
+
     formatDate: () => DateFormatter;
-    /** Rows with core meta, as the other contract lists build them. */
+
     rows: (tasks: readonly Task[], now: Date) => NativeTaskRow[];
     requestIdPattern: RegExp;
 };
 
-/** A user-visible refusal, shown the way mobile shows it (a toast or the dialog's error line). */
+
 export type NativeMenuViewRefusal = { refused: { title: string | null; message: string } };
 
-/** The first NATIVE_HOST_MAX_WINDOW items of a collection; getMenuViewCollection pages the rest. */
+
 export type NativeWindow<T> = { total: number; items: T[] };
 
 export type NativeSomedayMoveResult =
     | {
         moved: number;
         toast: { message: string; undoLabel: string } | null;
-        /** Send this to undoSomedaySectionMove as `moveRequestId`; null when nothing moved. */
+
         undoRequestId: string | null;
     }
     | NativeMenuViewRefusal;
@@ -136,16 +124,16 @@ export type NativeMoreMenu = Omit<MoreMenuModel, 'savedSearches'> & {
 
 export type TokenOption = { value: string; state: 'included' | 'excluded' | 'none'; edit: ListFilterEdit };
 type ProjectOption = { id: string; title: string; selected: boolean; excluded: boolean; edit: ListFilterEdit };
-/** A match mode control (the picker's footer): Any, then All, each with the edit that chooses it. */
+
 export type NativeMatchModeControl = {
     kind: 'context' | 'tag';
     label: string;
     options: { value: MultiValueFilterMatchMode; label: string; selected: boolean; edit: ListFilterEdit }[];
 };
 
-/** The filter picker: options carry the exact edit to send back as `filterEdit`. */
+
 export type NativeListFilterView = {
-    /** The effective state; send it back as `filters` with the next read. */
+
     state: ListFilterState;
     activeCount: number;
     hasActive: boolean;
@@ -153,11 +141,11 @@ export type NativeListFilterView = {
     visibility: ListFilterOptions['visibility'];
     showContextMatchMode: boolean;
     showTagMatchMode: boolean;
-    /** The match mode controls shown (contexts, then tags); empty until two tokens of a kind are chosen. */
+
     matchModes: NativeMatchModeControl[];
     tokens: NativeWindow<TokenOption>;
     projects: NativeWindow<ProjectOption> | null;
-    /** Contexts offers unfinished statuses; stored criteria can retain historical values. */
+
     statuses?: { value: TaskStatus; label: string; selected: boolean; edit: ListFilterEdit }[];
     priorities: { value: TaskPriority; label: string; selected: boolean; edit: ListFilterEdit }[];
     energyLevels: { value: TaskEnergyLevel; label: string; selected: boolean; edit: ListFilterEdit }[];
@@ -169,11 +157,11 @@ export type NativeListChip = {
     id: string;
     label: string;
     excluded: boolean;
-    /** What removing the chip sends: a filter edit, or Reference's archived-projects toggle turned off. */
+
     action: { filterEdit: ListFilterEdit } | { includeArchivedProjects: false };
 };
 
-/** A parked project; send its `projectRevision` with activateProject. */
+
 type DeferredRow = DeferredProjectsSection['rows'][number] & { projectRevision: string };
 type Deferred = Omit<DeferredProjectsSection, 'rows'> & { rows: DeferredRow[] };
 export type NativeDeferredProjects = Omit<DeferredProjectsSection, 'rows'> & { rows: NativeWindow<DeferredRow> };
@@ -181,26 +169,26 @@ type PersonOption = { label: string; person: string; selected: boolean };
 
 type Paged<T> = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
-    /** Changes with the data, settings, language, minute and the view's resolved inputs. */
+
     revision: string;
     total: number;
 } & T;
 
 export type NativeWaitingView = Paged<{
     rows: NativeTaskRow[];
-    /** The person in effect: '' when the one asked for is no longer offered. */
+
     person: string;
-    /** The "All" chip; sending person '' chooses it. */
+
     all: { label: string; selected: boolean };
-    /** Each person; send `person` back to choose it. */
+
     people: NativeWindow<PersonOption>;
     filterLabel: string;
-    /** Shown while a person is chosen; sending person '' clears it. */
+
     clearLabel: string | null;
     stats: { value: number; label: string }[];
     deferred: NativeDeferredProjects | null;
     empty: { title: string; hint: string } | null;
-    /** Waiting rows show their detail parts. */
+
     showDetails: true;
 }>;
 
@@ -210,14 +198,14 @@ export type NativeSomedayItem =
         id: string;
         title: string;
         muted: boolean;
-        /** Section grouping only: the section a new task goes to (null = No section). */
+
         addTask: { sectionId: string | null; label: string; accessibilityLabel: string } | null;
     }
     | { type: 'task'; row: NativeTaskRow; groupId: string | null }
-    /** With `projectsInSections`: a parked project in its section group, before the group's tasks (#1319). */
+
     | { type: 'project'; id: string; groupId: string; project: DeferredRow; activateLabel: string };
 
-/** getTaskDestinationPicker's answer: core's words and rows; each row's `destination` is moveTaskToDestination's. */
+
 export type NativeTaskDestinationPicker = {
     title: string;
     searchLabel: string;
@@ -234,7 +222,7 @@ export type NativeSomedayView = Paged<{
     groupBy: SomedayGroupBy;
     showDetails: boolean;
     stats: { value: number; label: string }[];
-    /** The summary chip beside the stats while filters are on; its edit clears them. */
+
     filterChip: { label: string; removeLabel: string } | null;
     menu: {
         filters: { label: string; selected: boolean };
@@ -257,7 +245,7 @@ export type NativeSomedayView = Paged<{
         errorTitle: string;
         moveFailed: string;
         undoFailed: string;
-        /** The Add task dialog; its title is the heading's `addTask.accessibilityLabel`. */
+
         addTask: Omit<ReturnType<typeof getSomedaySectionTaskText>, 'title'>;
     };
 }>;
@@ -266,14 +254,14 @@ export type NativeStatusListItem =
     | { type: 'section'; id: string; title: string; count: number; muted: boolean; collapsible: boolean; collapsed: boolean }
     | { type: 'task'; row: NativeTaskRow & { readOnly: boolean }; groupId: string | null };
 
-/** Reference and Done; the Inbox has its own view (native-host-contract-inbox-view.ts). */
+
 type MenuStatusListKind = Exclude<StatusListKind, 'inbox'>;
 
 export type NativeStatusListView = Paged<{
     kind: MenuStatusListKind;
     title: string;
     items: NativeStatusListItem[];
-    /** Tasks shown (the header count). */
+
     count: number;
     groupBy: TaskGroupBy;
     sortBy: TaskSortBy;
@@ -282,13 +270,13 @@ export type NativeStatusListView = Paged<{
     sort: { title: string; label: string; options: { value: TaskSortBy; label: string; selected: boolean }[] };
     group: { title: string; label: string; options: { value: TaskGroupBy; label: string; selected: boolean }[] };
     filters: NativeListFilterView;
-    /** The header's active filters, Reference's archived-projects toggle included. */
+
     chips: NativeListChip[];
     filterActiveCount: number;
     hasActiveFilters: boolean;
-    /** Reference only: the filter sheet's top switch. */
+
     archivedProjectsToggle: { label: string; value: boolean } | null;
-    /** Shown when there are no items; `clear` is set when filters hide everything. */
+
     empty: { message: string; hint: string; actionLabel: string | null; clear: boolean };
 }>;
 
@@ -301,12 +289,12 @@ const VIEW_COLLECTIONS: Record<string, readonly MenuViewCollectionName[]> = {
     done: ['tokens'],
 };
 
-// The helpers below, down to nativeFilterView, are shared with the Inbox view (native-host-contract-inbox-view.ts).
+
 export const fail = (code: NativeHostErrorCode, message: string): NativeHostResult<never> => ({ ok: false, error: { code, message } });
 export const isObjectRecord = (value: unknown): value is Record<string, unknown> => (
     typeof value === 'object' && value !== null && !Array.isArray(value)
 );
-// ponytail: id lists (a selection) stop at 1000; raise with the selection UI if people select more.
+
 const MAX_IDS = 1000;
 export const isText = (value: unknown, max = 500): value is string => typeof value === 'string' && value.length <= max;
 export const isTextList = (value: unknown, max = MAX_IDS): value is string[] => (
@@ -319,7 +307,7 @@ const MATCH_MODES = new Set(['all', 'any']);
 export const isTimeEstimate = (value: unknown): value is TimeEstimate => (
     typeof value === 'string' && (TIME_ESTIMATE_OPTIONS.includes(value as TimeEstimate) || isCustomTimeEstimate(value as TimeEstimate))
 );
-/** Known fields keep their wire shapes; future JSON criteria survive a date-only edit. */
+
 export const isPreservedFilterCriteria = (value: unknown): value is FilterCriteria => {
     if (!isObjectRecord(value) || !isNativeJsonWithinBytes(value)) return false;
     const arrays = ['contexts', 'excludedContexts', 'areas', 'projects', 'excludedProjects', 'tags', 'excludedTags',
@@ -337,7 +325,7 @@ const isFilterDateRange = (value: unknown): boolean => {
     ));
 };
 
-// Selections are bounded by the window, so the chips they make are bounded too.
+
 const FILTER_STATE_CHECKS: Record<keyof ListFilterState, (value: unknown) => boolean> = {
     searchQuery: (value) => isText(value, 2000),
     tokens: (value) => isTextList(value, NATIVE_HOST_MAX_WINDOW),
@@ -354,7 +342,7 @@ const FILTER_STATE_CHECKS: Record<keyof ListFilterState, (value: unknown) => boo
     anyDateRange: isFilterDateRange,
 };
 
-/** A partial state is completed from the empty one; unknown keys are refused. */
+
 export const readFilterState = (value: unknown): ListFilterState | null => {
     if (value === undefined) return EMPTY_LIST_FILTER_STATE;
     if (!isObjectRecord(value)) return null;
@@ -405,7 +393,7 @@ export const isPaging = (input: Record<string, unknown>) => (
     && ((input.offset as number) === 0 || typeof input.revision === 'string')
 );
 
-/** A short, stable key for a view's own inputs, so a page of one filter never continues another. */
+
 export const paramsKey = (params: unknown): string => {
     const text = JSON.stringify(params);
     let hash = 2166136261;
@@ -419,10 +407,7 @@ export const paramsKey = (params: unknown): string => {
 export const page = <T,>(items: readonly T[], input: { offset: number; limit: number }) => items.slice(input.offset, input.offset + input.limit);
 export const firstWindow = <T,>(items: readonly T[]): NativeWindow<T> => ({ total: items.length, items: items.slice(0, NATIVE_HOST_MAX_WINDOW) });
 
-/**
- * The picker's search, as mobile's filter sheet narrows its token and project lists:
- * a trimmed, case-insensitive substring. toLowerCase, not toLocaleLowerCase: QuickJS has no Intl.
- */
+
 export const matchesPickerQuery = (label: string, query: string): boolean => label.toLowerCase().includes(query.trim().toLowerCase());
 
 const matchModeControls = (resolved: ResolvedListFilter, t: (key: string) => string): NativeMatchModeControl[] => {
@@ -504,14 +489,14 @@ const filterChips = (resolved: ResolvedListFilter): NativeListChip[] => resolved
 
 type MoveUndo = { previous: SomedaySectionAssignment[]; sectionId: string | null };
 
-/** Parked project rows with the revision activateProject compares. */
+
 const withProjectRevisions = (deferred: DeferredProjectsSection | null): Deferred | null => {
     if (!deferred) return null;
     const { _projectsById } = useTaskStore.getState();
     return { ...deferred, rows: deferred.rows.map((row) => ({ ...row, projectRevision: revisionOf(_projectsById.get(row.id)!) })) };
 };
 
-/** A view's data, its revision (from the resolved inputs) and its collections. */
+
 type Built<T> = { revision: string; now: Date; data: T; collections: Partial<Record<MenuViewCollectionName, readonly unknown[]>> };
 
 export function createMenuViewMethods(deps: MenuViewDeps) {
@@ -520,7 +505,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
         return fail(failure ? 'SAVE_FAILED' : 'ACTION_FAILED', failure?.message ?? message ?? 'Write failed');
     };
     const caught = (error: unknown) => writeFailure(error instanceof Error ? error.message : String(error));
-    /** Makes every write so far durable: retries a failed save, then flushes. */
+
     const durableSave = async (): Promise<NativeHostResult<null>> => {
         try {
             if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
@@ -529,15 +514,15 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
         }
         return deps.save();
     };
-    /** Nothing new to write: finish an earlier failed save, then acknowledge durably. */
+
     const settle = async <T,>(value: T): Promise<NativeHostResult<T>> => {
         const saved = await durableSave();
         return saved.ok ? { ok: true, value } : saved;
     };
-    // Moves, their Undo and Add task retry exactly through the shared helper.
+
     const receipts = createNativeRequestReceipts({ save: durableSave });
-    // ponytail: the 50 most recent moves keep their Undo, in memory like mobile's Undo toast;
-    // an older move, or any move after a restart, can no longer be undone.
+
+
     const undoByMove = new Map<string, MoveUndo>();
     const rememberUndo = (requestId: string, undo: MoveUndo) => {
         undoByMove.set(requestId, undo);
@@ -554,7 +539,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
         return { state, areas, areaById, resolvedAreaFilter, visibleTasks };
     };
 
-    // ponytail: one cached build per screen, keyed by the data and the raw inputs; paging rebuilds nothing.
+
     const cache = new Map<string, { key: string; value: unknown }>();
     const cached = <T,>(screen: string, key: string, build: () => T): T => {
         const hit = cache.get(screen);
@@ -644,9 +629,8 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
                 sortBy: params.sortBy, groupBy: params.groupBy, showDetails: params.showDetails,
                 criteria: resolved.criteria, searchQuery: resolved.searchQuery, filterChips: resolved.chips, t,
             });
-            // With `projectsInSections` (native Android) parked projects sit in their section group, before its tasks, and
-            // no block shows above the list, as React Native draws core's model (#1319). Without it (native iOS, until its
-            // parity lands) the block stays above the list and a "No section" group that holds only projects is skipped.
+
+
             const inGroups = params.projectsInSections && model.deferred === null;
             const deferredAll = withProjectRevisions(buildDeferredProjectsSection(model.deferredProjects, areaById, t));
             const deferredRows = new Map((deferredAll?.rows ?? []).map((row) => [row.id, row]));
@@ -697,7 +681,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             kind,
             groupBy: (input.groupBy as TaskGroupBy | undefined) ?? (kind === 'done' ? DONE_LIST_DEFAULT_GROUP_BY : REFERENCE_LIST_DEFAULT_GROUP_BY),
             viewSortBy: input.sortBy as TaskSortBy | undefined,
-            // Mobile's Clear also turns archived projects off.
+
             includeArchivedProjects: kind === 'reference' && input.includeArchivedProjects === true && edit?.type !== 'clear',
             collapsedGroupIds: (input.collapsedGroupIds as string[] | undefined) ?? [],
             filters: edit ? applyListFilterEdit(filters, edit) : filters,
@@ -801,7 +785,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
     };
 
     const somedaySections = () => useTaskStore.getState().settings.gtd?.viewSections?.someday;
-    /** A live parked Someday project by id, or null. */
+
     const parkedSomedayProject = (id: unknown) => {
         const project = isText(id) ? useTaskStore.getState()._projectsById.get(id) : undefined;
         return project && !project.deletedAt && project.status === 'someday' ? project : null;
@@ -817,7 +801,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
     );
 
     return {
-        /** The Menu tab's More sheet. */
+
         getMoreMenu(): NativeHostResult<NativeMoreMenu> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -833,7 +817,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             };
         },
 
-        /** Waiting For. `person` chooses one person's tasks ('' or absent = All). */
+
         getWaitingView(input: { person?: string; offset: number; limit: number; revision?: string }): NativeHostResult<NativeWaitingView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -867,16 +851,12 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             };
         },
 
-        /**
-         * Someday/Maybe. `sortBy`, `groupBy` and `showDetails` are the screen's
-         * session choices (defaults: default, viewSection, off); send the returned
-         * `filters.state` back with a control's `filterEdit`.
-         */
+
         getSomedayView(input: {
             sortBy?: TaskSortBy;
             groupBy?: SomedayGroupBy;
             showDetails?: boolean;
-            /** Parked projects as `project` items in their section groups, with no block above the list (#1319). */
+
             projectsInSections?: boolean;
             filters?: Partial<ListFilterState>;
             filterEdit?: ListFilterEdit;
@@ -965,7 +945,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             };
         },
 
-        /** Reference. Defaults: grouped by area, archived projects hidden. */
+
         getReferenceView(input: {
             groupBy?: TaskGroupBy;
             includeArchivedProjects?: boolean;
@@ -979,7 +959,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             return statusListView('reference', input as Record<string, unknown>);
         },
 
-        /** Done. `groupBy` and `sortBy` are the device's saved view choices (defaults: none, the stored sort). */
+
         getDoneView(input: {
             groupBy?: TaskGroupBy;
             sortBy?: TaskSortBy;
@@ -993,12 +973,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             return statusListView('done', input as Record<string, unknown>);
         },
 
-        /**
-         * A later window of one of a view's collections. `params` are the view's own
-         * inputs as last sent (with the returned `filters.state`, no `filterEdit`);
-         * `revision` is the view's. `query` is the filter picker's search text: the
-         * tokens or projects matching it, from offset zero.
-         */
+
         getMenuViewCollection(input: {
             view: 'more' | 'waiting' | 'someday' | 'reference' | 'done';
             collection: MenuViewCollectionName;
@@ -1058,7 +1033,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             };
         },
 
-        /** Someday's sections as Settings › Manage lists them; `moveUp.ids` / `moveDown.ids` go to reorderSomedaySections. */
+
         getSomedaySections(input: PageInput = { offset: 0, limit: NATIVE_HOST_MAX_WINDOW }): NativeHostResult<{
             version: typeof NATIVE_HOST_CONTRACT_VERSION;
             revision: string;
@@ -1097,10 +1072,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             };
         },
 
-        /**
-         * The Move to section dialog for these tasks, or for one parked Someday project (`projectId`, #1319): choices ("No section"
-         * first) with the current one selected.
-         */
+
         getSomedayMoveDialog(input: { taskIds?: string[]; projectId?: string; offset?: number; limit?: number; revision?: string }): NativeHostResult<
             Omit<ReturnType<typeof buildSomedaySectionMoveDialog>, 'choices'> & {
                 version: typeof NATIVE_HOST_CONTRACT_VERSION;
@@ -1121,7 +1093,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             const revision = `${deps.revision(new Date())}:${paramsKey(project ? ['project', ...ids] : ids)}`;
             if (window.revision !== undefined && window.revision !== revision) return fail('STALE_REVISION', 'Sections changed; read them again');
             const taskById = new Map(useTaskStore.getState().tasks.map((task) => [task.id, task]));
-            // A project's section sits in the same field as a task's (viewSectionIds.someday).
+
             const dialog = buildSomedaySectionMoveDialog(project ? [project as unknown as Task] : ids.map((id) => taskById.get(id)), somedaySections(), deps.t());
             return {
                 ok: true,
@@ -1134,11 +1106,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             };
         },
 
-        /**
-         * Waiting and Someday's parked projects: swiping one makes it active. Target state; a retry writes nothing.
-         * `projectRevision` is the row's: a project changed since is not written (STALE_REVISION), so a replay
-         * after a restart never undoes a later change.
-         */
+
         async activateProject(input: { projectId: string; projectRevision: string }): Promise<NativeHostResult<{ id: string; changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1162,12 +1130,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             return { ok: true, value: { id: project.id, changed: true } };
         },
 
-        /**
-         * RN's status menu Move to project or area… picker (SwipeableTaskItemStatusMenu → TaskEditDestinationPicker, no create):
-         * None, then the projects matching [query] (active ones, then Someday / Waiting under their own heading when there are
-         * any, #1467), then the matching areas; the task's own destination selected. Each row's `destination` is
-         * moveTaskToDestination's.
-         */
+
         getTaskDestinationPicker(input: { id: string; query?: string }): NativeHostResult<NativeTaskDestinationPicker> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1199,17 +1162,12 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
                 ],
                 areas: { title: areasLabel, rows: areas.map((area) => ({ title: area.name, accessibilityLabel: `${areasLabel}: ${area.name}`,
                     selected: task.areaId === area.id, destination: { kind: 'area' as const, id: area.id } })) },
-                // RN: only when neither a project nor an area matches.
+
                 noMatches: choices.filteredProjects.length === 0 && areas.length === 0 ? t('common.noMatches') : null,
             } };
         },
 
-        /**
-         * RN's status menu move (swipeable-task-item.tsx handleMoveToDestination): core's buildTaskMovePatch for [destination]
-         * through updateTask. `taskRevision` is the row's (its status menu's): a task changed since is not written (STALE_REVISION). A project
-         * that cannot take tasks, an area that is gone, or a task in an archived project is refused (INVALID_INPUT). Target
-         * state: a task already there is not written. Reusing `requestId` returns the first outcome.
-         */
+
         async moveTaskToDestination(input: { id: string; taskRevision: string; destination: TaskMoveDestination; requestId: string }):
             Promise<NativeHostResult<{ id: string; changed: boolean }>> {
             const ready = deps.readiness();
@@ -1243,12 +1201,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             });
         },
 
-        /**
-         * Move one parked Someday project to a section (null = No section), as React Native's project row does (#1319,
-         * someday-view.tsx moveProjectToSection): buildProjectViewSectionUpdate through updateProject. Target state: a project
-         * already there is not written. `projectRevision` is the row's: a project changed since is not written (STALE_REVISION).
-         * A section that is gone answers RN's failure words (`refused`). Reusing `requestId` returns the first outcome.
-         */
+
         async moveSomedayProjectToSection(input: {
             projectId: string;
             sectionId: string | null;
@@ -1280,15 +1233,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
                 });
         },
 
-        /**
-         * Move Someday tasks to a section (null = No section), as the move dialog
-         * does. Target state: tasks already in the section are not written.
-         * `taskRevisions` holds the revision the view showed for each task sent (the
-         * rows' `taskRevision`, or the bulk view's `moveToSection.taskRevisions`): a task
-         * it would move that changed since is not written (STALE_REVISION), so a replay
-         * after a restart never undoes a later change. Reusing `requestId` returns the
-         * first outcome; its Undo lives in memory, like mobile's Undo toast.
-         */
+
         async moveSomedayTasksToSection(input: {
             taskIds: string[];
             sectionId: string | null;
@@ -1318,14 +1263,14 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
                     tasks: state.tasks, projects: state.projects, areas: state.areas, ids, resolvedAreaFilter,
                 });
                 if (!tasks) return refused;
-                // Target state: tasks already in the section are not written.
+
                 const { updates, previous } = planSomedaySectionMove({ ids, tasks, destination });
                 if (previous.length === 0) return { ok: true, value: { moved: 0, toast: null, undoRequestId: null } };
                 const stale = refuseStaleTasks(previous.map(({ id }) => id), taskRevisions);
                 if (stale) return stale;
                 const written = await runStoreWrite(() => state.batchUpdateTasks(updates));
                 if (!written.ok && written.error.code !== 'SAVE_FAILED') return written;
-                // Landed: Undo is offered even while the save is owed.
+
                 rememberUndo(requestId, { previous, sectionId: input.sectionId });
                 return settleWrite(written, {
                     moved: previous.length,
@@ -1335,11 +1280,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             });
         },
 
-        /**
-         * Undo a recorded move (its `requestId`): tasks still Someday tasks in the
-         * moved-to section go back; tasks moved or filed elsewhere since stay.
-         * Reuse `requestId` to retry the Undo itself.
-         */
+
         async undoSomedaySectionMove(input: { moveRequestId: string; requestId: string }): Promise<NativeHostResult<{ reverted: number }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1351,7 +1292,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             if (!undo) return fail('STALE_REVISION', 'That move can no longer be undone');
             return receipts.run<{ reverted: number }>(input.requestId, JSON.stringify(['undo', input.moveRequestId]), async () => {
                 const state = useTaskStore.getState();
-                // Only tasks still in Someday: a task filed elsewhere since keeps its state.
+
                 const latest = undo.previous
                     .map(({ id }) => state.tasks.find((task) => task.id === id))
                     .filter((task): task is Task => task?.status === 'someday');
@@ -1361,11 +1302,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             });
         },
 
-        /**
-         * Add a Someday task to a section (null = No section). Reuse `captureId` to
-         * retry without a duplicate; a captureId already used for another title or
-         * section is refused.
-         */
+
         async addSomedaySectionTask(input: { title: string; sectionId: string | null; captureId: string }): Promise<NativeHostResult<
             { id: string; toast: string } | NativeMenuViewRefusal
         >> {
@@ -1382,8 +1319,8 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
                 input.captureId,
                 JSON.stringify(['add', title, input.sectionId]),
                 async () => {
-                    // After a restart the receipt is gone: the task the captureId created still
-                    // answers a retry, and refuses a different payload.
+
+
                     const id = input.captureId.toLowerCase();
                     const existing = useTaskStore.getState()._allTasks.find((task) => task.id === id);
                     if (existing) {
@@ -1405,11 +1342,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             );
         },
 
-        /**
-         * New Someday section. A title that exists (any case) returns that section. The new
-         * section takes the request UUID as its ID: a replay after a restart finds it (renamed
-         * since or not) and writes nothing. Reuse `requestId` to retry.
-         */
+
         async createSomedaySection(input: { title: string; requestId: string }): Promise<NativeHostResult<{ id: string; existing: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1420,7 +1353,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             const id = input.requestId.toLowerCase();
             const title = input.title.trim();
             return receipts.run<{ id: string; existing: boolean }>(input.requestId, JSON.stringify(['createSection', title]), async () => {
-                // ponytail: a deleted section leaves no tombstone in settings, so a replay after its delete makes it again.
+
                 if ((somedaySections() ?? []).some((section) => section?.id === id)) return { ok: true, value: { id, existing: false } };
                 const plan = planSomedaySectionCreate(somedaySections(), title, () => id);
                 if (plan.kind === 'blank') return fail('INVALID_INPUT', 'A section title is required');
@@ -1433,7 +1366,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             });
         },
 
-        /** Rename a section. Target state; the same title again writes nothing. */
+
         async renameSomedaySection(input: { id: string; title: string }): Promise<NativeHostResult<{ id: string; changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1454,7 +1387,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             return { ok: true, value: { id: input.id, changed: true } };
         },
 
-        /** Put the sections in this order (every section's id once), numbered from 0; other stored entries stay as they are. Target state. */
+
         async reorderSomedaySections(input: { ids: string[] }): Promise<NativeHostResult<{ changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1475,10 +1408,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             return { ok: true, value: { changed: true } };
         },
 
-        /**
-         * Delete a section after the row's `deleteConfirm`. Its tasks keep their
-         * stored assignment and show under "No section", as on mobile. Target state.
-         */
+
         async deleteSomedaySection(input: { id: string }): Promise<NativeHostResult<{ id: string; changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1495,7 +1425,7 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             return { ok: true, value: { id: input.id, changed: true } };
         },
 
-        /** Reference's sort sheet: the stored task-list sort, shared with the other lists. Target state. */
+
         async setTaskListSort(input: { sortBy: TaskSortBy }): Promise<NativeHostResult<{ sortBy: TaskSortBy; changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

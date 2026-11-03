@@ -1,4 +1,4 @@
-// Moved to core with the project list model; re-exported so existing imports keep working.
+
 export { buildProjectTaskReorderGroups, flattenProjectReorderGroups, resolveProjectReorderDropPlan, sortProjectTasksByOrder } from '@mindwtr/core';
 export type { ProjectTaskReorderListItem, ProjectTaskReorderGroup, ProjectReorderFlatItem, ProjectReorderDropPlan } from '@mindwtr/core';
 

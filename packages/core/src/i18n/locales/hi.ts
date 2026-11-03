@@ -1,4 +1,4 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const hiOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "शुरू होने से पहले",
     "attachments.webUploadRequiresCloud": "ब्राउज़र से अपलोड करने के लिए स्व-होस्टेड क्लाउड सिंक आवश्यक है।",
@@ -1521,7 +1521,7 @@ export const hiOverrides: Record<string, string> = {
         'settings.externalCalendarUrlPlaceholder': 'https://example.com/calendar.ics',
         'settings.webdavUrlPlaceholder': 'https://example.com/remote.php/dav/files/<username>/mindwtr',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'दिमाग़ ख़ाली करें',
         'mindSweep.title': 'दिमाग़ ख़ाली करें',
         'mindSweep.intro': 'कुछ संकेत-सूचियों से गुज़रें और जो भी मन में आए, लिखते जाएँ। न छाँटें, न सजाएँ — हर चीज़ इनबॉक्स में जाएगी, जिसे आप बाद में संभाल सकते हैं।',

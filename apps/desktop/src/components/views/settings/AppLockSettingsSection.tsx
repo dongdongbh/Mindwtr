@@ -20,11 +20,7 @@ type AppLockSettingsSectionProps = {
     availability: AppLockAvailability;
 };
 
-/**
- * The privacy lock row (#1472). Hidden where there is no OS check (Linux, web,
- * sample workspace); disabled with a reason when Windows Hello / the Mac
- * password is not set up. The delay picker shows only while the lock is on.
- */
+
 export function AppLockSettingsSection({ t, availability }: AppLockSettingsSectionProps) {
     const enabled = useAppLockStore((state) => state.enabled);
     const relockDelayMinutes = useAppLockStore((state) => state.relockDelayMinutes);
@@ -47,7 +43,7 @@ export function AppLockSettingsSection({ t, availability }: AppLockSettingsSecti
         try {
             const outcome = await setAppLockEnabled(
                 !enabled,
-                // macOS shows the reason after "Mindwtr is trying to …".
+
                 isMacRuntime() ? t.desktopAppLockMacEnableReason : t.desktopAppLockEnablePrompt,
             );
             if (outcome === 'cancelled') setMessage(t.desktopAppLockCancelled);

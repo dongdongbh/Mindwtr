@@ -4,11 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/**
- * The status menu's Move to project or area… and a parked project's Move to section… refused as stale wrote nothing. They show
- * core's line as RN's failure toast (swipeable-task-item.tsx showActionFailure, someday-view.tsx moveProjectToSection), and the
- * lists are read again, so the next tap sends the new revision (status menu review BLOCK 1). Other refusals are not this toast.
- */
+
 class StaleMoveTest {
     @Test fun aStaleMoveShowsCoresLine() {
         for (kind in listOf("taskDestinationMove", "somedayProjectMove")) {

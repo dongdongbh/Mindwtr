@@ -14,19 +14,11 @@ import { QuickDateChips } from '../QuickDateChips';
 import { FocusStarIcon, FOCUS_STAR_COLOR } from '../FocusStarIcon';
 import { styles } from './quick-capture-sheet.styles';
 
-// Quick capture favors speed: show only the most-reached date presets inline.
-// Rarer choices (+3 days, next month) and clearing live behind the Custom picker / tapping the active chip.
+
 const QUICK_CAPTURE_DATE_PRESETS = ['today', 'tomorrow', 'next_week'] as const;
 
-// An expanded "More" panel is taller than the space left above the keyboard, so without
-// a scroll container it pushes the title input off the top of the screen with no way back
-// (#887 on iOS, #1120 on Android). Android dismisses the keyboard before expanding, but it
-// comes straight back when the user taps the title to keep typing, and the measured lift
-// then leaves the tall sheet no room. Description and metadata scroll: the title input must
-// stay OUTSIDE this container, because UIKit auto-scrolls a focused TextInput inside a
-// UIScrollView above the keyboard, which double-counts against KeyboardAvoidingView and
-// flings the title off the top on every refocus (the regression the first #887 fix shipped).
-function SheetScrollArea({ children }: { children: React.ReactNode }) {
+
+function QuickCaptureMetadataScrollArea({ children }: { children: React.ReactNode }) {
   return (
     <ScrollView
       style={styles.scrollArea}
@@ -85,7 +77,7 @@ interface QuickCaptureSheetBodyProps {
   onToggleRecording: () => void;
   onValueChange: (value: string) => void;
   optionsExpanded: boolean;
-  /** Passive parse read-out; rendered above the metadata chips. */
+
   preview?: React.ReactNode;
   prioritiesEnabled: boolean;
   timeEstimatesEnabled: boolean;
@@ -172,10 +164,10 @@ export function QuickCaptureSheetBody({
   value,
   visible,
 }: QuickCaptureSheetBodyProps) {
-  // The full token reference is long; fold it so the More panel stays compact
-  // on a keyboard-shrunk sheet (#1120 follow-up). Resets per open on purpose.
+
+
   const [syntaxHelpVisible, setSyntaxHelpVisible] = React.useState(false);
-  // The popup's text is core's (getQuickCaptureText), shared with the native popup.
+
   const text = getQuickCaptureText(t, { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled });
   const optionsToggleLabel = optionsExpanded ? text.hideOptions : text.more;
   const defaultProjectLabel = tFallback(t, 'taskEdit.projectLabel', 'Project');
@@ -184,25 +176,19 @@ export function QuickCaptureSheetBody({
     canFocus: canFocusNewTask,
     disabledReason: focusNewTaskDisabledReason,
   });
-  // Short visible label for the property chip; reuses the Focus screen title so it
-  // stays translated everywhere without minting a new English-only string.
+
+
   const focusChipLabel = text.focusChip;
-  // The Custom chip drops the shared "Custom…" ellipsis so it fits the preset row.
+
   const customDateLabel = text.customDate;
-  // iOS resizes the modal via padding behavior; Android keeps the keyboard out
-  // of the way with a measured bottom inset (see android-keyboard-frame) because
-  // the transparent Android modal window does not resize for the keyboard. The
-  // lift is gated on keyboardAvoidingEnabled so the tall expanded sheet stays
-  // anchored to the bottom (its header cannot be pushed off the top of screen).
+
+
   const keyboardAvoidingBehavior = Platform.OS === 'ios' ? 'padding' : undefined;
   const androidKeyboardLift = Platform.OS === 'android' && keyboardAvoidingEnabled && androidKeyboardInset > 0
     ? { paddingBottom: androidKeyboardInset }
     : null;
 
-  // "Add to today's focus" is a task property, not a title-entry control, so it lives
-  // with the Contexts/Area/Project chips (here) instead of next to the mic. The mic
-  // stays beside the title because it is an input method. On = filled gold star +
-  // selected chip, matching how focused tasks render in the list.
+
   const renderFocusChip = (chipStyle: StyleProp<ViewStyle>) => (
     <TouchableOpacity
       onPress={onToggleFocusNewTask}
@@ -238,7 +224,7 @@ export function QuickCaptureSheetBody({
       visible={visible}
       onShow={onModalShow}
       transparent
-      // Transparent Android modal animations can blend stale frames on some tablet GPUs.
+
       animationType={Platform.OS === 'android' ? 'none' : 'slide'}
       hardwareAccelerated={Platform.OS === 'android'}
       navigationBarTranslucent={Platform.OS === 'android'}
@@ -321,9 +307,8 @@ export function QuickCaptureSheetBody({
                 }}
                 returnKeyType="done"
                 multiline
-                // Return still submits (and keeps focus in add-another mode)
-                // instead of inserting a newline; pasted multi-line text keeps
-                // its newlines so handleSave's bulk-create path engages.
+
+
                 submitBehavior={addAnother ? 'submit' : 'blurAndSubmit'}
                 textAlignVertical="center"
               />
@@ -349,7 +334,7 @@ export function QuickCaptureSheetBody({
               </TouchableOpacity>
             </View>
 
-            <SheetScrollArea>
+            <QuickCaptureMetadataScrollArea>
             <CompactTextInput
               style={[styles.noteInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
               placeholder={t('taskEdit.descriptionPlaceholder')}
@@ -603,7 +588,7 @@ export function QuickCaptureSheetBody({
                 />
               </>
             )}
-            </SheetScrollArea>
+            </QuickCaptureMetadataScrollArea>
 
             <View style={[styles.footerRow, !optionsExpanded && styles.footerRowCompact]}>
               <View style={styles.toggleRow}>
@@ -666,16 +651,15 @@ export function QuickCaptureSheetBody({
               </View>
             </View>
           </AdaptiveModalSurface>
-          {/* Toasts fired from inside the sheet (e.g. the speech-not-configured notice)
-              render behind the native modal window without a viewport here, so the user
-              only saw them after closing the sheet (#886, #834). It sits inside the
-              keyboard-avoiding view on purpose: that container's bottom padding is the
-              keyboard, so the toast lands above it instead of behind it. */}
+          {
+
+
+                                                                            }
           <ToastViewport />
         </KeyboardAvoidingView>
         {children}
-        {/* Audio/permission alerts fire while the sheet is up (#940); last child
-            so the overlay covers the sheet and its own pickers. */}
+        {
+                                                                   }
         <ThemedAlertHost />
       </View>
     </Modal>

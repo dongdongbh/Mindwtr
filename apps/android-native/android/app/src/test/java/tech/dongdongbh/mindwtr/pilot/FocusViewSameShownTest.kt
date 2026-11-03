@@ -5,10 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * A Focus read with the same content as shown (a resume, a new minute, a sync that brought nothing) is not drawn again
- * (InboxViewModel.showFocus): only its revision moves. Anything the screen draws differing makes it a new view.
- */
+
 class FocusViewSameShownTest {
     private fun row(tone: String?, blocked: String?) = TaskRow("t", "Pay rent", "next", false, RowMeta(
         listOf(MetaPart("due", "Today", false, tone = tone)), null, null, true, RowSwipe("done", "Done", "done"), false, "Pay rent"),
@@ -33,9 +30,9 @@ class FocusViewSameShownTest {
         assertFalse(view().sameShown(view(controls = """{"state":{"sortBy":"due"}}""")))
         assertFalse(view().sameShown(view(controls = null)))
         assertFalse(view().sameShown(view(date = "Wednesday")))
-        // The clock moved a row's urgency tone across a threshold (the due time passed): drawn again.
+
         assertFalse(view().sameShown(view(revision = "r2", tone = "overdue")))
-        // #1277: the star's block is per row; midnight can lift it from one row.
+
         assertFalse(view().sameShown(view(revision = "r2", blocked = "This task is deferred")))
     }
 }

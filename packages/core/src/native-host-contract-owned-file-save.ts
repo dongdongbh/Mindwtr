@@ -32,12 +32,11 @@ const exact = (value: unknown, fields: readonly string[]): value is Record<strin
     && Object.keys(value).length === fields.length && fields.every((field) => own(value, field));
 const invalid = (): NativeHostResult<never> => ({ ok: false, error: { code: 'INVALID_INPUT', message: 'A bounded owned-file Add Save and exact checkpoint are required' } });
 
-// Strict data capture: reject getters, non-JSON values, prototypes and cycles
-// before asynchronous durable reads. No host TextEncoder capability is needed.
+
 const capture = (input: unknown, bytes: number): unknown => {
     let remainingNodes = 100_000;
     const check = (value: unknown, depth: number): boolean => {
-        // Aliased object graphs can expand exponentially before JSON sizing.
+
         if (--remainingNodes < 0 || depth > 40) return false;
         if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
         if (typeof value === 'number') return Number.isFinite(value);
@@ -65,7 +64,7 @@ const payload = (json: string): Record<string, unknown> | null => {
     catch { return null; }
 };
 
-/** Internal shared capture/merge seams; these grant no native file authority. */
+
 export { capture as captureNativeOwnedFileAddSaveData };
 export const readNativeOwnedFileAddHalf = (input: unknown): NativeTaskLinkHalf | null => {
     if (!exact(input, ['base', 'value'])) return null;
@@ -86,13 +85,13 @@ export const mergeNativeOwnedFileAddAttachments = (stored: readonly Attachment[]
     return readNativeAttachments(merged);
 };
 
-/** Internal metadata authority only. Native publication/ownership proof is separate. */
+
 export function createOwnedFileAddTaskDraftSaveMethods(deps: NativeTaskDraftSaveDependencies) {
     const readSaveRequest = (input: unknown): OwnedFileAddSaveRequest['saveRequest'] | null => {
         if (!exact(input, ['id', 'base', 'patch', 'scheduleBase', 'attachments'])
             || !exact(input.base, []) || !exact(input.patch, []) || !exact(input.attachments, ['base', 'value'])) return null;
-        // Reuse the field/schedule grammar on the explicitly empty field half;
-        // no checklist or lifecycle field is admitted by this entry.
+
+
         const fields = readNativeTaskDraftSaveRequest({ id: input.id, base: input.base, patch: input.patch,
             scheduleBase: input.scheduleBase }, deps.validateField, true, true);
         const half = readNativeOwnedFileAddHalf(input.attachments);
@@ -172,8 +171,8 @@ export function createOwnedFileAddTaskDraftSaveMethods(deps: NativeTaskDraftSave
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const checked = readEnvelope(input);
-            // Complete immutable envelope is failed-save ownership, including
-            // checkpoint and historical additions, not just the SQL effect.
+
+
             return checked ? authority.commit(checked.prepared, checked.envelope) : invalid();
         },
     };

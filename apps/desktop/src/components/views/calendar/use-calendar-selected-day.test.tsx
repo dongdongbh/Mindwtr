@@ -93,12 +93,12 @@ describe('useCalendarSelectedDay', () => {
         const scheduled = [
             makeTask({ id: 'later', title: 'Later', startTime: '2026-04-04T15:00:00' }),
             makeTask({ id: 'earlier', title: 'Earlier', startTime: '2026-04-04T09:00:00' }),
-            // A date-only start is midnight, so it leads the day.
+
             makeTask({ id: 'untimed', title: 'Zulu untimed', startTime: '2026-04-04' }),
         ];
         const deadlines = [
             makeTask({ id: 'later', title: 'Later', dueDate: '2026-04-04' }),
-            // A date-only due date is 23:59:59.999, so it trails the day.
+
             makeTask({ id: 'due', title: 'Alpha due', dueDate: '2026-04-04' }),
         ];
         const { result } = renderSelectedDay({
@@ -112,8 +112,8 @@ describe('useCalendarSelectedDay', () => {
             'scheduled-later',
             'deadline-due',
         ]);
-        // A task that is both scheduled and due that day appears once, as its
-        // scheduled row.
+
+
         expect(result.current.selectedTaskRows.filter((row) => row.task.id === 'later')).toHaveLength(1);
     });
 
@@ -249,7 +249,7 @@ describe('useCalendarSelectedDay', () => {
         expect(result.current.scheduleError).toBeNull();
         expect(result.current.scheduleQuery).toBe('draft');
 
-        // The navigation hook's reset drops both, plus any in-progress edit.
+
         act(() => getFeedback().resetSelectedDayState());
         expect(result.current.scheduleQuery).toBe('');
         expect(result.current.editingTimeTaskId).toBeNull();

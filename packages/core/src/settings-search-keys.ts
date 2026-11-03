@@ -1,15 +1,6 @@
 import { getEnglishI18nValue } from './i18n';
 
-// Single source for which settings each settings page surfaces to search.
-// Desktop builds its settings-search results from this directly (see
-// apps/desktop/src/components/views/settings/settings-search.ts); mobile
-// derives its row keywords from the same arrays (see
-// apps/mobile/components/settings/settings.constants.ts).
-//
-// ⚠️ A settings row that is not listed here is unfindable by search on BOTH
-// platforms — that was the whole of issue #884. When you add a row to a
-// settings page, add its label key to that page's list below, with the
-// `section` of the subheading or disclosure card it renders inside.
+
 export type SettingsSearchPageId =
     | 'main'
     | 'gtd'
@@ -22,11 +13,7 @@ export type SettingsSearchPageId =
     | 'advanced'
     | 'about';
 
-// A searchable settings row. A bare string is a row that sits directly on the
-// page; the object form names the subheading or disclosure card containing it,
-// so results can show "Page → Section" and the desktop UI knows which
-// disclosure to expand before scrolling the row into view. `section` is a
-// label key resolved the same way as `key`.
+
 export type SettingsSearchEntry = string | { key: string; section?: string };
 
 export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly SettingsSearchEntry[]> = {
@@ -77,9 +64,8 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         { key: 'inboxContextStepEnabled', section: 'inboxProcessing' },
         { key: 'inboxScheduleEnabled', section: 'inboxProcessing' },
         'taskEditorLayout',
-        // The per-field visibility/order/section toggles inside this card are
-        // covered by the card itself — they are one control per task-editor
-        // field, not settings people search for by name.
+
+
         { key: 'taskEditorPresentation', section: 'taskEditorLayout' },
     ],
     manage: ['manage', 'manageAreas', 'managePeople', 'manageSomedaySections', 'manageContexts', 'manageTags'],
@@ -100,7 +86,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
     sync: [
         'sync',
         'syncBackend',
-        // Backend-specific fields; only the selected backend's rows render.
+
         { key: 'syncFolderLocation', section: 'syncBackend' },
         { key: 'cloudUrl', section: 'syncBackend' },
         { key: 'cloudToken', section: 'syncBackend' },
@@ -109,8 +95,8 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         { key: 'webdavPassword', section: 'syncBackend' },
         { key: 'dropboxAppKey', section: 'syncBackend' },
         'calendarFeed',
-        // Only rendered for the blob backends that can be encrypted (file, WebDAV,
-        // Dropbox); the self-hosted and CloudKit variants have no such section.
+
+
         'syncEncryption',
         'syncPreferences',
         'backgroundSync',
@@ -168,8 +154,8 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
     ],
     ai: [
         'ai',
-        // The assistant's own settings only render once its card is expanded,
-        // so they hang off the aiEnable toggle that expands it.
+
+
         'aiEnable',
         { key: 'aiProvider', section: 'aiEnable' },
         { key: 'aiModel', section: 'aiEnable' },
@@ -220,7 +206,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
     ],
 };
 
-// The page title each result's "Page → Section" path starts with.
+
 export const SETTINGS_SEARCH_PAGE_TITLE_KEYS: Record<SettingsSearchPageId, string> = {
     main: 'settings.general',
     gtd: 'settings.gtd',
@@ -234,10 +220,7 @@ export const SETTINGS_SEARCH_PAGE_TITLE_KEYS: Record<SettingsSearchPageId, strin
     about: 'settings.about',
 };
 
-// Bare keys above whose real i18n key isn't the default `settings.<key>`.
-// `keybindings` mirrors desktop's own `labelKeyOverrides`; the `manage*` keys
-// exist only here, because the Manage page's cards are titled from the shared
-// areas/contexts/tags namespaces rather than `settings.*`.
+
 const SEARCH_KEY_I18N_OVERRIDES: Record<string, string> = {
     sandboxWorkspace: 'sandbox.open',
     keybindings: 'keybindings.helpTitle',
@@ -267,24 +250,18 @@ export function getSettingsSearchEntries(pageId: SettingsSearchPageId): Settings
     );
 }
 
-// Bare label keys for a page, section information dropped — for consumers that
-// only need "which settings live here" (mobile's row keywords).
+
 export function getSettingsSearchEntryKeys(pageId: SettingsSearchPageId): string[] {
     return SETTINGS_SEARCH_PAGE_KEYS[pageId].map((entry) => (typeof entry === 'string' ? entry : entry.key));
 }
 
 export const SETTINGS_SEARCH_PAGE_IDS = Object.keys(SETTINGS_SEARCH_PAGE_KEYS) as SettingsSearchPageId[];
 
-// Every indexed setting across every page, flattened — the list search UIs
-// walk to build results.
+
 export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchIndexEntry[] =
     SETTINGS_SEARCH_PAGE_IDS.flatMap((pageId) => getSettingsSearchEntries(pageId));
 
-// Desktop page-search keys that mobile does not need to index verbatim, each
-// with the reason it's safe to skip: the feature doesn't exist on mobile, or
-// the key is a value-option/section-heading label whose parent setting is
-// indexed on its own. Every key in SETTINGS_SEARCH_PAGE_KEYS must be either
-// resolvable on mobile or listed here — see settings-search-keys.test.ts.
+
 export const SETTINGS_SEARCH_MOBILE_EXCLUSIONS: Record<string, string> = {
     mcpTitle: 'Bundled local MCP server is available in the desktop app only.',
     sandboxWorkspace: 'Sandbox workspace entry exists in desktop settings; mobile exposes it in its own settings screen.',
@@ -335,8 +312,7 @@ export const SETTINGS_SEARCH_MOBILE_EXCLUSIONS: Record<string, string> = {
     github: 'No repository link row on mobile\'s About screen.',
 };
 
-// A settings row as search shows it: the translated setting name plus the
-// "Page → Section" path that says where it lives.
+
 export type SettingsSearchResult = {
     pageId: SettingsSearchPageId;
     key: string;
@@ -344,14 +320,12 @@ export type SettingsSearchResult = {
     pageTitle: string;
     sectionKey?: string;
     sectionTitle?: string;
-    // Extra terms that match this row without appearing in its title (the
-    // desktop sidebar's hand-curated page synonyms, e.g. "dark mode").
+
+
     keywords?: readonly string[];
 };
 
-// Build the searchable list of every indexed setting. `translate` takes an
-// i18n key and returns the localized string; anything falsy, or the key echoed
-// back (how the app translators signal "missing"), falls back to English.
+
 export function buildSettingsSearchResults(
     translate: (i18nKey: string) => string | undefined,
     pageKeywords: Partial<Record<SettingsSearchPageId, readonly string[]>> = {},
@@ -376,8 +350,8 @@ export function buildSettingsSearchResults(
             pageTitle,
             ...(entry.section ? { sectionKey: entry.section } : {}),
             ...(sectionTitle ? { sectionTitle } : {}),
-            // Synonyms belong to the page, so they ride on the row that IS the
-            // page (title === page title) rather than matching every row on it.
+
+
             ...(title === pageTitle && pageKeywords[entry.pageId]
                 ? { keywords: pageKeywords[entry.pageId] }
                 : {}),
@@ -386,15 +360,12 @@ export function buildSettingsSearchResults(
     return results;
 }
 
-// "General → Input", or just the page title for a row that sits directly on
-// the page.
+
 export function formatSettingsSearchPath(result: SettingsSearchResult): string {
     return result.sectionTitle ? `${result.pageTitle} → ${result.sectionTitle}` : result.pageTitle;
 }
 
-// Substring match over the setting name, its section, its page and any
-// synonyms, ranked title-first so typing "add" leads with the settings that
-// have "add" in their name rather than everything on a page that does.
+
 export function matchSettingsSearchResults(
     results: readonly SettingsSearchResult[],
     query: string,
@@ -422,8 +393,7 @@ export function matchSettingsSearchResults(
         .map((entry) => entry.result);
 }
 
-// English text for a page's search keys, skipping excluded keys — the actual
-// "resolves to a real string" invariant the original bug report was about.
+
 export function getSettingsSearchPageEnglishText(pageId: SettingsSearchPageId): string[] {
     return getSettingsSearchEntryKeys(pageId)
         .filter((key) => !(key in SETTINGS_SEARCH_MOBILE_EXCLUSIONS))

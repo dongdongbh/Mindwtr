@@ -18,12 +18,10 @@ const { mockStorageGetItem, mockStorageRemoveItem, mockStorageSetItem } = vi.hoi
     mockStorageSetItem: vi.fn(),
 }));
 
-// The real core bucket builders run in this file, so "now" is pinned: stale
-// items, the look-back week, and the calendar window are all measured against
-// it. Wednesday 2026-03-04; the default (Sunday) review week starts 2026-03-01.
+
 const NOW = new Date(2026, 2, 4, 10, 0, 0);
-// Local-time fixture timestamps. UTC literals would land in the previous week
-// (and outside the look-back window) for any test machine behind UTC.
+
+
 const at = (day: number, hour = 9) => new Date(2026, 2, day, hour, 0, 0).toISOString();
 
 const defaultTasks: Task[] = [
@@ -56,7 +54,7 @@ const defaultTasks: Task[] = [
         updatedAt: at(2),
     },
     {
-        // Inside the calendar step's 7-day window, so that step has work.
+
         id: 'due-1',
         title: 'Due soon',
         status: 'next',
@@ -82,8 +80,7 @@ const defaultProjects: Project[] = [
     },
 ];
 
-// A task completed inside the current review week. The look-back counts it, no
-// bucket does, so the completed step stays the first step with work.
+
 const doneTask = (overrides: Record<string, unknown> = {}) => ({
     id: 'done-1',
     title: 'Shipped the thing',
@@ -96,9 +93,7 @@ const doneTask = (overrides: Record<string, unknown> = {}) => ({
     ...overrides,
 });
 
-// Finishing a task in a project counts as "moved forward" whatever the project's
-// own status is; an archived one keeps `projectEntries` (and so the projects
-// step) empty, which is what these look-back tests need.
+
 const archivedProject = {
     id: 'project-archived',
     title: 'Wrapped up',
@@ -157,8 +152,7 @@ vi.mock('react-native', async () => {
     };
 });
 
-// Only the store is faked; every review rule (buckets, step order, quick-add
-// parsing) runs for real, the way daily-review-modal.test.tsx does it.
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
     return {
@@ -191,7 +185,7 @@ vi.mock('@/hooks/use-theme-tokens', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-    // One object, like the real hook: rows compare `tc` by identity (#766).
+
     const themeColors = {
         bg: '#0f172a',
         cardBg: '#111827',
@@ -304,9 +298,7 @@ const flattenText = (value: unknown): string => {
     return '';
 };
 
-// Step-rail titles are drawn for every step, present or skipped, so they cannot
-// say which step is open. Each of these lines is rendered by exactly one step
-// body.
+
 const STEP_BODY_TEXT: Record<string, string> = {
     inbox: 'dailyReview.inboxDesc',
     stale: 'No recent activity.',
@@ -329,7 +321,7 @@ const STEP_RAIL_TITLE: Record<string, string> = {
     completed: 'Done!',
 };
 
-/** The open step, or the list of matches when the body is ambiguous. */
+
 const currentStepOf = (tree: ReturnType<typeof create>): string | string[] => {
     const open = Object.entries(STEP_BODY_TEXT)
         .filter(([, text]) => tree.root
@@ -346,8 +338,8 @@ const railTitlesOf = (tree: ReturnType<typeof create>) => {
 
 describe('ReviewModal', () => {
     beforeEach(() => {
-        // Pinned clock: the real bucket builders measure stale items, the
-        // look-back week and the calendar window against it.
+
+
         vi.useFakeTimers();
         vi.setSystemTime(NOW);
         vi.clearAllMocks();
@@ -665,7 +657,7 @@ describe('ReviewModal', () => {
             nextButton.props.onPress();
         });
 
-        // Stale is skipped (nothing is stale), so Next lands on Calendar.
+
         expect(currentStepOf(tree)).toBe('calendar');
 
         const backLabel = tree.root.find((node) => flattenText(node.props?.children) === '← Back');
@@ -738,8 +730,7 @@ describe('ReviewModal', () => {
             await Promise.resolve();
         });
 
-        // Inbox is empty, so the initial 'inbox' step canonicalizes to Calendar;
-        // the stored checkpoint then wins.
+
         expect(currentStepOf(tree)).toBe('waiting');
     });
 
@@ -840,15 +831,15 @@ describe('ReviewModal', () => {
         expect(summary.type).toBe(ScrollView);
         expect(summary.props.contentContainerStyle).toEqual(expect.objectContaining({ flexGrow: 1 }));
         expect(summary.props.contentContainerStyle.flex).toBeUndefined();
-        // Finish stays in the safe-area footer, outside the scrolling summary.
+
         expect(summary.findAllByProps({ accessibilityLabel: 'Finish' })).toHaveLength(0);
         expect(tree.root.findByProps({ accessibilityLabel: 'Finish' })).toBeDefined();
         expect(tree.root.findByProps({ testID: 'review-share-card-button' })).toBeDefined();
     });
 
     it('shows this week\'s completion, project, estimate, and tracked totals', async () => {
-        // Two tasks finished this week, one of them in a project and carrying a
-        // 1h estimate with 45m tracked against it.
+
+
         storeState.tasks = [
             doneTask({
                 projectId: archivedProject.id,
@@ -885,9 +876,8 @@ describe('ReviewModal', () => {
     it('shows the estimate look-back at defaults, with no features block stored', async () => {
         storeState.tasks = [doneTask({ timeEstimate: '1hr', timeSpentMinutes: 45 })] as typeof storeState.tasks;
         storeState.projects = [];
-        // No `features` key at all: time estimates default ON, so the look-back
-        // must render. `features?.timeEstimates === true` read this as OFF and
-        // hid the rows for everyone at defaults.
+
+
         storeState.settings = {
             ...defaultSettings,
             gtd: {
@@ -905,7 +895,7 @@ describe('ReviewModal', () => {
             tree.root.findAll((node) => flattenText(node.props?.children).includes(text)).length > 0;
         expect(hasText('1 completed task(s) had an estimate')).toBe(true);
         expect(hasText('Estimated: 1h')).toBe(true);
-        // Pomodoro still defaults OFF, so the tracked line stays hidden.
+
         expect(hasText('Tracked on those tasks: 45m')).toBe(false);
     });
 
@@ -971,7 +961,7 @@ describe('ReviewModal', () => {
             throw new Error(`No pressable found for "${text}"`);
         };
 
-        // Walk forward to the projects step (empty steps are skipped).
+
         for (let i = 0; i < 6; i += 1) {
             if (tree.root.findAll((node) => flattenText(node.props?.children).includes('Review Your Projects')).length > 0) break;
             await pressByText('Next →');
@@ -986,8 +976,7 @@ describe('ReviewModal', () => {
 
         await pressByText('Save & edit');
 
-        // The real quick-add grammar runs here: the `@errands` token leaves the
-        // title and becomes a context on the new task.
+
         expect(storeState.addTask).toHaveBeenCalledTimes(1);
         const [savedTitle, savedProps] = storeState.addTask.mock.calls[0];
         expect(savedTitle).toBe('Buy cable');
@@ -1000,8 +989,7 @@ describe('ReviewModal', () => {
         expect(editModal.props.defaultTab).toBe('task');
     });
 
-    // Rows carry the #766 memo boundary, which only holds while the modal hands
-    // untouched rows the same references back.
+
     it('hands rows stable prop references across a re-render', async () => {
         storeState.tasks = [
             ...defaultTasks.map((task) => ({ ...task })),
@@ -1031,8 +1019,7 @@ describe('ReviewModal', () => {
         expect(after[1].tc).toBe(before[1].tc);
     });
 
-    // The rail is the mobile copy of core's step order. Pinned against
-    // `buildReviewSteps` so the two cannot drift apart silently.
+
     it('renders the canonical core step order in the rail', async () => {
         const coreStepIds = (includeContextStep: boolean) => buildReviewSteps(
             getWeeklyReviewBuckets(

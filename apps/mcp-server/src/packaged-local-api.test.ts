@@ -9,9 +9,7 @@ import { fileURLToPath } from 'url';
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const token = 'packaged-fixture-api-token-1336';
 
-// This is an HTTP contract fixture, not validation against a running desktop app.
-// Exercised envelopes mirror local_api.rs: GET /tasks -> { tasks },
-// POST /tasks { title, props } -> 201 { task }.
+
 const taskFixture = () => {
   const timestamp = '2026-01-01T00:00:00.000Z';
   const task = (id: string, extra: Record<string, unknown>): Record<string, unknown> => ({
@@ -49,8 +47,8 @@ const taskFixture = () => {
       return;
     }
     if (req.method === 'GET' && url.pathname === '/tasks') {
-      // The adapter asks for every status and narrows only by the native filters (local_api.rs filter_tasks);
-      // MCP's richer filters run locally on the result.
+
+
       const query = url.searchParams;
       if (query.get('all') !== '1'
         || [...query.keys()].some((key) => !['all', 'deleted', 'status', 'isFocusedToday'].includes(key))) {
@@ -174,9 +172,8 @@ const toolPayload = (response: any): any => {
 };
 
 test('installed npm tarball uses the Local API fixture on Node without SQLite, with safe read/write defaults', async () => {
-  // Keep npm installation on disk and outside the checkout: Node walks ancestor
-  // node_modules directories, so a scratch folder inside the repo could silently
-  // resolve its better-sqlite3 even though this installation omits the addon.
+
+
   const tempRoot = join(homedir(), '.cache', 'mindwtr-mcp-package-tests');
   mkdirSync(tempRoot, { recursive: true });
   const outDir = mkdtempSync(join(tempRoot, 'mindwtr-mcp-package-'));
@@ -192,7 +189,7 @@ test('installed npm tarball uses the Local API fixture on Node without SQLite, w
       if (result.status !== 0) throw new Error(`${command} failed: ${result.error?.message ?? result.stderr}`);
       return result.stdout;
     };
-    // process.execPath is Bun inside bun:test; explicitly find the real Node binary.
+
     const node = run('node', ['-p', 'process.execPath'], outDir).trim();
     expect(run(node, ['-p', 'typeof globalThis.Bun'], outDir).trim()).toBe('undefined');
     run('bun', [
@@ -273,8 +270,7 @@ test('installed npm tarball uses the Local API fixture on Node without SQLite, w
     expect(fixture.failures).toEqual([]);
     expect(existsSync(bogusDb)).toBe(false);
 
-    // SQLite selection must still give an actionable error; an existing explicit
-    // path ensures this reaches addon loading rather than database discovery.
+
     const db = join(outDir, 'existing.db');
     writeFileSync(db, '');
     const sqlite = stdioClient(node, cli, ['--db', db], installed, runtimeEnvironment);

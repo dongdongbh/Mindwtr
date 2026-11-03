@@ -19,35 +19,30 @@ import java.util.concurrent.Executors
 import tech.dongdongbh.mindwtr.androidwidget.QuickCaptureAudioRecorder
 import tech.dongdongbh.mindwtr.androidwidget.QuickCaptureWave
 
-/** RN's two recording formats (decision Q1): the caller passes the one core's resolveQuickCaptureAudioFormat picked. */
+
 enum class VoiceFormat(val extension: String) {
-    /** expo-audio's HIGH_QUALITY preset on Android, as RN records for the cloud providers ([ExpoHighQuality]). */
+
     M4A(".m4a"),
-    /** 16 kHz mono PCM WAV through the widget's recorder, as RN's whisper.rn records for local Whisper. */
+
     WAV(".wav"),
 }
 
-/** One recording in progress. It owns its staged file: [stop] answers it complete; [cancel] and any failure delete it. */
+
 interface VoiceTake {
-    /** [done] once the microphone records, or with why it could not (then the take has ended and left no file). */
+
     fun started(done: (Result<Unit>) -> Unit)
-    /** Ends the recording; [done] runs once the recorder is released (RN d596ecce6: stop it before transcribing). */
+
     fun stop(done: (Result<File>) -> Unit)
     fun cancel(done: () -> Unit)
 }
 
-/** Ducks other audio while recording, as RN's setAudioModeAsync interruptionModeAndroid 'duckOthers'. */
+
 interface AudioFocus {
     fun request()
     fun abandon()
 }
 
-/**
- * The capture screens' microphone (voice pass V2): start, stop and cancel, each answered through a callback on [executor] like a
- * fetch, so no caller waits on the engine thread. One owner at a time (RN 9604387e4, c5fc870fe): a start while a recording runs or
- * ends is refused, and only the owner's id stops or cancels it. The recording stays staged until a stop succeeds, then takes its
- * final name in [directory]; a cancelled or failed one leaves no file. No foreground service: leaving the app cancels ([leave]).
- */
+
 class VoiceRecorder(
     private val directory: File,
     private val executor: Executor,
@@ -57,13 +52,10 @@ class VoiceRecorder(
 ) {
     class Refused(message: String) : IOException(message)
 
-    /**
-     * The microphone could not start in [format]. RN falls back to m4a when its Whisper start fails (use-quick-capture-audio.ts
-     * 'Whisper realtime start failed, falling back to audio recording'); the caller does the same on a WAV one. The device is free.
-     */
+
     class StartFailed(val format: VoiceFormat, cause: Throwable) : IOException("The $format recording could not start", cause)
 
-    /** The app left before the microphone started: nothing was recorded, and nothing should be retried. */
+
     class Cancelled : IOException("The recording was cancelled")
 
     private class Owner(val id: String, val format: VoiceFormat, val take: VoiceTake) {
@@ -71,7 +63,7 @@ class VoiceRecorder(
         var ending = false
     }
 
-    // Read and written on [executor] only.
+
     private var owner: Owner? = null
 
     fun start(format: VoiceFormat, reply: (Result<String>) -> Unit) = executor.execute {
@@ -86,7 +78,7 @@ class VoiceRecorder(
         }
         val current = Owner(id, format, take)
         owner = current
-        // The reply waits for the microphone, so a WAV source that cannot open answers here, not at the stop.
+
         take.started { result ->
             executor.execute {
                 current.starting = false
@@ -120,7 +112,7 @@ class VoiceRecorder(
 
     fun cancel(id: String) = executor.execute { end { it.id == id } }
 
-    /** The app left the front: a recording still running ends without saving, as RN's sheet closing; a stop already asked keeps its answer. */
+
     fun leave() = executor.execute { end { true } }
 
     private fun end(matches: (Owner) -> Boolean) {
@@ -143,7 +135,7 @@ class VoiceRecorder(
     }
 
     companion object {
-        /** The app's recorder: its own folder, apart from the widget's queue folder (QuickCaptureAudioCleanup expires that one). */
+
         fun create(context: Context): VoiceRecorder {
             val app = context.applicationContext
             val directory = File(app.filesDir, DIRECTORY)
@@ -161,12 +153,7 @@ class VoiceRecorder(
 
         private val RECORDING = Regex("^\\.?[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\\.(?:m4a|wav)(?:\\.tmp)?$")
 
-        /**
-         * Review N6: run when the process makes its recorder, before anything records. Every recording in [directory] is then
-         * left from an earlier process: a stopped one whose transcription died with it, or a staged `.tmp`. A task's recording
-         * is its managed copy under attachments/, never one of these. Deletes only the names this recorder gives, as direct
-         * regular files of [directory] or of the WAV recorder's staging folder, as QuickCaptureAudioCleanup does. Answers how many.
-         */
+
         fun sweep(directory: File): Int {
             val staging = File(directory, "quick-capture-audio")
             var deleted = 0
@@ -185,7 +172,7 @@ class VoiceRecorder(
     }
 }
 
-/** The process's recorder, set by the bundle's voice host (pass V3); MainActivity tells it when the app leaves the front. */
+
 object VoiceCapture {
     @Volatile var recorder: VoiceRecorder? = null
 
@@ -194,21 +181,21 @@ object VoiceCapture {
     }
 }
 
-/** RN's m4a settings: expo-audio 1.1.1 RecordingPresets.HIGH_QUALITY (src/RecordingConstants.ts), its Android part. */
+
 object ExpoHighQuality {
     const val SAMPLE_RATE = 44_100
     const val CHANNELS = 2
     const val BIT_RATE = 128_000
 }
 
-/** The m4a encoder: MediaRecorder on the device, a stand-in in the JVM tests. */
+
 interface M4aSink {
     fun start(output: File)
     fun stop()
     fun release()
 }
 
-/** An m4a recording, staged as `.<id>.m4a.tmp` in [directory]. */
+
 class M4aTake(directory: File, id: String, private val sink: M4aSink) : VoiceTake {
     private val staged = File(directory, ".$id.m4a.tmp")
 
@@ -224,11 +211,11 @@ class M4aTake(directory: File, id: String, private val sink: M4aSink) : VoiceTak
         }
     }
 
-    // MediaRecorder.start ran in the constructor: a take that exists records.
+
     override fun started(done: (Result<Unit>) -> Unit) = done(Result.success(Unit))
 
     override fun stop(done: (Result<File>) -> Unit) {
-        // MediaRecorder.stop throws when nothing was recorded.
+
         val stopped = runCatching { sink.stop() }
         runCatching { sink.release() }
         val result = stopped.mapCatching { if (staged.length() > 0) staged else throw IOException("Nothing was recorded") }
@@ -244,7 +231,7 @@ class M4aTake(directory: File, id: String, private val sink: M4aSink) : VoiceTak
     }
 }
 
-/** expo-audio's Android recorder with RN's HIGH_QUALITY options, in expo's call order (AudioRecorder.setRecordingOptions). */
+
 class AndroidM4aSink(private val context: Context) : M4aSink {
     private var recorder: MediaRecorder? = null
 
@@ -272,11 +259,7 @@ class AndroidM4aSink(private val context: Context) : M4aSink {
     }
 }
 
-/**
- * A WAV recording through the widget's QuickCaptureAudioRecorder, unchanged: it stages `quick-capture-audio/.<id>.wav.tmp` under
- * [directory], deletes it itself when cancelled or failed, and answers on [callbacks]. Its source is wrapped only to tell when the
- * microphone started; a source that cannot open or start ends the recorder before that.
- */
+
 class WavTake(
     directory: File,
     id: String,
@@ -305,7 +288,7 @@ class WavTake(
 
     init {
         recorder.start { ended ->
-            // An end before the microphone started is the start's answer too.
+
             settleStart(Result.failure((ended as? QuickCaptureAudioRecorder.Outcome.Failed)?.error ?: IOException("The recording ended before it started")))
             val next = synchronized(lock) {
                 outcome = ended
@@ -329,7 +312,7 @@ class WavTake(
         result?.let(done)
     }
 
-    // The recorder answers once, possibly before a stop was asked (a failed source): the answer waits for the caller.
+
     private fun whenEnded(action: (QuickCaptureAudioRecorder.Outcome) -> Unit) {
         val ended = synchronized(lock) { outcome.also { if (it == null) waiting = action } }
         ended?.let(action)
@@ -355,10 +338,7 @@ class WavTake(
     }
 }
 
-/**
- * The widget recorder's own microphone source (QuickCaptureAudioRecorder.AndroidPcmSource is private to :widget), with the same
- * settings: voice recognition, 16 kHz mono 16-bit PCM, a buffer of at least 4 KiB.
- */
+
 class AndroidPcmSource : QuickCaptureAudioRecorder.PcmSource {
     override val bufferSize: Int = maxOf(
         4_096,
@@ -395,7 +375,7 @@ class AndroidPcmSource : QuickCaptureAudioRecorder.PcmSource {
     override fun release() = recorder.release()
 }
 
-/** Transient focus that lets other audio duck (RN's interruptionModeAndroid 'duckOthers'); a refusal still records, as RN does. */
+
 class AndroidAudioFocus(context: Context) : AudioFocus {
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val listener = AudioManager.OnAudioFocusChangeListener { }
@@ -426,12 +406,9 @@ class AndroidAudioFocus(context: Context) : AudioFocus {
     }
 }
 
-/**
- * The system microphone prompt, on the open screen (MainActivity registers [launcher] and hands each answer to [answered]), as
- * the calendar prompt: an ask while one shows waits for the same answer; with no screen it answers false at once.
- */
+
 open class PermissionPrompt(private val post: (() -> Unit) -> Unit) {
-    /** The open Activity's launcher; null while none is open. Main thread. */
+
     var launcher: (() -> Unit)? = null
     private val waiting = ArrayList<(Boolean) -> Unit>()
 
@@ -441,7 +418,7 @@ open class PermissionPrompt(private val post: (() -> Unit) -> Unit) {
         if (waiting.size == 1) runCatching { launch() }.onFailure { answered(false) }
     }
 
-    /** The prompt closed with [granted]. Main thread. */
+
     fun answered(granted: Boolean) {
         val done = waiting.toList()
         waiting.clear()

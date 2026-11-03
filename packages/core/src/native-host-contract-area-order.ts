@@ -18,7 +18,7 @@ export type NativeAreaOrderRequest = { requestId: string; intent: AreaOrderInten
 export type NativeAreaOrderResult = { orderedIds: string[] };
 export type NativePreparedAreaOrder = PreparedAreaOrder & { version: 1; request: NativeAreaOrderRequest;
     result: NativeAreaOrderResult };
-/** Android's journaled area order (#1263): RN's intent on the order the sheet showed, a target state. */
+
 export type NativeAreaOrderRun = { requestId: string; intent: AreaOrderIntent; order: string[] };
 export type NativeAreaOrderPreparation = { kind: 'noop'; result: NativeAreaOrderResult }
     | { kind: 'prepared'; prepared: NativePreparedAreaOrder };
@@ -85,7 +85,7 @@ const validArea = (value: unknown): value is Area => record(value)
     && (value.revBy === undefined || typeof value.revBy === 'string' && value.revBy.length <= 500)
     && iso(value.createdAt) && iso(value.updatedAt) && value.deletedAt === undefined;
 
-/** Pure cold-journal validation before SQLite opens. */
+
 const readPrepared = (value: unknown): NativePreparedAreaOrder | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -133,17 +133,14 @@ export function createAreaOrderMethods(deps: {
             return isNativeJsonWithinBytes(value) ? { ok: true, value }
                 : fail('INVALID_INPUT', 'Area order options exceed the bounded native response');
         },
-        /**
-         * Android's Manage areas sheet (#1263, RN ProjectAreaModals.tsx): the live areas in order, each with Settings' revision (its
-         * swatch-free writes are Settings' manageEditor and manageDelete) and whether a live project uses it (RN's Delete is off
-         * then), and RN's swatches. iOS keeps reading getAreaOrderOptions, whose keys stay exact.
-         */
+
+
         getProjectAreaManager(): NativeHostResult<{ revision: string; colors: string[]; newArea: { type: 'newArea' };
             areas: Array<{ id: string; name: string; color: string | null; inUse: boolean; delete: { type: 'area'; id: string; revision: string } }> }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const usage = countLiveProjectsByArea(useTaskStore.getState().projects);
-            // Settings' targets, sent as given: the new area's (manageCheck, manageEditor) and each row's Delete (manageDelete).
+
             const value = { revision: deps.revision(), colors: [...AREA_PRESET_COLORS], newArea: { type: 'newArea' as const },
                 areas: deps.sortedAreas().filter((area) => !area.deletedAt).map((area) => ({ id: area.id, name: area.name,
                     color: area.color ?? null, inUse: (usage.get(area.id) ?? 0) > 0,
@@ -201,11 +198,7 @@ export function createAreaOrderMethods(deps: {
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
 
-        /**
-         * Android's Manage areas sheet: [input]'s intent on the order it showed, prepared and committed here (Android journals the
-         * request, not the envelope). The order the intent makes from the shown order already in place (a replay) answers
-         * unchanged; any other change since the sheet read refuses. A save owed from before is finished first.
-         */
+
         async runAreaOrder(input: NativeAreaOrderRun): Promise<NativeHostResult<{ outcome: 'saved' | 'unchanged'; orderedIds: string[] }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

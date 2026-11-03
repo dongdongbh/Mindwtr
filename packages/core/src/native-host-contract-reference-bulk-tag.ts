@@ -67,7 +67,7 @@ export const referenceTasksAddTagScope = (request: TagRequest,
 const tagUpdates = (request: TagRequest, scope: NativeReferenceTasksMoveScope, at: string) =>
     buildBulkTaskTokenUpdates(request.taskIds, buildEntityMap(scope.tasks.map((row) => historyRowLoadProjection(row, at))), 'tags', request.tag.trim(), 'add');
 
-/** Uses the actual RN builder, preflight and batch planner; replay never allocates. */
+
 export const referenceTasksTagEffect = (prepared: Pick<NativeReferenceTasksAddTagPrepared,
     'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates'>, updatesList: ReturnType<typeof buildBulkTaskTokenUpdates>, temporal?: TaskLoadTemporalContext): NativeReferenceTasksAddTagPrepared['effect'] | null => {
     const { scope } = prepared;
@@ -271,7 +271,7 @@ export function createTasksAddTagMethods(deps: {
             if (confirmed.ok) {
                 try { logInfo(`Native ${label} bulk tag confirmed`, { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-tag' : 'v1.3.4/ios-reference-bulk-tag', count: confirmed.value.count, outcome: 'added' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },
@@ -291,7 +291,7 @@ export function createReferenceTasksAddTagMethods(deps: Parameters<typeof create
     };
 }
 
-// The store's Reference addTag action reads these here: it cannot import this module (store-reference-batch-modules.ts).
+
 referenceBatchModules.shared = { historyRowLoadProjection, NativeReceiptSqliteAdapter };
 referenceBatchModules.addTag = (input) => {
     const prepared = input as NativeReferenceTasksAddTagPrepared;

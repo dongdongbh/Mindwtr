@@ -56,9 +56,8 @@ export function MindSweepModal({ isOpen, onClose, t, addTask }: MindSweepModalPr
         const title = draft.trim();
         if (!title || !group) return;
         try {
-            // Count the item only once the store accepted it, so the summary
-            // never claims more captures than exist and the draft survives a
-            // rejected write.
+
+
             const result = await addTask(title, { status: 'inbox' });
             if (!result?.success) {
                 setAddFailed(true);
@@ -90,8 +89,8 @@ export function MindSweepModal({ isOpen, onClose, t, addTask }: MindSweepModalPr
             labelledBy={titleId}
             placement="top"
             overlayClassName="pt-[12vh]"
-            // Capped under the 12vh offset so a long group prompt list scrolls
-            // instead of pushing Back/Next off the window (#957).
+
+
             panelClassName="max-w-lg mx-4 max-h-[76vh] bg-background text-foreground border-border shadow-xl"
         >
             <DialogBody className="p-6 flex flex-col gap-4">

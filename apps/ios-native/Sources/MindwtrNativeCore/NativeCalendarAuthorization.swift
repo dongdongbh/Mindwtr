@@ -3,7 +3,7 @@ import Foundation
 import EventKit
 #endif
 
-/// Explicit Settings permission only. The accepted system callback is not cancellable; its owner drains it.
+
 final class NativeCalendarAuthorization: @unchecked Sendable {
     typealias Requester = @Sendable () async throws -> Void
     private let lock = NSLock()

@@ -501,7 +501,7 @@ describe('TaskItemDisplay', () => {
         expect(getByText(/^Daily · Repeat every 3 day\(s\) · Next calendar preview: /)).toBeInTheDocument();
     });
 
-    // #1164: Waiting For completes from the quick action; Someday still promotes.
+
     it.each([
         ['waiting', 'Mark Done', 'done', 'Next'],
         ['someday', 'Next', 'next', 'Mark Done'],
@@ -591,8 +591,7 @@ describe('TaskItemDisplay', () => {
         expect(onStatusChange).not.toHaveBeenCalled();
     });
 
-    // #1155: the row status menu listed Reference only for a task that already
-    // was one, so a task inside a project could not be filed as reference.
+
     it('lets the row status menu send a task to Reference', () => {
         const onStatusChange = vi.fn();
         const { getByRole } = render(
@@ -680,8 +679,8 @@ describe('TaskItemDisplay', () => {
     });
 
     it('shows the projected recurrence date in task preview metadata', () => {
-        // The projected date is computed from "now"; freeze it so the
-        // hardcoded Jul 9 expectation stays valid after that date passes.
+
+
         vi.useFakeTimers();
         vi.setSystemTime(new Date(2026, 6, 3, 12, 0, 0));
         const { getByText } = render(
@@ -837,7 +836,7 @@ describe('TaskItemDisplay', () => {
         expect(openSpy).toHaveBeenCalledWith('https://example.com/spec', '_blank', 'noopener,noreferrer');
         expect(onToggleView).not.toHaveBeenCalled();
 
-        // Plain preview text stays inert, as before; the title still toggles.
+
         fireEvent.click(getByText(/before the call/));
         expect(onToggleView).not.toHaveBeenCalled();
         fireEvent.click(container.querySelector('[data-task-view-toggle]')!);
@@ -881,7 +880,7 @@ describe('TaskItemDisplay', () => {
         expect(openSpy).toHaveBeenCalledWith('http://www.google.com', '_blank', 'noopener,noreferrer');
         expect(onToggleView).not.toHaveBeenCalled();
 
-        // Plain preview text stays inert, as before; the title still toggles.
+
         fireEvent.click(getByText(/before the call/));
         expect(onToggleView).not.toHaveBeenCalled();
         fireEvent.click(container.querySelector('[data-task-view-toggle]')!);
@@ -1205,8 +1204,7 @@ describe('TaskItemDisplay', () => {
             </LanguageProvider>
         );
 
-        // A real anchor since #1048 — checklist links used to render as dead
-        // text because the whole row was one toggle button.
+
         expect(queryByRole('link', { name: 'spec' })).toBeInTheDocument();
         expect(container.textContent).toContain('Draft spec');
         expect(container.textContent).not.toContain('**');
@@ -1564,7 +1562,7 @@ describe('TaskItemDisplay', () => {
         expect(getByRole('button', { name: 'More options' })).toBeInTheDocument();
         const statusSelect = getByRole('combobox', { name: 'task.aria.status' });
         expect(statusSelect).toBeInTheDocument();
-        // Status pills wear the Board's per-status tint (an inbox task here).
+
         expect(statusSelect).toHaveClass('bg-[hsl(var(--status-inbox)/0.14)]', 'text-[hsl(var(--status-inbox))]');
         expect(queryByRole('button', { name: 'task.convertToReference' })).not.toBeInTheDocument();
         expect(queryByRole('button', { name: 'task.aria.delete' })).not.toBeInTheDocument();
@@ -1942,7 +1940,7 @@ describe('TaskItemDisplay', () => {
                 </LanguageProvider>
             );
             const label = safeFormatDate(dueDate, hasTimeComponent(dueDate) ? 'Pp' : 'P');
-            // The urgency class lands on the badge wrapper, not the label span.
+
             const className = getByText(label).closest('.metadata-badge')?.className ?? '';
             unmount();
             return className;
@@ -1950,7 +1948,7 @@ describe('TaskItemDisplay', () => {
 
         const hour = 60 * 60 * 1000;
         const overdue = dueColorFor(new Date(Date.now() - hour).toISOString());
-        // Urgent: inside 24h, which used to be destructive and read as overdue.
+
         const urgent = dueColorFor(new Date(Date.now() + (6 * hour)).toISOString());
         const upcoming = dueColorFor(new Date(Date.now() + (48 * hour)).toISOString());
         const later = dueColorFor(new Date(Date.now() + (30 * 24 * hour)).toISOString());
@@ -2031,8 +2029,7 @@ describe('TaskItemDisplay', () => {
             expect(strip?.className).toContain('-start-1.5');
         });
 
-        // Desktop keeps the priority text badge, so the strip is decoration only
-        // and must not reach the accessibility tree twice.
+
         it('is decorative: aria-hidden with no role', () => {
             const strip = renderStrip({ ...baseTask, priority: 'urgent' }, true);
             expect(strip?.ariaHidden).toBe('true');
@@ -2054,8 +2051,7 @@ describe('TaskItemDisplay', () => {
             expect(renderStrip(baseTask, true)).toBeNull();
         });
 
-        // A completed task keeps the row's own dimming; the strip gets no
-        // special-cased "done" color (decision: no green).
+
         it('keeps the priority color on a completed task', () => {
             expect(renderStrip({ ...baseTask, status: 'done', priority: 'low' }, true)?.background)
                 .toBe('rgb(59, 130, 246)');

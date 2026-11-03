@@ -59,7 +59,7 @@ describe('review views parity with the frozen React Native fixture', () => {
                 recorder.log.splice(0);
                 const observed = await replayReviewScenario({ part, fixture: fixture[part], scenario, recorder, contract });
                 const expected = structuredClone(fixture[part].observations[scenario.name]).map(projectObservation);
-                // Keep the frozen corpus: these are the two intentional #1495 deltas.
+
                 if (part === 'review' && scenario.name === 'overview: title sort') {
                     for (const observation of expected) {
                         const rows = observation.rows as [string, boolean, boolean][];
@@ -114,7 +114,7 @@ describe('review view models', () => {
 
     it('resumes a paused review only within its week or day', () => {
         const now = new Date(2026, 8, 23, 10);
-        // Sunday: this week by default, last week when weeks start on Monday.
+
         const stored = JSON.stringify({ step: 'projects', startedAt: new Date(2026, 8, 20, 9).toISOString() });
         expect(restoreReviewSession('weekly', stored, { now })).toMatchObject({ resumed: true, session: { step: 'projects' } });
         expect(restoreReviewSession('weekly', stored, { now, weekStart: 'monday' })).toMatchObject({ resumed: false, session: { step: 'inbox' } });

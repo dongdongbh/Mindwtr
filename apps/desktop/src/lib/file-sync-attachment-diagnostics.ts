@@ -108,17 +108,7 @@ const observeNativeFailure = (error: unknown): ObservedNativeFailure => {
     return { errorType: fallbackType, nativeCode: 'unknown' };
 };
 
-/**
- * Why the native side refused, when the refusal is one of OUR OWN fixed sentences.
- *
- * A tester's log showed `stage: generation-reserve` with no OS error code: the reserve step has
- * some forty rules of its own (journal full, lease gone, directory identity, path shape...), and
- * the generic error text told us none of them. The text cannot be logged as it comes, because
- * other native errors are built with `format!` and can carry a path or a file name. So only an
- * EXACT match against this list is logged; everything else is `unlisted`. Each entry is a string
- * literal in `src-tauri/src/file_sync_attachment_publication.rs` (or the lease wrapper in
- * `sync.rs`), and `file-sync-attachment-diagnostics.test.ts` fails when the two drift apart.
- */
+
 export const KNOWN_FILE_SYNC_PUBLICATION_REASONS: ReadonlySet<string> = new Set([
     'File Sync filesystem does not expose a stable directory identity',
     'File Sync directory identity is unsupported on this platform',
@@ -162,8 +152,7 @@ export const KNOWN_FILE_SYNC_LEASE_REASONS: ReadonlySet<string> = new Set([
     'File Sync lease belongs to a different renderer window',
 ]);
 
-// `format!("File Sync {label} path must be ...")`: the label is one of three fixed words, never
-// user data. Lowercase letters and spaces only, so a path can never satisfy it.
+
 const TEMPLATED_REASON_PATTERNS = [
     /^File Sync [a-z][a-z ]{0,30} path must be a real directory, not a link or reparse point$/,
     /^File Sync [a-z][a-z ]{0,30} path must be a directory$/,
@@ -211,7 +200,7 @@ export const reportFileSyncAttachmentFailure = (
             buildFileSyncAttachmentFailureExtra(stage, error),
         );
     } catch {
-        // Diagnostics are best effort and must never replace the transfer result.
+
     }
 };
 

@@ -1,36 +1,6 @@
-/**
- * The native host contract for the Calendar screen: the month, week, day and
- * schedule views, their navigation, the task composer, and every action the
- * React Native screen offers on a calendar item. Kept in its own file and spread
- * into createNativeHostContract. Every view is built from core's calendar view
- * model (calendar-view-model.ts), the same functions the React Native screen
- * calls.
- *
- * The host keeps the screen's place as a `state` (mode, selected day, visible
- * month) and sends it back; every navigation control carries the state it leads
- * to. External calendars are platform I/O: the host fetches the view's `range`
- * and sends what it has as `calendar` (loading, ready or error).
- *
- * Reads are windowed by NATIVE_HOST_MAX_WINDOW under one revision. Writes go
- * through runCalendarAction with a request UUID: a request the receipts hold
- * (running, or owing its save) goes to them before any other check, and a retry
- * only saves (native-request-receipts.ts); every write is target-state, so a
- * replay after a restart writes nothing, a write to an existing task
- * compare-and-sets on the revision the view showed (a task changed since is
- * refused: STALE_REVISION), and a task a request made answers its replay only
- * while it is exactly what the request writes. Success means the change is
- * saved. A refusal the screen shows (a time conflict, a composer error) writes
- * nothing and leaves the request ID free. The iOS host exposes only the
- * prepared existing-composer write below; its complete stamped target row is
- * the durable receipt.
- *
- * Headings (month and week titles, day titles, weekday labels) come from
- * date-fns patterns through the user's date formatter: the host's engine has no
- * Intl. Their English text equals the React Native screen's.
- *
- * Only functions read this module's imports from native-host-contract.ts, so
- * the import cycle between the two files is safe.
- */
+
+
+
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from './area-filter';
 import { getDefaultTaskAreaMode } from './area-utils';
 import { filterCalendarEventsForAreas } from './external-calendar-ingestion';
@@ -184,66 +154,58 @@ type Translate = (key: string) => string;
 export type CalendarViewDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
-    /** Data plus display revision: tasks, projects, settings, language and the minute. */
+
     revision: (now: Date) => string;
     t: () => Translate;
-    /** The user's date settings; clock times format through createDateFormatter with them. */
+
     dateFormatting: () => DateFormattingConfig;
-    /** Data and settings revision, without the clock: what the period index reads. */
+
     dataRevision: () => string;
-    /** Rows with core meta, as the other contract lists build them. */
+
     rows: (tasks: readonly Task[], now: Date) => NativeTaskRow[];
 };
 
-/**
- * The external calendars as the host fetched them for the view's `range`.
- * While a refetch runs for the same range, send the calendars and events already
- * shown with `loading`; after a failure the screen keeps the calendars and shows
- * no events. A ready feed's warning keeps its successfully fetched events.
- * Absent: no calendar fetched.
- */
+
 export type NativeCalendarFeed =
     | { status: 'loading'; calendars?: ExternalCalendarSubscription[]; events?: ExternalCalendarEvent[] }
     | { status: 'error'; message: string; calendars?: ExternalCalendarSubscription[] }
     | { status: 'ready'; calendars: ExternalCalendarSubscription[]; events: ExternalCalendarEvent[]; warning?: string };
 
-/** The screen's place: its mode, the selected day (null: none, month view only) and a day of the visible month. Days are `yyyy-MM-dd`. */
+
 export type NativeCalendarState = { viewMode: CalendarViewMode; selectedDate: string | null; visibleMonth: string };
 
 export type NativeCalendarItem = {
-    /** The React Native item id ("scheduled-<task>", "deadline-<task>", "completed-<task>", "event-<event>"), or the task or event id in a list. */
+
     id: string;
     kind: 'scheduled' | 'deadline' | 'completed' | 'event';
     taskId: string | null;
     eventId: string | null;
-    /** The exact displayed occurrence; provider identity remains transient. */
+
     eventRef: { sourceId: string; id: string; start: string; end: string } | null;
-    /** The title as drawn: a projected occurrence adds "· Projected · Oct 31" where the screen does. */
+
     title: string;
-    /** The second line (a time, "All day", "Deadline"), or null where the surface draws none. */
+
     detail: string | null;
     accessibilityLabel: string | null;
     projected: boolean;
-    /** Pressing opens getCalendarItemSheet. False for completed or projected items where the screen disables it. */
+
     pressable: boolean;
-    /** Theme tones: `fill` behind the item, `accent` on its left edge, `text` its title; `source` means `sourceColor`. */
+
     tones: { fill: CalendarTone | null; accent: CalendarTone | null; text: CalendarTone | null; dashed: boolean; struck: boolean; faded: boolean };
-    /** The event's calendar color, as the screen resolves it. */
+
     sourceColor: string | null;
-    /**
-     * A timed block: minutes into the day (clamped to it), its column among
-     * overlapping blocks, and a task's own duration (what a drag moves).
-     */
+
+
     timed: { startMinutes: number; endMinutes: number; durationMinutes: number; column: CalendarTimedLayout | null } | null;
-    /** Point geometry only; never a duration or a movable scheduled block. */
+
     deadline?: { startMinutes: number; labelMinutes: number; groupId: string; groupIndex: number; groupSize: number };
-    /** The row offers Done (month details). */
+
     showDone: boolean;
     row: NativeTaskRow | null;
 };
 
 export type NativeCalendarEntry =
-    /** A month cell with its preview items, a week column header, or a schedule day heading. */
+
     | {
         type: 'day';
         key: string;
@@ -253,17 +215,17 @@ export type NativeCalendarEntry =
         isToday: boolean;
         selected: boolean;
         accessibilityLabel: string | null;
-        /** Month cells that hide items show their task and event counts. */
+
         counts: { tasks: number; events: number } | null;
         preview: NativeCalendarItem[];
-        /** Pressing a week column header opens this day in the day view. */
+
         opens: NativeCalendarState | null;
-        /** A week column's "+2 more" chip under its all-day lane, when items are hidden; pressing it goes to `opens`. */
+
         allDayMore: string | null;
     }
-    /** An item in a lane of a day: the week's all-day lane or timeline, the day view's, a schedule day, or the month details' lists. */
+
     | { type: 'item'; dayKey: string; lane: 'allDay' | 'timed' | 'deadlineMarker' | 'list' | 'events' | 'deadlines' | 'scheduled'; item: NativeCalendarItem }
-    /** A task to schedule: a search result under the selected day, or a planning suggestion. Press it with openCalendarComposer({ scheduleTaskId }). */
+
     | { type: 'task'; list: 'search' | 'planning'; taskId: string; title: string; detail: string; row: NativeTaskRow };
 
 type NavigationTarget = { label: string; state: NativeCalendarState };
@@ -271,21 +233,21 @@ type NavigationTarget = { label: string; state: NativeCalendarState };
 export type NativeCalendarView = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
     revision: string;
-    /** The state this view shows; keep it and send it back. */
+
     state: NativeCalendarState;
-    /** Fetch external events for this window and send them as `calendar`. */
+
     range: { start: string; end: string };
-    /** All modes expose loading, whole-feed failures and retained ready warnings. */
+
     feedState: { status: 'ready' | 'loading' | 'error'; message: string | null };
     header: {
         title: string;
-        /** The day view uses the day title style. */
+
         titleVariant: 'day' | 'standard';
         previous: NavigationTarget | null;
         next: NavigationTarget | null;
         today: NavigationTarget;
     };
-    /** The mode switch; choosing one also runs setViewMode, which the screen saves. */
+
     modes: { mode: CalendarViewMode; label: string; selected: boolean; state: NativeCalendarState }[];
     showCompleted: { label: string; hint: string; on: boolean };
     text: Omit<ReturnType<typeof getCalendarScreenText>, 'weekDensityValue' | 'weekDensityChoice'> & { toasts: NativeCalendarToasts };
@@ -293,15 +255,15 @@ export type NativeCalendarView = {
         | {
             mode: 'month';
             dayNames: string[];
-            /** Blank cells before the month's first day. */
+
             leadingBlanks: number;
-            /** The selected day's details panel; `close` is the state without it. */
+
             details: {
                 title: string;
                 close: NativeCalendarState;
                 query: string;
                 searchTitle: string | null;
-                /** Null when no external calendar is configured. */
+
                 events: { title: string; loading: string | null; error: string | null } | null;
                 empty: string | null;
             } | null;
@@ -311,17 +273,14 @@ export type NativeCalendarView = {
             visibleDays: number;
             density: { value: string; choices: { days: number; label: string; selected: boolean }[] };
             hourLabels: string[];
-            /** Minutes into today for the current-time line; the column of today draws it. */
+
             nowMinutes: number | null;
         }
         | {
             mode: 'day';
             dayKey: string;
-            /**
-             * The all-day card draws its first `allDayLimit` items, then an
-             * `allDayMore` chip ("+2 more", null when nothing is hidden) that
-             * expands the card to every item and becomes `text.allDayLess`.
-             */
+
+
             allDayLimit: number;
             allDayMore: string | null;
             hourLabels: string[];
@@ -340,7 +299,7 @@ export type NativeCalendarView = {
 
 export type NativeCalendarToasts = Omit<ReturnType<typeof getCalendarToasts>, 'saveFailed'> & { saveFailed: CalendarToast };
 
-/** The composer as the host holds it: send it back with every edit and to save. Instants are ISO. */
+
 export type NativeCalendarComposer = {
     date: string;
     startTimeValue: string;
@@ -351,7 +310,7 @@ export type NativeCalendarComposer = {
     title: string;
     query: string;
     selectedTaskId: string | null;
-    /** The selected task's revision when core selected it: an existing-task Save is compare-and-set on it. */
+
     taskRevision: string | null;
     error: CalendarComposerError | null;
 };
@@ -363,7 +322,7 @@ export type NativeCalendarComposerView = {
     dateLabel: string;
     placeholders: { start: string; end: string };
     durations: { minutes: number; label: string; selected: boolean }[];
-    /** The existing-task list (existing mode only). */
+
     candidates: { id: string; title: string; selected: boolean }[] | null;
     selectedTaskTitle: string | null;
     error: string | null;
@@ -381,43 +340,41 @@ export type NativeCalendarComposerEdit =
 
 export type NativeCalendarSheet =
     | { kind: 'projected'; title: string; message: string; buttons: CalendarSheetButton<'ok'>[] }
-    /** Remove from calendar, Done and Delete send `taskRevision` back. */
+
     | { kind: 'task'; taskId: string; taskRevision: string; title: string; buttons: CalendarSheetButton<'edit' | 'unschedule' | 'done' | 'delete' | 'cancel'>[] }
     | { kind: 'event'; title: string; buttons: CalendarSheetButton<'createTask' | 'openInCalendar' | 'cancel'>[];
         creationTemplate?: NativeCalendarEventTaskTemplate };
 
 export type NativeCalendarAction =
-    /** The composer's Save. A new task takes the request ID as its id. */
+
     | { type: 'saveComposer'; composer: NativeCalendarComposer }
-    /**
-     * A timeline block let go at `startMinutes` into `day`. This and the next three send the
-     * task's revision the view showed (an item's `row.taskRevision`, the sheet's `taskRevision`).
-     */
+
+
     | { type: 'moveTask'; taskId: string; day: string; startMinutes: number; durationMinutes: number; taskRevision: string }
     | { type: 'unscheduleTask'; taskId: string; taskRevision: string }
     | { type: 'completeTask'; taskId: string; taskRevision: string }
     | { type: 'deleteTask'; taskId: string; taskRevision: string }
-    /** An event's Create task. The request ID becomes the task id. */
+
     | { type: 'createTaskFromEvent'; event: ExternalCalendarEvent }
     | { type: 'setViewMode'; viewMode: CalendarViewMode }
     | { type: 'setShowCompleted'; on: boolean }
     | { type: 'setWeekVisibleDays'; days: number };
 
 export type NativeCalendarActionResult = {
-    /** False when the action had nothing to write, or was refused (see `toast` and `composer`). */
+
     changed: boolean;
     toast: CalendarToast | null;
-    /** The state to show after it: the day view on a saved composer's start, an event task's day. */
+
     next: NativeCalendarState | null;
-    /** The day view scrolls its timeline to this minute. */
+
     scrollToMinutes: number | null;
-    /** A refused composer save: the composer with its error. */
+
     composer: NativeCalendarComposerView | null;
-    /** The task a composer save or an event wrote. */
+
     taskId: string | null;
 };
 
-/** Canonical stored preferences, independent of the Calendar's transient period. */
+
 export type NativeCalendarPreferences = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
     values: { viewMode: CalendarViewMode; showCompleted: boolean; weekVisibleDays: number };
@@ -448,7 +405,7 @@ const isPaging = (input: Record<string, unknown>) => (
     && (input.revision === undefined || typeof input.revision === 'string')
     && ((input.offset as number) === 0 || typeof input.revision === 'string')
 );
-/** A short, stable key for a view's own inputs, so a page of one view never continues another. */
+
 const paramsKey = (params: unknown): string => {
     const text = JSON.stringify(params);
     let hash = 2166136261;
@@ -465,7 +422,7 @@ const MAX_EVENTS = 2000;
 const MAX_CALENDARS = 200;
 const ISO_INSTANT_LIMIT = 64;
 
-/** A `yyyy-MM-dd` day as local midnight, or null. */
+
 const parseDayKey = (value: unknown): Date | null => {
     if (typeof value !== 'string' || !DAY_KEY_PATTERN.test(value)) return null;
     const [year, month, day] = value.split('-').map(Number);
@@ -513,7 +470,7 @@ const readFeed = (value: unknown): Feed | null => {
     return null;
 };
 
-/** The composer as the contract holds it: the view model's state and the selected task's revision. */
+
 type ComposerState = CalendarViewComposerState & { taskRevision: string | null };
 
 const toComposer = (state: ComposerState): NativeCalendarComposer => ({
@@ -650,7 +607,7 @@ export type NativePreparedCalendarCreate = {
 export type NativeCalendarCreatePreparation = { kind: 'prepared'; prepared: NativePreparedCalendarCreate }
     | { kind: 'refused'; result: NativeCalendarActionResult };
 
-/** Only the fields RN intentionally copies; never a provider id, URL or feed. */
+
 export type NativeCalendarEventTaskTemplate = {
     event: { title: string; start: string; end: string; allDay: boolean; description?: string; location?: string };
     calendarName: string | null;
@@ -708,8 +665,8 @@ const storedCalendarDateValid = (value: unknown): value is string => instantVali
     || (typeof value === 'string' && DAY_KEY_PATTERN.test(value)
         && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`))
         && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value);
-// The composer a prepared journal froze: the view's composer, with the selected task's
-// revision (receipts' compare-and-set) or, journaled before that field, without it.
+
+
 const PREPARED_COMPOSER_KEYS = ['date', 'startTimeValue', 'startAt', 'endTimeValue', 'durationMinutes', 'mode', 'title', 'query', 'selectedTaskId', 'error'] as const;
 const preparedComposerKeysValid = (composer: Record<string, unknown>) => calendarKeys(composer, PREPARED_COMPOSER_KEYS)
     || (calendarKeys(composer, [...PREPARED_COMPOSER_KEYS, 'taskRevision']) && (composer.taskRevision === null || isRevision(composer.taskRevision)));
@@ -764,12 +721,7 @@ const createIntentValid = (intent: CalendarCreateIntent, request: NativeCalendar
         && (project.areaId === null || typeof project.areaId === 'string'));
 };
 
-/**
- * Re-run the existing factories over only the inputs they read; never parse the user's title again.
- * Validation reads the reminder default back from the frozen row's suppression flag, which an
- * inheriting new row derives from it; journals keep their shape, and rows prepared before Skip was
- * honored carry `false` and replay as Send.
- */
+
 const calendarCreatedRows = (prepared: Pick<NativePreparedCalendarCreate, 'creation' | 'intent' | 'project' | 'preparedAt' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'task'>
     & { request: { requestId: string } },
     taskReminderDefault: 'send' | 'skip' = prepared.task.suppressMindwtrReminders === true ? 'skip' : 'send'): { task: Task; project: Project | null } | null => {
@@ -810,7 +762,7 @@ const calendarCreatedRows = (prepared: Pick<NativePreparedCalendarCreate, 'creat
     return built.ok ? { task: built.task, project: createdProject } : null;
 };
 
-/** No store, parser, current clock, or timezone access: also runs before terminal journal cleanup. */
+
 export const validatePreparedCalendarCreate = (input: unknown): NativeHostResult<NativeCalendarActionResult> => {
     try {
         if (!calendarRecord(input) || !calendarKeys(input, ['request', 'prepared'])
@@ -957,7 +909,7 @@ const eventCopyResult = (request: NativeCalendarEventTaskCreateRequest, localDay
     scrollToMinutes: null, taskId: request.requestId,
 });
 
-/** Closed event-copy journal authority; no provider, store, clock, locale or timezone access. */
+
 export const validatePreparedCalendarEventTaskCreate = (input: unknown): NativeHostResult<NativeCalendarActionResult> => {
     try {
         if (!calendarRecord(input) || !calendarKeys(input, ['request', 'prepared'])
@@ -966,8 +918,8 @@ export const validatePreparedCalendarEventTaskCreate = (input: unknown): NativeH
         const request = input.request;
         const prepared = input.prepared as NativePreparedCalendarEventTaskCreate;
         const { creation, projection, intent, defaultAreaWitness } = prepared;
-        // The planner's draft is shared with RN. Date-only parsing is anchored
-        // explicitly here; the planner's live showDate is not journal authority.
+
+
         const plan = buildCalendarEventTaskDraft({ ...request.event, id: 'calendar-copy', sourceId: 'calendar-copy',
             start: request.event.allDay ? `${request.event.start.slice(0, 10)}T00:00:00.000Z` : request.event.start },
         { calendarName: request.calendarName ?? undefined, fallbackTitle: request.fallbackTitle });
@@ -1022,7 +974,7 @@ export const validatePreparedCalendarEventTaskCreate = (input: unknown): NativeH
     } catch { return fail('INVALID_INPUT', 'Malformed prepared Calendar event task'); }
 };
 
-/** Pure journal authority: no store, clock, locale, or ambient timezone reads. */
+
 export const validatePreparedCalendarSchedule = (input: unknown): NativeHostResult<NativeCalendarActionResult> => {
     try {
         if (!calendarRecord(input) || !calendarKeys(input, ['request', 'prepared']) || !calendarRecord(input.request)
@@ -1110,7 +1062,7 @@ const unscheduleResult = (taskId: string, changed: boolean): NativeCalendarActio
     taskId, changed, toast: null, next: null, scrollToMinutes: null, composer: null,
 });
 
-/** Pure journal authority, including the exact shared task-update policy and stored row. */
+
 export const validatePreparedCalendarUnschedule = (input: unknown): NativeHostResult<NativeCalendarActionResult> => {
     const malformed = () => fail('INVALID_INPUT', 'Malformed prepared Calendar unschedule');
     try {
@@ -1173,7 +1125,7 @@ export const validatePreparedCalendarUnschedule = (input: unknown): NativeHostRe
 };
 
 export function createCalendarViewMethods(deps: CalendarViewDeps) {
-    // Exact retries through the shared helper: a retry finishes a failed save and never writes twice.
+
     const receipts = createNativeRequestReceipts({
         save: async () => {
             if (useTaskStore.getState().persistenceFailure) {
@@ -1186,13 +1138,13 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             return deps.save();
         },
     });
-    // Recurring projections are anchored once per local day, as on mobile, so a
-    // fluid series does not move with every minute of the revision.
+
+
     let projectedAt = { day: '', iso: '' };
-    // ponytail: one cached view per revision and inputs; paging rebuilds nothing.
+
     let cachedView: { key: string; value: BuiltView } | null = null;
-    // Request IDs that entered the receipts, and their payloads, so a retry reaches its
-    // receipt before any check. ponytail: the last 200; the receipts keep 50 anyway.
+
+
     const entered = new Map<string, string>();
 
     const preferences = (): NativeCalendarPreferences['values'] => {
@@ -1204,7 +1156,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         };
     };
 
-    /** The tasks the screen may show (mobile's visible-task projection), per data and settings revision. */
+
     let visible: { key: string; value: ReturnType<typeof buildVisible> } | null = null;
     const buildVisible = () => {
         const store = useTaskStore.getState();
@@ -1220,7 +1172,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         return visible.value;
     };
 
-    /** Everything a view, the composer and the actions read, as mobile's screen reads it. */
+
     const context = (now: Date) => {
         const store = useTaskStore.getState();
         const settings = store.settings;
@@ -1238,7 +1190,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             t,
             now,
             dataRevision,
-            // No Intl on the native host: headings come from date-fns patterns.
+
             dates: createCalendarPatternDates(createDateFormatter(config, { jalaliMonthNames: true })),
             calendarSystem: getCalendarSystem({ language, settings, systemLocale }),
             formatDate,
@@ -1256,7 +1208,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         if (projectedAt.day !== today) projectedAt = { day: today, iso: now.toISOString() };
     };
 
-    /** The state the host sent, or the screen's opening state; a mode that needs a day gets today. */
+
     const readState = (value: unknown, ctx: Pick<Context, 'settings' | 'now'>): CalendarPeriodState | null => {
         const today = parseDayKey(dayKey(ctx.now))!;
         if (value === undefined) {
@@ -1270,12 +1222,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         return selectCalendarViewMode({ viewMode: 'month', selectedDate, visibleMonthDate }, value.viewMode as CalendarViewMode, today);
     };
 
-    /**
-     * The period's tasks and events by day. Cached by what it reads (the data and
-     * settings revision, the range, the events and the projection day), so a new
-     * selected day, search text or item sheet in the same range expands nothing.
-     */
-    // ponytail: the last two ranges; a host that flips between more ranges rebuilds.
+
     const indexCache: { key: string; value: ReturnType<typeof buildIndex> }[] = [];
     const buildIndex = (ctx: Context, range: { rangeStart: Date; rangeEnd: Date }, feed: Feed) => {
         const rangeTasks = getCalendarRangeTasks(
@@ -1350,7 +1297,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         const { t, formatDate, dates, now, projectedLabel } = ctx;
         const periodData = periodIndex(ctx, period, feed);
         const { lists, availabilityEvents, currentMonthDate, weekStartTime } = periodData;
-        // Calendar colors in the theme's variant, as mobile paints them (its theme preset).
+
         const sourceColor = createCalendarSourceColorResolver(feed.calendars, themeDescriptor(ctx.settings.theme)?.statusPreset ?? 'default');
         const sourceNames = getCalendarSourceNames(feed.calendars);
         const screen = getCalendarScreenText(t);
@@ -1529,7 +1476,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             const day = selected!;
             title = dateLabels.dayTitle;
             const dayLists = lists(day);
-            // Every all-day item, in slot order: the screen keeps whether its card is expanded.
+
             const allDayLane = getCalendarAllDayLane(getCalendarDayItems(dayLists), CALENDAR_DAY_ALL_DAY_ITEMS, true);
             for (const entry of allDayLane.items) {
                 const tones = getCalendarDayAllDayTones(entry);
@@ -1633,7 +1580,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
 
     const finish = (built: BuiltView, revision: string, window: { offset: number; limit: number }, now: Date): NativeCalendarView => {
         const pageEntries = built.entries.slice(window.offset, window.offset + window.limit);
-        // Rows carry core meta; one row build per page, in entry order.
+
         const tasks: Task[] = [];
         for (const entry of pageEntries) {
             if (entry.type === 'task') tasks.push(entry.task);
@@ -1653,7 +1600,6 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         return { version: NATIVE_HOST_CONTRACT_VERSION, revision, ...view, total: entries.length, items };
     };
 
-    // ---- The composer ------------------------------------------------------------
 
     const composerDeps = (ctx: Context, events: (date: Date) => readonly ExternalCalendarEvent[]): CalendarComposerDeps => ({
         findFreeSlot: (day, durationMinutes, excludeTaskId) => findCalendarFreeSlot(day, durationMinutes, slotOptions(ctx, events(day), excludeTaskId)),
@@ -1686,11 +1632,10 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         projects: ctx.store.projects,
         now: ctx.now,
         parseOptions: buildQuickAddParseOptions(ctx.settings, { tasks: ctx.store.tasks, people: ctx.store.people }),
-        // A retry of a create finds the task it made in the slot; that task is not in the way.
+
         isSlotFree: (start, durationMinutes, excludeTaskId) => isCalendarSlotFree(start, start, durationMinutes, slotOptions(ctx, events(start), excludeTaskId ?? excludeCreatedId)),
     });
 
-    // ---- Actions -----------------------------------------------------------------
 
     type Outcome = NativeHostResult<NativeCalendarActionResult> | NativeUnsavedWrite<NativeCalendarActionResult>;
     const result = (fields: Partial<NativeCalendarActionResult> = {}): NativeCalendarActionResult => ({
@@ -1704,7 +1649,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         const task = typeof id === 'string' ? useTaskStore.getState()._tasksById.get(id) : undefined;
         return task && !task.deletedAt && !task.purgedAt ? task : undefined;
     };
-    /** After a composer save the screen shows the day view on the new start, scrolled to it. */
+
     const dayView = (start: Date): Pick<NativeCalendarActionResult, 'next' | 'scrollToMinutes'> => ({
         next: { viewMode: 'day', selectedDate: dayKey(start), visibleMonth: dayKey(start) },
         scrollToMinutes: start.getHours() * 60 + start.getMinutes(),
@@ -1714,11 +1659,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         return (date: Date): readonly ExternalCalendarEvent[] => byDay.get(calendarDateKey(date)) ?? [];
     };
 
-    /**
-     * A task this request made (the request ID is its id) answers a replay only
-     * when it is still exactly what the request writes: its title and every field
-     * the request sets. Anything else under that ID is refused.
-     */
+
     const matchesPlan = (task: Task, title: string, props: Partial<Task>): boolean => (
         !task.deletedAt && !task.purgedAt && task.title === title
         && Object.entries(props).every(([field, planned]) => (
@@ -1735,15 +1676,10 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         isSlotFree: (day, start, durationMinutes, excludeTaskId) => isCalendarSlotFree(day, start, durationMinutes, slotOptions(ctx, eventsByDay(feed)(day), excludeTaskId)),
     });
 
-    /** Compare-and-set, right before a write to an existing task: one changed since the view showed it is not written. */
+
     const stale = (task: Task, taskRevision: string | null): Outcome | null => refuseStale([task], [taskRevision ?? undefined]);
 
-    /**
-     * The write. It runs inside the receipts, so it checks everything again: a
-     * write that does not apply returns ACTION_FAILED and leaves no receipt, a
-     * target that already holds writes nothing, and a task that changed since the
-     * view is refused (STALE_REVISION).
-     */
+
     const perform = async (requestId: string, action: NativeCalendarAction, ctx: Context, feed: Feed, state: CalendarPeriodState): Promise<Outcome> => {
         const store = useTaskStore.getState();
         const events = eventsByDay(feed);
@@ -1752,17 +1688,16 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                 const composer = readComposer(action.composer, ctx.formatDate)!;
                 const createdId = requestId.toLowerCase();
                 const base = saveContext(ctx, events, createdId);
-                // A `+Project` this request creates takes an id from the request and its name (as a
-                // quick capture's does), and that project is matched first under that name: a replay
-                // files the task there, renamed since or not, never in a project given that name since.
+
+
                 const ownId = (name: string) => requestRowId(requestId, `project:${name.trim().toLowerCase()}`);
                 const bare = prepareComposerSave(composer, { ...base, projects: [] });
                 const ownName = bare.kind === 'create' ? bare.projectToCreate?.name : undefined;
                 const projects = ownName ? withRequestProject(base.projects ?? [], ownId(ownName), ownName) : base.projects;
-                // Deleted or archived since: never made again, and the task is not written.
+
                 if (!projects) return fail('STALE_REVISION', 'The project this request created is gone');
-                // The whole save is validated here, before any write: the task plan, its
-                // dates and the slot. No refusal can follow a project write.
+
+
                 const intent = prepareComposerSave(composer, { ...base, projects });
                 if (intent.kind === 'error') return fail('ACTION_FAILED', getCalendarComposerErrorText(intent.error, ctx.t));
                 const answer = { ...dayView(composer.startAt!), taskId: intent.kind === 'update' ? intent.taskId : createdId };
@@ -1776,7 +1711,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                 const planned = projectId ? applyComposerCreatedProject(intent.draft, projectId) : intent.draft;
                 const existing = taskById(createdId);
                 if (existing) {
-                    // A replay after a restart: the task is found by the request ID.
+
                     return matchesPlan(existing, planned.title, planned.props)
                         ? unchanged(answer)
                         : fail('INVALID_INPUT', 'Request ID already belongs to another task');
@@ -1791,9 +1726,8 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                     }
                     return useTaskStore.getState().addTask(draft.title, draft.props, { captureId: requestId });
                 });
-                // Acknowledged only once the task exists. A project without its task did not
-                // land the request: no receipt, and a retry finds the project by its id and adds
-                // the task.
+
+
                 if (!taskById(createdId)) return fail('ACTION_FAILED', landed.ok ? 'Task creation failed' : landed.error.message);
                 return settleWrite(landed, result({ ...answer, changed: true }));
             }
@@ -1828,12 +1762,12 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             case 'createTaskFromEvent': {
                 const plan = planCalendarEventTask(action.event, { calendarName: getCalendarSourceNames(feed.calendars).get(action.event.sourceId), t: ctx.t });
                 const createdId = requestId.toLowerCase();
-                // The screen stays in its mode and moves to the event's day.
+
                 const next = plan.showDate ? toState({ ...state, selectedDate: plan.showDate, visibleMonthDate: plan.showDate }) : null;
                 const answer = { toast: getCalendarToasts(ctx.t).eventTaskCreated, next, taskId: createdId };
                 const existing = taskById(createdId);
                 if (existing) {
-                    // The event's start or date, duration, place and notes: the whole task the event makes.
+
                     return matchesPlan(existing, plan.title, plan.initialProps)
                         ? unchanged(answer)
                         : fail('INVALID_INPUT', 'Request ID already belongs to another task');
@@ -1865,18 +1799,13 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         }
     };
 
-    /**
-     * A new request's input checks and the refusals the screen shows (a time
-     * conflict, a composer error). A refusal writes nothing and stays out of the
-     * receipts, so its request ID stays free. A request the receipts already hold
-     * skips these checks (runCalendarAction).
-     */
+
     const check = (requestId: string, action: NativeCalendarAction, ctx: Context, feed: Feed): Outcome | null => {
         switch (action.type) {
             case 'saveComposer': {
                 const composer = readComposer(action.composer, ctx.formatDate);
                 if (!composer) return fail('INVALID_INPUT', 'A composer from openCalendarComposer is required');
-                // A task under this ID is a replay: the write checks it is this request's.
+
                 if (taskById(requestId.toLowerCase())) return null;
                 if (isCalendarComposerSaveDisabled(composer)) return fail('INVALID_INPUT', 'Save is not available yet');
                 const intent = prepareComposerSave(composer, saveContext(ctx, eventsByDay(feed)));
@@ -1919,7 +1848,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, values: preferences() } };
         },
 
-        /** A stored preference edit, safe to replay after receipt loss or restart. */
+
         async setCalendarPreference(input: NativeCalendarPreferenceRequest): Promise<NativeHostResult<NativeCalendarActionResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1930,8 +1859,8 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             }
             const { requestId, field, before, value } = input;
             const outcome = await receipts.run(requestId, JSON.stringify(['calendarPreference', field, before, value]), async () => {
-                // Receipts precede mutable checks: an owed save must never reapply
-                // the edit over a newer value. A receipt-free replay checks only this field.
+
+
                 const current = preferences()[field];
                 if (current === value) return unchanged();
                 if (current !== before) return fail('STALE_REVISION', 'Calendar preference changed while editing');
@@ -1945,16 +1874,12 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                             releaseCheck: 'v1.3.3/native-calendar-preference', outcome: outcome.value.changed ? 'applied' : 'replayed',
                         },
                     });
-                } catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                } catch {                                                               }
             }
             return outcome;
         },
 
-        /**
-         * The Calendar in `state` (absent: the screen as it opens, in the saved
-         * view mode on today), windowed. Fetch external events for `range` and send
-         * them as `calendar`; `scheduleQuery` is the search under the selected day.
-         */
+
         getCalendarView(input: {
             state?: NativeCalendarState;
             scheduleQuery?: string;
@@ -1976,19 +1901,12 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             }
             const revision = `${deps.revision(now)}:${paramsKey([toState(period), query, feed, projectedAt.iso])}`;
             if (input.revision !== undefined && input.revision !== revision) return fail('STALE_REVISION', 'The calendar changed; restart paging from offset zero');
-            // The store, settings and language are in the revision; a later page reuses the build.
+
             if (cachedView?.key !== revision) cachedView = { key: revision, value: build(context(now), period, feed, query) };
             return { ok: true, value: finish(cachedView.value, revision, input as { offset: number; limit: number }, now) };
         },
 
-        /**
-         * What pressing an item offers: a task's sheet (Edit, Remove from calendar,
-         * Done, Delete, Cancel; a projected occurrence only explains itself) or an
-         * event's (Create task, Open in calendar when the host can open it, Cancel).
-         * Edit opens the task editor; the rest are runCalendarAction. Send the view's
-         * state and calendar: as on mobile, only the view's open tasks and projected
-         * occurrences offer a sheet, and a completed item answers TASK_NOT_FOUND.
-         */
+
         getCalendarItemSheet(input:
             | { taskId: string; state?: NativeCalendarState; calendar?: NativeCalendarFeed }
             | { event: ExternalCalendarEvent; canOpen: boolean; state?: NativeCalendarState; calendarName?: string | null }): NativeHostResult<NativeCalendarSheet> {
@@ -2030,12 +1948,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             return { ok: true, value: { ...sheet, kind: 'task', taskId: task.id, taskRevision: taskRevisionOf(stored) } };
         },
 
-        /**
-         * Open the composer: at an instant (a timeline tap), on a day at its first
-         * free slot (Add task, a week column), or for a task to schedule on the
-         * selected day (a planning or search row), which refuses with the no-free-time
-         * toast when the day is full.
-         */
+
         openCalendarComposer(input: {
             at?: string;
             day?: string;
@@ -2080,7 +1993,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             return fail('INVALID_INPUT', 'An instant, a day or a task to schedule is required');
         },
 
-        /** Apply one composer edit and return the composer after it. Nothing is written. */
+
         editCalendarComposer(input: { composer: NativeCalendarComposer; edit: NativeCalendarComposerEdit; calendar?: NativeCalendarFeed }): NativeHostResult<NativeCalendarComposerView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -2101,7 +2014,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                     if (isText(edit.title, 10_000)) next = { ...state, ...setComposerTitle(state, edit.title) };
                     break;
                 case 'query':
-                    // A new search drops the chosen task, and its revision with it.
+
                     if (isText(edit.query, 2000)) next = { ...state, ...setComposerQuery(state, edit.query), taskRevision: null };
                     break;
                 case 'selectTask': {
@@ -2125,7 +2038,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             return { ok: true, value: composerView(ctx, next) };
         },
 
-        /** Pure Calendar choice and RN task-update plan; the host journals its frozen row before commit. */
+
         async prepareCalendarComposerSave(input: { requestId: string; composer: NativeCalendarComposer; calendar?: NativeCalendarFeed }): Promise<NativeHostResult<NativeCalendarSchedulePreparation>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -2199,7 +2112,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                 : fail('INVALID_INPUT', 'Calendar schedule could not produce a valid prepared journal');
         },
 
-        /** The host calls this before SQLite open and terminal cleanup as well as before commit. */
+
         validatePreparedCalendarComposerSave: validatePreparedCalendarSchedule,
 
         async commitPreparedCalendarComposerSave(input: { request: NativeCalendarScheduleRequest; prepared: NativePreparedCalendarSchedule }): Promise<NativeHostResult<NativeCalendarActionResult>> {
@@ -2218,11 +2131,11 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             if (!saved.ok) return saved;
             try { logInfo('Native iOS Calendar schedule saved', { scope: 'native-host', category: 'storage',
                 context: { releaseCheck: 'v1.3.3/native-ios-calendar-schedule', outcome: applied.outcome } }); }
-            catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            catch {                                                               }
             return authority;
         },
 
-        /** Freeze RN's Unschedule update policy before the native host writes its journal. */
+
         async prepareCalendarUnschedule(input: NativeCalendarUnscheduleRequest): Promise<NativeHostResult<NativeCalendarUnschedulePreparation>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -2292,11 +2205,11 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             if (!saved.ok) return saved;
             try { logInfo('Native iOS Calendar unschedule saved', { scope: 'native-host', category: 'storage',
                 context: { releaseCheck: 'v1.3.4/ios-calendar-unschedule', outcome: applied.outcome } }); }
-            catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            catch {                                                               }
             return authority;
         },
 
-        /** Resolve RN New composer policy once, then freeze its complete atomic task/project publication. */
+
         async prepareCalendarEventTaskCreate(input: NativeCalendarEventTaskCreateRequest): Promise<NativeHostResult<NativeCalendarEventTaskCreatePreparation>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -2306,7 +2219,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                 }
                 const request = JSON.parse(JSON.stringify(input)) as NativeCalendarEventTaskCreateRequest;
                 const store = useTaskStore.getState();
-                // A fresh hot submission is not a prepared journal replay.
+
                 if (store._tasksById.has(request.requestId)) return fail('INVALID_INPUT', 'Request ID already belongs to a task');
                 const now = new Date();
                 const plan = eventCopyPlan(request);
@@ -2464,18 +2377,11 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             if (!saved.ok) return saved;
             try { logInfo('Native iOS Calendar task created', { scope: 'native-host', category: 'storage',
                 context: { releaseCheck: 'v1.3.3/native-ios-calendar-create', outcome: applied.outcome } }); }
-            catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            catch {                                                               }
             return authority;
         },
 
-        /**
-         * One calendar action, as the screen writes it. Reuse `requestId` to retry:
-         * a completed request writes nothing again. Send the `calendar` the view
-         * shows: a move and a composer save check the day's events for overlaps, and
-         * an event task names its calendar. A write to an existing task sends the
-         * revision the view showed (the composer carries its own) and is refused
-         * (STALE_REVISION) when the task changed since.
-         */
+
         async runCalendarAction(input: {
             requestId: string;
             action: NativeCalendarAction;
@@ -2494,8 +2400,8 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             const action = input.action as NativeCalendarAction;
             const requestId = input.requestId;
             const payload = JSON.stringify(['calendar', action]);
-            // The receipts come first: a request that is running or owes its save skips the
-            // checks of a new request (the slot may be taken since), and only saves.
+
+
             const known = entered.get(requestId);
             if (known === undefined) {
                 const refused = check(requestId, action, ctx, feed);
@@ -2504,7 +2410,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                 if (entered.size > ENTERED_LIMIT) entered.delete(entered.keys().next().value!);
             }
             const outcome = await receipts.run(requestId, payload, () => perform(requestId, action, context(new Date()), feed, state));
-            // A write that did not land leaves no receipt; another payload under a known ID was refused and changes nothing.
+
             if (!outcome.ok && outcome.error.code !== 'SAVE_FAILED' && (known === undefined || known === payload)) entered.delete(requestId);
             return outcome;
         },

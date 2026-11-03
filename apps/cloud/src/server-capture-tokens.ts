@@ -12,12 +12,7 @@ import {
     readJsonBody,
 } from './server-storage';
 
-/**
- * Capture-only tokens (#1178): a second secret for an account that the server
- * accepts on POST /v1/capture and nowhere else. One file per token under
- * `<dataDir>/capture-tokens/<sha256hex(token)>.json`; the clear token is shown
- * once at creation and never stored or logged.
- */
+
 export const CAPTURE_TOKENS_DIR_NAME = 'capture-tokens';
 export const CAPTURE_TOKENS_ROUTE_PATH = '/v1/capture-tokens';
 export const MAX_CAPTURE_TOKENS_PER_NAMESPACE = 20;
@@ -36,8 +31,7 @@ export type CaptureTokenRecord = {
 
 export type TokenScope = 'full' | 'capture';
 
-/** Generated capture credentials reserve this exact shape in any-token mode.
- * A loose `mwc_` prefix remains available to ordinary full tokens. */
+
 export const isGeneratedCaptureTokenShape = (token: string): boolean => (
     token.startsWith(CAPTURE_TOKEN_PREFIX)
     && CAPTURE_TOKEN_RANDOM_PATTERN.test(token.slice(CAPTURE_TOKEN_PREFIX.length))
@@ -45,8 +39,7 @@ export const isGeneratedCaptureTokenShape = (token: string): boolean => (
 
 const captureTokensDir = (dataDir: string): string => join(dataDir, CAPTURE_TOKENS_DIR_NAME);
 
-/** Parses one token file. Anything that is not the exact stored shape is treated
- *  as absent: a hand-edited or foreign file must never crash auth or grant access. */
+
 function readCaptureTokenFile(filePath: string): CaptureTokenRecord | null {
     let parsed: unknown;
     try {
@@ -67,16 +60,14 @@ function readCaptureTokenFile(filePath: string): CaptureTokenRecord | null {
     };
 }
 
-/** One `existsSync` plus one small read, keyed by the token digest. Full-token
- *  requests pay only the `existsSync`. */
+
 export function lookupCaptureToken(dataDir: string, token: string): CaptureTokenRecord | null {
     const filePath = join(captureTokensDir(dataDir), `${tokenToKey(token)}.json`);
     if (!existsSync(filePath)) return null;
     return readCaptureTokenFile(filePath);
 }
 
-/** Every token file that belongs to `namespaceKey`, with its path. Bounded by the
- *  directory size, which the per-namespace cap keeps small on a self-hosted server. */
+
 function listNamespaceTokenFiles(dataDir: string, namespaceKey: string): Array<{ filePath: string; record: CaptureTokenRecord }> {
     const dir = captureTokensDir(dataDir);
     if (!existsSync(dir)) return [];
@@ -98,7 +89,7 @@ const publicView = (record: CaptureTokenRecord) => ({
     createdAt: record.createdAt,
 });
 
-/** `mwc_` + 43 base64url characters from 32 random bytes; passes BEARER_TOKEN_PATTERN. */
+
 const generateCaptureToken = (): string => `${CAPTURE_TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`;
 
 const sanitizeLabel = (value: unknown): string | Response => {
@@ -110,10 +101,10 @@ const sanitizeLabel = (value: unknown): string | Response => {
 
 export type CaptureTokensRequestOptions = {
     dataDir: string;
-    /** Namespace key of the full token, as resolved by withNamespace. */
+
     key: string;
     filePath: string;
-    /** Reserves the owner's empty document (same helper admission uses). */
+
     initializeNamespace: (filePath: string) => Promise<void> | void;
     maxBodyBytes: number;
     abortSignal: AbortSignal;
@@ -121,10 +112,7 @@ export type CaptureTokensRequestOptions = {
     withWriteLock: <T>(key: string, handler: () => Promise<T>) => Promise<T>;
 };
 
-/**
- * Route body for /v1/capture-tokens and /v1/capture-tokens/:id, once withNamespace
- * has authenticated a FULL token (a capture token is refused there with 403).
- */
+
 export async function handleCaptureTokensRequest(
     req: Request,
     pathname: string,
@@ -152,8 +140,8 @@ export async function handleCaptureTokensRequest(
     if (!id || id.includes('/')) return errorResponse('Not found', 404);
     if (req.method !== 'DELETE') return errorResponse('Method not allowed', 405);
     return await options.withWriteLock(options.key, async () => {
-        // Match on id AND namespace: another account's full token must never revoke
-        // (or even learn about) this account's tokens.
+
+
         const match = listNamespaceTokenFiles(options.dataDir, options.key).find((entry) => entry.record.id === id);
         if (!match) return errorResponse('Not found', 404);
         options.assertStorageRoot();
@@ -167,9 +155,8 @@ async function createCaptureToken(options: CaptureTokensRequestOptions, label: s
         return errorResponse('Capture token limit reached', 409);
     }
     options.assertStorageRoot();
-    // Allowlist mode creates an account's document lazily on its first write, and a
-    // capture token is only honoured while that document exists (withNamespace's
-    // orphan check), so reserve it here the way any-token admission already did.
+
+
     if (!existsSync(options.filePath)) await options.initializeNamespace(options.filePath);
     const dir = ensureDurableDirectory(captureTokensDir(options.dataDir));
     if (!dir) return errorResponse('Failed to store capture token', 500);
@@ -183,7 +170,7 @@ async function createCaptureToken(options: CaptureTokensRequestOptions, label: s
     if (!durablyPublishFile(join(dir, `${tokenToKey(token)}.json`), JSON.stringify(record))) {
         return errorResponse('Failed to store capture token', 500);
     }
-    // Nothing identifying: no id, label, digest or token.
+
     logInfo('Capture token created', { tokenScope: 'capture' });
     return jsonResponse({ ...publicView(record), token }, { status: 201 });
 }

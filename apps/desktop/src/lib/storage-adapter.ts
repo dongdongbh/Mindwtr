@@ -56,7 +56,7 @@ export type DesktopSaveStatus = {
     reconciliationPending: boolean;
 };
 
-/** Counts only this WebView's saves, not other processes or future work. */
+
 export const getDesktopSaveStatus = (): DesktopSaveStatus => ({
     pending: pendingSaveCount,
     generation: saveVersion,
@@ -64,7 +64,7 @@ export const getDesktopSaveStatus = (): DesktopSaveStatus => ({
     reconciliationPending: pendingCanonicalReconciliationCleanup !== null,
 });
 
-/** Read-only quiescence gate used before leaving the personal renderer runtime. */
+
 export async function waitForDesktopStorageIdleSnapshot(timeoutMs: number): Promise<DesktopSaveStatus | null> {
     const deadline = Date.now() + Math.max(0, timeoutMs);
     while (Date.now() <= deadline) {
@@ -97,11 +97,7 @@ const scheduleCanonicalReconciliation = (
     if (canonical && attemptedFingerprint === computeStableValueFingerprint(canonical)) return;
     if (saveVersion !== attemptedSaveVersion) return;
 
-    // Store actions finish applying their optimistic state after the adapter
-    // promise resolves. Reconcile on the next task, and only if neither that
-    // state nor the save generation has moved on in the meantime. An active
-    // editor makes fetchData intentionally decline the update, so wait for its
-    // lock to clear instead of dropping the authoritative canonical result.
+
     let initialTimer: ReturnType<typeof setTimeout> | null = null;
     let unsubscribe: (() => void) | null = null;
     const cleanup = () => {
@@ -130,8 +126,7 @@ const scheduleCanonicalReconciliation = (
             if (currentFingerprint !== attemptedFingerprint) return 'finished';
             if (state.editLockCount > 0) return 'waiting';
 
-            // Unsubscribe before fetchData mutates the store so its synchronous
-            // state updates cannot re-enter this reconciliation callback.
+
             cleanup();
             const options = canonical
                 ? { silent: true, preloadedData: canonical }
@@ -152,18 +147,13 @@ const scheduleCanonicalReconciliation = (
         unsubscribe = useTaskStore.subscribe(() => {
             if (reconcileIfReady() === 'finished') cleanup();
         });
-        // Close the small gap between observing the lock and installing the
-        // subscription. It remains one-shot: unlock reconciles, while a newer
-        // snapshot/reset or save generation cancels it through the guards.
+
+
         if (reconcileIfReady() === 'finished') cleanup();
     }, 0);
 };
 
-// #913: save_data (and save_task, the same shape) can hang indefinitely
-// without ever rejecting, so the normal catch block never fires and the UI
-// looks fine while edits sit unsaved. This only observes and surfaces that
-// through the store's error channel — it must never alter save/retry
-// semantics (see the handoff's Do NOT list).
+
 const SAVE_STUCK_WARNING_MS = 15_000;
 
 const buildStuckSaveMessage = (label: string): string => (
@@ -175,14 +165,11 @@ const setStorageWarning = (message: string | null) => {
     try {
         useTaskStore.getState().setError(message);
     } catch {
-        // Store not initialized yet (e.g. very early startup); nothing to surface.
+
     }
 };
 
-// Shared by saveData and saveTask: runs `run`, surfacing a store warning if it
-// hasn't settled after SAVE_STUCK_WARNING_MS, and clearing that warning (and
-// only that warning) once it does. Observation only — never rejects, cancels,
-// or retries `run` itself.
+
 const withStuckSaveWarning = async <T>(command: string, label: string, run: () => Promise<T>): Promise<T> => {
     let stuckMessage: string | null = null;
     const stuckTimer = setTimeout(() => {
@@ -197,15 +184,15 @@ const withStuckSaveWarning = async <T>(command: string, label: string, run: () =
         return await run();
     } finally {
         clearTimeout(stuckTimer);
-        // Only clear our own warning — never clobber an unrelated error that
-        // may have been set (by the catch below, or elsewhere) in the meantime.
+
+
         if (stuckMessage) {
             try {
                 if (useTaskStore.getState().error === stuckMessage) {
                     setStorageWarning(null);
                 }
             } catch {
-                // Store not initialized; nothing to clear.
+
             }
         }
     }
@@ -292,7 +279,7 @@ const logStorageInitIfNeeded = () => {
         }
         localStorage.setItem(STORAGE_SCHEMA_VERSION_KEY, schemaVersion);
     } catch (error) {
-        // Local schema-version bookkeeping is best-effort only.
+
         void error;
     }
     void logInfo('Storage init complete', {
@@ -334,9 +321,8 @@ export const tauriStorage: StorageAdapter = {
         }
     },
     saveData: async (data: AppData): Promise<AppData> => {
-        // Associate the CAS baseline with this target before it enters the
-        // queue. A getData() while another save is in flight must not widen
-        // this save's observation set to newer rows it never saw.
+
+
         const observedBeforeSave = lastObservedData;
         const baselineEntities = observedBeforeSave
             ? buildChangedEntityBaseline(observedBeforeSave, data)
@@ -358,8 +344,8 @@ export const tauriStorage: StorageAdapter = {
             markLocalWrite(effectiveData);
             markLocalSqliteWrite();
             try {
-                // Provenance contains only rows actually observed at the queue
-                // root or exactly confirmed from a predecessor's own target.
+
+
                 const effectiveBaseline = provenance
                     ? buildChangedEntityBaseline(provenance, effectiveData)
                     : baselineEntities;
@@ -380,10 +366,8 @@ export const tauriStorage: StorageAdapter = {
                         computeStableValueFingerprint(replayedSettings)
                         !== computeStableValueFingerprint(canonical.settings)
                     ) {
-                        // The first whole-settings CAS missed, but some local
-                        // fields remain non-conflicting. Retry once with only
-                        // that delta replayed onto canonical data; a second
-                        // race returns its canonical result without looping.
+
+
                         const retryData: AppData = { ...canonical, settings: replayedSettings };
                         const retryBaseline = buildChangedEntityBaseline(canonical, retryData);
                         markLocalWrite(retryData);
@@ -447,9 +431,8 @@ export const tauriStorage: StorageAdapter = {
                 ) {
                     const canonical = nativeResult.canonical;
                     if (!canonical && nativeResult.canonicalReloadRequired) {
-                        // SQLite already committed. Keep the optimistic store
-                        // intact and reload canonical state after the store action
-                        // finishes instead of falsely rejecting and retrying.
+
+
                         if (saveVersion === queuedSaveVersion) {
                             lastObservedData = attemptedData;
                         }

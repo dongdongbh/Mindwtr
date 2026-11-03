@@ -19,7 +19,7 @@ export const WidgetLaunchContext = createContext<{
     complete: (token: number) => void;
 }>({ pending: null, complete: () => {} });
 
-/** The native cover starts before Linking resumes the retained React tree. Keep that tree and its drafts mounted. */
+
 export function useWidgetLaunch(incomingDelivery: number) {
     const [pending, setPending] = useState<PendingLaunch | null>(null);
     const delivered = useRef(0);
@@ -31,7 +31,7 @@ export function useWidgetLaunch(incomingDelivery: number) {
             if (delivered.current !== state.token) {
                 delivered.current = state.token;
                 editorOutcome.current = 'list';
-                // Same-route widget deliveries have no blur event. Reuse the editor's existing guarded decision.
+
                 for (const listener of editorListeners) {
                     const outcome = listener();
                     if (outcome === 'preserved-draft' || (outcome === 'closed-clean' && editorOutcome.current === 'list')) editorOutcome.current = outcome;
@@ -58,7 +58,7 @@ export function useWidgetLaunch(incomingDelivery: number) {
     }, [incomingDelivery, refresh]);
     useEffect(() => {
         if (!pending) return;
-        // Native also recovers independently if JS stops. This read records its actual result in Settings Diagnostics.
+
         const recovery = setTimeout(refresh, 5_100);
         return () => clearTimeout(recovery);
     }, [pending, refresh]);
@@ -68,7 +68,7 @@ export function useWidgetLaunch(incomingDelivery: number) {
     return { pending, complete };
 }
 
-/** A fresh native layout in the focused destination is required even when the widget opens the current route. */
+
 export function WidgetLaunchDestination({ path }: { path: string }) {
     const { pending, complete } = useContext(WidgetLaunchContext);
     if (!pending?.routed || pending.path !== path) return null;

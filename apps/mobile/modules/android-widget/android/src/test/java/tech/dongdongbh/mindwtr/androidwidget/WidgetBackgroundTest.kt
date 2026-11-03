@@ -53,7 +53,7 @@ class WidgetBackgroundTest {
   }
 
   @Test fun transparentWidgetsUseTheirOwnTextColorsWhateverTheAppTheme() {
-    // An explicit dark app theme: light text would be its own, dark text must still win.
+
     WidgetPayloadStore.write(context, JSONObject().put("themeMode", "dark").put("palette", JSONObject()
       .put("background", "#000000").put("card", "#000000").put("border", "#222222").put("text", "#EEEEEE")
       .put("mutedText", "#AAAAAA").put("accent", "#FF0000").put("onAccent", "#FFFFFF").put("warning", "#FFAA00"))
@@ -84,7 +84,7 @@ class WidgetBackgroundTest {
     bind(73, TasksWidgetProvider::class.java.name)
     val row = TasksWidgetFactory(context, WidgetKind.TASKS, 73).apply { onCreate() }.getViewAt(0)
     assertEquals(0xFF475569.toInt(), row.apply(context, null).findViewById<TextView>(R.id.mindwtr_widget_item_due).currentTextColor)
-    // The same cached row, drawn after a switch to night mode.
+
     org.robolectric.RuntimeEnvironment.setQualifiers("+night")
     val night = row.apply(context.createConfigurationContext(context.resources.configuration), null)
     assertEquals(0xFFCBD5E1.toInt(), night.findViewById<TextView>(R.id.mindwtr_widget_item_due).currentTextColor)

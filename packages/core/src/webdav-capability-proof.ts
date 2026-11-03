@@ -7,15 +7,7 @@ export type WebdavCapabilityProofConfig = {
     allowInsecureHttp?: boolean;
 };
 
-/**
- * The device-local identity a cached WebDAV capability proof is keyed on: normalized
- * endpoint, trimmed username, and the insecure-transport policy — the exact dimensions that
- * make an earlier proof (or legacy-plaintext answer) still apply to this configuration.
- *
- * Deliberately excludes the password: a caller that spreads a fuller config object (one that
- * happens to carry a `password` field) onto this shape must never have it enter the string
- * that gets written to device storage.
- */
+
 export const serializeWebdavCapabilityProof = (config: WebdavCapabilityProofConfig): string => JSON.stringify({
     version: 1,
     endpoint: normalizeWebdavUrl(config.url.trim()),
@@ -25,13 +17,11 @@ export const serializeWebdavCapabilityProof = (config: WebdavCapabilityProofConf
 
 export const WEBDAV_CAPABILITY_PROOF_STORAGE_KEY = '@mindwtr_webdav_capability_proof_v1';
 export const WEBDAV_LEGACY_PROOF_STORAGE_KEY = '@mindwtr_webdav_legacy_proof_v1';
-// A legacy (no strong ETag) answer is re-checked daily, not per cycle: the probe is the
-// cold first request of every sync and on a slow link it failed cycles whose own reads
-// then succeeded (Jianguoyun, roaming, 2026-08-31). A day bounds how long a server that
-// starts serving strong ETags goes unnoticed without asking the user to re-save.
+
+
 export const WEBDAV_LEGACY_PROOF_TTL_MS = 24 * 60 * 60_000;
 
-/** The host's device-local key-value store (AsyncStorage on RN). */
+
 export type WebdavCapabilityProofStoragePort = {
     getItem(key: string): Promise<string | null>;
     setItem(key: string, value: string): Promise<void>;
@@ -39,8 +29,8 @@ export type WebdavCapabilityProofStoragePort = {
 };
 
 export type EnsureWebdavCapabilityProofOptions = {
-    /** Only a caller that accepts plaintext without a strong ETag may reuse a cached
-     *  legacy answer; with encryption on, the probe must run and reject it. */
+
+
     allowLegacyPlaintext?: boolean;
     now?: () => number;
 };
@@ -55,12 +45,7 @@ export type WebdavCapabilityProofStore = {
     ): Promise<WebdavSyncCompatibility>;
 };
 
-/**
- * The device-local cache of WebDAV capability probes. A strong-ETag proof is kept until the
- * configuration changes; a legacy-plaintext answer is kept for one day and only reused by a
- * caller that accepts plaintext. A storage failure never counts as a proof: the next run
- * probes again.
- */
+
 export const createWebdavCapabilityProofStore = (
     storage: WebdavCapabilityProofStoragePort,
 ): WebdavCapabilityProofStore => {
@@ -80,8 +65,8 @@ export const createWebdavCapabilityProofStore = (
                 serializeWebdavCapabilityProof(config),
             );
         } catch {
-            // The current run was proven. If device storage is unavailable, the next
-            // run safely probes again instead of trusting an unrecorded result.
+
+
         }
     };
 
@@ -106,7 +91,7 @@ export const createWebdavCapabilityProofStore = (
                 JSON.stringify({ proof: serializeWebdavCapabilityProof(config), at: now }),
             );
         } catch {
-            // Next run probes again.
+
         }
     };
 

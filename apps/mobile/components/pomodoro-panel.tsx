@@ -45,10 +45,8 @@ export function PomodoroPanel({
   );
   const pomodoro = useMobilePomodoroControllerState();
   const { durations, timerState, selectedTaskId, lastEvent, sessionHistory } = pomodoro;
-  // Presentation only, and deliberately device-local: a phone folding the card
-  // away should not fold it away on the desktop too, so this lives in
-  // AsyncStorage rather than synced settings (#946, matching desktop's #875).
-  // Starts expanded so an update never hides a timer someone was already using.
+
+
   const [collapsed, setCollapsed] = useState(false);
   const isHydratingSession = pomodoro.isHydrating;
   const [isTaskPickerOpen, setIsTaskPickerOpen] = useState(false);
@@ -159,8 +157,8 @@ export function PomodoroPanel({
   );
 
   if (collapsed) {
-    // The session state and its timers live above this branch, so folding the
-    // card away never stops the run — the clock here is the same one.
+
+
     return (
       <View style={[styles.card, styles.collapsedCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
         <View style={styles.collapsedRow}>

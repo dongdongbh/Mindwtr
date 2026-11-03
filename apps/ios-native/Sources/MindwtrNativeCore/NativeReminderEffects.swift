@@ -1,6 +1,6 @@
 import Foundation
 
-/// One explicit asynchronous cycle. The Engine owns policy/storage; this latch only drains accepted callbacks.
+
 final class NativeReminderEffects: @unchecked Sendable {
     static var unavailable: HostFailure { HostFailure("NOT_READY: Reminder reconciliation is unavailable") }
     struct Alarm: Sendable {
@@ -8,9 +8,9 @@ final class NativeReminderEffects: @unchecked Sendable {
         let identifier: String
         let json: String
         let withdrawn: Bool
-        /// Only recovery of an already armed durable Snooze owes fresh future/absence admission.
+
         let armedSnoozeDeadline: Double?
-        /// Unarmed Snoozes retain the shared inclusive24h late allowance after awaited callbacks.
+
         let unarmedSnoozeExpiry: Double?
     }
     struct Cancellation: Sendable { let id: Int; let identifier: String; let withdrawn: Bool }
@@ -46,8 +46,8 @@ final class NativeReminderEffects: @unchecked Sendable {
         lock.unlock()
         resumed.forEach { $0.resume() }; ordinary.forEach { $0.resume(returning: true) }
     }
-    /// Reserves the existing Engine dispatcher, cancelling only asynchronous reminder work.
-    /// The reservation survives callback drain so another reminder cannot overtake the ordinary caller.
+
+
     func reserveOrdinary(cancellation: NativeAttachmentCancellation) async -> Bool {
         await withCheckedContinuation { continuation in
             lock.lock()
@@ -66,7 +66,7 @@ final class NativeReminderEffects: @unchecked Sendable {
         precondition(ordinaryReservations > 0)
         ordinaryReservations -= 1
     }
-    /// Only an actual preemption or blocked begin owes a successor wake; routine reads do not.
+
     func takeOrdinaryReadyWake(ready: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard !closed, ready, ordinaryReservations == 0, ordinaryBlockedReminder else { return false }
@@ -87,7 +87,7 @@ final class NativeReminderEffects: @unchecked Sendable {
     static func checkInventory(_ observations: [NativeReminderObservation]) throws {
         guard observations.count <= 4096, Set(observations.map(\.identifier)).count == observations.count else { throw unavailable }
     }
-    /// RN keeps the first observed delivery on a tie. Only exact native owners are eligible here.
+
     static func supersededDelivered(_ observations: [NativeReminderObservation]) throws -> [NativeReminderObservation] {
         try checkInventory(observations)
         var newest: [String: NativeReminderObservation] = [:], superseded: [NativeReminderObservation] = []

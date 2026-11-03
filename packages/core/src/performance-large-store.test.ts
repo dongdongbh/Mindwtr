@@ -104,7 +104,7 @@ const LARGE_STORE_PERFORMANCE_BUDGETS_MS: Record<LargeStoreSize, Record<Budgeted
     },
 };
 
-// 200 projects x 5k tasks. Calling previewProjectToSection per destination took 88-126 ms here.
+
 const PROJECT_TO_SECTION_BUDGET_MS = 3;
 
 const STORE_MUTATION_BUDGETS_MS: Record<LargeStoreSize, number> = {
@@ -122,8 +122,7 @@ const FULL_MERGE_BUDGETS_MS: Record<LargeStoreSize, number> = {
     50_000: 7_500,
 };
 
-// "Select all -> Move" hands batchUpdateTasks every visible task in one
-// synchronous set(), the largest mutation a user can trigger.
+
 const BATCH_MUTATION_BUDGETS_MS: Record<LargeStoreSize, number> = {
     1_000: 75,
     10_000: 250,
@@ -368,10 +367,8 @@ const operations: BudgetedOperation[] = [
         },
     },
     {
-        // The whole path the Focus screen runs, in the order it runs it, not
-        // just the Next-actions sort above: narrow to actionable tasks, build
-        // the pools, bucket and sort them, then build the sections. This is
-        // what a phone with a big store actually pays to open Focus.
+
+
         id: 'focusScreenDerivation',
         label: 'Focus screen derivation',
         maxGrowthFrom10kTo50k: 12,
@@ -447,15 +444,14 @@ describePerf('large-store performance budgets', () => {
         const measurements = new Map<LargeStoreSize, number>();
         for (const size of DATASET_SIZES) {
             const seed = createLargeStoreFixture(size).data;
-            // The shared UI fixture includes updates throughout June. Run
-            // after those dates so this measures an ordinary aligned merge,
-            // not per-entity clock-skew warning serialization.
+
+
             const options = { nowIso: '2026-07-01T12:00:00.000Z' };
             const canonical = mergeAppDataWithStats(seed, structuredClone(seed), options).data;
             let best = Infinity;
             for (let attempt = 0; attempt < 3; attempt++) {
-                // A remote snapshot arrives as new objects. Never benchmark a
-                // warmed identity cache or charge fixture cloning to the merge.
+
+
                 const local = structuredClone(canonical);
                 const incoming = structuredClone(canonical);
                 const start = performance.now();
@@ -495,7 +491,7 @@ describePerf('large-store performance budgets', () => {
 
     it('builds the 200-project convert-to-section destination list over 5k tasks within budget', () => {
         const fixture = createLargeStoreFixture(10_000);
-        // An eligible source: no sections, tags, dates, or focus. Ineligible sources exit early.
+
         const source = { ...fixture.projects[0], status: 'active' as const, tagIds: [], dueDate: undefined, isFocused: false };
         const projects = [source, ...fixture.projects.slice(1, 200)];
         const state = {
@@ -503,7 +499,7 @@ describePerf('large-store performance budgets', () => {
             _allSections: fixture.sections.filter((row) => row.projectId !== source.id && projects.some((p) => p.id === row.projectId)),
             _allTasks: fixture.tasks.slice(0, 5_000),
         };
-        // What one dialog render does: build once, then filter every project through it.
+
         const result = measureBest(() => {
             const previewDestination = createProjectToSectionPreviewer(state, source.id);
             return projects.filter((project) => previewDestination(project.id).ok).length;

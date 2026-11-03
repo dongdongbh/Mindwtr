@@ -99,7 +99,7 @@ struct CaptureSheet: View {
                     .accessibilityIdentifier("capture-title")
                 Spacer()
                 Button { model.requestCaptureClose() } label: {
-                    // RN closeButton: 48x48 hit area with -6pt vertical margins (36pt of layout).
+
                     AppIcon(name: "x", size: 18).foregroundStyle(palette.secondary).frame(width: 48, height: 48)
                         .contentShape(Rectangle()).padding(.vertical, -6)
                 }
@@ -123,7 +123,7 @@ struct CaptureSheet: View {
                 }
                 .background(palette.input, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1))
-                // ponytail: no mic until native audio capture exists; RN's recorder button returns with it.
+
             }
 
             if !model.capture.objects("preview").isEmpty {
@@ -431,7 +431,7 @@ private struct CaptureCorners: Shape {
     }
 }
 
-// UITextView preserves pasted newlines, while the keyboard's Done key submits just as RN does.
+
 private struct CaptureTextInput: UIViewRepresentable {
     @Binding var text: String
     let enabled: Bool

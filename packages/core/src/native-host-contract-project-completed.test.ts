@@ -179,7 +179,7 @@ describe('native Project completed view', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
-    // RN's task list shows Parallel or Sequential under each section header of a Per section project (#1429, d25316cf9).
+
     it('labels each section header with its flow in a Per section project only', async () => {
         const host = createNativeHostContract();
         expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });

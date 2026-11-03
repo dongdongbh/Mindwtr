@@ -1,13 +1,6 @@
-/**
- * React Native's Review screen, replayed against the `review` part of the review
- * views parity fixture (packages/core/src/review-views-parity.fixtures.json).
- * MINDWTR_CAPTURE_REVIEW_VIEWS=1 rewrites that part.
- *
- * Each scenario renders the real screen with the real core store, expands,
- * swipes, selects and confirms, and records what a user sees and what the store
- * is asked to write. The rows, the task editor and the guided review are stand-ins
- * that record their props: they are other screens' components.
- */
+
+
+
 import React from 'react';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -199,7 +192,7 @@ function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number
   const picker = hostsOf(root, 'TokenPickerModal')[0]?.props;
   const organize = hostsOf(root, 'TaskListBulkOrganizeModal')[0]?.props;
   const observation: Observation = {
-    // Legacy parity excludes the asserted scope bar and due-only controls.
+
     texts: allTexts.slice(scopeTexts.length).filter((value) => value !== harness.strings['review.markReviewed'] && value !== harness.strings['review.advanceWeek']),
     headers,
     expansion: expansion ? [
@@ -274,7 +267,7 @@ async function perform(root: ReactTestInstance, action: [string, ...unknown[]]) 
     case 'organize':
       return run('organize', () => hostsOf(root, 'TaskListBulkOrganizeModal')[0]?.props.onApply(target));
     case 'alert': {
-      // A button without onPress only dismisses the dialog.
+
       const button = harness.alerts.at(-1)?.buttons.find((entry) => entry.text === target);
       return run('alert', button ? button.onPress ?? (() => undefined) : undefined);
     }
@@ -285,8 +278,7 @@ async function perform(root: ReactTestInstance, action: [string, ...unknown[]]) 
   }
 }
 
-// Frozen pre-disclosure evidence still observes the whole plan. The focused
-// review-screen test separately checks the new collapsed default and its actions.
+
 async function expandSequencePlan(root: ReactTestInstance) {
   const writesBefore = writeLog.length;
   for (const disclosure of hostsOf(root, 'Pressable').filter((node) => (
@@ -350,7 +342,7 @@ describe('React Native Review screen parity fixture', () => {
     const { observations, ...frozenInputs } = readFixturePart('review');
     expect(frozenInputs).toEqual(inputs);
     for (const scenario of scenarios) {
-      // Apply only the accepted sequence presentation changes to the old evidence.
+
       let expected = JSON.stringify(observations[scenario.name])
         .replaceAll('"Launch","1 active task · Has Next Action"', '"Launch","1 active task · Scheduled"');
       for (const expanded of [false, true]) {

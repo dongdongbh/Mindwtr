@@ -192,9 +192,7 @@ export function TaskEditContentField({
         [cancelPendingChecklistFocus, fieldId, task?.id],
     );
 
-    // A just-added row is focused from its first onLayout, not the mount commit:
-    // focusing before native layout makes Android's ScrollView scroll-to-focused-
-    // child measure the unpositioned row and jump to the top of the checklist.
+
     const handleChecklistRowLayout = React.useCallback((key: string) => {
         if (pendingChecklistFocusKeyRef.current !== key) return;
         const target = checklistInputRefs.current[key];
@@ -274,10 +272,7 @@ export function TaskEditContentField({
         }, 300);
     }, []);
 
-    // Return key on a filled checklist item inserts an empty item right after it
-    // and moves focus there, so a list can be typed without tapping "+ Add item"
-    // between entries (matching the desktop editor's Enter). On an empty item the
-    // return key just ends editing.
+
     const handleChecklistSubmit = React.useCallback((index: number, key: string) => {
         if (!(checklist || [])[index]) return;
         const result = editChecklist({ kind: 'insertAfter', index, text: checklistTitleRefs.current[key] });
@@ -316,9 +311,8 @@ export function TaskEditContentField({
 
     const getDescriptionFocusScrollTarget = React.useCallback((nativeTarget?: number) => {
         if (Platform.OS === 'android') {
-            // Scroll to the input itself, not the label header above it, so the field (not just
-            // the "DESCRIPTION" label) lands above the keyboard. The reveal cap in
-            // scrollHandleIntoView keeps a tall description from over-scrolling (#921).
+
+
             return findNodeHandle(descriptionInputRef.current) ?? undefined;
         }
         return nativeTarget || undefined;
@@ -340,8 +334,8 @@ export function TaskEditContentField({
 
     const handleChecklistTitleChange = React.useCallback((index: number, key: string, text: string) => {
         if (/[\r\n]/.test(text)) {
-            // Multi-line paste: split into one checklist item per line. The
-            // first line replaces this item's title; the rest insert after it.
+
+
             const result = editChecklist({ kind: 'rename', index, text });
             if (!result) return;
             const updatedTitle = result.checklist[index].title;
@@ -396,10 +390,7 @@ export function TaskEditContentField({
         updateChecklistTitle(index, key, text);
     }, [editChecklist, getChecklistSelection, restoreChecklistSelection, updateChecklistTitle]);
 
-    // Checklist auto-pairing intentionally lives only in handleChecklistTitleChange. On
-    // Android the keyPress event is synthesized from the same native edit as the text
-    // change (and preventDefault cannot cancel it), so a keyPress pairing path processes
-    // one keystroke twice — IME-specific echo orders then double the pair (#565).
+
     const handleChecklistMove = React.useCallback((from: number, to: number) => {
         editChecklist({ kind: 'move', from, to });
     }, [editChecklist]);
@@ -852,7 +843,7 @@ export function TaskEditContentField({
                                                     checklistItemKey,
                                                     event.nativeEvent.selection,
                                                 )}
-                                                // Native caret movement must not be overwritten by a stale ref on iOS.
+
                                                 selection={checklistSelectionRestorePending[checklistItemKey] ? getControlledTextInputSelection(
                                                     checklistSelectionRefs.current[checklistItemKey] ?? {
                                                         start: item.title.length,

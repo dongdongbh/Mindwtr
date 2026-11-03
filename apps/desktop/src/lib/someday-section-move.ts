@@ -40,14 +40,14 @@ function assertSaved(result: unknown): void {
     }
 }
 
-/** Re-read the catalogue and tasks at Apply, rather than using picker-open rows. */
+
 export async function saveSomedaySectionMove(
     taskIds: readonly string[],
     destinationId: string | undefined,
     selectableIds: readonly string[],
     noSectionTitle: string,
 ): Promise<SomedaySectionMove> {
-    // The read, the plan and the write run as one command, so a sync save's newer rows are what the move builds on.
+
     const move = await runStoreCommand(() => writeSomedaySectionMove(taskIds, destinationId, selectableIds, noSectionTitle));
     if (move.changedCount) {
         try {
@@ -99,7 +99,7 @@ async function writeSomedaySectionMove(
     return move;
 }
 
-/** Retry a queued write without replacing the pre-write Undo snapshot. */
+
 export async function retryPendingSomedaySectionMove(move: SomedaySectionMove): Promise<SomedaySectionMove> {
     const state = useTaskStore.getState();
     const latestById = new Map(state.tasks.map((task) => [task.id, task]));
@@ -114,7 +114,7 @@ export async function retryPendingSomedaySectionMove(move: SomedaySectionMove): 
     return move;
 }
 
-/** Only restore this scope on tasks still assigned by the move. */
+
 export async function undoSomedaySectionMove(move: SomedaySectionMove, pendingCount?: number): Promise<number> {
     const state = useTaskStore.getState();
     if (pendingCount !== undefined) {
@@ -122,7 +122,7 @@ export async function undoSomedaySectionMove(move: SomedaySectionMove, pendingCo
         return pendingCount;
     }
     const previousIds = new Set(move.previous.map((assignment) => assignment.id));
-    // Built on the rows as they are when the write is admitted, so a sync save's newer sections stay.
+
     const updates = await runStoreCommand(async () => {
         const latest = useTaskStore.getState();
         const latestTasks: Task[] = latest.tasks.filter((task) => previousIds.has(task.id));

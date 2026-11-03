@@ -10,11 +10,7 @@ export const seedSandboxSessionStorage = (settings: AppSettings): void => {
     if (settings.theme) sandboxValues.set(MOBILE_THEME_STORAGE_KEY, settings.theme);
 };
 
-/**
- * UI convenience state must not read or overwrite the personal profile while
- * the disposable workspace is mounted. The sandbox side lives only for this
- * JS runtime and disappears with the reload used to leave/reset it.
- */
+
 export const workspaceSessionStorage = {
     getItem(key: string): Promise<string | null> {
         if (isSandboxMode()) return Promise.resolve(sandboxValues.get(key) ?? null);

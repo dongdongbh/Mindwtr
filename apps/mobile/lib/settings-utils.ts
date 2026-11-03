@@ -5,7 +5,7 @@ export const formatError = (error: unknown) => (error instanceof Error ? error.m
 
 export { isDropboxUnauthorizedError };
 
-// Core's (calendar-settings-model.ts), shared with the native host.
+
 export const maskCalendarUrl = maskCalendarFeedUrl;
 
 export const compareVersions = compareAppVersions;

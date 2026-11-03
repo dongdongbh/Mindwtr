@@ -9,7 +9,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/** The entries waiting to open (EntryQueue.kt): first in, first out, kept on disk, and removed only by their own id. */
+
 class EntryQueueTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -29,7 +29,7 @@ class EntryQueueTest {
         queue.add("""{"kind":"share","text":"same"}""")
         val (first, second) = queue.all()
         assertTrue(first.id != second.id)
-        // Removing the opened one keeps the other, even when both hold the same input.
+
         queue.remove(first.id)
         assertEquals(listOf(second), queue.all())
     }
@@ -72,7 +72,7 @@ class EntryQueueTest {
     }
 
     @Test fun onlyARefusedInputIsDroppedAfterAFailedRead() {
-        // Core refused the input (it can never open): drop it. Anything else (storage not ready, a save owed, a timeout): retry.
+
         assertFalse(entryRetryable("INVALID_INPUT: An entry point is a link, a share or a note"))
         assertTrue(entryRetryable("NOT_READY: Native storage has not been loaded and validated"))
         assertTrue(entryRetryable("SAVE_FAILED: disk full"))

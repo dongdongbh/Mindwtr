@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Actual bundled JSC policy, private v2 intent, and separate exact editor CAS.
+
 final class AttachmentDraftAdvanceHostTests: XCTestCase {
     private var root: URL!
     private var bundle: URL!
@@ -52,8 +52,8 @@ final class AttachmentDraftAdvanceHostTests: XCTestCase {
             let schema = try XCTUnwrap(table["sql"] as? String)
             let columns = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql("PRAGMA table_info(" + quoted(name) + ")").utf8)) as? [[String: Any]])
             let names = try columns.map { try XCTUnwrap($0["name"] as? String) }
-            // The bridge intentionally refuses BLOB columns. Encode TEXT/BLOB
-            // as hex bytes (including embedded NUL/BOM) and tag every SQL type.
+
+
             var fields = names.map { column -> String in
                 let identifier = quoted(column)
                 return "typeof(" + identifier + ") || ':' || CASE typeof(" + identifier
@@ -421,8 +421,8 @@ final class AttachmentDraftAdvanceHostTests: XCTestCase {
         await host.close()
         _ = try sql("INSERT INTO projects(id,title,status,color,createdAt,updatedAt,rev) VALUES ('archived-owner','Archived','archived','#94a3b8',?,?,1)", [at, at])
         _ = try sql("UPDATE tasks SET projectId='archived-owner' WHERE id=?", [taskID])
-        // External fixture SQL cannot change the already activated shared store.
-        // Recreate the host and prove the actual authority sees archived state.
+
+
         let archived = core(); _ = try await archived.start()
         let view = try object(await archived.call("taskView", argumentsJSON: json([json(["id": taskID])])))
         XCTAssertEqual(view["readOnly"] as? Bool, true)
@@ -632,8 +632,8 @@ final class AttachmentDraftAdvanceHostTests: XCTestCase {
         let (host, initial) = try await seed(extra: String(repeating: "x", count: 320_000))
         try await begin(host, initial)
         let input = try source()
-        // Actual shared preparation and native publication retain the complete
-        // large opaque initial payload in five immutable Add operations.
+
+
         for _ in 0..<5 { _ = try await host.addAttachmentDraft(requestJSON: addRequest(latest(), source: input)) }
         let small = try edited(latest(), generation: latest().generation + 7)
         try await host.checkpointEditorDraft(small)
@@ -642,8 +642,8 @@ final class AttachmentDraftAdvanceHostTests: XCTestCase {
             .init(sessionID: small.sessionID, taskID: small.taskID, generation: small.generation + 9,
                 payloadJSON: String(repeating: "\n", count: padding) + small.payloadJSON)
         }
-        // Leading JSON whitespace remains exact raw input. Each newline gains
-        // an escaping byte under Codable; no payload normalization is allowed.
+
+
         var lower = 0, upper = max(1_000_000 - small.payloadJSON.utf8.count, 0)
         while lower < upper {
             let middle = lower + (upper - lower + 1) / 2
@@ -715,9 +715,8 @@ final class AttachmentDraftAdvanceHostTests: XCTestCase {
         let pending = try XCTUnwrap(candidates.first), proofs = try encoded(fixture.accepted.operations)
         let markers = try discardCapacityMarkers()
         await host.close()
-        // This is a structurally valid old intent: both old encoded admission
-        // forms fit, even though its future detached Discard does not. Seed only
-        // the real private intent through the same store's retained-write checks.
+
+
         try store.write(pending)
         same(try latest(), fixture.accepted.session.checkpoint)
         let cold = core(); _ = try await cold.start()
@@ -726,8 +725,8 @@ final class AttachmentDraftAdvanceHostTests: XCTestCase {
         XCTAssertNil(try record().checkpointAdvance); XCTAssertEqual(try encoded(record().operations), proofs)
         XCTAssertEqual(try discardCapacityMarkers(), markers); XCTAssertEqual(try domain(), fixture.domain)
         try preservedCapacityFiles(fixture.files)
-        // Exact acknowledged retry remains compatible; a new generation must
-        // satisfy today's admission and may not inherit a capacity promise.
+
+
         try await cold.checkpointEditorDraft(fixture.over)
         let retained = try Data(contentsOf: store.url), checkpoint = try Data(contentsOf: editor.url)
         let later = EditorDraftSnapshot(sessionID: fixture.over.sessionID, taskID: fixture.over.taskID,

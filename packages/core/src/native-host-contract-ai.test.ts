@@ -10,29 +10,16 @@ import { createTaskDraft, type TaskDraft } from './task-draft';
 import type { AppSettings, ChecklistItem, Project, Section, Task } from './types';
 import { generateUUID } from './uuid';
 
-/**
- * The frozen React Native AI screens (ai-settings-parity.fixtures.json and
- * ai-actions-parity.fixtures.json, captured by apps/mobile/components/settings/
- * ai-settings-screen.parity.test.tsx and apps/mobile/components/ai-actions.parity.test.tsx),
- * replayed through the native host contract. Each replay plays the native screen: it keeps
- * the screen's own state (which cards and pickers are open, the typed extra parameters,
- * the editor's draft and copilot chips, the dialog), sends each control's command, and lays
- * the view out in the order React Native draws it. The provider and the model lists answer
- * from the scenario's queues exactly as the React Native harnesses' stubs do.
- */
 
 const device = vi.hoisted(() => ({
     queues: {} as Record<string, unknown[]>,
     calls: [] as unknown[][],
-    /** The abort signal each provider call and model list was given (review C1 5), apart from `calls`. */
+
     signals: [] as (AbortSignal | undefined)[],
     modelFetch: null as null | ((url: string, init: RequestInit) => Promise<unknown>),
 }));
 
-/**
- * The next queued answer for `name`: `{ value }` answers it, `{ error }` rejects, a function is awaited for its entry (it can
- * change the store while the request waits); none queued rejects with `fallback`.
- */
+
 const answer = async (name: string, fallback: string): Promise<any> => {
     const queue = device.queues[name];
     const next = queue && queue.length > 0 ? queue.shift() : { error: fallback };
@@ -81,7 +68,7 @@ const TINT = true;
 
 type Device = { language?: string; foss?: boolean; storage?: Record<string, string>; secrets?: Record<string, string>; queues?: Record<string, unknown[]> };
 
-/** `warnings`: where the host's log warnings go (the Settings harness records them among its calls). */
+
 function createDevice(input: Device, warnings: unknown[][] = []) {
     const storage = new Map(Object.entries(input.storage ?? {}));
     const secrets = new Map(Object.entries(input.secrets ?? {}));
@@ -95,7 +82,7 @@ function createDevice(input: Device, warnings: unknown[][] = []) {
         },
         secrets: {
             get: async (key) => secrets.get(key) ?? null,
-            // RN's AI keys are written readable while the device is unlocked.
+
             set: async (key, entry) => { log.push(['setSecret', key, entry, 'whenUnlockedThisDeviceOnly']); secrets.set(key, entry); },
             delete: async (key) => { log.push(['deleteSecret', key]); secrets.delete(key); },
         },
@@ -146,8 +133,6 @@ async function openHost(host: NativeAIHost, language = 'en') {
 }
 type Host = Awaited<ReturnType<typeof openHost>>;
 
-// ---------------------------------------------------------------------------
-// Settings › AI.
 
 type SettingsScenario = { name: string; settings: string; device: Device; actions: [string, ...unknown[]][] };
 type SettingsFixture = { settings: Record<string, AppSettings>; scenarios: SettingsScenario[]; observations: Record<string, Record<string, unknown>[]> };
@@ -384,8 +369,6 @@ async function replaySettings(scenario: SettingsScenario, strings: Record<string
     return observations;
 }
 
-// ---------------------------------------------------------------------------
-// The AI actions.
 
 type ActionsScenario = { name: string; screen: 'editor' | 'inbox' | 'review'; settings: string; taskId?: string; device: Device; actions: [string, ...unknown[]][] };
 type ActionsFixture = {
@@ -432,7 +415,7 @@ async function replayActions(scenario: ActionsScenario, strings: Record<string, 
         let copilot: { suggestion: NativeAICopilotSuggestion | null; applied: NativeAICopilotApplied } = { suggestion: null, applied: { tags: [] } };
         let dialog: ReturnType<typeof shown> = null;
         let dialogKind: 'clarify' | 'breakdown' | null = null;
-        // The editor asks the copilot once typing pauses: when it opens and after each change.
+
         let pending = true;
         const read = () => value(contract.getTaskEditorAI({ id, draft, copilot }));
         const typed = () => {
@@ -577,7 +560,7 @@ async function replayActions(scenario: ActionsScenario, strings: Record<string, 
             else review.selected.add(id);
         } else if (kind === 'apply') {
             const chosen = review.suggestions.filter((entry) => review.selected.has(entry.id));
-            // Each suggestion's task at the revision the analysis read it (a native host keeps no other copy of the stale tasks).
+
             const taskRevisions = Object.fromEntries(chosen.flatMap((entry) => (entry.taskRevision ? [[entry.id, entry.taskRevision]] : [])));
             value(await contract.runReviewAction({
                 requestId: generateUUID(),
@@ -628,10 +611,6 @@ describe('native host contract: AI', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Replays after a restart, over a real SQLite file with the app's request receipts.
-// A restart is process death: a new host over the same file and the same device (RN's
-// key-value store and keystore keep what the first run stored).
 
 describe('native host contract: AI commands replayed after a restart', () => {
     const originalTz = process.env.TZ;
@@ -709,7 +688,7 @@ describe('native host contract: AI commands replayed after a restart', () => {
             expect(value(result).changed).toBe(true);
             expect(wrote).toBe(false);
             expect(dev.log.length).toBe(consentWrites);
-            // Consent recorded, the next turn-on asks nothing.
+
             await useTaskStore.getState().updateSettings({ ai: { ...useTaskStore.getState().settings.ai, enabled: false } });
             expect(value(await env.host.setAISetting({ requestId: generateUUID(), change })).consent).toBeNull();
         } finally {
@@ -724,7 +703,7 @@ describe('native host contract: AI commands replayed after a restart', () => {
             const input = { requestId: generateUUID(), field: 'assistant' as const, provider: 'openai', value: 'sk-secret-000111' };
             expect(value(await env.host.setAIKey(input))).toEqual({ mask: '•'.repeat(16) });
             expect(dev.secrets.get('mindwtr-ai-key_openai')).toBe('sk-secret-000111');
-            // The same request with another key is another action.
+
             expect(await env.host.setAIKey({ ...input, value: 'other' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
             const rows = await env.sql<{ request_id: string; method: string; reply: string }>('SELECT request_id, method, reply FROM native_request_receipts');
             expect(rows.map((row) => row.request_id)).not.toContain(input.requestId);
@@ -750,7 +729,7 @@ describe('native host contract: AI commands replayed after a restart', () => {
             const { result, wrote, receipts } = await env.replay((restarted) => restarted.setAIEndpoint(input));
             expect(value(result)).toEqual({ changed: false });
             expect({ wrote, receipts }).toEqual({ wrote: false, receipts: false });
-            // The speech card shows a transcription server only while OpenAI transcribes.
+
             expect(await env.host.setAIEndpoint({ requestId: generateUUID(), field: 'speech', value: 'http://stt' }))
                 .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         } finally {
@@ -820,8 +799,6 @@ describe('native host contract: AI commands replayed after a restart', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Keys never leave the keystore.
 
 describe('native host contract: AI keys stay out of views, errors and logs', () => {
     beforeAll(() => {
@@ -860,7 +837,7 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
         expect(text).not.toContain('pw-9x7');
     });
 
-    // Review C1 1: the endpoint changed while the request waited; its error echoes the password the request was sent with.
+
     it('drops the password the request was sent with, though the endpoint changed while it waited', async () => {
         const settings: AppSettings = { ai: { enabled: true, provider: 'openai', baseUrl: 'http://ann:pw-old-1@10.0.0.5:11434/v1' } };
         const tasks = [{ id: 't1', title: 'Plan the trip', status: 'next', contexts: [], tags: [], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' }] as Task[];
@@ -904,7 +881,7 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
         expect(info).toHaveBeenCalledWith('Weekly review sequence candidates prepared', { scope: 'ai', extra: { releaseCheck: 'v1.3.8/review-sequence', candidateCount: 2, staleTaskCount: 1, staleProjectCount: 1 } });
     });
 
-    // Review C1 2: sync installs a newer, still-stale copy of a task while the analysis waits; Apply must refuse it (CAS).
+
     it('gives each suggestion the revision the analysis read, so Apply refuses a task changed while it waited', async () => {
         const tasks = [{ id: 's1', title: 'Old errand', status: 'next', contexts: [], tags: [], rev: 3, revBy: 'this', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }] as Task[];
         await seed({ tasks, settings: { ai: { enabled: true, provider: 'openai', baseUrl: 'http://local/v1' } } });
@@ -927,7 +904,7 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
         expect(useTaskStore.getState()._tasksById.get('s1')!.status).toBe('next');
     });
 
-    // Review C1 5: the host's signal (an input change, a close, a timeout) reaches every provider call and model list.
+
     it('hands the caller\'s abort signal to each provider call and to the model list\'s fetch', async () => {
         const tasks = [{ id: 't1', title: 'Plan the trip', status: 'next', contexts: [], tags: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }] as Task[];
         await seed({ tasks, settings: { ai: { enabled: true, provider: 'openai', baseUrl: 'http://local/v1' } } });
@@ -952,7 +929,7 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
         expect(seen[0].signal?.aborted).toBe(true);
     });
 
-    // Review C1 verification B: a cancelled model list frees its request, so the same request later fetches again.
+
     it('fetches a model list again after its earlier load was cancelled (endpoint A, B, then A while A loads)', async () => {
         await seed({ settings: { ai: { enabled: true, provider: 'openai', baseUrl: 'http://a/v1' } } });
         let release!: () => void;
@@ -969,7 +946,7 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
         expect(value(contract.getAISettings()).modelLists.assistant.request).not.toBe(atA);
         value(await contract.setAIEndpoint({ requestId: generateUUID(), field: 'assistant', value: 'http://a/v1' }));
         expect(value(contract.getAISettings()).modelLists.assistant.request).toBe(atA);
-        // The host cancels A's first load before it asks again.
+
         first.abort();
         view = value(await contract.loadAIModels({ list: 'assistant', request: atA }, { signal: new AbortController().signal }));
         release();
@@ -1007,7 +984,7 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
     it('Break down on a finished list task reopens it through a status edit, as React Native does', async () => {
         const tasks = [{
             id: 'l1', title: 'Pack', status: 'done', taskMode: 'list', contexts: [], tags: [], checklist: [{ id: 'c1', title: 'Passport', isCompleted: true }],
-            // Done just now, so it is not archived on load.
+
             createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completedAt: new Date().toISOString(),
         }] as Task[];
         await seed({ tasks, settings: { ai: { enabled: true, provider: 'openai', baseUrl: 'http://local/v1' } } });
@@ -1036,7 +1013,7 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
         expect(view.draft).toMatchObject({ title: 'Call Sam', contexts: ['@calls'] });
     });
 
-    // Pass C1 native: RN's Process Inbox shows Clarify while AI is on (InboxCaptureCard's aiEnabled); the native view says so.
+
     it('names Process Inbox\'s Clarify button while AI is on, and no button while it is off', async () => {
         const tasks = [{ id: 'i1', title: 'Gift', status: 'inbox', tags: [], contexts: [], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' }] as Task[];
         await seed({ tasks, settings: { ai: { enabled: true, provider: 'openai' } } });

@@ -229,7 +229,7 @@ describe('TaskInput autocomplete', () => {
         for (const name of ['/link:<url>', '/energy:<level>', '/priority:<level>', '/area:<name>', '/reference', '/archived', '/*']) {
             expect(getByRole('option', { name })).toBeInTheDocument();
         }
-        // Only /priority:<level> suggestions carry the decorative flag.
+
         expect(document.querySelectorAll('[data-priority-flag]')).toHaveLength(0);
     });
 
@@ -311,8 +311,7 @@ describe('TaskInput autocomplete', () => {
             '/priority:urgent',
         ]);
 
-        // Each level suggestion carries the canonical decorative flag; other
-        // command suggestions keep their plain label markup.
+
         const priorityFlagColors = {
             low: '#3b82f6',
             medium: '#ca8a04',

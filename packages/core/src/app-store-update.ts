@@ -5,13 +5,12 @@ export const UPDATE_BADGE_LAST_CHECK_KEY = 'mindwtr-update-last-check';
 export const UPDATE_BADGE_LATEST_KEY = 'mindwtr-update-latest';
 export const UPDATE_BADGE_INTERVAL_MS = 1000 * 60 * 60 * 24;
 
-/** Preserve RN's parseInt/NaN and future-clock behavior for device-local checks. */
+
 export const shouldCheckForAppUpdate = (rawLastCheck: string | null | undefined, now = Date.now()): boolean => (
     !(now - Number.parseInt(rawLastCheck || '0', 10) < UPDATE_BADGE_INTERVAL_MS)
 );
 
-// Preserve the mobile update checker's numeric comparison, including its
-// treatment of prerelease/build suffixes and omitted version segments.
+
 export const compareAppVersions = (v1: string, v2: string): number => {
     const parseVersionParts = (version: string): number[] => (
         version
@@ -41,8 +40,8 @@ const appStoreListingURL = (value: unknown): string | null => {
     const candidate = value.trim();
     if (!candidate || candidate.length > 2_048 || candidate.includes('\\')
         || [...candidate].some((character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127)) return null;
-    // URL shims may omit credential/port getters. Bind the original authority
-    // to Apple hosts and the default HTTPS port before reading parsed fields.
+
+
     const authority = /^https:\/\/([^/?#]*)/i.exec(candidate)?.[1];
     if (!authority || !/^(?:apps|itunes)\.apple\.com(?::443)?$/i.test(authority)) return null;
     try {
@@ -54,7 +53,7 @@ const appStoreListingURL = (value: unknown): string | null => {
     } catch { return null; }
 };
 
-/** Existing RN iOS lookup policy. Opening the returned listing stays caller-owned. */
+
 export async function fetchAppStoreInfo(bundleIdentifier: string, fetcher: typeof globalThis.fetch = globalThis.fetch): Promise<AppStoreInfo> {
     if (typeof bundleIdentifier !== 'string' || !bundleIdentifier.trim()) {
         throw new Error('App Store lookup requires a bundle identifier');

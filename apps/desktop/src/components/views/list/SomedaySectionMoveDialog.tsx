@@ -11,7 +11,7 @@ import {
 type Props = {
     sections: readonly ViewSectionDefinition[];
     selectedCount: number;
-    /** Replaces the "N selected" line, e.g. with a project's title. */
+
     description?: string;
     initialSectionId?: string;
     t: (key: string) => string;
@@ -20,7 +20,7 @@ type Props = {
     onCancel: () => void;
 };
 
-/** Keeps the selected tasks and destination in place after a failed save. */
+
 export function SomedaySectionMoveDialog({
     sections,
     selectedCount,

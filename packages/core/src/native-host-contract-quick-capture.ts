@@ -1,19 +1,6 @@
-/**
- * The native host contract for the capture popup: React Native's quick capture
- * sheet, the one the tab bar's center + opens. Kept in its own file and spread
- * into createNativeHostContract; every view and save comes from
- * quick-capture-model.ts, the module React Native's popup calls.
- *
- * The host keeps the typed text and the options, and sends both with every
- * call. The contract keeps the popup's one parse-options bag, as React Native
- * does: openQuickCapture rebuilds it, and so does every capture that lands, so
- * capture 2 of an "Add another" burst knows a context capture 1 created. Reads
- * in between reuse it, so the preview and the save cannot disagree; a sync that
- * lands mid-draft stays unknown until the next rebuild, as on mobile.
- *
- * Only functions read this module's imports from native-host-contract.ts, so
- * the import cycle between the two files is safe.
- */
+
+
+
 import { serializeBackupData } from './backup-transfer';
 import { applyCapturedProject, resolveCaptureAreaQuery, resolveCaptureProjectQuery, type CaptureTaskPlan } from './capture';
 import { safeParseDate, type DateFormatter } from './date';
@@ -68,10 +55,10 @@ type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['erro
 export type QuickCaptureDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
-    /** Data plus display revision: tasks, projects, settings, language and the minute. */
+
     revision: (now: Date) => string;
     t: () => TranslateFn;
-    /** The user's date formatting (createDateFormatter); the only formatter this block uses. */
+
     formatDate: () => DateFormatter;
     requestIdPattern: RegExp;
 };
@@ -83,7 +70,7 @@ type AreaPicker = ReturnType<typeof buildQuickCaptureAreaPicker>;
 type ContextPicker = ReturnType<typeof buildQuickCaptureContextPicker>;
 type PriorityPicker = ReturnType<typeof buildQuickCapturePriorityPicker>;
 
-/** The open picker. Lists hold the first NATIVE_HOST_MAX_WINDOW matches; `total` counts them all. */
+
 export type NativeQuickCapturePicker =
     | ({ kind: 'project'; query: string } & Windowed<ProjectPicker>)
     | ({ kind: 'area'; query: string } & Windowed<AreaPicker>)
@@ -92,22 +79,22 @@ export type NativeQuickCapturePicker =
 
 export type NativeQuickCaptureView = QuickCaptureView & {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
-    /** Changes with the data, settings, language and minute. */
+
     revision: string;
     picker: NativeQuickCapturePicker | null;
 };
 
-/** Which picker to show, with its search text. The priority picker has none. */
+
 export type NativeQuickCapturePickerInput = { kind: NativeQuickCapturePickerKind; query?: string };
 
 export type NativeQuickCaptureSubmitResult =
     | (Omit<QuickCaptureSaved, 'highlightTaskId'> & {
-        /** "Add another": the draft to show next (empty text, fresh options that keep Add another on). */
+
         reset: { text: string; options: QuickCaptureOptions } | null;
     })
-    /** Nothing was written: show the notice and keep the draft. The capture ID stays free. */
+
     | { kind: 'refused'; notice: QuickCaptureNotice }
-    /** Several lines: ask with this text, then send submitQuickCaptureLines with one capture ID per line. */
+
     | { kind: 'confirmLines'; confirm: ReturnType<typeof getQuickCaptureBulkConfirm>; lineCount: number };
 
 export type NativeQuickCaptureLinesResult = { kind: 'saved'; taskIds: string[] } | { kind: 'refused'; notice: QuickCaptureNotice };
@@ -119,7 +106,7 @@ export type NativeQuickCaptureInput = {
     openAfterSave?: boolean;
 };
 
-/** Private host journal payload, produced by prepareQuickCapture before any write. */
+
 export type NativePreparedQuickCapture = {
     version: 1;
     request: NativeQuickCaptureInput;
@@ -159,11 +146,8 @@ const TEXT_LIMIT = 100_000;
 const NOTE_LIMIT = 500_000;
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-/**
- * An option date as the popup holds it: null, a canonical instant
- * (Date.toISOString()), or a date-only day read as that local day's midnight,
- * never as a UTC instant. undefined when it is neither.
- */
+
+
 const readOptionDate = (value: unknown): string | null | undefined => {
     if (value === null) return null;
     if (!isText(value, 64)) return undefined;
@@ -185,11 +169,7 @@ const OPTION_CHECKS: Record<keyof QuickCaptureOptions, (value: unknown) => boole
     addAnother: (value) => typeof value === 'boolean',
 };
 
-/**
- * Every field, each valid, dates as the popup holds them. A date-only due date
- * cannot carry a time. With Priorities off the priority is cleared, as the
- * popup clears it.
- */
+
 const readOptions = (value: unknown): QuickCaptureOptions | null => {
     if (!isObjectRecord(value)) return null;
     const keys = Object.keys(OPTION_CHECKS) as (keyof QuickCaptureOptions)[];
@@ -218,7 +198,7 @@ const isCaptureDate = (value: unknown): value is string => isInstant(value) || (
 );
 const isNonemptyText = (value: unknown): value is string => isText(value, TEXT_LIMIT) && value.trim().length > 0;
 
-/** Identity never consults current feature flags or interprets a day in the current timezone. */
+
 const readOriginalOptions = (value: unknown): QuickCaptureOptions | null => {
     if (!isObjectRecord(value)) return null;
     const keys = Object.keys(OPTION_CHECKS) as (keyof QuickCaptureOptions)[];
@@ -248,8 +228,7 @@ const isLinkAttachment = (value: unknown) => isObjectRecord(value)
     && isNonemptyText(value.title) && isNonemptyText(value.uri)
     && isInstant(value.createdAt) && value.updatedAt === value.createdAt;
 
-// Capture has a deliberately narrower transport than Task/import: no arbitrary
-// attachments, archive history, checklist, or editor-only fields can be inserted.
+
 const CAPTURE_TASK_CHECKS: Partial<Record<keyof Task, (value: unknown) => boolean>> = {
     id: isNonemptyText, title: (v) => isNonemptyText(v) && v.trim() === v,
     status: (v) => typeof v === 'string' && normalizeTaskStatus(v) === v,
@@ -279,12 +258,11 @@ const readPreparedTask = (value: unknown): Task | null => {
     if (task.projectId ? !Number.isFinite(task.order) : task.order !== undefined) return null;
     if (!sameJson(taskToSqliteRow(task), taskToSqliteRow(normalizeTaskLifecycleFields(task)))) return null;
     if (task.status === 'reference' && !sameJson(taskToSqliteRow(task), taskToSqliteRow({ ...task, ...getReferenceTaskFieldClears(task.dueReminderLeadMinutes, task.startReminderLeadMinutes) }))) return null;
-    // Creation promotes a starred Inbox row; lifecycle/reference checks above
-    // cover terminal states. Review-due Someday can also receive a valid star.
+
+
     if (task.isFocusedToday && task.status === 'inbox') return null;
-    // JSON object key order is not stable across the native journal. Decode the
-    // persisted representation once so attachment/recurrence JSON uses the same
-    // field order as SQLite loads, while preserving array order and every value.
+
+
     const row = taskToSqliteRow(task);
     const decoded = taskFromSqliteRow(Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, row[index]])));
     return { ...decoded, recurrence: normalizeRecurrenceForLoad(decoded.recurrence) };
@@ -331,8 +309,7 @@ const readPreparedCapture = (value: unknown): NativePreparedQuickCapture | null 
         result: { kind: 'saved', taskId: task.id, ...(task.projectId ? { projectId: task.projectId } : { projectId: undefined }), next, reset } };
 };
 
-// Count the closed JSON grammar incrementally, before building a full journal
-// string. JSON escapes unpaired surrogates; no native TextEncoder is required.
+
 const jsonBytes = (value: unknown): number => {
     let bytes = 0;
     const ancestors = new Set<object>();
@@ -424,7 +401,7 @@ const readPreparedLines = (value: unknown): NativePreparedQuickCaptureLines | nu
     return jsonBytes(prepared) <= NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES ? prepared : null;
 };
 
-/** Pure authority for a private native journal, including cold terminal cleanup. */
+
 export const validatePreparedQuickCaptureLines = (input: unknown): NativeHostResult<NativePreparedQuickCaptureLines['result']> => {
     try {
         if (!isObjectRecord(input) || !hasKeys(input, ['request', 'prepared'])
@@ -440,24 +417,14 @@ const sameTokens = (left: readonly string[] | undefined, right: readonly string[
     JSON.stringify([...(left ?? [])].sort()) === JSON.stringify([...(right ?? [])].sort())
 );
 
-/**
- * The id of a project a capture makes: derived from the request (a batch's first
- * capture ID) and the project's name, so lines naming one project share it, as the
- * store's name match does, and a retry finds it whichever lines are still missing.
- */
+
 export const captureProjectId = (requestId: string, title: string) => requestRowId(requestId, `project:${title.trim().toLowerCase()}`);
 
-/** The addProject a capture hands to quick-capture-model: its projects take captureProjectId (requestProjects). */
+
 export const captureProjects = (requestId: string) => requestProjects((title) => captureProjectId(requestId, title));
 const projectGone = () => fail('STALE_REVISION', 'The project this capture created is gone');
 
-/**
- * Whether a stored task is what this plan writes: the check before a capture ID
- * reused after a restart is acknowledged. Title, project, area, contexts,
- * tags, status, priority, due date and the star must match; the store's own
- * change on a starred capture (Inbox to Next) counts as a match, and so does
- * the project this request made (captureProjectId), renamed since.
- */
+
 export const isTaskOfPlan = (task: Task, plan: CaptureTaskPlan, requestId: string): boolean => {
     const { props } = plan;
     const project = task.projectId ? useTaskStore.getState()._allProjects.find((entry) => entry.id === task.projectId) : undefined;
@@ -478,14 +445,14 @@ export const isTaskOfPlan = (task: Task, plan: CaptureTaskPlan, requestId: strin
         && Boolean(task.isFocusedToday) === Boolean(props.isFocusedToday);
 };
 
-/** The recovery snapshot's file name, as mobile names it (lib/recovery-snapshot.ts). */
+
 const snapshotFileNameAt = (date: Date) => {
     const [day, time] = date.toISOString().split('T');
     return `data.${day}T${time.replace(/Z$/u, '').replace(/:/gu, '-')}.snapshot.json`;
 };
 
 const SNAPSHOT_SUFFIX = '.snapshot.json';
-/** The name the host wrote: core's name, or its clash name with `.1`, `.2` before the suffix (as mobile writes it). */
+
 const isWrittenSnapshotName = (sent: string, taken: string): boolean => {
     if (sent === taken) return true;
     const base = taken.slice(0, -SNAPSHOT_SUFFIX.length);
@@ -545,7 +512,7 @@ const windowed = <T extends { items: unknown[] }>(picker: T): Windowed<T> => ({
 });
 
 export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
-    // The popup's one parse-options bag; see the module comment.
+
     let parseOptions: QuickAddParseOptions | null = null;
     const rebuildParseOptions = () => {
         const state = useTaskStore.getState();
@@ -553,11 +520,10 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         return parseOptions;
     };
 
-    // A write that did not apply. SAVE_FAILED means applied but not yet saved; only
-    // the receipts helper's save returns it, and the receipt then owes the save.
+
     const notApplied = (message: string | undefined): NativeHostResult<never> => fail('ACTION_FAILED', message ?? 'Write failed');
     const caught = (error: unknown) => notApplied(error instanceof Error ? error.message : String(error));
-    /** Makes every write so far durable: retries a failed save, then flushes. */
+
     const durableSave = async (): Promise<NativeHostResult<null>> => {
         try {
             if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
@@ -566,14 +532,13 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         }
         return deps.save();
     };
-    // The last recovery snapshot handed to the host, and the data it holds.
+
     let lastSnapshot: { fileName: string; changeAt: number } | null = null;
-    // ponytail: every picker create's request ID for this process, so its retry finishes an owed
-    // save instead of reading as a plain select; a restart forgets them (the data is saved then,
-    // and the project or area named by the request UUID answers the replay).
+
+
     const pickerCreates = new Set<string>();
-    // Captures, batches and picker creates retry exactly through the shared helper; results
-    // that write nothing (refusals, a picker search that selects) never enter it.
+
+
     const receipts = createNativeRequestReceipts({ save: durableSave });
 
     const context = (now = new Date()): QuickCaptureContext => {
@@ -590,16 +555,13 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             now,
         };
     };
-    /**
-     * context(), with each project this request made (captureProjectId of a line's `+Project`)
-     * matched first under the name the line gives it: a replay files its task there, renamed
-     * since or not, never in a project given that name since. Null when one is deleted or archived.
-     */
+
+
     const ownedContext = (requestId: string, texts: readonly string[], options: QuickCaptureOptions): QuickCaptureContext | null => {
         const ctx = context();
         let projects = ctx.projects;
         for (const text of texts) {
-            // The line's `+Project` as it reads with no project to match.
+
             const bare = planQuickCaptureTask({ text, options, projects: [] }, ctx);
             const title = bare.success ? bare.projectToCreate?.title : undefined;
             if (!title) continue;
@@ -650,7 +612,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         };
     };
 
-    /** The shared input checks: readiness, text and options. */
+
     const readDraft = (input: unknown): NativeHostResult<{ text: string; options: QuickCaptureOptions }> => {
         const ready = deps.readiness();
         if (!ready.ok) return ready;
@@ -661,7 +623,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
     };
 
     return {
-        /** Read-only prerequisite; the native owner must write its backup and journal before commit. */
+
         prepareQuickCaptureLines(input: NativeQuickCaptureLinesInput): NativeHostResult<
             { kind: 'prepared'; prepared: NativePreparedQuickCaptureLines } | Extract<NativeQuickCaptureLinesResult, { kind: 'refused' }>
         > {
@@ -672,7 +634,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             const options = readOptions(request.options)!;
             const plan = planQuickCaptureSave(request.text);
             if (plan.kind !== 'bulk') return fail('INVALID_INPUT', 'Several lines are required');
-            // Repeated notes/contexts alone can exceed the journal before any row array is built.
+
             const repeatedBytes = Math.max(0, jsonBytes(options.note.trim()) - 2) + jsonBytes([...new Set(options.contexts)]);
             let bytes = 2 * jsonBytes(request);
             if (bytes + repeatedBytes * plan.lines.length > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return fail('INVALID_INPUT', 'Prepared lines exceed the supported byte limit');
@@ -744,11 +706,11 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                     scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.5/native-capture-lines', operation: 'captureLinesCommit', count: prepared.tasks.length },
                 });
-            } catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            } catch {                                                               }
             return { ok: true, value: prepared.result };
         },
 
-        /** Read-only. The serial native owner must journal this result before commit. */
+
         prepareQuickCapture(input: NativeQuickCaptureInput): NativeHostResult<NativeQuickCapturePrepareResult> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -794,14 +756,14 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                 result: { kind: 'saved', taskId: built.task.id, projectId: built.task.projectId, next,
                     reset: next === 'addAnother' ? { text: '', options: freshOptions(true) } : null },
             };
-            // Detach every nested row/option from live state, and exercise the same
-            // decoder used after a journal JSON round-trip before handing it out.
+
+
             const decoded = readPreparedCapture(JSON.parse(JSON.stringify(prepared)));
             return decoded ? { ok: true, value: { kind: 'prepared', prepared: decoded } }
                 : fail('INVALID_INPUT', 'Capture could not produce a valid prepared journal');
         },
 
-        /** Replay only the journaled rows; no parsing, clock, settings or focus policy runs here. */
+
         async commitPreparedQuickCapture(input: { request: NativeQuickCaptureInput; prepared: NativePreparedQuickCapture }): Promise<NativeHostResult<Extract<NativeQuickCaptureSubmitResult, { kind: 'saved' }>>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -824,15 +786,11 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                     scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.3/native-prepared-capture', operation: 'captureCommit', count: 1 },
                 });
-            } catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            } catch {                                                               }
             return { ok: true, value: prepared.result };
         },
 
-        /**
-         * Open the popup: rebuilds the known-token bag and returns an empty draft
-         * with the starting options (the default area). Apply the stored "Add
-         * another" preference with a setAddAnother edit, as mobile does.
-         */
+
         openQuickCapture(): NativeHostResult<NativeQuickCaptureView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -840,7 +798,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             return view('', freshOptions(false), null);
         },
 
-        /** The popup for this text and these options; `picker` adds the open picker for its search text. */
+
         getQuickCaptureView(input: { text: string; options: QuickCaptureOptions; picker?: NativeQuickCapturePickerInput }): NativeHostResult<NativeQuickCaptureView> {
             const draft = readDraft(input);
             if (!draft.ok) return draft;
@@ -849,11 +807,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             return view(draft.value.text, draft.value.options, picker);
         },
 
-        /**
-         * Apply a control's edit (every control in the view carries its own) and
-         * return the popup after it. Nothing is written. A refused edit (focus at
-         * the limit) returns the notice mobile shows and the options unchanged.
-         */
+
         editQuickCapture(input: {
             text: string;
             options: QuickCaptureOptions;
@@ -876,18 +830,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             return { ok: true, value: { view: shown.value, notice: edited.notice } };
         },
 
-        /**
-         * Save the draft as mobile's Save does (`openAfterSave`: Save and edit).
-         * A date command it cannot read returns `refused` and writes nothing; the
-         * capture ID stays free. On ACTION_FAILED or SAVE_FAILED mobile shows
-         * `failureNotices.save`; reuse `captureId` to retry: the same draft is
-         * written at most once. After a restart the task that captureId created
-         * answers the retry only if it matches this draft; otherwise the reuse is
-         * refused. A `+Project` the capture creates takes an id from the capture
-         * ID and its name: a retry uses it, renamed since, and refuses one deleted
-         * or archived since (STALE_REVISION). Several lines return `confirmLines`
-         * and write nothing.
-         */
+
         async submitQuickCapture(input: {
             text: string;
             options: QuickCaptureOptions;
@@ -905,7 +848,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             if (plan.kind === 'bulk') {
                 return { ok: true, value: { kind: 'confirmLines', confirm: getQuickCaptureBulkConfirm(plan.lines, deps.t()), lineCount: plan.lines.length } };
             }
-            // A refusal writes nothing, so it stays out of the receipts: never SAVE_FAILED, the ID stays free.
+
             const planned = planQuickCaptureTask({ text: plan.text, options }, context());
             if (!planned.success) {
                 return planned.reason === 'invalid-date-command'
@@ -927,8 +870,8 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                     };
                     const owned = ownedContext(input.captureId, [plan.text], options);
                     if (!owned) return projectGone();
-                    // After a restart the receipt is gone: the task this captureId created answers
-                    // the retry, but only when it is what this draft writes.
+
+
                     const existing = useTaskStore.getState()._allTasks.find((task) => task.id === input.captureId.toLowerCase());
                     if (existing) {
                         const replanned = planQuickCaptureTask({ text: plan.text, options }, owned);
@@ -959,13 +902,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             );
         },
 
-        /**
-         * A voice capture's save (host-voice.ts, RN's stopRecording): the popup's draft with the recording [attachments], titled
-         * by the draft or else [fallbackTitle] ("Audio note" and the time), as RN's buildTaskProps. The task takes [captureId]
-         * (one per recording), so a retry answers from its task. A date command the draft cannot read refuses: nothing written.
-         * A stop's save closes the popup, as RN's stopRecording. [openAfterSave] marks the popup's Save of a kept recording (RN's
-         * handleSave with its recovery attachment): Save and edit opens the task, Add another keeps the popup, as submitQuickCapture.
-         */
+
         async submitQuickCaptureAudio(input: {
             text: string;
             options: QuickCaptureOptions;
@@ -985,7 +922,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             const captureId = input.captureId.toLowerCase();
             const fallbackTitle = input.fallbackTitle.trim();
             const next = input.openAfterSave === undefined ? 'close' : input.openAfterSave ? 'open' : options.addAnother ? 'addAnother' : 'close';
-            // Through the receipts, as submitQuickCapture: a write whose save failed is owed that save, and its retry makes it.
+
             return receipts.run<NativeQuickCaptureSubmitResult>(
                 input.captureId,
                 JSON.stringify(['captureAudio', text, options, fallbackTitle, input.attachments, input.openAfterSave ?? null]),
@@ -995,7 +932,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                         return { ok: true, value: { kind: 'saved', taskId, projectId, next,
                             reset: next === 'addAnother' ? { text: '', options: freshOptions(true) } : null } };
                     };
-                    // After a restart the receipt is gone: the live task this capture ID made answers the retry; a deleted one does not.
+
                     const existing = useTaskStore.getState()._allTasks.find((task) => task.id === captureId);
                     if (existing) {
                         return existing.deletedAt ? fail('INVALID_INPUT', 'Capture ID already belongs to a deleted task')
@@ -1028,14 +965,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             );
         },
 
-        /**
-         * Before submitQuickCaptureLines, as mobile does before "Create tasks":
-         * the saved data, serialized as a backup, and the file name mobile gives
-         * it. Write it to the host's snapshots folder (through a temporary file,
-         * keeping the 5 newest, adding `.1`, `.2` before `.snapshot.json` on a
-         * name clash), then send the name you wrote with the batch. Null in sandbox mode,
-         * where mobile takes none.
-         */
+
         async createQuickCaptureSnapshot(): Promise<NativeHostResult<{ fileName: string; contents: string } | null>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1055,18 +985,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             }
         },
 
-        /**
-         * Create one task per line after the confirmLines question, in one store
-         * write, as mobile's "Create tasks" does; the popup then closes. Take the
-         * recovery snapshot first and send its `fileName` (null in sandbox mode);
-         * a snapshot older than the data is refused (STALE_REVISION). Send one
-         * capture UUID per line and reuse them to retry (mobile shows
-         * `failureNotices.lines` on a failure). Every line is checked before
-         * anything is written: a date command it cannot read refuses the whole
-         * batch. After a restart, lines already saved answer from their tasks and
-         * only missing lines are written. Projects the lines create take ids from the
-         * first capture ID and their names, as a single capture's does.
-         */
+
         async submitQuickCaptureLines(input: {
             text: string;
             options: QuickCaptureOptions;
@@ -1087,7 +1006,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             if (input.snapshotFileName !== null && !isText(input.snapshotFileName, 200)) {
                 return fail('INVALID_INPUT', 'snapshotFileName must be the snapshot\'s file name or null');
             }
-            // Every line is checked before any write; a refusal stays out of the receipts.
+
             for (const line of plan.lines) {
                 const planned = planQuickCaptureTask({ text: line, options }, context());
                 if (!planned.success && planned.reason === 'invalid-date-command') {
@@ -1100,7 +1019,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                 const owned = ownedContext(ids[0], plan.lines, options);
                 if (!owned) return projectGone();
                 const missing: number[] = [];
-                // Lines saved before a restart answer from their tasks, when they match; nothing is prepared for them.
+
                 for (const [index, id] of taskIds.entries()) {
                     const existing = state._allTasks.find((task) => task.id === id);
                     if (!existing) {
@@ -1120,7 +1039,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                     return fail('STALE_REVISION', 'Take the recovery snapshot (createQuickCaptureSnapshot) right before this batch');
                 }
                 try {
-                    // The batch's projects take ids from its first capture ID (the receipt's).
+
                     const projects = captureProjects(ids[0]);
                     const outcome = await saveQuickCaptureBulk({
                         lines: missing.map((index) => plan.lines[index]),
@@ -1142,15 +1061,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             });
         },
 
-        /**
-         * Submit the project or area picker's search: choose the one with that
-         * exact name, or create it, as the picker's "Create" row does. Returns the
-         * options with it chosen; close the picker and read the view. Choosing an
-         * existing one writes nothing; reuse `requestId` to retry a create. A
-         * created project or area takes the request UUID as its id, so a replay
-         * after a restart chooses it (renamed since or not) and writes nothing; one
-         * deleted or archived since is refused (STALE_REVISION).
-         */
+
         async submitQuickCapturePickerQuery(input: {
             picker: 'project' | 'area';
             query: string;
@@ -1168,7 +1079,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             }
             const { options } = draft.value;
             const { picker, query } = input;
-            // The same edit the picker's rows send.
+
             const choose = (id: string, created: boolean): NativeHostResult<{ options: QuickCaptureOptions; created: boolean }> => {
                 const edit: QuickCaptureEdit = picker === 'project' ? { type: 'selectProject', projectId: id } : { type: 'selectArea', areaId: id };
                 return { ok: true, value: { options: applyQuickCaptureEdit(options, edit, context())!.options, created } };
@@ -1180,7 +1091,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                     : resolveCaptureAreaQuery(state.areas, query);
             };
             const createdId = input.requestId.toLowerCase();
-            /** The project or area this request created (its id is the request UUID): the replay's answer, with no write. */
+
             const made = (): NativeHostResult<{ options: QuickCaptureOptions; created: boolean }> | null => {
                 const state = useTaskStore.getState();
                 if (picker === 'project') {
@@ -1192,8 +1103,8 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                 if (!area) return null;
                 return area.deletedAt ? fail('STALE_REVISION', 'The area this request created is gone') : choose(area.id, false);
             };
-            // Choosing an existing one writes nothing, so it stays out of the receipts
-            // (a retry of an earlier create still goes through them, to finish its save).
+
+
             if (!pickerCreates.has(input.requestId)) {
                 const replayed = made();
                 if (replayed) return replayed;
@@ -1218,7 +1129,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                             return created ? choose(created.id, true) : notApplied(useTaskStore.getState().error ?? 'Project creation failed');
                         }
                         const { name, color } = resolution.areaToCreate;
-                        // The store restores a deleted area of that name and updates it with these props: an id there would rename it.
+
                         const restores = state._allAreas.some((area) => area.name?.trim().toLowerCase() === name.trim().toLowerCase());
                         const created = await state.addArea(name, restores ? { color } : { color, id: createdId });
                         return created ? choose(created.id, true) : notApplied(useTaskStore.getState().error ?? 'Area creation failed');

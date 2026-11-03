@@ -124,7 +124,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
 
     const { sortBy, includeFocusStep, focusTaskLimit } = getDailyReviewSettings(settings);
     const text = useMemo(() => getDailyReviewText(t, focusTaskLimit), [focusTaskLimit, t]);
-    // Keyed on the strings, so the waiting rows' footers keep their identity (#766).
+
     const { followUpToday, reviewDue } = text;
     const followUpText = useMemo(() => ({ followUpToday, reviewDue }), [followUpToday, reviewDue]);
 
@@ -166,12 +166,11 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         };
     }, [today]);
 
-    // Formatted each render: the app's date settings can change while the review is open.
+
     const todayCalendar = getDailyReviewCalendarDay(externalEvents, today, text, safeFormatDate, Infinity);
     const tomorrowCalendar = getDailyReviewCalendarDay(externalEvents, tomorrow, text, safeFormatDate, Infinity);
 
-    // Single source of "what needs reviewing today" (#867): shared with
-    // desktop via core so a raw startTime-vs-now check can't drift back in.
+
     const dailyBuckets = useMemo(
         () => getDailyReviewBuckets(tasks, projects, { now: today, sortBy, sections }),
         [tasks, projects, sections, today, sortBy],
@@ -228,8 +227,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         setIsTaskModalVisible(true);
     }, []);
 
-    // One object for every row across every step, so re-rendering a step does
-    // not hand each row a fresh set of arrows (#766).
+
     const rowActions = useMemo<TaskRowActions>(() => ({
         edit: openTask,
         changeStatus: (task, status) => updateTask(task.id, { status: status as TaskStatus }),
@@ -245,9 +243,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         if (plan) void updateTask(task.id, plan);
     }, [today, updateTask]);
 
-    // The waiting step is the only one that gives rows a footer. Building them
-    // once keeps `footerContent` identity-stable, so that
-    // step keeps the same row memo the other four already have (#766).
+
     const followUpFooters = useMemo(() => {
         const byTaskId = new Map<string, React.ReactNode>();
         for (const task of waitingTasks) {

@@ -5,26 +5,7 @@ import { getAndroidKeyboardFrame } from './android-keyboard-frame';
 import { measureAndroidModalKeyboardInset } from './android-modal-keyboard';
 import { logInfo } from './app-log';
 
-/**
- * Track the on-screen Android keyboard inset (its height in px) while `active`.
- *
- * Transparent React Native modals run in their own Android window that does not
- * resize for the soft keyboard, so any sheet or popup that floats content above
- * the keyboard has to measure the inset itself and lift its content by that
- * amount. Returns 0 on iOS (where KeyboardAvoidingView / automatic insets handle
- * it) and whenever the keyboard is closed, so callers can apply the value as
- * `paddingBottom` unconditionally.
- */
-/**
- * Cross-platform keyboard inset for overlays that render OUTSIDE a
- * KeyboardAvoidingView — absolute-fill picker layers in transparent modals sit
- * under the keyboard on iOS exactly like they do on Android, because nothing
- * above them resizes (#891). iOS listens to the keyboardWill* events so the
- * padding lands together with the keyboard animation, and derives the inset
- * from the keyboard frame's top edge (`screenY`), which correctly reads 0 when
- * a frame-change slides the keyboard offscreen. Android keeps the existing
- * keyboardDid* + defensive frame math (will* events never fire there).
- */
+
 export function useKeyboardInset(active = true): number {
   const [inset, setInset] = useState(0);
 
@@ -73,38 +54,38 @@ export function useAndroidKeyboardInset(active = true, inputRef?: RefObject<Text
       return;
     }
     if (typeof Keyboard?.addListener !== 'function') return;
-    let revision = 0;
-    let timers: ReturnType<typeof setTimeout>[] = [];
+    let measurementRevision = 0;
+    let measurementTimers: ReturnType<typeof setTimeout>[] = [];
     const cancelMeasurements = () => {
-      revision += 1;
-      timers.forEach(clearTimeout);
-      timers = [];
+      measurementRevision += 1;
+      measurementTimers.forEach(clearTimeout);
+      measurementTimers = [];
     };
     const applyFrame = (event: { endCoordinates?: { screenY?: number; height?: number } }) => {
       cancelMeasurements();
       const eventInset = getAndroidKeyboardFrame(event).inset;
       setInset(eventInset);
       if (!inputRef) return;
-      const currentRevision = revision;
-      let lastAppliedSample = -1;
-      // The activity event can precede the dialog's IME animation; re-read that
-      // dialog's insets through settlement instead of inventing a keyboard height.
-      const delays = [0, 80, 240, 480];
-      timers = delays.map((delay, sample) => setTimeout(() => {
+      const frameMeasurementRevision = measurementRevision;
+      let lastAppliedSampleIndex = -1;
+
+
+      const modalImeSettlementDelaysMs = [0, 80, 240, 480];
+      measurementTimers = modalImeSettlementDelaysMs.map((delayMs, sampleIndex) => setTimeout(() => {
         const input = inputRef.current;
         if (!input) return;
         void measureAndroidModalKeyboardInset(input).then((nativeInset) => {
-          if (revision !== currentRevision || inputRef.current !== input || nativeInset === null
-            || sample < lastAppliedSample) return;
-          lastAppliedSample = sample;
+          if (measurementRevision !== frameMeasurementRevision || inputRef.current !== input || nativeInset === null
+            || sampleIndex < lastAppliedSampleIndex) return;
+          lastAppliedSampleIndex = sampleIndex;
           setInset(nativeInset);
-          if (sample === delays.length - 1) {
+          if (sampleIndex === modalImeSettlementDelaysMs.length - 1) {
             void logInfo('Quick capture modal IME inset measured', { scope: 'quick-capture', force: true, extra: {
               releaseCheck: 'v1.3.8/quick-capture-modal-ime', eventInset, nativeInset, outcome: 'measured',
             } }).catch(() => undefined);
           }
         });
-      }, delay));
+      }, delayMs));
     };
     const reset = () => {
       cancelMeasurements();

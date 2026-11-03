@@ -53,4 +53,4 @@ DirectoryRetirementResult retire_empty_directory_if_identity(
     void* hook_context,
     int* error_number);
 
-}  // namespace mindwtr::attachment_file_installer
+}

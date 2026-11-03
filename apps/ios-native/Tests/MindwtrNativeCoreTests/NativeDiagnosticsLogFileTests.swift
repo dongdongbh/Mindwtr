@@ -108,8 +108,8 @@ final class NativeDiagnosticsLogFileTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside.deletingLastPathComponent().deletingLastPathComponent())
         let file = NativeDiagnosticsLogFile(libraryRoot: link.appendingPathComponent("library"))
         for operation in ["path", "ensure", "read", "append", "delete", "isAbsent"] {
-            // Each probe owns its private outside control; the old implementation
-            // must not let one destructive probe mask another refusal.
+
+
             try original.write(to: main)
             XCTAssertThrowsError(try file.perform(operation, text: operation == "append" ? "attempt" : ""), operation)
             XCTAssertEqual(try? Data(contentsOf: main), original, operation + " must preserve outside bytes")
@@ -124,12 +124,12 @@ final class NativeDiagnosticsLogFileTests: XCTestCase {
         let alias = NativeDiagnosticsLogFile(libraryRoot: URL(fileURLWithPath: "/var/" + absent, isDirectory: true))
         XCTAssertEqual(alias.mainURL.path, "/private/var/" + absent + "/logs/mindwtr.log")
         XCTAssertEqual(try alias.perform("isAbsent", text: ""), "1")
-        // This control only probes an absent path; it creates nothing outside the test home.
+
     }
     #if os(macOS)
     func testDiagnostics197ContainerAccessWithoutAncestorReadPermission() throws {
-        // Reproduce the device sandbox boundary: the app can open its home,
-        // but cannot open the parent directory for reading. Do not broaden it.
+
+
         let parent = FileManager.default.homeDirectoryForCurrentUser.deletingLastPathComponent().path
         let encoded = try JSONSerialization.data(withJSONObject: [parent], options: .withoutEscapingSlashes)
         let quoted = String(decoding: encoded, as: UTF8.self).dropFirst().dropLast()

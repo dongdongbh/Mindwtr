@@ -5,8 +5,7 @@ import { axe } from 'vitest-axe';
 
 import { Dialog, DialogBody, DialogFooter, DialogHeader, type DialogProps } from './Dialog';
 
-// Every desktop modal is one of these shapes. Running the whole contract over
-// each of them is what replaces the per-modal copies of these assertions.
+
 const VARIANTS: Array<{ name: string; props: Partial<DialogProps> }> = [
     { name: 'centered', props: {} },
     { name: 'top-offset', props: { placement: 'top', overlayClassName: 'pt-[20vh]' } },
@@ -48,7 +47,7 @@ describe.each(VARIANTS)('Dialog ($name)', ({ props }) => {
     it('has no accessibility violations', async () => {
         renderDialog(props);
         const results = await axe(screen.getByRole('dialog'), {
-            // jsdom cannot compute CSS variable/theme contrast reliably.
+
             rules: { 'color-contrast': { enabled: false } },
         });
         expect(results.violations).toHaveLength(0);
@@ -102,8 +101,7 @@ describe.each(VARIANTS)('Dialog ($name)', ({ props }) => {
         expect(screen.getByLabelText('Name')).toHaveFocus();
     });
 
-    // ConfirmModal and friends focus a control on a 50ms timer, i.e. after
-    // mount: the panel holds focus first, then the control takes it.
+
     it('yields to a control focused after mount', () => {
         vi.useFakeTimers();
         try {
@@ -144,9 +142,7 @@ describe.each(VARIANTS)('Dialog ($name)', ({ props }) => {
         trigger.remove();
     });
 
-    // jsdom cannot measure geometry, so the classes that make the layout
-    // impossible to break ARE the test (#957): a capped panel whose body is the
-    // only scrolling region, with the action row outside it.
+
     it('caps the panel and scrolls only the body', () => {
         renderDialog(props);
         const dialog = screen.getByRole('dialog');
@@ -294,9 +290,7 @@ describe('Dialog', () => {
         fallback.remove();
     });
 
-    // A sized or scrim-scrolling panel opts out of the cap with max-h-[none];
-    // plain `max-h-none` is NOT in tailwind-merge's scale, so it would leave the
-    // default cap in place alongside it and quietly clip the panel.
+
     it('lets a panel drop the default cap', () => {
         render(
             <Dialog onClose={vi.fn()} label="Uncapped" panelClassName="max-h-[none]">
@@ -354,9 +348,7 @@ describe('Dialog', () => {
         expect(onClose).not.toHaveBeenCalled();
     });
 
-    // A nested confirm consumed the key; the dialog underneath must not also
-    // close. Portals bubble through the React tree, so the outer panel does see
-    // the inner dialog's Escape.
+
     it('leaves the outer dialog open when a nested one handles Escape', () => {
         const onOuterClose = vi.fn();
         const onInnerClose = vi.fn();

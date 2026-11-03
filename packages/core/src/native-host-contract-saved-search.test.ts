@@ -32,11 +32,11 @@ type Fixture = {
 const fixture = loadScreenFixture<Fixture>('saved-search');
 const RECORD = { updateTask: null, deleteTask: null, updateSettings: null };
 
-/** The screen as a host draws it: its text, its rows' IDs, and what Delete asks. */
+
 type Screen = { text: SavedSearchScreenText; rowIds: string[] };
 type Driver = { screen: (id: string) => Screen; deleteSavedSearch: (id: string) => Promise<void> };
 
-/** Replays one scenario as the mobile screen runs it, and records the mobile harness's observation. */
+
 async function replay(scenario: Fixture['scenarios'][number], driver: Driver, log: unknown[][]) {
     const navigation: unknown[][] = [];
     const alerts: unknown[] = [];
@@ -81,7 +81,7 @@ async function replay(scenario: Fixture['scenarios'][number], driver: Driver, lo
             if (action[1] === text.empty.actions!.inboxLabel) navigation.push(['replace', '/inbox']);
             else goBackOrInbox();
         } else if (kind === 'row') {
-            // A row's swipes and taps are the task lists' own: the same store calls.
+
             const id = action[1] as string;
             if (action[2] === 'edit') editor = [true, id, 'view'];
             else if (action[2] === 'remove') await store.deleteTask(id);
@@ -132,7 +132,7 @@ describe('saved search screen: core and the native host contract', () => {
         });
         return { host, log };
     };
-    /** The screen from core called directly, with the store read as mobile reads it. */
+
     const direct = (id: string): Screen => {
         const state = useTaskStore.getState();
         const areas = sortAreasForDisplay(state.areas);
@@ -206,15 +206,15 @@ describe('saved search screen: core and the native host contract', () => {
             delete: expected.text.deleteAction, total: expected.rowIds.length, empty: null,
         });
         expect(first.rows).toHaveLength(100);
-        // Rows carry the list rows' meta.
+
         expect(first.rows[0]).toMatchObject({ id: expected.rowIds[0], meta: expect.any(Object) });
         const second = value(host.getSavedSearchView({ id: 'ss-errands', offset: 100, limit: 100, revision: first.revision }));
         expect([...first.rows, ...second.rows].map((row) => row.id)).toEqual(expected.rowIds);
-        // A store edit moves the revision: a later window is stale.
+
         await useTaskStore.getState().updateTask('t-milk', { title: 'Buy oat milk' });
         expect(host.getSavedSearchView({ id: 'ss-errands', offset: 100, limit: 100, revision: first.revision }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
-        // Another saved search is another screen.
+
         const other = value(host.getSavedSearchView({ id: 'ss-milk' }));
         expect(host.getSavedSearchView({ id: 'ss-errands', offset: 100, limit: 100, revision: other.revision }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -225,8 +225,7 @@ describe('saved search screen: core and the native host contract', () => {
         });
     });
 
-    // #1453 (352686e64): RN's saved search screen has a Sort button; its modal starts with "Use global setting (...)", and a
-    // choice is setSavedSearchSortById (null clears the search's own sort).
+
     it("draws RN's Sort control and keeps the saved search's own sort, as RN does (#1453)", async () => {
         freezeClock();
         const core = await open();
@@ -257,7 +256,7 @@ describe('saved search screen: core and the native host contract', () => {
             query: '@errand', tasks: state.tasks, projects: state.projects,
             areaFilter: resolveAreaFilterSelection(state.settings.filters, areas), areaById: new Map(areas.map((area) => [area.id, area])), sortBy: 'title',
         }).map((task) => task.id));
-        // A replay of the same request answers from its receipt and writes nothing.
+
         const written = log.length;
         expect(value(await host.setSavedSearchSort({ requestId: titled, id: 'ss-errands', sortBy: 'title' }))).toEqual({ changed: true });
         expect(log).toHaveLength(written);
@@ -290,7 +289,7 @@ describe('saved search screen: core and the native host contract', () => {
         freezeClock();
         const { host, log } = await open();
         value(host.getSavedSearchView({ id: 'ss-milk' }));
-        // Another writer adds a saved search (with a field this build does not know) after the screen was read.
+
         const later = { id: 'ss-later', name: 'Later', query: 'later', futureField: 1 } as never;
         await useTaskStore.getState().updateSettings({ savedSearches: [...useTaskStore.getState().settings.savedSearches!, later] });
         const before = useTaskStore.getState().settings.savedSearches!;
@@ -298,11 +297,11 @@ describe('saved search screen: core and the native host contract', () => {
         expect(value(await host.deleteSavedSearch({ requestId: requestId(), id: 'ss-milk' }))).toEqual({ changed: true });
         const after = useTaskStore.getState().settings.savedSearches!;
         expect(after.map((search) => search.id)).toEqual(['ss-errands', 'ss-next-work', 'ss-none', 'ss-blank', 'ss-later']);
-        // Every other saved search is the stored object itself.
+
         for (const search of after) expect(search).toBe(before.find((entry) => entry.id === search.id));
         expect(log).toHaveLength(1);
 
-        // The ID-targeted operation core owns: nothing to delete writes nothing.
+
         log.length = 0;
         expect(await deleteSavedSearchById('ss-gone')).toBe(false);
         expect(log).toEqual([]);
@@ -315,7 +314,7 @@ describe('saved search screen: core and the native host contract', () => {
         const { host, log } = await open();
         const input = { requestId: requestId(), id: 'ss-none' };
         expect(value(await host.deleteSavedSearch(input))).toEqual({ changed: true });
-        // Another writer renames another saved search.
+
         await useTaskStore.getState().updateSettings({
             savedSearches: useTaskStore.getState().settings.savedSearches!.map((search) => (search.id === 'ss-milk' ? { ...search, name: 'Dairy' } : search)),
         });
@@ -343,11 +342,11 @@ describe('saved search screen: core and the native host contract', () => {
         saveData.mockResolvedValue(undefined);
         const retried = await host.deleteSavedSearch(input);
         expect(retried).toEqual({ ok: true, value: { changed: true } });
-        // The retry only saved: no second write, and storage holds the deletion.
+
         expect(log).toHaveLength(1);
         expect(useTaskStore.getState().settings.savedSearches).toBe(landed);
         expect((saveData.mock.lastCall?.[0] as { settings: AppSettings }).settings.savedSearches).toEqual(landed);
-        // A lost reply repeats the request: no write, no save.
+
         const saves = saveData.mock.calls.length;
         expect(await host.deleteSavedSearch(input)).toEqual(retried);
         expect(saveData).toHaveBeenCalledTimes(saves);

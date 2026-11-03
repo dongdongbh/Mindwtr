@@ -9,11 +9,7 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 
-/**
- * Core's Gmail receipt store on this host (gmail-receipt-store.ts GmailReceiptFiles, design G2): the file calls reach only the
- * receipts files in filesDir/GmailCapture, and the SQL runs on the bundled driver, so the strict two-table check finds no
- * android_metadata table.
- */
+
 class HostGmailReceiptsTest {
     private fun withFolder(test: (File, HostGmailReceipts) -> Unit) {
         val dir = Files.createTempDirectory("gmail-receipts").toFile()
@@ -37,7 +33,7 @@ class HostGmailReceiptsTest {
             refused { receipts.file("rename", "receipts.sqlite", name) }
             refused { receipts.file("open", name, "") }
         }
-        // A journal of a moved file is a receipts file; the marker is too; the task database never is.
+
         for (name in listOf("receipts.sqlite", "receipts.sqlite-wal", "receipts.sqlite-shm", "receipts.sqlite-journal",
             "receipts.corrupt-1730000000000.sqlite", "receipts.corrupt-1730000000000.sqlite-journal", "receipts-reset")) {
             assertEquals("false", receipts.file("exists", name, ""))
@@ -47,7 +43,7 @@ class HostGmailReceiptsTest {
     }
 
     @Test fun aReadMakesNoFolder() = withFolder { folder, receipts ->
-        // RN makes the folder only when it opens the store: Settings' reset check on a build with Gmail off leaves no trace.
+
         assertEquals("false", receipts.file("exists", "receipts-reset", ""))
         assertEquals("[]", receipts.file("list", "", ""))
         assertFalse(folder.exists())
@@ -92,7 +88,7 @@ class HostGmailReceiptsTest {
         receipts.sql("receipts.sqlite", "UPDATE control SET label = ? WHERE id = 1", "[null]")
         assertTrue(JSONArray(receipts.sql("receipts.sqlite", "SELECT label FROM control", "[]")).getJSONObject(0).isNull("label"))
         receipts.file("close", "receipts.sqlite", "")
-        // A closed file runs nothing until it opens again; its rows stayed.
+
         try { receipts.sql("receipts.sqlite", "SELECT 1", "[]"); fail("ran on a closed file") } catch (_: IllegalStateException) {}
         receipts.file("open", "receipts.sqlite", "")
         assertEquals("a", JSONArray(receipts.sql("receipts.sqlite", "SELECT account FROM control", "[]")).getJSONObject(0).getString("account"))

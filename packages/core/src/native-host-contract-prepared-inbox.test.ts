@@ -589,7 +589,7 @@ describe('native prepared Process Inbox writer', () => {
             if (!result.ok) throw new Error(result.error.message);
             return result.value;
         };
-        /** Converts the first Inbox task to a project with two extra actions; returns the prepared envelope. */
+
         const prepareConversion = async (taskReminderDefault: 'send' | 'skip' | undefined) => {
             vi.useFakeTimers({ toFake: ['Date'] });
             vi.setSystemTime(new Date(fixture.now));

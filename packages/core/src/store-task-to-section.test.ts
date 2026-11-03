@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// RN's convertTaskToSection, frozen from HEAD 3dd0d4514 (before the shared planner): ids and the clock are pinned, so the
-// whole store result is compared, byte for byte.
+
 let ids = 0;
 vi.mock('./uuid', async (importActual) => ({
     ...(await importActual<typeof import('./uuid')>()),

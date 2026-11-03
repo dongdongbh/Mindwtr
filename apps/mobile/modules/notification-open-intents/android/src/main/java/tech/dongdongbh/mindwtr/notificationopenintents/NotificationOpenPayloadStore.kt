@@ -28,7 +28,7 @@ object NotificationOpenPayloadStore {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val queue = JSONArray(prefs.getString(PENDING_COMPLETIONS, "[]"))
     for (index in 0 until queue.length()) {
-      // Fail closed: malformed data stays on disk for recovery, never becomes an empty queue.
+
       val item = queue.getJSONObject(index)
       require(item.optString("taskId").isNotBlank()) { "Invalid pending completion" }
       if (item.optString("actionId").isBlank()) item.put("actionId", "legacy:$index")
@@ -42,12 +42,12 @@ object NotificationOpenPayloadStore {
     check(saved) { "Pending completion persistence failed" }
   }
 
-  /** Every Done tap is durable before cancellation or JS delivery, including a warm process. */
+
   @JvmStatic
   fun persistCompletion(context: Context, payload: Map<String, String>): String = synchronized(completionsLock) {
     require(!payload["taskId"].isNullOrBlank()) { "Invalid pending completion" }
     val queue = readQueue(context)
-    // Repeated delivery of the same notification action owns the same receipt.
+
     val actionId = payload["actionId"]?.takeIf { it.isNotBlank() }
       ?: "done:${payload["taskId"]}:${payload["alarmKey"] ?: payload["id"] ?: ""}"
     if ((0 until queue.length()).none { queue.getJSONObject(it).getString("actionId") == actionId }) {
@@ -57,11 +57,11 @@ object NotificationOpenPayloadStore {
     actionId
   }
 
-  /** Non-destructive replay. Receipts survive process death until the task save is acknowledged. */
+
   @JvmStatic
   fun peekCompletions(context: Context): List<Map<String, String>> = synchronized(completionsLock) {
     val queue = readQueue(context)
-    // Persist IDs added to receipts from an earlier version before exposing them to JS.
+
     if (queue.length() > 0) writeQueue(context, queue)
     (0 until queue.length()).map { index ->
       val item = queue.getJSONObject(index)

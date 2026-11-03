@@ -23,12 +23,10 @@ import { runToEnd, type CooperativePass } from './cooperative';
 import { retainTaxonomyEffects } from './taxonomy-catalog';
 import type { AppData, Area, Project, Task, TaskEditorFieldId } from './types';
 
-// Bumped whenever a schema-shaped repair (project status/order, legacy area
-// backfill) needs to run once for installs that predate it. Existing installs
-// already at this version skip that block entirely.
+
 export const MIGRATION_VERSION = 1;
-// Bumped only if the legacy archived-reference recovery below has to run again
-// for installs that already recorded the current version.
+
+
 export const LEGACY_REFERENCE_RECOVERY_VERSION = 1;
 export const TOMBSTONE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const TASK_EDITOR_DEFAULTS_VERSION = 5;
@@ -42,21 +40,16 @@ const TASK_EDITOR_LEAN_DEFAULT_HIDDEN: TaskEditorFieldId[] = [
     'location',
 ];
 
-/**
- * Environment for a load pass, computed once from the data as it arrived from
- * storage (before any migration ran) so every migration below sees the same
- * "should I run" decision regardless of what earlier migrations already did.
- * This mirrors the original fetchData, which computed these once too.
- */
+
 export type LoadContext = {
     nowIso: string;
     nowMs: number;
     isFreshInstall: boolean;
-    /** Gates the one-time project/area schema backfill (migrations.version). */
+
     shouldRunSchemaMigration: boolean;
-    /** Throttles the tombstone purge to TOMBSTONE_CLEANUP_INTERVAL_MS. */
+
     shouldRunTombstoneCleanup: boolean;
-    /** Gates the one-shot legacy archived-reference recovery. */
+
     shouldRunLegacyReferenceRecovery: boolean;
 };
 
@@ -81,24 +74,15 @@ export const buildLoadContext = (
 
 export type LoadMigration = {
     name: string;
-    /** Static gate evaluated once against the context, before `data` is touched. */
+
     shouldRun?(ctx: LoadContext): boolean;
-    /**
-     * Part of the one-time legacy schema backfill gated by
-     * `shouldRunSchemaMigration`. If one of these is skipped, the version bump
-     * that closes that gate must be skipped too, or the step never retries.
-     */
+
+
     schemaGated?: true;
-    /** Returns updated data, or null when this pass made no change. */
+
     run(data: AppData, ctx: LoadContext): AppData | null;
-    /**
-     * Pre-existing (pre-refactor) quirk, preserved as-is: fetchData bumped
-     * `lastDataChangeAt` — the in-memory sync-causality counter, never
-     * persisted itself — only for entity-level repairs (tasks/sections/
-     * people), not for area/project-order/settings migrations, even though
-     * both kinds trigger a save. See runLoadMigrations' caller for how this
-     * is used; do not use it to gate persistence, only the causality bump.
-     */
+
+
 };
 
 const normalizeAreaForLoad = (area: Area, fallbackOrder: number, nowIso: string): Area => {
@@ -131,8 +115,7 @@ const normalizeAreaTimestampsMigration: LoadMigration = {
     },
 };
 
-// Not in LOAD_MIGRATIONS: this is the backfill group's receipt, applied by
-// runLoadMigrations after the pass and only when every gated step landed.
+
 const bumpMigrationsVersionMigration: LoadMigration = {
     name: 'bump-migrations-version',
     run: (data) => ({
@@ -164,9 +147,7 @@ const ensureDeviceIdMigration: LoadMigration = {
     },
 };
 
-// A dataset id that sync carries to every device (analytics counts profiles,
-// not installs). Remote wins in mergeSettingsForSync, so this only seeds a
-// value for a document that has never seen one.
+
 const ensureAnalyticsProfileIdMigration: LoadMigration = {
     name: 'ensure-analytics-profile-id',
     run: (data) => {
@@ -267,10 +248,8 @@ const clearDeletedTaskProjectArchiveMetadataMigration: LoadMigration = {
 
 const recoverLegacyProjectReferencesMigration: LoadMigration = {
     name: 'recover-legacy-project-references',
-    // One shot per install. A <=1.2.8 peer re-completes every non-finished
-    // child of an archived project on its own load, re-creating exactly the
-    // marker shape below; without this gate the two devices would flip the
-    // task Done <-> Reference with a fresh rev on every sync cycle.
+
+
     shouldRun: (ctx) => ctx.shouldRunLegacyReferenceRecovery,
     run: (data, ctx) => {
         const archivedProjectIds = new Set(data.projects
@@ -279,9 +258,8 @@ const recoverLegacyProjectReferencesMigration: LoadMigration = {
         if (archivedProjectIds.size === 0) return null;
         let count = 0;
         const tasks = data.tasks.map((task) => {
-            // Older load migrations completed reference children. Direct edits
-            // clear these operation markers; automatic Done -> Archive retains
-            // them, so both untouched forms can be recovered without guessing.
+
+
             if (task.deletedAt || task.purgedAt || !task.projectId || !archivedProjectIds.has(task.projectId)
                 || task.statusBeforeProjectArchive !== 'reference' || !task.projectArchivedAt
                 || task.cancelledAt || task.completedAt !== task.projectArchivedAt
@@ -319,16 +297,11 @@ const recoverLegacyProjectReferencesMigration: LoadMigration = {
 
 function shouldPromoteScheduledTask(task: Task, nowMs: number, respectLastEdit = true): boolean {
     if (task.deletedAt || task.purgedAt) return false;
-    // Only Inbox means "unclarified", so only Inbox is promoted when its date
-    // arrives. Every other status is a decision the user already made: Waiting
-    // is a handoff, Someday is a tickler. This is the same rule the update path
-    // states in normalizeTaskUpdates (`startPromotingInbox`), and the two must
-    // agree — while they did not, filing a dated task into Someday saved, and
-    // the next load promoted it straight back to Next (#1248).
+
+
     if (task.status !== 'inbox') return false;
-    // Promote only a date that arrived after the task's last edit. A task the
-    // user put in Inbox once its date had passed stays there; otherwise every
-    // load (startup, each sync) undid that choice (#1452).
+
+
     const editedMs = respectLastEdit ? safeParseDate(task.updatedAt)?.getTime() ?? 0 : 0;
     const arrived = (value: string | undefined) => {
         const ms = safeParseDate(value)?.getTime() ?? NaN;
@@ -380,8 +353,8 @@ const autoArchiveStaleCompletedTasks = (
 
     let didAutoArchive = false;
     const archivedTasks = tasks.map((task): Task => {
-        // One rule, two clocks: the update path applies the same predicate the
-        // moment a completion time is edited (#959).
+
+
         if (!shouldAutoArchiveCompletedTask(task, settings, context.nowMs)) return task;
         const completedAt = safeParseDate(task.completedAt)?.getTime() ?? NaN;
         didAutoArchive = true;
@@ -403,17 +376,14 @@ const autoArchiveStaleCompletedTasks = (
     };
 };
 
-/**
- * Shared with store-settings.ts's updateSettings, which re-runs the same
- * archive pass immediately when the user changes autoArchiveDays.
- */
+
 export const runAutoArchive = (
     tasks: Task[],
     settings: AppData['settings'],
     context: { nowIso: string; nowMs: number; deviceId?: string; enabled?: boolean }
 ): { allTasks: Task[]; didAutoArchive: boolean; settings: AppData['settings'] } => {
     const result = autoArchiveStaleCompletedTasks(tasks, settings, context);
-    // Archiving can leave a token unused, so keep it saved; a catalogue write needs a device ID.
+
     const retained = result.didAutoArchive && context.deviceId
         ? retainTaxonomyEffects(settings, result.tasks.flatMap((after, index) =>
             after !== tasks[index] ? [{ before: tasks[index], after }] : []))
@@ -425,14 +395,7 @@ export const runAutoArchive = (
     };
 };
 
-/**
- * Runs on every load, deliberately unthrottled. It walks the task list once and
- * the predicate rejects anything that is not `done` on its second line — the
- * same shape as promote-scheduled-tasks above, which has always run every load.
- * A twice-daily throttle used to gate it, which meant a completion you had just
- * corrected sat in Done across restarts with nothing to explain why, and cost a
- * settings write per window even when nothing was stale (#959).
- */
+
 const autoArchiveStaleTasksMigration: LoadMigration = {
     name: 'auto-archive-stale-tasks',
     run: (data, ctx) => {
@@ -447,19 +410,15 @@ const autoArchiveStaleTasksMigration: LoadMigration = {
 
 const normalizePeopleForLoadMigration: LoadMigration = {
     name: 'normalize-people-for-load',
-    // Depends on the task list above: assignedTo -> Person derivation reads
-    // the already promoted/archived tasks.
+
+
     run: (data, ctx) => {
         const result = normalizePeopleForLoad(data.people ?? [], data.tasks, ctx.nowIso, data.settings.deviceId);
         return result.didChange ? { ...data, people: result.people } : null;
     },
 };
 
-// The next three migrations are the one-time legacy schema backfill, gated by
-// the same shouldRunSchemaMigration flag and always applied together when it
-// runs (each unconditionally returns updated data so later steps in this
-// group and in dedupe-areas-by-name always see the up-to-date result, even
-// for a project/area that itself needed no repair).
+
 const normalizeProjectStatusAndTagsMigration: LoadMigration = {
     name: 'normalize-project-status-and-tags',
     shouldRun: (ctx) => ctx.shouldRunSchemaMigration,
@@ -486,7 +445,7 @@ const migrateProjectOrderMigration: LoadMigration = {
     name: 'migrate-project-order',
     shouldRun: (ctx) => ctx.shouldRunSchemaMigration,
     schemaGated: true,
-    // Consumes normalize-project-status-and-tags' output.
+
     run: (data) => {
         const projectOrderCounters = new Map<string, number>();
         const projects = data.projects.map((project) => {
@@ -505,8 +464,8 @@ const migrateLegacyAreasMigration: LoadMigration = {
     name: 'migrate-legacy-areas',
     shouldRun: (ctx) => ctx.shouldRunSchemaMigration,
     schemaGated: true,
-    // Consumes migrate-project-order's output; must run after
-    // normalize-area-timestamps so area order/timestamps are already filled in.
+
+
     run: (data) => {
         let allAreas = data.areas
             .map((area, index) => ({ ...area, order: Number.isFinite(area.order) ? area.order : index }))
@@ -566,10 +525,8 @@ const migrateLegacyAreasMigration: LoadMigration = {
 
 const dedupeAreasByNameMigration: LoadMigration = {
     name: 'dedupe-areas-by-name',
-    // Runs unconditionally (not just for legacy installs) so duplicate area
-    // names introduced by a sync merge get cleaned up on every load. Must run
-    // after migrate-legacy-areas so any areas it created are included in the
-    // name-dedupe pass.
+
+
     run: (data, ctx) => {
         const deviceId = data.settings.deviceId;
         const dedupedAreas = dedupeLiveAreasByName(data.areas, { nowIso: ctx.nowIso, revBy: deviceId });
@@ -579,8 +536,7 @@ const dedupeAreasByNameMigration: LoadMigration = {
             .map((area, index) => ({ ...area, order: Number.isFinite(area.order) ? area.order : index }))
             .sort((a, b) => a.order - b.order);
 
-        // Duplicate areas were just tombstoned above; remap anything that
-        // pointed at a losing id onto the canonical winner.
+
         const areaIdRemap = dedupedAreas.areaIdRemap;
         const liveAreaById = new Map(allAreas.filter((area) => !area.deletedAt).map((area) => [area.id, area] as const));
         const allProjects = data.projects.map((project) => {
@@ -625,8 +581,8 @@ const dedupeAreasByNameMigration: LoadMigration = {
 
 const archiveDescendantsOfArchivedProjectsMigration: LoadMigration = {
     name: 'archive-descendants-of-archived-projects',
-    // Reads project.status === 'archived', so must run after any step above
-    // that can change project status (normalize-project-status-and-tags).
+
+
     run: (data, ctx) => {
         const archivedProjectsById = new Map(
             data.projects
@@ -676,8 +632,8 @@ const archiveDescendantsOfArchivedProjectsMigration: LoadMigration = {
 
 const repairDanglingEntityReferencesMigration: LoadMigration = {
     name: 'repair-dangling-entity-references',
-    // Must run after the archive pass above: section archival there changes
-    // which sections are "active", which this repair depends on.
+
+
     run: (data, ctx) => {
         const deviceId = data.settings.deviceId;
         let changed = false;
@@ -749,8 +705,8 @@ const repairDanglingEntityReferencesMigration: LoadMigration = {
 const purgeExpiredTombstonesMigration: LoadMigration = {
     name: 'purge-expired-tombstones',
     shouldRun: (ctx) => ctx.shouldRunTombstoneCleanup,
-    // Must run last: purge only after every repair pass above has settled,
-    // so nothing still-referenced above gets purged prematurely.
+
+
     run: (data, ctx) => {
         const cleanup = purgeExpiredTombstones(
             {
@@ -798,23 +754,21 @@ const purgeExpiredTombstonesMigration: LoadMigration = {
     },
 };
 
-// Order is load-bearing. Each migration reads the previous migrations'
-// output, so the array order below IS the dependency graph; see the comment
-// on each step above for why it must come after the ones before it.
+
 const LOAD_MIGRATIONS: LoadMigration[] = [
     normalizeAreaTimestampsMigration,
     bumpTombstoneCleanupTimestampMigration,
-    // Everything below reads settings.deviceId for revBy stamping.
+
     ensureDeviceIdMigration,
     ensureAnalyticsProfileIdMigration,
     freshInstallNotificationsDefaultMigration,
     taskEditorDefaultsMigration,
     focusGroupByDefaultsMigration,
     clearDeletedTaskProjectArchiveMetadataMigration,
-    // Recover before auto-archive can change the old completion timestamp.
+
     recoverLegacyProjectReferencesMigration,
-    // Must run before auto-archive: promoting a due/started task to 'next'
-    // changes its status, and auto-archive only scans 'done' tasks.
+
+
     promoteScheduledTasksMigration,
     autoArchiveStaleTasksMigration,
     normalizePeopleForLoadMigration,
@@ -830,7 +784,7 @@ const LOAD_MIGRATIONS: LoadMigration[] = [
 export const runLoadMigrations = (data: AppData, ctx: LoadContext): { data: AppData; applied: string[] } =>
     runToEnd(runLoadMigrationsPass(data, ctx));
 
-/** runLoadMigrations as a cooperative pass: it may give the thread back between two migrations (D9b W6). */
+
 export function* runLoadMigrationsPass(data: AppData, ctx: LoadContext): CooperativePass<{ data: AppData; applied: string[] }> {
     let current = data;
     const applied: string[] = [];
@@ -841,10 +795,8 @@ export function* runLoadMigrationsPass(data: AppData, ctx: LoadContext): Coopera
         try {
             result = migration.run(current, ctx);
         } catch (error) {
-            // One malformed row must not cost the user their whole document: the
-            // caller's outer catch would leave the store empty on every launch.
-            // Skipping keeps the pre-migration state, which the later steps and
-            // the next load both still see.
+
+
             if (migration.schemaGated) schemaBackfillFailed = true;
             logWarn('Load migration failed; continuing without it', {
                 scope: 'store',
@@ -866,9 +818,7 @@ export function* runLoadMigrationsPass(data: AppData, ctx: LoadContext): Coopera
         yield;
     }
 
-    // Last, and only when every gated step landed: this write closes
-    // shouldRunSchemaMigration for good, so recording it after a skipped
-    // backfill step would mean that step never runs again.
+
     if (ctx.shouldRunSchemaMigration && !schemaBackfillFailed) {
         apply(bumpMigrationsVersionMigration);
     }

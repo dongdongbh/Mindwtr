@@ -23,7 +23,7 @@ type Fixture = {
 };
 const fixture = loadScreenFixture<Fixture>('mind-sweep');
 
-/** How a screen shows a view: the mobile harness's observation, built from the model. */
+
 function observe(view: MindSweepView, draft: string) {
     const texts = [view.title, view.closeLabel];
     const buttons: unknown[] = [['mind-sweep-close', view.closeLabel, view.closeLabel, false, false]];
@@ -56,11 +56,11 @@ function observe(view: MindSweepView, draft: string) {
 type Screen = { state: MindSweepState; draft: string; addFailed: boolean; closes: number };
 type Driver = {
     view: (screen: Screen) => MindSweepView;
-    /** Add: true when the capture landed. */
+
     add: (title: string) => Promise<boolean>;
 };
 
-/** Replays one scenario as the mobile screen runs it, through `driver`. */
+
 async function replay(actions: Action[], driver: Driver, log: unknown[][], fail: (mode: string) => void) {
     const screen: Screen = { state: INITIAL_MIND_SWEEP_STATE, draft: '', addFailed: false, closes: 0 };
     const seen = { writes: 0, closes: 0 };
@@ -126,7 +126,7 @@ describe('Mind Sweep: core and the native host contract', () => {
         vi.setSystemTime(new Date(fixture.now));
     };
 
-    /** A host whose addTask calls are logged as the mobile harness logs them; `fail` makes the next one refuse or throw. */
+
     const open = async (saveData?: (data: unknown) => Promise<void>) => {
         const log: unknown[][] = [];
         let failure: string | null = null;
@@ -157,7 +157,7 @@ describe('Mind Sweep: core and the native host contract', () => {
             const { log, fail } = await open();
             const observations = await replay(scenario.actions, {
                 view: (screen) => buildMindSweepView({ ...screen, t }),
-                // Mobile's handleAdd: the store call, then a refused or thrown result keeps the draft.
+
                 add: async (title) => {
                     try {
                         const result = await useTaskStore.getState().addTask(title, { status: 'inbox' });
@@ -193,7 +193,7 @@ describe('Mind Sweep: core and the native host contract', () => {
         const direct = buildMindSweepView({ state, draft: 'x', addFailed: true, t });
         const { version, revision, state: echoed, group, ...rest } = view;
         expect(version).toBe(1);
-        // The host keeps the captures: the view echoes only the scope and the step.
+
         expect(echoed).toEqual({ scope: 'personal', step: 0 });
         const { captured: directCaptured, ...directGroup } = direct.group!;
         expect({ ...rest, group: { ...group!, captured: undefined } }).toEqual({ ...direct, group: { ...directGroup, captured: undefined } });
@@ -202,22 +202,22 @@ describe('Mind Sweep: core and the native host contract', () => {
         expect(direct.capturedCount).toBe(106);
         const next = value(host.getMindSweep({ state, draft: 'x', addFailed: true, offset: 100, limit: 100, revision }));
         expect(next.group!.captured).toEqual({ label: directCaptured!.label, total: 105, items: captured.homeStuff.slice(100) });
-        // A later window of another screen state is stale.
+
         expect(host.getMindSweep({ state, draft: 'y', addFailed: true, offset: 100, limit: 100, revision }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(host.getMindSweep({ state, draft: 'x', addFailed: true, offset: 100, limit: 100 }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // One capture a page: the response carries that one and the counts, never the whole session.
+
         const small = value(host.getMindSweep({ state, draft: 'x', addFailed: true, limit: 1 }));
         expect(small.group!.captured).toEqual({ label: directCaptured!.label, total: 105, items: ['Item 1'] });
         expect(small.capturedCount).toBe(106);
         expect(JSON.stringify(small)).not.toContain('Item 2"');
         expect(JSON.stringify(small)).not.toContain('Call mom');
-        // The first read starts at the intro.
+
         expect(value(host.getMindSweep())).toMatchObject({
             phase: 'intro', state: { scope: INITIAL_MIND_SWEEP_STATE.scope, step: INITIAL_MIND_SWEEP_STATE.step }, group: null,
         });
-        // A new capture is a store edit: the revision moves.
+
         value(await host.addMindSweepItem({ requestId: requestId(), title: 'Fix sink' }));
         expect(value(host.getMindSweep({ state, draft: 'x', addFailed: true })).revision).not.toBe(revision);
     });
@@ -235,14 +235,14 @@ describe('Mind Sweep: core and the native host contract', () => {
         expect(contract.log).toEqual([['addTask', 'Fix the sink', { status: 'inbox' }]]);
         expect(useTaskStore.getState()._allTasks.map(({ id: _id, revBy: _revBy, ...task }) => task)).toEqual(expected);
         expect(useTaskStore.getState()._tasksById.get(id)).toMatchObject({ title: 'Fix the sink', status: 'inbox' });
-        // A replay after a restart (a new host, no receipt) finds the task and adds nothing.
+
         const tasks = useTaskStore.getState()._allTasks;
         contract.log.length = 0;
         const restarted = await restartScreenHost();
         expect(value(await restarted.addMindSweepItem({ requestId: id, title: 'Fix the sink' }))).toEqual({ id, title: 'Fix the sink' });
         expect(useTaskStore.getState()._allTasks.filter((task) => task.title === 'Fix the sink')).toHaveLength(1);
         expect(useTaskStore.getState()._allTasks.map((task) => task.id)).toEqual(tasks.map((task) => task.id));
-        // The same request UUID with another title is another capture: refused, and the stored task keeps its title.
+
         expect(await restarted.addMindSweepItem({ requestId: id, title: 'Different capture' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(useTaskStore.getState()._tasksById.get(id)).toMatchObject({ title: 'Fix the sink' });
         expect(contract.log).toEqual([]);
@@ -253,7 +253,7 @@ describe('Mind Sweep: core and the native host contract', () => {
         const { host, log } = await open();
         const input = { requestId: requestId(), title: 'Fix the sink' };
         value(await host.addMindSweepItem(input));
-        // The user processes the capture.
+
         await useTaskStore.getState().updateTask(input.requestId, { status: 'next' });
         log.length = 0;
         const { result, wrote } = await replayAfterRestart((restarted) => restarted.addMindSweepItem(input));
@@ -275,11 +275,11 @@ describe('Mind Sweep: core and the native host contract', () => {
         saveData.mockResolvedValue(undefined);
         const retried = await host.addMindSweepItem(input);
         expect(retried).toEqual({ ok: true, value: { id: input.requestId, title: 'Call mom' } });
-        // The retry only saved: no second add, the same tasks, and storage holds the task.
+
         expect(log).toHaveLength(1);
         expect(useTaskStore.getState()._allTasks).toBe(landed);
         expect((saveData.mock.lastCall?.[0] as { tasks: { id: string }[] }).tasks.map((task) => task.id)).toEqual([input.requestId]);
-        // A lost reply repeats the request: no write, no save.
+
         const saves = saveData.mock.calls.length;
         expect(await host.addMindSweepItem(input)).toEqual(retried);
         expect(saveData).toHaveBeenCalledTimes(saves);
@@ -303,7 +303,7 @@ describe('Mind Sweep: core and the native host contract', () => {
         read({ addFailed: 'yes' });
         read({ limit: 101 });
         read('x');
-        // The summary is the step after the last cue list.
+
         expect(value(host.getMindSweep({ state: { scope: 'work', step: 4 } })).phase).toBe('summary');
         const add = async (input: unknown) => expect(await host.addMindSweepItem(input as never)).toMatchObject(invalid);
         await add({ requestId: requestId(), title: '   ' });

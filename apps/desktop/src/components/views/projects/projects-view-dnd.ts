@@ -3,8 +3,7 @@ import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { projectAreaCollisionDetection } from './project-area-dnd';
 import type { ProjectAreaSection } from './project-area-collapse';
 
-// The whole Projects view shares one DndContext; every draggable declares what it
-// is so collision detection and drag-end dispatch can branch per drag type.
+
 export type ProjectsTaskDragData = { type: 'task'; sortable: boolean };
 export type ProjectsProjectDragData = { type: 'project'; section: ProjectAreaSection };
 export type ProjectsSectionDragData = { type: 'project-section'; projectId: string; sectionId: string };
@@ -28,7 +27,7 @@ export const projectsViewKeyboardCoordinates: KeyboardCoordinateGetter = (event,
     const activeData = args.context.active?.data.current as ProjectsDragData | undefined;
     if (activeData?.type !== 'project-section') return sortableKeyboardCoordinates(event, args);
 
-    // Task rows between headers must not intercept keyboard section movement.
+
     const droppableRects = new Map([...args.context.droppableRects].filter(([id]) => {
         const container = args.context.droppableContainers.get(id);
         const data = container ? dataOf(container) : undefined;
@@ -54,8 +53,8 @@ export const projectsViewCollisionDetection: CollisionDetection = (args) => {
     }
 
     if (activeData?.type === 'project') {
-        // Project drags stay inside their own sidebar section, matching the old
-        // per-section DndContext boundaries.
+
+
         const containers = args.droppableContainers.filter((container) => {
             const data = dataOf(container);
             if (data.type === 'project') return data.section === activeData.section;
@@ -75,7 +74,7 @@ export const projectsViewCollisionDetection: CollisionDetection = (args) => {
         const filteredArgs = { ...args, droppableContainers: containers };
         const pointerCollisions = pointerWithin(filteredArgs);
         if (pointerCollisions.length > 0) {
-            // Prefer sidebar project rows over the surrounding area block.
+
             const containerById = new Map(containers.map((container) => [String(container.id), container]));
             const projectRowHits = pointerCollisions.filter((collision) => {
                 const container = containerById.get(String(collision.id));

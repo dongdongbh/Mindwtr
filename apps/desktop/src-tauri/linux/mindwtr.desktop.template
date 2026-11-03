@@ -1,7 +1,7 @@
-# Keep URI forwarding explicit: Tauri's default template omits %u (#1377).
+
 [Desktop Entry]
 Categories={{categories}}
-{{#if comment}}
+{{
 Comment={{comment}}
 {{/if}}
 Exec={{exec}} %u

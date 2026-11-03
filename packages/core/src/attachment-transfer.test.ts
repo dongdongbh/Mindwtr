@@ -59,12 +59,7 @@ const makeData = (overrides: Partial<AppData>): AppData => ({
     ...overrides,
 });
 
-/**
- * The lifecycle never writes to its inputs: it reports every change as a patch keyed by
- * attachment id. `after(id)` is where a test reads the post-run value — the patch when one
- * was produced, otherwise the (pristine) input, which is exactly what the platform backends
- * see once {@link applyAttachmentPatches} has folded the patches back into the document.
- */
+
 const runLifecycle = async (options: AttachmentTransferLifecycleOptions) => {
     const { changed, patches } = await runAttachmentTransferLifecycle(options);
     return {
@@ -215,7 +210,7 @@ describe('runAttachmentTransferLifecycle', () => {
         expect(after().localStatus).toBe('available');
         expect(after().cloudKey).toBe('attachments/attachment-1.txt');
         expect(onUpload).toHaveBeenCalledWith(after(), '/local/file.txt');
-        // The input object is never written to — that is the whole point of the patch contract.
+
         expect(attachment.localStatus).toBe('missing');
         expect(attachment.cloudKey).toBeUndefined();
     });
@@ -347,8 +342,8 @@ describe('runAttachmentTransferLifecycle', () => {
     });
 
     it('supports a custom hasCloudCopy predicate for backends whose cloudKey format differs', async () => {
-        // Simulates CloudKit: a cloudKey written by a different backend before a provider switch
-        // isn't a valid CloudKit record key, so CloudKit must still upload.
+
+
         const attachment = makeAttachment({ cloudKey: 'attachments/from-other-backend.txt' });
         const onUpload = vi.fn(async () => true);
         const { didMutate, after } = await runLifecycle({
@@ -383,7 +378,7 @@ describe('runAttachmentTransferLifecycle', () => {
 
         expect(onUpload).not.toHaveBeenCalled();
         expect(shouldUpload).toHaveBeenCalledTimes(2);
-        // localStatus still refreshes even when the cap blocks the transfer itself.
+
         expect(didMutate).toBe(true);
         expect(after('upload-a').localStatus).toBe('available');
     });
@@ -428,11 +423,8 @@ describe('runAttachmentTransferLifecycle', () => {
     });
 
     it('rethrows a fatal error immediately and discards the whole run, inputs included', async () => {
-        // Mirrors an AbortSignal firing mid-run on a mobile backend. Under the patch contract
-        // a rejected run publishes NOTHING: the earlier attachment's successful upload lives
-        // only on a working copy inside the discarded patch map, and the caller's document is
-        // byte-identical to what it passed in. (Before the purity refactor this test asserted
-        // the opposite — that attachment #1 stayed mutated in place.)
+
+
         const first = makeAttachment({ id: 'first', uri: '/local/first.txt' });
         const second = makeAttachment({ id: 'second', uri: '/local/second.txt' });
         const abortError = new Error('aborted');
@@ -1039,11 +1031,8 @@ describe('runAttachmentTransferLifecycle', () => {
             });
 
             it('a later cycle with a working upload still detects and retries the same change', async () => {
-                // Proves the "leave it untouched" fix actually enables retry, not just
-                // "nothing happens forever": the stat/hash are still recorded as stale, so
-                // the exact same mismatch is detected again next cycle. The second cycle
-                // reads the first cycle's patched value, as a real backend would after
-                // applyAttachmentPatches folded it back into the document.
+
+
                 const attachment = staleAttachment();
                 const firstPass = await runLifecycle({
                     ...baseOptions,
@@ -1103,10 +1092,8 @@ describe('runAttachmentTransferLifecycle', () => {
             });
             const onDownload = vi.fn(async () => true);
             const onLocalEditRace = vi.fn();
-            // First stat call (the detection pass) reports the state that triggers the
-            // mismatch; the second (the re-stat immediately before overwrite, S3) reports
-            // that the file changed AGAIN in between — simulating the user's editor saving
-            // mid-cycle.
+
+
             const getLocalFileStat = vi.fn()
                 .mockResolvedValueOnce({ mtimeMs: 1234, size: 12 })
                 .mockResolvedValueOnce({ mtimeMs: 5678, size: 34 });
@@ -1126,8 +1113,8 @@ describe('runAttachmentTransferLifecycle', () => {
             expect(onDownload).not.toHaveBeenCalled();
             expect(onLocalEditRace).toHaveBeenCalledWith(after());
             expect(didMutate).toBe(false);
-            // The record is untouched — the next cycle's prepare pass picks this up as an
-            // ordinary local edit.
+
+
             expect(after().fileHash).toBe('winner-hash');
             expect(after().contentMtimeMs).toBe(9000);
         });
@@ -1143,8 +1130,8 @@ describe('runAttachmentTransferLifecycle', () => {
             });
             const onDownload = vi.fn(async () => true);
             const shouldDownload = vi.fn(() => true);
-            // Same race setup as the S3 test above: the re-stat immediately before
-            // overwrite reports a fresh mismatch, so the download is skipped.
+
+
             const getLocalFileStat = vi.fn()
                 .mockResolvedValueOnce({ mtimeMs: 1234, size: 12 })
                 .mockResolvedValueOnce({ mtimeMs: 5678, size: 34 });
@@ -1221,9 +1208,8 @@ describe('runAttachmentTransferLifecycle', () => {
         });
 
         it('post-merge phase: a hash mismatch (another device won the merge) re-downloads instead of re-uploading', async () => {
-            // Simulates the losing side of a concurrent edit: the merge already adopted
-            // the other device's fileHash/contentRev into this attachment object, but the
-            // file still on this device's disk is the old, losing content.
+
+
             const attachment = makeAttachment({
                 cloudKey: 'attachments/attachment-1.txt',
                 fileHash: 'winner-hash',
@@ -1255,8 +1241,8 @@ describe('runAttachmentTransferLifecycle', () => {
                 kind: 'present',
                 sha256: 'loser-hash',
             });
-            // contentRev/fileHash are untouched by the download branch itself — they
-            // already carry the winning side's values from the merge.
+
+
             expect(after().contentRev).toBe(5);
             expect(after().fileHash).toBe('winner-hash');
         });
@@ -1269,12 +1255,12 @@ describe('runAttachmentTransferLifecycle', () => {
                 item.localStatus = 'available';
                 return true;
             });
-            // Round 1: not on disk yet — the existing "missing -> download" path fires.
+
             let existsLocally = false;
             const getLocalFilePresence = vi.fn(async () => (
                 existsLocally ? 'present' as const : 'confirmed-not-found' as const
             ));
-            // The freshly-written file's real stat, as the caller's getLocalFileStat would report it.
+
             const getLocalFileStat = vi.fn(async () => ({ mtimeMs: 42_000, size: 42 }));
 
             const firstPass = await runLifecycle({
@@ -1290,13 +1276,13 @@ describe('runAttachmentTransferLifecycle', () => {
             });
             expect(firstPass.didMutate).toBe(true);
             expect(onDownload).toHaveBeenCalledTimes(1);
-            // The invariant under test: contentMtimeMs/contentSize already match the
-            // fresh file immediately after download, without waiting for a second cycle.
+
+
             const downloaded = firstPass.after();
             expect(downloaded.contentMtimeMs).toBe(42_000);
             expect(downloaded.contentSize).toBe(42);
 
-            // Round 2: the file is now on disk and its stat is unchanged.
+
             existsLocally = true;
             const secondPass = await runLifecycle({
                 attachmentsById: new Map([[downloaded.id, downloaded]]),
@@ -1310,7 +1296,7 @@ describe('runAttachmentTransferLifecycle', () => {
                 onDownloadError: vi.fn(),
             });
 
-            // Byte-for-byte no-op: no second download, no further mutation.
+
             expect(onDownload).toHaveBeenCalledTimes(1);
             expect(secondPass.didMutate).toBe(false);
         });
@@ -1370,11 +1356,7 @@ describe('runAttachmentTransferLifecycle', () => {
     });
 });
 
-/**
- * The teeth of the purity contract: a deep-frozen input graph makes any in-place write
- * throw (module code is strict mode), so every one of these passing is proof the lifecycle
- * wrote only to its own working copies.
- */
+
 describe('runAttachmentTransferLifecycle purity (frozen inputs)', () => {
     beforeEach(() => {
         resetUnhashableAttachmentStatsForTests();
@@ -1555,11 +1537,11 @@ describe('applyAttachmentPatches', () => {
         expect(next.tasks[0]).toBe(untouchedTask);
         expect(next.tasks[1]).not.toBe(patchedTask);
         expect(next.tasks[1].attachments?.[0]).toBe(patch);
-        // Siblings inside the reallocated owner keep their identity.
+
         expect(next.tasks[1].attachments?.[1]).toBe(siblingAttachment);
-        // The projects array had nothing to patch, so it is the same array object.
+
         expect(next.projects).toBe(data.projects);
-        // Inputs untouched.
+
         expect(patchedTask.attachments?.[0]).toBe(patchedAttachment);
         expect(patchedAttachment.cloudKey).toBeUndefined();
     });
@@ -1653,7 +1635,7 @@ describe('upload source containment (SEC-07)', () => {
         expect(onUpload).not.toHaveBeenCalled();
         expect(computeLocalFileHash).not.toHaveBeenCalled();
         expect(after().cloudKey).toBeUndefined();
-        // localStatus is still reconciled — the file is there, it is just not ours to send.
+
         expect(after().localStatus).toBe('available');
     });
 
@@ -1722,9 +1704,8 @@ describe('missing fileHash and unhashable files (BUG-16)', () => {
     };
 
     it('backfills a missing fileHash instead of guessing a transfer', async () => {
-        // An attachment uploaded by a client that predates fileHash: it has a cloud copy
-        // and a local file, but no baseline hash, so a bare stat mismatch is not evidence
-        // of anything and must not trigger a download.
+
+
         const attachment = makeAttachment({ cloudKey: 'attachments/attachment-1.txt' });
         const onDownload = vi.fn(async () => true);
         const onUpload = vi.fn(async () => true);
@@ -1749,8 +1730,8 @@ describe('missing fileHash and unhashable files (BUG-16)', () => {
     });
 
     it('re-reads a file it could not hash only once per observed stat', async () => {
-        // Each cycle carries the previous cycle's patched attachment forward, exactly as a
-        // backend does once applyAttachmentPatches has folded it into the document.
+
+
         let current = makeAttachment({
             cloudKey: 'attachments/attachment-1.txt',
             fileHash: 'old-hash',
@@ -1787,7 +1768,7 @@ describe('missing fileHash and unhashable files (BUG-16)', () => {
 });
 
 describe('validateAttachmentHash', () => {
-    // sha256("abc")
+
     const ABC_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
     const abcBytes = new Uint8Array([0x61, 0x62, 0x63]);
 
@@ -1843,9 +1824,8 @@ describe('normalizePendingRemoteDeletes', () => {
 });
 
 describe('a remote winner the merge took but this device has not installed yet', () => {
-    // The merge took another device's newer content (its fileHash and contentRev; no recorded stat, which never travels)
-    // and marked the bytes this device holds (staleContentHash).
-    // The download that would install it did not run this cycle, so the disk still holds this device's OLD bytes.
+
+
     const OLD = 'a'.repeat(64);
     const NEW = 'b'.repeat(64);
     const winner = (): Attachment => ({

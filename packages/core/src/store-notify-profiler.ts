@@ -5,13 +5,8 @@ export type NotifyProfile = {
     maxMs: number;
     top5Ms: number[];
     top5Names: string[];
-    /**
-     * Derived-state rebuilds that ran inside this notify (getDerivedState cache
-     * misses). setNotifyMs minus notifyTimedMs isolates React render time, but
-     * a rebuild reached through a subscriber's SELECTOR lands in that remainder
-     * too (#766) — these two numbers split it: remainder minus derivedRebuildMs
-     * is genuinely React.
-     */
+
+
     derivedRebuildCount: number;
     derivedRebuildMs: number;
 };
@@ -41,12 +36,7 @@ const now = (): number =>
         ? performance.now()
         : Date.now();
 
-/**
- * Labels a store listener so slow-pipeline logs can attribute time to it by
- * name instead of an anonymous slot in `notifyTop5Ms` (#766: one ~420ms
- * subscriber stayed unidentified for a whole round). Only ever pass fixed
- * string literals — the name lands in diagnostic logs.
- */
+
 export const nameNotifyListener = <T extends object>(name: string, listener: T): T => {
     listenerNames.set(listener, name);
     return listener;
@@ -86,9 +76,8 @@ export const instrumentStoreSubscribe = <TStore extends InstrumentableStore>(
         ...args: unknown[]
     ) => unknown;
     const subscribe = function (this: unknown, ...args: unknown[]): unknown {
-        // Hook form is subscribe(listener); selector form is
-        // subscribe(selector, listener[, options]) — time the listener in both
-        // so setNotifyMs minus notifyTimedMs isolates React render time.
+
+
         let subscribeArgs = args;
         if (args.length === 1 && typeof args[0] === 'function') {
             subscribeArgs = [timeListener(args[0] as (...a: unknown[]) => unknown)];
@@ -120,15 +109,14 @@ export const instrumentStoreSubscribe = <TStore extends InstrumentableStore>(
     instrumentedStores.add(api);
 };
 
-/** The store's live subscribers (every subscribe through an instrumented store, until it unsubscribes). */
+
 export const getStoreListenerCount = (): number => activeListenerCount;
 
 export const beginNotifyProfile = (): void => {
     currentProfile = { entries: [], derivedRebuildCount: 0, derivedRebuildMs: 0 };
 };
 
-/** Called by getDerivedState when a cache miss forces a rebuild. Free outside
- *  a profiling window — the accumulator only exists while one is open. */
+
 export const recordDerivedStateRebuild = (ms: number): void => {
     const profile = currentProfile;
     if (!profile) return;

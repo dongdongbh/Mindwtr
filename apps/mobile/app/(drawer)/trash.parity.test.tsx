@@ -1,13 +1,6 @@
-/**
- * React Native's Trash screen, replayed against the `trash` part of the list
- * views parity fixture that core's trash-view-model and the native host contract
- * are tested against. MINDWTR_CAPTURE_LIST_VIEWS=1 rewrites that part.
- *
- * Each scenario renders the real screen with the real core store, swipes, selects,
- * confirms and cancels, and records what a user sees and what the store is asked
- * to write. Dates render through the app's date formatter, configured per
- * scenario as the root layout does, with the device locale pinned to en-US.
- */
+
+
+
 import React from 'react';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -332,7 +325,7 @@ async function runScenario(scenario: Scenario) {
   const tasks = scenario.taskIds ? allTasks.filter((entry) => scenario.taskIds!.includes(entry.id)) : allTasks;
   const seededProjects = scenario.projectIds ? projects.filter((entry) => scenario.projectIds!.includes(entry.id)) : projects;
   const settings = settingsVariants[scenario.settings];
-  // What the root layout applies before any screen renders.
+
   configureDateFormatting({
     language: settings.language || 'en',
     dateFormat: settings.dateFormat,

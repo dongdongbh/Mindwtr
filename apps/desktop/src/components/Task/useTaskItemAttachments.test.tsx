@@ -36,8 +36,7 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
     remove: (...args: unknown[]) => removeMock(...args),
 }));
 
-// The privacy lock's dialog bookkeeping (its own invoke calls) is tested in
-// app-lock.test.ts; here the picker runs as-is so the invoke assertions stay exact.
+
 vi.mock('../../lib/app-lock', async (importOriginal) => ({
     ...(await importOriginal<typeof import('../../lib/app-lock')>()),
     withMindwtrDialog: <T,>(run: () => Promise<T>) => run(),
@@ -166,7 +165,7 @@ describe('useTaskItemAttachments addFolderLinkAttachment', () => {
             uri: '/Users/dd/Projects/Alpha',
             mimeType: 'inode/directory',
         });
-        // A link owns no bytes: nothing for the file upload pipeline.
+
         expect(attachment.cloudKey).toBeUndefined();
         expect(attachment.localStatus).toBeUndefined();
         expect(invokeMock).toHaveBeenCalledWith('remember_link_folder_access', {
@@ -178,8 +177,8 @@ describe('useTaskItemAttachments addFolderLinkAttachment', () => {
         act(() => {
             result.current.openAttachment(attachment);
         });
-        // The id travels with the open so the App Store build can find the
-        // folder's bookmark; other builds open the path as before.
+
+
         expect(openAttachmentTarget).toHaveBeenCalledWith('/Users/dd/Projects/Alpha', attachment.id);
     });
 
@@ -216,8 +215,8 @@ describe('useTaskItemAttachments addDroppedFileAttachments', () => {
         invokeMock.mockReset();
         mkdirMock.mockClear();
         writeFileMock.mockClear();
-        // No Rust "get_managed_data_dir" command in this test environment;
-        // getManagedDataDir() falls back to dataDir() + "mindwtr".
+
+
         invokeMock.mockRejectedValue(new Error('get_managed_data_dir not supported'));
     });
 
@@ -437,9 +436,8 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
     });
 
     it('removes the managed copy when a converted link persists, keeps it on cancel', async () => {
-        // #913/#1001 follow-up: converting a pre-fix file-kind link to a
-        // pointer must clean up the copy the app restored into data/attachments
-        // — but only once the conversion actually saves.
+
+
         const legacy = {
             id: 'legacy-1',
             kind: 'file' as const,
@@ -451,7 +449,7 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
         };
         const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
 
-        // Round 1: convert, then cancel — the copy must survive.
+
         act(() => {
             result.current.resetAttachmentState([legacy]);
         });
@@ -467,7 +465,7 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
         });
         expect(removeMock).not.toHaveBeenCalled();
 
-        // Round 2: convert, then save — now the copy is orphaned.
+
         act(() => {
             result.current.editLinkAttachment(legacy);
         });
@@ -589,8 +587,8 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
     });
 
     it('never removes an orphaned file in a sibling directory that merely shares the managed dir prefix', async () => {
-        // e.g. `/data/mindwtr/attachments-old/x.pdf` — `startsWith('/data/mindwtr/attachments')`
-        // would wrongly match this without a path-separator boundary.
+
+
         const siblingAttachment = {
             id: 'sibling-1',
             kind: 'file' as const,
@@ -603,9 +601,8 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
         };
         const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
         act(() => {
-            // Simulate the sibling-dir attachment having entered edit state
-            // this session (e.g. imported/synced data), so cancelling treats
-            // it as orphaned relative to the saved (empty) task.attachments.
+
+
             result.current.setEditAttachments([siblingAttachment]);
         });
 
@@ -661,10 +658,8 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
     });
 
     it('keeps a local file path added through the link prompt a pointer', async () => {
-        // #1001: "Add link" and "Link to file…" promise a reference, no copy.
-        // A kind:'file' record here hands the user's own file to attachment
-        // sync, which uploads the bytes and re-homes the attachment onto its
-        // own copy the first time the original moves.
+
+
         const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
 
         act(() => {
@@ -684,9 +679,8 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
     });
 
     it('converts a pre-fix file-kind link back to a pointer via edit', () => {
-        // #1001 follow-up: "Add link" items recorded before the pointer fix
-        // carry kind:'file' plus managed-copy bookkeeping. Editing one must be
-        // allowed and re-saving must produce a clean pointer.
+
+
         const legacy = {
             id: 'legacy-1',
             kind: 'file',
@@ -723,8 +717,7 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
     });
 });
 
-// The overlays take the hook's result whole, so they can be rendered over the
-// real hook instead of a wall of hand-built props.
+
 function OverlaysHarness({ openTarget }: { openTarget?: Attachment }) {
     const attachments = useTaskItemAttachments({ task, t });
     return (

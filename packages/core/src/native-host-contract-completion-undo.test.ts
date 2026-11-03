@@ -4,8 +4,7 @@ import { taskRevisionOf } from './native-request-receipts';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Task } from './types';
 
-// RN cafdac02d (#834) and efd0d8ac8 (#1051): every completion shows "{title} marked Done" with Undo, and Undo puts the
-// task back in its status (and its Today star). The native contract completed a task with nothing to undo it with.
+
 const T0 = '2026-09-01T00:00:00.000Z';
 const task = (fields: Partial<Task> = {}): Task => ({
     id: 't1', title: 'Water the plants', status: 'next', tags: [], contexts: [], isFocusedToday: true,

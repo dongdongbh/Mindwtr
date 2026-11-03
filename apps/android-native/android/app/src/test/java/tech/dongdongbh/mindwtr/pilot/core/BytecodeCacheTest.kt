@@ -11,7 +11,7 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.RandomAccessFile
 
-/** The bytecode cache runs bytecode only for its exact bundle and engine, whole and unchanged; every other case runs the source. */
+
 class BytecodeCacheTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -28,7 +28,7 @@ class BytecodeCacheTest {
         val read = cache().read(bundle)
         assertEquals("hit", read.outcome)
         assertArrayEquals(bytecode, read.bytecode)
-        // Synced into place: the directory after the rename, and no temporary file left.
+
         assertEquals(listOf(folder.root), syncs)
         assertEquals(listOf("core-host.qjsc"), folder.root.list()!!.toList())
     }
@@ -69,26 +69,26 @@ class BytecodeCacheTest {
         val whole = file().readBytes()
         file().writeBytes(whole.copyOf(whole.size - 1))
         assertMiss("truncated", cache().read(bundle))
-        // Cut inside the header too.
+
         file().writeBytes(whole.copyOf(20))
         assertMiss("truncated", cache().read(bundle))
-        // Bytes after the bytecode are not part of any write.
+
         file().writeBytes(whole + byteArrayOf(0))
         assertMiss("truncated", cache().read(bundle))
     }
 
     @Test fun anUnreadableFileRunsTheSource() {
-        // A directory where the file should be: reading it fails, and that is a miss, never an exception.
+
         assertTrue(file().mkdir())
         assertTrue(cache().read(bundle).outcome.startsWith("error:"))
     }
 
     @Test fun aFailedWriteLeavesNoCacheAndDoesNotThrow() {
-        // The cache's directory is missing: the temporary file cannot be made.
+
         val missing = cache(file = File(folder.root, "gone/core-host.qjsc"))
         assertFalse(missing.write(bundle, bytecode))
         assertMiss("absent", missing.read(bundle))
-        // The rename cannot replace a directory: the temporary file is removed and nothing is under the cache's name.
+
         assertTrue(file().mkdir())
         assertFalse(cache().write(bundle, bytecode))
         assertEquals(listOf("core-host.qjsc"), folder.root.list()!!.toList())
@@ -101,8 +101,8 @@ class BytecodeCacheTest {
     }
 
     @Test fun anotherWritersTemporaryFileIsNeverShared() {
-        // Writer A is mid-write on a temporary file (its stream still open) when writer B writes and publishes. With one shared
-        // temporary name, B would truncate A's file, rename it into place, and A's later bytes would land in the published cache.
+
+
         val other = File(folder.root, "core-host.qjsc.tmp")
         java.io.FileOutputStream(other).use { writerA ->
             writerA.write("A's first bytes".toByteArray())

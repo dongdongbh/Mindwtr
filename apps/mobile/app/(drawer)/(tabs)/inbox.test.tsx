@@ -98,13 +98,13 @@ vi.mock('@/lib/onboarding-hints', () => ({
   dismissMobileHint: vi.fn(),
 }));
 
-// Mocks above must be registered before the real shared styles are evaluated.
+
 // eslint-disable-next-line import/first
 import { styles as taskListStyles } from '../../../components/task-list/task-list.styles';
 
 let InboxScreen: typeof import('./inbox').default;
 
-// The core mock imports all of core, which takes seconds on a loaded machine.
+
 beforeAll(async () => {
   vi.stubGlobal('React', React);
   InboxScreen = (await import('./inbox')).default;

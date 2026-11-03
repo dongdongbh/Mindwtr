@@ -1,7 +1,7 @@
 import CoreFoundation
 import Foundation
 
-/// A frozen provider witness is not ownership; the caller still requires the exact owner and a successful read.
+
 enum NativeCalendarPushWitness {
     static func markCreateEvent(requestJSON: String, id: UUID) throws -> String {
         do {

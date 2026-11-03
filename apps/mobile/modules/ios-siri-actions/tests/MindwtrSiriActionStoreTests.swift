@@ -59,8 +59,7 @@ final class MindwtrSiriActionStoreTests: XCTestCase {
             resignObservations.append(MindwtrSiriActionStore.isAccessAllowed)
         }
 
-        // The main-queue resign transition advances the generation before an
-        // older queued enable can run.
+
         MindwtrSiriActionStore.endAccessSession()
         accessQueue.async {
             resignDrained.fulfill()

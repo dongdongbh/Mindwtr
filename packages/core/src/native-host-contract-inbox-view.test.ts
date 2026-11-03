@@ -43,7 +43,7 @@ describe('native host contract: the Inbox view', () => {
         vi.restoreAllMocks();
     });
 
-    // Revisions read the clock.
+
     const freezeClock = () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(fixture.now));
@@ -107,13 +107,13 @@ describe('native host contract: the Inbox view', () => {
         expect({ message: view.empty.message, hint: view.empty.hint, actionLabel: view.empty.actionLabel }).toEqual(summary.empty);
         expect(view.process).toEqual(screen.process);
         expect(view.scopeLabel).toBe(screen.scopeLabel);
-        // A folded heading's edit unfolds it; an open one's folds it too.
+
         const folded = view.items.find((item) => item.type === 'section' && item.id === 'context:@home');
         expect(folded?.type === 'section' && folded.collapseEdit).toEqual({ collapsedGroupIds: [] });
         const open = view.items.find((item) => item.type === 'section' && item.id === 'context:@phone');
         expect(open?.type === 'section' && open.collapseEdit).toEqual({ collapsedGroupIds: ['context:@home', 'context:@phone'] });
 
-        // Rows carry core meta exactly as the existing Inbox window builds them (no checklist progress).
+
         const plain = value(host.getInboxView({ offset: 0, limit: 100 }));
         const window = value(host.getInboxWindow({ offset: 0, limit: 100 }));
         expect(plain.items.map((item) => (item.type === 'task' ? { ...item.row, readOnly: undefined } : null)))
@@ -122,7 +122,7 @@ describe('native host contract: the Inbox view', () => {
         expect(gutter?.meta).toBeTruthy();
     });
 
-    // Task737 fixture design only: physical namespaces and initialized databases belong to root.
+
     const groupedInboxData = () => {
         const stamp = '2026-09-01T12:00:00.000Z', deviceId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
         const areas: Area[] = [
@@ -168,7 +168,7 @@ describe('native host contract: the Inbox view', () => {
             expect(first.items).toHaveLength(50);
             expect(rest.total).toBe(first.total);
             expect(rest.revision).toBe(first.revision);
-            expect(first.count).toBe(55); // Distinct tasks, not duplicated displayed rows or headings.
+            expect(first.count).toBe(55);
             expect(first.total).toBe(rn.items.length);
             expect(items.map(groupItem)).toEqual(rn.items.map(groupItem));
             expect(first.toolbar.group.options.map(({ value: axis, edit, selected }) => ({ axis, edit, selected })))
@@ -177,7 +177,7 @@ describe('native host contract: the Inbox view', () => {
             expect(new Set(identities).size).toBe(items.length);
             if (groupBy === 'none') expect(items.every((item) => item.type === 'task' && item.groupId === null)).toBe(true);
             if (groupBy === 'context' || groupBy === 'tag') {
-                expect(first.total).toBe(59); // 55 tasks + one legitimate second membership + three headings.
+                expect(first.total).toBe(59);
                 const duplicated = items.filter((item) => item.type === 'task' && item.row.id === 'inbox-group-001');
                 expect(duplicated.map((item) => item.type === 'task' && item.groupId))
                     .toEqual(groupBy === 'context' ? ['context:@alpha', 'context:@beta'] : ['tag:alpha', 'tag:beta']);
@@ -215,7 +215,7 @@ describe('native host contract: the Inbox view', () => {
             { ...params, groupBy: 'tag' as const },
             { groupBy: 'context' as const, ...alpha.collapseEdit },
             { ...params, filters: { tokens: ['@alpha'] } },
-            {}, // Omitting params defaults to none; never treat it as the previous grouped view.
+            {},
         ]) expect(host.getInboxView({ ...changed, offset: 50, limit: 50, revision: first.revision }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         const foldPage = value(host.getInboxView({ groupBy: 'context', ...alpha.collapseEdit, offset: 1, limit: 2, revision: folded.revision }));
@@ -246,7 +246,7 @@ describe('native host contract: the Inbox view', () => {
         expect(before.collapsedGroupIds).toEqual(collapsedGroupIds);
         const heading = before.items.find((item) => item.type === 'section');
         if (heading?.type !== 'section') throw new Error('Missing heading');
-        expect(heading.collapseEdit.collapsedGroupIds).toHaveLength(201); // App must bound even core-offered edits before local persistence.
+        expect(heading.collapseEdit.collapsedGroupIds).toHaveLength(201);
         expect(host.getInboxView({ ...params, ...heading.collapseEdit, offset: 0, limit: 50 }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         for (const bad of [[...collapsedGroupIds, 'context:overflow'], [1], 'context:@alpha']) {
@@ -271,7 +271,7 @@ describe('native host contract: the Inbox view', () => {
         const tokens = value(host.getInboxFilterTokens({ offset: 0, limit: 2, revision: first.revision }));
         expect(tokens.items.map((token) => token.value)).toEqual(first.filters.tokens.items.slice(0, 2).map((token) => token.value));
         expect(tokens.total).toBe(first.filters.tokens.total);
-        // The picker's search box narrows the tokens, ignoring case.
+
         const needle = first.filters.tokens.items[0].value.slice(1, 3).toUpperCase();
         const found = value(host.getInboxFilterTokens({ offset: 0, limit: 100, revision: first.revision, query: ` ${needle} ` }));
         expect(found.items.map((token) => token.value)).toEqual(first.filters.tokens.items
@@ -280,18 +280,18 @@ describe('native host contract: the Inbox view', () => {
         expect(found.total).toBe(found.items.length);
         expect(host.getInboxFilterTokens({ offset: 0, limit: 2, revision: first.revision, query: 7 as never }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // Another grouping is another view: its revision differs.
+
         expect(host.getInboxFilterTokens({ params: { groupBy: 'tag' }, offset: 0, limit: 2, revision: first.revision }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
 
-        // A new capture is a relevant edit.
+
         await useTaskStore.getState().addTask('Fresh capture', { status: 'inbox' });
         expect(host.getInboxView({ offset: 100, limit: 100, revision: first.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         const after = value(host.getInboxView({ offset: 0, limit: 100 }));
         expect(after.revision).not.toBe(first.revision);
         expect(after.process?.count).toBe(109);
 
-        // So is the sort.
+
         value(await host.setTaskListSort({ sortBy: 'title' }));
         expect(value(host.getInboxView({ offset: 0, limit: 100 })).revision).not.toBe(after.revision);
     });
@@ -467,7 +467,7 @@ describe('native host contract: the Inbox view', () => {
         saveData.mockRejectedValue(new Error('disk unavailable'));
         expect(await host.setTaskListSort(edit)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED', message: 'disk unavailable' } });
         saveData.mockResolvedValue(undefined);
-        // Target state: the retry finds the sort stored, only saves, and writes nothing again.
+
         expect(await host.setTaskListSort(edit)).toEqual({ ok: true, value: { sortBy: 'due', changed: false } });
         expect(writes).toEqual([['updateSettings', { taskSortBy: 'due' }]]);
         const saved = saveData.mock.lastCall?.[0] as { settings: { taskSortBy?: string } };

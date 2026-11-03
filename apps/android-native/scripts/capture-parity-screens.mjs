@@ -1,53 +1,6 @@
-// Side-by-side screenshots of the React Native app and the native Android app on one fixture.
-//
-//   node apps/android-native/scripts/build-upgrade-harness.mjs     (once: builds the APKs)
-//   node apps/android-native/scripts/capture-parity-screens.mjs <adb-serial>
-//
-// Bun builds one fixture database through core's own store: 2 areas, 3 projects (one
-// sequential, with sections), 20 tasks with contexts, dates, priorities, notes, and one
-// starred task, and RN's quick-access tab set to Projects so both tab bars show the same
-// tabs. The script installs the harness RN build (154), puts the fixture in as its
-// database, and shoots Inbox, Focus, Projects, the task editor (Form tab) for one
-// task opened from Focus, global search for "kitchen", Process Inbox's first step, the
-// capture popup (empty, with text and core's preview, and with the contexts picker open),
-// (PARITY_ONLY=d1b shoots only pass D1b's: Settings › Data with the Backup fold's end (Getting Started), the Import fold open,
-// and in light mode the Todoist question and the invalid-import warning.)
-// (PARITY_ONLY=gtd-hub shoots only Settings › GTD in light mode, scrolled to RN's "Include start dates in Today" switch, #1325.)
-// (PARITY_ONLY=status-menu shoots only an Inbox row's status menu and its Move to project or area… picker, in light mode, 43479990e.)
-// (PARITY_ONLY=s5 shoots only pass S5's: Settings › Sync with File chosen, at its top and at the folder card.)
-// (PARITY_ONLY=r2b shoots only pass R2b's Pomodoro card on Focus, in light mode, with the Pomodoro feature and Link task on in the
-// fixture: idle with Timer only, the task picker, a linked task, running, paused, the break, and folded. RN's run ends back at
-// the idle card with Timer only, so the native build adopts the same session.)
-// (PARITY_ONLY=r2 shoots only pass R2's screens, with the weekly review on in the fixture: Settings › Notifications from its
-// top and its end, and its day picker.)
-// RN's capture screen for each entry kind (a capture link with the keyboard up and down, a share, an assistant note, and a
-// widget's quick capture), the Menu tab (the More sheet, Waiting, Someday, History's Done, Contexts, Trash with one trashed
-// task, and Review), the Weekly Review's first step, the Calendar's week and month, the Board, and Settings'
-// General, GTD (their switches drawn as RN's for the props it sets), Sync (off, then WebDAV chosen with the encryption card's
-// Enable flow open, never saved; then File chosen with no folder picked, pass S5), AI (each card unfolded) and Calendar (pass C3: the cards and form, then the subscription
-// list; the fixture's one ICS subscription is served on this computer through `adb reverse`, and its events show in the
-// Calendar's week and month, the Weekly Review's calendar step and the Daily Review), in light
-// and dark mode; and in light mode the attachments (a task's file and link in the editor, the Add link sheet, the project's).
-// Then it installs
-// the native upgradetest build (153) over it, on the same database, and shoots the same
-// screens. It writes rn-*.png, native-*.png, and side-by-side pair-*.png (RN left) to
-// /home/dd/.mindwtr-harness/parity/<timestamp>/.
-//
-// PARITY_ONLY=13a shoots only audit row 13a's, in light mode, against RN 155 (RN 154 predates RN's Daily Review fix 36c6cd6e4):
-// a completion's "marked Done" toast with Undo and the task back after Undo, a Process Inbox Trash's toast with Undo and the item
-// back in the Inbox, and the Daily Review with seven of the feed's events tomorrow, at its top and scrolled to the last event.
-//
-// PARITY_ONLY=small2 shoots only pass small-2's pull down to sync on Focus, in light mode: two frames right after the pull (RN's
-// bar over a transparent spinner, then its notice; the harness has no sync set up, so RN's red bar and setup notice).
-//
-// PARITY_ONLY=c3-fixes shoots only C3's 10-10 fixes, in light mode: the Calendar's month with today's details while the same
-// range reloads (the feed answers after 15 s: RN's Loading… line over the events kept), and Settings › Calendar's pills at
-// system font scale 2.0 and 1.0 (RN's CompactText 1.2x cap). The font scale is restored at the end.
-//
-// It touches only tech.dongdongbh.mindwtr.upgradetest: it refuses any other APK, sends
-// input only while that package is in front, and at the end uninstalls it and restores
-// night mode and rotation. Leave the phone on its home screen. Exit 0 = shots taken,
-// 1 = failed, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -79,7 +32,7 @@ const STATUS_MENU_ONLY = process.env.PARITY_ONLY === 'status-menu';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
-    // Today's RN when the harness built it (build-upgrade-harness.mjs --parity-rn), else RN 154's older source; A13 shoots RN 155.
+
     const rnSide = A13_ONLY ? built.rn155 : built.rnParity ?? built.rn154;
     apks = { rn: rnSide.path, native: built.native153.path };
     console.log(`RN side: ${A13_ONLY ? 'rn155' : built.rnParity ? `rnParity from ${built.rnParitySource}` : `rn154 from ${built.recoverySource}`}`);
@@ -94,7 +47,7 @@ for (const apk of Object.values(apks)) {
     }
 }
 
-// ---- the fixture, built through core's store in Bun ----
+
 const T = {
     call: 'Call the plumber about the leak', receipts: 'Scan last month\'s receipts', gift: 'Gift idea for Sam\'s birthday',
     article: 'Read the article on habit tracking', dentist: 'Book a dentist appointment', bikes: 'Look into e-bike prices',
@@ -105,19 +58,17 @@ const T = {
     mom: 'Call Mom back', taxes: 'Gather tax documents',
     deck: 'Hear back from Sam about the deck', insurance: 'Renew car insurance',
 };
-/**
- * Pass C3: one ICS subscription (synced settings), served on this computer through `adb reverse`: a timed event today and an
- * all-day one tomorrow, for the Calendar, the reviews and Settings › Calendar. The device calendars stay off (never read here).
- */
+
+
 const CALENDAR_PORT = Number(process.env.MINDWTR_CALENDAR_PORT ?? 18784);
 const CALENDAR_EVENTS = { timed: 'Design review', allDay: 'Team offsite' };
-/** Pass 13a: six more all-day events tomorrow, so the Daily Review's day holds seven, past core's five-event preview. */
+
 const MORE_EVENTS = A13_ONLY ? ['Budget sync', 'Dentist check-up', 'School pickup', 'Gym class', 'Book club', 'Car service'] : [];
 const CALENDAR_FEED = { id: 'parity-feed', name: 'Team calendar', url: `http://127.0.0.1:${CALENDAR_PORT}/parity.ics`, enabled: true };
-/** One task in Trash (not among T's live tasks), for the Trash screen. */
+
 const TRASHED = 'Old grocery list';
 const fixture = resolve(out, 'fixture/mindwtr.db');
-/** The fixture's file attachment: its bytes go to the app's files/attachments/ before the first launch (RN's managed copy). */
+
 const ATTACHMENT_FILE = {
     title: 'Paint swatches.pdf',
     uri: `file:///data/user/0/${PKG}/files/attachments/parity-file.pdf`,
@@ -206,7 +157,7 @@ const buildFixture = () => execFileSync('bun', ['-e', `
 `], { encoding: 'utf8', env: { ...process.env, FIXTURE_DB: fixture, FIXTURE_TITLES: JSON.stringify(T), FIXTURE_TRASHED: TRASHED,
     FIXTURE_FEED: JSON.stringify(CALENDAR_FEED), FIXTURE_FILE_TITLE: ATTACHMENT_FILE.title, FIXTURE_FILE_URI: ATTACHMENT_FILE.uri, FIXTURE_FILE_SIZE: String(ATTACHMENT_FILE.bytes.length), FIXTURE_R2: R2_ONLY ? '1' : '', FIXTURE_R2B: R2B_ONLY ? '1' : '' } }).trim().split('\n').pop();
 
-// ---- the device ----
+
 const device = connect({ serial, pkg: PKG, uiFile: '/data/local/tmp/mindwtr-parity-ui.xml' });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap } = device;
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
@@ -222,36 +173,36 @@ const stopApp = async () => {
 };
 const setNight = async (mode) => {
     sh(`cmd uimode night ${mode}`);
-    await sleep(2500); // the app redraws (RN) or is recreated (native) in the new mode
+    await sleep(2500);
 };
-/** Waits for [text] (a fixture title or a tab label), then saves a screenshot; a missing text is reported, not fatal. */
+
 const shoot = async (name, ready) => {
     try { await waitFor(`${name} to show`, ready, 45_000); } catch { console.log(`warn - ${name}: expected content not found; shot taken anyway`); }
     await sleep(1200);
     requireAppFront();
     const file = resolve(out, `${name}.png`);
     writeFileSync(file, adbRaw('exec-out', 'screencap', '-p'));
-    // The view tree beside each shot, so a pair's heights can be measured (bounds in px) as well as looked at.
+
     writeFileSync(resolve(out, `${name}.xml`), adbRaw('exec-out', 'uiautomator', 'dump', '/dev/tty'));
     shots.push(name);
     console.log(`shot ${basename(file)}`);
 };
-/** Sends an intent (am start arguments) to the harness package only, from the app itself or the home screen. */
+
 const openIntent = (args) => {
     const current = front();
     if (!current.includes(`${PKG}/`) && !current.includes(`${home}/`)) throw new Stopped(`another app is in front: ${current.trim()}`);
     sh(`am start -W ${args} ${PKG}`);
 };
 const openLink = (path) => openIntent(`-a android.intent.action.VIEW -d 'mindwtr-upgradetest://${path}'`);
-/** The task whose editor is shot: opened from Focus, where it has a project, a context, a priority, and a due date. */
+
 const EDITOR_TASK = T.outline;
-/** Opens the editor for EDITOR_TASK from the Focus screen on show, shoots it, and closes it with Back (nothing was edited). */
+
 const shootEditor = async (name, rn) => {
     const nodes = await waitFor(`${EDITOR_TASK} in Focus`, (current) => Boolean(inList(current, EDITOR_TASK)), 45_000);
     await tap(inList(nodes, EDITOR_TASK));
     const formShown = (current) => current.some((node) => node.class === 'android.widget.EditText' && node.text === EDITOR_TASK)
         && (rn || inEditor(current));
-    // Both open on the View tab here (Edit | Preview tabs, no title field; RN's resolveTaskOpenTab for Focus); the Edit tab is the Form tab.
+
     const rnTabs = (current) => (rn ? hasText(current, 'Preview') : Boolean(withDescription(current, 'Preview'))) && Boolean(button(current, 'Edit'));
     const open = await waitFor(`the editor for ${EDITOR_TASK}`, (current) => formShown(current) || rnTabs(current), 30_000);
     if (!formShown(open)) await tap(button(open, 'Edit'));
@@ -261,17 +212,17 @@ const shootEditor = async (name, rn) => {
     sh('input keyevent KEYCODE_BACK');
     await waitFor('the editor to close', (current) => !editorOpen(current), 15_000);
 };
-/** Core's en `inbox.processButton` with the fixture's six Inbox tasks: the button's spoken label in both apps. */
+
 const PROCESS = 'Process Inbox (6)';
 const SEARCH_QUERY = 'kitchen';
-/** Closes the keyboard if it shows, so the shot matches RN's (its search opened by link leaves the keyboard down). */
+
 const hideKeyboard = async () => {
     if (!/mInputShown=true/.test(sh('dumpsys input_method'))) return;
     requireAppFront();
     sh('input keyevent KEYCODE_BACK');
     await sleep(800);
 };
-/** Opens Process Inbox from the Inbox on show, shoots its first step (the fixture's first Inbox task), and closes it with Back. */
+
 const shootProcess = async (name) => {
     const nodes = await waitFor('the Process Inbox button', (current) => current.some((node) => node['content-desc'] === PROCESS), 45_000);
     await tap(nodes.find((node) => node['content-desc'] === PROCESS));
@@ -282,17 +233,15 @@ const shootProcess = async (name) => {
     sh('input keyevent KEYCODE_BACK');
     await waitFor('Process Inbox to close', (current) => !shown(current), 15_000);
 };
-/**
- * The capture popup from the tab bar's + (both apps label it core's nav.addTask): empty, then with a typed draft
- * and its preview, then with the contexts picker open. Back closes it (the first Back may only close the keyboard).
- */
+
+
 const CAPTURE_TEXT = 'Call Sam @phone #home';
 const shootPopup = async (prefix, suffix) => {
     const nodes = await waitFor('the + button', (current) => current.some((node) => node['content-desc'] === 'Add Task'), 30_000);
     await tap(nodes.find((node) => node['content-desc'] === 'Add Task'));
     const field = (current) => current.find((node) => node.class === 'android.widget.EditText');
     await shoot(`${prefix}-popup-empty-${suffix}`, (current) => Boolean(field(current)));
-    // Add another switched on (a switch on shows where its track starts), its bounds printed, then off again (it is remembered).
+
     const another = 'Add another';
     await tap(withDescription(await device.screen(), another));
     await shoot(`${prefix}-popup-another-${suffix}`, (current) => switchOn(current, another));
@@ -311,14 +260,8 @@ const shootPopup = async (prefix, suffix) => {
         await sleep(800);
     }
 };
-/**
- * RN's capture screen (capture-modal.tsx) for each entry kind, in both apps by the same intents: a capture link (a title with
- * tokens, so core's preview shows, a note, tags and a project), a share (a subject, and a body with a URL), an assistant note,
- * and a widget's quick capture. The link is shot with the keyboard up (RN focuses the field) and every kind with it down;
- * Cancel then writes nothing. Quick capture's Cancel puts the app behind the previous screen (#1169), so the app is launched
- * again. RN's capture links are read only on the mindwtr scheme (core's parser), which the harness RN app does not register,
- * so RN gets them by its component; RN's MainActivity turns the note into such a link itself.
- */
+
+
 const MODAL = { title: 'Call Sam @phone #home', note: 'Ask about Saturday', subject: 'Quarterly numbers', body: 'The numbers are in https://example.com/q3', named: 'Water the plants' };
 const shootModal = async (prefix, suffix, activity) => {
     const capture = (path) => (prefix === 'rn' ? openIntent(`-a android.intent.action.VIEW -d 'mindwtr://${path}' -n ${RN_ACTIVITY}`) : openLink(path));
@@ -336,7 +279,7 @@ const shootModal = async (prefix, suffix, activity) => {
         await sleep(1500);
         await hideKeyboard();
         await shoot(`${prefix}-modal-${kind}-${suffix}`, shown);
-        // The link's screen with the ? open: core's syntax help, on RN's line height.
+
         if (kind === 'link') {
             const help = await waitFor('the ? button', (current) => Boolean(button(current, '?')), 15_000);
             await tap(button(help, '?'));
@@ -354,23 +297,21 @@ const shootModal = async (prefix, suffix, activity) => {
         }
     }
 };
-/**
- * The Menu tab: RN's More sheet from the Menu tab (both apps label it core's tab.menu), then Waiting, Someday, and History's
- * Done (RN by its links, native from the sheet's tiles), each shot and closed with Back.
- */
+
+
 const MENU_SCREENS = [
     { name: 'waiting', link: 'waiting', tile: 'Waiting For', text: T.deck },
     { name: 'someday', link: 'someday', tile: 'Someday/Maybe', text: T.passport },
     { name: 'done', link: 'history?tab=done', tile: 'History', text: T.insurance },
     { name: 'contexts', link: 'contexts', tile: en['nav.contexts'], text: '@phone' },
     { name: 'trash', link: 'trash', tile: en['nav.trash'], text: TRASHED },
-    // RN's Review opens on its Due scope: the fixture has nothing due for review, so both show core's empty line.
+
     { name: 'review', link: 'review', tile: en['nav.review'], text: en['review.dueEmpty'] },
-    // The Calendar is shot in its week and month views (a mode tap saves the mode, in both apps); the Board opens on its Inbox column.
+
     { name: 'calendar', link: 'calendar', tile: en['nav.calendar'], text: en['calendar.mobile.week'] },
     { name: 'board', link: 'board', tile: en['tab.board'], text: T.call },
 ];
-/** Taps the Calendar's mode labelled [label] (both apps label the mode buttons with core's words) and waits for it to be on. */
+
 const calendarMode = async (label) => {
     const nodes = await waitFor(`the ${label} mode`, (current) => Boolean(withDescription(current, label)), 15_000);
     if (!chipOn(nodes, label)) await tap(withDescription(nodes, label));
@@ -403,17 +344,17 @@ const shootMenu = async (prefix, suffix, rn) => {
             await sleep(1000);
             continue;
         }
-        // A Trash row speaks its title (the row is one TalkBack node), so its title may be the node's description; so does a Board card.
+
         await shoot(`${prefix}-${screen.name}-${suffix}`, (current) => hasText(current, screen.text) || current.some((node) => node['content-desc'] === screen.text
             || (node['content-desc'] ?? '').startsWith(`${screen.text}, `)));
-        // From Review: Start Review, then the Weekly Review's first step (the Inbox), closed with its X.
+
         if (screen.name === 'review') {
             const start = await waitFor('Start Review', (current) => Boolean(button(current, en['review.startReview'])), 15_000);
             await tap(button(start, en['review.startReview']));
             const choices = await waitFor('the Weekly Review choice', (current) => Boolean(button(current, en['review.openGuide'])), 15_000);
             await tap(button(choices, en['review.openGuide']));
             await shoot(`${prefix}-weekly-${suffix}`, (current) => hasText(current, T.call));
-            // Pass C3: Next until the calendar step (its "Mindwtr tasks" heading), with the subscription's events.
+
             try {
                 for (let step = 0; step < 6 && !hasText(await device.screen(), en['review.calendarTasks']); step += 1) {
                     await tap(button(await device.screen(), en['review.next']) ?? fail('no Next'));
@@ -424,7 +365,7 @@ const shootMenu = async (prefix, suffix, rn) => {
             const close = await waitFor('the review\'s Close', (current) => Boolean(button(current, en['common.close'])), 15_000);
             await tap(button(close, en['common.close']));
             await sleep(1000);
-            // The Daily Review's first step (today: the subscription's event under Today's calendar).
+
             try {
                 const again = await waitFor('Start Review', (current) => Boolean(button(current, en['review.startReview'])), 15_000);
                 await tap(button(again, en['review.startReview']));
@@ -441,14 +382,12 @@ const shootMenu = async (prefix, suffix, rn) => {
         await sleep(1000);
     }
 };
-/**
- * Settings from the More sheet's Settings tile (both apps, shot as settings-menu), then General, GTD and Sync (their menu rows, core's labels): each
- * shot with its first switch or RN's "Sync is off" box on screen, and closed with Back; Back again leaves Settings.
- */
+
+
 const SETTINGS_SCREENS = [
     { name: 'general', row: `${en['settings.general']}. ${en['settings.menuDesc.general']}`, text: en['settings.mobile.showTaskAge'] },
     { name: 'gtd', row: `${en['settings.gtd']}. ${en['settings.menuDesc.gtd']}`, text: en['settings.featurePomodoro'] },
-    // Sync is off on the fixture: the backend card, the setup guide, and RN's "Sync is off" box.
+
     { name: 'sync', row: `${en['settings.sync']}. ${en['settings.menuDesc.sync']}`, text: en['settings.syncOff'] },
 ];
 const shootSettings = async (prefix, suffix, rn) => {
@@ -475,11 +414,8 @@ const shootSettings = async (prefix, suffix, rn) => {
     sh('input keyevent KEYCODE_BACK');
     await sleep(1000);
 };
-/**
- * Pass D1a: Settings › Data folded and with the Backup fold open (both modes); in light mode also the Merge and Restore questions
- * for a pushed backup (cancelled, so nothing is written), the invalid-file warning, and Sync › Recovery snapshots open. A shot
- * that cannot be reached is reported, never fatal to the other shots. Ends on the Settings menu.
- */
+
+
 const DATA_DIR = '/sdcard/Download/mindwtr-parity-d1';
 const DATA_FILES = { valid: 'd1-parity-backup.json', invalid: 'd1-parity-invalid.json', todoist: 'd1b-parity-todoist.csv' };
 const pushDataFiles = () => {
@@ -496,7 +432,7 @@ const anyNodes = () => {
     return [...xml.matchAll(/<node [^>]*>/g)].map(([node]) => Object.fromEntries([...node.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, name, value]) => [name, value])));
 };
 const tapNode = (node) => { const [x1, y1, x2, y2] = node.bounds.match(/\d+/g).map(Number); sh(`input tap ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)}`); };
-/** The system document picker: the file named [name], found in its list or through its search. */
+
 const pickParityFile = async (name) => {
     for (let wait = 0; wait < 30 && front().includes(`${PKG}/`); wait += 1) await sleep(500);
     await sleep(1500);
@@ -510,7 +446,7 @@ const pickParityFile = async (name) => {
     tapNode(hit);
     for (let wait = 0; wait < 30 && !front().includes(`${PKG}/`); wait += 1) await sleep(500);
 };
-/** A Data row: RN's label text, or the native row's one TalkBack node ("label, description"). */
+
 const dataRow = (nodes, label) => nodes.find((node) => node.text === label || (node['content-desc'] ?? '').startsWith(`${label}, `));
 const shootData = async (prefix, suffix) => {
     try {
@@ -557,32 +493,28 @@ const shootData = async (prefix, suffix) => {
     sh('input keyevent KEYCODE_BACK');
     await sleep(1000);
 };
-/**
- * Pass S4b: the sync encryption card's Enable flow (RN's warnings, the passphrase fields, Generate, Enable, Cancel). WebDAV is
- * chosen but never saved (no URL), so nothing is stored; the card shows under its form. Reported, never fatal to other shots.
- */
+
+
 const shootEncryption = async (prefix, suffix) => {
     const labelled = (nodes, label) => nodes.find((node) => node.text === label || node['content-desc'] === label);
     try {
         await tap(labelled(await screen(), en['settings.syncBackendWebdav']) ?? fail('no WebDAV chip'));
-        // The form and the card come in below the chips; their first words differ between the apps, so scroll for Enable.
+
         await sleep(1500);
         let nodes = await screen();
         for (let step = 0; step < 20 && !labelled(nodes, en['settings.syncEncryptionEnable']); step += 1) nodes = await device.swipe(nodes, 'down');
         if (!labelled(nodes, en['settings.syncEncryptionEnable'])) writeFileSync(resolve(out, `${prefix}-encryption-failed.xml`), adbRaw('exec-out', 'uiautomator', 'dump', '/dev/tty'));
         await tap(labelled(nodes, en['settings.syncEncryptionEnable']) ?? fail('no Enable encryption'));
         nodes = await waitFor('the Enable flow', (current) => hasText(current, en['settings.syncEncryptionWarningLost']), 15_000);
-        // The flow's top (its warnings) a little below the top of the screen.
+
         for (let step = 0; step < 3 && !hasText(nodes, en['settings.syncEncryptionDesc']); step += 1) nodes = await device.swipe(nodes, 'up');
         await shoot(`${prefix}-settings-encryption-${suffix}`, (current) => hasText(current, en['settings.syncEncryptionWarningLost']));
     } catch (error) {
         console.log(`warn - ${prefix} encryption card: ${error.message}`);
     }
 };
-/**
- * Pass S5: the File Sync panel, File chosen and no folder picked yet (the how-to box, Sync folder with Select Folder, Sync now).
- * Nothing is picked or stored. Reported, never fatal to other shots.
- */
+
+
 const shootFilePanel = async (prefix, suffix) => {
     const labelled = (nodes, label) => nodes.find((node) => node.text === label || node['content-desc'] === label);
     try {
@@ -590,8 +522,8 @@ const shootFilePanel = async (prefix, suffix) => {
         for (let step = 0; step < 20 && !labelled(nodes, en['settings.syncBackendFile']); step += 1) nodes = await device.swipe(nodes, 'up');
         await tap(labelled(nodes, en['settings.syncBackendFile']) ?? fail('no File chip'));
         await sleep(1500);
-        // Two places both apps reach alike: the top (the chips and the how-to box), then the folder card, brought up with short
-        // slow drags (a swipe flings RN's ScrollView past it) until Select Folder sits in the screen's upper half.
+
+
         for (let step = 0; step < 20; step += 1) {
             const next = await device.swipe(await screen(), 'up');
             if (device.signature(next) === device.signature(nodes)) break;
@@ -611,11 +543,8 @@ const shootFilePanel = async (prefix, suffix) => {
         console.log(`warn - ${prefix} File Sync panel: ${error.message}`);
     }
 };
-/**
- * Settings › Advanced › AI (pass C1): the assistant card unfolded, then folded again and the speech card unfolded, each shot at
- * the top of the screen. A card's heading is RN's touchable row (tapped on its description) or the native FoldRow (one node,
- * "title, description"). Back twice returns to the Settings menu.
- */
+
+
 const shootAI = async (prefix, suffix, rn) => {
     const rows = await waitFor('the Advanced row', (current) => Boolean(withDescription(current, `${en['settings.advanced']}. ${en['settings.menuDesc.advanced']}`)), 30_000);
     await tap(withDescription(rows, `${en['settings.advanced']}. ${en['settings.menuDesc.advanced']}`));
@@ -624,7 +553,7 @@ const shootAI = async (prefix, suffix, rn) => {
     const heading = (current, title, description) => (rn ? current.find((node) => node.text === description) : withDescription(current, `${title}, ${description}`));
     const cards = [[en['settings.ai'], en['settings.aiDesc'], en['settings.aiEnable']], [en['settings.speechTitle'], en['settings.speechDesc'], en['settings.speechEnable']]];
     for (const [index, [title, description, inside]] of cards.entries()) {
-        // The speech card is shot alone: the assistant card folds again first (unfolded, it pushes the speech card below the fold).
+
         if (index === 1) {
             await tap(heading(await screen(), cards[0][0], cards[0][1]) ?? fail('no assistant card heading'));
             await waitFor('the assistant card folded', (current) => !hasText(current, cards[0][2]), 15_000);
@@ -639,11 +568,8 @@ const shootAI = async (prefix, suffix, rn) => {
         await sleep(1000);
     }
 };
-/**
- * Pass C3: Settings › Advanced › Calendar at its top (the push and device calendar cards, the subscription form) and scrolled
- * to the subscription list. Shot before the Menu screens: RN 154's Calendar reads the device copy this screen writes. Starts and
- * ends on the tabs; a shot that cannot be reached is reported, never fatal.
- */
+
+
 const shootCalendarSettings = async (prefix, suffix, rn) => {
     const back = async () => { requireAppFront(); sh('input keyevent KEYCODE_BACK'); await sleep(1000); };
     try {
@@ -665,11 +591,8 @@ const shootCalendarSettings = async (prefix, suffix, rn) => {
         for (let step = 0; step < 3; step += 1) await back();
     }
 };
-/**
- * Pass A2's attachments, light mode: the editor's Attachments field on T.paint (a file and a link), its Add link sheet, and the
- * project's Attachments (RN: inside the project's Details; native: the card above the tasks). Ends on the tabs. A shot that
- * cannot be reached is reported, never fatal to the other shots.
- */
+
+
 const shootAttachments = async (prefix, rn) => {
     const PROJECT = 'Kitchen renovation';
     const back = async () => { requireAppFront(); sh('input keyevent KEYCODE_BACK'); await sleep(1000); };
@@ -681,7 +604,7 @@ const shootAttachments = async (prefix, rn) => {
         for (let step = 0; step < 20 && !ready(nodes); step += 1) {
             const next = await device.swipe(nodes, 'down');
             if (device.signature(next) === device.signature(nodes)) {
-                // Details unfolds only when it hides the field (an open Details would fold again).
+
                 const fold = unfold && !button(next, en['attachments.addFile']) && button(next, en['taskEdit.details']);
                 if (!fold) break;
                 await tap(fold);
@@ -698,7 +621,7 @@ const shootAttachments = async (prefix, rn) => {
         await tap(inList(projects, PROJECT));
         const projectOpen = await waitFor(T.paint, (current) => Boolean(inList(current, T.paint)), 30_000);
         await tap(inList(projectOpen, T.paint));
-        // As shootEditor: the Edit tab is the Form tab (its title field shows the task's title).
+
         const formShown = (current) => current.some((node) => node.class === 'android.widget.EditText' && node.text === T.paint) && (rn || inEditor(current));
         const opened = await waitFor(`the editor for ${T.paint}`, (current) => formShown(current) || Boolean(button(current, 'Edit')), 30_000);
         if (!formShown(opened)) await tap(button(opened, 'Edit'));
@@ -707,7 +630,7 @@ const shootAttachments = async (prefix, rn) => {
         await scrollTo(fieldShown, true);
         await shoot(`${prefix}-attachments-editor-light`, fieldShown);
         await tap(button(await screen(), en['attachments.addLink']));
-        // The sheet's hint line (RN's field reports its placeholder as the EditText's own text, which hasText skips).
+
         const sheetShown = (current) => current.some((node) => node.text === en['attachments.linkBatchHint']
             || node.text === en['attachments.linkPlaceholder'] || node['content-desc'] === en['attachments.linkBatchHint']);
         await waitFor('the link sheet', sheetShown, 15_000);
@@ -719,10 +642,10 @@ const shootAttachments = async (prefix, rn) => {
         await back();
         const discard = button(await screen(), en['common.discard']);
         if (discard) await tap(discard);
-        // A link's row shows core's display title (no scheme) in both apps.
+
         const projectShown = (current) => current.some((node) => (node.text ?? '').endsWith('example.com/kitchen-plan')) && hasText(current, en['attachments.title']);
         await waitFor(`${PROJECT}'s screen`, (current) => Boolean(inList(current, T.paint)) || projectShown(current), 15_000);
-        // Both apps: the project's Attachments sit inside its folded Details.
+
         {
             const details = button(await screen(), en['taskEdit.details']);
             if (details) await tap(details);
@@ -731,15 +654,13 @@ const shootAttachments = async (prefix, rn) => {
         await shoot(`${prefix}-attachments-project-light`, projectShown);
     } catch (error) {
         console.log(`warn - ${prefix} attachments: ${error.message}`);
-        // The screen as it was, for the next run's fix.
-        try { writeFileSync(resolve(out, `${prefix}-attachments-failed.xml`), adbRaw('exec-out', 'uiautomator', 'dump', '/dev/tty')); } catch { /* best effort */ }
+
+        try { writeFileSync(resolve(out, `${prefix}-attachments-failed.xml`), adbRaw('exec-out', 'uiautomator', 'dump', '/dev/tty')); } catch {                   }
     }
     await toTabs();
 };
-/**
- * Pass PD's Project details, light and dark: the open project with Details unfolded (Status, Type, Sequential Scope, Sections),
- * then scrolled to its end (Area, Tags, Notes, Attachments, the dates). Ends on the tabs; a shot that cannot be reached is reported.
- */
+
+
 const shootProjectDetails = async (prefix, suffix, rn) => {
     const PROJECT = 'Kitchen renovation';
     const back = async () => { requireAppFront(); sh('input keyevent KEYCODE_BACK'); await sleep(1000); };
@@ -748,7 +669,7 @@ const shootProjectDetails = async (prefix, suffix, rn) => {
         else {
             const nodes = await waitFor('the native tabs', (current) => Boolean(tab(current, 'Projects')), 60_000);
             await tap(tab(nodes, 'Projects'));
-            // The tab keeps an open project (the attachments shots leave one): Back to the list.
+
             if (button(await screen(), 'Back')) await back();
         }
         const projects = await waitFor(PROJECT, (current) => Boolean(inList(current, PROJECT)), 45_000);
@@ -763,12 +684,12 @@ const shootProjectDetails = async (prefix, suffix, rn) => {
         await shoot(`${prefix}-project-details-end-${suffix}`, end);
     } catch (error) {
         console.log(`warn - ${prefix} project details: ${error.message}`);
-        try { writeFileSync(resolve(out, `${prefix}-project-details-failed.xml`), adbRaw('exec-out', 'uiautomator', 'dump', '/dev/tty')); } catch { /* best effort */ }
+        try { writeFileSync(resolve(out, `${prefix}-project-details-failed.xml`), adbRaw('exec-out', 'uiautomator', 'dump', '/dev/tty')); } catch {                   }
     }
     for (let step = 0; step < 4 && !tab(await screen(), 'Inbox'); step += 1) await back();
     if (!rn) { const nodes = await screen(); if (button(nodes, 'Back')) await back(); }
 };
-/** Pass R2: Settings › Notifications (top, end) and its day picker. */
+
 const shootR2 = async (prefix, suffix, rn) => {
     if (rn) openLink('focus');
     else {
@@ -789,11 +710,11 @@ const shootR2 = async (prefix, suffix, rn) => {
     for (let step = 0; step < 3; step += 1) nodes = await device.swipe(nodes, 'up');
     let day = await waitFor('the Review day row', (current) => current.some((node) => node.text === en['settings.weeklyReviewDay']
         || (node['content-desc'] ?? '').startsWith(`${en['settings.weeklyReviewDay']}: `)), 15_000);
-    // The row can sit at the screen's bottom edge: one drag brings it up.
+
     day = await device.swipe(day, 'down');
     await tap(day.find((node) => (node['content-desc'] ?? '').startsWith(`${en['settings.weeklyReviewDay']}: `)) ?? day.find((node) => node.text === en['settings.weeklyReviewDay']));
     await shoot(`${prefix}-notifications-day-picker-${suffix}`, (current) => hasText(current, 'Wednesday'));
-    // Back until the tabs show (the picker, Notifications, Settings), never past them.
+
     for (let step = 0; step < 6; step += 1) {
         const current = await screen();
         if (rn ? current.some((node) => node['content-desc'] === 'Menu') && !hasText(current, en['settings.notificationsEnable']) && !hasText(current, 'Wednesday')
@@ -803,7 +724,7 @@ const shootR2 = async (prefix, suffix, rn) => {
         await sleep(900);
     }
 };
-/** PARITY_ONLY=status-menu: the status menu of the Inbox row T.call, then its Move to project or area… picker; Back closes both. */
+
 const shootStatusMenu = async (prefix, rn) => {
     if (rn) openLink('inbox');
     else {
@@ -834,7 +755,7 @@ const shootStatusMenu = async (prefix, rn) => {
         await sleep(900);
     }
 };
-/** PARITY_ONLY=gtd-hub: Settings › GTD from the Menu sheet with the "Include start dates in Today" switch on screen, then Back to the tabs. */
+
 const shootGtdHub = async (prefix, rn) => {
     if (rn) openLink('focus');
     else {
@@ -860,7 +781,7 @@ const shootGtdHub = async (prefix, rn) => {
         await sleep(900);
     }
 };
-/** Pass S5 only: Settings › Sync from the Menu sheet, the File panel's two shots, then Back to the tabs. */
+
 const shootS5 = async (prefix, suffix, rn) => {
     if (rn) openLink('focus');
     const menu = await waitFor('the Menu tab', (current) => Boolean(rn ? current.find((node) => node['content-desc'] === 'Menu') : tab(current, 'Menu')), 60_000);
@@ -881,11 +802,8 @@ const shootS5 = async (prefix, suffix, rn) => {
         await sleep(900);
     }
 };
-/**
- * Pass R2b: the Pomodoro card on Focus in each state. Both apps label the card's controls with core's en words (RN as text,
- * native as the node's description). It ends at the idle card with Timer only, as it began.
- */
-/** Pass small-2: Focus pulled down from its top (5bb0ea8f), shot 300 ms and 900 ms after the finger lifts (the bar is brief). */
+
+
 const shootSmall2 = async (prefix, rn) => {
     if (rn) openLink('focus');
     else {
@@ -904,7 +822,7 @@ const shootSmall2 = async (prefix, rn) => {
         shots.push(`${prefix}-pull-sync-${frame}-light`);
         console.log(`shot ${prefix}-pull-sync-${frame}-light.png`);
     }
-    await sleep(4000); // the notice leaves before the next screen
+    await sleep(4000);
 };
 const shootR2b = async (prefix, rn) => {
     const labeled = (nodes, label) => nodes.findLast((node) => node.text === label || node['content-desc'] === label);
@@ -924,8 +842,8 @@ const shootR2b = async (prefix, rn) => {
     await shoot(`${prefix}-pomodoro-picker-light`, shown(T.outline, en['pomodoro.timerOnly']));
     await press(T.outline);
     await shoot(`${prefix}-pomodoro-linked-light`, shown(en['pomodoro.markTaskDone']));
-    // A running card redraws each second, so uiautomator never sees the screen idle: the running shot waits a fixed time, and
-    // Pause is tapped where Start was (the same button).
+
+
     const toggle = labeled(await screen(), en['common.start']);
     await tap(toggle);
     await sleep(2500);
@@ -940,7 +858,7 @@ const shootR2b = async (prefix, rn) => {
     await shoot(`${prefix}-pomodoro-break-light`, shown('05:00', en['pomodoro.switchToFocus']));
     await press(en['pomodoro.collapse']);
     await shoot(`${prefix}-pomodoro-collapsed-light`, shown(en['pomodoro.expand']));
-    // Back to the start: expanded, Focus, the full 25:00, Timer only.
+
     await press(en['pomodoro.expand']);
     await press(en['pomodoro.switchToFocus']);
     await press(en['common.reset']);
@@ -948,15 +866,12 @@ const shootR2b = async (prefix, rn) => {
     await press(en['pomodoro.timerOnly']);
     await waitFor('the idle card again', (current) => shown('25:00', en['common.start'])(current) && !labeled(current, en['pomodoro.markTaskDone']), 30_000);
 };
-/**
- * Pass 13a, in light mode: (1) Done on Focus's T.milk (RN's swipe action) shows the "marked Done" toast with Undo, and Undo brings
- * the row back; (2) Process Inbox's Trash on its first item shows the toast with Undo, and Undo puts the item back in the Inbox;
- * (3) the Daily Review lists all seven of tomorrow's events (shot at its top and at the last one).
- */
+
+
 const shoot13a = async (prefix, rn) => {
     const labeled = (nodes, label) => nodes.findLast((node) => node.text === label || node['content-desc'] === label);
     const undoShown = (current) => Boolean(labeled(current, en['common.undo']));
-    // A toast lasts 5.2 s and one UI dump takes 1-2 s: the shot and the Undo tap use the dump that found it, with no wait between.
+
     const shootAndUndo = async (name, nodes) => {
         requireAppFront();
         writeFileSync(resolve(out, `${name}.png`), adbRaw('exec-out', 'screencap', '-p'));
@@ -969,7 +884,7 @@ const shoot13a = async (prefix, rn) => {
         const tabs = await waitFor('the native tabs', (current) => Boolean(tab(current, name)), 60_000);
         if (!tabSelected(tabs, name)) await tap(tab(tabs, name));
     };
-    // (1) Done from Focus, then Undo.
+
     await showTab('Focus');
     const row = await waitFor(`${T.milk} in Focus`, (current) => Boolean(inList(current, T.milk)), 45_000);
     const [x1, y1, , y2] = box(inList(row, T.milk));
@@ -986,7 +901,7 @@ const shoot13a = async (prefix, rn) => {
     await waitFor(`${T.milk} back in Focus`, (current) => Boolean(inList(current, T.milk)), 15_000);
     check(true, `(13a-1) ${prefix}: Undo after Done brought ${T.milk} back to Focus`);
     await shoot(`${prefix}-complete-undone-light`, (current) => Boolean(inList(current, T.milk)) && !undoShown(current));
-    // (2) Trash in Process Inbox, then Undo.
+
     await showTab('Inbox');
     const inbox = await waitFor('the Process Inbox button', (current) => current.some((node) => node['content-desc'] === PROCESS), 45_000);
     await tap(inbox.find((node) => node['content-desc'] === PROCESS));
@@ -1005,7 +920,7 @@ const shoot13a = async (prefix, rn) => {
     await waitFor(`${T.call} back in the Inbox`, (current) => Boolean(inList(current, T.call)), 15_000);
     check(true, `(13a-2) ${prefix}: Undo after Trash put ${T.call} back in the Inbox`);
     await shoot(`${prefix}-inbox-trash-undone-light`, (current) => Boolean(inList(current, T.call)));
-    // (3) The Daily Review with all seven of tomorrow's events.
+
     if (rn) openLink('review');
     else {
         const menu = await waitFor('the Menu tab', (current) => Boolean(tab(current, 'Menu')), 30_000);
@@ -1030,7 +945,7 @@ const shoot13a = async (prefix, rn) => {
 };
 const c3FixesOnly = process.env.PARITY_ONLY === 'c3-fixes';
 const originalFontScale = sh('settings get system font_scale');
-/** Opens the Calendar (RN: its link; native: the Menu sheet's tile). */
+
 const openCalendar = async (rn) => {
     if (rn) { openLink('calendar'); return; }
     const menu = await waitFor('the Menu tab', (current) => Boolean(tab(current, 'Menu')), 30_000);
@@ -1038,13 +953,13 @@ const openCalendar = async (rn) => {
     const sheet = await waitFor('the Calendar tile', (current) => current.some((node) => node['content-desc'] === en['nav.calendar']), 15_000);
     await tap(sheet.find((node) => node['content-desc'] === en['nav.calendar']));
 };
-/** C3 fix 2: the month with today's details, then a return to the app reloads the same range while the feed answers slowly. */
+
 const shootCalendarReload = async (prefix, rn) => {
     await openCalendar(rn);
     await calendarMode(en['calendar.mobile.month']);
     const today = await waitFor('Today', (current) => Boolean(withDescription(current, en['calendar.today'])), 15_000);
     await tap(withDescription(today, en['calendar.today']));
-    // Today's details pane lists the fixture's tasks first: scroll inside the pane (the bottom of the screen) to its events.
+
     const eventShown = (current) => hasText(current, CALENDAR_EVENTS.timed) || current.some((node) => (node['content-desc'] ?? '').includes(CALENDAR_EVENTS.timed));
     let nodes = await screen();
     const [, , width, height] = box(nodes.find((node) => node.bounds) ?? { bounds: '[0,0][1080,2340]' });
@@ -1059,13 +974,13 @@ const shootCalendarReload = async (prefix, rn) => {
     requireAppFront();
     sh('input keyevent KEYCODE_HOME');
     await sleep(1500);
-    // The launcher's intent: the task comes back as it was (RN's AppState and native's resume reload the Calendar's range).
+
     sh(`monkey -p ${PKG} -c android.intent.category.LAUNCHER 1`);
     await shoot(`${prefix}-calendar-reload-light`, (current) => hasText(current, en['calendar.mobile.loading']));
     calendarServer.state.mode('parity', 'ok');
     await sleep(16_000);
 };
-/** C3 fix 3: Settings › Calendar at system font scale [scale], scrolled to its pills (Add, Test, Choose local .ics file). */
+
 const shootPillsFontScale = async (prefix, rn, activity, scale = '2.0') => {
     await stopApp();
     sh(`settings put system font_scale ${scale}`);
@@ -1092,11 +1007,8 @@ const shootPillsFontScale = async (prefix, rn, activity, scale = '2.0') => {
     sh(`settings put system font_scale ${originalFontScale === 'null' ? '1.0' : originalFontScale}`);
     await stopApp();
 };
-/**
- * Pass D1b: Settings › Data with the Backup fold open at its end (RN's Getting Started row), the Import fold open (the guide
- * link and the five importers), and in light mode the Todoist question for a pushed Todoist CSV and the warning for that file on
- * the DGT row (both cancelled or dismissed, so nothing is written). Back to the tabs at the end.
- */
+
+
 const shootD1b = async (prefix, suffix, rn) => {
     if (rn) openLink('inbox');
     const menu = await waitFor('the Menu tab', (current) => Boolean(rn ? current.find((node) => node['content-desc'] === 'Menu') : tab(current, 'Menu')), 60_000);
@@ -1158,7 +1070,7 @@ try {
     calendarServer = await serveCalendar(CALENDAR_PORT, icsCalendar({ ...CALENDAR_EVENTS, moreAllDay: MORE_EVENTS, name: CALENDAR_FEED.name }));
     adbRaw('reverse', `tcp:${CALENDAR_PORT}`, `tcp:${CALENDAR_PORT}`);
 
-    // RN 154, fresh, with the fixture as its database before its first launch.
+
     if (installed()) sh(`pm uninstall ${PKG}`);
     adbRaw('install', '-g', apks.rn);
     runAs('mkdir -p files/SQLite');
@@ -1170,7 +1082,7 @@ try {
     device.launch(RN_ACTIVITY);
     if (c3FixesOnly) {
         await setNight('no');
-        // Settings › Calendar first: RN's Calendar reads the subscriptions RN's Settings › Calendar copies to the device.
+
         await shootPillsFontScale('rn', true, RN_ACTIVITY);
         await shootPillsFontScale('rn', true, RN_ACTIVITY, '1.0');
         device.launch(RN_ACTIVITY);
@@ -1178,8 +1090,8 @@ try {
     }
     for (const mode of c3FixesOnly ? [] : ['no', 'yes']) {
         await setNight(mode);
-        // RN's activity handles uiMode itself, so AppCompat's own colors (a switch's default thumb) stay as they were at launch:
-        // start RN again in dark mode, as a user who opens it in dark mode sees it.
+
+
         if (mode === 'yes') {
             await stopApp();
             device.launch(RN_ACTIVITY);
@@ -1220,7 +1132,7 @@ try {
     }
     await stopApp();
 
-    // The native build over it: the same database, the same screens (tabs are tapped; it has no links).
+
     adbRaw('install', '-r', '-d', '-g', apks.native);
     await setNight('no');
     device.launch(NATIVE_ACTIVITY);
@@ -1248,14 +1160,14 @@ try {
         const nodes = await waitFor('the native tabs', (current) => Boolean(tab(current, 'Focus')), 60_000);
         if (!tabSelected(nodes, 'Focus')) await tap(tab(nodes, 'Focus'));
         await shootEditor(`native-editor-${mode === 'yes' ? 'dark' : 'light'}`, false);
-        // Search from the header's button, the query typed (letters: the parity fixture's titles are words).
+
         const search = await waitFor('the header Search button', (current) => current.some((node) => node['content-desc'] === 'Search'), 30_000);
         await tap(search.find((node) => node['content-desc'] === 'Search'));
         await waitFor('the search field', (current) => current.some((node) => node.class === 'android.widget.EditText'), 15_000);
         requireAppFront();
         sh(`input text ${SEARCH_QUERY}`);
-        // A Pinyin keyboard holds typed letters in its own composition strip and sends none to the field
-        // (run 21: the field stayed empty with "kitchen" above the keys). Enter commits the held letters as typed.
+
+
         await sleep(800);
         const typed = (current) => current.some((node) => node.class === 'android.widget.EditText' && node.text === SEARCH_QUERY);
         if (!typed(await device.screen())) {
@@ -1281,7 +1193,7 @@ try {
     }
     await stopApp();
 
-    // RN on the left, native on the right.
+
     const magick = ['magick', 'convert'].find((tool) => { try { execFileSync('which', [tool], { stdio: 'ignore' }); return true; } catch { return false; } });
     for (const name of shots.filter((shot) => shot.startsWith('rn-')).map((shot) => shot.slice(3))) {
         if (!magick || !shots.includes(`native-${name}`)) continue;
@@ -1294,14 +1206,14 @@ try {
     console.error(error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
     process.exitCode = error instanceof Stopped ? 3 : 1;
 } finally {
-    try { adbRaw('reverse', '--remove', `tcp:${CALENDAR_PORT}`); } catch { /* device gone */ }
+    try { adbRaw('reverse', '--remove', `tcp:${CALENDAR_PORT}`); } catch {                   }
     void calendarServer?.close();
-    try { if (installed()) sh(`pm uninstall ${PKG}`); } catch { /* device gone */ }
-    try { sh(`cmd uimode night ${['yes', 'no', 'auto'].includes(originalNight) ? originalNight : 'auto'}`); } catch { /* device gone */ }
-    try { sh(originalFontScale === 'null' ? 'settings delete system font_scale' : `settings put system font_scale ${originalFontScale}`); } catch { /* device gone */ }
+    try { if (installed()) sh(`pm uninstall ${PKG}`); } catch {                   }
+    try { sh(`cmd uimode night ${['yes', 'no', 'auto'].includes(originalNight) ? originalNight : 'auto'}`); } catch {                   }
+    try { sh(originalFontScale === 'null' ? 'settings delete system font_scale' : `settings put system font_scale ${originalFontScale}`); } catch {                   }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh('rm -f /data/local/tmp/mindwtr-parity-ui.xml /data/local/tmp/mindwtr-parity.db'); } catch { /* device gone */ }
-    try { sh(`rm -rf ${DATA_DIR}`); } catch { /* device gone */ }
+    try { sh('rm -f /data/local/tmp/mindwtr-parity-ui.xml /data/local/tmp/mindwtr-parity.db'); } catch {                   }
+    try { sh(`rm -rf ${DATA_DIR}`); } catch {                   }
 }

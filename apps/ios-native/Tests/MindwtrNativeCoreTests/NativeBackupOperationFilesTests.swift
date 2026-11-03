@@ -67,7 +67,7 @@ final class NativeBackupOperationFilesTests: XCTestCase {
             let name = try owner.nextSnapshotName(at: date)
             XCTAssertTrue(name.hasPrefix("data."))
             XCTAssertTrue(name.hasSuffix(".snapshot.json"))
-            // nextName is read-only and creates neither storage family.
+
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
             let first = try owner.prepare(id: id(), planJSON: "{}", newSnapshot: (name, "first"), existingSnapshot: nil)
             XCTAssertThrowsError(try owner.prepare(id: id(), planJSON: "{}", newSnapshot: (name, "replacement"), existingSnapshot: nil))
@@ -144,7 +144,7 @@ final class NativeBackupOperationFilesTests: XCTestCase {
             try initialPlan.write(to: plan)
             try Data("{}".utf8).write(to: manifest)
             XCTAssertThrowsError(try owner.read(reference))
-            // Even a recomputed digest cannot authorize an unknown local schema.
+
             var object = try XCTUnwrap(JSONSerialization.jsonObject(with: initialManifest) as? [String: Any])
             object["path"] = "../../escape"
             let forgedManifest = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
@@ -181,7 +181,7 @@ final class NativeBackupOperationFilesTests: XCTestCase {
             XCTAssertThrowsError(try owner.discardUnreferencedOperations(retaining: []))
             XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: plan.path), target.path)
             XCTAssertEqual(try String(contentsOf: target), "private-target")
-            // Unknown ownership of the linked operation also protects its snapshot.
+
             XCTAssertEqual(try owner.readSnapshot(snapshot), "{\"data\":\"before\"}")
             try FileManager.default.removeItem(at: plan)
             XCTAssertEqual(Darwin.link(target.path, plan.path), 0)
@@ -235,8 +235,8 @@ final class NativeBackupOperationFilesTests: XCTestCase {
             let afterRename = Set(try owner.listSnapshots().map { $0.id })
             XCTAssertTrue(Set(old.map { $0.id }).isSubset(of: afterRename))
             XCTAssertTrue(afterRename.contains(pending.id))
-            // Recreate after the rename and finish synchronization without changing
-            // plan bytes or making another recovery snapshot.
+
+
             let recreated = NativeBackupOperationFiles(libraryRoot: root)
             try recreated.complete(reference)
             try recreated.complete(reference)
@@ -259,7 +259,7 @@ final class NativeBackupOperationFilesTests: XCTestCase {
             try recreated.discardUnreferencedOperations(retaining: [restore.id])
             XCTAssertEqual(try recreated.readSnapshot(oldest), "{\"data\":\"before\"}")
             try recreated.discard(restore, provenRejected: true)
-            // Discard itself never deletes a completed snapshot.
+
             XCTAssertEqual(try recreated.readSnapshot(oldest), "{\"data\":\"before\"}")
             try recreated.discardUnreferencedOperations(retaining: [])
             XCTAssertEqual(try recreated.listSnapshots().count, 5)
@@ -427,8 +427,7 @@ final class NativeBackupOperationFilesTests: XCTestCase {
         }
     }
 
-    /// Intentionally exercises the actual product ceilings; run separately when
-    /// reporting large-file capacity because this allocates >512MiB of UTF-8 data.
+
     func testExactProductByteBoundsAndUnicodeOverflow() throws {
         XCTAssertEqual(NativeBackupOperationFiles.maximumPlanBytes, 536870912)
         XCTAssertEqual(NativeBackupOperationFiles.maximumSnapshotBytes, 134217728)

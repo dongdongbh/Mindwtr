@@ -1,6 +1,6 @@
 import Foundation
 
-/// Serialized Engine calls only: the caller retains the exact owner/library/KV lease and drains before close.
+
 final class NativeCalendarPushEffects {
     private let storage: NativeDeviceKV
     private let database: SQLiteBridge
@@ -55,7 +55,7 @@ final class NativeCalendarPushEffects {
         return started
     }
 
-    /// The exact owner drains old jobs first; confirmed started publication always precedes worker admission.
+
     func discardPrepared(id: UUID) throws {
         let snapshot = try read()
         guard let effect = snapshot.effect, effect.id == id, effect.phase == .prepared else {
@@ -64,7 +64,7 @@ final class NativeCalendarPushEffects {
         _ = try publish(nil, replacing: snapshot.state)
     }
 
-    /// The caller retains the actual worker outcome until this publication succeeds, then retires it.
+
     func acceptCompletion(id: UUID, outcome: NativeCalendarWriteOutcome) throws {
         let snapshot = try read()
         guard let effect = snapshot.effect, effect.id == id, effect.phase == .started else {
@@ -103,7 +103,7 @@ final class NativeCalendarPushEffects {
         _ = try publish(nil, replacing: state)
     }
 
-    /// Before cold saved-delete acknowledgment, the exact owner must freshly prove the calendar is absent.
+
     func acknowledgeCalendar(id: UUID) throws {
         let snapshot = try read()
         guard let effect = snapshot.effect, effect.id == id, effect.phase == .saved,
@@ -135,10 +135,10 @@ final class NativeCalendarPushEffects {
         try retryPublication()
     }
 
-    /// Admission only: cold records retain their own validation without requiring hypothetical future space.
+
     private func preflightTransitions(_ effect: NativeCalendarPushEffect) throws {
         let started = try effect.markingStarted()
-        // NUL is valid here and uses the largest JSON escape per permitted UTF-8 byte.
+
         let maximumIdentifier = String(repeating: "\0", count: 1024)
         let maximumStamp = String(repeating: "\0", count: 128)
         switch effect.request {
@@ -172,7 +172,7 @@ final class NativeCalendarPushEffects {
         let intent = try Self.calendarIntent(state[4])
         switch request {
         case .createCalendar(let details):
-            // The exact owner separately proves a stale saved ID absent before admitting this unbound create.
+
             guard let intent, intent.calendarID == nil, intent.deletionRevision == nil,
                   NativeCalendarWriteValidation.equalID(intent.title, details.title) else { throw NativeCalendarWriteError.invalid }
         case .updateCalendar(let calendarID, let details):

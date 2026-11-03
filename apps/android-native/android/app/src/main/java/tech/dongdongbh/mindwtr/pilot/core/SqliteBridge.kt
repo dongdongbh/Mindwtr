@@ -10,34 +10,20 @@ import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
 
-/**
- * The core's storage port.
- *
- * The core builds every SQL statement through its own `SqliteAdapter`. This
- * class only runs them and turns rows into JSON. It knows no Mindwtr table or
- * column name.
- *
- * It uses androidx's **bundled** SQLite, not the one built into Android. This
- * phone's own SQLite has no FTS5, the full-text search engine the core's schema
- * creates, so creating the schema failed outright with it.
- */
+
 class SqliteBridge(databaseFile: File) {
 
     private val checkpointFile = File(databaseFile.parentFile, "${databaseFile.name}.prewrite")
 
     private val connection: SQLiteConnection = BundledSQLiteDriver().open(databaseFile.absolutePath).apply {
-        // A connection setting: it writes nothing to the file.
+
         prepare("PRAGMA foreign_keys = ON").use { it.step() }
     }
 
-    /** Prepared statements are reused: re-preparing the same SQL is pure waste. */
+
     private val statements = HashMap<String, SQLiteStatement>()
 
-    /**
-     * Run before core schema setup or any task write. Never replace the first snapshot.
-     * The journal settings come only after the snapshot exists: switching a
-     * rollback-journal database to WAL rewrites its header.
-     */
+
     fun ensureRecoveryCheckpoint() {
         checkIntegrity(connection)
         if (checkpointFile.exists()) {
@@ -58,9 +44,8 @@ class SqliteBridge(databaseFile: File) {
                 throw error
             }
         }
-        // Write-ahead logging, the same journal mode the app uses. A committed
-        // row can still live in the -wal file, so anything that inspects this
-        // database must close it first or copy .db, -wal and -shm together.
+
+
         exec("PRAGMA journal_mode = WAL")
         exec("PRAGMA synchronous = FULL")
     }
@@ -84,23 +69,19 @@ class SqliteBridge(databaseFile: File) {
             it.clearBindings()
         }
 
-    /** Debug-only fault: set solely by CoreHost's `BuildConfig.DEBUG`-gated hook. */
+
     @Volatile var failCommits = false
 
-    /**
-     * Debug-only fault (check-data-device.mjs E4c, `debug.mindwtr.native.commit_stop=<method>`): set by CoreHost's
-     * `BuildConfig.DEBUG`-gated hook as that journaled write is sent (and cleared as any other is); the process dies right after
-     * the next COMMIT, before core reloads or replies. A replay never sets it.
-     */
+
     @Volatile var stopAfterCommit = false
 
     fun run(sql: String, paramsJson: String) {
-        // The core's adapter then runs ROLLBACK, as after a real commit failure.
+
         if (failCommits && sql == "COMMIT") throw IllegalStateException("Injected commit failure")
         val statement = statementFor(sql)
         bind(statement, JSONArray(paramsJson))
-        // A statement that returns no rows still needs one step to execute.
-        while (statement.step()) { /* drain: PRAGMA and RETURNING answer with rows */ }
+
+        while (statement.step()) {                                                    }
         if (stopAfterCommit && sql == "COMMIT") {
             android.util.Log.i(CoreHost.TAG, "Native Android commit stop at=after-commit")
             android.os.Process.killProcess(android.os.Process.myPid())
@@ -108,17 +89,15 @@ class SqliteBridge(databaseFile: File) {
     }
 
     fun exec(sql: String) {
-        connection.prepare(sql).use { statement -> while (statement.step()) { /* drain */ } }
+        connection.prepare(sql).use { statement -> while (statement.step()) {             } }
     }
 
     fun all(sql: String, paramsJson: String): String {
         val statement = statementFor(sql)
         bind(statement, JSONArray(paramsJson))
         val rows = JSONArray()
-        // Column names are read after the first row arrives. Asking a prepared
-        // but un-stepped statement for them gave empty names here, and every row
-        // then decoded into an object with no `id` — 5,000 rows read, 0 tasks in
-        // the store, and no error anywhere.
+
+
         var columnCount = 0
         var names: Array<String> = emptyArray()
         while (statement.step()) {
@@ -152,8 +131,8 @@ class SqliteBridge(databaseFile: File) {
                 is Boolean -> statement.bindLong(position, if (value) 1L else 0L)
                 is Int -> statement.bindLong(position, value.toLong())
                 is Long -> statement.bindLong(position, value)
-                // JSON has one number type, so a whole number arrives as a
-                // double. Store it as an integer or `rev` columns become floats.
+
+
                 is Double ->
                     if (!value.isInfinite() && value == Math.floor(value)) statement.bindLong(position, value.toLong())
                     else statement.bindDouble(position, value)
@@ -169,15 +148,15 @@ class SqliteBridge(databaseFile: File) {
     }
 
     private companion object {
-        // androidx.sqlite.SQLITE_DATA_* constants, spelled out to avoid a
-        // top-level-property import from Kotlin.
+
+
         const val COLUMN_INTEGER = 1
         const val COLUMN_FLOAT = 2
         const val COLUMN_BLOB = 4
     }
 }
 
-/** Also used for the RN state checkpoint (LegacyRnStoreGuard). */
+
 internal fun syncFile(file: File) {
     RandomAccessFile(file, "r").use { it.fd.sync() }
 }

@@ -148,15 +148,15 @@ struct MindSweepSheet: View {
             .submitLabel(.done).onSubmit {
                 Task {
                     await model.addMindSweep()
-                    // SwiftUI resigns on Return; RN uses blurOnSubmit=false.
+
                     if model.mindSweepControlsEnabled { inputFocused = true }
                 }
             }
             .padding(12).frame(maxWidth: .infinity, minHeight: 44)
             .background(palette.card, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
-            // The model freezes edits while Add is in flight. Disabling this
-            // focused field would dismiss the keyboard before its acknowledgement.
+
+
             .disabled(model.retryNeeded)
             .contentShape(Rectangle()).onTapGesture { if enabled { inputFocused = true } }
             .accessibilityLabel(labels.text("inputPlaceholder"))

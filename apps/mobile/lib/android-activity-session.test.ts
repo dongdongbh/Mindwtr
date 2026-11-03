@@ -97,8 +97,7 @@ describe('android activity session registry', () => {
     nativeState.destroyed.set(30, { activityId: 30, isChangingConfigurations: true });
     expect(retainAndroidActivitySession('editor', { count: 4 }, 30)).toBe(true);
 
-    // Activity 31 handled an external intent and deliberately did not mount the
-    // editor owner. Activity 32 must not see Activity 30's draft.
+
     nativeState.current = { activityId: 31, isChangingConfigurations: false };
     expect(getCurrentAndroidActivityId()).toBe(31);
     nativeState.current = { activityId: 32, isChangingConfigurations: false };
@@ -125,8 +124,7 @@ describe('android activity session registry', () => {
     expect(retainAndroidActivitySession('editor', { count: 6 }, 50)).toBe(true);
     nativeState.current = { activityId: 51, isChangingConfigurations: false };
 
-    // A caller can reject the value for an external-intent priority decision;
-    // take still consumes it before invoking the caller's restore path.
+
     expect(takeAndroidActivitySession('editor', isCountSnapshot)).toEqual({ value: { count: 6 } });
     nativeState.current = { activityId: 52, isChangingConfigurations: false };
     expect(takeAndroidActivitySession('editor', isCountSnapshot)).toBeNull();

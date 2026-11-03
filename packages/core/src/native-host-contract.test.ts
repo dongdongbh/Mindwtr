@@ -112,7 +112,7 @@ describe('native host contract', () => {
         vi.restoreAllMocks();
     });
 
-    // Inbox and project pages carry a minute in their revision; paging tests keep one minute.
+
     const freezeClock = () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 8, 23, 10, 0));
@@ -209,7 +209,7 @@ describe('native host contract', () => {
             expect(chip.clearedFilters).toEqual(clearGlobalSearchActiveChip(filters, chip.key));
             expect(clearGlobalSearchActiveChip(chip.clearedFilters, chip.key)).toEqual(chip.clearedFilters);
         }
-        // A direct JS consumer cannot change defaults for subsequent queries.
+
         all.value.defaultFilters.selectedTokens.push('#mutated');
         expect(DEFAULT_GLOBAL_SEARCH_FILTERS.selectedTokens).toEqual([]);
     });
@@ -256,7 +256,7 @@ describe('native host contract', () => {
         expect(useTaskStore.getState().settings.savedSearches).toHaveLength(1);
         saveData.mockResolvedValue(undefined);
         const retry = await host.saveSearch(request);
-        // The request UUID names the new search.
+
         expect(retry).toEqual({ ok: true, value: { id: CAPTURE_ID, existing: false } });
         if (!retry.ok) return;
         expect(useTaskStore.getState().settings.savedSearches).toHaveLength(1);
@@ -527,8 +527,8 @@ describe('native host contract', () => {
     });
 
     describe('project detail', () => {
-        // The store state mobile's snapshot rendered from; a real load would run
-        // migrations (for example auto-archiving old Done tasks) first.
+
+
         const activateParity = async () => {
             const host = createNativeHostContract();
             expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
@@ -545,8 +545,8 @@ describe('native host contract', () => {
         };
 
         const expectMobileParity = (value: ReturnType<typeof detail>, scenario: string) => {
-            // #1401 corrects the Reference pile's title order without rewriting
-            // the historical mobile capture used by the other parity scenarios.
+
+
             const mobile = projectParity.mobileSnapshot[scenario].map((item) => {
                 if (scenario !== 'live-sorted-title') return item;
                 if (item.id === 'live-ref') return { ...item, id: 'loose-ref-tag' };
@@ -697,8 +697,7 @@ describe('native host contract', () => {
                 .toEqual(['seq-1', 'seq-2', 'seq-5', 'seq-3']);
             expect(sequentialByTitle.items.every((item) => item.type === 'task' && item.sequenceCue === null)).toBe(true);
 
-            // A time-estimate sort (a valid, feature-gated project sort) falls back to project
-            // order while Time estimates is off.
+
             setProjectSort({ 'p-seq': 'timeEstimate' });
             useTaskStore.setState({ settings: { features: { timeEstimates: false } } });
             const estimatesOff = detail(host, 'p-seq');
@@ -993,7 +992,7 @@ describe('native host contract', () => {
         const completedAt = useTaskStore.getState()._tasksById.get('to-complete')?.completedAt;
         expect(completedAt).toEqual(expect.any(String));
         saveData.mockResolvedValue(undefined);
-        // The exact retry: the completion landed, so its target holds and only the save runs.
+
         expect(await host.completeTask(input)).toEqual({ ok: true, value: { id: 'to-complete' } });
         expect(useTaskStore.getState()._tasksById.get('to-complete')?.completedAt).toBe(completedAt);
     });
@@ -1245,8 +1244,8 @@ describe('native host contract', () => {
     ];
 
     it.each(editorFieldEdits)('persists $field only after its save is durable', async ({ field, value }) => {
-        // Keep the saved schedule in the future; crossing its date must not
-        // turn this durability check into an Inbox activation test.
+
+
         freezeClock();
         const host = await activateWith(
             [task('edit', '2026-09-01T00:00:00.000Z', { description: 'Old notes', priority: 'low' })],
@@ -1585,7 +1584,7 @@ describe('native host contract', () => {
                     t: getTranslator('en'), now: new Date(),
                 }),
             });
-            // Concrete values, so the test does not only compare core with itself.
+
             const { layout, options } = result.value;
             expect(layout.sections.map(({ id, fields }) => [id, fields])).toEqual([
                 ['basic', ['status', 'project', 'area', 'contexts', 'dueDate', 'section']],
@@ -1615,10 +1614,10 @@ describe('native host contract', () => {
                 { id: 'vs-books', title: 'Books', selected: true, viewSectionIds: { someday: 'vs-books' } },
                 { id: 'vs-later', title: 'Later', selected: false, viewSectionIds: { someday: 'vs-later' } },
             ]);
-            // Plain JSON for the native client.
+
             expect(JSON.parse(JSON.stringify({ layout, options }))).toEqual({ layout, options });
 
-            // The area filters the project list, as in the mobile picker.
+
             const waiting = host.getTaskEditorModel({ id: 'waiting' });
             expect(waiting.ok && waiting.value.options.projects.map(({ id }) => id)).toEqual(['p-home']);
             expect(waiting.ok && waiting.value.layout.sections[2].fields).toContain('assignedTo');
@@ -1742,7 +1741,7 @@ describe('native host contract', () => {
             });
             const saved = storedTask()!;
             expect(result).toEqual({ ok: true, value: { id: 'edit', draft: createTaskDraft(saved) } });
-            // Date-only stays date-only; moving projects drops the old project's section.
+
             expect(saved).toMatchObject({ title: 'Mine', dueDate: '2026-10-01', projectId: 'p-home', description: 'Other notes' });
             expect(saved.sectionId).toBeUndefined();
             expect(saveData).toHaveBeenCalledTimes(1);
@@ -1773,7 +1772,7 @@ describe('native host contract', () => {
                 .toMatchObject({ ok: true, value: { draft: { status: 'inbox', focusedToday: false } } });
             expect(storedTask()).toMatchObject({ status: 'inbox', isFocusedToday: false });
 
-            // Status goes first, so the chosen completion time survives its cascade.
+
             const completedAt = '2026-09-20T10:00:00.000Z';
             expect(await host.saveTaskDraft({
                 requestId: newRequestId(),
@@ -1851,7 +1850,7 @@ describe('native host contract', () => {
             expect(await host.saveTaskDraft(input)).toMatchObject({ ok: true, value: { draft: { title: 'Mine' } } });
             expect(storedTask()?.rev).toBe(revAfterFailure);
             expect((saveData.mock.lastCall?.[0] as { tasks: Task[] }).tasks.find(({ id }) => id === 'edit')?.title).toBe('Mine');
-            // A lost reply repeats the request once more: still no write.
+
             const saves = saveData.mock.calls.length;
             expect(await host.saveTaskDraft(input)).toMatchObject({ ok: true });
             expect(storedTask()?.rev).toBe(revAfterFailure);
@@ -1881,7 +1880,7 @@ describe('native host contract', () => {
                 dueDate: '2026-10-01', startTime: '2026-09-30T14:30:00.000Z',
             });
 
-            // The save landed but its reply was lost; no process-local receipt survives.
+
             const restarted = await restartEditorFromLastSave();
             const updateTask = vi.spyOn(useTaskStore.getState(), 'updateTask');
             expect(await restarted.saveTaskDraft(input)).toEqual(first);
@@ -1927,8 +1926,7 @@ describe('native host contract', () => {
             expect(saveData).not.toHaveBeenCalled();
         });
 
-        // The store stamps recurrence and queues a future-start star, so the
-        // saved draft can differ from the request.
+
         it.each([
             {
                 name: 'a recurrence series stamp',
@@ -1955,7 +1953,7 @@ describe('native host contract', () => {
 
         it('keeps retry state per task: A, then B, then the exact retry of A', async () => {
             const host = await activateEditor([editTask(), task('b', '2026-09-01T00:00:00.000Z'), task('other', '2026-09-01T00:00:00.000Z')]);
-            // The store keeps the star queued for its future start.
+
             const inputA = { id: 'edit', base: { focusedToday: false, startTime: '' }, patch: { focusedToday: true, startTime: '2027-01-04' }, requestId: newRequestId() };
             saveData.mockRejectedValue(new Error('disk unavailable'));
             expect(await host.saveTaskDraft(inputA)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
@@ -1964,7 +1962,7 @@ describe('native host contract', () => {
 
             saveData.mockResolvedValue(undefined);
             expect(await host.saveTaskDraft({ id: 'b', base: { title: 'b' }, patch: { title: 'B' }, requestId: newRequestId() })).toMatchObject({ ok: true });
-            // An unrelated write, through another path, between the failure and the retry.
+
             expect((await useTaskStore.getState().updateTask('other', { title: 'Other' })).success).toBe(true);
             expect(await host.saveTaskDraft(inputA)).toMatchObject({ ok: true, value: { draft: { focusedToday: true } } });
             expect(storedTask()).toBe(savedA);
@@ -1978,7 +1976,7 @@ describe('native host contract', () => {
             saveData.mockResolvedValue(undefined);
             expect((await useTaskStore.getState().updateTask('edit', { description: 'Other notes' })).success).toBe(true);
             const afterOtherWrite = storedTask();
-            // The request's receipt answers: its first reply, and nothing is written.
+
             expect(await host.saveTaskDraft(input)).toMatchObject({ ok: true, value: { draft: { title: 'Mine', description: 'Old notes' } } });
             expect(storedTask()).toBe(afterOtherWrite);
         }, 15_000);
@@ -2002,7 +2000,7 @@ describe('native host contract', () => {
 
             expect(await host.saveTaskDraft({ id: 'edit', base: { sectionId: 's-plan' }, patch: { sectionId: 's-ship' }, requestId: newRequestId() }))
                 .toMatchObject({ ok: true, value: { draft: { sectionId: 's-ship' } } });
-            // Moving projects without naming a section still drops the old one, as in the mobile editor.
+
             expect(await host.saveTaskDraft({ id: 'edit', base: { projectId: 'p-work' }, patch: { projectId: 'p-home' }, requestId: newRequestId() }))
                 .toMatchObject({ ok: true, value: { draft: { projectId: 'p-home', sectionId: '' } } });
         });
@@ -2017,7 +2015,7 @@ describe('native host contract', () => {
                 requestId: newRequestId(),
                 id: 'via-host', base: { status: 'inbox', startTime: '' }, patch: { status: 'inbox', startTime: '2026-10-01' },
             })).toMatchObject({ ok: true });
-            // The mobile editor: the same draft edit through its save composition, then the store.
+
             const adapterTask = storedTask('via-adapter')!;
             const state = createTaskEditDraft(adapterTask);
             const adapterPatch = buildTaskEditUpdatePatch({ ...state, draft: setTaskDraftField(state.draft, 'startTime', '2026-10-01') }, adapterTask);
@@ -2028,7 +2026,7 @@ describe('native host contract', () => {
                 const saved = storedTask(id)!;
                 return { status: saved.status, startTime: saved.startTime, isFocusedToday: saved.isFocusedToday };
             };
-            // Both promote the task to Next: a start date is a clarify decision in the store.
+
             expect(outcome('via-host')).toEqual(outcome('via-adapter'));
             expect(outcome('via-host')).toMatchObject({ status: 'next', startTime: '2026-10-01' });
         });
@@ -2053,7 +2051,7 @@ describe('native host contract', () => {
                 field: 'contexts', text: '@o', limit: 4, knownTokens: ['@home', '@office', '@offsite', '@Seasonal Planning'], usage: derived.contextTokenUsage,
                 people: state.people, tasks: state.tasks,
             }) });
-            // Typed matches include retained history, ranked before substring matches.
+
             expect(contexts.ok && contexts.value.matches).toEqual([
                 { value: '@office', text: '@office, ' },
                 { value: '@offsite', text: '@offsite, ' },
@@ -2076,7 +2074,7 @@ describe('native host contract', () => {
             expect(contexts.ok && contexts.value.draftValue).toBe('@o');
             expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'tags', query: '', limit: 4 }))
                 .toMatchObject({ ok: true, value: { matches: [], quick: [{ value: '#launch', selected: false, text: '#launch' }] } });
-            // Loading made Sam a person just now, so the more recent Sam comes first.
+
             expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'assignedTo', query: 'a', limit: 4 }))
                 .toMatchObject({ ok: true, value: { draftValue: 'a', matches: [{ value: 'Sam', text: 'Sam' }, { value: 'Alex', text: 'Alex' }], quick: [] } });
             expect(host.getTaskEditorSuggestions({ id: 'missing', field: 'tags', query: '', limit: 4 }))
@@ -2130,7 +2128,7 @@ describe('native host contract', () => {
         });
         describe('draft edits (editTaskDraft)', () => {
             type Host = ReturnType<typeof createNativeHostContract>;
-            // A host keeps the draft as JSON: unset fields drop out.
+
             const json = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
             const openDraft = (host: Host, id = 'edit') => {
                 const result = host.getTaskEditorModel({ id });
@@ -2142,7 +2140,7 @@ describe('native host contract', () => {
                 if (!result.ok) throw new Error(result.error.message);
                 return result.value;
             };
-            // saveTaskDraft's base and patch: the fields the edit changed.
+
             const changes = (before: TaskDraft, after: TaskDraft) => {
                 const fields = (Object.keys({ ...before, ...after }) as Array<keyof TaskDraft>)
                     .filter((field) => JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null));
@@ -2196,7 +2194,7 @@ describe('native host contract', () => {
                 const moved = edited(host, draft, { type: 'fields', patch: { projectId: 'p-home', sectionId: '' } });
                 expect(moved.options.sections).toEqual([]);
                 expect(edited(host, draft).options.sections.map(({ id }) => id)).toEqual(['s-ship', 's-plan']);
-                // Nothing is written.
+
                 expect(storedTask()?.status).toBe('next');
             });
 
@@ -2267,8 +2265,7 @@ describe('native host contract', () => {
                         .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
                     expect(saveData).not.toHaveBeenCalled();
 
-                    // Explicit native date intent remains raw even when it equals
-                    // the opening projection that RN now protects from drift.
+
                     const prepared = host.prepareTaskDraftSave({ id: 'edit', base: { dueDate: draft.dueDate }, patch: { dueDate: draft.dueDate }, scheduleBase: opening.value.scheduleBase });
                     if (!prepared.ok) throw new Error(prepared.error.message);
                     const recovered = json(prepared.value);
@@ -2296,7 +2293,7 @@ describe('native host contract', () => {
                     dueDate: '2026-10-05', startTime: '2026-10-03', relativeStartOffset: { amount: -2, unit: 'day' },
                 });
 
-                // A hand-set start ends the link; clearing the due ends it too.
+
                 const next = openDraft(host);
                 expect(edited(host, next, { type: 'pickDate', field: 'startTime', date: '2026-10-01' }).draft.relativeStartOffset).toBeUndefined();
                 expect(edited(host, next, { type: 'date', field: 'dueDate', value: '' }).draft).toMatchObject({
@@ -2319,7 +2316,7 @@ describe('native host contract', () => {
                 expect(due.draft.dueDate).toBe(new Date(2026, 9, 1, 17, 0).toISOString());
                 expect(due.fields.dueDate).toMatchObject({ label: '2026-10-01 17:00', hasTime: true, time: '17:00', dateOnly: '2026-10-01' });
                 expect(edited(host, draft, { type: 'pickDate', field: 'reviewAt', date: '2026-10-02' }).draft.reviewAt).toBe('2026-10-02T09:15');
-                // No time yet: the default schedule time is added.
+
                 expect(edited(host, draft, { type: 'pickDate', field: 'startTime', date: '2026-10-01' }).draft.startTime).toBe('2026-10-01T09:05');
                 const timed = edited(host, draft, { type: 'pickTime', field: 'dueDate', time: '08:30' });
                 expect(timed.draft.dueDate).toBe(new Date(2026, 8, 25, 8, 30).toISOString());
@@ -2330,9 +2327,9 @@ describe('native host contract', () => {
                 expect(moved.draft.dueDate).toBe('2026-10-01T09:05');
                 const chip = edited(host, plain, undefined, 'plain').fields.dueDate.quickDates.find(({ preset }) => preset === 'tomorrow')!;
                 expect(chip).toMatchObject({ label: 'Tomorrow', selected: false, value: '2026-09-24T09:05' });
-                // The host also applies the user's settings globally, for quick add's parsing, as RN's root layout does (#1006).
+
                 expect(getDateFormattingConfig().dateFormat).toBe('ymd');
-                // Labels follow the user's date settings through the host's formatter, never the global one.
+
                 configureDateFormatting({ dateFormat: 'mdy' });
                 expect(edited(host, plain, undefined, 'plain').fields.dueDate.label).toBe('2026-09-25');
                 configureDateFormatting();
@@ -2343,7 +2340,7 @@ describe('native host contract', () => {
                 process.env.TZ = 'America/New_York';
                 try {
                     vi.useFakeTimers({ toFake: ['Date'] });
-                    // Today is the spring DST change: 02:00-03:00 does not exist today.
+
                     vi.setSystemTime(new Date('2027-03-14T10:00:00'));
                     const host = await activateEditor([
                         editTask({ dueDate: '2027-03-20', startTime: '2027-03-14', reviewAt: '2027-03-20' }),
@@ -2358,15 +2355,15 @@ describe('native host contract', () => {
                         edited(host, from, { type: 'pickTime', field, time }, id).draft[field]
                     );
                     expect(local(pickTime('dueDate', '02:30'))).toEqual([3, 20, 2, 30]);
-                    // On the change day itself the skipped 02:30 moves forward, as the mobile editor stores it.
+
                     expect(local(pickTime('startTime', '02:30'))).toEqual([3, 14, 3, 30]);
                     expect(local(pickTime('dueDate', '23:30'))).toEqual([3, 20, 23, 30]);
                     const moved = edited(host, draft, { type: 'pickDate', field: 'dueDate', date: '2027-03-14' });
                     expect(local(pickTime('dueDate', '23:30', moved.draft))).toEqual([3, 14, 23, 30]);
-                    // The repeated 01:30 on the autumn change takes its first occurrence (EDT).
+
                     vi.setSystemTime(new Date('2027-11-07T10:00:00'));
                     expect(pickTime('dueDate', '01:30', openDraft(host, 'fall'), 'fall')).toBe('2027-11-07T05:30:00.000Z');
-                    // Review keeps the picked time as local wall time on its own day, as its day picker does.
+
                     expect(edited(host, draft, { type: 'pickTime', field: 'reviewAt', time: '14:30' }).draft.reviewAt).toBe('2027-03-20T14:30');
                 } finally {
                     if (originalTz === undefined) delete process.env.TZ;
@@ -2384,7 +2381,7 @@ describe('native host contract', () => {
                     expect(host.editTaskDraft({ id: 'edit', draft, edit: { type: 'relativeStart', amount, unit: 'day' } }))
                         .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
                 }
-                // Negative input starts on the due date, as the mobile input does.
+
                 expect(edited(host, draft, { type: 'relativeStart', amount: '-4', unit: 'day' }).draft)
                     .toMatchObject({ startTime: '2026-09-28', relativeStartOffset: { amount: 0, unit: 'day' } });
             });
@@ -2534,17 +2531,17 @@ describe('native host contract', () => {
                 };
                 const unsaved = [{ id: 'c-new', title: '', isCompleted: false }];
 
-                // The field is hidden and the task has no items: no Checklist field.
+
                 expect(layout('edit')?.fields).not.toContain('checklist');
-                // An item added in the editor shows it, counts it and opens its section.
+
                 expect(layout('edit', unsaved)).toMatchObject({ fields: expect.arrayContaining(['checklist']), filledCount: 1, open: true });
-                // Items removed in the editor hide it again, though the task still has some saved.
+
                 expect(layout('listed')?.fields).toContain('checklist');
                 expect(layout('listed', [])?.fields).not.toContain('checklist');
-                // A reference shows its checklist only while it has items.
+
                 expect(layout('reference')?.fields ?? []).not.toContain('checklist');
                 expect(layout('reference', unsaved)?.fields).toContain('checklist');
-                // Nothing is written.
+
                 expect(storedTask()?.checklist).toBeUndefined();
                 expect(storedTask('listed')?.checklist).toEqual(saved);
             });
@@ -2654,8 +2651,7 @@ describe('native host contract', () => {
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
     });
 
-    // #1444 (7ecbd5be3): RN folds a grouped Next actions heading and Today's "Later today" heading (buildFocusNextItems,
-    // buildFocusScheduleItems with the device's collapsedGroupIds); the header counts stay, the folded rows go.
+
     it('folds Next action groups and Later today with the device folds, as RN does (#1444)', async () => {
         const now = new Date(2026, 8, 23, 10);
         const host = await activateWith([
@@ -2677,8 +2673,8 @@ describe('native host contract', () => {
             return { total: section.total, rowTotal: section.rowTotal, rows: section.rows.map(({ id }) => id),
                 groups: section.groups?.map(({ id, count, collapsed, axis, start }) => ({ id, count, collapsed, axis, start })) };
         };
-        // A host that sends no folds (iOS) keeps drawing Later today from the rows' laterToday: no Today heading. iOS's
-        // CoreModel.readFocus and InboxScreen read these keys (no exact-key guard); pin them so a change is seen here.
+
+
         const plain = host.getFocus({ limit: 20, controls: DEFAULT_FOCUS_CONTROL_STATE });
         if (!plain.ok) throw new Error(plain.error.message);
         expect(plain.value.sections.find(({ key }) => key === 'schedule')!.groups).toBeNull();
@@ -2699,20 +2695,19 @@ describe('native host contract', () => {
             { id: 'context:@home', count: 1, collapsed: true, axis: 'context', start: 0 },
             { id: 'context:@phone', count: 1, collapsed: false, axis: 'context', start: 0 },
         ] });
-        // A folded last group has no row to precede: its heading comes with the window that ends the section.
+
         const trailing = host.getFocus({ limit: 1, controls: DEFAULT_FOCUS_CONTROL_STATE, collapsedGroupIds: ['context:@phone'] });
         expect(trailing.ok && shape(trailing.value, 'next')).toEqual({ total: 2, rowTotal: 1, rows: ['home'], groups: [
             { id: 'context:@home', count: 1, collapsed: false, axis: 'context', start: 0 },
             { id: 'context:@phone', count: 1, collapsed: true, axis: 'context', start: 1 },
         ] });
-        // The folds are part of the view: a page read under other folds is stale.
+
         expect(host.getFocusSectionWindow({ key: 'next', offset: 0, limit: 1, revision: folded.revision, controls: DEFAULT_FOCUS_CONTROL_STATE }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(host.getFocusSectionWindow({ key: 'next', offset: 0, limit: 1, revision: folded.revision, controls: DEFAULT_FOCUS_CONTROL_STATE,
             collapsedGroupIds: ['focus:schedule:later-today', 'context:@home', 'project:elsewhere'] })).toMatchObject({ ok: true, value: { rows: [{ id: 'phone' }] } });
-        // The folds change no filter list and no Pomodoro choice: the filter sheet's lists and the Pomodoro picker take the
-        // folded read's revision (a fold once broke the filter search, its More and the picker with STALE_REVISION).
-        // Another base revision still refuses.
+
+
         expect(host.getFocusControlsList({ list: 'tokens', offset: 0, limit: 2, revision: folded.revision, controls: DEFAULT_FOCUS_CONTROL_STATE }))
             .toMatchObject({ ok: true });
         expect(host.getPomodoroTaskWindow({ offset: 0, limit: 2, revision: folded.revision, controls: DEFAULT_FOCUS_CONTROL_STATE }))
@@ -2744,8 +2739,7 @@ describe('native host contract', () => {
         configureDateFormatting();
     });
 
-    // #1277 (9c499f0f7): RN blocks an Upcoming star only for a row that is not a future Focus candidate
-    // (focus.tsx: section.type === 'upcoming' && !isTaskFutureFocusCandidate(task)), so a future-start Next action can be starred.
+
     it('matches React Native Upcoming blocked star text in English and Chinese, per row', async () => {
         const host = await activateWith([task('upcoming', '2026-09-01T00:00:00.000Z', {
             status: 'next', startTime: '2026-09-24',
@@ -2900,7 +2894,7 @@ describe('native host contract', () => {
             });
             const host = createNativeHostContract();
             expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
-            // Set after the load, whose migrations would promote a dated Inbox task.
+
             useTaskStore.setState({
                 _allTasks: [
                     task('inbox-due', '2026-09-02T10:00:00', {
@@ -2918,11 +2912,11 @@ describe('native host contract', () => {
             vi.setSystemTime(NOW);
             return host;
         };
-        // What the mobile row computes with the date configuration its root layout applies.
+
         const mobileMeta = (id: string, settings: AppSettings, language: Language, systemLocale: string | null, options = {}) => {
             const state = useTaskStore.getState();
             const rowTask = state._allTasks.find((candidate) => candidate.id === id)!;
-            // The contract adds the instant the row next reads differently (#1360).
+
             return { validUntil: getTaskRowMetaValidUntil(rowTask, NOW, resolveTaskRowFeatures(state.settings)), ...buildTaskRowMeta({
                 ...options,
                 task: rowTask,
@@ -2949,7 +2943,7 @@ describe('native host contract', () => {
             };
             const host = await activateMeta(settings);
             expect(await host.setLanguage({ storedLanguage: 'de', systemLocale: 'de-DE' })).toMatchObject({ ok: true });
-            // Rows format with the stored settings, whatever the process-wide configuration is.
+
             configureDateFormatting({ language: 'fa', dateFormat: 'ymd', calendarSystem: 'jalali', systemLocale: 'fa-IR' });
 
             const inbox = host.getInboxWindow({ offset: 0, limit: 10 });
@@ -3110,7 +3104,7 @@ describe('native host contract', () => {
             task('second', '2026-09-01T00:00:00.000Z', { status: 'next' }),
         ]);
         saveData.mockClear();
-        // The row's revision, as the view showed it.
+
         const star = (id: string, focused: boolean) => ({ id, focused, taskRevision: taskRevisionOf(useTaskStore.getState()._tasksById.get(id)!) });
         const starFirst = star('first', true);
         expect(await host.setTaskFocus(starFirst)).toEqual({ ok: true, value: { id: 'first', focused: true } });
@@ -3140,7 +3134,7 @@ describe('native host contract', () => {
         const failedRev = useTaskStore.getState()._tasksById.get('second')?.rev;
         const savesAfterFailure = saveData.mock.calls.length;
         saveData.mockResolvedValue(undefined);
-        // The exact retry: the star landed, so its target holds and only the save runs.
+
         expect(await host.setTaskFocus(starSecond)).toEqual({ ok: true, value: { id: 'second', focused: true } });
         expect(useTaskStore.getState()._tasksById.get('second')?.rev).toBe(failedRev);
         expect(saveData).toHaveBeenCalledTimes(savesAfterFailure + 1);
@@ -3151,7 +3145,7 @@ describe('native host contract', () => {
         freezeClock();
         const host = await activateWith([], [project('one'), project('archived', 'archived')]);
         saveData.mockClear();
-        // The row's revision, as getProjects showed it (archived projects are grouped too).
+
         const star = (id: string, focused: boolean) => {
             const view = host.getProjects();
             if (!view.ok) throw new Error(view.error.message);
@@ -3219,7 +3213,7 @@ describe('native host contract', () => {
         saveData.mockRejectedValue(new Error('disk unavailable'));
         expect(await host.createProject(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
         const created = useTaskStore.getState().projects.find((item) => item.title === 'Project')!;
-        // The request UUID names the project.
+
         expect(created).toMatchObject({ id: CAPTURE_ID, areaId: 'live', color: '#aabbcc' });
         await useTaskStore.getState().updateProject(created.id, { title: 'Renamed project' });
         saveData.mockResolvedValue(undefined);
@@ -3385,8 +3379,7 @@ describe('native host contract', () => {
     });
 });
 
-// The native app journals each write and replays it after process death. A new host
-// holds no receipts, so each replay must write nothing wrong after a later change.
+
 describe('native host contract: replays after a restart', () => {
     afterEach(async () => {
         await flushPendingSave();
@@ -3412,7 +3405,7 @@ describe('native host contract: replays after a restart', () => {
         expect(await host.completeTask({ id: 'a' } as never)).toMatchObject(invalid);
         expect(await host.setTaskFocus({ id: 'a', focused: true, taskRevision: '' })).toMatchObject(invalid);
         expect(await host.setProjectFocus({ id: 'p', focused: true } as never)).toMatchObject(invalid);
-        // A revision the task no longer has is refused, and nothing is written.
+
         const before = stored('a');
         expect(await host.completeTask({ id: 'a', taskRevision: '0::2020-01-01T00:00:00.000Z' })).toMatchObject(stale);
         expect(stored('a')).toBe(before);
@@ -3422,7 +3415,7 @@ describe('native host contract: replays after a restart', () => {
         const host = await open();
         const input = { id: 'a', focused: true, taskRevision: taskRevisionOf(stored('a')) };
         expect(unwrap(await host.setTaskFocus(input))).toEqual({ id: 'a', focused: true });
-        // The landed request's target holds: nothing to write.
+
         expect(await replayAfterRestart((restarted) => restarted.setTaskFocus(input))).toEqual({ result: { ok: true, value: { id: 'a', focused: true } }, wrote: false });
         expect((await store().updateTask('a', { isFocusedToday: false })).success).toBe(true);
         const { result, wrote } = await replayAfterRestart((restarted) => restarted.setTaskFocus(input));
@@ -3459,7 +3452,7 @@ describe('native host contract: replays after a restart', () => {
     it('a request UUID belongs to one action across the contract\'s modules: another command under it is refused', async () => {
         const host = await open();
         const requestId = newRequestId();
-        // Reuses the live project "p" by title: nothing written, and its request is still spent.
+
         expect(unwrap(await host.createProject({ title: store()._projectsById.get('p')!.title, areaId: null, requestId }))).toEqual({ id: 'p' });
         expect(await host.setGeneralSetting({ requestId, edit: { type: 'timeFormat', value: '12h' } })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(store().settings.timeFormat).toBeUndefined();

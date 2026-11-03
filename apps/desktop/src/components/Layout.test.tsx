@@ -29,11 +29,7 @@ const dispatchDrag = (type: string, withTaskData: boolean) => act(() => {
     document.dispatchEvent(event);
 });
 
-// A real drag starts on a task row deep in the tree, and that row fills the
-// transfer in its OWN dragstart handler. Dispatching straight at document would
-// hide an ordering bug — a capture-phase listener runs before the row and sees an
-// empty transfer, so the drag goes unrecognised and nothing lights up. Both the
-// source element and that timing are reproduced here.
+
 const dispatchDragStartFromRow = (withTaskData: boolean) => act(() => {
     const source = document.createElement('div');
     document.body.appendChild(source);
@@ -128,8 +124,8 @@ describe('Layout shared view actions', () => {
 beforeEach(() => {
     window.localStorage.clear();
     resetStores();
-    // Pin a sync-enabled backend so footer/toast assertions don't race the async
-    // backend read (jsdom's persisted default is 'off', which hides the footer).
+
+
     vi.spyOn(SyncService, 'refreshSyncBackendStatus').mockResolvedValue();
     syncStatusListeners.clear();
     vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation((listener) => {
@@ -216,9 +212,7 @@ describe('Layout content width', () => {
         expect(content).not.toHaveClass('max-w-screen-2xl', 'max-w-none');
     });
 
-    // This width has flipped between list-width, edge-to-edge, and back once already
-    // (#966). jsdom cannot measure it, so pin both halves: wider than a list view,
-    // still capped so the grid keeps its side margins.
+
     it('gives the calendar a wider cap than list views without going edge-to-edge', () => {
         const { container } = renderLayout('calendar');
         const content = container.querySelector('[data-main-content] > div');
@@ -236,9 +230,7 @@ describe('Layout content width', () => {
         expect(content).not.toHaveClass('max-w-screen-2xl');
     });
 
-    // This box is `h-full`, so bottom padding here is a dead band below views
-    // that scroll inside it and is skipped entirely by views that overflow it
-    // (#977). Views own their end gap; jsdom cannot measure, so pin the classes.
+
     it('keeps bottom padding off the shared content wrapper', () => {
         const { container } = renderLayout('next');
         const content = container.querySelector('[data-main-content] > div');
@@ -338,9 +330,8 @@ describe('Layout Obsidian nav visibility', () => {
 });
 
 describe('Layout sync conflict surface', () => {
-    // A cycle that queues a follow-up leaves inFlight false while queued is true. If the
-    // footer only watched inFlight it would re-enable the button and drop animate-spin for
-    // that gap, flickering the cursor, hover background and spinner on every hand-off.
+
+
     it('keeps the footer busy while a follow-up sync is queued but not yet in flight', () => {
         const statusSpy = vi.spyOn(SyncService, 'getSyncStatus').mockReturnValue({
             inFlight: false,
@@ -357,8 +348,8 @@ describe('Layout sync conflict surface', () => {
 
         expect(getByRole('button', { name: /Sync now/i })).toBeDisabled();
         expect(container.querySelector('[data-sidebar-sync-dot]')).toHaveClass('animate-pulse');
-        // The spinner must sit inside a clip, or Chromium lifts every task row into its own
-        // layer while it turns and the row text loses ClearType (#1251).
+
+
         expect(container.querySelector('.animate-spin')?.parentElement).toHaveClass('overflow-hidden');
 
         statusSpy.mockRestore();
@@ -900,7 +891,7 @@ describe('Layout sync security warning', () => {
         expect(first.queryByText(/WebDAV sync is using HTTP/)).not.toBeInTheDocument();
         first.unmount();
 
-        // Equivalent spelling remains acknowledged on the next mount.
+
         webdav.mockResolvedValue({ url: 'http://192.168.1.50:80/dav/data.json', username: '', hasPassword: false, allowInsecureHttp: true });
         const next = renderLayout();
         await waitFor(() => expect(webdav).toHaveBeenCalledTimes(2));
@@ -911,7 +902,7 @@ describe('Layout sync security warning', () => {
         expect(await next.findByText(/WebDAV sync is using HTTP/)).toBeInTheDocument();
         fireEvent.click(next.getByRole('button', { name: 'Dismiss for this sync destination' }));
 
-        // The same network address is a separate acknowledgment for self-hosted sync.
+
         backend.mockResolvedValue('cloud');
         vi.spyOn(SyncService, 'getCloudProvider').mockResolvedValue('selfhosted');
         vi.spyOn(SyncService, 'getCloudConfig').mockResolvedValue({ url: 'http://192.168.1.50/other', token: '', allowInsecureHttp: true });
@@ -937,8 +928,8 @@ describe('Layout sync security warning', () => {
     });
 
     it('clears the HTTP warning when sync is switched Off without a focus event', async () => {
-        // Use the setup's in-memory storage boundary and the real service path,
-        // including its cache, persistence and synchronous status subscribers.
+
+
         vi.mocked(SyncService.refreshSyncBackendStatus).mockRestore();
         vi.mocked(SyncService.subscribeSyncStatus).mockRestore();
         vi.mocked(SyncService.getSyncStatus).mockRestore();
@@ -1006,8 +997,7 @@ describe('Layout sync security warning', () => {
         }
     });
 
-    // Loopback HTTP never leaves the machine and is auto-allowed without the
-    // insecure toggle, so a permanent banner for it is pure noise (discussion #1001).
+
     it('shows no cleartext banner for loopback HTTP WebDAV sync', async () => {
         const configurationSpy = vi.spyOn(
             SyncService,
@@ -1081,11 +1071,7 @@ describe('Layout sync security warning', () => {
         }
     });
 
-    // PERF-02: this used to re-read the locked, persisted sync configuration
-    // on a bare 30s setInterval with no in-flight guard, which queued behind
-    // whole sync cycles (tens of seconds on WebDAV) and drained as a burst of
-    // lock acquisitions. The interval is gone; only mount and the storage/focus
-    // listeners below still read it.
+
     it('does not poll the persisted sync configuration on a timer, but a focus event still refreshes it', async () => {
         const configurationSpy = vi.spyOn(
             SyncService,
@@ -1113,14 +1099,12 @@ describe('Layout sync security warning', () => {
         });
 
         try {
-            // Fake timers must be in place before mount: a setInterval already
-            // running under the real clock would not be advanced below, and
-            // the test would pass for the wrong reason (real 30s never elapses
-            // in test wall-clock time).
+
+
             vi.useFakeTimers();
             renderLayout();
-            // The mount-time read is a real microtask chain; fake timers only
-            // stub setTimeout/setInterval, so flushing microtasks is enough.
+
+
             await act(async () => {
                 await Promise.resolve();
                 await Promise.resolve();
@@ -1128,7 +1112,7 @@ describe('Layout sync security warning', () => {
             expect(configurationSpy).toHaveBeenCalledTimes(1);
 
             act(() => {
-                // The old 30s interval would have fired this call ~4 times.
+
                 vi.advanceTimersByTime(2 * 60_000);
             });
             expect(configurationSpy).toHaveBeenCalledTimes(1);
@@ -1144,9 +1128,7 @@ describe('Layout sync security warning', () => {
         }
     });
 
-    // This nav item is the only place a task dragged out of a list can be dropped,
-    // and it gave no sign of that while a drag was in flight, so the capability was
-    // undiscoverable (#867).
+
     it('lights up every drop target while a task drag is in flight', () => {
         const { container, getByRole } = renderLayout();
         const calendarItem = getByRole('button', { name: 'Calendar' });
@@ -1157,17 +1139,17 @@ describe('Layout sync security warning', () => {
 
         dispatchDragStartFromRow(true);
 
-        // Every destination, not just whichever one the pointer happens to be over.
+
         expect(calendarItem.className).toContain('outline-dashed');
         expect(somedayItem.className).toContain('outline-dashed');
         expect(historyItem.className).toContain('outline-dashed');
-        // Projects is not a destination and must stay quiet.
+
         expect(projectsItem.className).not.toContain('outline-dashed');
 
         dispatchDrag('dragend', true);
         expect(calendarItem.className).not.toContain('outline-dashed');
 
-        // An unrelated drag (text, a file) must not advertise anything.
+
         dispatchDragStartFromRow(false);
         expect(calendarItem.className).not.toContain('outline-dashed');
     });
@@ -1199,13 +1181,12 @@ describe('Layout sync security warning', () => {
         };
         await waitFor(() => expect(latestToast()?.action?.label).toBe('Undo'));
 
-        // Undo puts it back where it came from.
+
         latestToast()!.action!.onClick();
         expect(moveTask).toHaveBeenLastCalledWith('task-1', 'inbox');
     });
 
-    // 1.3.1 merged the Done and Archived entries into History, so the old ids the
-    // drop table used no longer match any sidebar entry.
+
     it('marks a task done when it is dropped on History', async () => {
         const moveTask = vi.fn().mockResolvedValue({ success: true });
         const task = { id: 'task-1', title: 'Buy milk', status: 'inbox' };
@@ -1229,8 +1210,7 @@ describe('Layout sync security warning', () => {
         await waitFor(() => expect(moveTask).toHaveBeenCalledWith('task-1', 'done'));
     });
 
-    // The drop completes the task, so its Undo must be the completion Undo: a plain
-    // status move leaves the follow-up occurrence behind and loses the Today star.
+
     it('undoes a History drop the way a completion is undone', async () => {
         const stamp = '2026-01-01T00:00:00.000Z';
         const task = {
@@ -1263,7 +1243,7 @@ describe('Layout sync security warning', () => {
         });
 
         const liveTasks = () => useTaskStore.getState()._allTasks.filter((entry) => !entry.deletedAt);
-        // Completing a repeating task creates the next occurrence.
+
         await waitFor(() => expect(liveTasks()).toHaveLength(2));
 
         const latestToast = () => {
@@ -1280,12 +1260,11 @@ describe('Layout sync security warning', () => {
         });
     });
 
-    // Reference and History live in the folded "More" group, so their drop targets
-    // cannot be seen or hit during a drag unless the group opens on its own.
+
     it('opens a folded group while a task is dragged over its header', () => {
         const { container } = renderLayout();
         const panel = container.querySelector('#sidebar-section-secondary')!;
-        const toggle = panel.previousElementSibling as HTMLElement;   // the section header button
+        const toggle = panel.previousElementSibling as HTMLElement;
         expect(panel).toHaveAttribute('hidden');
 
         dispatchDragStartFromRow(true);
@@ -1294,12 +1273,11 @@ describe('Layout sync security warning', () => {
 
         dispatchDrag('dragend', true);
         expect(panel).toHaveAttribute('hidden');
-        // The temporary open must not be saved as the user's fold choice.
+
         expect(toggle).toHaveAttribute('aria-expanded', 'false');
     });
 
-    // Trash is deliberately not a drop target: a stray drag must never be able to
-    // delete a task, unlike the reversible status moves above.
+
     it('ignores a task dropped on Trash', () => {
         const moveTask = vi.fn().mockResolvedValue({ success: true });
         useTaskStore.setState({
@@ -1320,11 +1298,7 @@ describe('Layout sync security warning', () => {
         expect(moveTask).not.toHaveBeenCalled();
     });
 
-    // The drag this highlight exists for routinely ends without giving us either
-    // signal: the calendar grid's own drop handler stops propagation, and the
-    // spring-loaded jump to the calendar unmounts the list the drag started in, so
-    // dragend fires on a detached node. Relying on those alone left the nav item
-    // lit for the rest of the session (#867).
+
     it('clears the calendar highlight when a drag ends with no drop or dragend', () => {
         const { getByRole } = renderLayout();
         const calendarItem = getByRole('button', { name: 'Calendar' });
@@ -1334,7 +1308,7 @@ describe('Layout sync security warning', () => {
 
         vi.useFakeTimers();
         try {
-            // Nothing else arrives — no drop, no dragend, no further dragover.
+
             dispatchDrag('dragover', true);
             act(() => { vi.advanceTimersByTime(5_000); });
             expect(calendarItem.className).not.toContain('outline-dashed');
@@ -1359,7 +1333,7 @@ describe('Sidebar hidden views (#1115)', () => {
         expect(ids).not.toContain('done');
         expect(ids).toContain('inbox');
         expect(ids).toContain('waiting');
-        // Legacy Done + Archived preferences jointly hide the consolidated History entry.
+
         expect(ids).not.toContain('history');
         expect(ids).not.toContain('trash');
         expect(container.querySelector('#sidebar-section-lists')).not.toBeNull();

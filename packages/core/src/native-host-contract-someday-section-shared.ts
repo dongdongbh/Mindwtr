@@ -3,8 +3,8 @@ import { record, detach } from './native-host-contract-project-shared';
 import { useTaskStore } from './store';
 
 export const SOMEDAY_SECTION_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-// The frozen raw settings array may contain entries from a newer client. Refuse
-// a journal over 1 MiB rather than discard entries from the synced document.
+
+
 export const SOMEDAY_SECTION_REQUEST_BYTES = 1_000_000;
 const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 const unsupported = (message: string): NativeHostResult<never> => ({ ok: false, error: { code: 'INVALID_INPUT', message } });

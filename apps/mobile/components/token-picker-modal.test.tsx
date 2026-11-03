@@ -63,7 +63,7 @@ describe('TokenPickerModal', () => {
       );
     });
 
-    // The dimmed overlay is the outermost Pressable inside the modal.
+
     const overlay = tree.root.findAllByType(Pressable)[0];
     expect(flattenStyle(overlay.props.style).paddingBottom).toBeUndefined();
 
@@ -91,7 +91,7 @@ describe('TokenPickerModal', () => {
     expect(chip('#home').props.accessibilityState).toEqual({ selected: false });
     expect(chip('#work').props.accessibilityState).toEqual({ selected: false });
 
-    // A pick also fills the field, which filters the list down to the picked chip.
+
     act(() => {
       chip('#home').props.onPress();
     });

@@ -43,7 +43,7 @@ const winner = (left: TaxonomyCatalogEntry, right: TaxonomyCatalogEntry): Taxono
     return leftTie >= rightTie ? left : right;
 };
 
-/** Omission is not deletion: older clients do not know this settings field. */
+
 export function mergeTaxonomyCatalog(local: TaxonomyCatalog | undefined, incoming: TaxonomyCatalog | undefined): TaxonomyCatalog | undefined {
     const validLocal = isTaxonomyCatalog(local) ? local : undefined;
     const validIncoming = isTaxonomyCatalog(incoming) ? incoming : undefined;
@@ -116,11 +116,7 @@ export function planTaxonomyCatalogChange(catalogue: TaxonomyCatalog | null, kin
     ]).taxonomy!;
 }
 
-/**
- * Retain a token only when this write can make it unused: removed from the row, or the row leaves the lists
- * that read tokens (deleted; for a task also entering Done, which the Contexts pickers skip, or Archived, which
- * the visible task list skips). New tokens are written too. Other writes never touch settings.
- */
+
 const tokenWrites = (kind: TaxonomyCatalogKind, before: readonly string[], after: readonly string[], leaves: boolean,
     deviceId: string, now: string): TaxonomyWrite[] => {
     const writes: TaxonomyWrite[] = [];
@@ -138,9 +134,9 @@ const tokenWrites = (kind: TaxonomyCatalogKind, before: readonly string[], after
 };
 
 const taskTaxonomyWrites = (settings: AppSettings, before: Task | undefined, after: Task): TaxonomyWrite[] => {
-    // A row already in the trash uses no token, so purging it writes nothing.
+
     if (before?.deletedAt && after.deletedAt) return [];
-    // A delete passes no after-tokens, so only Done and Archived need the flag.
+
     const leaves = Boolean(before) && (isTaskFinished(after) && !isTaskFinished(before)
         || after.status === 'archived' && before!.status !== 'archived');
     return (['context', 'tag'] as const).flatMap((kind) => tokenWrites(kind, before?.[field(kind)] ?? [],
@@ -151,7 +147,7 @@ const projectTaxonomyWrites = (settings: AppSettings, before: Project | undefine
     before?.deletedAt && after.deletedAt ? [] : tokenWrites('tag', before?.tagIds ?? [], after.deletedAt ? [] : after.tagIds ?? [],
         false, after.revBy ?? settings.deviceId!, after.updatedAt);
 
-/** Only newly assigned values can restore a removed catalogue entry. */
+
 export function retainTaskTaxonomy(settings: AppSettings, before: Task | undefined, after: Task): AppSettings {
     return writeTaxonomyTokens(settings, taskTaxonomyWrites(settings, before, after));
 }
@@ -178,7 +174,7 @@ export function retainTaxonomyEffects(settings: AppSettings,
     return writeTaxonomyTokens(settings, writes);
 }
 
-/** An explicit backup replacement outranks current entries, including removed values. */
+
 export function prepareRestoredTaxonomyCatalog(restored: TaxonomyCatalog | undefined, previous: TaxonomyCatalog | undefined,
     now: string, deviceId: string): TaxonomyCatalog | undefined {
     if (restored === undefined && previous === undefined) return undefined;

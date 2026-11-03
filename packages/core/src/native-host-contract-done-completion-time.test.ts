@@ -135,7 +135,7 @@ describe('Done row completion time uses RN completedAt-only update and guarded r
         }
     });
 
-    // Four full SQLite host boots (RN and native, two instants): about 2 s alone, past the 5 s default under gate load.
+
     it('matches RN when an ordinary completion changes to an extended-year instant', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
         for (const completedAt of ['+020000-01-01T00:00:00.123Z', '-000001-01-01T00:00:00.123Z']) {
@@ -175,7 +175,7 @@ describe('Done row completion time uses RN completedAt-only update and guarded r
         } finally { await sqlite.close(); }
     });
 
-    // Several SQLite host boots (writable and read-only): past the 5 s default under gate load.
+
     it('refuses invalid, stale, read-only, non-Done, deleted and projected inputs', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
         const sqlite = await openSqliteHost(seed());

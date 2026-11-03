@@ -28,8 +28,7 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean) {
 
 afterEach(async () => { await flushPendingSave(); resetForTests(); });
 
-// Project details' journaled edit (the user's intent, written first): options, preparation and commit run inside it, so a
-// boot replay or a retry redoes the whole edit, and a replayed edit already applied writes nothing more.
+
 describe('runProjectEdit', () => {
     it('applies a typed title once, and a replay of the same edit writes nothing', async () => {
         const { host, stored, saves } = await open();
@@ -56,7 +55,7 @@ describe('runProjectEdit', () => {
         expect(await host.runProjectEdit({ requestId: uuid(2), projectId: 'p', kind: 'notes', text: 'Typed notes' }))
             .toEqual({ ok: true, value: { id: 'p', kind: 'notes', outcome: 'saved' } });
         expect(stored()).toMatchObject({ supportNotes: 'Typed notes', tagIds: ['#home', '#synced'] });
-        // The first preparation met the sync (STALE_REVISION); the edit was read and prepared again.
+
         expect(spy).toHaveBeenCalledTimes(2);
     });
 
@@ -73,7 +72,7 @@ describe('runProjectEdit', () => {
         expect(await run(8, { kind: 'tag', tag: '#home', present: false })).toMatchObject({ ok: true, value: { outcome: 'saved' } });
         expect(await run(8, { kind: 'tag', tag: '#home', present: false })).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
         expect(await run(9, { kind: 'date', field: 'dueDate', value: '2026-10-20', opened: null })).toMatchObject({ ok: true, value: { outcome: 'saved' } });
-        // A review day picked on Android: core makes the instant, at the hour and minute the picker opened on.
+
         expect(await run(16, { kind: 'date', field: 'reviewAt', value: '2026-11-20', opened: '2026-10-04T21:23:37.456Z' }))
             .toMatchObject({ ok: true, value: { outcome: 'saved' } });
         expect(stored().reviewAt).toMatch(/^2026-11-20T\d{2}:23:00\.000Z$/);
@@ -118,8 +117,7 @@ describe('runProjectEdit', () => {
     });
 });
 
-// The project header's actions sheet (RN ProjectDetailModal's "..."): core's prepared lifecycle, duplicate and delete run inside
-// the same journaled edit, each a target state on replay; Delete answers RN's toast words and its Undo restores the task links.
+
 describe('runProjectEdit project actions', () => {
     const task = (id: string) => ({ id, title: id, status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at });
 
@@ -166,8 +164,7 @@ describe('runProjectEdit project actions', () => {
     });
 });
 
-// RN's Convert to section… (ProjectToSectionModal): core's eligibility for the sheet row, the destinations and the preview words,
-// then the conversion inside the journaled edit (the request UUID names the new section, so a replay finds it) and its Undo.
+
 describe('project to section', () => {
     const task = { id: 't1', title: 'Wash', status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at };
     const projects = [project('p', { tagIds: [] }), project('d', { tagIds: [], title: 'Home' }), project('archived', { status: 'archived' })];
@@ -203,7 +200,7 @@ describe('project to section', () => {
     });
 });
 
-// Review of b1+b2: retries and replays end as RN's first try did, and an Undo that cannot apply refuses and writes nothing.
+
 describe('project actions: retries, replays and refused Undos', () => {
     const task = (id: string) => ({ id, title: id, status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at });
     const restart = async () => {
@@ -255,7 +252,7 @@ describe('project actions: retries, replays and refused Undos', () => {
     it('refuses an Undo after a sync changed the deleted project, and writes nothing', async () => {
         const { host, saves, stored } = await open({ tasks: [task('t1')] as never });
         expect(await host.runProjectEdit({ requestId: uuid(45), projectId: 'p', kind: 'delete' } as never)).toMatchObject({ ok: true });
-        // A sync lands a newer row for the deleted project.
+
         const synced = { ...useTaskStore.getState()._projectsById.get('p')!, title: 'Synced', rev: 99, updatedAt: '2026-10-02T00:00:00.000Z' };
         useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((row) => row.id === 'p' ? synced : row),
             _projectsById: new Map(state._projectsById).set('p', synced) }) as never);
@@ -281,7 +278,7 @@ describe('project actions: retries, replays and refused Undos', () => {
     });
 });
 
-// RN's view options Sort (ProjectDetailModal's sort modal): the project's task sort, core's choices, saved as a target state.
+
 describe('runProjectEdit sort', () => {
     it('stores the chosen sort once, a replay writes nothing, and a filed project refuses it', async () => {
         const { host, stored, saves } = await open();
@@ -300,8 +297,7 @@ describe('runProjectEdit sort', () => {
     });
 });
 
-// RN's view options Reorder (ProjectTaskList's reorder mode): one task moved after another row (or to the top) on the order the
-// reorder view showed; a replay of a move already in place answers unchanged, and any other change since refuses.
+
 describe('runProjectEdit task order', () => {
     const task = (id: string, order: number) => ({ id, title: id, status: 'next', projectId: 'p', order, orderNum: order, tags: [], contexts: [], createdAt: at, updatedAt: at });
 
@@ -336,8 +332,7 @@ describe('runProjectEdit task order', () => {
     });
 });
 
-// RN's Flow Mode picker (#1429, d25316cf9): Parallel, Sequential or Per section, each a target state; and the section manager's
-// Parallel/Sequential button while the project is Per section. Native's old two-way toggle turned Per section into Sequential.
+
 describe('runProjectEdit flow mode (#1429)', () => {
     const perSection = { isSequential: false, perSectionFlow: true };
     const flowRead = (host: Awaited<ReturnType<typeof open>>['host']) =>
@@ -348,7 +343,7 @@ describe('runProjectEdit flow mode (#1429)', () => {
         expect(flowRead(host)).toBe('perSection');
     });
 
-    // RN's planProjectFlowModeChange through runProjectEdit: entering Per section stores a choice for each section without one.
+
     it('gives undecided sections their current flow on entering Per section and keeps a stored choice (review N5)', async () => {
         const choice = (id: string, order: number, isSequential: boolean) => ({ ...section(id, order), isSequential });
         const fromParallel = await open({ sections: [section('s1', 0), choice('kept', 1, true)] });
@@ -419,8 +414,7 @@ describe('runProjectEdit flow mode (#1429)', () => {
     });
 });
 
-// iOS reads these two options with exact key counts (CoreModel.swift: Project flow options, section order rows). Android's extra
-// fields ride only on the flag its Menu reads pass (host-entry MENU_READS); the iOS-read shapes stay byte-identical.
+
 describe('iOS-read shapes stay exact (review B1, B2)', () => {
     it('keeps getProjectFlowOptions at revision, project and canChange unless Android asks for flowMode', async () => {
         const { host } = await open({ projects: [project('p', { isSequential: false, perSectionFlow: true })], sections: [section('s1', 0)] });
@@ -441,8 +435,7 @@ describe('iOS-read shapes stay exact (review B1, B2)', () => {
     });
 });
 
-// RN's long-press Move up / Move down on the Projects screen (#1263, 2678f9a44): core's planProjectMove swaps the project with its
-// shown neighbour inside one area; a starred project never passes an unstarred one. The edit carries the order the area showed.
+
 describe('runProjectEdit move (#1263)', () => {
     const ordered = (id: string, order: number, extra: Partial<Project> = {}) => project(id, { title: id, order, ...extra });
     const fixture = () => ({ projects: [ordered('p1', 0, { areaId: 'a' }), ordered('p2', 1, { areaId: 'a' }), ordered('p3', 2, { areaId: 'a' }),
@@ -498,7 +491,7 @@ describe('runProjectEdit move (#1263)', () => {
         const { host } = await open(fixture());
         const read = host.getProjects.bind(host);
         let reads = 0;
-        // The second read is the write's own: a sync swapped p1 and p2 just before it.
+
         vi.spyOn(host, 'getProjects').mockImplementation((...args) => {
             reads += 1;
             if (reads === 2) void useTaskStore.getState().reorderProjects(['p2', 'p1', 'p3', 'star'], 'a');
@@ -509,7 +502,7 @@ describe('runProjectEdit move (#1263)', () => {
         expect(group(host, 'a')).toEqual(['star', 'p2', 'p1', 'p3']);
     });
 
-    // iOS's CoreHostTests pins getProjects()' exact keys: the moves ride only on Android's flag (projectList).
+
     it('keeps getProjects at its five keys unless Android asks for the moves', async () => {
         const { host } = await open(fixture());
         const ios = host.getProjects() as { ok: true; value: Record<string, unknown> };
@@ -531,8 +524,7 @@ describe('runProjectEdit move (#1263)', () => {
     });
 });
 
-// The Projects screen's Manage areas sheet offers Delete only while no live project uses the area (RN ProjectAreaModals.tsx). Core
-// holds that rule too (review 2a): a sync can move a project into the area after the sheet read, and Settings' delete would detach it.
+
 describe('Manage areas sheet Delete (#1263 review 2a)', () => {
     it('refuses a sheet Delete once a live project uses the area, and deletes it while none does', async () => {
         const { host, data, saves } = await open();

@@ -36,7 +36,7 @@ describe('CollapsibleSection', () => {
         expect(toggle.props.accessibilityLabel).toBe('Details');
         expect(help.props.accessibilityLabel).toBe('onboarding.help: taskEdit.details');
         expect(help.props.hitSlop).toBe(12);
-        // Same header row: the (?) is the title toggle's next sibling, not a line in the section body.
+
         const headerRow = toggle.parent!;
         const helpButton = tree.root.findByType(ContextualHelpButton);
         expect(helpButton.parent).toBe(headerRow);

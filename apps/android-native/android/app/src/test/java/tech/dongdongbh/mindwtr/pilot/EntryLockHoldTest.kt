@@ -8,10 +8,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/**
- * RN b7bccbbc3 (#1475, apps/mobile/tests/use-root-layout-external-capture.test.tsx): a widget task or a share that arrives while
- * the app lock covers the app waits for the unlock, then opens once; the held entry is reported once.
- */
+
 class EntryLockHoldTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -20,7 +17,7 @@ class EntryLockHoldTest {
     private val hold = EntryLockHold()
     private val reported = mutableListOf<String>()
 
-    /** One EntryRouter.pump: the entry core would read now, or null. */
+
     private fun pump(locked: Boolean): EntryQueue.Entry? {
         if (hold.holds(locked, queue.head()) { reported += it.input }) return null
         return lifecycle.next(blocked = false)

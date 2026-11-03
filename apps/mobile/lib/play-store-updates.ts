@@ -37,7 +37,7 @@ export const getPlayStoreUpdateInfoAsync = async (): Promise<PlayStoreUpdateInfo
   return PlayStoreUpdates.getUpdateInfoAsync();
 };
 
-/** The package that installed the app (com.android.vending for Google Play), or null when unknown or without the module (FOSS). */
+
 export const getInstallerPackageName = (): string | null => {
   try {
     return PlayStoreUpdates?.getInstallerPackageName() ?? null;

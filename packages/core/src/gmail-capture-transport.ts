@@ -2,9 +2,7 @@ import { base64ToBytes } from './base64-bytes';
 import type { GmailCaptureBatch, GmailCaptureConfig, GmailCaptureTransport } from './gmail-capture';
 import type { GmailReceiptStore } from './gmail-receipt-store';
 
-// RN's Gmail transport and message parser (apps/mobile/lib/gmail-capture-service.ts), shared with the native hosts. Moved as
-// is, with three seams: core-relative imports, the HTML parser passed in (xmldom's DOMParser; core bundles no XML parser),
-// and no default receipt store or ID source (each host passes its own).
+
 export type GmailHtmlParser = new (options: { errorHandler: { warning: () => void; error: () => void; fatalError: () => void } }) => {
     parseFromString: (source: string, mimeType: string) => unknown;
 };
@@ -77,7 +75,7 @@ export function parseGmailMessage(value: unknown, DOMParser: GmailHtmlParser): G
         if (data.attachmentId || !Number.isSafeInteger(data.size) || (data.size as number) < 0) return fail('other');
         if (typeof data.data !== 'string') {
             if (data.size === 0 && !data.attachmentId) return '';
-            return fail('other'); // Never acknowledge a message whose body needs another fetch.
+            return fail('other');
         }
         if (data.data.length > 2_800_000 || !/^[A-Za-z0-9_-]*={0,2}$/.test(data.data) || data.data.replace(/=+$/, '').length % 4 === 1) return fail('other');
         const normalized = data.data.replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/');

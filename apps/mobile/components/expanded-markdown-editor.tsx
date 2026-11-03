@@ -102,8 +102,8 @@ export function ExpandedMarkdownEditor({
     const ignoredNativePairChangeRef = React.useRef<IgnoredNativePairChange | null>(null);
     const valueRef = React.useRef(value);
     const selectionRef = React.useRef(selection);
-    // Keep a local mirror while the fullscreen editor is open so Android
-    // focus/toolbar interactions do not have to wait on parent rerenders.
+
+
     const [editorValue, setEditorValue] = React.useState(value);
     const [editorSelection, setEditorSelection] = React.useState(selection);
     const [selectionRestorePending, setSelectionRestorePending] = React.useState(false);
@@ -392,10 +392,8 @@ export function ExpandedMarkdownEditor({
         setEditorValue(nextValue);
         onChange(nextValue);
     }, [onChange, onSelectionChange, restoreEditorFocus]);
-    // Auto-pairing intentionally lives only in the text-change handler. On Android the
-    // keyPress event is synthesized from the same native edit as the text change (and
-    // preventDefault cannot cancel it), so pairing here too processes one keystroke
-    // twice — IME-specific echo orders then double the pair (#565).
+
+
     const handleKeyPress = React.useCallback((event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
         if (event.nativeEvent.key === 'Backspace') {
             ignoredNativePairChangeRef.current = null;

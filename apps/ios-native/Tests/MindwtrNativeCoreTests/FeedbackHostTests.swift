@@ -4,8 +4,7 @@ import Security
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Intercept every destination, including malformed URLs and redirects. This
-/// fixture never submits real feedback or proves live service availability.
+
 private final class FeedbackProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var state: FeedbackState?

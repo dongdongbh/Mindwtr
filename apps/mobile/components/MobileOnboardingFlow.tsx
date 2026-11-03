@@ -31,8 +31,8 @@ export function MobileOnboardingFlow({
   const onFilled = filledButton.textColor ?? tc.onTint;
   const { t } = useLanguage();
   const { fontScale } = useWindowDimensions();
-  // At large font scales the note and the skip button cannot share a row;
-  // stack them so the note keeps the full card width (#632).
+
+
   const stackFooter = fontScale >= 1.5;
 
   return (
@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
   },
   headerText: {
     minWidth: 0,
-    // Keep the scrolling title clear of the pinned close button.
+
     paddingRight: 38,
   },
   title: {

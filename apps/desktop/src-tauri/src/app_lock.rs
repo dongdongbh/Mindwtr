@@ -1,20 +1,8 @@
-//! Desktop privacy lock (#1472): Windows Hello on Windows, Touch ID or the
-//! account password on macOS. Linux has no device check that works across
-//! deb/AppImage/Flatpak, so it reports `supported: false` and the setting hides.
-//!
-//! The lock settings live in the device-level `config.toml`, never in the
-//! per-library database, so switching libraries can never skip the lock. All
-//! access goes through `read_app_lock_config` / `write_app_lock_config`.
-//!
-//! The in-process lock flag lives here too, so the tray and the Quick Add
-//! window can refuse to show task text without asking the renderer.
-
 use crate::*;
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8};
 
-/// Minutes away before the lock engages; same choices as mobile App Lock.
 const RELOCK_DELAY_OPTIONS: [u8; 4] = [0, 1, 5, 15];
-// Linux has no tray tooltip (Tauri does not support one there).
+
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 const NEUTRAL_TRAY_TOOLTIP: &str = "Mindwtr";
 
@@ -23,13 +11,8 @@ static LOCKED: AtomicBool = AtomicBool::new(false);
 static RELOCK_DELAY: AtomicU8 = AtomicU8::new(0);
 static AWAY: AwayLock = AwayLock::new();
 
-/// Delay 0 still waits this long: focus moving to the Quick Add window or a
-/// dialog arrives as "lost" then "gained".
 const AWAY_GRACE: Duration = Duration::from_millis(400);
 
-/// The away lock's state, shared by every window: whether any Mindwtr window
-/// has focus, how many Mindwtr-owned dialogs or OS prompts are open, and a
-/// generation that cancels a pending timer whenever it changes.
 pub(crate) struct AwayLock {
     generation: AtomicU64,
     any_focused: AtomicBool,
@@ -53,8 +36,6 @@ impl AwayLock {
         !self.any_focused.load(Ordering::SeqCst) && self.dialogs_open.load(Ordering::SeqCst) == 0
     }
 
-    /// Any focus change cancels the pending timer; losing focus with no
-    /// Mindwtr dialog open returns the generation of a new one to start.
     fn focus_changed(&self, any_focused: bool) -> Option<u64> {
         self.any_focused.store(any_focused, Ordering::SeqCst);
         let generation = self.cancel();
@@ -66,7 +47,6 @@ impl AwayLock {
         self.cancel();
     }
 
-    /// The last dialog closing while no window has focus starts the timer.
     fn dialog_closed(&self) -> Option<u64> {
         let _ = self
             .dialogs_open
@@ -77,9 +57,6 @@ impl AwayLock {
         self.away_now().then_some(generation)
     }
 
-    /// The user just answered a prompt this window owns: treat Mindwtr as
-    /// focused until the next real focus loss, so a late "focus is back"
-    /// event cannot relock right after an unlock.
     fn unlocked(&self) {
         self.any_focused.store(true, Ordering::SeqCst);
         self.cancel();
@@ -98,8 +75,6 @@ fn away_delay(relock_delay_minutes: u8) -> Duration {
     }
 }
 
-/// Sleeps on the async runtime (no thread, no blocked command) and calls
-/// `fire` only if nothing changed the away state meanwhile.
 fn spawn_away_timer(
     lock: &'static AwayLock,
     generation: u64,
@@ -114,9 +89,6 @@ fn spawn_away_timer(
     });
 }
 
-/// Rust runs the away timer, so a hidden window whose page timers the OS
-/// slowed still locks on time, and the tray, Quick Add and notifications see
-/// the lock at once.
 fn arm_away_timer(app: &tauri::AppHandle, generation: Option<u64>) {
     let Some(generation) = generation else {
         return;
@@ -135,7 +107,6 @@ fn arm_away_timer(app: &tauri::AppHandle, generation: Option<u64>) {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-// Linux only ever answers Unavailable.
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) enum AppLockOutcome {
     Success,
@@ -155,9 +126,8 @@ pub(crate) struct AppLockState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AppLockAvailability {
-    /// False on Linux: the setting is hidden, not just disabled.
     supported: bool,
-    /// False when the OS check is not set up (no Windows Hello, no Mac password).
+
     available: bool,
 }
 
@@ -176,13 +146,10 @@ fn app_lock_config_from(config: &AppConfigToml) -> (bool, u8) {
     )
 }
 
-/// The one reader of the lock settings. A workspaces change points this (and
-/// the writer below) at the device-level root; nothing else reads the keys.
 fn read_app_lock_config(app: &tauri::AppHandle) -> (bool, u8) {
     app_lock_config_from(&read_config(app))
 }
 
-/// The one writer of the lock settings. `None` leaves a field as stored.
 fn write_app_lock_config(
     app: &tauri::AppHandle,
     enabled: Option<bool>,
@@ -203,9 +170,6 @@ fn write_app_lock_config(
     Ok((enabled, delay))
 }
 
-/// Runs once per process, from setup and again (as a no-op) from the
-/// renderer's first ask, whichever comes first: a launch with the lock on
-/// starts locked. A webview reload keeps the process's lock state.
 pub(crate) fn init(app: &tauri::AppHandle) {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
@@ -232,9 +196,6 @@ fn current_state() -> AppLockState {
     }
 }
 
-/// Locks and clears every native surface that can show task text: the
-/// Quick Add window (its autocomplete lists projects) and the tray tooltip
-/// (today's Focus titles). The renderer re-sends the tooltip after unlock.
 fn engage(app: &tauri::AppHandle) -> bool {
     if !is_enabled() {
         return false;
@@ -258,8 +219,6 @@ fn log_lock_line(app: &tauri::AppHandle, message: String) {
     crate::logging::append_native_log_line(app, &message);
 }
 
-/// A lock Rust started (tray item or away timer): engage, log it here (the
-/// renderer may be asleep in a hidden window), and tell the main window.
 fn engage_and_notify(app: &tauri::AppHandle, trigger: &'static str) {
     if engage(app) {
         let message = format!(
@@ -272,13 +231,10 @@ fn engage_and_notify(app: &tauri::AppHandle, trigger: &'static str) {
     }
 }
 
-/// The tray's "Lock Mindwtr" item.
 pub(crate) fn engage_from_tray(app: &tauri::AppHandle) {
     engage_and_notify(app, "manual");
 }
 
-/// Any window's focus change. "Away" means no Mindwtr window (main or Quick
-/// Add) has focus, so moving between Mindwtr's own windows is not leaving.
 pub(crate) fn focus_changed(app: &tauri::AppHandle) {
     let any_focused = app
         .webview_windows()
@@ -287,8 +243,6 @@ pub(crate) fn focus_changed(app: &tauri::AppHandle) {
     arm_away_timer(app, AWAY.focus_changed(any_focused));
 }
 
-/// Holds the shared "Mindwtr dialog open" count for its lifetime, so a file
-/// dialog or OS prompt taking focus is not counted as leaving.
 struct DialogOpen(tauri::AppHandle);
 
 impl DialogOpen {
@@ -314,7 +268,6 @@ pub(crate) async fn app_lock_dialog_end(app: tauri::AppHandle) {
     arm_away_timer(&app, AWAY.dialog_closed());
 }
 
-/// The tooltip to show: a neutral one while locked, whatever was asked otherwise.
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn tray_tooltip(requested: Option<String>) -> Option<String> {
     if is_locked() {
@@ -355,8 +308,6 @@ async fn run_check(app: &tauri::AppHandle, reason: String) -> AppLockOutcome {
         .unwrap_or(AppLockOutcome::Failed)
 }
 
-/// Runs the OS check; a success unlocks. `reason` is the localized line the
-/// OS prompt shows.
 #[tauri::command]
 pub(crate) async fn app_lock_authenticate(app: tauri::AppHandle, reason: String) -> AppLockOutcome {
     let outcome = run_check(&app, reason).await;
@@ -367,17 +318,10 @@ pub(crate) async fn app_lock_authenticate(app: tauri::AppHandle, reason: String)
     outcome
 }
 
-/// The lock screen's way out when the OS check cannot run (Remote Desktop,
-/// a policy, a reset Windows Hello): turning the lock off is allowed only
-/// when the lock is not really on, or when the OS itself says no check is
-/// available right now. Anyone in this OS session can read the data file
-/// anyway; refusing here would only lock the owner out.
 fn may_turn_off_from_lock_screen(enabled: bool, available: bool) -> bool {
     !enabled || !available
 }
 
-/// Re-checks availability itself (the renderer's word is not enough) and, only
-/// when the OS reports no check is possible, turns the lock off and unlocks.
 #[tauri::command]
 pub(crate) async fn app_lock_disable_unavailable(
     app: tauri::AppHandle,
@@ -409,9 +353,6 @@ pub(crate) async fn app_lock_disable_unavailable(
     Ok(AppLockOutcome::Success)
 }
 
-/// Turning the lock on needs one successful OS check first, done here so no
-/// caller can skip it. Turning it off is refused while locked (Settings is
-/// behind the lock, so only a stray call could ask).
 #[tauri::command]
 pub(crate) async fn set_app_lock_enabled(
     app: tauri::AppHandle,
@@ -483,8 +424,6 @@ mod platform {
             .unwrap_or(false)
     }
 
-    /// The window-parented interop form: a desktop app's plain
-    /// RequestVerificationAsync prompt opens behind the window.
     pub(super) fn authenticate(hwnd: Option<isize>, reason: &str) -> AppLockOutcome {
         let Some(hwnd) = hwnd else {
             return AppLockOutcome::Failed;
@@ -529,8 +468,6 @@ mod platform {
         unsafe { mindwtr_app_lock_available() }
     }
 
-    /// LAPolicyDeviceOwnerAuthentication: Touch ID, falling back to the
-    /// account password. Blocks this (spawn_blocking) thread until answered.
     pub(super) fn authenticate(_hwnd: Option<isize>, reason: &str) -> AppLockOutcome {
         let reason = CString::new(reason.replace('\0', "")).unwrap_or_default();
         match unsafe { mindwtr_app_lock_authenticate(reason.as_ptr()) } {
@@ -587,14 +524,11 @@ mod tests {
             .expect("focus lost starts a timer");
         assert!(lock.should_fire(lost));
 
-        // Coming back cancels it.
         lock.focus_changed(false);
         let lost = lock.focus_changed(false).unwrap();
         lock.focus_changed(true);
         assert!(!lock.should_fire(lost));
 
-        // A Mindwtr dialog opening cancels it, and losing focus while one is
-        // open starts nothing; the last dialog closing while away starts it.
         let lost = lock.focus_changed(false).unwrap();
         lock.dialog_opened();
         assert!(!lock.should_fire(lost));
@@ -602,7 +536,6 @@ mod tests {
         let closed = lock.dialog_closed().expect("dialog closed while away");
         assert!(lock.should_fire(closed));
 
-        // Closing a dialog while focused starts nothing.
         lock.focus_changed(true);
         lock.dialog_opened();
         assert_eq!(lock.dialog_closed(), None);
@@ -612,7 +545,7 @@ mod tests {
     fn an_unlock_is_not_followed_by_an_away_relock_from_stale_focus() {
         let lock = AwayLock::new();
         lock.focus_changed(false);
-        // The OS prompt is a dialog; it closes before "focus is back" arrives.
+
         lock.dialog_opened();
         let after_prompt = lock.dialog_closed().unwrap();
         lock.unlocked();

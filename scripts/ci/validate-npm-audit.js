@@ -2,9 +2,8 @@ import { readFileSync } from "node:fs";
 
 export const AUDIT_EXCEPTIONS = {
   "node-forge": { version: "1.4.0", advisories: { "GHSA-86w9-cpqp-85rv": "<=1.4.0" } },
-  // GHSA-gcqx-w48m-w2h4 (low, prototype poisoning in mergeObject): no fixed deepmerge release exists. Its only consumer is
-  // @expo/config, which merges our own app config at prebuild and EAS build time; no runtime package imports it (governance
-  // test). Drop this when deepmerge ships a fix or @expo/config drops it; a newer deepmerge release fails the workflow.
+
+
   deepmerge: { version: "4.3.1", advisories: { "GHSA-gcqx-w48m-w2h4": ">=4.2.0 <=4.3.1" } },
   "image-size": { version: "1.2.1", advisories: {
     "GHSA-5p2g-fcmc-qvqq": ">=1.2.0 <=2.0.2",
@@ -22,10 +21,7 @@ const sorted = (value) => JSON.stringify(Object.entries(value).sort(([a], [b]) =
   name, { ...metadata, edges: Object.fromEntries(Object.entries(metadata.edges).sort(([a], [b]) => a.localeCompare(b))) },
 ]));
 
-// Snapshot every reviewed ancestor version and dependency edge. New consumers, nested
-// copies, versions, or production classifications cannot inherit these exceptions.
-// Peer-only audit propagation through React Native/Expo does not itself bundle their
-// separate Node CLI packages into the mobile application's runtime.
+
 export const npmAuditTopology = (lockfile, profile) => {
   if (!PROFILE_ROOTS[profile] || lockfile?.lockfileVersion !== 3 || !isRecord(lockfile.packages)) throw new Error("invalid audit profile or npm lockfile");
   const names = new Set(PROFILE_ROOTS[profile]);

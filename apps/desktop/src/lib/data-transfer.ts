@@ -240,11 +240,7 @@ export const exportDesktopBackup = async (data: AppData): Promise<void> => {
     }
 };
 
-/**
- * `tasks` narrows the export to a view's current result set (#1096) — `data`
- * stays the full dataset because that is where the serializer looks up project,
- * section and area titles.
- */
+
 export const exportDesktopCsv = async (data: AppData, tasks?: readonly Task[]): Promise<boolean> => {
     addBreadcrumb('transfer:export');
     void logInfo('CSV export started', {
@@ -346,7 +342,7 @@ export const inspectDesktopBackup = async (
     });
 };
 
-// Core owns parser dispatch; only desktop file-picker metadata stays here.
+
 type ImportPickerDescriptor = {
     accept: string;
     extensions: string[];

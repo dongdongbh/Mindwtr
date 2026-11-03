@@ -24,7 +24,7 @@ describe('log sanitization', () => {
         expect(sanitizeUrl('https://example.com/sync?token=secret&ok=1')).toBe('https://example.com/sync?token=redacted&ok=1');
     });
 
-    // Made-up strings in the public shape of each provider's key. Never a real key.
+
     const FAKE_KEYS: Array<[string, string]> = [
         ['openai legacy', `sk-${'A'.repeat(48)}`],
         ['openai project', `sk-proj-${'Ab1_'.repeat(6)}-${'Cd2'.repeat(10)}`],
@@ -43,9 +43,7 @@ describe('log sanitization', () => {
         expect(context).not.toContain(key.slice(-12));
     });
 
-    // The character to the left of a key in a log line is rarely a space: it is
-    // an env-var name, a percent escape or an `=`. Only a LETTER before the
-    // prefix means this is an ordinary word rather than a key.
+
     const KEY_CONTEXTS: Array<[string, (key: string) => string]> = [
         ['an env var name', (key) => `OPENAI_${key}`],
         ['a percent escape', (key) => `q=%20${key}`],
@@ -66,7 +64,7 @@ describe('log sanitization', () => {
     it('leaves ordinary words that contain "sk-" alone', () => {
         expect(sanitizeForLog('task-management-system and risk-assessment-notes'))
             .toBe('task-management-system and risk-assessment-notes');
-        // Same words at the very start of the text, where `^` also applies.
+
         expect(sanitizeForLog('risk-assessment-notes only')).toBe('risk-assessment-notes only');
     });
 
@@ -77,8 +75,8 @@ describe('log sanitization', () => {
 });
 
 describe('a URL the platform cannot parse', () => {
-    // The sanitizer used to call itself on such a URL (sanitizeUrl's fallback redacted the text, whose URL pass called
-    // sanitizeUrl again), so any log line or sync error holding one threw "Maximum call stack size exceeded".
+
+
     it.each(['http://nas.local:99999/dav', 'https://[bad/remote.php/dav', 'webcal://[bad/calendar.ics'])('redacts %s without throwing', (url) => {
         expect(() => sanitizeForLog(`Sync failed for ${url}`)).not.toThrow();
         expect(() => sanitizeUrl(url)).not.toThrow();
@@ -129,7 +127,7 @@ describe('a URL the platform cannot parse', () => {
             expect(sanitizeForLog(`Location '${paren}' isn't writable.`)).not.toContain('sync)');
             expect(sanitizeForLog("open 'file:///storage/emulated/0/My Folder (2)/data.json' failed")).not.toMatch(/Folder|data\.json/);
             expect(sanitizeForLog('CONTENT://com.example/tree/Private%20Name')).not.toContain('Private');
-            // Outside the plain-path roots, so only the one-slash file: rule can catch it.
+
             expect(sanitizeForLog('java.io.File file:/tmp/private-folder/x y')).toBe('java.io.File [redacted-file-uri]');
             expect(sanitizeForLog('{"error":"\\nfile:///tmp/private-folder/x"}')).not.toContain('private-folder');
         });

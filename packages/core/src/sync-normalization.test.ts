@@ -248,7 +248,7 @@ describe('sync normalization', () => {
             revBy: 'old-client',
             updatedAt: '2026-01-01T00:01:00.000Z',
         };
-        // data.json round trip: the payload a peer reads back from the synced file.
+
         const local = JSON.parse(JSON.stringify(mockAppData([], [localProject]))) as AppData;
         const incoming = JSON.parse(JSON.stringify(mockAppData([], [oldClientProject as Project]))) as AppData;
 
@@ -273,7 +273,7 @@ describe('sync normalization', () => {
         const book = { ...createMockSection('book', 'trip', '2026-01-01T00:00:00.000Z'), rev: 1, revBy: 'new-client', isSequential: true };
         const prep = { ...createMockSection('prep', 'trip', '2026-01-01T00:00:00.000Z'), rev: 1, revBy: 'new-client', isSequential: false };
         const later = { ...createMockSection('later', 'trip', '2026-01-01T00:00:00.000Z'), rev: 1, revBy: 'new-client' };
-        // An old client renames everything; it never carried the new fields.
+
         const { perSectionFlow: _p, ...oldProject } = { ...project, title: 'Renamed', rev: 2, revBy: 'old-client', updatedAt: '2026-01-01T00:01:00.000Z' };
         const strip = (section: typeof book) => {
             const { isSequential: _s, ...rest } = { ...section, title: 'Renamed', rev: 2, revBy: 'old-client', updatedAt: '2026-01-01T00:01:00.000Z' };
@@ -305,7 +305,7 @@ describe('sync normalization', () => {
         const merged = mergeAppData(roundTrip(mockAppData([], [project], [book])), roundTrip(mockAppData([], [off], [parallel])), { nowIso: NOW });
         expect(merged.projects[0]).toMatchObject({ isSequential: true, perSectionFlow: false });
         expect(merged.sections[0].isSequential).toBe(false);
-        // A macOS CloudKit bridge boxes booleans as numbers; the merge reads them back as booleans.
+
         const boxed = mergeAppData(mockAppData([], [{ ...project, perSectionFlow: 1 as unknown as boolean }], [{ ...book, isSequential: 0 as unknown as boolean }]),
             mockAppData([], [], []), { nowIso: NOW });
         expect(boxed.projects[0].perSectionFlow).toBe(true);
@@ -729,7 +729,7 @@ describe('sync normalization', () => {
         expect(normalized.dueDate).toBe('2026-04-24');
         expect(normalized.startDate).toBe('2026-04-20');
 
-        // Blank strings normalize to undefined for startDate exactly like dueDate does.
+
         const blank = normalizeProjectForSyncMerge({ ...project, dueDate: '   ', startDate: '   ' });
         expect(blank.dueDate).toBeUndefined();
         expect(blank.startDate).toBeUndefined();
@@ -1068,11 +1068,7 @@ describe('sync normalization', () => {
     });
 });
 
-// Regression coverage for #902: the macOS CloudKit bridge could box booleans
-// read off iOS-written records as numeric NSNumbers, which NSJSONSerialization
-// then emits as JSON numbers (1/0) instead of booleans. The sync-merge
-// normalizers must treat `1` as `true` so a numeric boolean never gets
-// coerced to `false` by a strict `=== true` check.
+
 describe('sync-merge numeric boolean tolerance (#902)', () => {
     it('treats numeric 1 as true for task synced booleans, mirroring the strict-boolean case', () => {
         const numeric = normalizeTaskForSyncMerge({
@@ -1175,8 +1171,8 @@ describe('sync-merge numeric boolean tolerance (#902)', () => {
         }]);
         const incoming = mockAppData([{
             ...createMockTask('task-1', updatedAt),
-            // Simulates the un-fixed macOS CloudKit bridge reading an iOS-written
-            // record: the boolean arrives as a JSON number, not a JSON boolean.
+
+
             isFocusedToday: 1,
             rev: 6,
             revBy: 'ios-device',

@@ -60,7 +60,7 @@ describe('iOS widget completion ingestion', () => {
     it('completes through the normal store, flushes and publishes before acknowledging', async () => {
         const deps = depsFor([task()]);
         expect(await ingestIosWidgetCompletions(deps)).toBe(1);
-        // The widget tap time, not the time the app happened to drain the outbox.
+
         expect(deps.updateTask).toHaveBeenCalledWith('task-1', { status: 'done', completedAt: '2026-09-14T08:30:00.000Z' });
         expect(deps.updateTask.mock.invocationCallOrder[0]).toBeLessThan(deps.flushPendingSave.mock.invocationCallOrder[0]);
         expect(deps.flushPendingSave.mock.invocationCallOrder[0]).toBeLessThan(deps.refreshWidgets.mock.invocationCallOrder[0]);

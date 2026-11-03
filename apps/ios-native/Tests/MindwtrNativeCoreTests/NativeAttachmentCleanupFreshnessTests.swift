@@ -29,7 +29,7 @@ private final class CleanupBarrier: @unchecked Sendable {
         let hold = armed && !claimed && !isInstaller
         if hold { claimed = true }
         lock.unlock()
-        if hold { entered.fulfill(); release.wait() } // Native file worker only; never the async test/Engine.
+        if hold { entered.fulfill(); release.wait() }
     }
 }
 
@@ -81,8 +81,8 @@ final class NativeAttachmentCleanupFreshnessTests: XCTestCase {
         let saveValue: Any
         if let save { saveValue = save } else { saveValue = NSNull() }
         let encodedSave = try json([saveValue])
-        // Test-only wrappers forward the native file requests unchanged. The
-        // save timer uses the existing shared durable command, never setState.
+
+
         let prefix = """
         (()=>{
           const n=globalThis.__mindwtrNative;globalThis.__cleanupOps={};let scheduled=false;
@@ -181,8 +181,8 @@ final class NativeAttachmentCleanupFreshnessTests: XCTestCase {
     func testHeldCleanupAbortsAfterActualDurableSaveRestoresLiveReference() async throws {
         try await seed()
         let restoredID = UUID().uuidString.lowercased(), tombstone = attachment()
-        // Ordinary draft merging intentionally never revives a tombstoned id.
-        // A newly saved live record references the same already-existing bytes.
+
+
         let live = attachment(id: restoredID, deleted: false)
         let save = try json(["id": taskID, "base": [:] as [String: Any], "patch": [:] as [String: Any],
             "attachments": ["base": [tombstone], "value": [tombstone, live]], "requestId": UUID().uuidString.lowercased()])

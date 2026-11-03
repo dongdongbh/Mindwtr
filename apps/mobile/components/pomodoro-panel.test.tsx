@@ -190,9 +190,7 @@ describe('PomodoroPanel', () => {
     expect(tree.root.findAllByType(Text).some((node) => flattenText(node.props.children) === 'Break')).toBe(true);
   });
 
-  // The shared getItem mock is key-blind, and the panel now reads two keys.
-  // Keying the implementation keeps the collapse read from consuming a value
-  // queued for the session read (or vice versa).
+
   const mockStorage = (values: Record<string, string | null>) => {
     vi.mocked(AsyncStorage.getItem).mockImplementation(async (key: string) => values[key] ?? null);
   };
@@ -280,7 +278,7 @@ describe('PomodoroPanel', () => {
       act(() => markDone?.props.onPress());
       expect(onMarkDone).toHaveBeenCalledWith(linkedTask.id);
       expect(clearEvent).toHaveBeenCalledWith({ autoStartBreaks: true, autoStartFocus: true });
-      // The parent owns write errors; a pending or rejected write leaves live state untouched.
+
       expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBe(linkedTask.id);
       act(() => updateLiveTasks([{ ...linkedTask, status: 'done' }]));
       expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBeUndefined();
@@ -306,7 +304,7 @@ describe('PomodoroPanel', () => {
     const tree = await renderPanel();
     const textValues = tree.root.findAllByType(Text).map((node) => flattenText(node.props.children));
 
-    // The clock and the phase survive the fold; the controls do not.
+
     expect(textValues).toContain('25:00');
     expect(textValues).toContain('Focus · Paused');
     expect(pressableText(tree)).not.toContain('Switch to Break');
@@ -387,8 +385,8 @@ describe('PomodoroPanel', () => {
     });
 
     expect(AsyncStorage.setItem).toHaveBeenCalledWith('@mindwtr_pomodoro_collapsed', 'true');
-    // Collapsing is a presentation choice, not task data: it must never ride
-    // along in the synced session payload.
+
+
     const sessionWrites = vi.mocked(AsyncStorage.setItem).mock.calls
       .filter(([key]) => key === '@mindwtr_pomodoro_state');
     sessionWrites.forEach(([, value]) => {

@@ -1,18 +1,6 @@
-// Someday projects in their section (pass P3, #1319) for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-someday-projects-device.mjs <adb-serial> [apk]
-//
-// RN draws a parked (Someday) project inside its Someday section group, before the group's tasks, and no Projects block above the
-// list. The first run INJECTS, through
-// core's own store on a host copy of the database, one fixed Someday section ("P3 1319") and one fixed Someday project in it
-// ("P3 1319 project"); every later run REUSES them, so the development data does not grow. Installs the debug APK with
-// `install -r`, then checks against core's own Someday view (projectsInSections, grouped by section) on a copy: the project row
-// sits under its section's heading, before that group's first task, and no Projects block shows; its tap opens the project, and
-// Back returns. Then RN's long press on the row (8fd2cab96) opens core's Move to section… for the project: No section moves it
-// under "No section" (core stores no section), and a second long press puts it back in "P3 1319" (the fixture as it was). Screenshots
-// go to the harness folder (MINDWTR_HARNESS_DIR) for the side-by-side with RN. Its only UI writes are those two moves; it touches
-// only the development package (it refuses any other APK), never launches over another app, leaves the
-// app on its Inbox tab and restores rotation on exit. Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -58,10 +46,8 @@ const pullDatabase = (name) => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/**
- * Core on a copy: `inject` makes the fixed section and project when either is missing (and checkpoints the WAL); `view` prints the
- * fixed project and section ids and core's Someday items (projectsInSections, by section) as the screen reads them.
- */
+
+
 const core = (mode, db = pullDatabase(mode)) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, buildSomedaySectionsSettingsUpdate, createNativeHostContract, flushPendingSave, planSomedaySectionCreate, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -111,7 +97,7 @@ const core = (mode, db = pullDatabase(mode)) => JSON.parse(execFileSync('bun', [
 `], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_SECTION: SECTION, CHECK_PROJECT: PROJECT } })
     .trim().split('\n').pop());
 
-// ---- UI (core's English) ----
+
 const onInbox = (nodes) => !tagged(nodes, 'menu-screen') && tabSelected(nodes, en['tab.inbox']);
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
 const top = (node) => box(node)[1];
@@ -129,11 +115,11 @@ const restore = async () => {
         }
         const nodes = await screen();
         if (front().includes(`${PKG}/`) && tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {                   }
 };
 
 try {
@@ -150,7 +136,7 @@ try {
     await waitFor('the Inbox', onInbox, 60_000);
     let seen = core('view');
     if (!seen.section || seen.project?.status !== 'someday' || seen.project.section !== seen.section) {
-        // First run (or the fixture changed): stop, add the fixed section and project through core, put the database back.
+
         await device.stopApp();
         const db = pullDatabase('inject');
         core('inject', db);
@@ -168,7 +154,7 @@ try {
         `core's Someday puts "${PROJECT}" first under "${SECTION}", with no Projects block`);
     const nextTask = seen.items.slice(heading + 1).find((item) => item[0] !== 'project');
 
-    // Someday from the More sheet, scrolled to the section.
+
     const openSomeday = async () => {
         const sheet = await device.settle(await tapExpecting(tab(await screen(), en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet'));
         return tapExpecting(withDescription(sheet, en['nav.someday']) ?? fail('no Someday tile'),
@@ -189,13 +175,13 @@ try {
     const file = resolve(shots, 'someday-section-native.png');
     writeFileSync(file, adbRaw('exec-out', 'screencap', '-p'));
     console.log(`screenshot ${file}`);
-    // Its tap opens the project (RN's onOpenProject; its title is the header's text field).
+
     nodes = await tapExpecting(projectNode, (current) => !textNode(current, SECTION) && current.some((node) => node.text === PROJECT), `the project "${PROJECT}"`);
     check(true, `the project row's tap opens "${PROJECT}"`);
     requireAppFront();
     sh('input keyevent KEYCODE_BACK');
 
-    // RN's long press (8fd2cab96): Move to section… for the project, out to No section and back into its section.
+
     const noSection = en['viewSections.noSection'];
     const moveTitle = en['viewSections.moveToSection'];
     const longPress = (node) => {
@@ -214,7 +200,7 @@ try {
         await sleep(1500);
         return core('view');
     };
-    // The project opened on the Projects tab (openProjects while that tab holds Projects), so Back lands there: Someday again from the More sheet.
+
     await sleep(1500);
     if (!textNode(await screen(), en['someday.title'])) await openSomeday();
     seen = await moveTo(noSection, true);

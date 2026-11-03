@@ -267,7 +267,7 @@ describe('Reference leading Next is the source-bound RN status-only update', () 
             const before = rows().settings;
             expect(await useTaskStore.getState().updateTask(ID, { status: 'next' })).toEqual({ success: true });
             await flushPendingSave(); expectedSettings = rows().settings;
-            // A status-only write leaves every token in use, so RN writes no settings (#828).
+
             expect(expectedSettings).toEqual(before);
             expect(expectedSettings).toMatchObject({ theme: 'dark', gtd: { focusTaskLimit: 1, autoArchiveDays: 1 } });
         } finally { await rn.close(); }

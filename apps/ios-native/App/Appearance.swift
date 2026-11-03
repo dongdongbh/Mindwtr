@@ -1,7 +1,6 @@
 import SwiftUI
 
-// Presentation tokens from mobile/constants/theme{,-presets}.ts and use-theme-tokens.ts.
-// Core supplies the selected theme descriptor and all status/priority colors.
+
 struct AppPalette {
     let values: [String]
     let dark: Bool
@@ -74,7 +73,7 @@ private struct RNFont: ViewModifier {
 }
 
 extension View {
-    // RN caps compact controls explicitly; reading content keeps full scaling.
+
     func rnFont(_ size: Double, _ weight: Font.Weight = .regular, maxScale: Double? = nil) -> some View {
         modifier(RNFont(size: size, weight: weight, maxScale: maxScale))
     }
@@ -94,7 +93,7 @@ struct AppIcon: View {
     }
 }
 
-// Match RN FocusStarIcon in capture, task rows and Projects.
+
 struct AppFocusStar: View {
     let focused: Bool
     var disabled = false

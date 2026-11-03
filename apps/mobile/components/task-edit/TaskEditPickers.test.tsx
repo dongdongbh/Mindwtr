@@ -242,7 +242,7 @@ describe('Task edit pickers', () => {
             .toEqual(['nav.projects: Active one', 'nav.projects: Someday one', 'nav.projects: Waiting one']);
         expect(destinationTree.root.findAll((node) => typeof node.type === 'string'
             && React.Children.toArray(node.props.children).join('') === 'Someday / Waiting')).toHaveLength(1);
-        // The heading sits between the active and the deferred rows.
+
         const texts = destinationTree.root.findAll((node) => typeof node.type === 'string' && typeof node.props.children === 'string')
             .map((node) => node.props.children as string);
         expect(texts.indexOf('Active one') < texts.indexOf('Someday / Waiting') && texts.indexOf('Someday / Waiting') < texts.indexOf('Someday one')).toBe(true);

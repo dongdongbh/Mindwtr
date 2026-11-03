@@ -1,18 +1,6 @@
-// Runs the native Android device checks as one batch on the shared S23 test phone, under /home/dd/scratch/s23.lock.
-//
-//   node apps/android-native/scripts/run-device-batch.mjs [--tree <worktree>] [--harness <dir>] [--log <dir>] [--no-build]
-//       [--detach [--unit <name>]] [check names...]
-//
-// It builds the bundle and the four Gradle variants, and stops before any check when one of them fails (`STOP: <step> failed`).
-// It builds the upgrade harness only when a check reads its APKs (harnessChecks; else `harness=skipped (no check needs it)`); a
-// harness that fails to build marks only those checks `EXIT=1 not run, harness failed`, and the others still run. Each check
-// then starts from the home screen with rotation on, runs for at most an hour and adds
-// `## <check> HH:MM` and `EXIT=<code> rotation=<r>` to <log>/summary.txt (its output goes to <log>/<check>.log). The last line
-// of summary.txt is `VERDICT PASS <n>/<n>` or `VERDICT FAIL <passed>/<n>: <failed checks>`; the exit code is 0 only on PASS.
-// With no names it runs every check-*-device.mjs and capture-parity-screens.mjs in the tree (check-projects-device with
-// --prune-old first, check-upgrade-device last). --detach starts the batch as a systemd user unit (a worker shell's
-// background jobs die when the worker pauses) and prints the unit and the log folder. phone-queue.mjs shows who holds the
-// phone and who waits.
+
+
+
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -28,7 +16,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const scriptsDir = 'apps/android-native/scripts';
 const apkDir = 'apps/android-native/android/app/build/outputs/apk/play';
 
-// The order the batch has always run in: lists first, the RN-to-native upgrade (it reinstalls the app) last.
+
 const ORDER = ['check-projects-device', 'check-bgsync-device', 'check-encryption-device', 'check-widgets-device',
     'check-project-details-device', 'capture-parity-screens', 'check-startup-device', 'check-lifecycle-device',
     'check-editor-device', 'check-search-device', 'check-process-inbox-device', 'check-capture-device',
@@ -61,7 +49,7 @@ export function parseArgs(argv) {
     return opts;
 }
 
-// Every check script in the tree, in ORDER; a check ORDER does not know yet runs before the upgrade check.
+
 export function defaultChecks(names) {
     const found = names.map((n) => n.replace(/\.mjs$/, '')).filter((n) => /^check-[\w-]+-device$|^capture-parity-screens$/.test(n));
     const known = ORDER.filter((n) => found.includes(n) && n !== LAST);
@@ -69,15 +57,14 @@ export function defaultChecks(names) {
     return [...known, ...fresh, ...(found.includes(LAST) ? [LAST] : [])];
 }
 
-// The S23's adb server listens on 5038 (dd 10-09): a shell without the port reached another server and failed whole batches
-// (0/N, "rotation=" empty). An unset port defaults to it; a set one wins.
+
 export function withAdbPort(env) {
     env.ANDROID_ADB_SERVER_PORT ||= ADB_PORT;
     return env;
 }
 export const setenvArgs = (env) => ['PATH', 'JAVA_HOME', 'HOME', 'ANDROID_ADB_SERVER_PORT', 'PARITY_ONLY'].filter((k) => env[k]).map((k) => `--setenv=${k}=${env[k]}`);
 
-/** The batch's last line when `adb get-state` ([result], a spawnSync result) did not answer "device"; null when it did. */
+
 export function unreachable(result, port, total) {
     const state = result.stdout?.trim() || result.stderr?.trim().split('\n').pop() || result.error?.message || `exit ${result.status}`;
     return state === 'device' ? null : `VERDICT FAIL 0/${total}: not run, ${SERIAL} not reachable on adb port ${port} (${state})`;
@@ -98,15 +85,14 @@ export function checkArgs(check) {
     return [];
 }
 
-// The checks that need the upgrade harness's built APKs: their script, or a check script it runs, reads apks/manifest.json.
-// [read] gives a check's source. Shots, locks and fixtures kept in the harness folder do not count.
+
 export function harnessChecks(checks, read) {
     const reads = (check) => read(check).includes('apks/manifest.json');
     return checks.filter((check) => reads(check)
         || [...read(check).matchAll(/'((?:check-[\w-]+-device|capture-parity-screens))\.mjs'/g)].some(([, other]) => other !== check && reads(other)));
 }
 
-// The build before the checks; the upgrade harness only when [needHarness] names a check.
+
 export function buildSteps(tree, needHarness) {
     return [
         ['bundle', process.execPath, [`${scriptsDir}/build-bundle.mjs`]],
@@ -143,7 +129,7 @@ function main() {
     if (opts.detach) {
         const unit = opts.unit ?? `device-batch-${basename(opts.log)}`.replace(/[^\w.-]/g, '-');
         const env = setenvArgs(process.env);
-        // KillMode=process: the unit's end must not take down an adb server or Gradle daemon other sessions now use.
+
         const run = spawnSync('systemd-run', ['--user', `--unit=${unit}`, '--collect', '--property=KillMode=process', `--working-directory=${opts.tree}`, ...env,
             `--property=StandardOutput=append:${opts.log}/runner.out`, `--property=StandardError=append:${opts.log}/runner.out`,
             process.execPath, ...self], { stdio: 'inherit' });
@@ -151,7 +137,7 @@ function main() {
         process.exit(run.status ?? 1);
     }
 
-    // One batch on the phone at a time: run again under the lock. -o keeps the lock out of the adb server this batch may start.
+
     if (!process.env.S23_LOCKED) {
         const run = spawnSync('flock', ['-o', '-E', String(LOCK_TIMED_OUT), '-w', '43200', LOCK, process.execPath, ...self],
             { stdio: 'inherit', env: { ...process.env, S23_LOCKED: '1' } });
@@ -185,7 +171,7 @@ function main() {
 
     const head = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: opts.tree, encoding: 'utf8' }).stdout.trim();
     say(`start ${new Date().toString()} tree ${opts.tree} head ${head} harness ${opts.harness ?? env.MINDWTR_HARNESS_DIR ?? '(default)'}`);
-    // Before the build: a phone this server cannot see ends the batch now, with its rotation left alone (nothing reaches it).
+
     const stop = unreachable(spawnSync(ADB, ['-s', SERIAL, 'get-state'], { encoding: 'utf8' }), process.env.ANDROID_ADB_SERVER_PORT, checks.length);
     if (stop) {
         say(stop);
@@ -203,7 +189,7 @@ function main() {
                 const sha = spawnSync('sha256sum', [apk], { encoding: 'utf8' }).stdout.slice(0, 12);
                 say(`apk sha ${sha}`);
             }
-            // A harness that cannot be built fails only the checks that need it; the others still run.
+
             if (code !== 0 && name === 'harness' && needHarness.length < checks.length) {
                 say(`harness failed (${opts.log}/harness.log): not run: ${needHarness.join(' ')}`);
                 harnessFailed = true;

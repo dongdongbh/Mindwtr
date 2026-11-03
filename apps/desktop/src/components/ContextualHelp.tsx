@@ -6,7 +6,7 @@ import { useDocumentationLanguage } from '../contexts/language-context';
 
 type Props = { topic: OnboardingTopic; t: (key: string) => string; autoReveal?: boolean };
 
-/** Editor help is opt-in; only an explicit onboarding surface may auto-reveal it. */
+
 export function ContextualHelp({ topic, t, autoReveal = false }: Props) {
     return <TopicHelp key={topic} topic={topic} t={t} autoReveal={autoReveal} />;
 }

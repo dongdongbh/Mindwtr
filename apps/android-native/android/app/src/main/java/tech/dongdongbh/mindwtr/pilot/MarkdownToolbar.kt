@@ -49,13 +49,10 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/** One of core's MARKDOWN_TOOLBAR_ACTIONS (the `markdownToolbarActions` read): its id, RN's label (translateWithFallback) and short label. */
+
 internal data class MarkdownAction(val id: String, val label: String, val short: String)
 
-/**
- * The expanded editor's text with its cursor, and RN's description undo stack (use-task-description-editor: every text change
- * pushes the text and selection before it, an identical entry is skipped, at most 100).
- */
+
 @Stable
 internal class MarkdownDraft(text: String) {
     var field by mutableStateOf(TextFieldValue(text, TextRange(text.length)))
@@ -65,7 +62,7 @@ internal class MarkdownDraft(text: String) {
     var canUndo by mutableStateOf(false)
         private set
 
-    /** [next] from the keyboard or the toolbar; a text change records the text before it and is sent to [store]. */
+
     fun change(next: TextFieldValue, store: (String) -> Unit) {
         if (next.text != field.text) {
             val before = TextFieldValue(field.text, field.selection)
@@ -84,13 +81,13 @@ internal class MarkdownDraft(text: String) {
         store(last.text)
     }
 
-    /** Text set from outside (core's stored value read again): the cursor keeps its place, clamped to the new text. */
+
     fun sync(text: String) {
         if (text != field.text) field = TextFieldValue(text, TextRange(field.selection.start.coerceAtMost(text.length), field.selection.end.coerceAtMost(text.length)))
     }
 }
 
-/** The expanded editor's field: [draft]'s text, focused on open so the keyboard is up, as RN's ExpandedMarkdownEditor's autoFocus. */
+
 @Composable
 internal fun MarkdownInput(draft: MarkdownDraft, store: (String) -> Unit, enabled: Boolean, placeholder: String, description: String, style: TextStyle,
                            modifier: Modifier, decoration: @Composable (@Composable () -> Unit) -> Unit, onBlur: () -> Unit = {}) {
@@ -105,17 +102,13 @@ internal fun MarkdownInput(draft: MarkdownDraft, store: (String) -> Unit, enable
         decorationBox = { field -> decoration { Box { if (draft.field.text.isEmpty()) Text(placeholder, style = style, color = c.secondaryText); field() } } })
 }
 
-/**
- * RN's MarkdownFormatToolbar over the keyboard, shown while the field has focus and the keyboard is up: the actions scroll
- * sideways, then a divider and Undo. Each action is core's applyMarkdownToolbarAction (the `markdownToolbarApply` read) on the
- * text and selection of the tap; a reply for text typed over since is dropped.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun MarkdownToolbar(model: InboxViewModel, draft: MarkdownDraft, store: (String) -> Unit) {
     var actions by remember { mutableStateOf<List<MarkdownAction>?>(null) }
     var undoLabel by remember { mutableStateOf("") }
-    // A background read: it does not start while a user action runs, so it tries again once that ends.
+
     LaunchedEffect(model.busy) {
         if (actions == null && !model.busy) model.background(emptyList(), { runtime -> runtime.menuRead("markdownToolbarActions", "{}") }) { reply, _ ->
             val list = reply.getJSONArray("actions")
@@ -126,7 +119,7 @@ internal fun MarkdownToolbar(model: InboxViewModel, draft: MarkdownDraft, store:
     val shown = actions
     if (shown == null || !draft.focused || !WindowInsets.isImeVisible) return
     val c = LocalTheme.current.colors
-    // RN's sizing: the actions and Undo across the window, less 16 padding, 18 chrome and the 2 gaps, each 32 to 40.
+
     val width = LocalConfiguration.current.screenWidthDp
     val button = ((width - 16 - 18 - 2 * (shown.size - 1)) / (shown.size + 1)).coerceIn(32, 40)
     val iconSize = (button * 0.58f).roundToInt().coerceIn(18, 22)
@@ -147,7 +140,7 @@ internal fun MarkdownToolbar(model: InboxViewModel, draft: MarkdownDraft, store:
                     when (val glyph = markdownGlyph(id)) {
                         null -> Text(short, style = rnText(fontSize, 700), color = c.text)
                         else -> {
-                            // RN draws FontAwesome's italic and strikethrough as text at 64% of the icon size.
+
                             val fa = id == "italic" || id == "strikethrough"
                             val size = if (fa) maxOf(12, (iconSize * 0.64f).roundToInt()) else iconSize
                             Icon(glyph, null, tint = c.text, modifier = Modifier.size((size * glyph.defaultWidth.value / glyph.defaultHeight.value).dp, size.dp))
@@ -179,7 +172,7 @@ private fun markdownGlyph(id: String): ImageVector? = when (id) {
     else -> null
 }
 
-/** RN's toolbar button: square, radius 7, the filter background while pressed; disabled at 35%. */
+
 @Composable
 private fun ToolbarButton(label: String, size: Int, enabled: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
     val c = LocalTheme.current.colors

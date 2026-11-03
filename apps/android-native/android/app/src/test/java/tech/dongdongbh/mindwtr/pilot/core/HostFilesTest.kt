@@ -13,7 +13,7 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.IOException
 
-/** The pending-captures queue port's Kotlin side: list, read and delete, only under the app's files and cache folders. */
+
 class HostFilesTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -44,7 +44,7 @@ class HostFilesTest {
         queue().resolve("a.json").writeText("{}")
         open().delete("files/pending-captures/a.json")
         assertFalse(queue().resolve("a.json").exists())
-        // Its folder is synced after the delete, so a power cut cannot bring the item back.
+
         assertEquals(listOf("pending-captures"), synced)
     }
 
@@ -72,7 +72,6 @@ class HostFilesTest {
 
     private fun JSONArray.toList() = List(length()) { getString(it) }
 
-    // ---- Core's attachment file port (MobileAttachmentFileSystemPort), as expo-file-system answers it ----
 
     private fun uri(file: File) = "file://${file.absolutePath}"
     private fun call(files: HostFiles, op: String, file: File, extra: JSONObject.() -> Unit = {}, bytes: ByteArray? = null) =
@@ -113,13 +112,13 @@ class HostFilesTest {
         assertArrayEquals(bytes, call(files, "readBytes", file).bytes)
         assertArrayEquals(bytes.copyOfRange(10, 30), call(files, "readBytesRange", file, { put("position", 10).put("length", 20) }).bytes)
         assertArrayEquals(bytes.copyOfRange(290, 300), call(files, "readBytesRange", file, { put("position", 290).put("length", 50) }).bytes)
-        // Synced: the write's folder.
+
         assertTrue("attachments" in synced)
         assertEquals(listOf("a.bin"), (call(files, "readDirectory", attachments()).value as JSONArray).toList())
     }
 
     @Test fun sha256HashesTheBytesItIsSent() {
-        // The SHA-256 of "abc" (FIPS 180-2's example).
+
         assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
             open().call(JSONObject().put("op", "sha256").toString(), "abc".toByteArray()).value)
     }
@@ -127,7 +126,7 @@ class HostFilesTest {
     @Test fun aFileIsHashedWhereItLiesInPiecesPastTheReadLimit() {
         attachments().mkdirs()
         val file = File(attachments(), "big.bin").apply { writeBytes(ByteArray(300_000) { (it % 251).toByte() }) }
-        // Larger than a whole read may be: the hash streams it and never holds the file.
+
         val files = HostFiles(filesDir, cacheDir, syncDirectory = { }, maxReadBytes = 100_000)
         val expected = java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) }
         assertEquals(expected, call(files, "sha256File", file).value)
@@ -160,7 +159,7 @@ class HostFilesTest {
         assertArrayEquals(bytes, target.readBytes())
         assertEquals(bytes.size.toLong(), (files.call(JSONObject().put("op", "getInfo").put("uri", picked).toString()).value as JSONObject).getLong("size"))
         assertArrayEquals(bytes, files.call(JSONObject().put("op", "readBytes").put("uri", picked).toString()).bytes)
-        // A document is only ever a source.
+
         assertThrows(IllegalArgumentException::class.java) { files.call(JSONObject().put("op", "copy").put("uri", uri(target)).put("to", picked).toString()) }
     }
 
@@ -179,7 +178,7 @@ class HostFilesTest {
         assertFalse(File(attachments(), "dir").exists())
     }
 
-    /** RN's file-system.ts prepareFileTarget (c2472e974): a write, copy or move makes its folder and replaces a folder at the target. */
+
     @Test fun aWriteCopyOrMoveMakesItsFolderAndReplacesAFolderAtTheTarget() {
         val files = open()
         val written = File(cacheDir, "stage/new/a.bin")
@@ -202,10 +201,7 @@ class HostFilesTest {
         assertTrue(File(attachments(), "f.bin").isFile)
     }
 
-    /**
-     * Android names the app's folders through a link (/data/user/0 → /data/data). A URI in either spelling is the same file, as
-     * desktop's lease must compare a canonical root with an app-built one (the Windows `\\?\` root, bc3ab4c2e).
-     */
+
     @Test fun aRootNamedThroughALinkTakesURIsInEitherSpelling() {
         val real = File(folder.root, "data/app").apply { mkdirs() }
         File(real, "files/attachments").mkdirs()
@@ -219,7 +215,7 @@ class HostFilesTest {
         assertFalse(linked.exists())
     }
 
-    /** The managed delete's two halves (review finding 1): a barrier that answers in order, and a delete at once with call's rules. */
+
     @Test fun aBarrierAnswersAndADeleteNowKeepsTheDeleteRules() {
         val files = open()
         assertEquals(null, files.call(JSONObject().put("op", "barrier").toString()).value)
@@ -227,7 +223,7 @@ class HostFilesTest {
         synced.clear()
         files.deleteNow(uri(file))
         assertFalse(file.exists())
-        // The unlink only: the folder's sync is slow and decides nothing, so it runs on the files thread after (syncParent).
+
         assertEquals(emptyList<String>(), synced)
         call(files, "syncParent", file)
         assertEquals(listOf("attachments"), synced)
@@ -239,7 +235,7 @@ class HostFilesTest {
         assertTrue(journal.exists() && attachments().isDirectory)
     }
 
-    /** Review finding 2: a copy stalled on its document provider ends once the call is aborted (core copies into a temporary name). */
+
     @Test fun anAbortedReadEndsACopyStalledOnItsProvider() {
         val stalled = object : java.io.InputStream() {
             private val gate = java.util.concurrent.CountDownLatch(1)
@@ -275,7 +271,7 @@ class HostFilesTest {
             assertThrows(bad, IllegalArgumentException::class.java) { files.call(JSONObject().put("op", "readBytes").put("uri", bad).toString()) }
             if (bad != uri(link)) assertThrows(bad, IllegalArgumentException::class.java) { files.call(JSONObject().put("op", "delete").put("uri", bad).toString()) }
         }
-        // A link is deleted as a link: what it points to is never touched.
+
         call(files, "delete", link)
         assertFalse(java.nio.file.Files.exists(link.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS))
         assertEquals("secret", outside.readText())
@@ -312,11 +308,11 @@ class HostFilesTest {
         assertThrows(IllegalArgumentException::class.java) { call(files, "move", journal, { put("to", uri(File(attachments(), "j"))) }) }
         assertThrows(IllegalArgumentException::class.java) { call(files, "copy", File(attachments(), "a").apply { writeText("a") }, { put("to", uri(File(filesDir, "a"))) }) }
         assertEquals("{}", journal.readText())
-        // The attachments folder and the cache take writes; the attachments folder itself can be made.
+
         call(files, "makeDirectory", attachments())
         call(files, "writeBytes", File(cacheDir.apply { mkdirs() }, "stage.bin"), bytes = ByteArray(2))
         call(files, "writeBytes", File(attachments(), "b.bin"), bytes = ByteArray(2))
-        // A read may come from anywhere in the two folders.
+
         assertEquals(2, (call(files, "getInfo", File(cacheDir, "stage.bin")).value as JSONObject).getLong("size"))
         assertArrayEquals("{}".toByteArray(), call(files, "readBytes", journal).bytes)
     }

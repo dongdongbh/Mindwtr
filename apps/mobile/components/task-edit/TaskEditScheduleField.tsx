@@ -305,7 +305,7 @@ export function TaskEditScheduleField({
         }
     };
 
-    // A new due date moves a relative start, or ends the link, through the draft's cascade.
+
     const updateDueDate = (dueDate: string | undefined) => {
         setDraftField('dueDate', dueDate ?? '');
     };

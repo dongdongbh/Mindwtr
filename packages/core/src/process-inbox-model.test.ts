@@ -47,8 +47,8 @@ it('retains progress when new work arrives and resets for a fresh session', () =
     const grown = getProcessInboxProgress(converted, 5, session);
     expect(grown).toEqual({ total: 7, processed: 2 });
     expect(getProcessInboxProgress(grown, 5, session)).toEqual(grown);
-    // Work removed by another writer counted as progress under the RN policy;
-    // a later capture must not erase that count either.
+
+
     const removed = getProcessInboxProgress(grown, 3, session);
     expect(removed).toEqual({ total: 7, processed: 4 });
     expect(getProcessInboxProgress(removed, 5, session)).toEqual({ total: 9, processed: 4 });
@@ -86,7 +86,7 @@ describe('Process Inbox model parity with the mobile modal', () => {
         expect(observed).toEqual(fixture.observations[scenario.name].map((observation) => frozenObservation(observation)));
     });
 
-    // Mobile used to clear these after the next item had opened, so filing that item erased them.
+
     it('records the next item keeping its dates after Start later, Next, Incubate and Waiting', () => {
         const observations = fixture.observations['the next item keeps its dates after Start later, Next, Incubate and Waiting'];
         const dates = (taskId: string) => {
@@ -144,7 +144,7 @@ describe('Process Inbox steps', () => {
         if (outcome.type !== 'flow') return;
         expect(resolveProcessInboxStep(outcome.answers, 'quick', base)).toBe('file');
         expect(outcome.draft).toMatchObject({ convertToProject: true, nextAction: 'Plan trip', projectId: null });
-        // Back returns to the choices and drops the split.
+
         const back = answerProcessInboxStep({ choice: 'back', answers: outcome.answers,
             draft: outcome.draft, mode: 'quick', plan: base, task, parseTitle: (title) => ({ title }) as never });
         expect(back).toMatchObject({ type: 'flow', answers: INITIAL_PROCESS_INBOX_ANSWERS, draft: { convertToProject: false, nextAction: '' } });
@@ -171,7 +171,7 @@ describe('Process Inbox steps', () => {
         const base = plan({});
         const file = answers({ actionability: 'actionable', twoMinute: 'no', execution: 'defer', oneActionAnswered: true });
         expect(backProcessInboxStep(file, 'guided', base)).toEqual({ answers: { ...file, oneActionAnswered: false }, cancelProjectConversion: true });
-        // Quick mode returns to its entry screen; only Project starts a split there, so Back drops it.
+
         expect(backProcessInboxStep(file, 'quick', base)).toEqual({ answers: INITIAL_PROCESS_INBOX_ANSWERS, cancelProjectConversion: true });
     });
 
@@ -372,8 +372,7 @@ describe('captured RN note and date controls', () => {
     });
 });
 
-// Priority, energy, and person controls are hidden by default, so the typed
-// tokens are the only way the user said anything. They must reach the write.
+
 describe('typed single-value tokens with hidden controls', () => {
     const title = 'Call bank /priority:high /energy:low %Alice';
     const commit = (settings: Parameters<typeof resolveProcessInboxPlan>[0], decision: 'next' | 'someday') => {
@@ -404,8 +403,7 @@ describe('typed single-value tokens with hidden controls', () => {
     });
 });
 
-// #1461: processing offers the chosen project's sections, and the write carries
-// the picked section only with its own project.
+
 describe('project section in Inbox processing', () => {
     const plan = resolveProcessInboxPlan({});
     const selection = (projectId: string | null, sectionId?: string | null) => ({
@@ -442,7 +440,7 @@ describe('project section in Inbox processing', () => {
         expect(Object.hasOwn(cleared, 'sectionId')).toBe(true);
         expect(cleared.sectionId).toBeUndefined();
         expect(Object.hasOwn(commit(inbox, selection('p-work', null)), 'sectionId')).toBe(false);
-        // A caller that does not offer sections leaves the task's section alone.
+
         expect(Object.hasOwn(commit(sectioned, selection('p-work')), 'sectionId')).toBe(false);
     });
 

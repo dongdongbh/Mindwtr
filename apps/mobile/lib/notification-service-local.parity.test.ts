@@ -1,17 +1,6 @@
-/**
- * React Native's reminder alarm reconciliation, replayed against the frozen parity
- * fixture (packages/core/src/reminder-alarms-parity.fixtures.json) that core's
- * mobile-reminder-alarms planner and applier are tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit every other change first, then run
- *   MINDWTR_CAPTURE_REMINDER_ALARMS=1 MINDWTR_CAPTURE_REMINDER_ALARMS_COMMIT=$(git rev-parse HEAD) TZ=UTC bunx vitest run lib/notification-service-local.parity.test.ts
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code and the reminder parity harnesses, so the provenance
- * always names the code that ran. Each scenario runs the real service against a
- * scripted alarm library, one reconciliation cycle at a time, and records every
- * library call, alarm map write, timer and log line in order.
- */
+
+
+
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -28,7 +17,7 @@ type Cycle = {
   settings: Record<string, unknown>;
   tasks: Record<string, unknown>[];
   projects?: Record<string, unknown>[];
-  /** scheduleAlarm answers in call order; once used up, ids count up from the scenario's next id. */
+
   answers?: Answer[];
 };
 type Scenario = { name: string; storedAlarms?: string; cycles: Cycle[] };
@@ -94,8 +83,7 @@ vi.mock('react-native-alarm-notification', () => ({
   },
 }));
 
-// The store and the system language are the only replaced parts: stored language,
-// translations and every reminder rule are core's real code.
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mindwtr/core')>();
   return {

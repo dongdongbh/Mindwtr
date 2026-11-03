@@ -36,14 +36,11 @@ type UseSettingsDataPageOptions = {
         | 'gettingStartedContentConfirmDesc'
         | 'gettingStartedContentConfirmTitle'
     >;
-    /** Import/export lives in useSyncSettings; the Data page just renders it. */
+
     dataTransferProps: SettingsDataTransferProps;
 };
 
-/**
- * Diagnostics, attachment cleanup and Getting Started content for the Data
- * page. Returns members already named as props so SettingsView can spread them.
- */
+
 export function useSettingsDataPage({
     isTauri,
     language,

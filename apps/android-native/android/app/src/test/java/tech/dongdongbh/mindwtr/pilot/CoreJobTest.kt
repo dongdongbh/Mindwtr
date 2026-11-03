@@ -4,7 +4,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** One CoreWork run: the host's boot first (the app's boot order), then the one named job, then the widgets' refresh. */
+
 class CoreJobTest {
     private val events = mutableListOf<String>()
     private var drained = true
@@ -81,16 +81,14 @@ class CoreJobTest {
         assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "reminders background sync", "ensure", "widgets"), events)
     }
 
-    // #1257: what a capture job stored while the app was closed is sent before the job ends (core's capture run), never after.
+
     @Test fun aCaptureJobSendsWhatItStoredBeforeItEnds() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
         assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "reminders background sync", "ensure", "widgets"), events)
         assertEquals(listOf("Native Android core work ingest success"), lines)
     }
 
-    // Review S4a 2: a capture job succeeds only once its upload is owned: sent, or failed and recorded with the scheduled job in
-    // WorkManager to retry it (the first native start after RN's may be a capture, with no screen to schedule it).
-    // A widget tap or a capture is stored and drawn before the job waits for any sync (a dead server can hold that for minutes).
+
     @Test fun aCaptureJobStoresAndDrawsWhatItDrainedBeforeItWaitsForTheSync() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
         assertEquals(listOf("drain", "widgets", "reminders background capture", "sync capture"), events.filter { it in setOf("drain", "widgets", "reminders background capture", "sync capture") }.take(4))
@@ -112,7 +110,7 @@ class CoreJobTest {
     }
 
     @Test fun aCaptureWhoseSyncThrowsRetriesItsUpload() {
-        // The capture is committed; the retry sends it (the count it owes survives in OwedUploads).
+
         syncFailure = IllegalStateException("Core backgroundSync timed out")
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.INGEST))
         assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture"), events)
@@ -123,11 +121,11 @@ class CoreJobTest {
         var stored = 0
         val first = OwedUploads(read = { stored }, write = { stored = it })
         first.add(2)
-        // A new process reads the same store.
+
         val restarted = OwedUploads(read = { stored }, write = { stored = it })
         val owed = restarted.owed()
         assertEquals(2, owed)
-        // A capture stored while that run went on stays owed.
+
         restarted.add(1)
         restarted.settle(owed)
         assertEquals(1, restarted.owed())
@@ -146,22 +144,21 @@ class CoreJobTest {
         assertEquals(listOf("boot", "recover", "drain", "sync scheduled", "reminders background sync", "widgets"), events)
     }
 
-    // #1424 (RN 64f35d79d): tasks a background sync brought get their alarms before the job ends; core's 2.5 s store timer may
-    // never fire in a job's process, and a cold job planned once before the sync.
+
     @Test fun aBackgroundSyncPlansTheRemindersOfWhatItSyncedBeforeItEnds() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.SYNC))
         assertEquals(listOf("sync scheduled", "reminders background sync"), events.filter { it.startsWith("sync") || it.startsWith("reminders") })
         assertEquals("cycled", diagnostics.single().getString("reminders"))
     }
 
-    // #1398 (RN a7da952cf): a capture's reminder is set by the job that stored it, before its sync's wait.
+
     @Test fun aCaptureJobPlansItsRemindersBeforeItSends() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
         assertEquals(listOf("reminders background capture", "sync capture", "reminders background sync"), events.filter { it.startsWith("sync") || it.startsWith("reminders") })
         assertEquals("cycled", diagnostics.single().getString("reminders"))
     }
 
-    // RN's background reconcile never fails its job: a plan that throws is logged, and the sync still runs.
+
     @Test fun aReminderPlanThatFailsNeverFailsTheJob() {
         remindersFailure = IllegalStateException("NOT_READY: storage")
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
@@ -172,7 +169,7 @@ class CoreJobTest {
     }
 
     @Test fun theSyncJobSkipsWhileTheAppIsInFrontAndQueuesItsNext() {
-        // RN's Expo worker runs nothing while the app is in the foreground (its triggers sync) and schedules the next run.
+
         appActive = true
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.SYNC))
         assertEquals(listOf("boot", "recover", "drain", "again", "widgets"), events)
@@ -184,7 +181,7 @@ class CoreJobTest {
         assertEquals(listOf("boot", "recover", "drain", "sync scheduled"), events)
     }
 
-    // Review S4a 3: a next run WorkManager did not store would end the chain; the job retries instead of reporting success.
+
     @Test fun aSyncJobWhoseNextRunIsNotStoredRetries() {
         nextStored = false
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.SYNC))
@@ -209,7 +206,7 @@ class CoreJobTest {
         recovered = true
         drained = false
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.CONTEXT, mapOf("action" to "activate", "context" to "@home")))
-        // Nothing was posted from unfinished state.
+
         assertEquals(listOf("boot", "recover", "boot", "recover", "drain"), events)
     }
 
@@ -237,7 +234,7 @@ class CoreJobTest {
     @Test fun aBootThatFailsRunsNoJob() {
         bootFailure = IllegalStateException("Incomplete tasks load")
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.INGEST))
-        // A trigger whose recovery cannot finish waits for it too.
+
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.CONTEXT, mapOf("action" to "activate", "context" to "@home")))
         assertEquals(listOf("boot", "boot"), events)
     }
@@ -255,7 +252,7 @@ class CoreJobTest {
 
     @Test fun aFailedTriggerIsNotRetried() {
         contextFailure = IllegalStateException("Core contextAutomation timed out")
-        // A late notification would describe a moment that has passed: RN's headless task does not retry either.
+
         assertEquals(CoreJob.Outcome.Failure, run(CoreJob.CONTEXT, mapOf("action" to "activate", "context" to "@home")))
         assertEquals(listOf("boot", "recover", "drain", "context activate @home"), events)
     }

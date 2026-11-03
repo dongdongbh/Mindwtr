@@ -13,10 +13,8 @@ export const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    // The keyboard lift (padding on the keyboard-avoiding parent) can leave less room
-    // than sheetMaxHeight allows; without this the bottom-anchored sheet overflows past
-    // the top of the screen and takes the title input with it (#1120). Shrinking hands
-    // the loss to scrollArea, the only shrinkable child, so the title/header stay put.
+
+
     flexShrink: 1,
     width: '100%',
     maxWidth: 860,
@@ -55,13 +53,13 @@ export const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     minHeight: 44,
-    // Allow a few lines for pasted multi-line text without blowing up the
-    // sheet; content beyond ~4 lines scrolls within the input.
+
+
     maxHeight: 120,
   },
   scrollArea: {
-    // Shrink within the maxHeight sheet so overflowing content scrolls instead of
-    // pushing the title input off the top of the screen (#887).
+
+
     flexShrink: 1,
     flexGrow: 0,
   },
@@ -184,7 +182,7 @@ export const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     minHeight: 44,
-    // Keep capture compact; longer descriptions scroll inside the input.
+
     maxHeight: 96,
   },
   optionsRow: {

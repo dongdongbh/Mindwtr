@@ -5,11 +5,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * Review of a55450375: a draft restored after a restart saves its checklist against the one it started from. With the
- * restored model's checklist as the base, a change another device synced meanwhile looked like the base, and Save wrote the
- * draft's older list over it; with the right base, core merges the two (saveTaskDraft's mergeSyncedChanges).
- */
+
 class TaskEditorChecklistTest {
     private fun model(checklist: String): EditorModel {
         val date = JSONObject().put("value", "").put("label", "").put("hasTime", false).put("dateOnly", "")

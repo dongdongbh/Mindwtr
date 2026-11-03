@@ -40,7 +40,7 @@ describe('canMoveTaskToChecklist', () => {
             { reminderPolicy: 'send' },
         ];
         for (const patch of blocked) expect(canMoveTaskToChecklist(task('a', { title: 'Buy milk', ...patch })), JSON.stringify(patch)).toBe(false);
-        // A whitespace-only description holds nothing.
+
         expect(canMoveTaskToChecklist(task('a', { description: '  ' }))).toBe(true);
     });
 
@@ -106,7 +106,7 @@ describe('moveTaskToChecklist store action', () => {
         expect(row('src').deletedAt).toBeUndefined();
         expect(row('src').status).toBe('inbox');
         expect(row('target').checklist).toBeUndefined();
-        // Undo again finds nothing to undo.
+
         expect((await useTaskStore.getState().undoMoveTaskToChecklist('src', 'target')).success).toBe(false);
     });
 });

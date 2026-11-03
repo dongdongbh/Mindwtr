@@ -129,7 +129,7 @@ export const projectsScreenStyles = StyleSheet.create({
     projectReorderListFill: {
         flex: 1,
     },
-    // The list header pinned in reorder mode: the task list's listContent padding, less its bottom (the reorder list follows).
+
     projectReorderHeader: {
         paddingHorizontal: 12,
         paddingTop: 12,

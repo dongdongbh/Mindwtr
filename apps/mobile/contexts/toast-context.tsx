@@ -84,12 +84,11 @@ const getToastSwipeExitTranslateX = (gestureState: PanResponderGestureState): nu
 
 export function ToastProvider({ children }: { children: ReactNode }) {
     const [queue, setQueue] = useState<ToastState[]>([]);
-    // Lift the root overlay above a persistent bottom bar (the tab bar) so an
-    // undo toast never covers it (#1044). ponytail: single value, not a stack —
-    // only the tabs layout registers one; add a stack if a second caller appears.
+
+
     const [bottomOffset, setBottomOffset] = useState(0);
-    // Native <Modal> windows cover the root overlay, so modal content mounts a
-    // ToastViewport and the toast renders in the topmost registered one (#834).
+
+
     const [viewportStack, setViewportStack] = useState<number[]>([]);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const queueAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -170,9 +169,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, [translateX]);
 
     const panResponder = useMemo(() => PanResponder.create({
-        // Native Modal claims otherwise-unhandled starts. Own touches on the
-        // toast body immediately so subsequent moves reach this responder.
-        // The nested action Pressable still wins starts on its own button.
+
+
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: shouldStartToastSwipe,
         onMoveShouldSetPanResponderCapture: shouldStartToastSwipe,
@@ -235,8 +233,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         const dismissAfter = (ms: number) => {
             if (current) timerRef.current = setTimeout(dismissToast, ms);
         };
-        // A toast with an action (Undo) stays for Android's "Time to take action" (TalkBack and switch users), never below its own
-        // time, as the native app does; iOS answers the time it was given.
+
+
         if (toast.actionLabel) {
             AccessibilityInfo.getRecommendedTimeoutMillis(shown)
                 .then((recommended) => dismissAfter(Math.max(shown, recommended)), () => dismissAfter(shown));
@@ -301,8 +299,8 @@ function ToastOverlay({ respectBottomOffset = false, inline = false }: { respect
     const tc = useThemeColors();
     if (!renderState?.toast) return null;
     const { toast, opacity, translateX, translateY, panHandlers, showToast, dismissToast } = renderState;
-    // The registered offset (tab bar height) already contains the bottom safe
-    // area; modal viewports have no tab bar, so they keep the plain inset.
+
+
     const bottomOffset = respectBottomOffset ? renderState.bottomOffset : 0;
     const paddingBottom = bottomOffset > 0
         ? bottomOffset + 12
@@ -381,11 +379,7 @@ function ToastOverlay({ respectBottomOffset = false, inline = false }: { respect
     );
 }
 
-// Mount inside a native <Modal>'s content so toasts fired while the modal is
-// open render above it instead of behind the modal window. The most recently
-// opened modal wins; the root overlay takes over when no viewport is mounted.
-// Use inline between scrolling content and a footer to reserve the toast's
-// natural height, including wrapped text, instead of covering either region.
+
 export function ToastViewport({ inline = false }: { inline?: boolean } = {}) {
     const renderState = useContext(ToastRenderContext);
     const idRef = useRef<number | null>(null);
@@ -406,9 +400,7 @@ export function ToastViewport({ inline = false }: { inline?: boolean } = {}) {
     return <ToastOverlay inline={inline} />;
 }
 
-// Mount where a persistent bottom bar lives (the tabs layout) so root-overlay
-// toasts render above the bar instead of covering it (#1044). Pass the bar's
-// full height including its safe-area inset.
+
 export function useToastBottomOffset(offset: number) {
     const renderState = useContext(ToastRenderContext);
     const setBottomOffset = renderState?.setBottomOffset;

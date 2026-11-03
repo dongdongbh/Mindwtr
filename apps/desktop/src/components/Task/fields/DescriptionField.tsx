@@ -91,9 +91,8 @@ export function DescriptionField({
     const descriptionAudioLabel = descriptionAudioState === 'recording'
         ? tFallback(t, 'taskEdit.descriptionAudioStop', 'Stop dictation')
         : tFallback(t, 'taskEdit.descriptionAudio', 'Dictate description');
-    // The toolbar toggle switches between editing and previewing the rendered
-    // markdown. The mode it offers next is announced by its label (Preview when
-    // editing, Edit when previewing); the button itself is icon-only.
+
+
     const descriptionModeToggleLabel = showDescriptionPreview ? t('markdown.edit') : t('markdown.preview');
 
     return (

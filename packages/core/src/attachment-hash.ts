@@ -8,8 +8,7 @@ const toHex = (bytes: Uint8Array): string => {
 
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/i;
 
-/** A `fileHash` that isn't a 64-character hex digest carries no information — nothing
- *  can be compared against it. The single home for that judgement. */
+
 export const isSha256Hex = (value: unknown): value is string =>
     typeof value === 'string' && SHA256_HEX_PATTERN.test(value);
 
@@ -17,12 +16,7 @@ export type Sha256HexProvider = (bytes: Uint8Array) => Promise<string> | string;
 
 let sha256HexProvider: Sha256HexProvider | null = null;
 
-/**
- * Register a platform SHA-256, mirroring the native-module seam in mobile's
- * sync-crypto-native.ts: Hermes ships no WebCrypto, so without a provider every
- * attachment integrity check on that platform would have nothing to compute with.
- * Pass `null` to fall back to `crypto.subtle`.
- */
+
 export const setSha256HexProvider = (provider: Sha256HexProvider | null): void => {
     sha256HexProvider = provider;
 };

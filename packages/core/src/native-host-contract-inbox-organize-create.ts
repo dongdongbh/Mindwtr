@@ -148,8 +148,8 @@ const validScope = (s: unknown): s is Prepared['scope'] => {
         && validReferenceBatchArea(restore.area) && Boolean(restore.area.deletedAt)
         && rows(restore.projects, validReferenceBatchProject) && rows(restore.sections, section) && rows(restore.tasks, validReferenceBatchTask);
 };
-// Inbox and restoration are independently ordered saved witnesses. Their overlapping rows
-// must agree, but an Inbox-first union cannot reconstruct the original restoration order.
+
+
 const scopeConsistent = (r: Request, scope: Prepared['scope'], data: NonNullable<ReturnType<typeof scopeData>>): boolean => {
     const inbox = rawReferenceBatchScope(inboxTasksOrganizeScope(scopeRequest(r), data));
     if (!same(inbox, scope.inbox)) return false;
@@ -315,7 +315,7 @@ export function createInboxOrganizeDestinationCreateMethods(deps: {
             if (confirmed.ok) {
                 try { logInfo('Native Inbox Organize destination confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },

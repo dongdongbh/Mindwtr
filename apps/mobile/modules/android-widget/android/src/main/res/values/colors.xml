@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Defaults for themeMode "system": the launcher re-inflates widgets on a
-     day/night flip, so resource colors follow it without a payload update.
-     Same values as core widget-payload.ts's light palette. -->
+
+
 <resources>
     <color name="mindwtr_widget_background">#F8FAFC</color>
     <color name="mindwtr_widget_card">#FFFFFF</color>

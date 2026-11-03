@@ -1,38 +1,23 @@
-// React Native's global fetch is the whatwg-fetch polyfill, which hands every
-// result back to JavaScript through setTimeout(..., 0). Android pauses all
-// JavaScript timers while the activity is paused (JavaTimerManager.onHostPause),
-// and a headless instance starts paused. So a request made after the app went
-// to the background completes on the network and then sits unresolved until
-// the app is foregrounded again. A scheduled background sync froze at its first
-// reply this way and held its WorkManager job open until Android killed it
-// (#1001). XMLHttpRequest completes through a native event instead, and its
-// timeout is enforced by OkHttp, so neither depends on a JavaScript timer.
+
+
 
 import { getNativeUtf8TextNative } from '@/modules/native-utf8-text';
 import { logInfo } from './app-log';
 
-/** Ceiling for one request, enforced natively; foreground code keeps its own
- *  shorter JavaScript timeouts on top. */
+
 export const BACKGROUND_SAFE_FETCH_NATIVE_TIMEOUT_MS = 5 * 60 * 1000;
 
 let deadlineAt: number | null = null;
 
-/** While set, no request may start after this time, and every request is cut
- *  short at it. The background sync job uses it as a deadline that holds even
- *  though its own timers do not fire. */
+
 export const setBackgroundSafeFetchDeadline = (at: number | null): void => {
   deadlineAt = at;
 };
 
-/** Read back the deadline set above. CloudKit calls in cloudkit-sync.ts are
- *  not fetch requests, so they cannot share the enforcement above, but they
- *  share this same wall-clock deadline: it is checked before and after every
- *  native CloudKit call so a run resumed from suspension past its deadline
- *  aborts at once instead of starting (or trusting the result of) another one. */
+
 export const getBackgroundSafeFetchDeadline = (): number | null => deadlineAt;
 
-// Only React Native's XMLHttpRequest has the timer-free completion and the
-// native timeout; a browser (the web build, tests) keeps its own fetch.
+
 const hasNativeXhr = (): boolean => (
   typeof XMLHttpRequest === 'function' && typeof document === 'undefined'
 );
@@ -54,7 +39,7 @@ const parseResponseHeaders = (raw: string): Headers => {
     try {
       headers.append(name, value);
     } catch {
-      // A header the platform refuses to represent is not worth failing the request over.
+
     }
   }
   return headers;
@@ -65,8 +50,7 @@ type XhrBody = { buffer: () => ArrayBuffer; nativeText: () => NativeText | null 
 
 let nativeTextLogged = false;
 
-// #1434: Expo's TextDecoder is JavaScript, and a sync document of a few MB took seconds to decode in the
-// background. Swift decodes it when it is valid UTF-8; any other body takes the JavaScript path as before.
+
 const decodeNatively = (base64: string | null): NativeText | null => {
   if (base64 === null) return null;
   const native = getNativeUtf8TextNative();
@@ -106,7 +90,7 @@ class XhrResponse {
     return this.status >= 200 && this.status < 300;
   }
 
-  /** Core's readDecodedResponseText (http-utils.ts) reads text() under its byte limit when this is set. */
+
   get mindwtrDecodedTextBytes(): number | undefined {
     return this.content.nativeText()?.bytes;
   }
@@ -190,8 +174,8 @@ const xhrFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Respons
   });
 
   xhr.onload = () => {
-    // React Native keeps an 'arraybuffer' reply as the native side's base64 string and builds the
-    // ArrayBuffer in JavaScript only when `response` is read, so a text read skips that step too.
+
+
     const nativeBase64 = (xhr as unknown as { _response?: unknown })._response;
     let buffer: ArrayBuffer | undefined;
     let nativeText: NativeText | null | undefined;
@@ -217,8 +201,8 @@ const xhrFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Respons
     ) as unknown as Response));
   };
   xhr.onerror = () => finish(() => reject(new TypeError('Network request failed')));
-  // Worded like a dropped connection so the sync classifies it as offline
-  // (retry later, no failure banner) rather than as a server error.
+
+
   xhr.ontimeout = () => finish(() => reject(new TypeError(
     `Network request failed: no answer within ${Math.round(xhr.timeout / 1000)} s`,
   )));

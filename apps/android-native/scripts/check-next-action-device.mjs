@@ -1,20 +1,6 @@
-// Project next-action prompt check for the isolated native Android development app (RN's project-next-action-prompt.tsx).
-//
-//   node apps/android-native/scripts/check-next-action-device.mjs <adb-serial> [apk]
-//
-// Starts a WebDAV folder (sync-harness.mjs serveWebdav) on 127.0.0.1 and maps the phone's port to it (`adb reverse`), sets it up
-// through Settings › Sync and puts one active project into the folder's document: "NA <run>" with a Next task, a Waiting task
-// and a Someday task. Sync now brings it to the phone. Then, on the project's screen:
-//   (1) the Next task's Done swipe shows RN's prompt: its title, the project in the description, both other tasks to choose,
-//       Complete project; shot in light and dark mode; Choose on the Waiting task makes it Next and closes the prompt;
-//   (2) that task's Done swipe asks again; Skip closes it and writes nothing; the Someday row's swipe (Next) shows no prompt, and
-//       its Done then asks with nothing to choose; "Typed <run> /waiting" and Add next action make a Waiting task in the project
-//       (the quick-add grammar, #859);
-//   (3) its Done swipe asks again; "Edit <run>" and Save & edit make a Next task and open it on the Form tab (RN 9dea771b5);
-//   (4) that task's Done swipe asks again; Complete project archives the project.
-// Shots go to <log>/next-action-*.png (MINDWTR_SHOTS, else android/build/next-action-check). On exit it sets Sync to Off, removes
-// the port mapping, stops the server, puts night mode and rotation back and leaves the phone on its home screen.
-// Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -74,7 +60,7 @@ const sqlite = (sql) => {
     const out = execFileSync('sqlite3', ['-json', pullDb(), sql], { encoding: 'utf8', maxBuffer: 1 << 28 }).trim();
     return out ? JSON.parse(out) : [];
 };
-/** This run's project tasks on the phone, by title: `{ title, status, sectionId }`. */
+
 const projectTasks = () => Object.fromEntries(sqlite(`SELECT title, status FROM tasks WHERE projectId = '${PROJECT.id}' AND deletedAt IS NULL`)
     .map((row) => [row.title, row.status]));
 const projectStatus = () => sqlite(`SELECT status FROM projects WHERE id = '${PROJECT.id}'`)[0]?.status;
@@ -88,7 +74,7 @@ const until = async (description, holds, timeoutMs = 60_000, everyMs = 1_500) =>
     }
 };
 
-// ---- Settings › Sync (core's English), as check-bgsync-device.mjs drives it ----
+
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
 const onInbox = (nodes) => !tagged(nodes, 'quick-capture') && !tagged(nodes, 'menu-screen') && !tagged(nodes, 'global-search') && !inEditor(nodes)
     && tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes));
@@ -145,7 +131,7 @@ const syncOff = async () => {
     }
 };
 
-// ---- The project and its prompt ----
+
 const inProject = (nodes) => projectTitled(nodes, PROJECT.title) && !inEditor(nodes);
 const openProject = async () => {
     let nodes = await toTabs();
@@ -153,13 +139,13 @@ const openProject = async () => {
     const row = await reveal((current) => current.find((node) => node.text === PROJECT.title), `the project ${PROJECT.title}`);
     return tapExpecting(row, inProject, `the project ${PROJECT.title}`, 30_000);
 };
-/** The Done swipe on [title] in the open project, until the prompt shows. */
+
 const doneUntilPrompt = async (title) => {
     await reveal((current) => taskRow(current, title), `the row ${title}`);
     await device.swipeDone(await screen(), title);
     return waitFor(`the prompt after ${title}'s Done`, prompted, 20_000);
 };
-/** A candidate's title inside the prompt's card (the project's own row behind the scrim has the same title). */
+
 const candidate = (nodes, title) => {
     const card = tagged(nodes, 'next-action-prompt');
     if (!card) return undefined;
@@ -178,7 +164,7 @@ const typeTitle = async (text) => {
     await waitFor(`"${text}" in the field`, (nodes) => tagged(nodes, 'next-action-input')?.text === text, 10_000);
     await hideKeyboardKeepingPrompt();
 };
-/** The keyboard down with the prompt kept: Back would close the prompt, so only the IME's own hide. */
+
 const hideKeyboardKeepingPrompt = async () => {
     if (!/mInputShown=true/.test(sh('dumpsys input_method'))) return;
     sh('input keyevent KEYCODE_ESCAPE');
@@ -213,7 +199,7 @@ try {
     device.launch(ACTIVITY);
     await waitFor('the Inbox', onInbox, 90_000);
 
-    // WebDAV through Settings › Sync, then the project through the folder.
+
     let nodes = await openSync();
     if (!nodes.some((node) => node.text === en['settings.syncOff'])) {
         await tapTag('sync-backend-off', (next) => next.some((node) => node.text === en['settings.syncOff']), 'Sync off');
@@ -241,7 +227,7 @@ try {
     await tapTag('sync-now', () => commands('syncNow', since) > 0, 'Sync now', 240_000);
     await until('the project on the phone', () => Object.keys(projectTasks()).length === 3);
 
-    // (1) The last Next task's Done asks; Choose makes the Waiting task Next.
+
     await openProject();
     nodes = await doneUntilPrompt(NEXT.title);
     check(nodes.some((node) => node.text === en['projects.nextActionPromptTitle'])
@@ -261,12 +247,12 @@ try {
     await until('the Waiting task Next', () => projectTasks()[WAITS.title] === 'next');
     check(true, '(1) Choose made the Waiting task Next and closed the prompt');
 
-    // (2) Skip writes nothing; the status menu's Done asks too; Add parses the quick-add text.
+
     nodes = await doneUntilPrompt(WAITS.title);
     const before = JSON.stringify(projectTasks());
     await tapExpecting(tagged(nodes, 'next-action-skip') ?? fail('no Skip'), (next) => !prompted(next), 'Skip');
     check(JSON.stringify(projectTasks()) === before, '(2) Skip closed the prompt and wrote nothing');
-    // A Someday row's swipe is Next, not Done: no prompt. Its Done then asks again, with nothing left to choose.
+
     await reveal((current) => taskRow(current, LATER.title), `the row ${LATER.title}`);
     await device.swipeDone(await screen(), LATER.title);
     await until('the Someday task Next', () => projectTasks()[LATER.title] === 'next');
@@ -280,8 +266,7 @@ try {
     await until(`"${typed}" Waiting in the project`, () => projectTasks()[typed] === 'waiting');
     check(true, `(2) Add next action made "${typed}" a Waiting task in the project (the quick-add grammar)`);
 
-    // (3) Save & edit opens the new task on the Form tab.
-    // The project still has no Next task: the Waiting task's Done asks again.
+
     nodes = await doneUntilPrompt(typed);
     const edit = `Edit ${run}`;
     await typeTitle(edit);
@@ -289,7 +274,7 @@ try {
     check(projectTasks()[edit] === 'next', `(3) Save & edit made "${edit}" a Next task and opened it in the editor`);
     await toTabs();
 
-    // (4) Complete project archives it.
+
     await openProject();
     await doneUntilPrompt(edit);
     await tapExpecting(tagged(await screen(), 'next-action-complete-project') ?? fail('no Complete project'), (next) => !prompted(next), 'Complete project', 30_000);

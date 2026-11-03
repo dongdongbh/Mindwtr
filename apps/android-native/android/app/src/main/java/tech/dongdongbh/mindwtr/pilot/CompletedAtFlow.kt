@@ -37,23 +37,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/**
- * RN's CompletedAtPicker on Android (completed-at-picker.tsx, bca5e3e7e): the date dialog, then the time dialog, then, when core
- * offers Time Spent (a Done with the feature on), RN's card with the picked time and the minutes. Core's getCompletedAtPicker
- * says where each dialog starts. A row's long-press on Done ("complete") and a finished row's date ("edit") end in core's
- * setTaskCompletedAt (journaled); the editor's long-press on Done ("editor") ends in an editTaskDraft edit, saved with the editor.
- * Dismissing any step ends it, writing nothing.
- */
+
 class CompletedAtModel(private val shell: InboxViewModel) {
-    /** Core's picker with this flow's `step` ("date", "time", "details"), the picked `day` and `time`, and the card's `label`. */
+
     var open by mutableStateOf<JSONObject?>(null); private set
-    /** The card's minutes as typed (RN keeps digits only). */
+
     var minutes by mutableStateOf(""); private set
 
-    /** A row's Done at a picked time ([mode] "complete") or a finished row's time ("edit"). */
+
     fun open(task: TaskRow, mode: String) = start(JSONObject().put("taskId", task.id).put("mode", mode))
 
-    /** The open editor's long-press on Done: the picker starts at its draft's completion and minutes. */
+
     fun openEditor() {
         val editor = shell.editor ?: return
         val draft = JSONObject().put("completedAt", editor.text("completedAt").ifEmpty { null } ?: JSONObject.NULL)
@@ -74,7 +68,7 @@ class CompletedAtModel(private val shell: InboxViewModel) {
 
     fun pickDay(day: String) { open = open?.let { JSONObject(it.toString()).put("day", day).put("step", "time") } }
 
-    /** The time dialog's `HH:mm`: the card next when Time Spent is offered (its line read from core), else the write. */
+
     fun pickTime(time: String) {
         val current = open?.let { JSONObject(it.toString()).put("time", time) } ?: return
         if (current.optJSONObject("timeSpent") == null) { open = current; save(); return }
@@ -86,14 +80,14 @@ class CompletedAtModel(private val shell: InboxViewModel) {
 
     fun type(text: String) { minutes = text.filter { it.isDigit() } }
 
-    /** RN's confirm: the editor's draft edit, or core's journaled write for a row. */
+
     fun save() {
         val current = open ?: return
         val details = current.optString("step") == "details"
         val typed = minutes
         close()
         if (current.getString("mode") == "editor") {
-            // Only the editor the picker opened from: another one open since takes no edit (backdate review).
+
             if (shell.editor?.id != current.getString("taskId")) return
             val edit = JSONObject().put("type", "backdatedCompletion").put("day", current.getString("day")).put("time", current.getString("time"))
             if (details) edit.put("timeSpentText", typed)
@@ -107,13 +101,13 @@ class CompletedAtModel(private val shell: InboxViewModel) {
     }
 }
 
-/** The open step: the system date and time dialogs (TaskEditor.kt), or RN's Time Spent card. */
+
 @Composable
 fun CompletedAtFlow(model: InboxViewModel) {
     val flow = model.completedAt
     val open = flow.open ?: return
     when (open.optString("step")) {
-        // The date dialog's dismiss also runs after its OK; only a dismiss that left the date step ends the flow.
+
         "date" -> DayPickerDialog(open.getString("day"), { if (flow.open?.optString("step") == "date") flow.close() }) { flow.pickDay(it) }
         "time" -> {
             val (hour, minute) = pickerClock(open.getString("time"))
@@ -123,7 +117,7 @@ fun CompletedAtFlow(model: InboxViewModel) {
     }
 }
 
-/** RN's card after the time dialog (completed-at-picker.tsx on Android): the title, the picked time, Time Spent, Cancel and Save. */
+
 @Composable
 private fun TimeSpentCard(flow: CompletedAtModel, open: JSONObject) {
     val theme = LocalTheme.current

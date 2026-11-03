@@ -9,11 +9,10 @@ export const MOBILE_SYNC_BADGE_COLORS: Record<Exclude<MobileSyncBadgeState, 'hid
     attention: '#EF4444',
 };
 
-// The rule lives in core (sync-settings-model.ts) so the native app draws the same badge.
+
 export const resolveMobileSyncBadgeState = resolveSyncBadgeState;
 
-// A local change waiting in the automatic-sync scheduler (#1431). The root layout's sync
-// triggers set it; the badge reads it, so the dot is not green before the upload starts.
+
 let mobileLocalChangePending = false;
 const localChangePendingListeners = new Set<() => void>();
 

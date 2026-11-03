@@ -1,11 +1,6 @@
-/**
- * CloudKit sync orchestrator.
- *
- * Bridges the native CloudKitSync Expo module to the sync-service.ts
- * SyncCycleIO interface. CloudKit acts as a readRemote/writeRemote backend
- * alongside file, webdav, and cloud — the existing TypeScript merge engine
- * handles conflict resolution.
- */
+
+
+
 import { requireNativeModule, type NativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CLOUDKIT_ATTACHMENT_RECORD_TYPE, parseCloudKitRetryAfterMs, type AppData } from '@mindwtr/core';
@@ -13,7 +8,6 @@ import { logInfo, logWarn, logError } from './app-log';
 import { getBackgroundSafeFetchDeadline } from './background-safe-fetch';
 import { CLOUDKIT_CHANGE_TOKEN_KEY, CLOUDKIT_SEEDED_KEY, CLOUDKIT_ZONE_CREATED_KEY } from './sync-constants';
 
-// MARK: - Types
 
 type ChangeResult = {
     records: Record<string, Array<Record<string, unknown>>>;
@@ -22,7 +16,7 @@ type ChangeResult = {
     tokenExpired?: boolean;
 };
 
-// Type-safe interface for the native module's async functions.
+
 interface CloudKitSyncModule extends NativeModule {
     getAccountStatus(): Promise<string>;
     ensureZone(): Promise<void>;
@@ -40,16 +34,15 @@ interface CloudKitSyncModule extends NativeModule {
     consumePendingRemoteChange(): Promise<boolean>;
 }
 
-// The native module — loaded via requireNativeModule (Expo SDK 54+).
-// Will throw on non-iOS platforms, so we guard with a try/catch.
+
 let CloudKitSync: CloudKitSyncModule | null = null;
 try {
     CloudKitSync = requireNativeModule<CloudKitSyncModule>('CloudKitSync');
 } catch {
-    // Not available — Android or missing native build
+
 }
 
-// Record type names (must match CloudKitRecordMapper.swift)
+
 const RECORD_TYPES = {
     task: 'MindwtrTask',
     project: 'MindwtrProject',
@@ -90,10 +83,7 @@ export const isCloudKitAttachmentNotFoundError = (
     || getCloudKitErrorCode(error) === CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE
 );
 
-/** The native module reports this when the record zone is gone: the user
- *  cleared Mindwtr's data in iCloud settings, or the zone never existed for
- *  this account. The zone-created flag then lies, so every read and write
- *  keeps failing until the zone is created again. */
+
 export const CLOUDKIT_ZONE_GONE_CODE = 'ERR_CLOUDKIT_ZONE_GONE';
 
 export const isCloudKitZoneGoneError = (error: unknown): boolean => (
@@ -135,11 +125,7 @@ const throwIfAborted = (signal: AbortSignal | undefined, fallbackMessage: string
 const isAbortLikeError = (error: unknown, signal?: AbortSignal): boolean =>
     Boolean(signal?.aborted) || (error instanceof Error && error.name === 'AbortError');
 
-/** The wall-clock deadline background-sync-task.ts arms for the run (shared
- *  with fetch via background-safe-fetch.ts). A CloudKit op has no way to know
- *  the app was suspended mid-request, so this is checked on the JS side
- *  before starting a native call and again right after one resolves — a run
- *  resumed past its deadline must not start (or trust the result of) another. */
+
 const throwIfMobileSyncDeadlinePassed = (fallbackMessage: string): void => {
     const deadlineAt = getBackgroundSafeFetchDeadline();
     if (deadlineAt !== null && Date.now() >= deadlineAt) {
@@ -147,19 +133,13 @@ const throwIfMobileSyncDeadlinePassed = (fallbackMessage: string): void => {
     }
 };
 
-/** CloudKitOperationTimeouts.apply (ios/CloudKitOperationTimeouts.swift) gives
- *  every CKOperation a 30s request timeout. Only the elapsed time decides
- *  whether a failure is logged as a timeout: no CKError code crosses the
- *  bridge, and the message that does is CKError.localizedDescription, which
- *  iOS translates — matching English words in it would never fire on a phone
- *  that is not set to English. A genuinely offline device fails in well under
- *  a second, so this floor filters it out. */
+
 const CLOUDKIT_OPERATION_TIMEOUT_LOG_THRESHOLD_MS = 25_000;
 
 const logCloudKitOperationTimeoutIfNeeded = (operationName: string, startedAt: number, error: unknown): void => {
     const elapsedMs = Date.now() - startedAt;
     if (elapsedMs < CLOUDKIT_OPERATION_TIMEOUT_LOG_THRESHOLD_MS) return;
-    // We cancelled it ourselves; that is the wall-clock abort's line to write.
+
     if (error instanceof Error && error.name === 'AbortError') return;
     void logWarn('CloudKit operation timed out', {
         scope: 'cloudkit',
@@ -205,10 +185,7 @@ const runNativeOperation = async <T>(
     }
 };
 
-/** Create the zone again after CloudKit reported it gone, and drop the two
- *  local facts that were only true for the old zone: the created flag and the
- *  change token. The next full fetch sees an empty zone and the normal merge
- *  and write refill it from this device's data. */
+
 const recreateCloudKitZone = async (signal: AbortSignal | undefined): Promise<void> => {
     await AsyncStorage.removeItem(CLOUDKIT_CHANGE_TOKEN_KEY);
     await AsyncStorage.removeItem(CLOUDKIT_ZONE_CREATED_KEY);
@@ -220,8 +197,7 @@ const recreateCloudKitZone = async (signal: AbortSignal | undefined): Promise<vo
     });
 };
 
-/** Every native call goes through here. A zone-gone failure recreates the
- *  zone and retries the call once; a second failure surfaces as usual. */
+
 const runCloudKitOperation = async <T>(
     operationName: string,
     operation: () => Promise<T>,
@@ -238,13 +214,11 @@ const runCloudKitOperation = async <T>(
     }
 };
 
-// MARK: - Module availability
 
 export const isCloudKitAvailable = (): boolean => {
     return CloudKitSync != null;
 };
 
-// MARK: - Account check
 
 export const getCloudKitAccountStatus = async (): Promise<AccountStatus> => {
     if (!isCloudKitAvailable()) return 'unknown';
@@ -255,7 +229,6 @@ export const getCloudKitAccountStatus = async (): Promise<AccountStatus> => {
     }
 };
 
-// MARK: - Setup
 
 export const ensureCloudKitReady = async (options: CloudKitOperationOptions = {}): Promise<void> => {
     if (!isCloudKitAvailable()) {
@@ -279,7 +252,7 @@ export const ensureCloudKitReady = async (options: CloudKitOperationOptions = {}
         );
     } catch (error) {
         if (isAbortLikeError(error, options.signal)) throw error;
-        // Subscription failures are non-fatal — we still have timer-based sync
+
         void logWarn('CloudKit subscription setup failed (non-fatal)', {
             scope: 'cloudkit',
             extra: { error: error instanceof Error ? error.message : String(error) },
@@ -287,7 +260,6 @@ export const ensureCloudKitReady = async (options: CloudKitOperationOptions = {}
     }
 };
 
-// MARK: - Read Remote (for SyncCycleIO.readRemote)
 
 export const readRemoteCloudKit = async (options: CloudKitOperationOptions = {}): Promise<AppData | null> => {
     if (!isCloudKitAvailable()) return null;
@@ -296,7 +268,7 @@ export const readRemoteCloudKit = async (options: CloudKitOperationOptions = {})
         throwIfAborted(options.signal, 'CloudKit read cancelled');
         const changeToken = await AsyncStorage.getItem(CLOUDKIT_CHANGE_TOKEN_KEY);
 
-        // Try incremental fetch first
+
         if (changeToken) {
             let result: ChangeResult;
             try {
@@ -309,9 +281,8 @@ export const readRemoteCloudKit = async (options: CloudKitOperationOptions = {})
                 );
             } catch (error) {
                 if (!isCloudKitZoneGoneError(error)) throw error;
-                // Retrying the incremental fetch would hand the stale token to a
-                // brand-new zone; read the (empty) zone in full instead so the
-                // merge and write that follow refill it from local data.
+
+
                 await recreateCloudKitZone(options.signal);
                 return await fullFetch(options);
             }
@@ -324,12 +295,12 @@ export const readRemoteCloudKit = async (options: CloudKitOperationOptions = {})
                 return await fullFetch(options);
             }
 
-            // Save new token
+
             if (result.changeToken) {
                 await AsyncStorage.setItem(CLOUDKIT_CHANGE_TOKEN_KEY, result.changeToken);
             }
 
-            // If no changes, return null to skip merge
+
             const hasChanges =
                 Object.values(result.records).some((arr) => arr.length > 0) ||
                 Object.values(result.deletedIDs).some((arr) => arr.length > 0);
@@ -338,13 +309,11 @@ export const readRemoteCloudKit = async (options: CloudKitOperationOptions = {})
                 return null;
             }
 
-            // For incremental changes, we need to do a full fetch to get the complete
-            // remote state for three-way merge. The change result only tells us what
-            // changed, but our merge engine needs the full remote AppData.
+
             return await fullFetch(options);
         }
 
-        // No token — first sync, do full fetch
+
         return await fullFetch(options);
     } catch (error) {
         if (!isAbortLikeError(error, options.signal)) {
@@ -357,14 +326,13 @@ export const readRemoteCloudKit = async (options: CloudKitOperationOptions = {})
     }
 };
 
-// MARK: - Write Remote (for SyncCycleIO.writeRemote)
 
 export const writeRemoteCloudKit = async (data: AppData, options: CloudKitOperationOptions = {}): Promise<void> => {
     if (!isCloudKitAvailable()) return;
 
     try {
         throwIfAborted(options.signal, 'CloudKit write cancelled');
-        // Save each entity type
+
         const allTasks = Array.isArray(data.tasks) ? data.tasks : [];
         const allProjects = Array.isArray(data.projects) ? data.projects : [];
         const allSections = Array.isArray(data.sections) ? data.sections : [];
@@ -424,7 +392,7 @@ export const writeRemoteCloudKit = async (data: AppData, options: CloudKitOperat
             );
         }
 
-        // Save settings as a single record
+
         if (data.settings && Object.keys(data.settings).length > 0) {
             const settingsRecord = [
                 {
@@ -452,12 +420,10 @@ export const writeRemoteCloudKit = async (data: AppData, options: CloudKitOperat
             });
         }
 
-        // Delete purged records from CloudKit
+
         await deletePurgedRecords(data, options);
 
-        // Only advance the change token if no conflicts occurred.
-        // When conflicts exist, the conflicted records weren't actually written,
-        // so advancing the token would cause the next sync to skip them.
+
         if (allConflicts.length === 0) {
             const changeResult: ChangeResult = await runCloudKitOperation(
                 'fetchChanges',
@@ -485,7 +451,6 @@ export const writeRemoteCloudKit = async (data: AppData, options: CloudKitOperat
     }
 };
 
-// MARK: - Attachment Assets
 
 export const saveCloudKitAttachmentAsset = async (
     recordName: string,
@@ -540,7 +505,6 @@ export const deleteCloudKitAttachmentAssets = async (
     );
 };
 
-// MARK: - Seed (first-time upload from local data)
 
 let seedingInFlight: Promise<void> | null = null;
 
@@ -548,7 +512,7 @@ export const seedCloudKitFromLocal = async (data: AppData): Promise<void> => {
     const seeded = await AsyncStorage.getItem(CLOUDKIT_SEEDED_KEY);
     if (seeded) return;
 
-    // Prevent concurrent seed writes — second caller awaits the first.
+
     if (seedingInFlight) {
         await seedingInFlight;
         return;
@@ -556,7 +520,7 @@ export const seedCloudKitFromLocal = async (data: AppData): Promise<void> => {
 
     seedingInFlight = (async () => {
         void logInfo('Seeding CloudKit from local data', { scope: 'cloudkit' });
-        // Set the flag before writing so a crash mid-write doesn't re-seed stale data.
+
         await AsyncStorage.setItem(CLOUDKIT_SEEDED_KEY, '1');
         await writeRemoteCloudKit(data);
         void logInfo('CloudKit seed complete', { scope: 'cloudkit' });
@@ -569,21 +533,19 @@ export const seedCloudKitFromLocal = async (data: AppData): Promise<void> => {
     }
 };
 
-// MARK: - Push Notification Subscription
 
 let changeSubscription: { remove: () => void } | null = null;
 
 export const subscribeToCloudKitChanges = (onChanged: () => void): (() => void) => {
     if (!isCloudKitAvailable() || !CloudKitSync) return () => {};
 
-    // Remove any existing subscription
+
     changeSubscription?.remove();
 
-    // Expo SDK 54+: NativeModule from requireNativeModule has addListener built-in
+
     changeSubscription = (CloudKitSync as any).addListener('onRemoteChange', () => {
-        // Proves a silent push reached the app. The native delegate method had
-        // the wrong return type since March and was never called, so this
-        // line had never been written by a real push before v1.3.2.
+
+
         void logInfo('CloudKit remote change notification received', {
             scope: 'cloudkit',
             force: true,
@@ -615,7 +577,6 @@ export const subscribeToCloudKitChanges = (onChanged: () => void): (() => void) 
     };
 };
 
-// MARK: - Helpers
 
 async function fullFetch(options: CloudKitOperationOptions = {}): Promise<AppData> {
     throwIfAborted(options.signal, 'CloudKit read cancelled');
@@ -658,7 +619,7 @@ async function fullFetch(options: CloudKitOperationOptions = {}): Promise<AppDat
         ),
     ]);
 
-    // Extract settings from the single settings record
+
     let settings: Record<string, unknown> = {};
     if (Array.isArray(settingsRecords) && settingsRecords.length > 0) {
         const settingsRecord = settingsRecords[0];
@@ -667,10 +628,10 @@ async function fullFetch(options: CloudKitOperationOptions = {}): Promise<AppDat
         }
     }
 
-    // Save change token from the fetch
+
     const changeToken = await AsyncStorage.getItem(CLOUDKIT_CHANGE_TOKEN_KEY);
     if (!changeToken) {
-        // After a full fetch, get the current token for future incremental fetches
+
         try {
             const result: ChangeResult = await runCloudKitOperation(
                 'fetchChanges',
@@ -682,12 +643,11 @@ async function fullFetch(options: CloudKitOperationOptions = {}): Promise<AppDat
                 await AsyncStorage.setItem(CLOUDKIT_CHANGE_TOKEN_KEY, result.changeToken);
             }
         } catch {
-            // Non-fatal — we'll get the token on next sync
+
         }
     }
 
-    // CloudKit records are untyped JSON — cast through unknown to AppData.
-    // The merge engine validates shape downstream.
+
     return {
         tasks: Array.isArray(tasks) ? tasks : [],
         projects: Array.isArray(projects) ? projects : [],
@@ -699,7 +659,7 @@ async function fullFetch(options: CloudKitOperationOptions = {}): Promise<AppDat
 }
 
 async function deletePurgedRecords(data: AppData, options: CloudKitOperationOptions = {}): Promise<void> {
-    // Find records with purgedAt set — these should be removed from CloudKit entirely
+
     const purgedTaskIDs = (data.tasks ?? []).filter((t) => t.purgedAt).map((t) => t.id);
     const purgedProjectIDs = (data.projects ?? []).filter((p) => (p as any).purgedAt).map((p) => p.id);
 

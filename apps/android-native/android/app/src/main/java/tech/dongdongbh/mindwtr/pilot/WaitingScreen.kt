@@ -29,12 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/**
- * RN's Waiting For (components/views/waiting-view.tsx) on core's getWaitingView: core's two stats, the person filter
- * (core's All, each person core offers, and Clear while one is chosen), the parked projects, core's rows with their detail
- * parts (Waiting shows them) and RN's status glyph (a long-press starts selection mode, core's bulk bar), and core's empty
- * state. The stats and the filter scroll with the rows, as every list here does, so landscape shows rows.
- */
+
 @Composable
 fun WaitingList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
@@ -55,7 +50,7 @@ fun WaitingList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's person filter: core's label, then All and each person as RN's pills (the tint when chosen), then core's Clear. */
+
 @Composable
 private fun PersonFilter(model: InboxViewModel, shown: MenuPage) = with(model.menu) {
     val c = LocalTheme.current.colors

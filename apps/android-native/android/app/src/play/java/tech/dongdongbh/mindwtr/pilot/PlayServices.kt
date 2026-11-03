@@ -11,16 +11,12 @@ import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/**
- * The Play channel's Google Play services, as RN's modules call them: expo-application's install referrer, RN's PlayStoreUpdates
- * module (modules/play-store-updates) and expo-store-review. The FOSS channel has none (src/foss's PlayServices). Each blocking
- * call runs on a worker thread and gives up after [WAIT_S]: a Play service that never answers reads as a failure.
- */
+
 object PlayServices {
     private const val WAIT_S = 20L
     private const val PLAY_STORE_PACKAGE = "com.android.vending"
 
-    /** RN's getInstallReferrerAsync: the referrer text (empty for an install not from Play), or null when it cannot be read. */
+
     fun installReferrer(context: Context): String? {
         val client = InstallReferrerClient.newBuilder(context).build()
         val latch = CountDownLatch(1)
@@ -41,10 +37,7 @@ object PlayServices {
         return referrer
     }
 
-    /**
-     * RN's PlayStoreUpdates.getUpdateInfoAsync as core's `play` input: `{ value: { updateAvailable, availableVersionCode } }`
-     * (an update is UPDATE_AVAILABLE or a developer-triggered one in progress, as RN's module reads it), or `{ error }`.
-     */
+
     fun updateInfo(context: Context): JSONObject? {
         val latch = CountDownLatch(1)
         var answer = JSONObject().put("error", "Unable to query Play Store update availability.")
@@ -64,10 +57,10 @@ object PlayServices {
         return answer
     }
 
-    /** expo-store-review's isAvailableAsync (RN's hasAction without a store URL): Google Play is installed. */
+
     fun reviewAvailable(context: Context): Boolean = runCatching { context.packageManager.getPackageInfo(PLAY_STORE_PACKAGE, 0); true }.getOrDefault(false)
 
-    /** expo-store-review's requestReview: Play's review flow over [activity]; [done] gets the failure, or null. Main thread. */
+
     fun requestReview(activity: Activity, done: (String?) -> Unit) {
         runCatching {
             val manager = ReviewManagerFactory.create(activity)

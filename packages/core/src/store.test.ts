@@ -205,7 +205,7 @@ describe('TaskStore', () => {
     let mockStorage: StorageAdapter;
 
     beforeEach(() => {
-        // Create fresh mock storage for each test
+
         mockStorage = {
             getData: vi.fn().mockResolvedValue({ tasks: [], projects: [], sections: [], areas: [], settings: {} }),
             saveData: vi.fn().mockResolvedValue(undefined),
@@ -335,10 +335,7 @@ describe('TaskStore', () => {
         expect(junk?.repeatReminderMinutes).toBeUndefined();
     });
 
-    // prepareStoreStateUpdate derives `tasks` from `_allTasks` on every write, so a
-    // task that becomes visible again takes its place in the collection's order.
-    // Appending it at the end (what a hand-maintained visible list does) is not the
-    // behavior the store has ever shown.
+
     it('keeps a newly visible task in _allTasks order rather than appending it', async () => {
         const first = createStoreTask('task-a', { status: 'next' });
         const middle = createStoreTask('task-b', { status: 'archived' });
@@ -367,11 +364,7 @@ describe('TaskStore', () => {
         expect(updatedTask.status).toBe('next');
     });
 
-    // #1248: filing a dated task from Focus into Someday saved, the row left
-    // Focus, and the very next load promoted it back to next -- the load-time
-    // promote rule read "someday with a past date" as unclarified, which the
-    // update path already refuses to do (normalizeTaskUpdates' inbox-only
-    // promotion). The round trip is the repro: edit, persist, load again.
+
     it('keeps a Someday edit on a dated task through the next load (#1248)', async () => {
         vi.setSystemTime(new Date('2026-04-10T12:00:00.000Z'));
         vi.mocked(mockStorage.getData).mockResolvedValue({
@@ -389,8 +382,7 @@ describe('TaskStore', () => {
         const saved = vi.mocked(mockStorage.saveData).mock.calls.at(-1)?.[0] as AppData;
         expect(saved.tasks[0].status).toBe('someday');
 
-        // A later clock, so the load is not skipped as stale by the
-        // concurrent-local-change guard.
+
         vi.setSystemTime(new Date('2026-04-10T12:00:05.000Z'));
         vi.mocked(mockStorage.getData).mockResolvedValue(saved);
         await useTaskStore.getState().fetchData({ silent: true });
@@ -406,8 +398,8 @@ describe('TaskStore', () => {
             tasks: [task],
             _allTasks: [task],
             _tasksById: buildEntityMap([task]),
-            // A loaded store always carries a deviceId; without one the update
-            // mints it and takes the snapshot path instead (see below).
+
+
             settings: { deviceId: 'device-a' },
         });
 
@@ -426,9 +418,7 @@ describe('TaskStore', () => {
         expect(mockStorage.saveData).not.toHaveBeenCalled();
     });
 
-    // A deviceId minted inside the update only exists in the snapshot, and the
-    // incremental path writes one task row: taking it would drop the id and let
-    // the next launch mint another one, churning revBy across sessions.
+
     it('takes the snapshot path when the update mints a device id', async () => {
         const saveTask = vi.fn().mockResolvedValue(undefined);
         mockStorage.saveTask = saveTask;
@@ -461,8 +451,7 @@ describe('TaskStore', () => {
             _tasksById: buildEntityMap([task]),
         });
 
-        // Same sequence as Process Inbox "make it a project": the project is
-        // only in the debounced save queue when the task write happens.
+
         const project = await useTaskStore.getState().addProject('New Project', '#2563EB');
         expect(project).not.toBeNull();
         const result = await useTaskStore.getState().updateTask('task-1', { projectId: project!.id, status: 'next' });
@@ -928,9 +917,7 @@ describe('TaskStore', () => {
         const duplicateResult = await duplicateTask(addResult.id!, false);
         expect(duplicateResult.success).toBe(true);
 
-        // The reporter's video (#feedback 9cb87074): the copy existed in the
-        // store but the list on screen kept showing one row until an unrelated
-        // action re-derived it.
+
         const visibleAfter = useTaskStore.getState().tasks.filter((task) => task.title === 'Context Bank');
         expect(visibleAfter).toHaveLength(2);
         expect(useTaskStore.getState()._tasksById.get(duplicateResult.id!)?.title).toBe('Context Bank');
@@ -1023,9 +1010,7 @@ describe('TaskStore', () => {
         expect(copy?.checklist?.every((item) => item.isCompleted === true)).toBe(true);
     });
 
-    // focusOrder is a synced field and the *BeforeProjectArchive trio only means
-    // something for the instance that was actually archived, so a copy must start
-    // without either: it is not in Today's Focus and was never archived.
+
     it('drops focus position and project-archive metadata from the copy', async () => {
         const { addTask, duplicateTask } = useTaskStore.getState();
         const source = await addTask('Ship release', {
@@ -1347,23 +1332,21 @@ describe('TaskStore', () => {
         const id = created.id!;
         expect(useTaskStore.getState()._tasksById.get(id)?.status).toBe('inbox');
 
-        // Starring an inbox task promotes it to next.
+
         const starResult = await updateTask(id, { isFocusedToday: true });
         expect(starResult).toEqual({ success: true });
         let task = useTaskStore.getState()._tasksById.get(id);
         expect(task?.status).toBe('next');
         expect(task?.isFocusedToday).toBe(true);
 
-        // Demoting a starred task back to inbox drops the star — including via
-        // an editor-shaped patch that re-sends the existing star value.
+
         const demoteResult = await updateTask(id, { status: 'inbox', isFocusedToday: true });
         expect(demoteResult).toEqual({ success: true });
         task = useTaskStore.getState()._tasksById.get(id);
         expect(task?.status).toBe('inbox');
         expect(task?.isFocusedToday).toBe(false);
 
-        // Starring a waiting task keeps its status: "chase this today" does
-        // not stop the task being waiting-for.
+
         await updateTask(id, { status: 'waiting', isFocusedToday: false });
         const starWaiting = await updateTask(id, { isFocusedToday: true });
         expect(starWaiting).toEqual({ success: true });
@@ -1387,7 +1370,7 @@ describe('TaskStore', () => {
         const inboxTask = useTaskStore.getState()._tasksById.get(inbox.id!)!;
         expect(useTaskStore.getState().getFocusStarAction(inboxTask).blockedReason).toBe('clarify');
         expect(useTaskStore.getState().getFocusStarAction(inboxTask, { allowUnclarified: true }).canToggle).toBe(true);
-        // A row's Focus on an Inbox task is Next + Focus in one patch (#1464).
+
         const rowAction = useTaskStore.getState().getFocusStarAction(inboxTask, { promoteInbox: true });
         expect(rowAction).toMatchObject({ canToggle: true, patch: { isFocusedToday: true, status: 'next' } });
         await useTaskStore.getState().updateTask(inboxTask.id, rowAction.patch);
@@ -1457,9 +1440,7 @@ describe('TaskStore', () => {
     it('promotes a starred inbox capture to next so the star takes effect', async () => {
         const { addTask } = useTaskStore.getState();
 
-        // Starring at capture is an explicit "actionable next action I'm doing today"
-        // decision, incompatible with the unprocessed Inbox default. Promote Inbox -> Next
-        // so the star can stick; focus eligibility requires status 'next'.
+
         const result = await addTask('Capture into focus', { isFocusedToday: true });
         expect(result.success).toBe(true);
 
@@ -1478,8 +1459,7 @@ describe('TaskStore', () => {
             expect(seeded.success).toBe(true);
         }
 
-        // The promotion only commits when focus actually sticks: a full cap drops the
-        // star and the task stays in Inbox rather than being silently reclassified.
+
         const blocked = await addTask('Capture into full focus', { isFocusedToday: true });
         expect(blocked.success).toBe(true);
 
@@ -1559,8 +1539,7 @@ describe('TaskStore', () => {
         const taskId = result.id;
         expect(taskId).toBeTruthy();
 
-        // Clearing the start defers the recurring task on its due date (#843);
-        // the Today star must not survive invisibly until then.
+
         await expect(updateTask(taskId!, { startTime: undefined })).resolves.toEqual({ success: true });
 
         const task = useTaskStore.getState()._tasksById.get(taskId!);
@@ -1594,8 +1573,8 @@ describe('TaskStore', () => {
 
         const task = useTaskStore.getState()._tasksById.get(id)!;
         expect(task.status).toBe('next');
-        // Status outranks the date for classification, but the row still stays
-        // hidden from Focus/Next until the start arrives — that IS the feature.
+
+
         expect(shouldShowTaskForStart(task, { showFutureStarts: false })).toBe(false);
     });
 
@@ -1628,9 +1607,9 @@ describe('TaskStore', () => {
         const { addTask, updateTask } = useTaskStore.getState();
         const created = await addTask('Dated inbox', { startTime: '2026-07-20' });
         const id = created.id!;
-        // Created with a start date and no status → already promoted to next.
+
         expect(useTaskStore.getState()._tasksById.get(id)?.status).toBe('next');
-        // Demote back to inbox, then re-send the identical start value: no promotion.
+
         await updateTask(id, { status: 'inbox' });
         expect(useTaskStore.getState()._tasksById.get(id)?.status).toBe('inbox');
 
@@ -2574,7 +2553,7 @@ describe('TaskStore', () => {
         deleteTask(restoreMe.id);
         deleteTask(purgeMe.id);
 
-        // Live task ids are ignored: only trashed tasks are eligible.
+
         await restoreTasks([restoreMe.id, liveTask.id]);
         await purgeTasks([purgeMe.id, liveTask.id]);
 
@@ -2595,7 +2574,7 @@ describe('TaskStore', () => {
         const b = await addTask('B', { status: 'next', isFocusedToday: true });
         const c = await addTask('C', { status: 'next', isFocusedToday: true });
 
-        // Seed b already at its target position so the reorder should leave it untouched.
+
         await updateTask(b.id!, { focusOrder: 1 });
         const revBefore = useTaskStore.getState()._tasksById.get(b.id!)?.rev;
 
@@ -3036,7 +3015,7 @@ describe('TaskStore', () => {
         const unchangedProject = loaded._projectsById.get('project-1');
         const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
-        // A timezone or clock change can make the same persisted start date future again.
+
         vi.setSystemTime(new Date(2026, 8, 26, 12));
         await loaded.fetchData({ silent: true });
         await flushPendingSave();
@@ -3077,10 +3056,8 @@ describe('TaskStore', () => {
     });
 
     it('advances lastDataChangeAt when a load migration mutates synced entities', async () => {
-        // dedupe-areas-by-name tombstones a duplicate area and remaps the projects pointing at
-        // it. That is a synced-entity mutation, so a sync in flight during the load has to see
-        // the local change and requeue -- otherwise it can write a pre-dedupe snapshot and
-        // resurrect the tombstoned area.
+
+
         mockStorage.getData = vi.fn().mockResolvedValue({
             tasks: [],
             projects: [{
@@ -3144,11 +3121,7 @@ describe('TaskStore', () => {
         expect((mockStorage.saveData as unknown as { mock: { calls: any[][] } }).mock.calls.length).toBe(firstSaveCount);
     });
 
-    // #store-helpers guard hole: fetchData used to hand-build its debounced-save
-    // payload instead of calling buildSaveSnapshot, so a storage read that came
-    // back missing live tasks (a truncated/corrupted read, not a tombstone purge)
-    // silently overwrote memory and re-persisted the gap. It now routes through
-    // the same buildSaveSnapshot guard every other write action uses.
+
     it('fails a load whose storage read drops live tasks instead of silently saving the gap', async () => {
         const nowIso = '2026-07-21T12:00:00.000Z';
         vi.setSystemTime(new Date(nowIso));
@@ -3177,10 +3150,7 @@ describe('TaskStore', () => {
         expect(useTaskStore.getState()._allTasks.map((task) => task.id).sort()).toEqual(['task-victim-1', 'task-victim-2']);
         const saveCallsAfterFirstLoad = (mockStorage.saveData as unknown as { mock: { calls: any[][] } }).mock.calls.length;
 
-        // The second read drops both existing tasks entirely (simulating a bad or
-        // truncated storage read) while carrying an overdue inbox task, which
-        // trips the promote-scheduled-tasks migration (its due date arrived after its last edit) --
-        // proving the guard fires on a genuine gap, not just "nothing changed".
+
         mockStorage.getData = vi.fn().mockResolvedValue({
             tasks: [createStoreTask('task-trigger', { dueDate: '2020-01-01', createdAt: '2019-12-01T00:00:00.000Z', updatedAt: '2019-12-01T00:00:00.000Z' })],
             projects: [],
@@ -3194,8 +3164,8 @@ describe('TaskStore', () => {
 
         const state = useTaskStore.getState();
         expect(state.error).toMatch(/Refusing to save a partial task snapshot/);
-        // The guard throws inside the set() producer, so the whole state update
-        // is discarded -- both tasks survive in memory rather than vanishing.
+
+
         expect(state._allTasks.map((task) => task.id).sort()).toEqual(['task-victim-1', 'task-victim-2']);
         await flushPendingSave();
         expect((mockStorage.saveData as unknown as { mock: { calls: any[][] } }).mock.calls.length).toBe(saveCallsAfterFirstLoad);
@@ -3282,11 +3252,7 @@ describe('TaskStore', () => {
         expect((mockStorage.saveData as unknown as { mock: { calls: any[][] } }).mock.calls.length).toBeGreaterThan(0);
     });
 
-    // Restore Backup replaces the whole document, so the freshly loaded rows share
-    // no ids with what the store still holds. The migration write-back's guard asks
-    // "did the migrations drop rows", not "does the new document contain the old
-    // one" -- comparing against the pre-load store threw inside the set() producer,
-    // fetchData swallowed it, and the UI kept serving the pre-restore data.
+
     it('accepts a full-replace load whose document shares no ids with the in-memory store', async () => {
         const stale = createStoreTask('stale-1', { status: 'next' });
         useTaskStore.setState({
@@ -3296,8 +3262,8 @@ describe('TaskStore', () => {
             settings: { deviceId: 'device-a' },
         });
         const restored = createStoreTask('restored-1', { status: 'next' });
-        // No deviceId in the restored document, so ensure-device-id applies and the
-        // migration write-back runs -- the same thing a real restore does.
+
+
         const restoredDocument: AppData = {
             tasks: [restored],
             projects: [],
@@ -3331,12 +3297,8 @@ describe('TaskStore', () => {
     });
 
     it('clears project archive metadata from deleted task tombstones during fetch', async () => {
-        // Dates are relative on purpose. This test needs the tombstone to SURVIVE
-        // fetchData's purge so it can assert the archive metadata was stripped, and
-        // tombstones expire after DEFAULT_TOMBSTONE_RETENTION_DAYS (90). Hardcoded
-        // dates made it a time bomb: it was written 2026-05-13 with deletedAt
-        // 2026-05-11 and started failing on 2026-08-09, exactly 90 days later, when
-        // the tombstone aged out and `_allTasks` came back empty.
+
+
         const dayMs = 24 * 60 * 60 * 1000;
         const archivedAt = new Date(Date.now() - 3 * dayMs).toISOString();
         const deletedAt = new Date(Date.now() - 2 * dayMs).toISOString();
@@ -3430,8 +3392,8 @@ describe('TaskStore', () => {
 
         const byId = new Map(useTaskStore.getState()._allTasks.map((task) => [task.id, task]));
         expect(byId.get('t-inbox')?.status).toBe('next');
-        // A dated Someday task is a tickler, not an unclarified one: its start
-        // arriving is not a reason to reopen the decision (#1248).
+
+
         expect(byId.get('t-someday')?.status).toBe('someday');
         expect(byId.get('t-waiting-future')?.status).toBe('waiting');
         expect(byId.get('t-inbox')?.rev).toBe(1);
@@ -3490,8 +3452,7 @@ describe('TaskStore', () => {
             lastDataChangeAt: 0,
         });
 
-        // The load-time sweep is throttled to twice a day, so without this rule
-        // the correction appears to do nothing at all.
+
         await useTaskStore.getState().updateTask('task-done', { completedAt: '2025-06-01T17:45:00.000Z' });
 
         expect(useTaskStore.getState()._tasksById.get('task-done')?.status).toBe('archived');
@@ -3512,8 +3473,7 @@ describe('TaskStore', () => {
             lastDataChangeAt: 0,
         });
 
-        // Archive's "move back to Done" deliberately keeps the old completion
-        // time; re-archiving it in the same write would make it a no-op.
+
         await useTaskStore.getState().updateTask('task-archived', {
             status: 'done',
             completedAt: '2025-06-01T17:45:00.000Z',
@@ -3537,9 +3497,7 @@ describe('TaskStore', () => {
             lastDataChangeAt: 0,
         });
 
-        // The desktop full editor's submit always resends the task's current
-        // status, unlike the bare `{ completedAt }` patch from "Edit completion
-        // time" — the rule must fire for both.
+
         await useTaskStore.getState().updateTask('task-done-editor', {
             status: 'done',
             completedAt: '2025-06-01T17:45:00.000Z',
@@ -3555,9 +3513,8 @@ describe('TaskStore', () => {
         const doneTask = createStoreTask('task-done-cleared', {
             status: 'done',
             completedAt: '2026-04-09T12:00:00.000Z',
-            // Pre-edit updatedAt is stale past the archive window; evaluating
-            // against it (instead of the post-stamp "now") would wrongly
-            // archive a task the user just touched (Defect B).
+
+
             updatedAt: '2025-06-01T17:45:00.000Z',
         });
         useTaskStore.setState({
@@ -3983,7 +3940,7 @@ describe('TaskStore', () => {
         expect(visibleStarterTasks.filter((task) => task.title === 'Start here: process your first inbox item')).toHaveLength(1);
         expect(visibleStarterTasks[0].checklist?.[0]?.isCompleted).toBe(true);
         expect(visibleStarterTasks.every((task) => task.checklist?.length === 3)).toBe(true);
-        // The renamed quick-capture lesson is repaired in place, not re-added.
+
         expect(visibleStarterTasks.find((task) => task.title === 'Capture a task in one line')?.id).toBe(legacyQuickCaptureTask.id);
         expect(useTaskStore.getState()._allTasks.find((task) => task.id === legacyProcessTask.id)?.deletedAt).toBeTruthy();
     });
@@ -4016,7 +3973,7 @@ describe('TaskStore', () => {
         expect(result).toEqual({ success: true, id: existingProject.id });
         const starterTasks = useTaskStore.getState().tasks
             .filter((task) => task.projectId === existingProject.id);
-        // Renamed in place, so the seven lessons stay seven rather than doubling.
+
         expect(starterTasks).toHaveLength(7);
         expect(starterTasks.map((task) => task.id)).toEqual(
             expect.arrayContaining(legacyKoreanTasks.map((task) => task.id))
@@ -4044,7 +4001,7 @@ describe('TaskStore', () => {
         expect(english).toEqual(german);
         const englishState = useTaskStore.getState();
         expect(englishState.projects.map((project) => project.title)).toEqual(['Getting Started']);
-        // Tutorial tasks repaired to English in place; samples not duplicated.
+
         expect(englishState.tasks).toHaveLength(9);
         expect(
             englishState.tasks
@@ -4222,7 +4179,7 @@ describe('TaskStore', () => {
         if (!task) return;
 
         await deleteTask(task.id);
-        // Sync (or another device) restores it after the Trash confirmation was shown.
+
         await restoreTask(task.id);
         const live = useTaskStore.getState()._allTasks.find((item) => item.id === task.id)!;
 
@@ -4241,7 +4198,7 @@ describe('TaskStore', () => {
         const task = useTaskStore.getState()._allTasks.find((item) => item.title === 'Restored by a document restore')!;
         await deleteTask(task.id);
         let release: (() => void) | undefined;
-        // A document restore holds the store write lock and makes the task live again.
+
         const restore = runSerializedSyncDocumentWriteOperation(async () => {
             await new Promise<void>((resolve) => { release = resolve; });
             useTaskStore.setState((state) => ({
@@ -4249,7 +4206,7 @@ describe('TaskStore', () => {
             }));
         });
         await vi.waitFor(() => expect(release).toBeDefined());
-        // Trash showed the task, so the purge was requested; it waits for the lock.
+
         const purging = useTaskStore.getState().purgeTask(task.id);
         release!();
         await restore;
@@ -4336,13 +4293,13 @@ describe('TaskStore', () => {
     it('should coalesce saves and allow immediate flush', async () => {
         const { addTask } = useTaskStore.getState();
 
-        // 1. Trigger a change
+
         addTask('Test Save');
 
-        // 2. Flush pending save (should be safe even if already in-flight)
+
         await flushPendingSave();
 
-        // Should have saved exactly once
+
         expect(mockStorage.saveData).toHaveBeenCalledTimes(1);
     });
 
@@ -4499,8 +4456,8 @@ describe('TaskStore', () => {
     });
 
     it('waits the real retry schedule between failed saves (250, 500, 1000, 2000 ms)', async () => {
-        // vitest.setup.ts skips these waits for every other test; this one runs them on fake timers.
-        // Only exactly true skips them: a truthy stray value still waits.
+
+
         const flags = globalThis as { __mindwtrSkipSaveRetryWait?: unknown };
         const skipped = flags.__mindwtrSkipSaveRetryWait;
         flags.__mindwtrSkipSaveRetryWait = 'yes';
@@ -4577,10 +4534,7 @@ describe('TaskStore', () => {
             retrying: false,
         });
 
-        // The failed incremental save queued a retry snapshot, so the next edit
-        // folds into that snapshot instead of dispatching another incremental
-        // save (#1024). Keep the full save failing so the failure stays visible
-        // until the explicit retry below durably persists the latest snapshot.
+
         const laterSaveTask = vi.fn().mockResolvedValue(undefined);
         mockStorage.saveTask = laterSaveTask;
         vi.mocked(mockStorage.saveData).mockRejectedValue(new Error('secret adapter detail'));
@@ -4629,16 +4583,13 @@ describe('TaskStore', () => {
         }));
         setStorageAdapter(mockStorage);
 
-        // Dispatch the incremental save. Its retry snapshot is captured now, before
-        // the newer task below is created.
+
         void useTaskStore.getState().updateTask(task.id, { title: 'First edit' });
 
-        // A newer full snapshot (with the extra task) is enqueued via debouncedSave
-        // while the incremental save above is still in flight.
+
         await useTaskStore.getState().addTask('Newer task');
 
-        // The incremental save now fails. Its retry snapshot predates the newer
-        // pending snapshot and must not be allowed to win at flush time.
+
         rejectSaveTask?.(new Error('incremental write failed'));
         await waitForExpectation(() => {
             expect(useTaskStore.getState().persistenceFailure).toMatchObject({
@@ -4670,19 +4621,12 @@ describe('TaskStore', () => {
         }));
         setStorageAdapter(mockStorage);
 
-        // Dispatch A then B: both incremental saves are in flight together,
-        // each capturing its own retry snapshot from the store's cumulative
-        // state at its own dispatch time.
+
         void useTaskStore.getState().updateTask(task1.id, { title: 'A edit' });
         void useTaskStore.getState().updateTask(task2.id, { title: 'B edit' });
         expect(rejectors).toHaveLength(2);
 
-        // Both fail, in dispatch order (A's write settles first). Each
-        // rejection's catch chain (trackImmediateSave's internal .catch()
-        // .finally(), then store-tasks.ts's outer .catch()) needs a couple of
-        // microtask hops to fully settle; ticking between them (and after)
-        // avoids a harness-only unhandled-rejection false positive from
-        // firing both synchronously back to back.
+
         rejectors[0]?.(new Error('A write failed'));
         await Promise.resolve();
         await Promise.resolve();
@@ -5218,10 +5162,7 @@ describe('TaskStore', () => {
         expect(nextInstance?.revBy).toBeTruthy();
     });
 
-    // The completed instance leaves the active list and a series only ever has one
-    // active instance, so the next occurrence keeps the task's place in the project
-    // instead of dropping below every sibling (which is what a missing order, sorted
-    // as +Infinity by compareTasksByProjectOrder, or a max+1 reservation would do).
+
     it('gives a recurring follow-up the completed task place in the project', async () => {
         vi.setSystemTime(new Date('2026-07-01T12:00:00.000Z'));
         const { addProject, addTask, moveTask } = useTaskStore.getState();
@@ -5270,7 +5211,7 @@ describe('TaskStore', () => {
         vi.setSystemTime(new Date('2026-07-01T12:00:00.000Z'));
         const project = createStoreProject('project-legacy');
         const sibling = createStoreTask('sibling', { status: 'next', projectId: project.id, order: 0, orderNum: 0 });
-        // Legacy row from before project ordering: in a project, but no order.
+
         const recurring = createStoreTask('legacy-recurring', {
             status: 'next',
             projectId: project.id,
@@ -5416,10 +5357,7 @@ describe('TaskStore', () => {
         expect(new Set(liveSeriesIds)).toEqual(new Set([originalId, duplicateId]));
     });
 
-    // Completing an occurrence and then the one it just spawned, both on the same
-    // day, gives the second candidate the same due date as the first. The dedupe
-    // scan sees the pre-update snapshot, where the task being completed still reads
-    // as live, so it used to match itself and the series silently ended (#867).
+
     it('keeps spawning when a fluid occurrence and its follow-up are completed the same day', async () => {
         vi.setSystemTime(new Date('2026-07-22T09:30:00.000Z'));
 
@@ -5789,7 +5727,7 @@ describe('TaskStore', () => {
             expect(restoredSection.deletedAt).toBeUndefined();
         });
 
-        // Undo has the links the Trash screen lacks: it recorded them before deleting.
+
         it('undoing a project delete re-attaches its tasks and sections', async () => {
             const { addProject, addSection, addTask, deleteProject } = useTaskStore.getState();
             const project = await addProject('Undo Project', '#333333');
@@ -5844,9 +5782,7 @@ describe('TaskStore', () => {
             expect(deletedAfter.projectId).toBeUndefined();
         });
 
-        // Purge takes its ids when a confirm dialog opens. If a sync merge restores
-        // the project before the user confirms, purging it would trash a live
-        // project and strip its live tasks in one unrecoverable step.
+
         it('refuses to purge a project that is not in the trash', async () => {
             const { addProject, addTask, purgeProject } = useTaskStore.getState();
             const project = await addProject('Live Project', '#555555');
@@ -5988,11 +5924,10 @@ describe('TaskStore', () => {
             expect(useTaskStore.getState().projects.find((item) => item.id === project.id)).toBeUndefined();
         });
 
-        // Sections carry no `purgedAt` in the schema, so only tasks can reach
-        // the cascade already purged (a hand-made or not-yet-compacted row).
+
         it('leaves a purged task out of the project restore cascade', async () => {
             const cascadeDeletedAt = '2026-04-02T00:00:00.000Z';
-            // Inside the tombstone retention window, so the load keeps the deleted rows.
+
             vi.setSystemTime(new Date('2026-04-03T00:00:00.000Z'));
             mockStorage.getData = vi.fn().mockResolvedValue({
                 tasks: [

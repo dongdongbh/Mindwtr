@@ -1,26 +1,10 @@
-//! Window geometry, remembered per monitor layout (#936).
-//!
-//! One saved rectangle cannot serve a docked 4K desktop and the same machine
-//! over remote desktop: restoring the desktop's window onto the small screen
-//! puts most of it off the edge, and clamping it there loses the desktop size
-//! for good. So geometry is keyed by a signature of the screens that were
-//! attached, and each layout keeps its own rectangle.
-//!
-//! Deliberately local and never synced — the screens on one machine say nothing
-//! about the screens on another.
-
 use crate::*;
 
 const WINDOW_LAYOUTS_FILE_NAME: &str = "window-layouts.json";
 const LEGACY_WINDOW_STATE_FILE_NAME: &str = "window-state.json";
 
-/// Layouts kept before the least recently used ones are dropped. Someone who
-/// changes remote-desktop resolution often would otherwise accumulate an entry
-/// per resolution forever.
 const MAX_REMEMBERED_LAYOUTS: usize = 8;
 
-/// A window narrower or shorter than this is treated as unusable and ignored,
-/// so a bad read can never save the user into a window they cannot grab.
 const MIN_USABLE_SIZE: u32 = 320;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,10 +19,6 @@ pub(crate) struct WindowGeometry {
     pub(crate) fullscreen: bool,
 }
 
-/// A screen, in the terms the signature is built from. Logical size and a
-/// position relative to the top-left of the whole desktop, so moving every
-/// screen (a different primary, a docking station that renumbers outputs) does
-/// not read as a different layout, while resolution or scale changes do.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ScreenInfo {
     pub(crate) x: i32,
@@ -52,7 +32,7 @@ pub(crate) struct ScreenInfo {
 struct LayoutProfile {
     #[serde(flatten)]
     geometry: WindowGeometry,
-    /// Unix milliseconds, used only to decide which layouts to forget.
+
     #[serde(default)]
     last_used_at: i64,
 }
@@ -63,9 +43,6 @@ struct WindowLayouts {
     profiles: HashMap<String, LayoutProfile>,
 }
 
-/// Names the set of attached screens. Monitor *names* are not part of it: they
-/// are absent or duplicated on several platforms, and two identical external
-/// panels would collide.
 pub(crate) fn layout_signature(screens: &[ScreenInfo]) -> String {
     if screens.is_empty() {
         return "none".to_string();
@@ -85,13 +62,11 @@ pub(crate) fn layout_signature(screens: &[ScreenInfo]) -> String {
             )
         })
         .collect();
-    // Enumeration order is not stable across sessions on every platform.
+
     parts.sort();
     parts.join("|")
 }
 
-/// Fits a rectangle inside `area`, shrinking before moving so a window carried
-/// over from a larger layout stays fully reachable.
 pub(crate) fn clamp_to_area(geometry: WindowGeometry, area: WindowGeometry) -> WindowGeometry {
     let width = geometry.width.min(area.width).max(1);
     let height = geometry.height.min(area.height).max(1);
@@ -111,13 +86,6 @@ fn is_usable(geometry: &WindowGeometry) -> bool {
     geometry.width >= MIN_USABLE_SIZE && geometry.height >= MIN_USABLE_SIZE
 }
 
-/// What to apply on this launch.
-///
-/// A layout that has been seen before gets its own rectangle back, untouched. A
-/// layout seen for the first time borrows the most recently used one, clamped to
-/// the screen in front of the user — and because that is only ever read, the
-/// layout it was borrowed from keeps its geometry for when the user returns to
-/// it.
 fn resolve_geometry(
     layouts: &WindowLayouts,
     signature: &str,
@@ -135,8 +103,7 @@ fn resolve_geometry(
         .max_by_key(|(_, profile)| profile.last_used_at)?
         .1
         .geometry;
-    // Borrowed geometry has no claim on where the user left this screen's
-    // window, so a maximized or fullscreen source starts plain here.
+
     let borrowed = WindowGeometry {
         maximized: false,
         fullscreen: false,
@@ -170,8 +137,7 @@ fn remember(
         .iter()
         .map(|(key, profile)| (key.clone(), profile.last_used_at))
         .collect();
-    // Oldest first, and by key when two carry the same stamp so trimming is
-    // deterministic rather than dependent on hash order.
+
     keys.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
     for (key, _) in keys.into_iter().take(layouts.profiles.len() - max_layouts) {
         layouts.profiles.remove(&key);
@@ -196,10 +162,6 @@ fn seed_layout(
     true
 }
 
-/// v1.1.5 kept a single rectangle in the window-state plugin's file. Reading it
-/// once means upgrading does not look like the reset this issue was about
-/// (#936); it is only ever a starting point for the layout in front of the user,
-/// and the file is left where it is.
 #[derive(Debug, Clone, Copy, Deserialize)]
 struct LegacyWindowState {
     x: i32,
@@ -281,8 +243,6 @@ fn screens_of<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Vec<Screen
         .collect()
 }
 
-/// The usable area of the screen the window is currently on, for clamping a
-/// rectangle borrowed from another layout.
 fn current_work_area<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
 ) -> Option<WindowGeometry> {
@@ -318,13 +278,10 @@ fn measured_normal_geometry<R: tauri::Runtime>(
     })
 }
 
-/// Applies the geometry saved for the screens attached right now. Called while
-/// the window is still hidden, so nothing here is ever seen moving.
 pub(crate) fn restore<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     let mut layouts = read_layouts();
     let signature = layout_signature(&screens_of(window));
     let legacy_candidates = [
-        // Portable installs redirected the plugin's file into their own profile.
         crate::storage::get_device_config_dir_for_startup().join(LEGACY_WINDOW_STATE_FILE_NAME),
         window
             .app_handle()
@@ -335,8 +292,7 @@ pub(crate) fn restore<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     ];
     let geometry = resolve_geometry(&layouts, &signature, current_work_area(window))
         .or_else(|| legacy_geometry(&legacy_candidates));
-    // Seed before reveal so a first close while maximized or fullscreen can
-    // update only those flags and retain this normal rectangle.
+
     if let Some(seed_geometry) = geometry.or_else(|| measured_normal_geometry(window)) {
         if seed_layout(&mut layouts, &signature, seed_geometry, now_ms()) {
             write_layouts(&layouts);
@@ -350,9 +306,7 @@ pub(crate) fn restore<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
         width: geometry.width,
         height: geometry.height,
     });
-    // Only place the window where a screen actually is. Unplugging the monitor
-    // it was on otherwise opens it somewhere unreachable; leaving the position
-    // alone lets the OS put it somewhere sane.
+
     if any_screen_shows(window, geometry) {
         let _ = window.set_position(tauri::PhysicalPosition {
             x: geometry.x,
@@ -367,8 +321,6 @@ pub(crate) fn restore<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     }
 }
 
-/// Whether two rectangles overlap at all — enough of the window has to land on
-/// a screen for the user to grab it.
 pub(crate) fn overlaps(window: WindowGeometry, screen: WindowGeometry) -> bool {
     let right = window.x.saturating_add(window.width as i32);
     let bottom = window.y.saturating_add(window.height as i32);
@@ -420,12 +372,6 @@ fn geometry_for_save(
     }
 }
 
-/// Stores the window's current geometry against the current screens.
-///
-/// A maximized or fullscreen window reports the screen's rectangle, not the one
-/// the user sized, so only the flag is updated and the stored rectangle is left
-/// as it was — that is what should come back when they un-maximize. A minimized
-/// window reports nothing useful and is skipped entirely.
 pub(crate) fn save<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -510,7 +456,6 @@ mod tests {
 
     #[test]
     fn signature_ignores_where_the_desktop_starts() {
-        // Same two screens, same relative placement, different origin.
         assert_eq!(
             layout_signature(&[
                 screen(0, 0, 1920, 1080, 1.0),

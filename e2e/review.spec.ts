@@ -1,11 +1,10 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { dismissOnboarding, localDateKey, seedAppData, seedTasks } from './seed';
 
-// Every bucket is seeded past any slice a step has ever applied, so a step that
-// silently caps its list disagrees with its own header count and fails here.
+
 const BUCKET_SIZE = 12;
-// Deliberately not the default 3: the focus header must read the configured
-// limit rather than a hardcoded one.
+
+
 const FOCUS_LIMIT = 5;
 
 const ADD_TO_FOCUS = "Add to today's focus";
@@ -36,11 +35,7 @@ const openDailyReview = async (page: Page): Promise<Locator> => {
     return dialog;
 };
 
-/**
- * The step header states a count; the step below it renders rows. They are two
- * derivations of the same bucket, so a slice applied to one and not the other
- * is exactly the drift this walk exists to catch.
- */
+
 const expectHeaderCountToMatchRows = async (dialog: Locator, step: string) => {
     const header = dialog.locator('p', { hasText: /^\d+ tasks$/ });
     await expect(header, `${step} step should render one "<n> tasks" header`).toHaveCount(1);

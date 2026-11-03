@@ -92,14 +92,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/*
- * RN's task editor tabs (TaskEditTabs), its View tab (TaskEditViewTab) on core's getTaskView, the Markdown preview
- * (markdown-text.tsx) on core's resolved blocks, and the Form tab's checklist field (TaskEditContentField's checklist) on core's
- * editTaskChecklist field. Every word, row, label and link is core's; every checklist change is core's edit on the draft, saved
- * with it in one write.
- */
 
-/** RN's TaskEditTabs: Edit and Preview in one bordered track under the header; the open one is filled with the tint. */
 @Composable
 fun EditorTabs(model: InboxViewModel, editor: TaskEditor) {
     val c = LocalTheme.current.colors
@@ -121,11 +114,7 @@ fun EditorTabs(model: InboxViewModel, editor: TaskEditor) {
     }
 }
 
-/**
- * RN's View tab: core's rows for the editor's draft and checklist (the saved task when read-only), read again whenever either
- * changes. The status opens the status choices ([pickStatus]); the project, a context or tag, and a Markdown link go to
- * [follow] (core's link target, or `{ kind: "token", value }`). A tick or the add input is core's checklist edit on the draft.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pickStatus: () -> Unit, follow: (JSONObject) -> Unit, modifier: Modifier) = with(model) {
@@ -142,7 +131,7 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
             "status" -> ViewCard(row.getString("label")) {
                 val editable = row.getBoolean("editable") && !locked
                 val status = row.menuText("status")
-                // RN's TaskStatusBadge: a long-press on Done picks the draft's completion time (bca5e3e7e).
+
                 if (row.getBoolean("editable") && status != null) StatusPill(status, row.getString("value"), editable, pickStatus,
                     if (status == "done") { { completedAt.openEditor() } } else null)
                 else Text(row.getString("value"), style = rnText(14, 600, 20), color = c.text)
@@ -179,7 +168,7 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
             "checklist" -> ViewChecklist(model, row, labels, locked, follow)
             "attachments" -> Column(Modifier.padding(bottom = 16.dp)) {
                 ViewLabel(row.getString("label"))
-                // RN's attachment grid: an image's picture, else the title and core's note (Loading, Download, Missing); a tap opens it.
+
                 FlowRow(Modifier.padding(top = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp), maxItemsInEachRow = 2) {
                     for (item in row.menuObjects("items")) {
@@ -203,12 +192,12 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
     }
 }
 
-/** RN's viewLabel: 12/700 capitals, the secondary text color. */
+
 @Composable
 private fun ViewLabel(label: String) =
     Text(label.uppercase(), style = rnText(12, 700, letterSpacing = 0.4f), color = LocalTheme.current.colors.secondaryText)
 
-/** RN's viewRow: a bordered input-colored card with the label over the value; tappable (the project row) when [onClick] is set. */
+
 @Composable
 private fun ViewCard(label: String, spoken: String? = null, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
     val c = LocalTheme.current.colors
@@ -222,10 +211,7 @@ private fun ViewCard(label: String, spoken: String? = null, onClick: (() -> Unit
     }
 }
 
-/**
- * RN's TaskStatusBadge in the View tab: core's status label in core's status colors; a tap opens the status choices, a
- * long-press on Done runs [backdate] (RN's onBackdatedComplete), named for TalkBack as RN's accessibilityHint.
- */
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun StatusPill(status: String, label: String, enabled: Boolean, open: () -> Unit, backdate: (() -> Unit)? = null) {
@@ -245,10 +231,7 @@ private fun StatusPill(status: String, label: String, enabled: Boolean, open: ()
     }
 }
 
-/**
- * The View tab's checklist: core's items (a reference list too), a tap ticks one (core's toggle by its position) where
- * core makes them tappable, core's add input (append on Done), and More while core has more items than read.
- */
+
 @Composable
 private fun ViewChecklist(model: InboxViewModel, row: JSONObject, labels: JSONObject, locked: Boolean, follow: (JSONObject) -> Unit) = with(model) {
     val c = LocalTheme.current.colors
@@ -281,10 +264,7 @@ private fun ViewChecklist(model: InboxViewModel, row: JSONObject, labels: JSONOb
     }
 }
 
-/**
- * RN's View tab add input: the typed text is the draft's (kept with it, counted as unsaved on Close, added by Save); Done appends it
- * (core's append edit) and clears the field.
- */
+
 @Composable
 private fun ChecklistAddInput(model: InboxViewModel, add: JSONObject, enabled: Boolean) {
     val c = LocalTheme.current.colors
@@ -298,10 +278,7 @@ private fun ChecklistAddInput(model: InboxViewModel, add: JSONObject, enabled: B
         decorationBox = { inner -> Box { if (text.isEmpty()) Text(placeholder, style = rnText(14, 400), color = c.secondaryText); inner() } })
 }
 
-/**
- * RN's Markdown preview on core's resolved blocks: blank lines, headings, rules, code with its copy button, task lists, bullet and
- * numbered lists, and paragraphs, each block's text drawn from core's inline runs.
- */
+
 @Composable
 internal fun MarkdownBlocks(blocks: List<JSONObject>, labels: JSONObject, follow: (JSONObject) -> Unit) {
     val c = LocalTheme.current.colors
@@ -341,10 +318,7 @@ internal fun MarkdownBlocks(blocks: List<JSONObject>, labels: JSONObject, follow
     }
 }
 
-/**
- * Core's inline runs as one text: bold, italic, struck, code on the card color, a link in the tint and underlined that [follow]s
- * core's target when tapped, and a deleted reference struck with core's "(deleted task)" or "(deleted project)".
- */
+
 private fun inline(runs: List<JSONObject>, labels: JSONObject, tint: androidx.compose.ui.graphics.Color, muted: androidx.compose.ui.graphics.Color,
                    codeBg: androidx.compose.ui.graphics.Color, follow: (JSONObject) -> Unit) = buildAnnotatedString {
     for (run in runs) {
@@ -367,13 +341,7 @@ private fun inline(runs: List<JSONObject>, labels: JSONObject, tint: androidx.co
     }
 }
 
-/**
- * RN's checklist field on the Form tab, as core's field model describes it: the heading with Reorder / Done, the items (a
- * checkbox, or a bullet for a reference list; the title as typed; ×), "+ Add item", and Reset checklist. In reorder mode each
- * item has Move up and Move down. Every change is core's checklist edit on the draft ([InboxViewModel.editChecklist]), naming
- * its item by the item's id (a move by its direction): the item's position is read only when the edit is sent, after the edits
- * queued before it. Reset checklist writes at once, as in RN.
- */
+
 @Composable
 fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) = with(model) {
     val field = editor.view.checklistField ?: return
@@ -528,11 +496,7 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
     }
 }
 
-/**
- * One checklist item on the Form tab: the checkbox (core's toggle) or a bullet, the title input (each change is core's rename;
- * Next is core's insertAfter, which names the new item to focus), and × (core's remove). The typed text stays as typed while an
- * edit from this input waits for core, so an older reply never resets newer typing.
- */
+
 @Composable
 private fun ChecklistItemRow(model: InboxViewModel, editor: TaskEditor, field: JSONObject, item: JSONObject, locked: Boolean, identity: String, beforeRemove: () -> Unit) = with(model) {
     val c = LocalTheme.current.colors
@@ -542,9 +506,8 @@ private fun ChecklistItemRow(model: InboxViewModel, editor: TaskEditor, field: J
     val typed = "checklist:$identity"
     val structuralLocked = locked || editsPending
     val pending = editor.pendingFor(typed)
-    // The field keeps its own cursor (TextFieldValue). While it has focus the typing wins: a reply to an earlier keystroke reset
-    // the text mid-typing, and letters landed out of order or were lost (S23 runs 52 and 54). Core's title is taken when the
-    // field is not being typed in and differs from what this field last sent (a rename core changed, a reset).
+
+
     var input by remember(identity) { mutableStateOf(TextFieldValue(title, TextRange(title.length))) }
     var sent by remember(identity) { mutableStateOf(title) }
     var typing by remember(identity) { mutableStateOf(false) }

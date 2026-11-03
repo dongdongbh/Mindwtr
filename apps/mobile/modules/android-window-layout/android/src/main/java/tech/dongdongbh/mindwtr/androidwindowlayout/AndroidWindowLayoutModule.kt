@@ -27,10 +27,7 @@ private const val LAYOUT_EVENT = "onLayoutChanged"
 private const val MAX_DESTROYED_ACTIVITY_SESSIONS = 4
 private const val MAX_KNOWN_HOST_ACTIVITY_IDS = 8
 
-/**
- * Read-only, non-exported bridge for the current Android activity window.
- * Nothing here persists UI-session state or reads physical-screen dimensions.
- */
+
 class AndroidWindowLayoutModule : Module() {
   private val mainHandler = Handler(Looper.getMainLooper())
   private val trackingScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -51,8 +48,8 @@ class AndroidWindowLayoutModule : Module() {
     }
 
     override fun onActivityDestroyed(activity: Activity) {
-      // API 24-28 fallback. On newer versions the primitive session was
-      // already recorded by onActivityPreDestroyed and this is a no-op.
+
+
       captureDestroyedHostActivity(activity)
     }
   }
@@ -116,10 +113,8 @@ class AndroidWindowLayoutModule : Module() {
 
     OnActivityDestroys {
       runOnMain {
-        // Application.ActivityLifecycleCallbacks normally captures the exact
-        // Activity first. Keep this guarded fallback for hosts that do not
-        // dispatch application lifecycle callbacks, without touching a
-        // replacement Activity that has already entered the foreground.
+
+
         sessionActivity
           ?.takeIf { it.isChangingConfigurations || it.isFinishing || it.isDestroyed }
           ?.let(::captureDestroyedHostActivity)
@@ -184,8 +179,8 @@ class AndroidWindowLayoutModule : Module() {
       } catch (error: CancellationException) {
         throw error
       } catch (_: Throwable) {
-        // WindowManager is optional. Keep publishing window metrics without
-        // folding features and try the tracker again after the next rebind.
+
+
         if (!destroyed && trackedActivity === activity) {
           latestLayoutInfo = null
           publishSnapshot(activity, null)

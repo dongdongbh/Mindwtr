@@ -105,8 +105,8 @@ const storeState: {
   setHighlightTask: vi.fn(),
   getDerivedState: () => ({
     focusedProjectCount: 0,
-    // Mirrors core's real computeTaskDerivedState output shape (#927) so the
-    // screen's live selector-driven wiring to ProjectRow is exercised.
+
+
     projectTaskSummaryById: new Map([
       [testProject.id, { activeTaskCount: 1, nextAction: testNextActionTask }],
     ]),
@@ -162,8 +162,8 @@ vi.mock('expo-router', async () => {
     useLocalSearchParams: () => routeParams.current,
     usePathname: () => '/projects-screen',
     useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-    // Captured so a test can fire it to stand in for the screen regaining
-    // focus; also run on mount the way a focused screen would.
+
+
     useFocusEffect: (callback: () => void | (() => void)) => {
       focusEffect.callback = callback;
       react.useEffect(callback, [callback]);
@@ -345,8 +345,8 @@ vi.mock('../lib/app-log', () => ({
 }));
 
 describe('ProjectsScreen project tag picker', () => {
-  // The picker's + adds the typed tag; a tag already on the project stays (it toggled before, so + removed it).
-  // Removing a tag is the tag chip's toggle.
+
+
   it('adds the typed tag with + and never removes one the project already has', async () => {
     const tagged = { ...testProject, tagIds: ['#work'] };
     storeState.projects = [tagged];
@@ -367,7 +367,7 @@ describe('ProjectsScreen project tag picker', () => {
 });
 
 describe('ProjectsScreen project edits on close', () => {
-  // Leaving the sheet writes only what the user changed since it opened: an area another device set meanwhile stays.
+
   it('keeps an area another device set while the sheet was open', async () => {
     const actualCore = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
     const remote = { ...testProject, areaId: 'area-remote', updatedAt: '2026-02-01T00:00:00.000Z' };
@@ -384,7 +384,7 @@ describe('ProjectsScreen project edits on close', () => {
       tree = create(<ProjectsScreen />);
       await Promise.resolve();
     });
-    // The sync lands while the sheet still shows the project as opened.
+
     storeState.projects = [remote];
     storeState._allProjects = [remote];
     await act(async () => { tree.update(<ProjectsScreen />); await Promise.resolve(); });
@@ -403,7 +403,7 @@ describe('ProjectsScreen project edits on close', () => {
     const remote = { ...padded, title: 'Remote name', updatedAt: '2026-02-01T00:00:00.000Z' };
     actualCore.resetForTests();
     actualCore.setStorageAdapter({ getData: async () => ({ tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} }), saveData: async () => undefined });
-    // The store holds the other device's rename; the sheet opens on the copy from before it.
+
     actualCore.useTaskStore.setState({ _allProjects: [remote], _allAreas: [testArea] });
     storeState.projects = [padded];
     storeState._allProjects = [padded];
@@ -427,10 +427,8 @@ describe('ProjectsScreen project edits on close', () => {
 });
 
 describe('ProjectsScreen project quick add', () => {
-  // The detail sheet is a native modal driven by selectedProject. Leaving it set
-  // while quick add pushes a route desyncs state from the native sheet, and
-  // re-tapping the project then sets identical state — no transition, so the
-  // sheet never comes back and the row reads as dead (#938).
+
+
   it('closes the open project on the way to quick add and restores it on focus', async () => {
     routeParams.current = { projectId: testProject.id, openToken: 'token-1' };
 
@@ -449,8 +447,7 @@ describe('ProjectsScreen project quick add', () => {
 
     expect(detailModal.props?.project).toBeNull();
 
-    // Returning to the screen re-runs the focus callback, which re-opens it and
-    // gives the native modal a real false -> true transition.
+
     await act(async () => {
       focusEffect.callback?.();
       await Promise.resolve();
@@ -484,9 +481,7 @@ describe('ProjectsScreen project quick add ordering', () => {
     return tree;
   };
 
-  // Presenting the capture route while UIKit is still dismissing the project
-  // sheet races two presentations on one presenter; a lost race left an
-  // invisible modal host over the Projects list that swallowed every touch.
+
   it('on iOS opens capture only after the project sheet reports dismissal', async () => {
     Platform.OS = 'ios';
     const tree = await openProjectAndQuickAdd();
@@ -505,8 +500,7 @@ describe('ProjectsScreen project quick add ordering', () => {
       returnTo: expect.any(String),
     }));
 
-    // A later dismissal (closing the reopened sheet by hand) must not open
-    // capture again.
+
     await act(async () => {
       detailModal.props?.onDismiss?.();
       await Promise.resolve();
@@ -518,9 +512,7 @@ describe('ProjectsScreen project quick add ordering', () => {
     });
   });
 
-  // Save & edit opens the editor and the project, two sibling sheets. iOS
-  // refuses the second presentation and left its invisible host over the list,
-  // so on iOS the project reopens only after the editor is dismissed.
+
   it('on iOS opens the Save & edit editor first and reopens the project after it closes', async () => {
     Platform.OS = 'ios';
     vi.useFakeTimers();
@@ -903,8 +895,7 @@ describe('ProjectsScreen view state hydration', () => {
     const projectRow = list.props.data.find((row: { type: string }) => row.type === 'project');
     expect(projectRow).toBeTruthy();
 
-    // renderItem returns the <ProjectRow /> element without needing FlatList's
-    // native windowing/layout, which react-test-renderer can't provide here.
+
     const rendered = list.props.renderItem({ item: projectRow, index: 0 });
     expect(rendered.props.taskSummary).toEqual({ activeTaskCount: 1, nextAction: testNextActionTask });
   });

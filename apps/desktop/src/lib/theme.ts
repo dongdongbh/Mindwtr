@@ -4,8 +4,7 @@ import { THEME_DESCRIPTORS, resolveThemeColorScheme, themeDescriptor } from '@mi
 import { invokeNative } from './tauri-invoke';
 import { isLinuxRuntime } from './runtime';
 
-// The themes desktop ships CSS for, read off core's registry rather than
-// hand-listed here: `desktop: false` themes (material3-*) collapse below.
+
 type DesktopThemeName = {
     [K in keyof typeof THEME_DESCRIPTORS]: (typeof THEME_DESCRIPTORS)[K]['desktop'] extends true ? K : never;
 }[keyof typeof THEME_DESCRIPTORS];
@@ -36,8 +35,7 @@ const isDesktopThemeMode = (value: string | null | undefined): value is DesktopT
     value === 'system' || themeDescriptor(value)?.desktop === true
 );
 
-// A theme core knows but desktop has no CSS for (material3-*) collapses into
-// the plain light/dark mode it renders as; anything else is not a theme at all.
+
 const collapseUnsupportedDesktopTheme = (value: string): DesktopThemeMode | null => (
     themeDescriptor(value)?.scheme ?? null
 );
@@ -121,7 +119,7 @@ export const watchNativeSystemThemePreference = (
     onChange: (theme: NativeThemePreference) => void,
     onError?: (step: 'resolveSystem' | 'watch', error: unknown) => void,
 ): (() => void) => {
-    // GTK theme events reflect our own setTheme calls on Linux, not the portal preference.
+
     if (isLinuxRuntime()) return () => { };
     let cancelled = false;
     let stopWatchingNativeTheme = () => { };
@@ -199,10 +197,7 @@ export const watchSystemThemePortalPreference = (
     };
 };
 
-// One entry per theme with its own CSS variable block in index.css. This single
-// map drives both the reset and the apply below, so a new theme can't end up in
-// one list and not the other — and whether it renders dark comes from core's
-// classification, not a second hand-maintained list here.
+
 const THEME_MODE_CLASSES = {
     eink: 'theme-eink',
     nord: 'theme-nord',

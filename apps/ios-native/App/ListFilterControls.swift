@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The RN TaskFilterSheet contents shared by the two core list DTOs.
-/// Query, paging and edit ownership remain with the calling screen's model.
+
 struct ListFilterControls: View {
     let data: CoreObject
     let strings: CoreObject
@@ -184,7 +183,7 @@ struct ListFilterControls: View {
                         id: prefix + "-filter-picker-search", value: $pickerQuery)
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    // Keep the accepted projection in layout while refreshing to preserve the scroll position.
+
                     Group {
                         let items = picker.objects("items")
                         ForEach(items.indices, id: \.self) { index in pickerOption(items[index]) }
@@ -199,7 +198,7 @@ struct ListFilterControls: View {
                             .accessibilityIdentifier(prefix + "-filter-picker-more")
                         }
                         if pickerName == "tokens" {
-                            // Give the bounded match controls one lazy child so their index IDs cannot collide with token rows.
+
                             VStack(alignment: .leading, spacing: 0) {
                                 let controls = filters.objects("matchModes")
                                 ForEach(controls.indices, id: \.self) { index in
@@ -335,7 +334,7 @@ struct ListFilterControls: View {
         })
     }
     private var projectSummary: String {
-        // Chips include selected projects beyond the first picker window.
+
         summary(data.objects("chips").filter {
             ["toggleProject", "removeProject", "cycleProject"].contains($0.object("action").object("filterEdit").text("type"))
         }.map { ($0.flag("excluded") ? localized("filters.excluded") + ": " : "") + $0.text("label") })

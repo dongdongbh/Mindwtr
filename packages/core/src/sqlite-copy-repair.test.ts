@@ -26,8 +26,7 @@ const copyOf = (fields: Record<string, unknown>): AppData => ({
     tasks: [], projects: [], sections: [], areas: [], people: [], settings: {}, ...fields,
 } as unknown as AppData);
 
-// The move the mobile app makes: merge the copy over what SQLite holds, then
-// save it, on a real database with foreign keys on as the app opens it.
+
 const moveIntoSqlite = async (copy: AppData) => {
     const { client, close } = openScratchSqlite(join(mkdtempSync(join(tmpdir(), 'mindwtr-copy-repair-')), 'mindwtr.db'));
     try {
@@ -42,9 +41,7 @@ const moveIntoSqlite = async (copy: AppData) => {
     }
 };
 
-// Every shape the probe of the real schema found SQLite (or the merge before
-// it) rejecting. Each row: the copy, the repair count it must raise, and what
-// the stored library must still hold.
+
 const REJECTED_COPIES: Array<{
     name: string;
     copy: AppData;
@@ -76,7 +73,7 @@ const REJECTED_COPIES: Array<{
         name: 'a project without createdAt',
         copy: copyOf({ projects: [project({ createdAt: undefined, updatedAt: '2026-02-02T00:00:00.000Z' })] }),
         counted: 'missingCreatedAt',
-        // createdAt takes updatedAt, both aged past the skew window (see the tie tests).
+
         check: (stored) => expect(stored.projects[0]).toEqual(expect.objectContaining({
             createdAt: '2026-02-01T23:54:59.999Z',
             updatedAt: '2026-02-01T23:54:59.999Z',
@@ -147,9 +144,7 @@ describe('repairAppDataForSqlite', () => {
         expect(Object.values(counts).every((count) => count === 0)).toBe(true);
     });
 
-    // A repaired row keeps its revision, so it ties with the good row on another
-    // device (or in SQLite). It must lose that tie in both merge directions, with
-    // and without revisions; "Untitled" used to win it on signature order.
+
     const bothWays = (left: AppData, right: AppData) => [
         mergeAppDataWithStats(left, right).data,
         mergeAppDataWithStats(right, left).data,

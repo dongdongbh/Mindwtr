@@ -20,8 +20,7 @@ const importMocks = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/apple-reminders-import', () => importMocks);
 
-// The real AppState shim drops its listeners; the hook's whole job is what it
-// does on each foreground, so the test keeps them.
+
 const appStateListeners = vi.hoisted(() => ({ current: [] as ((state: string) => void)[] }));
 vi.mock('react-native', async () => {
   const actual = await vi.importActual<typeof import('react-native')>('react-native');
@@ -91,8 +90,7 @@ describe('useRootLayoutAppleRemindersAutoImport', () => {
     importMocks.runAppleRemindersAutoImport.mockResolvedValue(null);
   });
 
-  // The import runs on every foreground, so a run that changed nothing must
-  // leave no trace at all: no toast, and no log line either.
+
   it('writes no log line on a foreground where nothing was imported', async () => {
     importMocks.runAppleRemindersAutoImport.mockResolvedValue({ ...emptyResult, skippedDuplicateCount: 3 });
     const tree = await mount();
@@ -103,8 +101,7 @@ describe('useRootLayoutAppleRemindersAutoImport', () => {
     act(() => tree.unmount());
   });
 
-  // Without a flush the import records a reminder as done while its task is
-  // still only in memory, so the hook must hand one in.
+
   it('hands the import ways to flush and resolve the pending task save', async () => {
     const tree = await mount();
 
@@ -128,14 +125,14 @@ describe('useRootLayoutAppleRemindersAutoImport', () => {
   it('does not run before canonical data is ready or while it is disabled', async () => {
     const notReady = await mount({ canonicalDataReady: false });
     const disabled = await mount({ disabled: true });
-    // A foreground during the startup snapshot must not start an import either.
+
     await foreground();
 
     expect(importMocks.runAppleRemindersAutoImport).not.toHaveBeenCalled();
     act(() => { notReady.unmount(); disabled.unmount(); });
   });
 
-  // Its duplicate check reads the store, so it must see SQLite, not the snapshot.
+
   it('runs once canonical data arrives after the startup snapshot', async () => {
     const tree = await mount({ canonicalDataReady: false });
     await act(async () => {
@@ -147,8 +144,7 @@ describe('useRootLayoutAppleRemindersAutoImport', () => {
     act(() => tree.unmount());
   });
 
-  // A foreground burst (unlock, switcher, share sheet) fires several 'active'
-  // events in a row; reading the Reminders store each time is wasted work.
+
   it('waits 30 seconds between runs', async () => {
     vi.useFakeTimers();
     const tree = await mount();
@@ -184,8 +180,7 @@ describe('useRootLayoutAppleRemindersAutoImport', () => {
     act(() => tree.unmount());
   });
 
-  // The user did not ask for anything on this foreground: a failure is logged
-  // and nothing else, and it must not wedge later runs.
+
   it('swallows an import failure without a toast and keeps running later', async () => {
     vi.useFakeTimers();
     importMocks.runAppleRemindersAutoImport.mockRejectedValueOnce(new Error('reminders unavailable'));

@@ -48,8 +48,8 @@ final class ProjectFileRemoveHostTests: XCTestCase {
     private func seed(_ attachments: [[String: Any]], status: String = "active") async throws {
         let initial = core(); _ = try await initial.start(); await initial.close()
         try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
-        // Match the existing writer's defaults so exact preservation checks do
-        // not mistake first-save hydration of incomplete SQL fixtures for Remove.
+
+
         _ = try sql("INSERT INTO projects(id,title,status,color,supportNotes,orderNum,tagIds,isSequential,isFocused,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,'Preserved Project',?,'#94a3b8','Preserved notes',1,'[]',0,0,?,?,?,1,'fixture')",
             [projectID, status, try json(attachments), at, at])
         _ = try sql("INSERT INTO projects(id,title,status,color,supportNotes,orderNum,tagIds,isSequential,isFocused,attachments,createdAt,updatedAt,rev,revBy) VALUES ('sibling-project','Sibling','waiting','#123456','Sibling notes',2,'[]',0,0,NULL,?,?,4,'fixture')", [at, at])

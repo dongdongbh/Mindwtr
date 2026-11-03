@@ -17,7 +17,7 @@ interface ProjectSelectorProps {
     noMatchesLabel?: string;
     emptyLabel?: string;
     createProjectLabel?: string;
-    /** Heading above Someday / Waiting projects, which list after the active ones (#1467). */
+
     deferredLabel?: string;
     leadingOption?: { value: string; label: string };
     noProjectValue?: string;
@@ -85,7 +85,7 @@ export function ProjectSelector({
     );
     const areas = useTaskStore((state) => state.areas);
     const groups = useMemo(() => groupProjectsForPicker(filteredProjects, areas), [areas, filteredProjects]);
-    // Visual order: the arrow keys walk the DOM and Enter takes the first row, so both follow it.
+
     const filtered = useMemo(() => [...groups.active, ...groups.deferred], [groups]);
 
     useEffect(() => {
@@ -124,7 +124,7 @@ export function ProjectSelector({
         if (!options || options.length === 0) return;
         const list = Array.from(options);
         const index = list.findIndex((option) => option === document.activeElement);
-        // From the search box, Down starts at the top (the Enter target while searching).
+
         const nextIndex = index < 0
             ? (direction > 0 ? 0 : list.length - 1)
             : (index + direction + list.length) % list.length;
@@ -193,8 +193,8 @@ export function ProjectSelector({
 
     const emptyStateLabel = normalizedQuery ? noMatchesLabel : (emptyLabel ?? noMatchesLabel);
     const showCreate = canCreate && Boolean(onCreateProject);
-    // While searching, the list runs matches, Create, then the fixed choices, and
-    // the row Enter picks (handleSearchKeyDown) is highlighted (#1461).
+
+
     const searching = Boolean(normalizedQuery);
     const enterTargetId = !searching
         ? undefined

@@ -2,8 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins');
 
-// The native quick-capture dialog (modules/android-widget, #1169): saves to the
-// Inbox queue and closes without bringing the app forward.
+
 const QUICK_CAPTURE_ACTIVITY = 'tech.dongdongbh.mindwtr.androidwidget.QuickCaptureActivity';
 const SERVICE_NAME = '.quicksettings.CaptureTileService';
 const SERVICE_PERMISSION = 'android.permission.BIND_QUICK_SETTINGS_TILE';

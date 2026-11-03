@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 import Combine
 
-// MARK: Board drag geometry and claim (Foundation-only seam)
+
 struct BoardDragRowFrame: Equatable {
     let status: String
     let id: String
@@ -179,9 +179,8 @@ struct BoardDragState {
         return true
     }
 }
-// MARK: End Board drag geometry and claim
 
-// Nonobservable, diagnostic-only slots; callbacks retain their original attempt.
+
 final class BoardDragDiagnostics {
     enum Stage: String, CaseIterable { case begin, cancel, validate, hover, drop, load }
     final class Attempt {
@@ -192,7 +191,7 @@ final class BoardDragDiagnostics {
     func begin() { attempt = Attempt() }
 }
 
-/// RN Board stacks full-width columns in a single vertical scroll.
+
 struct BoardScreen: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -236,8 +235,8 @@ struct BoardScreen: View {
                 .onPreferenceChange(BoardRowFrames.self) { frames in
                     guard trackingAnchor, model.boardCurrent, !model.busy, !model.boardFiltersPresented,
                           !model.taskPresented, !model.areaPickerPresented else { return }
-                    // Retain the first fully visible row/header. Rebuilding a
-                    // fresh revision restores this ID instead of an old pixel offset.
+
+
                     if let first = frames.filter({ $0.value.minY >= 0 }).min(by: { $0.value.minY < $1.value.minY }) {
                         model.boardScrollAnchor = first.key
                     }
@@ -441,7 +440,7 @@ struct BoardScreen: View {
     }
 
     private func makeDragProvider(item: CoreObject, column: CoreObject, filters: CoreObject) -> NSItemProvider {
-        // SwiftUI may ask for the same source again; never revoke an admitted load.
+
         guard drag.claim == nil else { return NSItemProvider() }
         func refuse(_ reason: String) -> NSItemProvider {
             cancelDrag(reason: "new-drag"); dragDiagnostics.begin()
@@ -549,7 +548,7 @@ struct BoardScreen: View {
         }
         let diagnosticAttempt = dragDiagnostics.attempt
         dropIndicator = nil
-        // The load must begin inside performDrop; only its completion hops to MainActor.
+
         providers[0].loadDataRepresentation(forTypeIdentifier: Self.dragType) { data, error in
             Task { @MainActor in
                 guard error == nil, let data, data.count == 36, drag.matches(claim), scenePhase == .active,
@@ -619,8 +618,7 @@ struct BoardScreen: View {
     }
 }
 
-/// Observe horizontal drags alongside the Board's vertical ScrollView.
-/// Like RN Swipeable, crossing the action threshold closes the panel and acts once.
+
 struct SwipeActionCard<Content: View>: View {
     let palette: AppPalette
     let enabled: Bool
@@ -641,8 +639,8 @@ struct SwipeActionCard<Content: View>: View {
     @GestureState private var offset: CGFloat = 0
 
     var body: some View {
-        // A Button's touch-up can fire after a short simultaneous drag. Use a
-        // distinct tap recognizer, while retaining the button's VoiceOver role.
+
+
         content
             .contentShape(Rectangle())
             .onTapGesture { if enabled { open() } }
@@ -988,7 +986,7 @@ private struct BoardCardDropDelegate: DropDelegate {
     let perform: (DropInfo) -> Bool
 
     func validateDrop(info: DropInfo) -> Bool {
-        // Item providers are available only during performDrop, not validation.
+
         let conforms = info.hasItemsConforming(to: [type])
         let admitted = active()
         validated(conforms, admitted)

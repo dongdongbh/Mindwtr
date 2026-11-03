@@ -31,10 +31,7 @@ import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.Executors
 
-/**
- * Floating quick-capture dialog (#1169). Runs in its own task, never brings
- * the main app forward, and only appends to the pending-captures queue.
- */
+
 class QuickCaptureActivity : AppCompatActivity() {
   private lateinit var input: EditText
   private lateinit var description: EditText
@@ -79,9 +76,8 @@ class QuickCaptureActivity : AppCompatActivity() {
     val payload = WidgetPayloadStore.read(this)
     labels = payload.quickCapture
     audioSession = obtainAudioSession(savedInstanceState)
-    // ActivityResultRegistry may redeliver a permission result after a config
-    // recreation. The ViewModel/session survives, so restore its request token
-    // before this Activity reaches STARTED and callbacks can run.
+
+
     microphonePermissionOwner.restore(audioSession.permissionRequestId)
 
     val title = findViewById<TextView>(R.id.mindwtr_quick_capture_title)
@@ -113,7 +109,7 @@ class QuickCaptureActivity : AppCompatActivity() {
           .setTitle(labels.statusLabel)
           .setSingleChoiceItems(statuses.map { labels.statusLabels.getValue(it) }.toTypedArray(),
             statuses.indexOf(audioSession.captureStatus ?: audioSession.defaultStatus)) { dialog, position ->
-            // A click is explicit even when Inbox was already selected initially.
+
             audioSession.selectCaptureStatus(statuses[position])
             dialog.dismiss()
           }
@@ -127,7 +123,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     contextFilter = findViewById<EditText>(R.id.mindwtr_quick_capture_context_filter).apply {
       hint = payload.listTitles["search"] ?: "Search"
       doAfterTextChanged { showContextMatches() }
-      // Done picks the top match, so a keyboard user never has to leave the keys.
+
       setOnEditorActionListener { _, actionId, event ->
         val enterPressed = event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN
         if (actionId != EditorInfo.IME_ACTION_DONE && !enterPressed) return@setOnEditorActionListener false
@@ -165,7 +161,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     palette?.let { applyPalette(it, title, cancel) }
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() {
-        // Back closes the context list first, so the draft is never lost to it.
+
         if (contextPanel.visibility == View.VISIBLE) closeContextPanel() else audioSession.cancelAudioOrClose()
       }
     })
@@ -177,8 +173,8 @@ class QuickCaptureActivity : AppCompatActivity() {
   }
 
   override fun onStart() {
-    // ActivityResultRegistry may deliver a pending permission result from
-    // super.onStart(); mark this recreated owner ready before that dispatch.
+
+
     visible = true
     microphonePermissionOwner.onStarting()
     super.onStart()
@@ -187,8 +183,8 @@ class QuickCaptureActivity : AppCompatActivity() {
   override fun onNewIntent(nextIntent: Intent) {
     super.onNewIntent(nextIntent)
     if (captureOwner(nextIntent) == captureOwner(intent)) return
-    // singleTask can deliver another widget/shortcut while this draft is open.
-    // Retire its UI/permission owner before background publication can complete.
+
+
     visible = false
     microphonePermissionOwner.onStopped()
     observerToken?.let(audioSession::detach)
@@ -291,7 +287,7 @@ class QuickCaptureActivity : AppCompatActivity() {
               PendingCaptureWriter.creationStatus(widgetList) ?: "inbox"
             },
             initialCaptureStatus = savedInstanceState?.getString(STATE_CAPTURE_STATUS),
-            // A recreated Activity restores the user's own text; only a fresh open pre-fills.
+
             initialTitle = if (savedInstanceState == null) widgetList?.let(WidgetListStore::captureText).orEmpty() else "",
           )
           retainedSession
@@ -398,7 +394,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     contextFilter.setText("")
     contextPanel.visibility = View.VISIBLE
     showContextMatches()
-    // The title box keeps its caret while the filter has focus; the pick lands there.
+
     contextFilter.requestFocus()
   }
 
@@ -484,12 +480,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     private const val TAG = "Mindwtr"
     private const val MAX_CONTEXT_MATCHES = 8
 
-    /**
-     * What the Contexts button offers (#1418), as (name, token). Mirrors core getTaskContextMatches
-     * (task-token-usage.ts): exact label, then prefix, then substring; ties keep the payload's order, which core
-     * already sorts the same way (WidgetPayload.contexts). An empty query lists them all, like the in-app picker.
-     * Only names captureText can write back exactly, and never one the text already holds.
-     */
+
     internal fun contextChoices(options: List<WidgetPayload.SavedFilterOption>, text: String, query: String): List<Pair<String, String>> {
       val needle = query.trim().removePrefix("@").lowercase()
       fun quality(name: String): Int {
@@ -507,7 +498,7 @@ class QuickCaptureActivity : AppCompatActivity() {
         .map { (name, token) -> name to token }
     }
 
-    /** Puts [token] over the selection with a space on each side the text lacks; returns the text and the caret after it. */
+
     internal fun insertToken(text: String, start: Int, end: Int, token: String): Pair<String, Int> {
       val from = minOf(start, end).coerceIn(0, text.length)
       val to = maxOf(start, end).coerceIn(0, text.length)

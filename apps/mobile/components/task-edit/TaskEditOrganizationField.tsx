@@ -41,9 +41,7 @@ type OrganizationFieldId =
     | 'assignedTo'
     | 'timeEstimate';
 
-// Status chips pair each offered status with a leading glyph so the row scans
-// faster. The icon is decorative: the text label stays the accessible name.
-// One status, one glyph across the app: the map lives in lib/task-status-icons (#1256).
+
 const STATUS_ICON_BY_STATUS: Record<string, LucideIcon> = TASK_STATUS_ICONS;
 
 const getStatusIcon = (status: string): LucideIcon => STATUS_ICON_BY_STATUS[status] ?? CircleDot;

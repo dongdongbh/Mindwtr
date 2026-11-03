@@ -101,8 +101,7 @@ const BackendButton = ({
     </button>
 );
 
-// Connection options that belong to the backend form around them rather than
-// being settings of their own, so they carry no search key.
+
 const CONNECTION_OPTION_ROW_CLS = 'rounded-md border border-border bg-muted/30 p-3';
 
 const ConnectionBadge = ({
@@ -579,8 +578,8 @@ export function SyncConfigurationSection({
     const language = useDocumentationLanguage();
     const isSelfHostedSelected = syncBackend === 'cloud' && cloudProvider === 'selfhosted';
     const isDropboxSelected = syncBackend === 'cloud' && cloudProvider === 'dropbox';
-    // CloudKit has one container per Apple ID, so it stays with the default
-    // workspace; another workspace would share its records (#1473).
+
+
     const cloudKitOffered = isMacOS && getActiveWorkspaceId() === DEFAULT_WORKSPACE_ID;
     const backendGroups: BackendButtonGroup[] = [
         {

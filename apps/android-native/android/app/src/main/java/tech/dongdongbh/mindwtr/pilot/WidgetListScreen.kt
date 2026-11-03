@@ -15,17 +15,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-/**
- * RN's widget list screen (app/(drawer)/widget-list/[id].tsx) on core's getWidgetListView, under RN's stack header with the list's
- * title: every task of the widget's own core list (already filtered and ordered; no in-app filter applies again) as the lists draw
- * them (RN's task row with its status badge; their swipes, status menu and editor are the lists' own commands), read in windows of
- * 50 with More, and RN's empty line ("No results", also for a list that is gone).
- */
+
 @Composable
 fun WidgetList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
     val c = LocalTheme.current.colors
-    // RN's pull here reads the list again (a RefreshControl over fetchData), no sync.
+
     PullToRead(Modifier.fillMaxSize(), { done -> refresh(done) }) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
             shown.view.optJSONObject("empty")?.takeIf { shown.items.isEmpty() }?.let { empty ->

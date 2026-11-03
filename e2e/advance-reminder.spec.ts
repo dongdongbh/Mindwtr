@@ -21,7 +21,7 @@ for (const presentation of ['inline', 'modal']) {
         await page.getByRole('button', { name: 'Save', exact: true }).click();
         await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('mindwtr-data') || '{}').tasks?.find((t: { id: string }) => t.id === 'advance-task')?.dueReminderLeadMinutes)).toBe(2880);
 
-        // A new page reads the saved document without rerunning the seed script.
+
         await page.close();
         const reopened = await context.newPage();
         await reopened.goto('/');

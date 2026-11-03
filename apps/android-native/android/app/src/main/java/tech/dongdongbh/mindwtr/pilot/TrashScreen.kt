@@ -41,12 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/**
- * RN's Trash (app/(drawer)/trash.tsx) on core's getTrashView and runTrashAction: core's counts with Select and Clear Trash,
- * core's retention hint, the bulk bar (Select all, Restore, Delete permanently), core's task and project items with core's
- * type and deleted labels, and core's empty state. A row swipes right to Restore and left to Delete permanently, which asks
- * core's question first, as Clear Trash does (it sends the revision its question showed). Rows open nothing, as in RN.
- */
+
 @Composable
 fun TrashList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
@@ -58,7 +53,7 @@ fun TrashList(model: InboxViewModel) = with(model.menu) {
     val selected = view.getJSONObject("selected")
     val tasks = selected.optJSONArray("taskIds").ids()
     val projects = selected.optJSONArray("projectIds").ids()
-    // Back leaves selection mode before the screen (RN's trash.tsx); an open dialog takes Back first.
+
     BackHandler(enabled = selecting && dialog == null && model.failedAction == null) { endSelection(); reload() }
     LazyColumn(Modifier.fillMaxSize().testTag("trash-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         view.menuText("summary")?.let { summary ->
@@ -102,10 +97,7 @@ fun TrashList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/**
- * RN's trashed task or project: the struck title, core's note preview (a task's), core's type and deleted lines, and the
- * gray bar (a task) or the project's accent bar. While selecting, a tap toggles it and RN's circle shows it.
- */
+
 @Composable
 private fun TrashItem(model: InboxViewModel, item: MenuItem, labels: JSONObject, selecting: Boolean, isSelected: Boolean) = with(model.menu) {
     val theme = LocalTheme.current
@@ -148,7 +140,7 @@ private fun TrashItem(model: InboxViewModel, item: MenuItem, labels: JSONObject,
     }
 }
 
-/** RN's Trash bulk bar: core's count, then Select all, Restore, and Delete permanently (core's question first). */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TrashBulkBar(model: InboxViewModel, view: JSONObject, tasks: List<String>, projects: List<String>) = with(model.menu) {
@@ -170,7 +162,7 @@ private fun TrashBulkBar(model: InboxViewModel, view: JSONObject, tasks: List<St
     }
 }
 
-/** One trashed task or project in or out of the selection; core prunes it to the items on screen and counts it. */
+
 private fun MenuModel.toggleTrash(kind: String, id: String) {
     val name = if (kind == "task") "selectedTasks" else "selectedProjects"
     val picked = own("trash").optJSONArray(name).ids()

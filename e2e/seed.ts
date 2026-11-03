@@ -1,9 +1,7 @@
 import type { Page } from '@playwright/test';
 import type { Attachment } from '@mindwtr/core';
 
-// The web build keeps the whole document under one localStorage key
-// (apps/desktop/src/lib/storage-adapter-web.ts), so a fixture is one init
-// script — the same seam app.spec.ts already uses for the onboarding flag.
+
 const DATA_KEY = 'mindwtr-data';
 const ONBOARDING_KEY = 'mindwtr:desktop:first-run-onboarding:v1';
 const THEME_KEY = 'mindwtr-theme';
@@ -38,7 +36,7 @@ export type SeedData = {
     settings?: Record<string, unknown>;
 };
 
-/** A local `YYYY-MM-DD` key, the shape the app writes for date-only fields. */
+
 export const localDateKey = (dayOffset = 0): string => {
     const date = new Date();
     date.setDate(date.getDate() + dayOffset);
@@ -47,7 +45,7 @@ export const localDateKey = (dayOffset = 0): string => {
     return `${date.getFullYear()}-${month}-${day}`;
 };
 
-/** Builds `count` tasks sharing one template, titled `<prefix> <n>`. */
+
 export const seedTasks = (
     prefix: string,
     count: number,
@@ -58,7 +56,7 @@ export const seedTasks = (
     ...template,
 }));
 
-/** Suppresses the first-run modal, as every pre-existing spec does. */
+
 export const dismissOnboarding = async (page: Page): Promise<void> => {
     await page.addInitScript((key) => {
         window.localStorage.setItem(key, 'dismissed');
@@ -71,7 +69,7 @@ export const seedTheme = async (page: Page, theme: string): Promise<void> => {
     }, [THEME_KEY, theme] as const);
 };
 
-/** Writes a persisted document the app reads on startup. Call before goto. */
+
 export const seedAppData = async (page: Page, data: SeedData): Promise<void> => {
     const payload = JSON.stringify({
         tasks: (data.tasks ?? []).map((task, index) => ({
@@ -107,8 +105,7 @@ export const seedAppData = async (page: Page, data: SeedData): Promise<void> => 
         settings: data.settings ?? {},
     });
 
-    // Seed once per browser context: a later reload inside the same walk must
-    // read what the app wrote, not the fixture again.
+
     await page.addInitScript(([key, value]) => {
         if (window.localStorage.getItem(key) == null) window.localStorage.setItem(key, value);
     }, [DATA_KEY, payload] as const);

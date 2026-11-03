@@ -1,4 +1,3 @@
-"""Destructive cleanup tests use only isolated fixture directories."""
 import hashlib
 import importlib.util
 import os

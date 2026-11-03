@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** InboxViewModel's Archive retention run: whether an editor is open is read once core is quiet, a tap still opening one included. */
+
 class ArchiveRetentionRunTest {
     private var editor = false
     private var project = false
@@ -27,7 +27,7 @@ class ArchiveRetentionRunTest {
         assertEquals(listOf(true, true), sent)
     }
 
-    // Review BLOCK 1: a tap on an old archived task during a long sync takes busy at once; its editor is set only after its read.
+
     @Test fun aTapWhoseEditorIsStillBeingReadSkips() {
         run { busy = true }
         assertEquals(listOf(true), sent)

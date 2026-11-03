@@ -55,7 +55,7 @@ export function WaitingView() {
     [navBarInset],
   );
 
-  // Rows, people, counts and parked projects come from core, shared with the native host.
+
   const model = useMemo(() => buildWaitingViewModel({
     tasks: visibleTasks,
     projects,

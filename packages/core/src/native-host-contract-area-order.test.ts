@@ -220,8 +220,7 @@ describe('prepared native Area order', () => {
     });
 });
 
-// Android's Manage areas sheet (#1263, RN 56921ca38): one journaled Menu command runs the prepared order above. The request is the
-// order the sheet showed and RN's intent, so a replay that already landed writes nothing and a changed order is refused.
+
 describe('runAreaOrder (#1263)', () => {
     const run = (methods: Awaited<ReturnType<typeof open>>['methods'], intent: NativeAreaOrderRequest['intent'], order: string[]) =>
         methods.runAreaOrder({ requestId: '320bd84a-0fd1-497b-823d-3435ae8fd921', intent, order });
@@ -273,8 +272,7 @@ describe('runAreaOrder (#1263)', () => {
     });
 });
 
-// The sheet's own read (Android only; getAreaOrderOptions keeps the exact keys iOS reads): each area with Settings' revision for its
-// writes and whether it holds a live project (RN's Delete is off then), and RN's swatches.
+
 describe('getProjectAreaManager (#1263)', () => {
     it('lists the live areas in order with RN\'s in-use rule and Settings\' revisions', async () => {
         const { methods } = await open({ projects: [{ id: 'p', title: 'P', status: 'active', color: '#000000', order: 0, tagIds: [], areaId: 'c',

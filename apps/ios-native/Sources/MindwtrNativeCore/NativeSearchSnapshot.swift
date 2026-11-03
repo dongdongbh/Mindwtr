@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// A bounded readonly projection; library-scoped publication belongs to its future index owner.
+
 public struct NativeSearchSnapshot: Sendable {
     public enum List: String, Sendable {
         case inbox, focus, next, waiting, someday

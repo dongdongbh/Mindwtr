@@ -73,31 +73,25 @@ export interface TaskQuickActionMenuProps {
         title: string;
         onToggle: () => void;
     };
-    /**
-     * `restoreFocus: false` marks a dismissal where focus should follow the
-     * pointer (outside click/right-click, scroll) instead of returning to the
-     * row's trigger — a deferred focus-return there lands after whatever the
-     * pointer opened next and paints the old row's focus ring (#999).
-     */
+
+
     onClose: (options?: { restoreFocus?: boolean }) => void;
     onRename?: () => void;
-    /** @deprecated Conversion actions now live in the task editor. */
+
     onPromoteToProject?: () => void;
-    /** @deprecated Conversion actions now live in the task editor. */
+
     onConvertToSection?: () => void;
     onDuplicate: () => void;
     onDelete: () => void;
     onStatusChange: (status: TaskStatus) => void;
     onCreateArea: (name: string) => Promise<string | null>;
     onCreateProject: (title: string) => Promise<string | null>;
-    /** With [base] (the task an edit panel opened on), the updates merge onto the latest row field by field. */
+
     onUpdateTask: (updates: Partial<Task>, base?: Task) => Promise<StoreActionResult>;
-    /**
-     * Add to checklist (#1467): present only for a title-only Inbox task. `tasks` are the store's visible tasks;
-     * the panel lists the open ones (core's getChecklistMoveTargets) and hands the picked id to `onSelect`.
-     */
+
+
     checklistMove?: { tasks: Task[]; onSelect: (targetId: string) => void };
-    /** Extra entries rendered above Delete. Generic by design — the menu does not interpret them. */
+
     extraActions?: Array<{
         id: string;
         label: string;
@@ -110,11 +104,7 @@ const clamp = (value: number, min: number, max: number) => {
     return Math.min(Math.max(value, min), max);
 };
 
-// The mousedown that dismisses the menu (an "outside" click) must not also
-// activate whatever control is underneath it — closing unmounts the menu
-// synchronously, so a listener scoped to its own effect would already be
-// gone by the time the matching `click` event arrives. Registered directly
-// on window, independent of any component's lifecycle, so it survives.
+
 const suppressDismissClick = () => {
     const cleanup = () => {
         window.removeEventListener('click', swallow, true);
@@ -126,22 +116,14 @@ const suppressDismissClick = () => {
         event.stopPropagation();
         cleanup();
     }
-    // The swallower must last exactly one gesture: long enough to eat that
-    // gesture's click, and no longer. Both bounds have bitten:
-    // - A timer started at mousedown fires while the button is still held, since
-    //   `click` only arrives after `mouseup` — the swallower is gone before the
-    //   click it exists for.
-    // - Removing it only on the click leaks when no click ever comes, and the
-    //   stale listener then eats an unrelated later one.
-    // mouseup is the end of the press, and the click that belongs to it is
-    // dispatched immediately afterwards in the same task, so cleaning up in a
-    // task scheduled from mouseup always runs after the click was swallowed.
+
+
     function endGesture() {
         window.setTimeout(cleanup, 0);
     }
     window.addEventListener('click', swallow, { capture: true, once: true });
     window.addEventListener('mouseup', endGesture, { capture: true, once: true });
-    // A press that becomes a drag produces neither mouseup nor click.
+
     window.addEventListener('dragstart', cleanup, { capture: true, once: true });
 };
 
@@ -153,12 +135,12 @@ const parseTokenInput = (value: string) => Array.from(new Set(
 ));
 
 const preserveFocusedDatePanelLayout = (event: ReactMouseEvent<HTMLDivElement>) => {
-    // Keep focus on the date input while Save/Cancel is pressed so DateField's
-    // blur teardown does not run mid-click.
+
+
     event.preventDefault();
 };
 
-// Opens beside the anchor, flipping left when the right side would overflow.
+
 const getPanelPosition = (anchor: HTMLElement | null, panel: HTMLElement | null) => {
     if (!anchor || !panel) return null;
     const anchorRect = anchor.getBoundingClientRect();
@@ -216,7 +198,7 @@ export function TaskQuickActionMenu({
     extraActions = [],
 }: TaskQuickActionMenuProps) {
     const menuRef = useRef<HTMLDivElement | null>(null);
-    // The Dates list stays open while one of its date editors (panelRef) opens beside it.
+
     const datesMenuRef = useRef<HTMLDivElement | null>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
     const focusedPanelRef = useRef<QuickPanelId>(null);
@@ -256,7 +238,7 @@ export function TaskQuickActionMenu({
     const [destinationDraft, setDestinationDraft] = useState<TaskMoveDestination>(initialDestinationDraft);
     const [sectionDraft, setSectionDraft] = useState(initialSectionDraft);
     const [contextsDraft, setContextsDraft] = useState(initialContextsDraft);
-    // The task the contexts draft was last reset from: the save merges against it.
+
     const contextsBaseRef = useRef(task);
     const [savingPanel, setSavingPanel] = useState<Exclude<QuickPanelId, null> | null>(null);
     const startLabel = tFallback(t, 'taskEdit.startDateLabel', 'Start Date');
@@ -302,7 +284,7 @@ export function TaskQuickActionMenu({
     };
     const createAreaLabel = tFallback(t, 'areas.new', 'New area');
     const canMarkReviewed = isDueForReview(task.reviewAt);
-    // Keep the stored baseline so an explicit Save can repair legacy bare tokens.
+
     const normalizedInitialContexts = parseTokenInput(initialContextsDraft);
     const normalizedDraftContexts = Array.from(new Set(
         parseTokenInput(contextsDraft)
@@ -350,9 +332,7 @@ export function TaskQuickActionMenu({
         contextsBaseRef.current = task;
     }, [task.areaId, task.contexts, task.dueDate, task.id, task.projectId, task.reviewAt, task.startTime]);
 
-    // Focus the menu container, not the first item — like native context menus,
-    // nothing is highlighted until the first arrow press, and key events still
-    // land inside the menu so the app-wide shortcuts stay suppressed.
+
     useEffect(() => {
         menuRef.current?.focus();
     }, []);
@@ -377,19 +357,16 @@ export function TaskQuickActionMenu({
         });
         const handlePointer = (event: Event) => {
             if (isInsideMenuSurface(event)) return;
-            // Only mousedown has a click that could follow it in the same
-            // gesture — contextmenu (a right-click elsewhere) never fires one.
+
+
             if (event.type === 'mousedown') suppressDismissClick();
             onClose({ restoreFocus: false });
         };
         const handleScrollOrResize = (event: Event) => {
             if (event.type === 'scroll') {
                 if (!initialLayoutScrollSettledRef.current) return;
-                // A scroll from the menu's own surface must not dismiss it: its
-                // panels and dropdowns scroll, and focusing a partially clipped
-                // item on mousedown scrolls it into view — closing here killed
-                // the click before mouseup, a menu tap that silently did
-                // nothing. The list scrolling behind the menu still closes it.
+
+
                 if (isInsideMenuSurface(event)) return;
             }
             onClose({ restoreFocus: false });
@@ -423,9 +400,8 @@ export function TaskQuickActionMenu({
             setActivePanel(null);
             anchor?.focus();
         };
-        // Runs in the capture phase so the app-wide shortcut handler never sees
-        // keys the open menu consumes (arrows would otherwise move the list
-        // selection behind the menu and close it via the scroll listener).
+
+
         const handleKeyDown = (event: KeyboardEvent) => {
             cancelHoverOpen();
             const target = event.target instanceof Node ? event.target : null;
@@ -433,8 +409,8 @@ export function TaskQuickActionMenu({
                 target instanceof Element && target.closest('[data-selector-dropdown="true"]'),
             );
             if (event.key === 'Escape') {
-                // An open selector dropdown is one layer deeper — it closes
-                // itself on Escape; the panel takes the next press.
+
+
                 if (inSelectorDropdown) return;
                 event.preventDefault();
                 event.stopPropagation();
@@ -447,9 +423,8 @@ export function TaskQuickActionMenu({
             }
             const inPanelSurface = inSelectorDropdown
                 || Boolean(target && panelRef.current?.contains(target));
-            // The "Dates…" list is a menu of its own, so its items walk with the
-            // same keys. The form panels still bail out — their date inputs need
-            // the arrows.
+
+
             if (inPanelSurface) return;
             const inDatesSubmenu = Boolean(target && datesMenuRef.current?.contains(target));
             const surface = inDatesSubmenu ? datesMenuRef.current : menuRef.current;
@@ -575,8 +550,8 @@ export function TaskQuickActionMenu({
         if (focusedPanelRef.current === activePanel) return;
         focusedPanelRef.current = activePanel;
         if (panelOpenedByHoverRef.current) {
-            // A hovered date row shows its calendar right away (#1390); focus
-            // stays put so moving on to the next row still switches editors.
+
+
             if (isDateEditorPanel(activePanel)) surface?.querySelector<HTMLElement>('input')?.click();
             return;
         }
@@ -595,7 +570,7 @@ export function TaskQuickActionMenu({
         )) return;
         if (panelId === activePanel) {
             if (fromHover) return;
-            // A click on a row the pointer already opened confirms it instead of closing it.
+
             if (panelOpenedByHoverRef.current) {
                 panelOpenedByHoverRef.current = false;
                 const control = focusPanelControl(panelId === 'dates' ? datesMenuRef.current : panelRef.current);
@@ -603,7 +578,7 @@ export function TaskQuickActionMenu({
                 return;
             }
             setPanelPosition(null);
-            // Clicking an open date row closes only its editor; the Dates list stays.
+
             setActivePanel(isDateEditorPanel(panelId) ? 'dates' : null);
             return;
         }
@@ -628,8 +603,6 @@ export function TaskQuickActionMenu({
                     ? { kind: 'area', id: task.areaId }
                     : { kind: 'none' });
             setSectionDraft(task.projectId ? task.sectionId || '' : '');
-        } else if (panelId === 'priority') {
-            // The priority panel applies immediately from task state; no draft to reset.
         } else if (panelId === 'checklist') {
             setChecklistQuery('');
         } else if (panelId === 'contexts') {
@@ -752,7 +725,7 @@ export function TaskQuickActionMenu({
     const handleContextsSave = async () => {
         setSavingPanel('contexts');
         try {
-            // Merged by token onto the latest row: a context another device added since the panel opened stays.
+
             const result = await onUpdateTask({ contexts: normalizedDraftContexts }, contextsBaseRef.current);
             if (!result.success) {
                 throw new Error(result.error || 'Failed to update task contexts');
@@ -780,10 +753,7 @@ export function TaskQuickActionMenu({
         }
     };
 
-    // Enter in a panel field confirms like the Save button (#992). Buttons act
-    // on Enter natively, and an open selector dropdown / suggestion list
-    // consumes it one layer deeper (arriving here already default-prevented or
-    // not at all), so both are left alone.
+
     const handlePanelKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
         if (event.key !== 'Enter' || event.defaultPrevented || !activePanel) return;
         const target = event.target instanceof HTMLElement ? event.target : null;
@@ -853,9 +823,8 @@ export function TaskQuickActionMenu({
             onPointerLeave={cancelHoverOpen}
             onPointerDown={cancelHoverOpen}
             className={cn(
-                // Plain focus: styles, not focus-visible: — keyboard traversal
-                // moves focus programmatically, and WebKit does not always mark
-                // that focus-visible, which left the focused item unhighlighted.
+
+
                 'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus:outline-none focus:bg-muted focus-visible:ring-2 focus-visible:ring-primary/40',
                 disabled
                     ? 'cursor-not-allowed text-muted-foreground/50'
@@ -1347,7 +1316,7 @@ export function TaskQuickActionMenu({
                             className="space-y-2"
                             onKeyDown={(event) => {
                                 if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-                                // The search box and the rows walk in visual order.
+
                                 const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input, [role="option"]'));
                                 const index = controls.indexOf(document.activeElement as HTMLElement);
                                 const next = controls[(index + (event.key === 'ArrowDown' ? 1 : -1) + controls.length) % controls.length];

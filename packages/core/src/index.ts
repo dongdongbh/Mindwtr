@@ -1,17 +1,5 @@
-// packages/core barrel: every module in this package is re-exported here with `export *`,
-// uniformly, so that anything published from a `.ts` file under src/ is reachable both as a
-// named import from '@mindwtr/core' and as '@mindwtr/core/<module>'.
-//
-// Mobile's Metro resolver collapses EVERY '@mindwtr/core/<module>' subpath onto this file and
-// ignores package.json "exports" entirely (see apps/mobile/metro.config.js). A module that
-// isn't re-exported here is `undefined` at runtime on a real device even though vitest (Node
-// resolution, which does honour package.json exports) resolves it fine and every test passes.
-// The uniform `export *` convention below exists specifically to make that bug class impossible:
-// a module reachable from src/ is barrel-reachable by construction. Guarded by
-// index-exports.test.ts.
-//
-// One deliberate exception: toStableSyncJson is also exported under its old alias
-// toStableJson. This preserves the public name without duplicating its implementation.
+
+
 
 export * from './types';
 export * from './task-icon-badge';
@@ -83,7 +71,7 @@ export * from './timeline-date-edit';
 export * from './sync-normalization';
 export * from './sync-document';
 export * from './sync-helpers';
-export { toStableSyncJson as toStableJson } from './sync-helpers'; // preserved alias; the plain name is also re-exported via `export *` above
+export { toStableSyncJson as toStableJson } from './sync-helpers';
 export * from './sync-log-utils';
 export * from './sync-client-helpers';
 export * from './sync-runtime-utils';

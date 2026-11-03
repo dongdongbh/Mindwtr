@@ -43,7 +43,7 @@ test('Timeline shares row ordering, preserves hidden tasks and dates, and refuse
     await page.mouse.up();
     await expect.poll(() => taskOrder(page)).toEqual(['task-c', 'task-a', 'hidden', 'task-b']);
 
-    // A different section is not a reorder destination and cannot reparent the task.
+
     const moved = (await handle('task-c').boundingBox())!;
     const other = (await handle('section-task').boundingBox())!;
     await page.mouse.move(moved.x + moved.width / 2, moved.y + moved.height / 2);

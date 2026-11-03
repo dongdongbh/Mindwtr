@@ -1,19 +1,12 @@
-/**
- * Host APIs the core expects that a plain ECMAScript engine does not have.
- *
- * This file is loaded BEFORE the core bundle. It is plain ES2020 so QuickJS can
- * run it as-is. Every polyfill counts its own use, so the experiment can report
- * which host APIs the core really touches (`__hostUse`).
- *
- * Rule from the repo: never construct TextEncoder/TextDecoder at module scope.
- * Only the classes are defined here; nothing is instantiated.
- */
+
+
+
 (function installHostPolyfills(global) {
-    // Startup trace sections (Android's trace bridge call; absent elsewhere): this file's run, then the bundle's init, which
-    // the last line of host-entry.ts closes.
+
+
     var tracer = global.__mindwtrNative && typeof global.__mindwtrNative.trace === 'function' ? global.__mindwtrNative : null;
     if (tracer) tracer.trace('js:polyfills');
-    // A trace section around [work] (sync profiling: a large fetch body's bridge crossing and decoding).
+
     var traced = function (name, work) {
         if (!tracer) return work();
         tracer.trace(name);
@@ -29,9 +22,7 @@
         return bridge;
     };
 
-    // --- timers -------------------------------------------------------------
-    // The engine has no event loop. Timers go in a table the host drains between
-    // calls (`__pumpTimers`), so a debounced save still fires.
+
     var timers = new Map();
     var nextTimerId = 1;
 
@@ -53,48 +44,44 @@
         global.clearInterval = function (id) { timers.delete(id); };
     }
 
-    // --- host calls ---------------------------------------------------------
-    // fetch and the secret calls run in the Android host, off the engine thread
-    // (HostIo.kt). Each call's answer waits in the host's queue until the pump
-    // below takes it (`ioNext`), so a promise settles where a timer fires.
+
     var NATIVE_ERROR = '!MindwtrNativeError:';
     var hostCall = function (value) {
         if (typeof value === 'string' && value.indexOf(NATIVE_ERROR) === 0) throw new TypeError(value.slice(NATIVE_ERROR.length));
         return value;
     };
-    // Each open call's `settle` (its answer) and, for a fetch, `cancel` (a rejection with the reason, and the host's cancel).
+
     var ioPending = new Map();
-    // Calls started and not yet answered, cancelled ones included: the pump asks the host only while one is open.
+
     var ioOpen = 0;
     var startIo = function (id, settle, cancel) {
         ioOpen += 1;
         ioPending.set(String(id), { settle: settle, cancel: cancel });
         return String(id);
     };
-    // Takes one queued answer: 1 when it settled a call, 0 when its call was cancelled, null when none is queued (or the host refused).
+
     var pumpIoOne = function () {
         var text;
         try { text = hostCall(native().ioNext()); } catch (error) { global.__hostLog('host call error: ' + error); return null; }
         if (!text) return null;
         ioOpen -= 1;
         var answer = JSON.parse(text);
-        // The body comes apart from its answer, so no copy of it is wrapped in JSON: base64, or a fetch body's text when the
-        // host found it strict UTF-8 (`utf8`, HostIo.read) and decoded it off this thread.
-        // A body the bridge could not hand over fails its own call; it never strands it.
+
+
         if (answer.body) {
             var payload = null;
             try {
                 payload = traced('io:body', function () { return hostCall(native().ioBody()); });
             } catch (_error) {
-                // Close can win after metadata. Settle that request rather than
-                // stranding it after ioOpen was decremented; never expose bytes/errors.
+
+
                 answer.body = false;
                 answer.error = 'I/O response body is unavailable';
                 delete answer.errorCode;
                 delete answer.limitBytes;
             }
             if (payload !== null) {
-                // A text body comes after a "T" (HostIo.read), so its own first characters can never read as an error.
+
                 if (answer.utf8 && payload.charAt(0) === 'T') answer.utf8Text = payload.slice(1);
                 else if (answer.utf8) {
                     global.__hostLog('host call error: the host sent an unreadable body');
@@ -104,7 +91,7 @@
         }
         var entry = ioPending.get(answer.id);
         ioPending.delete(answer.id);
-        // A cancelled call's late answer has no promise left to settle.
+
         if (!entry) return 0;
         try { entry.settle(answer); } catch (error) { global.__hostLog('host call error: ' + error); }
         return 1;
@@ -117,8 +104,8 @@
         }
         return settled;
     };
-    // The host's deadline passed (CoreHost.callAsync): every open fetch rejects with an AbortError and is cancelled, and a
-    // new fetch or secret call is refused until __resumeHostCalls, so the timed-out operation drains without any IO.
+
+
     var refusing = null;
     var refuseIfCancelled = function () {
         if (refusing !== null) throw namedError('AbortError', refusing);
@@ -134,7 +121,7 @@
         try { timer.fn.apply(null, timer.args); } catch (error) { global.__hostLog('timer error: ' + error); }
     };
 
-    /** Settles every host call already answered, then runs every timer already due. Returns how many of both. */
+
     global.__pumpTimers = function () {
         var ran = pumpIo();
         var now = global.__nowMs();
@@ -148,11 +135,7 @@
         return ran;
     };
 
-    /**
-     * One item of a bounded idle pump turn (CoreHost.idlePump, D9): one queued host-call answer, else the earliest due timer.
-     * 1 when it ran one, 0 when nothing was waiting. The host times each call with the promise jobs it set off (they run
-     * before the call returns), and stops the turn once its budget is spent.
-     */
+
     global.__pumpOne = function () {
         if (ioOpen > 0 && pumpIoOne() !== null) return 1;
         var now = global.__nowMs();
@@ -163,7 +146,7 @@
         return 1;
     };
 
-    /** Milliseconds until the next timer is due, or -1 when none is waiting. */
+
     global.__nextTimerDelay = function () {
         var soonest = -1;
         var now = global.__nowMs();
@@ -174,7 +157,7 @@
         return soonest;
     };
 
-    // --- clock and logging --------------------------------------------------
+
     global.__nowMs = function () { return native().nowMs(); };
     global.__hostLog = function (line) { native().log(String(line)); };
 
@@ -182,7 +165,7 @@
         global.performance = { now: function () { mark('performance.now'); return global.__nowMs(); } };
     }
 
-    // --- crypto -------------------------------------------------------------
+
     if (typeof global.crypto !== 'object' || !global.crypto) global.crypto = {};
     if (typeof global.crypto.getRandomValues !== 'function') {
         global.crypto.getRandomValues = function (array) {
@@ -206,8 +189,7 @@
         };
     }
 
-    // --- text encoding ------------------------------------------------------
-    // UTF-8 only. A lone surrogate encodes as U+FFFD, as the platform's does.
+
     if (typeof global.TextEncoder !== 'function') {
         global.TextEncoder = function TextEncoder() { };
         global.TextEncoder.prototype.encode = function (input) {
@@ -233,10 +215,8 @@
             return new Uint8Array(bytes);
         };
     }
-    // The platform's UTF-8 decoder, with one difference on purpose: a decoder made without options is fatal (malformed
-    // UTF-8 throws a TypeError). Core reads every response as text through `new TextDecoder()`, and a body that decoded
-    // to replacement or wrong characters (E2 alone once read as U+2000, a space) could trim to empty and read as a
-    // missing remote document, which sync writes over. `{ fatal: false }` replaces each malformed sequence with U+FFFD.
+
+
     if (typeof global.TextDecoder !== 'function') {
         global.TextDecoder = function TextDecoder(_label, options) {
             this.encoding = 'utf-8';
@@ -280,7 +260,7 @@
                         malformed();
                     }
                 } else if (byte < lower || byte > upper) {
-                    // The sequence ends here; this byte starts over (the platform's maximal-subpart rule).
+
                     needed = seen = code = 0;
                     lower = 0x80;
                     upper = 0xbf;
@@ -308,7 +288,7 @@
         };
     }
 
-    // --- structuredClone ----------------------------------------------------
+
     if (typeof global.structuredClone !== 'function') {
         global.structuredClone = function (value) {
             mark('structuredClone');
@@ -345,10 +325,7 @@
         };
     }
 
-    // --- AbortController and AbortSignal ------------------------------------
-    // What core and fetch use: abort with a reason (an AbortError without one),
-    // AbortSignal.abort and AbortSignal.timeout (a TimeoutError, on the host's
-    // timers), throwIfAborted, onabort, and abort listeners, each run once.
+
     var namedError = function (name, message) {
         var error = new Error(message);
         error.name = name;
@@ -400,12 +377,9 @@
         global.AbortController.prototype.abort = function (reason) { abortSignal(this.signal, reason); };
     }
 
-    // --- URL ----------------------------------------------------------------
-    // Enough for the sync ports: scheme, host, port, path, query. Not a full
-    // WHATWG URL parser; the report says so. A non-special scheme without "//"
-    // (mailto:, tel:) has no host: its path is the rest, as the platform parses it.
+
     if (typeof global.URL !== 'function') {
-        // Userinfo runs to the authority's LAST "@" (WHATWG): a password may hold an "@", and a log must never keep part of it.
+
         var URL_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/(?:([^/?#]*)@)?([^:/?#]*)(?::(\d+))?([^?#]*)(\?[^#]*)?(#.*)?$/;
         var OPAQUE_URL_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):([^?#]*)(\?[^#]*)?(#.*)?$/;
         var SPECIAL_SCHEMES = ['http', 'https', 'ws', 'wss', 'ftp', 'file'];
@@ -433,7 +407,7 @@
             }
             if (!parts) throw new TypeError('Invalid URL: ' + input);
             this.protocol = parts[1].toLowerCase() + ':';
-            // The password is everything after the first ":" of the userinfo.
+
             var credentials = parts[2] || '';
             var colon = credentials.indexOf(':');
             this.username = colon < 0 ? credentials : credentials.slice(0, colon);
@@ -458,7 +432,7 @@
     }
 
     if (typeof global.URLSearchParams !== 'function') {
-        // WHATWG form decoding keeps malformed percent literals and replaces malformed UTF-8.
+
         var decodeQuery = function (text) {
             var bytes = new global.TextEncoder().encode(text.replace(/\+/g, ' '));
             var decoded = [];
@@ -495,7 +469,7 @@
             return null;
         };
         global.URLSearchParams.prototype.has = function (key) { return this.get(key) !== null; };
-        // WHATWG: the first pair named [key] takes the value and every later one goes (core's sanitizer redacts a repeated token).
+
         global.URLSearchParams.prototype.set = function (key, value) {
             var found = false;
             this._pairs = this._pairs.filter(function (pair) {
@@ -514,7 +488,7 @@
         global.URLSearchParams.prototype.forEach = function (fn) {
             this._pairs.forEach(function (pair) { fn(pair[1], pair[0]); });
         };
-        // Iterators over a copy, as WHATWG's (core's log sanitizer walks keys()).
+
         var pairIterator = function (pairs, pick) {
             var items = pairs.map(pick);
             var index = 0;
@@ -528,21 +502,16 @@
         if (typeof Symbol === 'function' && Symbol.iterator) global.URLSearchParams.prototype[Symbol.iterator] = global.URLSearchParams.prototype.entries;
         global.URLSearchParams.prototype.toString = function () {
             if (this._pairs.length === 0) return '';
-            // A space goes out as "+", as WHATWG writes it, so a "+" the query came with survives String(url).
+
             var encodeQuery = function (text) { return encodeURIComponent(text).replace(/%20/g, '+'); };
-            // No "?": WHATWG's serialization, which a form body and a caller's own "?" rely on.
+
             return this._pairs.map(function (pair) {
                 return encodeQuery(pair[0]) + '=' + encodeQuery(pair[1]);
             }).join('&');
         };
     }
 
-    // --- fetch --------------------------------------------------------------
-    // RN's fetch as the Android host gives it (HostIo.kt, on OkHttp as RN's):
-    // Headers, Request, Response with no stream body (core then reads through
-    // arrayBuffer(), as from RN's background-safe fetch), and fetch itself. A
-    // body crosses the bridge as text or base64 bytes; the answer's body comes
-    // back as base64 and is decoded on first read.
+
     var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     var base64Codes = null;
     var toBase64 = function (bytes) {
@@ -557,7 +526,7 @@
         parts.push(chunk);
         return parts.join('');
     };
-    // Strict: text that is not whole base64 throws, so a damaged answer can never read as a shorter body.
+
     var fromBase64 = function (text) {
         var unreadable = function () { return new TypeError('Network request failed: the host sent an unreadable body'); };
         if (typeof text !== 'string' || text.length % 4 !== 0) throw unreadable();
@@ -595,9 +564,7 @@
         throw new TypeError('Unsupported body: text, URLSearchParams, FormData, Blob, ArrayBuffer or a typed array only');
     };
 
-    // --- Blob and FormData --------------------------------------------------
-    // Core's OpenAI speech upload (speech-to-task.ts transcribeRemoteOpenAI) posts a FormData with a Blob file part. The
-    // whole Blob sits in memory: its parts' bytes, copied, with strings as UTF-8.
+
     if (typeof global.Blob !== 'function') {
         global.Blob = function Blob(parts, options) {
             mark('Blob');
@@ -610,14 +577,14 @@
                 chunks.push(bytes);
                 size += bytes.length;
             });
-            // A sole Blob part shares its bytes: a Blob never changes them.
+
             if (chunks.length === 1 && parts[0] instanceof global.Blob) {
                 this._bytes = chunks[0];
             } else {
                 this._bytes = new Uint8Array(size);
                 for (var i = 0, at = 0; i < chunks.length; at += chunks[i].length, i += 1) this._bytes.set(chunks[i], at);
             }
-            // The File API: a type with a character outside U+0020-U+007E is empty, any other is lower-cased.
+
             var type = options && options.type !== undefined ? String(options.type) : '';
             this.type = /^[\x20-\x7e]*$/.test(type) ? type.toLowerCase() : '';
             this.size = this._bytes.length;
@@ -629,7 +596,7 @@
         };
         blobProto.bytes = function () { return Promise.resolve(this._bytes.slice()); };
         blobProto.text = function () { return Promise.resolve(new global.TextDecoder('utf-8', { fatal: false }).decode(this._bytes)); };
-        // subarray clamps negative and out-of-range offsets as Blob.slice does.
+
         blobProto.slice = function (start, end, type) {
             var blob = new global.Blob([], { type: type });
             blob._bytes = this._bytes.subarray(start === undefined ? 0 : start, end === undefined ? this.size : end);
@@ -639,7 +606,7 @@
     }
 
     if (typeof global.FormData !== 'function') {
-        // An entry's value is a string or a Blob carrying its filename (`name`, as the File the platform makes).
+
         var formEntry = function (name, value, filename) {
             if (!(value instanceof global.Blob)) return [String(name), String(value)];
             var file = new global.Blob([value], { type: value.type });
@@ -686,30 +653,7 @@
         formProto[Symbol.iterator] = formProto.entries;
     }
 
-    // A FormData body as RN's Android app sends it (React Native 0.81.5, OkHttp 4.x), boundary aside:
-    // - RN's FormData.getParts (Libraries/Network/FormData.js:83-104) gives each part the header
-    //   `content-disposition: form-data; name="<name>"` (the name as is, not escaped), and a file part
-    //   `; filename="<encodeURIComponent(filename with each / as _)>"` (encodeFilename, lines 36-38) and a `content-type`
-    //   of the file's type. A text part has no content-type.
-    // - RCTNetworking.android.js:25-31,72-77 turns those headers into [name, value] pairs, in that order, names lower-case.
-    // - NetworkingModule.kt:685-765 (constructMultipartBody) takes the content-type out of the part headers (lines 719-725)
-    //   and gives it to OkHttp as the part body's MediaType. extractHeaders (lines 770-801) adds no User-Agent:
-    //   MainReactPackage.kt:123 builds NetworkingModule(reactContext), so defaultUserAgent is null. A text part is
-    //   RequestBody.create(null, value): UTF-8 bytes, a known length, no media type (OkHttp's
-    //   RequestBody.Companion.create(String, MediaType) appends "; charset=utf-8" only to a non-null type). A file part is
-    //   RequestBodyUtil.create (RequestBodyUtil.kt:134-158); its length is the stream's available(), the file's size.
-    // - OkHttp's MultipartBody.writeOrCountBytes (okhttp-4.12.0.jar in ~/.gradle/caches/modules-2, read with javap -c; RN's
-    //   own pin is 4.9.2, same code) writes per part: "--" boundary CRLF; each part header as `name: value` CRLF, in order,
-    //   names as given (so lower-case); `Content-Type: <type>` CRLF when the body has a type; `Content-Length: <n>` CRLF
-    //   when the length is known; CRLF; the body; CRLF. Then "--" boundary "--" CRLF. No preamble, no epilogue.
-    // - The request's content-type: NetworkingModule.kt:453-464 types the body multipart/form-data when the caller set
-    //   none, and OkHttp's MultipartBody.contentType() is `<type>; boundary=<boundary>`, the boundary a
-    //   UUID.randomUUID() string (MultipartBody.Builder).
-    // RN never sends a Blob part on Android: its Blob throws on ArrayBuffer parts (BlobManager.js:70-74), so
-    // speech-to-text.helpers.ts buildMultipartAudioPart falls back to a { uri, name, type } part (and a Blob part would reach
-    // constructMultipartBody with neither `string` nor `uri`: "Unrecognized FormData part."). A Blob part here takes that
-    // uri part's layout, with the Blob's bytes. A Blob with no type, which RN refuses ("Binary FormData part needs a
-    // content-type header."), goes as application/octet-stream, as browsers send it.
+
     var multipartOf = function (form, boundary) {
         var encoder = new global.TextEncoder();
         var chunks = [];
@@ -773,7 +717,7 @@
         };
         headersProto.has = function (name) { return this._map.has(headerName(name)); };
         headersProto.delete = function (name) { this._map.delete(headerName(name)); };
-        // Names in order, as the platform's Headers iterates.
+
         headersProto._pairs = function () {
             var pairs = [];
             this._map.forEach(function (value, name) { pairs.push([name, value]); });
@@ -789,7 +733,7 @@
         headersProto[Symbol.iterator] = headersProto.entries;
     }
 
-    // WebDAV's methods and the usual ones. Upper-cased, as RN's background-safe fetch sends them.
+
     var METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'PATCH', 'PROPFIND', 'MKCOL', 'MOVE', 'COPY'];
     if (typeof global.Request !== 'function') {
         global.Request = function Request(input, init) {
@@ -823,7 +767,7 @@
             this.bodyUsed = false;
             this._bytes = body == null ? new Uint8Array(0) : typeof body === 'string' ? new global.TextEncoder().encode(body) : bytesOf(body).slice();
         };
-        // A fetch body the host decoded keeps only its text until someone asks for bytes: valid UTF-8 encodes back exactly.
+
         var readBody = function (response) {
             response.bodyUsed = true;
             if (response._bytes === undefined) response._bytes = new global.TextEncoder().encode(response._text);
@@ -835,7 +779,7 @@
             return Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
         };
         responseProto.bytes = function () { return Promise.resolve(readBody(this).slice()); };
-        // Fatal: a body that is not UTF-8 rejects rather than reading as other text.
+
         responseProto.text = function () {
             var response = this;
             if (response._text !== undefined) {
@@ -874,27 +818,26 @@
                     }
                     payload.text = typeof body === 'string' ? body : body.toString();
                 } else if (body instanceof global.FormData) {
-                    // OkHttp types the body `<the caller's type, else multipart/form-data>; boundary=<uuid>` and that replaces
-                    // the request's content-type (BridgeInterceptor). A boundary the caller set is kept and used.
+
+
                     var formType = request.headers.get('content-type') || 'multipart/form-data';
                     var callerBoundary = /;\s*boundary="?([^";]+)"?/i.exec(formType);
                     var boundary = callerBoundary ? callerBoundary[1] : global.crypto.randomUUID();
                     if (!callerBoundary) request.headers.set('content-type', formType + '; boundary=' + boundary);
                     payload.base64 = toBase64(multipartOf(body, boundary));
                 } else if (body !== null) {
-                    // RN's fetch (whatwg-fetch) types a Blob body with its type.
+
                     if (body instanceof global.Blob && body.type && !request.headers.has('content-type')) request.headers.set('content-type', body.type);
                     payload.base64 = toBase64(bytesOf(body));
                 }
                 payload.headers = [];
                 request.headers.forEach(function (value, name) { payload.headers.push([name, value]); });
-                // The host answers with the whole body or an error (a body cut short, reset, oversized or undecodable is
-                // an error, HostIo.read): fetch then rejects. It never resolves with a partial or empty body, which core
-                // would read as a missing remote document and write over.
+
+
                 var cancel = function (reason) {
                     signal.removeEventListener('abort', onAbort);
                     ioPending.delete(id);
-                    try { native().netAbort(id); } catch (_error) { /* its late answer is dropped either way */ }
+                    try { native().netAbort(id); } catch (_error) {                                             }
                     reject(reason);
                 };
                 var onAbort = function () { cancel(signal.reason); };
@@ -916,7 +859,7 @@
                         response.redirected = answer.redirected;
                         response.type = 'basic';
                         if (answer.utf8) {
-                            // Core's readDecodedResponseText (http-utils.ts) reads this text under its byte limit.
+
                             response._text = answer.utf8Text;
                             response._bytes = undefined;
                             response.mindwtrDecodedTextBytes = answer.bytes;
@@ -933,10 +876,7 @@
         };
     }
 
-    // --- secrets ------------------------------------------------------------
-    // The host's secure storage (SecretStore.kt: RN's expo-secure-store items in
-    // the Android Keystore, under RN's key names), for the credentials core's
-    // sync and AI settings keep. Each call runs off the engine thread.
+
     var secretCall = function (op, key, value, refuse, accessibility) {
         return new Promise(function (resolve, reject) {
             if (refuse) refuseIfCancelled();
@@ -950,7 +890,7 @@
     };
     var secrets = function (refuse) {
         return {
-            /** The value saved under [key], or null. */
+
             getSecret: function (key) { mark('secrets'); return secretCall('get', key, undefined, refuse); },
             setSecret: function (key, value, accessibility) {
                 mark('secrets');
@@ -961,17 +901,11 @@
         };
     };
     global.__mindwtrSecrets = secrets(true);
-    // Sync's (host-sync.ts), never refused while another call drains: a Save's commit refused half-way leaves sync off,
-    // and a keystore call answers at once, so the timed-out call still ends.
+
+
     global.__mindwtrSyncSecrets = secrets(false);
 
-    // --- files --------------------------------------------------------------
-    // Core's attachment file port and RN's installer (host-attachments.ts) on the host's app-private files (HostFiles.kt,
-    // HostInstaller.kt): each call runs off the engine thread, one at a time in call order, and settles where a timer fires.
-    // `request` is `{ op, ... }`; `bytes` a write's bytes. It answers the call's value, or a read's bytes; a failure rejects
-    // with the host's text (a missing file names ENOENT). Refused once the host's deadline passed, as a fetch is, and an open
-    // call then rejects at once and the host aborts it (HostIo.fileAbort: a copy stalled on a document provider), so a
-    // timed-out operation drains and the host never stops; its late answer settles nothing.
+
     var fileChannel = function (method, abortMethod, withValue) {
         abortMethod = abortMethod || 'fileAbort';
         return function (request, bytes) {
@@ -982,7 +916,7 @@
                 if (bytes !== undefined) payload.base64 = toBase64(bytesOf(bytes));
                 var cancel = function (reason) {
                     ioPending.delete(id);
-                    try { native()[abortMethod](id); } catch (_error) { /* its late answer is dropped either way */ }
+                    try { native()[abortMethod](id); } catch (_error) {                                             }
                     reject(reason);
                 };
                 var id = startIo(hostCall(native()[method](JSON.stringify(payload))), function (answer) {
@@ -997,15 +931,13 @@
         global.__mindwtrFileCall = fileChannel('fileCall');
         global.__mindwtrInstallerCall = fileChannel('installerCall');
     }
-    // File Sync's SAF folder (HostDocuments.kt, pass S5). A document read answers `{ value, bytes }` (its lengthVerified and its
-    // bytes), so its channel keeps both.
+
+
     if (global.__mindwtrNative && typeof global.__mindwtrNative.documentCall === 'function') {
         global.__mindwtrDocumentCall = fileChannel('documentCall', 'fileAbort', true);
     }
-    // File Sync's folder lock (HostSyncLock.kt). A host cancel must never strand a lease, or every later cycle stays busy until
-    // the process ends (RN's Expo lock calls are never cancelled). So a release is never refused or cancelled: it only closes
-    // handles and answers at once. An acquire or a revalidate asks the provider, so it is refused and cancelled as a file
-    // call is; an acquire the cancel abandoned keeps listening, and a lease the lock still granted is released at once.
+
+
     if (global.__mindwtrNative && typeof global.__mindwtrNative.syncLockCall === 'function') {
         var lockCall = function (request, settle, cancel) {
             return startIo(hostCall(native().syncLockCall(JSON.stringify(request))), settle, cancel);
@@ -1013,9 +945,9 @@
         var releaseLate = function (answer) {
             if (answer.error === undefined && typeof answer.value === 'string' && answer.value) {
                 lockCall({ op: 'release', token: answer.value }, function (released) {
-                    // host-sync.ts logs it (v1.3.8/native-file-sync-late-release).
+
                     if (typeof global.__mindwtrLockReleasedLate === 'function') {
-                        try { global.__mindwtrLockReleasedLate(released.error === undefined); } catch (_error) { /* a log only */ }
+                        try { global.__mindwtrLockReleasedLate(released.error === undefined); } catch (_error) {                  }
                     }
                 });
             }
@@ -1026,7 +958,7 @@
                 if (!release) refuseIfCancelled();
                 var id;
                 var cancel = release ? undefined : function (reason) {
-                    try { native().fileAbort(id); } catch (_error) { /* its late answer still comes */ }
+                    try { native().fileAbort(id); } catch (_error) {                                   }
                     ioPending.set(id, { settle: request.op === 'acquire' ? releaseLate : function () {} });
                     reject(reason);
                 };
@@ -1041,13 +973,11 @@
         global.__mindwtrCalendarCall = fileChannel('calendarCall', 'calendarAbort');
     }
     if (global.__mindwtrNative && typeof global.__mindwtrNative.appSearchCall === 'function') {
-        // No abort: an AppSearch call ends on its own (its late answer settles nothing); 'appSearchAbort' does not exist and is skipped.
+
         global.__mindwtrAppSearchCall = fileChannel('appSearchCall', 'appSearchAbort');
     }
-    // Gmail capture (GmailAuthorization.kt, host-gmail.ts): RN's five calls on Kotlin's own threads, settled where a timer fires. A
-    // failure rejects with RN's fixed E_GMAIL_<KIND> code as its message. Never refused or cancelled by another operation's
-    // deadline, as a lock release is not: Kotlin bounds every call itself (30 s a read, 180 s a consent), and RN's calls are never
-    // cancelled, so a Connect waiting on the user ends with Kotlin's answer.
+
+
     if (global.__mindwtrNative && typeof global.__mindwtrNative.gmailCall === 'function') {
         global.__mindwtrGmailCall = function (request) {
             return new Promise(function (resolve, reject) {
@@ -1058,9 +988,8 @@
             });
         };
     }
-    // Voice capture's microphone (HostVoice.kt, host-voice.ts): the permission prompt and the recorder answer from their own
-    // threads, so a call is only started here and settled by the pump, as a fetch. Never refused or cancelled by a host
-    // deadline: a recording the recorder started must reach its owner, or the microphone stays held until the app leaves.
+
+
     if (global.__mindwtrNative && typeof global.__mindwtrNative.voiceCall === 'function') {
         global.__mindwtrVoiceCall = function (request) {
             return new Promise(function (resolve, reject) {
@@ -1075,11 +1004,7 @@
         global.__mindwtrCalendarPushCall = fileChannel('calendarPushCall', 'calendarPushAbort');
     }
 
-    // --- sync crypto --------------------------------------------------------
-    // Sync encryption's Argon2id and AES-256-GCM (HostCrypto.kt, through host-sync.ts): each call runs on the host's crypto
-    // thread, never the engine's, and settles where a timer fires. `request` is `{ op, ... }` with its bytes as Uint8Arrays;
-    // it answers the result's bytes. A GCM tag or AAD mismatch rejects with `code: 'auth'`. Never refused once the host's
-    // deadline passed: it does no IO and always answers, so the timed-out call still drains.
+
     if (global.__mindwtrNative && typeof global.__mindwtrNative.cryptoCall === 'function') {
         global.__mindwtrCryptoCall = function (request) {
             return new Promise(function (resolve, reject) {
@@ -1100,9 +1025,7 @@
         };
     }
 
-    // --- localStorage -------------------------------------------------------
-    // In-memory only. The core stores the chosen language here; the experiment
-    // never relies on it surviving a restart.
+
     if (typeof global.localStorage !== 'object' || !global.localStorage) {
         var store = Object.create(null);
         global.localStorage = {
@@ -1113,20 +1036,14 @@
         };
     }
 
-    // --- Intl ---------------------------------------------------------------
-    // QuickJS has no Intl at all, and `packages/core/src/task-utils.ts` builds
-    // three Intl.Collator objects while the bundle is being evaluated, so the
-    // bundle does not even load without this. The Android host gives ICU
-    // collation keys (`__mindwtrNative.collationKey`, the device locale's
-    // collator, as Hermes uses), so titles sort as in RN; without that bridge
-    // the plain comparison below is a fallback, not ICU.
+
     if (typeof global.Intl !== 'object' || !global.Intl) {
         var WEEKDAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         var MONTH_LONG = ['January', 'February', 'March', 'April', 'May', 'June',
             'July', 'August', 'September', 'October', 'November', 'December'];
         var pad2 = function (value) { return (value < 10 ? '0' : '') + value; };
 
-        // One key per text and options, kept until 20000 are held (a sort compares the same titles many times).
+
         var collationKeys = Object.create(null);
         var collationKeyCount = 0;
         var collationKey = function (native, text, options) {
@@ -1177,27 +1094,24 @@
             };
         };
         Collator.prototype.resolvedOptions = function () { return { locale: 'en' }; };
-        // Hermes's localeCompare is its Intl.Collator; QuickJS's compares code points.
+
         Object.defineProperty(String.prototype, 'localeCompare', {
             value: function localeCompare(that, locales, options) { return new Collator(locales, options).compare(String(this), String(that)); },
             writable: true, configurable: true, enumerable: false,
         });
 
-        // Intl.DateTimeFormat and Date's toLocale*String, as Hermes gives them on Android: the host's `dateTimeFormat`
-        // (IcuDateTimeFormat.kt) resolves and formats with Android's ICU as Hermes's Java does; this side does Hermes's
-        // C++ part (Intl.cpp): read the locales and the options, apply toLocale*String's defaults, TimeClip the date.
-        // Without that bridge (a Node VM gate) the English stand-in below is a fallback, not ICU.
+
         var dateBridge = function () {
             var bridge = global.__mindwtrNative;
             return bridge && typeof bridge.dateTimeFormat === 'function' ? bridge : null;
         };
         var askDates = function (bridge, spec, op, time) {
             var value = bridge.dateTimeFormat(spec, op, time);
-            // Hermes turns every Java failure into a RangeError.
+
             if (typeof value === 'string' && value.indexOf(NATIVE_ERROR) === 0) throw new RangeError(value.slice(NATIVE_ERROR.length));
             return value;
         };
-        // Hermes's kDTFOptions, in its order: hour12 is a boolean, fractionalSecondDigits a number, the rest strings.
+
         var DATE_OPTIONS = ['localeMatcher', 'calendar', 'numberingSystem', 'hour12', 'hourCycle', 'timeZone', 'formatMatcher', 'weekday', 'era',
             'year', 'month', 'dayPeriod', 'day', 'hour', 'minute', 'second', 'timeZoneName', 'dateStyle', 'timeStyle', 'fractionalSecondDigits'];
         var DATE_FIELDS = ['weekday', 'year', 'month', 'day'];
@@ -1234,7 +1148,7 @@
             return Math.trunc(time) + 0;
         };
         var getTime = Date.prototype.getTime;
-        // Date.prototype.toLocale*String: Hermes's toDateTimeOptions, then a formatter for these locales and options.
+
         [['toLocaleString', true, true], ['toLocaleDateString', true, false], ['toLocaleTimeString', false, true]].forEach(function (entry) {
             var own = Date.prototype[entry[0]];
             var date = entry[1];
@@ -1259,7 +1173,7 @@
             Object.defineProperty(Date.prototype, entry[0], { value: toLocale, writable: true, configurable: true, enumerable: false });
         });
 
-        // A formatter's state sits in one non-enumerable slot, as Hermes's internal slots do not show.
+
         var DateTimeFormat = function DateTimeFormat(locales, options) {
             mark('Intl.DateTimeFormat');
             var self = this instanceof DateTimeFormat ? this : Object.create(DateTimeFormat.prototype);
@@ -1273,14 +1187,14 @@
             }
             var list = readLocales(locales);
             var read = readDateOptions(options);
-            // ECMA-402 2023 11.1.2 step 42, Hermes's checkOptions: a style with an explicit field is a TypeError.
+
             if ((read.dateStyle !== undefined || read.timeStyle !== undefined)
                 && has(read, ['weekday', 'era', 'year', 'month', 'day', 'dayPeriod', 'hour', 'minute', 'second', 'fractionalSecondDigits', 'timeZoneName'])) {
                 throw new TypeError("{data/time}Style and explicit format components shouldn't be used together");
             }
             state.bridge = bridge;
             state.spec = JSON.stringify({ locales: list, options: read });
-            // Hermes builds its formatter here, so a bad option throws now.
+
             state.resolved = JSON.parse(askDates(bridge, state.spec, 'resolvedOptions', 0));
             return self;
         };
@@ -1291,7 +1205,7 @@
             for (var name in state.resolved) copy[name] = state.resolved[name];
             return copy;
         };
-        // Hermes's format is a getter that keeps one function bound to its formatter.
+
         Object.defineProperty(DateTimeFormat.prototype, 'format', {
             configurable: true,
             enumerable: false,
@@ -1369,12 +1283,12 @@
         };
     }
 
-    // --- queueMicrotask -----------------------------------------------------
+
     if (typeof global.queueMicrotask !== 'function') {
         global.queueMicrotask = function (fn) { Promise.resolve().then(fn); };
     }
 
-    // --- console ------------------------------------------------------------
+
     if (typeof global.console !== 'object' || !global.console) {
         global.console = {};
     }
@@ -1392,11 +1306,11 @@
         return String(value);
     };
     ['log', 'warn', 'error', 'info', 'debug'].forEach(function (level) {
-        // QuickJS's built-in methods throw when no platform stdout is set.
+
         global.console[level] = function () {
             var parts = [];
             for (var i = 0; i < arguments.length; i += 1) parts.push(describe(arguments[i]));
-            try { global.__hostLog(level + ': ' + parts.join(' ')); } catch (_error) { /* logging cannot fail a save */ }
+            try { global.__hostLog(level + ': ' + parts.join(' ')); } catch (_error) {                                  }
         };
     });
     if (tracer) { tracer.trace(''); tracer.trace('js:bundleInit'); }

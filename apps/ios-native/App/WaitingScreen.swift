@@ -188,7 +188,7 @@ struct WaitingScreen: View {
     }
 
     private var pauseIcon: some View {
-        // Lucide PauseCircle, as in RN's empty Waiting view.
+
         Path { path in
             path.addEllipse(in: CGRect(x: 2, y: 2, width: 20, height: 20))
             path.move(to: CGPoint(x: 10, y: 8)); path.addLine(to: CGPoint(x: 10, y: 16))

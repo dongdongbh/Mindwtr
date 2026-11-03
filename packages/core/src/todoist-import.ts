@@ -249,11 +249,8 @@ const parseTodoistDate = (
         saturday: 6,
     };
     const weekday = weekdayMap[normalized];
-    // A plain-object lookup keyed by parsed CSV cell text resolves a value like
-    // "constructor" through Object.prototype instead of returning undefined;
-    // `typeof === 'number'` rejects that inherited function (SEC-13) instead of
-    // letting `(weekday - target.getDay() + 7) % 7 || 7` turn NaN into a
-    // fabricated one-week-out due date.
+
+
     if (typeof weekday === 'number') {
         const target = new Date(now);
         const delta = (weekday - target.getDay() + 7) % 7 || 7;
@@ -261,8 +258,7 @@ const parseTodoistDate = (
         return { dueDate: formatLocalDate(target) };
     }
 
-    // Engines invent a year for yearless text ("Mar 5" parses as 2001), so a
-    // free-text date must name its own four-digit year.
+
     if (/\b\d{4}\b/u.test(text)) {
         const parsed = new Date(text);
         if (Number.isFinite(parsed.getTime())) {

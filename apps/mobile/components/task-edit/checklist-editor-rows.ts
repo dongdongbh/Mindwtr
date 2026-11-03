@@ -2,7 +2,7 @@ import type { ChecklistItem, TaskChecklistEdit } from '@mindwtr/core';
 
 type EditorRow = { identity: string; item: ChecklistItem };
 
-/** Row identity belongs to the editor session; stored checklist IDs may repeat. */
+
 export class ChecklistEditorRows {
     private serial = 0;
     private rows: EditorRow[] = [];

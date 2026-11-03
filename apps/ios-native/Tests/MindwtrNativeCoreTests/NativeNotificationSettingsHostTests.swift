@@ -406,7 +406,7 @@ final class NativeNotificationSettingsHostTests: XCTestCase {
         let reply = try await core.retryPending(), result = try object(XCTUnwrap(reply))
         XCTAssertEqual(result["type"] as? String, "dateFormat"); XCTAssertEqual(result["changed"] as? Bool, true)
         XCTAssertEqual(try settings()["dateFormat"] as? String, "ymd")
-        // General uses its existing synced CAS stamp, so establish a real foreign durable UUID receipt too.
+
         let focus = try object(await core.call("focus", argumentsJSON: "[50]"))
         let sections = try XCTUnwrap(focus["sections"] as? [[String: Any]])
         let task = try XCTUnwrap(sections.flatMap { $0["rows"] as? [[String: Any]] ?? [] }.first { $0["id"] as? String == id })

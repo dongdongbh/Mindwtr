@@ -1,8 +1,6 @@
-/**
- * The deep links Mindwtr's apps open (moved from apps/mobile/lib/capture-deeplink.ts, unchanged, so the
- * native Android app parses the same links React Native does): capture shortcuts, named app features, and
- * entity links. Route resolution and shares: entry-points.ts.
- */
+
+
+
 export type ShortcutCapturePayload = {
     title: string;
     note?: string;
@@ -20,8 +18,8 @@ const trimOrUndefined = (value: string | null | undefined): string | undefined =
 };
 
 const normalizeRouteFromUrl = (url: URL): string => {
-    // mindwtr://capture -> hostname "capture"
-    // mindwtr:///capture -> pathname "/capture"
+
+
     const route = trimOrUndefined(url.hostname) ?? trimOrUndefined(url.pathname.replace(/^\/+/, '')) ?? '';
     return route.toLowerCase();
 };
@@ -128,9 +126,7 @@ export type EntityOpenPayload = { kind: EntityOpenKind; id: string };
 
 const ENTITY_OPEN_PARAM_KINDS: EntityOpenKind[] = ['task', 'project', 'area'];
 
-// mindwtr://open?task=<id> | ?project=<id> | ?area=<id> — the deep link a
-// system-search result (#1017) or any future entity-open surface opens.
-// Distinct from open-feature (named app sections) and capture (quick-add).
+
 export function isEntityOpenUrl(rawUrl: string): boolean {
     if (typeof rawUrl !== 'string' || !rawUrl.trim()) return false;
 

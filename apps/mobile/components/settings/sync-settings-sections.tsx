@@ -115,8 +115,8 @@ type SyncBackupSectionProps = {
   handleImportTodoist: () => void;
   handleMergeBackup: () => void;
   handleRestoreBackup: () => void;
-  // The screen owns the docs URL, so it passes the rendered link in rather than
-  // this module reaching into the settings shell for SettingsGuideLink.
+
+
   importGuide?: ReactNode;
   isBackupBusy: boolean;
   isGettingStartedDisabled: boolean;
@@ -127,10 +127,7 @@ type SyncBackupSectionProps = {
   tc: ThemeColors;
 };
 
-// Two folded cards, matching desktop's Data page: restoring a backup and
-// migrating from another app are unrelated errands, and both are rare enough to
-// stay folded until asked for (same disclosure shape as the recovery snapshots
-// card below). The cards title themselves, so there is no outer section header.
+
 export function SyncBackupSection({
   backupAction,
   handleAddGettingStartedContent,
@@ -155,7 +152,7 @@ export function SyncBackupSection({
 }: SyncBackupSectionProps) {
   const [backupOpen, setBackupOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
-  // Getting Started's seed is a data write too: no export, restore or import starts while it saves.
+
   const dataRowsDisabled = isSyncing || isBackupBusy || isGettingStartedBusy;
 
   return (
@@ -669,12 +666,7 @@ type SyncDiagnosticsCardProps = {
   toggleDebugLogging: (value: boolean) => void;
 };
 
-/**
- * The `Encryption` block (#1056 diagnostics). Read-only, and deliberately rendered as the same
- * `label: value` tokens the `[sync-encryption]` log lines use, so a user can copy either one
- * into a report and both match. Loads its own data rather than threading props through the
- * whole settings screen: nothing else on this screen needs the encryption posture.
- */
+
 function SyncEncryptionDiagnosticsBlock({ t, tc }: { t: Translate; tc: ThemeColors }) {
   const [lines, setLines] = React.useState<string[] | null>(null);
   const [open, setOpen] = React.useState(false);
@@ -684,8 +676,8 @@ function SyncEncryptionDiagnosticsBlock({ t, tc }: { t: Translate; tc: ThemeColo
     void (async () => {
       const next = await getSyncEncryptionDiagnosticsLines().catch(() => null);
       if (!cancelled) setLines(next);
-      // Also stamp the posture into the log file itself, forced, so a shared log carries it
-      // even if the user shares without scrolling here or had Debug logging off until now.
+
+
       await logSyncEncryptionDiagnosticsBlock().catch(() => undefined);
     })();
     return () => {
@@ -694,9 +686,8 @@ function SyncEncryptionDiagnosticsBlock({ t, tc }: { t: Translate; tc: ThemeColo
   }, []);
 
   if (!lines) return null;
-  // Folded by default (same disclosure shape as the Backup card): the block is
-  // reference data for a bug report, not something to read on every visit. The
-  // lines are still loaded, and the log stamped, on mount regardless.
+
+
   return (
     <>
       <TouchableOpacity

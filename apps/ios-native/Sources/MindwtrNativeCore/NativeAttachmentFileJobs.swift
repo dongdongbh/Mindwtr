@@ -1,6 +1,6 @@
 import Foundation
 
-/// A primitive cancellation flag may cross queues; a JS value never does.
+
 final class NativeAttachmentCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
@@ -54,10 +54,7 @@ enum NativeAttachmentFileJobsError: LocalizedError {
     }
 }
 
-/// Native-owned proofs only. This is not an extension of either JSON allowlist.
-/// Retirement grants no domain authority: a future coordinator must persist its
-/// decision and check latest shared live references under Engine/library ownership,
-/// held without JSC pumping until the typed operation has completed.
+
 enum NativeAttachmentDraftFileRequest: Sendable {
     case ensureManagedDirectory
     case ensureManagedDirectoryProof
@@ -166,16 +163,15 @@ enum NativeAttachmentDraftFileRequest: Sendable {
             input = ["op": "retirePrivateStage", "stage": try stageObject(stage),
                      "targetURI": targetURI, "operationID": operationID]
         }
-        // Count the actual escaped encoding; bounded individual strings are
-        // checked first, so no oversized caller string is copied into a frame.
+
+
         let count = try JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]).count
         guard count <= 64 * 1024 else { throw NativeAttachmentFileJobsError.capacity }
         return count
     }
 }
 
-/// Swift-only FIFO and mailbox. The engine takes serialized replies itself,
-/// including while its synchronous JSC invoke occupies the engine queue.
+
 final class NativeAttachmentFileJobs: @unchecked Sendable {
     static let maximumJobs = 16
     static let maximumReservedBytes = 48 * 1024 * 1024
@@ -221,7 +217,7 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
     private var accepting = true
     private var wake: (@Sendable () -> Void)?
     #if DEBUG
-    /// Set before submitting work. Hooks run on the file queue, never on JSC.
+
     var beforeWork: ((String, Bool) throws -> Void)?
     var afterWork: ((String, Bool) -> Void)?
     var beforeProviderOutputNamedStat: ((Bool) throws -> Void)? {
@@ -264,8 +260,8 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         if let maximumReadBytes { guard !isInstaller, (0...NativeAttachmentFiles.maximumBytes).contains(maximumReadBytes) else { throw NativeAttachmentFileJobsError.capacity } }
         let count = json.utf8.count
         guard count <= (isInstaller ? 64 * 1024 : 24 * 1024 * 1024) else { throw NativeAttachmentFileJobsError.capacity }
-        // Only small requests can return bytes. Large frames are base64 writes
-        // or will be refused by the adapter, without allocating on this queue.
+
+
         var replyReservation = 64 * 1024
         if !isInstaller, count <= 64 * 1024,
            let value = try? NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any],
@@ -280,7 +276,7 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         return try enqueue(.draft(request, maximumReadBytes: maximumReadBytes), inputBytes: request.encodedInputSize(), replyReservation: 64 * 1024)
     }
 
-    /// Native-only immutable journal lease; no raw JSON request can grant it.
+
     func submitBaselineRetirement(attachmentID: String, proof: NativeAttachmentFiles.BaselineAttachmentProof,
                                   ownershipBytes: Int, checkOwnership: @escaping @Sendable () throws -> Void) throws -> String {
         guard ownershipBytes >= 0, ownershipBytes <= 8 * 1024 * 1024 else { throw NativeAttachmentFileJobsError.capacity }
@@ -314,8 +310,8 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
                 let bytes: Data?
                 switch work {
                 case .raw(let json, true, _):
-                    // Once begun the RN installer must finish; cancellation
-                    // cannot undo publication or release the library early.
+
+
                     value = try NativeJSON.jsonObject(with: Data(installer.handle(json).utf8))
                     bytes = nil
                 case .raw(let json, false, let cap):
@@ -353,9 +349,7 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         return id
     }
 
-    /// Called only inside the shared FIFO and mutation lock. Prepare/publish
-    /// and private retirement must finish once begun; source/fill and published
-    /// retirement retain the existing primitive's cancellation cutover.
+
     private func executeDraft(_ request: NativeAttachmentDraftFileRequest, maximumReadBytes: Int?,
                               token: NativeAttachmentCancellation) throws -> [String: Any] {
         switch request {
@@ -392,7 +386,7 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         case .fillStage(let source, let stage):
             let content = try files.fillReservedAttachmentStage(sourceProof: source, stageProof: stage,
                                                                 checkCancellation: token.check)
-            // Task221 proves successful fill retains the reserved inode.
+
             return ["sha256": content.sha256, "size": content.size, "identity": stage.stagedIdentity]
         case .publishStage(let stage, let targetURI, let sha256):
             return ["status": try installer.publishStage(stage: stage, targetURI: targetURI, sha256: sha256)]
@@ -415,8 +409,8 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             return ["status": outcome.rawValue]
         case .retirePrivateStage(let stage, let targetURI, let operationID):
             try token.check()
-            // Once entered, the existing installer finishes durability even if
-            // cancellation arrives. Keep its actual result for the owner.
+
+
             return ["status": try installer.retirePrivateStage(stage: stage, targetURI: targetURI, operationID: operationID)]
         }
     }
@@ -424,15 +418,15 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
     func abort(_ id: String) { lock.lock(); let token = jobs[id]?.token; lock.unlock(); token?.cancel() }
     func next() -> String {
         lock.lock(); defer { lock.unlock() }
-        // The polyfill takes a body immediately after its metadata. Retain its
-        // admission reservation until that body is actually consumed.
+
+
         guard taken == nil, let index = answers.firstIndex(where: { !$0.isDraft }) else { return "" }
         let answer = answers.remove(at: index)
         if answer.body != nil { taken = answer } else { release(answer.id) }
         return answer.json
     }
-    /// Native callers consume only their own completed typed proof. This never
-    /// takes another ID, a raw reply, or the raw body awaiting consumption.
+
+
     func takeDraft(_ id: String) -> String {
         lock.lock(); defer { lock.unlock() }
         guard let index = answers.firstIndex(where: { $0.isDraft && $0.id == id }) else { return "" }
@@ -452,8 +446,8 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         mutationLock.lock(); defer { mutationLock.unlock() }
         try files.deleteNow(uri)
     }
-    /// Native-only object transport. Never round-trip creation authority through
-    /// the JSON mailbox or call these synchronous wrappers from the file queue.
+
+
     func copyProviderSource(_ url: URL, cancellation: NativeAttachmentCancellation) throws -> NativeAttachmentFiles.ProviderCacheCopyReceipt {
         try queue.sync {
             lock.lock(); let ready = accepting; lock.unlock()
@@ -463,8 +457,8 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             return try files.copyProviderSource(url, checkCancellation: cancellation.check)
         }
     }
-    /// Native-only Calendar capture. Provider coordination runs on the owned
-    /// file queue while Engine remains available to cancel/close the owner.
+
+
     func copyCalendarProviderSource(_ url: URL, cancellation: NativeAttachmentCancellation) async throws -> NativeAttachmentFiles.CalendarFileSelection {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
@@ -474,8 +468,8 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
                     try cancellation.check()
                     mutationLock.lock(); defer { mutationLock.unlock() }
                     let selection = try files.copyCalendarProviderSource(url, checkCancellation: cancellation.check)
-                    // A helper-returned immutable snapshot is retained even
-                    // when the caller becomes stale before Add admission.
+
+
                     try cancellation.check()
                     continuation.resume(returning: selection)
                 } catch { continuation.resume(throwing: error) }
@@ -511,8 +505,8 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             try files.requireProviderSource(receipt)
         }
     }
-    /// After drain, retirement stays on the off-main Engine turn so its final
-    /// callback may recheck editor/journal evidence without file-queue JSC use.
+
+
     func retireProviderSource(_ receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt,
                               requireOwner: () throws -> Void) throws -> NativeAttachmentFiles.BaselineAttachmentRetirementOutcome {
         lock.lock(); let ready = accepting; lock.unlock()
@@ -520,8 +514,8 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         mutationLock.lock(); defer { mutationLock.unlock() }
         return try files.retireProviderSource(receipt, checkCancellation: requireOwner)
     }
-    /// After drain, only the owning Engine's validated durable download journal
-    /// can request this retirement; it has no JSON mailbox operation.
+
+
     func retireAdoptedProjectDownloadSource(_ proof: NativeAttachmentFiles.CacheSourceProof,
                                            requireOwner: () throws -> Void) throws -> NativeAttachmentFiles.BaselineAttachmentRetirementOutcome {
         lock.lock(); let ready = accepting; lock.unlock()

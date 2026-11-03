@@ -13,7 +13,7 @@ type BadgePorts = {
     report: (count: number, enabled: boolean, result: 'applied' | 'denied' | 'failed') => void;
 };
 
-/** One owner serializes preferences, authorization, and writes, including settings/lifecycle races. */
+
 export function createIosAppBadgeController(ports: BadgePorts) {
     let queue: Promise<unknown> = Promise.resolve();
     let enabled: boolean | undefined;
@@ -51,11 +51,11 @@ export function createIosAppBadgeController(ports: BadgePorts) {
         },
         readEnabled: () => enqueue(async () => {
             const native = ports.native();
-            // Read the saved opt-in so someone who revoked OS permission can still turn it off.
+
             return !!native && (await load()) && intent !== false;
         }),
         setEnabled(value: boolean): Promise<IosAppBadgeToggleResult> {
-            // Invalidate an in-flight restore/permission request immediately, before its await returns.
+
             const revision = ++generation;
             intent = value;
             return enqueue(async () => {
@@ -80,7 +80,7 @@ export function createIosAppBadgeController(ports: BadgePorts) {
                     return 'enabled';
                 }
                 enabled = false;
-                // Clear even when durability fails; the rejected promise tells the settings UI to show the error.
+
                 let persistenceError: unknown;
                 try { await ports.write(false); } catch (error) { persistenceError = error; }
                 try { await apply(native, 0, false, true); } finally { emit(); }
@@ -88,7 +88,7 @@ export function createIosAppBadgeController(ports: BadgePorts) {
                 return 'disabled';
             });
         },
-        /** getCount is read AFTER authorization, so no stale task/workspace snapshot crosses an await. */
+
         refresh(getCount: () => number | null, options: { canWrite?: () => boolean; force?: boolean } = {}): Promise<void> {
             return enqueue(async () => {
                 const native = ports.native();
@@ -97,7 +97,7 @@ export function createIosAppBadgeController(ports: BadgePorts) {
                 const active = await load();
                 if (revision !== generation) return;
                 if (!active || intent === false) {
-                    // A disposed owner must not write over a newer workspace/root owner.
+
                     if (options.canWrite ? options.canWrite() : getCount() !== null) await apply(native, 0, false, options.force);
                     return;
                 }

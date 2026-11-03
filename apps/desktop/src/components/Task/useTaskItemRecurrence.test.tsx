@@ -103,7 +103,7 @@ describe('useTaskItemRecurrence', () => {
         });
 
         expect(result.current.customMode).toBe('lastDay');
-        // The day grid falls back to the anchor rather than clamping -1 to 1.
+
         expect(result.current.customMonthDays).toEqual([10]);
     });
 
@@ -128,7 +128,7 @@ describe('useTaskItemRecurrence', () => {
         act(() => {
             result.current.openCustomRecurrence();
         });
-        // Anchored on the 1st; adding the 16th out of order still emits a sorted list.
+
         act(() => {
             result.current.toggleCustomMonthDay(16);
         });
@@ -140,7 +140,7 @@ describe('useTaskItemRecurrence', () => {
         expect(setField).toHaveBeenCalledWith('recurrenceRRule', 'FREQ=MONTHLY;BYMONTHDAY=1,16');
 
         rerender({ recurrenceRRule: 'FREQ=MONTHLY;BYMONTHDAY=1,16' });
-        // The list is custom even though its first day equals the anchor day.
+
         expect(result.current.monthlyRecurrence.pattern).toBe('custom');
         act(() => {
             result.current.openCustomRecurrence();

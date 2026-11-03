@@ -231,10 +231,7 @@ DirectoryRetirementResult retire_quarantine(
     return conflict();
   }
 
-  // The quarantine leaf is derived from the reservation's random capability and is
-  // only manipulated while Mindwtr holds the installer lock. Rechecking here
-  // rejects uncoordinated swaps before the directory-only removal. A malicious
-  // same-UID process that targets this private name is outside the stated model.
+
   if (
       !parent_matches(parent_fd, expected_parent)
       || !retained_directory_matches(retained_directory_fd, expected_directory)) {
@@ -286,7 +283,7 @@ DirectoryRetirementResult retire_quarantine(
       error_number);
 }
 
-}  // namespace
+}
 
 std::string directory_retirement_quarantine_name(
     const char* directory_name) {
@@ -565,4 +562,4 @@ DirectoryRetirementResult retire_empty_directory_if_identity(
   return result;
 }
 
-}  // namespace mindwtr::attachment_file_installer
+}

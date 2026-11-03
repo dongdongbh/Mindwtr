@@ -15,22 +15,10 @@ export function isLocalAttachmentPath(uri: string): boolean {
     return !URI_SCHEME_PATTERN.test(trimmed);
 }
 
-// #1245 moved an installed Windows/macOS profile's managed folders from
-// `<root>/` down into `<root>/data/`. Only these two hold files whose absolute
-// path was recorded in an attachment `uri`; `quick-add-images` did not move, so
-// old pasted-image paths must keep resolving exactly where they are.
+
 const RELOCATED_MANAGED_DIR_NAMES = [ATTACHMENTS_DIR_NAME, 'audio-captures'];
 
-/**
- * Map a path recorded at the flat profile root onto the same file under the
- * current managed data dir, or null when the shape does not match. Unlike the
- * relocated portable profile of #1038 this stale path sits inside the OS data
- * dir and its file name need not be the attachment id (audio captures are named
- * after their timestamp), so the id-based fallback never reaches it.
- *
- * The result always stays inside the managed data dir: the rest of the path may
- * not contain `.` or `..`, so this opens no location the app did not already own.
- */
+
 export function rehomeManagedSubfolderPath(path: string, managedDataDir: string): string | null {
     const normalized = normalizeAttachmentPathForUrl(path.trim());
     const managed = normalizeAttachmentPathForUrl(managedDataDir.trim()).replace(/\/+$/, '');
@@ -56,16 +44,12 @@ export function resolveAttachmentOpenTarget(uri: string): string {
     return stripFileScheme(trimmed);
 }
 
-// A portable profile travels with the install, so an attachment URI recorded at
-// the previous location is stale even though the file moved along inside the
-// profile's attachments dir. The recorded path always wins while it resolves;
-// only once it is gone do we retry the same file name in the current managed
-// attachments dir, so the stored URI format never changes (#1038).
+
 export async function resolveAttachmentReadPath(uri: string, attachmentId: string): Promise<string> {
     const target = resolveAttachmentOpenTarget(uri);
     if (!target || !isLocalAttachmentPath(target)) return target;
     const { exists } = await import('@tauri-apps/plugin-fs');
-    // A path outside the webview's fs scope throws instead of returning false.
+
     const readable = async (path: string): Promise<boolean> => {
         try {
             return await exists(path);

@@ -6,13 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 
-/**
- * Debug builds only (scripts/check-share-files-device.mjs): sends a file share to this app's launcher alias as another app's
- * share sheet does, which `am start` cannot (it has no list of URIs for SEND_MULTIPLE). Extras: `action` (SEND or
- * SEND_MULTIPLE), `type`, `uris` (a string list), and `subject` and `text` when set. Only this app's own URIs go out:
- * ShareTestProvider's files, and the hostile ones the check expects refused (a `file://` URI, this app's other providers,
- * with or without a user prefix).
- */
+
 class ShareTestSender : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

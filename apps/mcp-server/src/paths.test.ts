@@ -73,7 +73,7 @@ describe('mcp default database discovery', () => {
     delete process.env.MINDWTR_DB_PATH;
     delete process.env.MINDWTR_DB;
 
-    // MCP client configs pass args without a shell, so the tilde arrives literally.
+
     expect(resolveMindwtrDbPath('~/.local/share/mindwtr/mindwtr.db'))
       .toBe('/home/tester/.local/share/mindwtr/mindwtr.db');
     expect(resolveMindwtrDbPath('~\\mindwtr.db')).toBe('/home/tester/mindwtr.db');
@@ -107,7 +107,7 @@ describe('mcp default database discovery', () => {
   test('discovers the Snap database through the current revision link', () => {
     const home = mkdtempSync(join(tmpdir(), 'mindwtr-mcp-snap-'));
     tempDirs.push(home);
-    // Snapd moves HOME and XDG_DATA_HOME under ~/snap/<name>/<revision>/; `current` links the active revision.
+
     const dbPath = join(home, 'snap', 'mindwtr', 'current', '.local', 'share', 'mindwtr', 'mindwtr.db');
     mkdirSync(join(dbPath, '..'), { recursive: true });
     writeFileSync(dbPath, '');

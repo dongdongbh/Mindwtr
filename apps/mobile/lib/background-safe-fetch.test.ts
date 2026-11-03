@@ -86,7 +86,7 @@ describe('backgroundSafeFetch', () => {
     xhr.response = new TextEncoder().encode('{"hello":"wörld"}').buffer;
     xhr.onload?.();
 
-    // Timers are never advanced: the promise must settle from the event alone.
+
     const response = await pending;
     expect(response.ok).toBe(true);
     expect(response.status).toBe(200);
@@ -148,8 +148,8 @@ describe('backgroundSafeFetch', () => {
   });
 
   it('fails a sync PUT that the iOS client followed to another URL as a GET', async () => {
-    // RCTHTTPRequestHandler follows a 303 on a PUT as a GET without the Authorization
-    // header, and reports the GET's 200 with the final URL as responseURL.
+
+
     const { backgroundSafeFetch } = await loadModule();
     const pending = webdavPutJson('http://dav.example/dav/data.json', { tasks: [] }, {
       fetcher: backgroundSafeFetch,
@@ -194,7 +194,7 @@ describe('backgroundSafeFetch', () => {
 
   describe('native UTF-8 text (#1434)', () => {
     const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-    // React Native's XHR holds an 'arraybuffer' reply as base64 in _response and decodes it only when response is read.
+
     const answer = (bytes: Uint8Array) => {
       const xhr = FakeXhr.instances[FakeXhr.instances.length - 1] as FakeXhr & { _response?: string };
       const responseRead = vi.fn(() => bytes.slice().buffer);

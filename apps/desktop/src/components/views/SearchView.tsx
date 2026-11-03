@@ -71,7 +71,7 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
 
     const savedSearch = settings?.savedSearches?.find(s => s.id === savedSearchId);
     const query = savedSearch?.query || '';
-    // The saved search's own sort, else the global one (#1453). Opening the view writes nothing.
+
     const sortBy = resolveSavedSearchSortBy(savedSearch, settings);
     const ownSortBy = getSavedSearchOwnSortBy(savedSearch, settings);
 

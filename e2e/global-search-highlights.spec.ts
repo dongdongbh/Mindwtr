@@ -41,7 +41,7 @@ test('global search highlights separate Chinese title substrings', async ({ page
     await page.screenshot({ path: testInfo.outputPath('global-search-chinese-highlights.png') });
 });
 
-// #1262: 25 unsectioned tasks, 11 sections, 105 total / 93 active.
+
 for (const opener of ['project', 'task', 'inbox']) test(`search keeps an unsectioned project result in view (${opener})`, async ({ page }) => {
     await dismissOnboarding(page);
     await page.addInitScript(() => {
@@ -79,7 +79,7 @@ for (const opener of ['project', 'task', 'inbox']) test(`search keeps an unsecti
     await expect(dialog).toHaveCount(0);
     const task = page.locator('[data-task-id="task-24"]');
     await expect(task).toBeInViewport();
-    // Include the end of the smooth scroll and highlight removal.
+
     await page.waitForTimeout(4500);
     await expect(task).toBeInViewport();
 });

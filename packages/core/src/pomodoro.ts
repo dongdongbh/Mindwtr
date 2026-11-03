@@ -24,9 +24,9 @@ export interface PomodoroState {
 export interface PomodoroSessionHistory {
     totalCompletedFocusSessions: number;
     completedFocusSessionsByTaskId: Record<string, number>;
-    /** Local YYYY-MM-DD the today-count belongs to; rolls over automatically. */
+
     todayDayKey: string;
-    /** Sessions completed on todayDayKey — the count the panels display (#833). */
+
     completedTodayFocusSessions: number;
 }
 
@@ -144,9 +144,7 @@ export function sanitizePomodoroSessionHistory(
         taskTotal
     );
 
-    // The today-count survives a reload only while the stored day key still is
-    // today; a stale or missing key (including pre-daily-count stored data)
-    // starts the day at zero.
+
     const completedTodayFocusSessions = value?.todayDayKey === todayDayKey
         ? sanitizeCompletedSessionCount(value?.completedTodayFocusSessions)
         : 0;
@@ -159,7 +157,7 @@ export function sanitizePomodoroSessionHistory(
     };
 }
 
-/** The count the panels display: today's sessions, zero once the local day rolls. */
+
 export function getPomodoroFocusSessionsCompletedToday(
     history: Partial<PomodoroSessionHistory> | undefined,
     todayDayKey: string = getPomodoroLocalDayKey()
@@ -285,8 +283,8 @@ export function advancePomodoroState(
     let remainingElapsedSeconds = safeElapsedSeconds;
 
     while (remainingElapsedSeconds > 0 && nextState.isRunning) {
-        // A fractional, zero or negative initial countdown still finishes on
-        // exactly the tick where tickPomodoroState would switch phases.
+
+
         const countdownSeconds = nextState.remainingSeconds > 1
             ? Math.ceil(nextState.remainingSeconds) - 1
             : 0;
@@ -304,18 +302,15 @@ export function advancePomodoroState(
         lastEvent = next.completedFocusSession ? 'focus-finished' : 'break-finished';
 
         if (nextState.isRunning && options.autoStartFocus === true && options.autoStartBreaks === true) {
-            // The first partial phase is now settled. Full focus/break cycles
-            // return to this same full phase; the remaining tail spans at most
-            // two boundaries, regardless of how long the timer was inactive.
+
+
             const cycleSeconds = getPomodoroPhaseSeconds('focus', durations) + getPomodoroPhaseSeconds('break', durations);
             const fullCycles = Math.floor(remainingElapsedSeconds / cycleSeconds);
             if (fullCycles > 0) {
                 const count = nextState.completedFocusSessions;
                 const incremented = count + 1;
-                // Counts from stored sessions are nonnegative integers. Keep
-                // repeated +1's IEEE fixed point without truncating the input.
-                // shortcut: fractional direct-call counts use arithmetic addition;
-                // revisit if a caller stops normalizing completed counts to integers.
+
+
                 const completedFocusSessions = incremented === count
                     ? count
                     : count >= Number.MAX_SAFE_INTEGER + 1
@@ -353,7 +348,7 @@ export function getPomodoroTaskChoices(pools: {
 }): Task[] {
     const byId = new Map<string, Task>();
     for (const task of [...pools.focusedTasks, ...pools.schedule, ...pools.nextActions, ...pools.reviewDue]) {
-        // RN's picker lists only actionable tasks (e4d71e032).
+
         if (!task.deletedAt && isTaskActionable(task)) byId.set(task.id, task);
     }
     return Array.from(byId.values());

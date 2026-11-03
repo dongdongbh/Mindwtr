@@ -3,7 +3,7 @@ import { buildNativeAISettingsProjection } from './native-ai-settings-projection
 import type { AIProviderId } from './ai/types';
 import type { AppSettings } from './types';
 
-/** Private display metadata only; every future write or request needs fresh admission. */
+
 export async function readNativeAIProviderDeviceState(settings: AppSettings,
     inspect: (provider: AIProviderId, secretName: string, legacyName: string) => unknown | Promise<unknown>) {
     const provider = buildNativeAISettingsProjection(settings).aiProvider;

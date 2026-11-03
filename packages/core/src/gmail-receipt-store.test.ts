@@ -51,7 +51,7 @@ describe('Gmail durable receipts', () => {
     });
 });
 
-// The reset rule each host shares: a node:fs folder stands in for the host's file calls.
+
 function receiptFolder(faults: { create?: (name: string) => boolean; rename?: (name: string) => boolean; sql?: (name: string, sql: string) => boolean } = {}) {
     const parent = join(homedir(), '.cache', 'mindwtr-tests');
     mkdirSync(parent, { recursive: true });
@@ -136,8 +136,7 @@ describe('Gmail receipts file reset', () => {
     });
 });
 
-// An interrupted reset must not lose the moved file's receipts (G1 review finding 1): the marker is written first, and every
-// open while it exists carries over from every moved file, so the next start finishes what the first one could not.
+
 describe('Gmail receipts reset interrupted part way', () => {
     it.each([
         ['the fresh file cannot get its schema (a full disk)', { sql: (name: string, sql: string) => name === 'receipts.sqlite' && sql.startsWith('CREATE TABLE receipts') }, 'file'],
@@ -168,7 +167,7 @@ describe('Gmail receipts reset interrupted part way', () => {
         });
         folder.closeAll();
 
-        // Carrying over again is harmless, and it stops once capture starts again.
+
         expect(openGmailReceiptStore(folder.files, { now, logWarn }).seen('a', 'kept')).toBe(true);
         expect(logWarn).toHaveBeenCalledTimes(2);
         folder.closeAll();
@@ -177,7 +176,7 @@ describe('Gmail receipts reset interrupted part way', () => {
         expect(logWarn).toHaveBeenCalledTimes(2);
     });
 
-    // A hot journal left beside a fresh file would be played back into it, so the journals move first and the file last.
+
     it.each(['receipts.sqlite', 'receipts.sqlite-journal'])('never leaves a journal beside a fresh file when moving %s fails', (failing) => {
         let armed = true;
         const folder = receiptFolder({ rename: (name) => armed && name === failing });
@@ -202,8 +201,7 @@ describe('Gmail receipts reset interrupted part way', () => {
     });
 });
 
-// Receipts are never pruned, and the carry-over runs on the JS thread inside the first status read after app start (Hermes
-// has no JIT). Copying the account's list for every row made it quadratic: 40 000 receipts took about 8 s in Node.
+
 describe('Gmail receipts carry-over cost', () => {
     it('carries 40 000 receipts in linear time', () => {
         const folder = receiptFolder();

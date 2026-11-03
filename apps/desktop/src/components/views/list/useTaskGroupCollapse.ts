@@ -14,12 +14,7 @@ import {
     type TaskGroupAxis,
 } from './next-grouping';
 
-/**
- * The one sanitizer for a grouped section's DOM id. Every view has to spell the
- * same group the same way: a title that starts with a separator ("- Later")
- * would otherwise produce a leading dash in one view and not in another, and
- * the header's `aria-controls` then points at nothing (#963/#970).
- */
+
 export function getGroupDomIdSegment(value: string): string {
     return value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'group';
 }
@@ -37,13 +32,7 @@ type SetCollapsedGroups<Axis extends TaskGroupAxis> = (
     updater: (current: CollapsedGroups<Axis>) => CollapsedGroups<Axis>,
 ) => void;
 
-/**
- * The collapsed set per axis, persisted device-locally under the list's own
- * storage key — one key per list, so folding Someday never folds Next (#963).
- * Views whose persisted state holds more than the collapsed groups (Focus keeps
- * its expanded sections there too) keep their own `usePersistedViewState` and
- * pass the slice to `useTaskGroupCollapse` instead.
- */
+
 export function useCollapsedGroupsViewState<Axis extends TaskGroupAxis>(
     storageKey: string,
     axes: readonly Axis[],
@@ -65,25 +54,19 @@ export function useCollapsedGroupsViewState<Axis extends TaskGroupAxis>(
 }
 
 type TaskGroupCollapseOptions<Axis extends TaskGroupAxis> = {
-    /** The axis the list is grouped by right now; 'none' means no grouping. */
+
     axis: Axis;
-    /** The grouped sections for that axis, empty when the list is not grouped. */
+
     groups: TaskGroup[];
-    /** The flat list, used as the visible order when the list is not grouped. */
+
     tasks: Task[];
-    /** Namespaces the section DOM ids so two views never collide. */
+
     idPrefix: string;
     collapsedGroups: CollapsedGroups<Axis>;
     setCollapsedGroups: SetCollapsedGroups<Axis>;
 };
 
-/**
- * Group collapse for a task list: which groups are folded, the writer that
- * folds them, the section DOM ids their headers control, the virtual row model
- * for the folded shape, and the tasks the keyboard walk and "Select all" act on
- * — a collapsed group renders no rows, so it contributes no tasks either
- * (#963/#970).
- */
+
 export function useTaskGroupCollapse<Axis extends TaskGroupAxis>({
     axis,
     groups,
@@ -96,7 +79,7 @@ export function useTaskGroupCollapse<Axis extends TaskGroupAxis>({
     collapsedGroupIds: Set<string>;
     toggleGroup: (groupId: string) => void;
     getSectionDomId: (group: TaskGroup, groupIndex: number) => string;
-    /** The header/task row model, null when the list is not grouped. */
+
     virtualRows: GroupedVirtualRow[] | null;
     visibleTasks: Task[];
 } {
@@ -122,10 +105,8 @@ export function useTaskGroupCollapse<Axis extends TaskGroupAxis>({
         (group: TaskGroup, groupIndex: number) => buildSectionDomId(idPrefix, axis, groupIndex, group.id),
         [axis, idPrefix],
     );
-    // Null rather than an empty array when the list is ungrouped: `GroupedTaskList`
-    // and the virtualizer both need to know which shape they are rendering, and
-    // one nullable value says it once instead of every caller pairing the rows
-    // with its own `isGrouping` flag and one of them forgetting.
+
+
     const virtualRows = useMemo(
         () => (isGrouping ? buildGroupedVirtualRows(groups, collapsedGroupIds, getSectionDomId) : null),
         [collapsedGroupIds, getSectionDomId, groups, isGrouping],

@@ -7,21 +7,21 @@ export interface ExternalCalendarSubscription {
     url: string;
     enabled: boolean;
     color?: string;
-    /** Empty or absent shows this calendar in every Area. */
+
     areaIds?: string[];
-    /** Derived from the feed (ICS COLOR/X-APPLE-CALENDAR-COLOR or an OS calendar's own color). Never persisted to synced settings — resolve through `resolveExternalCalendarColor`. */
+
     feedColor?: string;
 }
 
 export interface ExternalCalendarEvent {
-    /** Stable id: `${sourceId}:${uid}:${startIso}` */
+
     id: string;
     sourceId: string;
-    /** Device calendar event id when the event came from the OS calendar provider. */
+
     nativeEventId?: string;
     title: string;
-    start: string; // ISO string
-    end: string; // ISO string
+    start: string;
+    end: string;
     allDay: boolean;
     description?: string;
     location?: string;
@@ -33,35 +33,27 @@ export interface ParseIcsOptions {
     rangeEnd: Date;
     maxOccurrencesPerEvent?: number;
     maxTotalOccurrences?: number;
-    /**
-     * Treat each `CATEGORIES` value as its own calendar, so one subscribed .ics
-     * holding several logical calendars gets a colour and a toggle per calendar
-     * (#966). Only for URL subscriptions: an OS calendar already carries its own
-     * identity, and splitting it would fragment it.
-     */
+
+
     splitByCategory?: boolean;
 }
 
 export interface IcsCategoryInfo {
     names: string[];
     hasUncategorized: boolean;
-    /** Category name -> `#RRGGBB`. The first color seen for a category wins. */
+
     colors?: Record<string, string>;
 }
 
 export interface ParseIcsResult {
     events: ExternalCalendarEvent[];
-    /** Derived from every valid event in the feed, not only the requested range. */
+
     categoryInfo: IcsCategoryInfo;
-    /** RFC 7986 COLOR or X-APPLE-CALENDAR-COLOR for the whole feed, if present. */
+
     calendarColor?: string;
 }
 
-/**
- * How many calendars one .ics may split into. Feeds that use `CATEGORIES` as
- * free-form tags would otherwise turn a single subscription into a wall of
- * chips, so past this many distinct categories the file stays one calendar.
- */
+
 const MAX_CATEGORY_CALENDARS = 8;
 
 const categoryCalendarPrefix = (sourceId: string): string => `${sourceId}#`;
@@ -74,7 +66,7 @@ type ParsedRRule = {
     until?: Date;
     count?: number;
     byDay?: Array<{
-        weekday: number; // 0=Sun..6=Sat
+        weekday: number;
         ordinal?: number;
     }>;
     byMonth?: number[];
@@ -90,26 +82,20 @@ type ParsedVEvent = {
     end: Date;
     allDay: boolean;
     rrule?: ParsedRRule;
-    /**
-     * `RECURRENCE-ID`: this VEVENT replaces one occurrence of the master with the
-     * same UID. Not supported: `RANGE=THISANDFUTURE` is treated as a single-instance
-     * override — Google Calendar splits the series instead of emitting it.
-     */
+
+
     recurrenceId?: Date;
-    /** `STATUS:CANCELLED`. Kept through parsing so it can still remove the master's occurrence, but never emitted. */
+
     cancelled?: boolean;
-    /** Occurrence start instants to skip: this event's `EXDATE`s plus the `RECURRENCE-ID` of every override of it. */
+
     excludedStarts?: Set<number>;
-    /** First `CATEGORIES` value, if any. An event lands on one calendar only. */
+
     category?: string;
-    /** RFC 7986 COLOR or X-FOSSIFY-CATEGORY-COLOR on this event, if present. */
+
     categoryColor?: string;
 };
 
-/**
- * CSS Color Module Level 3 extended keywords, the set RFC 7986's calendar
- * `COLOR` property draws from. Lower-case keys.
- */
+
 const CSS3_COLOR_NAMES: Record<string, string> = {
     aliceblue: '#F0F8FF', antiquewhite: '#FAEBD7', aqua: '#00FFFF', aquamarine: '#7FFFD4', azure: '#F0FFFF',
     beige: '#F5F5DC', bisque: '#FFE4C4', black: '#000000', blanchedalmond: '#FFEBCD', blue: '#0000FF',
@@ -147,7 +133,7 @@ function resolveCssColorName(value: string): string | undefined {
     return CSS3_COLOR_NAMES[value.trim().toLowerCase()];
 }
 
-/** Signed 32-bit ARGB (Android `Color.parseColor`/Fossify convention) -> `#RRGGBB`, alpha dropped. */
+
 function argbIntToHex(raw: string): string | undefined {
     const trimmed = raw.trim();
     if (!/^-?\d+$/.test(trimmed)) return undefined;
@@ -174,7 +160,7 @@ function unfoldIcsLines(input: string): string[] {
 }
 
 function unescapeIcsText(value: string): string {
-    // RFC 5545 TEXT escaping.
+
     return value
         .replace(/\\\\/g, '\\')
         .replace(/\\n/gi, '\n')
@@ -182,12 +168,7 @@ function unescapeIcsText(value: string): string {
         .replace(/\\;/g, ';');
 }
 
-/**
- * Split an RFC 5545 comma-separated TEXT list, honouring `\,` escapes.
- *
- * Hand-rolled rather than a lookbehind regex: this runs in the desktop webview,
- * and WKWebView on older macOS throws on lookbehind at parse time.
- */
+
 function splitIcsTextList(value: string): string[] {
     const out: string[] = [];
     let current = '';
@@ -233,7 +214,7 @@ function parseIcsLine(line: string): { name: string; params: IcsParams; value: s
 }
 
 function parseIcsDurationMs(value: string): number | null {
-    // Supports PnW, PnD, PTnHnMnS forms.
+
     const match = /^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/i.exec(value.trim());
     if (!match) return null;
     const weeks = parseInt(match[1] || '0', 10);
@@ -246,7 +227,7 @@ function parseIcsDurationMs(value: string): number | null {
 }
 
 function getTimeZoneOffsetMillis(date: Date, timeZone: string): number {
-    // Offset = (timeZoneLocalAsUTC - actualUTC)
+
     const dtf = new Intl.DateTimeFormat('en-US', {
         timeZone,
         hour12: false,
@@ -329,7 +310,7 @@ function parseIcsDateTime(value: string, params: IcsParams): { date: Date; allDa
                 allDay: false,
             };
         } catch {
-            // Fall through to local parsing.
+
         }
     }
 
@@ -379,7 +360,7 @@ function parseRRule(raw: string): ParsedRRule | null {
         ? map.BYMONTHDAY
             .split(',')
             .map((token) => parseInt(token.trim(), 10))
-            // -1 = RFC 5545 "last day of the month"; other negatives stay out.
+
             .filter((d) => Number.isFinite(d) && ((d > 0 && d <= 31) || d === -1))
         : undefined;
 
@@ -426,7 +407,7 @@ function getMonthlyCandidates(
 
     if (rule.byMonthDay && rule.byMonthDay.length > 0) {
         return rule.byMonthDay
-            // -1 = last day of this month (day 0 of the next one).
+
             .map((monthDay) => (monthDay === -1
                 ? new Date(year, month + 1, 0, eventTime.h, eventTime.m, eventTime.s, eventTime.ms)
                 : new Date(year, month, monthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms)))
@@ -539,9 +520,8 @@ function expandRecurringEvent(event: ParsedVEvent, options: ParseIcsOptions): Ex
     const out: ExternalCalendarEvent[] = [];
 
     const addOccurrence = (start: Date) => {
-        // One home for EXDATE/RECURRENCE-ID removals, so every generator path gets
-        // them. The callers still count the instance, because RFC 5545 removes it
-        // from a set COUNT has already bounded.
+
+
         if (event.excludedStarts?.has(start.getTime())) return;
         const end = new Date(start.getTime() + durationMs);
         if (!intersectsRange(start, end, rangeStart, rangeEnd)) return;
@@ -558,7 +538,7 @@ function expandRecurringEvent(event: ParsedVEvent, options: ParseIcsOptions): Ex
         });
     };
 
-    // An override stands for one occurrence only, even if the feed repeats the master's RRULE on it.
+
     const rule = event.recurrenceId ? undefined : event.rrule;
     if (!rule) {
         if (intersectsRange(event.start, event.end, rangeStart, rangeEnd)) {
@@ -779,9 +759,8 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
     let currentDurationMs: number | null = null;
     let calendarColorRfc: string | undefined;
     let calendarColorApple: string | undefined;
-    // Every BEGIN:/END: nesting, not just VEVENT, so a calendar-level
-    // property can be told apart from the same property name inside a
-    // nested component (VTODO, VJOURNAL, VTIMEZONE, ...).
+
+
     const componentStack: string[] = [];
 
     for (const rawLine of lines) {
@@ -805,8 +784,8 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
             if (componentStack[componentStack.length - 1] === component) componentStack.pop();
             if (component === 'VEVENT') {
                 if (!current) continue;
-                // A cancelled instance may carry nothing but UID, RECURRENCE-ID and
-                // STATUS, and it still has to remove the master's occurrence.
+
+
                 if (!current.start && current.recurrenceId) current.start = current.recurrenceId;
                 if (!current.uid || !current.start || (!current.summary && !current.cancelled)) {
                     current = null;
@@ -820,7 +799,7 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
                     end = new Date(current.start.getTime() + currentDurationMs);
                 }
                 if (!end) {
-                    // Reasonable defaults.
+
                     end = allDay ? addDays(current.start, 1) : new Date(current.start.getTime() + 60 * 60 * 1000);
                 }
 
@@ -846,12 +825,8 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
         }
 
         if (!current) {
-            // Calendar-level properties (COLOR, X-APPLE-CALENDAR-COLOR) only
-            // count directly inside VCALENDAR — not inside VTODO, VJOURNAL,
-            // VTIMEZONE, or any other nested component, which may carry a
-            // same-named property with an unrelated meaning. First value of
-            // each wins; Apple's hex is preferred over the RFC 7986
-            // name-table approximation below.
+
+
             const directlyInVcalendar = componentStack.length === 1 && componentStack[0] === 'VCALENDAR';
             if (directlyInVcalendar && (!calendarColorRfc || !calendarColorApple)) {
                 const calendarProp = parseIcsLine(line);
@@ -892,8 +867,8 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
             const rule = parseRRule(value);
             if (rule) current.rrule = rule;
         } else if (name === 'EXDATE') {
-            // The property may repeat, and one line may hold a comma-separated list.
-            // TZID/VALUE on the line apply to every value on it.
+
+
             for (const entry of value.split(',')) {
                 const dt = parseIcsDateTime(entry, params);
                 if (!dt) continue;
@@ -916,10 +891,7 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
         }
     }
 
-    // An edited occurrence arrives as a second VEVENT with the same UID and a
-    // RECURRENCE-ID, so the master must stop generating that instant or the week
-    // shows twice (#1249). Matched over every parsed VEVENT, not only the in-range
-    // ones, so paging months cannot change what a master generates.
+
     const mastersByUid = new Map<string, ParsedVEvent>();
     for (const event of events) {
         if (event.recurrenceId || !event.rrule || mastersByUid.has(event.uid)) continue;
@@ -933,8 +905,7 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
         master.excludedStarts.add(event.recurrenceId.getTime());
     }
 
-    // Decided over the whole file, not the requested range, so paging months
-    // cannot make a calendar split in January and merge again in February.
+
     const categories = new Set(
         options.splitByCategory
             ? events.map((event) => event.category).filter((category): category is string => Boolean(category))
@@ -942,7 +913,7 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
     );
     const splitByCategory = categories.size > 0 && categories.size <= MAX_CATEGORY_CALENDARS;
 
-    // First color seen for a category wins, so paging months can't change it.
+
     const categoryColors: Record<string, string> = {};
     if (splitByCategory) {
         for (const event of events) {
@@ -955,8 +926,8 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
     const maxTotal = options.maxTotalOccurrences ?? 5000;
     for (const event of events) {
         if (occurrences.length >= maxTotal) break;
-        // Cancelled events stay in `events` above so the category split still sees
-        // them: a cancelled instance must not make a calendar appear or vanish.
+
+
         if (event.cancelled) continue;
         const expanded = expandRecurringEvent(
             event,
@@ -970,7 +941,7 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
         }
     }
 
-    // Stable ordering
+
     occurrences.sort((a, b) => a.start.localeCompare(b.start));
     return {
         events: occurrences,
@@ -985,23 +956,12 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
     };
 }
 
-/**
- * The calendars one subscription contributes, given the events `parseIcs`
- * produced for it. Pass `parseIcsWithMetadata`'s category info when calendar
- * identity must stay stable across range-limited loads.
- *
- * When the feed split by `CATEGORIES` the subscription is replaced by one
- * calendar per category — each picks up its own palette colour and its own
- * show/hide toggle, since both key off the calendar id. The subscription itself
- * stays in the list only while some of its events carry no category: a chip
- * that toggles nothing is worse than no chip. Its own row in Calendar settings,
- * which owns the URL and the Remove button, is unaffected.
- */
+
 export function expandCategoryCalendars(
     subscription: ExternalCalendarSubscription,
     events: readonly ExternalCalendarEvent[],
     categoryInfo?: IcsCategoryInfo,
-    /** Whole-feed color from `parseIcsWithMetadata`, or an OS calendar's own color. */
+
     calendarColor?: string,
 ): ExternalCalendarSubscription[] {
     const prefix = categoryCalendarPrefix(subscription.id);

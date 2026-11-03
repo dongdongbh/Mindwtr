@@ -15,9 +15,7 @@ const ALARM_RECEIVER = 'com.emekalites.react.alarm.notification.AlarmReceiver';
 const ALARM_DISMISS_RECEIVER = 'com.emekalites.react.alarm.notification.AlarmDismissReceiver';
 const ALARM_BOOT_RECEIVER = 'com.emekalites.react.alarm.notification.AlarmBootReceiver';
 
-// Every pure transform used to be its own named export in `__testables`; now
-// each one lives on its PATCHES entry instead. Pulling them out by id keeps
-// every test below unchanged — only the import mechanism moved.
+
 const transformFor = (id) => {
   const patch = PATCHES.find((entry) => entry.id === id);
   if (!patch) throw new Error(`No PATCHES entry with id "${id}"`);
@@ -28,8 +26,8 @@ const applyGradleCompatPatchToSource = transformFor('gradle-compat');
 const applyAlarmPendingIntentPatchToSource = transformFor('alarm-pending-intent');
 const applyAlarmDuplicateToastPatchToSource = transformFor('alarm-duplicate-toast');
 const applyAlarmTimingPatchToSource = transformFor('alarm-timing');
-// Same function as 'alarm-exact-repeat-receiver' — see PATCHES for why the
-// one transform gets two registry entries (one per file it patches).
+
+
 const applyAlarmExactRepeatPatchToSource = transformFor('alarm-exact-repeat-util');
 const applyAlarmReminderBehaviorPatchToSource = transformFor('alarm-reminder-behavior');
 const applyAlarmLockScreenPrivacyPatchToSource = transformFor('alarm-lock-screen-privacy');
@@ -57,7 +55,7 @@ const applyAlarmReminderActionsReceiverPatchToSource = transformFor('alarm-remin
 
 const installedAlarmPackage = path.join(testDirectory, '..', '..', '..', 'node_modules', 'react-native-alarm-notification');
 
-// The installed package with the whole registry applied, as the prebuild leaves it.
+
 const patchInstalledPackage = () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alarm-patch-chain-'));
   const projectRoot = path.join(tmpRoot, 'apps', 'mobile');
@@ -413,7 +411,7 @@ describe('patch-alarm-notification-gradle', () => {
     expect(output).toContain('int firedNotificationId = alarm.getAlarmId();');
     expect(output).toContain('getNotificationManager().cancel(firedNotificationId);');
     expect(output.indexOf('int firedNotificationId = alarm.getAlarmId();')).toBeLessThan(output.indexOf('alarm.setAlarmId((int) time);'));
-    // Snooze schedules an independent alarm row so the JS reschedule cycle cannot reap it.
+
     expect(output).toContain('int snoozedAlarmRowId = getAlarmDB().insert(alarm);');
     expect(output).toContain('alarm.setId(snoozedAlarmRowId);');
     expect(output).not.toContain('getAlarmDB().update(alarm);');
@@ -733,27 +731,20 @@ class AlarmReceiver {
 
     const output = applyAlarmDeadRowUtilPatchToSource(input);
 
-    // Every action intent gets the notification's real post id, not just the
-    // DB row id it already carried — removeFiredNotification(id) resolves
-    // the row id back to the post id via a DB lookup, which fails silently
-    // once the row is gone.
+
     expect(output).toContain('completeIntent.putExtra("NotificationId", notificationID);');
     expect(output).toContain('snoozeIntent.putExtra("NotificationId", notificationID);');
     expect(output).toContain('dismissIntent.putExtra("NotificationId", notificationID);');
     expect(output.indexOf('completeIntent.putExtra("AlarmId"')).toBeLessThan(output.indexOf('completeIntent.putExtra("NotificationId"'));
     expect(output).toContain('void clearNotification(int notificationId)');
     expect(output).toContain('getNotificationManager().cancel(notificationId);');
-    // Idempotent: a second pass leaves the patched source untouched.
+
     expect(applyAlarmDeadRowUtilPatchToSource(output)).toBe(output);
   });
 
   it('throws naming the missing marker when one action-intent anchor silently drifts', () => {
-    // Same fixture as above, except the completeIntent anchor picked up a
-    // trailing comment (as if upstream reformatted just that one line). The
-    // other two intents and the clearNotification helper still patch fine,
-    // so a bare "did anything change" check would pass this through with the
-    // dead-row fix silently missing from the COMPLETE action — the one that
-    // matters most, since it's the one that delivers the task payload.
+
+
     const input = `class AlarmUtil {
     private NotificationManager getNotificationManager() {
         return null;
@@ -889,7 +880,7 @@ class AlarmReceiver {
 
     const output = applyAlarmActionDeadRowPatchToSource(input);
 
-    // (a) every case gets a null-alarm branch that clears the tray notification.
+
     const snoozeCase = output.slice(output.indexOf('NOTIFICATION_ACTION_SNOOZE'), output.indexOf('NOTIFICATION_ACTION_COMPLETE'));
     const completeCase = output.slice(output.indexOf('NOTIFICATION_ACTION_COMPLETE'), output.indexOf('NOTIFICATION_ACTION_DISMISS'));
     const dismissCase = output.slice(output.indexOf('NOTIFICATION_ACTION_DISMISS'));
@@ -901,38 +892,32 @@ class AlarmReceiver {
     expect(dismissCase).toContain('if (alarm != null) {');
     expect(dismissCase).toContain('alarmUtil.clearNotification(intent.getExtras().getInt("NotificationId"));');
 
-    // Every case receipts before doing anything else.
+
     expect(output).toContain('Log.d(TAG, "ACTION_SNOOZE id=" + id + " alarmFound=" + (alarm != null));');
     expect(output).toContain('Log.d(TAG, "ACTION_COMPLETE id=" + id + " alarmFound=" + (alarm != null));');
     expect(output).toContain('Log.d(TAG, "ACTION_DISMISS id=" + id + " alarmFound=" + (alarm != null));');
 
-    // (b) COMPLETE's dead-row path builds the payload from intent extras,
-    // falling back to the intent's own id instead of dereferencing a null alarm.
+
     expect(completeCase).toContain('payload.putString("id", String.valueOf(alarm != null ? alarm.getId() : id));');
     expect(completeCase).toContain('payload.putAll(intent.getExtras());');
     expect(completeCase).toContain('emit("OnNotificationOpened"');
 
-    // (c) SNOOZE's dead-row path never inserts/updates an alarm row — it
-    // degrades to a plain dismiss instead of reconstructing schedule state.
+
     const snoozeDeadRowBranch = snoozeCase.slice(snoozeCase.indexOf('else if (intent.getExtras()'));
     expect(snoozeDeadRowBranch).not.toContain('getAlarmDB().insert(');
     expect(snoozeDeadRowBranch).not.toContain('getAlarmDB().update(');
     expect(snoozeDeadRowBranch).not.toContain('alarmUtil.snoozeAlarm(');
 
-    // DISMISS still emits with the intent's id, not a dereferenced null alarm.
+
     expect(dismissCase).toContain('emit("OnNotificationDismissed", "{\\"id\\": \\"" + id + "\\"}");');
 
-    // Idempotent: a second pass leaves the patched source untouched.
+
     expect(applyAlarmActionDeadRowPatchToSource(output)).toBe(output);
   });
 
   it('throws naming the missing marker when one case anchor silently drifts', () => {
-    // Same fixture as above, except the SNOOZE case's removeFiredNotification
-    // line picked up a trailing comment (as if upstream touched just that one
-    // case). COMPLETE and DISMISS still patch fine — a build that only
-    // re-checks "did the file change" would succeed on the first prebuild and
-    // only throw on the *next* one, once the idempotency guard's early-return
-    // marker is present but the SNOOZE case never actually got hardened.
+
+
     const input = `class AlarmReceiver {
     void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
@@ -1140,9 +1125,8 @@ API_AVAILABLE(ios(10.0)) {
     );
     expect(coldCapableOwner.match(/\[RnAlarmNotification snoozeAlarm:/g)).toHaveLength(1);
     expect(coldCapableOwner.match(/removeDeliveredNotificationsWithIdentifiers:/g)).toHaveLength(1);
-    // Nil-safe injection: a caller omitting has_complete_action (the pomodoro
-    // path) must not raise NSInvalidArgumentException from the userInfo
-    // dictionary literal (#888).
+
+
     expect(output).toContain('@"has_complete_action": (details[@"has_complete_action"] ?: @NO)');
     expect(output).toContain('@"has_complete_action": ([contentInfo.userInfo objectForKey:@"has_complete_action"] ?: @NO)');
     expect(output).not.toContain('@"has_complete_action": details[@"has_complete_action"],');
@@ -1150,8 +1134,8 @@ API_AVAILABLE(ios(10.0)) {
     expect(dismissAction).toContain('actionWithIdentifier:@"DISMISS_ACTION"');
     expect(dismissAction).toContain('options:UNNotificationActionOptionNone');
     expect(dismissAction).not.toContain('UNNotificationActionOptionForeground');
-    // A previously prebuilt/complete-action-patched installation must gain the
-    // new Dismiss behavior too, and subsequent prebuilds must not change it.
+
+
     const previouslyPatched = output.replace(dismissAction, dismissAction.replace('UNNotificationActionOptionNone', 'UNNotificationActionOptionForeground'));
     expect(applyAlarmIosCompleteActionPatchToSource(previouslyPatched)).toBe(output);
     expect(applyAlarmIosCompleteActionPatchToSource(output)).toBe(output);
@@ -1198,7 +1182,7 @@ static id _sharedInstance = nil;
     const rewrittenSites = output.match(/mindwtrAlarmIdCounter = \(mindwtrAlarmIdCounter \+ 1\) % 1000;/g) ?? [];
     expect(rewrittenSites).toHaveLength(3);
     expect(output).toContain('((int64_t)(NSDate.date.timeIntervalSince1970 * 1000.0)) * 1000 + mindwtrAlarmIdCounter');
-    // Idempotent: a second pass leaves the patched source untouched.
+
     expect(applyAlarmIosUniqueIdentifierPatchToSource(output)).toBe(output);
   });
 
@@ -1219,9 +1203,9 @@ RCT_EXPORT_METHOD(removeFiredNotification: (NSInteger)id){
     expect(output).toContain('RCT_EXPORT_METHOD(deleteAlarm: (NSInteger)id)');
     expect(output).toContain('RCT_EXPORT_METHOD(deleteRepeatingAlarm: (NSInteger)id)');
     expect(output).not.toContain('(NSInteger *)id');
-    // The sibling that already took its id by value must be left alone.
+
     expect(output).toContain('RCT_EXPORT_METHOD(removeFiredNotification: (NSInteger)id)');
-    // Idempotent: a second pass leaves the patched source untouched.
+
     expect(applyAlarmIosDeletePendingPatchToSource(output)).toBe(output);
   });
 
@@ -1234,7 +1218,7 @@ RCT_EXPORT_METHOD(removeFiredNotification: (NSInteger)id){
       expect(util).toContain('cancelPostedNotification(firedNotificationId);');
       expect(util).toContain('cancelPostedNotification(alarm.getAlarmId());');
       expect(util).toMatch(/void clearNotification\(int notificationId\) \{\n {8}cancelPostedNotification\(notificationId\);/);
-      // Every tray post and cancel goes through the slot helpers; only they touch the manager by id.
+
       const outsideHelpers = util.replace(util.slice(util.indexOf('    // Mindwtr reminder notification slots'), util.indexOf('    void removeFiredNotification(int id) {')), '');
       expect(outsideHelpers).not.toMatch(/\.notify\(/);
       expect(outsideHelpers).not.toMatch(/getNotificationManager\(\)\.cancel\(/);
@@ -1251,7 +1235,7 @@ RCT_EXPORT_METHOD(removeFiredNotification: (NSInteger)id){
     try {
       const util = read('android', 'src', 'main', 'java', 'com', 'emekalites', 'react', 'alarm', 'notification', 'AlarmUtil.java');
       const helpersStart = util.indexOf('    // Mindwtr reminder notification slots');
-      // The slot helpers alone: the task reminder actions after them need the alarm database.
+
       const helpersEnd = [util.indexOf('    // Mindwtr task reminder actions'), util.indexOf('    void removeFiredNotification(int id) {')]
         .filter((index) => index > helpersStart)
         .reduce((first, index) => Math.min(first, index));
@@ -1356,13 +1340,13 @@ ${helpers}
       expect(util).toContain('snoozeIntent.putExtra("SnoozeAlarm", new com.google.gson.Gson().toJson(alarm));');
       expect(util).toContain('completeIntent.putExtra("ReminderTag", alarm.getTag() == null ? "" : alarm.getTag());');
 
-      // Snooze: a live row first, then the intent's alarm, and only without either a plain dismiss.
+
       const snoozeCase = receiver.slice(receiver.indexOf('case Constants.NOTIFICATION_ACTION_SNOOZE:'), receiver.indexOf('case Constants.NOTIFICATION_ACTION_COMPLETE:'));
       const order = ['alarmUtil.snoozeAlarm(alarm);', 'alarmUtil.snoozeAlarm(carried);', 'alarmUtil.clearNotification('].map((call) => snoozeCase.indexOf(call));
       expect(order.every((index) => index >= 0)).toBe(true);
       expect([...order].sort((a, b) => a - b)).toEqual(order);
 
-      // Every receipt is committed before alarm cancellation and warm/cold delivery.
+
       const completeCase = receiver.slice(receiver.indexOf('case Constants.NOTIFICATION_ACTION_COMPLETE:'), receiver.indexOf('case Constants.NOTIFICATION_ACTION_DISMISS:'));
       const persistIndex = completeCase.indexOf('NotificationOpenPayloadStore.persistCompletion(context, pendingPayload)');
       expect(persistIndex).toBeGreaterThan(-1);
@@ -1429,7 +1413,7 @@ ${helper}
     const { tmpRoot, read } = patchInstalledPackage();
     try {
       const module = read('ios', 'RnAlarmNotification.m');
-      // scheduleAlarm and sendNotification take the tag; the repeat re-arm and snooze keep it.
+
       expect(module.match(/content\.threadIdentifier = details\[@"tag"\];/g)).toHaveLength(2);
       expect(module.match(/content\.threadIdentifier = contentInfo\.threadIdentifier;/g)).toHaveLength(2);
       expect(module).toContain('RCT_EXPORT_METHOD(collapseDeliveredReminderNotifications:(RCTPromiseResolveBlock)resolve');
@@ -1477,14 +1461,8 @@ afterEvaluate { project ->
 });
 
 describe('PATCHES registry completeness', () => {
-  // Pinned verbatim from the original per-candidate loops this task replaced
-  // (17 (file, transform) call sites from 16 distinct transforms —
-  // applyAlarmExactRepeatPatchToSource was called against both AlarmUtil.java
-  // and AlarmReceiver.java, hence 17 sites from 16 functions). This list is
-  // NOT derived from PATCHES: a test that only iterates PATCHES would shrink
-  // in lockstep with a bug that silently drops a registry entry and never
-  // catch it. Pinning the old list independently is what makes a dropped
-  // entry visible.
+
+
   const ORIGINAL_CALL_SITES = [
     ['build.gradle', 'applyGradleCompatPatchToSource'],
     ['AlarmUtil.java', 'applyAlarmPendingIntentPatchToSource'],
@@ -1496,7 +1474,7 @@ describe('PATCHES registry completeness', () => {
     ['AlarmUtil.java', 'applyAlarmReminderBehaviorPatchToSource'],
     ['AlarmUtil.java', 'applyAlarmLockScreenPrivacyPatchToSource'],
     ['AlarmUtil.java', 'applyAlarmCompleteUtilPatchToSource'],
-    // dd's choice (2026-10-22): a Pomodoro alert shows its phase's end time.
+
     ['AlarmUtil.java', 'applyAlarmPomodoroWhenPatchToSource'],
     ['AudioInterface.java', 'applyAlarmAudioInterfacePatchToSource'],
     ['AlarmDismissReceiver.java', 'applyAlarmDismissReceiverPatchToSource'],
@@ -1508,30 +1486,29 @@ describe('PATCHES registry completeness', () => {
     ['RnAlarmNotification.m', 'applyAlarmIosCompleteActionPatchToSource'],
     ['RnAlarmNotification.h', 'applyAlarmIosColdStartHeaderPatchToSource'],
     ['RnAlarmNotification.m', 'applyAlarmIosUniqueIdentifierPatchToSource'],
-    // Added after the collapse (#1020), pinned here for the same reason as the
-    // original sites: dropping it silently restores the duplicate-reminder leak.
+
+
     ['RnAlarmNotification.m', 'applyAlarmIosDeletePendingPatchToSource'],
     ['RnAlarmNotification.m', 'applyAlarmIosPendingKindPatchToSource'],
     ['RnAlarmNotification.m', 'applyAlarmIosReminderThreadPatchToSource'],
-    // Added for #1028: dropping either silently restores the dead-row silent
-    // no-op on a notification action tap.
+
+
     ['AlarmUtil.java', 'applyAlarmDeadRowUtilPatchToSource'],
     ['AlarmReceiver.java', 'applyAlarmActionDeadRowPatchToSource'],
-    // Reboot recovery restores retained rows without replacing their PendingIntents.
+
     ['ANModule.java', 'applyAlarmBootRecoveryModulePatchToSource'],
     ['AlarmUtil.java', 'applyAlarmBootRecoveryUtilPatchToSource'],
-    // Added for #528: dropping it leaves JS unable to see that "Alarms &
-    // reminders" is denied, so the settings screens silently stop offering the
-    // fix and every reminder stays inexact.
+
+
     ['ANModule.java', 'applyAlarmExactPermissionModulePatchToSource'],
-    // Added for the expired-then-withdrawn reminder: dropping it leaves a
-    // delivered reminder in the tray after its task is completed.
+
+
     ['ANModule.java', 'applyAlarmDeliveredNotificationModulePatchToSource'],
-    // Added for repeat reminders: dropping either brings back one notification
-    // per occurrence (a 10-minute repeat stacks six an hour) instead of one per task.
+
+
     ['AlarmUtil.java', 'applyAlarmReminderSlotPatchToSource'],
-    // Added for the reminder buttons: dropping one brings back a Snooze that never
-    // reminds again, or a Done after which the task's next repeat still fires.
+
+
     ['AlarmUtil.java', 'applyAlarmReminderActionsUtilPatchToSource'],
     ['AlarmReceiver.java', 'applyAlarmReminderActionsReceiverPatchToSource'],
   ];
@@ -1619,16 +1596,15 @@ describe('applyPatches (registry-driven fixture tree)', () => {
   it('running applyPatches twice against the real installed package succeeds both times and converges', () => {
     const realPackageRoot = path.join(testDirectory, '..', '..', '..', 'node_modules', 'react-native-alarm-notification');
     if (!fs.existsSync(realPackageRoot)) {
-      // react-native-alarm-notification isn't installed in this environment
-      // (e.g. a pruned/production install) — nothing to verify against.
+
+
       return;
     }
 
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alarm-patch-real-'));
     try {
-      // Mirror the real monorepo layout (apps/mobile, two levels below the
-      // repo root) so the hoisted candidate path resolves the same way it
-      // does during the actual prebuild.
+
+
       const projectRoot = path.join(tmpRoot, 'apps', 'mobile');
       const hoistedDest = path.join(tmpRoot, 'node_modules', 'react-native-alarm-notification');
       fs.mkdirSync(projectRoot, { recursive: true });
@@ -1654,13 +1630,7 @@ describe('applyPatches (registry-driven fixture tree)', () => {
     }
   }, 30_000);
 
-  // The mechanism behind #1020, stated as an invariant rather than as one
-  // method's spelling: under the New Architecture the interop marshals a
-  // numeric argument by ObjC encoding, and only a by-value scalar ("q") gets
-  // the converted integer. A pointer-typed scalar ("^q") silently receives the
-  // raw double bit pattern instead, so the method runs with a garbage id and
-  // reports no error. Any exported method that takes an id this way is a
-  // silent no-op waiting to happen — assert none survive the patch pass.
+
   it('leaves no pointer-typed scalar arguments in the patched iOS module', () => {
     const realPackageRoot = path.join(testDirectory, '..', '..', '..', 'node_modules', 'react-native-alarm-notification');
     if (!fs.existsSync(realPackageRoot)) return;
@@ -1698,8 +1668,8 @@ describe('alarm manifest entries', () => {
 
     expect(receiverNamed(manifest, ALARM_RECEIVER).$['android:exported']).toBe('false');
     expect(receiverNamed(manifest, ALARM_DISMISS_RECEIVER).$['android:exported']).toBe('false');
-    // BOOT_COMPLETED is a protected broadcast, so this one has to stay exported
-    // or reminders never survive a reboot.
+
+
     expect(receiverNamed(manifest, ALARM_BOOT_RECEIVER).$['android:exported']).toBe('true');
   });
 
@@ -1735,14 +1705,8 @@ describe('alarm manifest entries', () => {
 });
 
 describe('pristine react-native-alarm-notification@1.8.0 fixture (#1028 correction)', () => {
-  // Verbatim bytes from `npm pack react-native-alarm-notification@1.8.0`
-  // (sha512-4PrFdorpF49Rt...rk2a43ANkZAfg== — matches bun.lock's pinned
-  // integrity for the dependency). This is what CI's fresh install produces,
-  // as opposed to whatever this machine's node_modules happens to hold —
-  // which can be stale-patched from an earlier prebuild and silently differ
-  // in whitespace from a truly fresh install (#1028: the COMPLETE case's
-  // anchor matched a dev machine's stale copy but not this pristine shape,
-  // and CI caught it; this fixture is what would have caught it locally).
+
+
   const PRISTINE_ALARM_UTIL_JAVA = "package com.emekalites.react.alarm.notification;\n\nimport android.app.AlarmManager;\nimport android.app.Application;\nimport android.app.Notification;\nimport android.app.NotificationChannel;\nimport android.app.NotificationManager;\nimport android.app.PendingIntent;\nimport android.content.ComponentName;\nimport android.content.Context;\nimport android.content.Intent;\nimport android.content.pm.ApplicationInfo;\nimport android.content.pm.PackageManager;\nimport android.content.res.Resources;\nimport android.graphics.Bitmap;\nimport android.graphics.BitmapFactory;\nimport android.graphics.Color;\nimport android.media.MediaPlayer;\nimport android.os.Build;\nimport android.os.Bundle;\nimport android.os.VibrationEffect;\nimport android.os.Vibrator;\nimport android.util.Log;\nimport android.widget.Toast;\n\nimport androidx.core.app.NotificationCompat;\n\nimport com.facebook.react.bridge.WritableMap;\nimport com.facebook.react.bridge.WritableNativeMap;\n\nimport org.json.JSONException;\nimport org.json.JSONObject;\n\nimport java.util.ArrayList;\nimport java.util.Calendar;\nimport java.util.GregorianCalendar;\nimport java.util.Iterator;\n\nimport static com.emekalites.react.alarm.notification.Constants.ADD_INTENT;\nimport static com.emekalites.react.alarm.notification.Constants.NOTIFICATION_ACTION_DISMISS;\nimport static com.emekalites.react.alarm.notification.Constants.NOTIFICATION_ACTION_SNOOZE;\n\nclass AlarmUtil {\n    private static final String TAG = AlarmUtil.class.getSimpleName();\n\n    private Context mContext;\n    private AudioInterface audioInterface;\n    static final long[] DEFAULT_VIBRATE_PATTERN = {0, 250, 250, 250};\n\n    AlarmUtil(Application context) {\n        mContext = context;\n\n        audioInterface = AudioInterface.getInstance();\n        audioInterface.init(mContext);\n    }\n\n    private Class getMainActivityClass() {\n        String packageName = mContext.getPackageName();\n        Intent launchIntent = mContext.getPackageManager().getLaunchIntentForPackage(packageName);\n        String className = launchIntent.getComponent().getClassName();\n        Log.e(TAG, \"main activity classname: \" + className);\n        try {\n            return Class.forName(className);\n        } catch (ClassNotFoundException e) {\n            e.printStackTrace();\n            return null;\n        }\n    }\n\n    private AlarmManager getAlarmManager() {\n        return (AlarmManager) mContext.getSystemService(Context.ALARM_SERVICE);\n    }\n\n    private AlarmDatabase getAlarmDB() {\n        return new AlarmDatabase(mContext);\n    }\n\n    private NotificationManager getNotificationManager() {\n        return (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);\n    }\n\n    private void playAlarmSound(String name, String names, boolean shouldLoop, double volume) {\n        float number = (float) volume;\n\n        MediaPlayer mediaPlayer = audioInterface.getSingletonMedia(name, names);\n        mediaPlayer.setLooping(shouldLoop);\n        mediaPlayer.setVolume(number, number);\n        mediaPlayer.start();\n\n        mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {\n            @Override\n            public void onCompletion(MediaPlayer mp) {\n                try {\n                    mp.stop();\n                    mp.reset();\n                    mp.release();\n                    Log.e(TAG, \"release media player\");\n                } catch (Exception e) {\n                    e.printStackTrace();\n                }\n            }\n        });\n    }\n\n    boolean checkAlarm(ArrayList<AlarmModel> alarms, AlarmModel alarm) {\n        boolean contain = false;\n        for (AlarmModel aAlarm : alarms) {\n            if (aAlarm.getHour() == alarm.getHour() && aAlarm.getMinute() == alarm.getMinute() && aAlarm.getDay() == alarm.getDay() && aAlarm.getMonth() == alarm.getMonth() && aAlarm.getYear() == alarm.getYear() && aAlarm.getActive() == 1) {\n                contain = true;\n                break;\n            }\n        }\n\n        if (contain) {\n            Toast.makeText(mContext, \"You have already set this Alarm\", Toast.LENGTH_SHORT).show();\n        }\n\n        return contain;\n    }\n\n    void setBootReceiver() {\n        ArrayList<AlarmModel> alarms = getAlarmDB().getAlarmList(1);\n        if (alarms.size() > 0) {\n            enableBootReceiver(mContext);\n        } else {\n            disableBootReceiver(mContext);\n        }\n    }\n\n    void setAlarm(AlarmModel alarm) {\n        Calendar calendar = getCalendarFromAlarm(alarm);\n\n        Log.e(TAG, alarm.getAlarmId() + \" - \" + calendar.getTime().toString());\n\n        int alarmId = alarm.getAlarmId();\n\n        Intent intent = new Intent(mContext, AlarmReceiver.class);\n        intent.putExtra(\"intentType\", ADD_INTENT);\n        intent.putExtra(\"PendingId\", alarm.getId());\n\n        PendingIntent alarmIntent = PendingIntent.getBroadcast(mContext, alarmId, intent, 0);\n        AlarmManager alarmManager = this.getAlarmManager();\n\n        String scheduleType = alarm.getScheduleType();\n\n        if (scheduleType.equals(\"once\")) {\n            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {\n                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), alarmIntent);\n            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {\n                alarmManager.setExact(AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), alarmIntent);\n            } else {\n                alarmManager.set(AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), alarmIntent);\n            }\n        } else if (scheduleType.equals(\"repeat\")) {\n            long interval = this.getInterval(alarm.getInterval(), alarm.getIntervalValue());\n\n            alarmManager.setRepeating(AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), interval, alarmIntent);\n        } else {\n            Log.d(TAG, \"Schedule type should either be once or repeat\");\n            return;\n        }\n\n        this.setBootReceiver();\n    }\n\n    void snoozeAlarm(AlarmModel alarm) {\n        Calendar calendar = getCalendarFromAlarm(alarm);\n\n        this.stopAlarmSound();\n\n        // set snooze interval\n        calendar.add(Calendar.MINUTE, alarm.getSnoozeInterval());\n\n        setAlarmFromCalendar(alarm, calendar);\n\n        long time = System.currentTimeMillis() / 1000;\n\n        alarm.setAlarmId((int) time);\n\n        getAlarmDB().update(alarm);\n\n        Log.e(TAG, \"snooze data - \" + alarm.toString());\n\n        int alarmId = alarm.getAlarmId();\n\n        Intent intent = new Intent(mContext, AlarmReceiver.class);\n        intent.putExtra(\"intentType\", ADD_INTENT);\n        intent.putExtra(\"PendingId\", alarm.getId());\n\n        PendingIntent alarmIntent = PendingIntent.getBroadcast(mContext, alarmId, intent, 0);\n        AlarmManager alarmManager = this.getAlarmManager();\n\n        String scheduleType = alarm.getScheduleType();\n\n        if (scheduleType.equals(\"once\")) {\n            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {\n                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), alarmIntent);\n            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {\n                alarmManager.setExact(AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), alarmIntent);\n            } else {\n                alarmManager.set(AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), alarmIntent);\n            }\n        } else if (scheduleType.equals(\"repeat\")) {\n            long interval = this.getInterval(alarm.getInterval(), alarm.getIntervalValue());\n\n            alarmManager.setRepeating(AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), interval, alarmIntent);\n        } else {\n            Log.d(TAG, \"Schedule type should either be once or repeat\");\n        }\n    }\n\n    long getInterval(String interval, int value) {\n        long duration = 1;\n\n        switch (interval) {\n            case \"minutely\":\n                duration = value;\n                break;\n            case \"hourly\":\n                duration = 60 * value;\n                break;\n            case \"daily\":\n                duration = 60 * 24;\n                break;\n            case \"weekly\":\n                duration = 60 * 24 * 7;\n                break;\n        }\n\n        return duration * 60 * 1000;\n    }\n\n    void doCancelAlarm(int id) {\n        try {\n            AlarmModel alarm = getAlarmDB().getAlarm(id);\n            this.cancelAlarm(alarm, false);\n        } catch (Exception e) {\n            e.printStackTrace();\n        }\n    }\n\n    void deleteAlarm(int id) {\n        try {\n            AlarmModel alarm = getAlarmDB().getAlarm(id);\n            this.cancelAlarm(alarm, true);\n        } catch (Exception e) {\n            e.printStackTrace();\n        }\n    }\n\n    void deleteRepeatingAlarm(int id) {\n        try {\n            AlarmModel alarm = getAlarmDB().getAlarm(id);\n\n            String scheduleType = alarm.getScheduleType();\n            if (scheduleType.equals(\"repeat\")) {\n                this.stopAlarm(alarm);\n            }\n        } catch (Exception e) {\n            e.printStackTrace();\n        }\n    }\n\n    void cancelAlarm(AlarmModel alarm, boolean delete) {\n        String scheduleType = alarm.getScheduleType();\n        if (scheduleType.equals(\"once\") || delete) {\n            this.stopAlarm(alarm);\n        }\n    }\n\n    void stopAlarm(AlarmModel alarm) {\n        AlarmManager alarmManager = this.getAlarmManager();\n\n        int alarmId = alarm.getAlarmId();\n\n        Intent intent = new Intent(mContext, AlarmReceiver.class);\n        PendingIntent alarmIntent = PendingIntent.getBroadcast(mContext, alarmId, intent, PendingIntent.FLAG_UPDATE_CURRENT);\n        alarmManager.cancel(alarmIntent);\n\n        getAlarmDB().delete(alarm.getId());\n\n        this.stopAlarmSound();\n\n        this.setBootReceiver();\n    }\n\n    Calendar getCalendarFromAlarm(AlarmModel alarm) {\n        Calendar calendar = new GregorianCalendar();\n        calendar.set(Calendar.HOUR_OF_DAY, alarm.getHour());\n        calendar.set(Calendar.MINUTE, alarm.getMinute());\n        calendar.set(Calendar.SECOND, alarm.getSecond());\n        calendar.set(Calendar.DAY_OF_MONTH, alarm.getDay());\n        calendar.set(Calendar.MONTH, alarm.getMonth() - 1);\n        calendar.set(Calendar.YEAR, alarm.getYear());\n        return calendar;\n    }\n\n    void setAlarmFromCalendar(AlarmModel alarm, Calendar calendar) {\n        alarm.setSecond(calendar.get(Calendar.SECOND));\n        alarm.setMinute(calendar.get(Calendar.MINUTE));\n        alarm.setHour(calendar.get(Calendar.HOUR_OF_DAY));\n        alarm.setDay(calendar.get(Calendar.DAY_OF_MONTH));\n        alarm.setMonth(calendar.get(Calendar.MONTH) + 1);\n        alarm.setYear(calendar.get(Calendar.YEAR));\n    }\n\n    private void enableBootReceiver(Context context) {\n        ComponentName receiver = new ComponentName(context, AlarmBootReceiver.class);\n        PackageManager pm = context.getPackageManager();\n\n        int setting = pm.getComponentEnabledSetting(receiver);\n        if (setting == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {\n            pm.setComponentEnabledSetting(receiver,\n                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,\n                    PackageManager.DONT_KILL_APP);\n        }\n    }\n\n    private void disableBootReceiver(Context context) {\n        ComponentName receiver = new ComponentName(context, AlarmBootReceiver.class);\n        PackageManager pm = context.getPackageManager();\n\n        pm.setComponentEnabledSetting(receiver,\n                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,\n                PackageManager.DONT_KILL_APP);\n    }\n\n    private PendingIntent createOnDismissedIntent(Context context, int notificationId) {\n        Intent intent = new Intent(context, AlarmDismissReceiver.class);\n        intent.putExtra(Constants.DISMISSED_NOTIFICATION_ID, notificationId);\n        return PendingIntent.getBroadcast(context.getApplicationContext(), notificationId, intent, 0);\n    }\n\n    void sendNotification(AlarmModel alarm) {\n        try {\n            Class intentClass = getMainActivityClass();\n\n            if (intentClass == null) {\n                Log.e(TAG, \"No activity class found for the notification\");\n                return;\n            }\n\n            boolean playSound = alarm.isPlaySound();\n            if (playSound) {\n                this.playAlarmSound(alarm.getSoundName(), alarm.getSoundNames(), alarm.isLoopSound(), alarm.getVolume());\n            }\n\n            NotificationManager mNotificationManager = getNotificationManager();\n            int notificationID = alarm.getAlarmId();\n\n            // title\n            String title = alarm.getTitle();\n            if (title == null || title.equals(\"\")) {\n                ApplicationInfo appInfo = mContext.getApplicationInfo();\n                title = mContext.getPackageManager().getApplicationLabel(appInfo).toString();\n            }\n\n            // message\n            String message = alarm.getMessage();\n            if (message == null || message.equals(\"\")) {\n                Log.d(TAG, \"Cannot send to notification centre because there is no 'message' found\");\n                return;\n            }\n\n            // channel\n            String channelID = alarm.getChannel();\n            if (channelID == null || channelID.equals(\"\")) {\n                Log.d(TAG, \"Cannot send to notification centre because there is no 'channel' found\");\n                return;\n            }\n\n            Resources res = mContext.getResources();\n            String packageName = mContext.getPackageName();\n\n            //icon\n            int smallIconResId;\n            String smallIcon = alarm.getSmallIcon();\n            if (smallIcon != null && !smallIcon.equals(\"\")) {\n                smallIconResId = res.getIdentifier(smallIcon, \"mipmap\", packageName);\n            } else {\n                smallIconResId = res.getIdentifier(\"ic_launcher\", \"mipmap\", packageName);\n            }\n\n            Intent intent = new Intent(mContext, intentClass);\n            intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);\n\n            Bundle bundle = new Bundle();\n            if (alarm.getData() != null && !alarm.getData().equals(\"\")) {\n                String[] datum = alarm.getData().split(\";;\");\n                for (String item : datum) {\n                    String[] data = item.split(\"==>\");\n                    bundle.putString(data[0], data[1]);\n                }\n\n                intent.putExtras(bundle);\n            }\n\n            PendingIntent pendingIntent = PendingIntent.getActivity(mContext, notificationID, intent, PendingIntent.FLAG_UPDATE_CURRENT);\n\n            NotificationCompat.Builder mBuilder = new NotificationCompat.Builder(mContext, channelID)\n                    .setSmallIcon(smallIconResId)\n                    .setContentTitle(title)\n                    .setContentText(message)\n                    .setTicker(alarm.getTicker())\n                    .setPriority(NotificationCompat.PRIORITY_MAX)\n                    .setAutoCancel(alarm.isAutoCancel())\n                    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)\n                    .setCategory(NotificationCompat.CATEGORY_ALARM)\n                    .setSound(null)\n                    .setDeleteIntent(createOnDismissedIntent(mContext, alarm.getId()));\n\n            long vibration = (long) alarm.getVibration();\n\n            long[] vibrationPattern = vibration == 0 ? DEFAULT_VIBRATE_PATTERN : new long[]{0, vibration, 1000, vibration};\n\n            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {\n                NotificationChannel mChannel = new NotificationChannel(channelID, \"Alarm Notify\", NotificationManager.IMPORTANCE_HIGH);\n                mChannel.enableLights(true);\n\n                String color = alarm.getColor();\n                if (color != null && !color.equals(\"\")) {\n                    mChannel.setLightColor(Color.parseColor(color));\n                }\n\n                if(!mChannel.canBypassDnd()){\n                    mChannel.setBypassDnd(alarm.isBypassDnd());\n                }\n\n                mChannel.setVibrationPattern(null);\n\n                // play vibration\n                if (alarm.isVibrate()) {\n                    Vibrator vibrator = (Vibrator) mContext.getSystemService(Context.VIBRATOR_SERVICE);\n                    if (vibrator.hasVibrator()) {\n                        vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, 0));\n                    }\n                }\n\n                mNotificationManager.createNotificationChannel(mChannel);\n                mBuilder.setChannelId(channelID);\n            } else {\n                // set vibration\n                mBuilder.setVibrate(alarm.isVibrate() ? vibrationPattern : null);\n            }\n\n            //color\n            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {\n                String color = alarm.getColor();\n                if (color != null && !color.equals(\"\")) {\n                    mBuilder.setColor(Color.parseColor(color));\n                }\n            }\n\n            mBuilder.setContentIntent(pendingIntent);\n\n            if (alarm.isHasButton()) {\n                Intent dismissIntent = new Intent(mContext, AlarmReceiver.class);\n                dismissIntent.setAction(NOTIFICATION_ACTION_DISMISS);\n                dismissIntent.putExtra(\"AlarmId\", alarm.getId());\n                PendingIntent pendingDismiss = PendingIntent.getBroadcast(mContext, notificationID, dismissIntent, PendingIntent.FLAG_UPDATE_CURRENT);\n                NotificationCompat.Action dismissAction = new NotificationCompat.Action(android.R.drawable.ic_lock_idle_alarm, \"DISMISS\", pendingDismiss);\n                mBuilder.addAction(dismissAction);\n\n                Intent snoozeIntent = new Intent(mContext, AlarmReceiver.class);\n                snoozeIntent.setAction(NOTIFICATION_ACTION_SNOOZE);\n                snoozeIntent.putExtra(\"SnoozeAlarmId\", alarm.getId());\n                PendingIntent pendingSnooze = PendingIntent.getBroadcast(mContext, notificationID, snoozeIntent, PendingIntent.FLAG_UPDATE_CURRENT);\n                NotificationCompat.Action snoozeAction = new NotificationCompat.Action(R.drawable.ic_snooze, \"SNOOZE\", pendingSnooze);\n                mBuilder.addAction(snoozeAction);\n            }\n\n            //use big text\n            if (alarm.isUseBigText()) {\n                mBuilder = mBuilder.setStyle(new NotificationCompat.BigTextStyle().bigText(message));\n            }\n\n            //large icon\n            String largeIcon = alarm.getLargeIcon();\n            if (largeIcon != null && !largeIcon.equals(\"\") && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {\n                int largeIconResId = res.getIdentifier(largeIcon, \"mipmap\", packageName);\n                Bitmap largeIconBitmap = BitmapFactory.decodeResource(res, largeIconResId);\n                if (largeIconResId != 0) {\n                    mBuilder.setLargeIcon(largeIconBitmap);\n                }\n            }\n\n            // set tag and push notification\n            Notification notification = mBuilder.build();\n\n            String tag = alarm.getTag();\n            if (tag != null && !tag.equals(\"\")) {\n                mNotificationManager.notify(tag, notificationID, notification);\n            } else {\n                Log.e(TAG, \"notification done\");\n                mNotificationManager.notify(notificationID, notification);\n            }\n        } catch (Exception e) {\n            Log.e(TAG, \"failed to send notification\", e);\n        }\n    }\n\n    void removeFiredNotification(int id) {\n        try {\n            AlarmModel alarm = getAlarmDB().getAlarm(id);\n            getNotificationManager().cancel(alarm.getAlarmId());\n        } catch (Exception e) {\n            e.printStackTrace();\n        }\n    }\n\n    void removeAllFiredNotifications() {\n        getNotificationManager().cancelAll();\n    }\n\n    void stopAlarmSound() {\n        try {\n            Log.e(TAG, \"stop vibration and alarm sound\");\n            Vibrator vibrator = (Vibrator) mContext.getSystemService(Context.VIBRATOR_SERVICE);\n            if (vibrator.hasVibrator()) {\n                vibrator.cancel();\n            }\n            audioInterface.stopPlayer();\n        } catch (Exception e) {\n            e.printStackTrace();\n        }\n    }\n\n    ArrayList<AlarmModel> getAlarms() {\n        return getAlarmDB().getAlarmList(1);\n    }\n\n    WritableMap convertJsonToMap(JSONObject jsonObject) throws JSONException {\n        WritableMap map = new WritableNativeMap();\n\n        Iterator<String> iterator = jsonObject.keys();\n        while (iterator.hasNext()) {\n            String key = iterator.next();\n            Object value = jsonObject.get(key);\n            if (value instanceof JSONObject) {\n                map.putMap(key, convertJsonToMap((JSONObject) value));\n            } else if (value instanceof Boolean) {\n                map.putBoolean(key, (Boolean) value);\n            } else if (value instanceof Integer) {\n                map.putInt(key, (Integer) value);\n            } else if (value instanceof Double) {\n                map.putDouble(key, (Double) value);\n            } else if (value instanceof String) {\n                map.putString(key, (String) value);\n            } else {\n                map.putString(key, value.toString());\n            }\n        }\n        return map;\n    }\n}\n";
   const PRISTINE_ALARM_RECEIVER_JAVA = "package com.emekalites.react.alarm.notification;\n\nimport android.app.Application;\nimport android.content.BroadcastReceiver;\nimport android.content.Context;\nimport android.content.Intent;\nimport android.util.Log;\n\nimport com.facebook.react.modules.core.DeviceEventManagerModule;\n\nimport java.util.ArrayList;\n\npublic class AlarmReceiver extends BroadcastReceiver {\n    private static final String TAG = AlarmReceiver.class.getSimpleName();\n\n    AlarmModel alarm;\n\n    int id;\n\n    @Override\n    public void onReceive(Context context, Intent intent) {\n        if (intent != null) {\n            final AlarmDatabase alarmDB = new AlarmDatabase(context);\n            AlarmUtil alarmUtil = new AlarmUtil((Application) context.getApplicationContext());\n\n            try {\n                String intentType = intent.getExtras().getString(\"intentType\");\n                if (Constants.ADD_INTENT.equals(intentType)) {\n                    id = intent.getExtras().getInt(\"PendingId\");\n\n                    try {\n                        alarm = alarmDB.getAlarm(id);\n\n                        alarmUtil.sendNotification(alarm);\n\n                        ArrayList<AlarmModel> alarms = alarmDB.getAlarmList(1);\n                        alarmUtil.setBootReceiver();\n\n                        Log.d(TAG, \"alarm start: \" + alarm.toString() + \", alarms left: \" + alarms.size());\n                    } catch (Exception e) {\n                        alarmUtil.stopAlarmSound();\n                        e.printStackTrace();\n                    }\n                }\n\n            } catch (Exception e) {\n                e.printStackTrace();\n            }\n\n            String action = intent.getAction();\n            if (action != null) {\n                Log.e(TAG, \"ACTION: \" + action);\n                switch (action) {\n                    case Constants.NOTIFICATION_ACTION_SNOOZE:\n                        id = intent.getExtras().getInt(\"SnoozeAlarmId\");\n\n                        try {\n                            alarm = alarmDB.getAlarm(id);\n                            alarmUtil.snoozeAlarm(alarm);\n                            Log.e(TAG, \"alarm snoozed: \" + alarm.toString());\n\n                            alarmUtil.removeFiredNotification(alarm.getId());\n                        } catch (Exception e) {\n                            alarmUtil.stopAlarmSound();\n                            e.printStackTrace();\n                        }\n                        break;\n\n                    case Constants.NOTIFICATION_ACTION_DISMISS:\n                        id = intent.getExtras().getInt(\"AlarmId\");\n\n                        try {\n                            alarm = alarmDB.getAlarm(id);\n                            Log.e(TAG, \"alarm cancelled: \" + alarm.toString());\n\n                            // emit notification dismissed\n                            ANModule.getReactAppContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit(\"OnNotificationDismissed\", \"{\\\"id\\\": \\\"\" + alarm.getId() + \"\\\"}\");\n\n                            alarmUtil.removeFiredNotification(alarm.getId());\n                            \n                            alarmUtil.cancelAlarm(alarm, false);\n                        } catch (Exception e) {\n                            alarmUtil.stopAlarmSound();\n                            e.printStackTrace();\n                        }\n                        break;\n                }\n            }\n        }\n    }\n}\n";
 
@@ -1772,10 +1736,7 @@ describe('pristine react-native-alarm-notification@1.8.0 fixture (#1028 correcti
       writeFixture(androidJavaPath(projectRoot, 'AlarmUtil.java'), PRISTINE_ALARM_UTIL_JAVA);
       writeFixture(androidJavaPath(projectRoot, 'AlarmReceiver.java'), PRISTINE_ALARM_RECEIVER_JAVA);
 
-      // Only the patches that target these two files — the other registry
-      // entries target files this fixture doesn't provide (build.gradle,
-      // AudioInterface.java, etc.) and would fail on missing candidates,
-      // which isn't what this test is checking.
+
       const relevantPatches = PATCHES.filter((patch) => {
         const [firstCandidate] = patch.getCandidates(projectRoot);
         return firstCandidate.endsWith('AlarmUtil.java') || firstCandidate.endsWith('AlarmReceiver.java');
@@ -1786,7 +1747,7 @@ describe('pristine react-native-alarm-notification@1.8.0 fixture (#1028 correcti
       const utilOut1 = fs.readFileSync(androidJavaPath(projectRoot, 'AlarmUtil.java'), 'utf8');
       const receiverOut1 = fs.readFileSync(androidJavaPath(projectRoot, 'AlarmReceiver.java'), 'utf8');
 
-      // Every marker each new (#1028) transform is responsible for actually landed.
+
       expect(utilOut1).toContain('completeIntent.putExtra("NotificationId", notificationID);');
       expect(utilOut1).toContain('snoozeIntent.putExtra("NotificationId", notificationID);');
       expect(utilOut1).toContain('dismissIntent.putExtra("NotificationId", notificationID);');
@@ -1830,10 +1791,10 @@ public class ANModule extends ReactContextBaseJavaModule {
     expect(output).toContain('public void canScheduleExactAlarms(Promise promise)');
     expect(output).toContain('android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S');
     expect(output).toContain('alarmManager != null && alarmManager.canScheduleExactAlarms()');
-    // Fully qualified so the patch never has to touch the import block.
+
     expect(output).toContain('android.content.Context.ALARM_SERVICE');
     expect(output).not.toContain('import android.app.AlarmManager;');
-    // The method it anchors on survives.
+
     expect(output).toContain('public void removeAllFiredNotifications()');
   });
 

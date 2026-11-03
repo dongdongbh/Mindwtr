@@ -1,28 +1,6 @@
-// Project details check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-project-details-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays). It stops the app and, through core's own store
-// (Bun runs core's TypeScript) on a host copy of the app's database, prepares ONE fixture found by its stable marker
-// (535353535353): an area PDArea<marker> and a project PD<marker> with one task. The first run injects it; every later run puts
-// it back to RN's defaults (its title, Active, Parallel, no area, no tags, no notes, no dates, no attachments, no sections),
-// so the development data does not grow. Then, on the open project's Details panel (RN's ProjectDetailModal):
-//   (a) the folded Details shows core's summary; a tap unfolds the panel;
-//   (b) Status → Waiting, (c) Flow Mode → Sequential, (d) Sequential Scope → Within sections, (e) Sections: Add Section twice,
-//       Move down, Edit, Delete, (f) Area, (g) Tags (+ adds; Done and + on a held tag store nothing), (h) Notes (Preview shows the
-//       typed notes and stores nothing; Back stores them),
-//       (i) Attachments' Add link and Remove, (j) Start, Due and Review dates (the picker's day), and a Clear, (k) the title:
-//       each write is stored once (the pulled database: the value, and the project's rev one higher);
-//   (l) a restart replays a journaled edit: one stopped before the engine saw it (Status → Someday) is stored by the boot's
-//       replay, one stopped after core's reply (a tag) is replayed and stores nothing more; typed notes Back journaled, killed
-//       before the engine sees them, are stored by the replay;
-//   (m) a restart keeps every value: the reopened Details shows core's labels for the stored values;
-//   (o) Per section (#1429): Flow Mode → Parallel, then → Per section (the section gets an explicit Parallel); the section
-//       manager's flow button → Sequential stores that section's choice; closing and reopening the project and its Details
-//       shows Per section and stores nothing (native's old toggle turned it into Sequential).
-// It touches only the development package (it refuses any other APK), never launches over another app, leaves the app on its
-// Inbox tab, and restores rotation and clears its debug properties on exit. Leave the device on its home screen. It needs host
-// `sqlite3` and `bun`. Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -68,7 +46,7 @@ const stopApp = async () => {
     await device.stopApp();
 };
 
-// ---- database: a host copy of .db, -wal and -shm; core runs on it in Bun ----
+
 const pullDatabase = (name) => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -81,7 +59,7 @@ const pullDatabase = (name) => {
 };
 const sqlite = (db, sql) => JSON.parse(execFileSync('sqlite3', ['-json', db, sql], { encoding: 'utf8' }) || '[]');
 let ids = {};
-/** The fixture project as stored, and its live sections in order. */
+
 const stored = (label = 'stored') => {
     const db = pullDatabase(label);
     const [project] = sqlite(db, `SELECT title, status, isSequential, sequentialScope, perSectionFlow, areaId, tagIds, supportNotes, attachments, startDate, dueDate,
@@ -89,10 +67,8 @@ const stored = (label = 'stored') => {
     const sections = sqlite(db, `SELECT id, title, isSequential, rev FROM sections WHERE projectId = '${ids.project}' AND deletedAt IS NULL ORDER BY orderNum`);
     return { ...project, tags: JSON.parse(project.tagIds || '[]'), attachmentList: JSON.parse(project.attachments || '[]'), sections };
 };
-/**
- * Runs core's contract on a database copy: `prepare` finds the fixture by its marker (or injects it once), puts it back to RN's
- * defaults through core's store, and prints the ids; `metadata` prints core's Details metadata for the project.
- */
+
+
 const core = (db, mode) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, flushPendingSave, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -150,7 +126,7 @@ const core = (db, mode) => JSON.parse(execFileSync('bun', ['-e', `
     .trim().split('\n').pop());
 const coreMetadata = (label) => core(pullDatabase(label), 'metadata');
 
-// ---- UI ----
+
 const textNode = (nodes, text) => nodes.find((node) => node.text === text && node.class !== 'android.widget.EditText');
 const inProject = (nodes) => Boolean(tagged(nodes, 'project-title-input')) && Boolean(button(nodes, 'Back'));
 const showTab = async (name) => {
@@ -158,7 +134,7 @@ const showTab = async (name) => {
     if (!tabSelected(nodes, name)) await tap(tab(nodes, name));
     await waitFor(`the ${name} tab`, (current) => tabSelected(current, name), 10_000);
 };
-/** Scrolls the open project until [found] holds (the panel's lower blocks sit below the fold). */
+
 const revealIn = async (found, description) => {
     let nodes = await screen();
     for (const direction of ['down', 'up']) {
@@ -174,13 +150,13 @@ const revealIn = async (found, description) => {
 const revealTag = (tag) => revealIn((nodes) => {
     const node = tagged(nodes, tag);
     if (!node) return false;
-    // Fully inside the list, not under the header or the tab bar.
+
     const list = mainList(nodes);
     const [, top, , bottom] = box(node);
     return !list || (top >= box(list)[1] && bottom <= box(list)[3]);
 }, tag);
 const hideKeyboard = async () => {
-    // Back while the keyboard shows only hides it.
+
     if (/mInputShown=true/.test(sh('dumpsys input_method'))) { requireAppFront(); sh('input keyevent KEYCODE_BACK'); await sleep(800); }
 };
 const typeText = async (node, text) => {
@@ -191,14 +167,14 @@ const typeText = async (node, text) => {
     sh(`input text '${text.replace(/ /g, '%s')}'`);
     await sleep(500);
 };
-/** Waits until the stored project satisfies [holds]; checks it took exactly one write (its rev one higher). */
+
 const expectWrite = async (label, before, holds) => {
     let after;
     await waitFor(`${label} stored`, () => { after = stored(); return holds(after); }, 30_000);
     check(after.rev === before.rev + 1, `${label}: stored once (rev ${before.rev} → ${after.rev})`);
     return after;
 };
-/** One write from the panel: [act] taps it, [holds] reads the stored value. */
+
 const write = async (label, act, holds) => {
     const before = stored('before');
     await act();
@@ -210,7 +186,7 @@ const pickToday = async () => {
 };
 const localDay = () => sh('date +%Y-%m-%d');
 
-// ---- stop and relaunch (check-journal-device.mjs's) ----
+
 const stopAt = async (at, op, trigger) => {
     const before = pid();
     setProp('journal_stop', `${at}:${op}`);
@@ -242,14 +218,14 @@ const relaunch = async (stopped) => {
 };
 const replayed = (replay) => replay.includes('sent=1 dropped=1 left=0 owed=none');
 
-/** The fixture project open (after a restart the app may come back on its Inbox), titled [title]. */
+
 const openFixture = async (title) => {
     let nodes = await waitFor('the app', (current) => Boolean(tab(current, 'Inbox')) || inProject(current), 60_000);
     if (inProject(nodes)) return nodes;
     await showTab('Projects');
     nodes = await device.reveal(title, 80);
     if (!textNode(nodes, title)) {
-        // A Waiting or Someday project is listed under RN's Someday / Waiting group, which starts closed.
+
         const heading = en['projects.deferredSection'];
         nodes = await device.reveal(heading, 80);
         await tap(textNode(nodes, heading) ?? textNode(nodes, heading.toUpperCase()) ?? fail('no Someday / Waiting group'));
@@ -269,7 +245,7 @@ const openDetails = async (title = names.renamed) => {
 
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
     try {
         await hideKeyboard();
         if (front().includes(`${PKG}/`)) {
@@ -278,9 +254,9 @@ const restore = async () => {
             if (button(nodes, 'Back') && tabSelected(nodes, 'Projects')) { sh('input keyevent KEYCODE_BACK'); await sleep(1000); nodes = await screen(); }
             if (tab(nodes, 'Inbox') && !tabSelected(nodes, 'Inbox')) await tap(tab(nodes, 'Inbox'));
         }
-    } catch { /* the app is gone */ }
-    try { sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch { /* device gone */ }
-    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
+    } catch {                       }
+    try { sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch {                   }
+    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {                   }
 };
 
 try {
@@ -311,28 +287,28 @@ try {
     check(!bootFailure(nodes), 'boot validation passed on the prepared database');
     nodes = await openFixture(names.project);
 
-    // (a) Folded: core's summary; a tap unfolds the panel.
+
     let metadata = coreMetadata('a');
     check(textNode(nodes, metadata.summary) !== undefined, `(a) the folded Details shows core's summary "${metadata.summary}"`);
     check(!tagged(nodes, 'project-details-attachments'), '(a) the Attachments block is inside the folded Details, not above the tasks');
     nodes = await openDetails(names.project);
     check(true, '(a) a tap unfolds the Details panel');
 
-    // (b) Status.
+
     let row = await write('(b) Status → Waiting', async () => {
         await tap(tagged(await revealTag('project-status-picker'), 'project-status-picker'));
         await tap(tagged(await waitFor('the status menu', (current) => Boolean(tagged(current, 'project-status-menu-item-waiting'))), 'project-status-menu-item-waiting'));
     }, (current) => current.status === 'waiting');
     nodes = await waitFor('the Waiting status', (current) => withDescription(current, `${en['projects.statusLabel']}: ${en['status.waiting']}`), 15_000);
 
-    // (c) Flow Mode, (d) Sequential Scope.
+
     row = await write('(c) Flow Mode → Sequential', async () => tap(tagged(await revealTag('project-flow-mode-sequential'), 'project-flow-mode-sequential')),
         (current) => current.isSequential === 1);
     nodes = await waitFor('the Sequential Scope block', (current) => textNode(current, en['projects.sequentialWithinSections']), 15_000);
     row = await write('(d) Sequential Scope → Within sections', async () => tap(textNode(await screen(), en['projects.sequentialWithinSections'])),
         (current) => current.sequentialScope === 'section');
 
-    // (e) Sections: Add Section (twice), Move down, Edit, Delete.
+
     const manager = async () => {
         const current = await screen();
         if (tagged(current, 'project-section-manager')) return current;
@@ -374,12 +350,12 @@ try {
     await tap(withDescription(await screen(), en['common.cancel']) ?? fail('no Close on the section manager'));
     await waitFor('the section manager to close', (current) => !tagged(current, 'project-section-manager'), 10_000);
 
-    // (f) Area.
+
     row = await write('(f) Area', async () => {
         await tap(tagged(await revealTag('project-area-picker'), 'project-area-picker'));
         nodes = await waitFor('the area picker', (current) => Boolean(tagged(current, 'project-area-sheet')), 15_000);
-        // The development data has many areas: scroll the picker's list until the fixture's shows. Each drag covers half
-        // the list, slowly: the full-height 500 ms drag flung past the fixture's row to the end of 47 areas (10-09).
+
+
         for (let step = 0; step < 30 && !textNode(nodes, names.area); step += 1) {
             const list = nodes.find((node) => node.scrollable === 'true' && box(node)[1] >= box(tagged(nodes, 'project-area-sheet'))[1]);
             const [x1, y1, x2, y2] = box(list ?? fail('the area picker has no list'));
@@ -394,8 +370,7 @@ try {
         await tap(textNode(nodes, names.area) ?? fail(`${names.area} is not in the area picker`));
     }, (current) => current.areaId === ids.area);
 
-    // (g) Tags: typed, then + adds it. The keyboard's Done changes nothing, and + on a tag the project has keeps it (RN: Done ends
-    // editing; dd 2026-10-04: + only adds).
+
     row = await write('(g) Tags', async () => {
         await tap(tagged(await revealTag('project-tag-picker'), 'project-tag-picker'));
         nodes = await waitFor('the tag picker', (current) => Boolean(tagged(current, 'project-tag-input')), 15_000);
@@ -412,18 +387,17 @@ try {
         check(after.rev === tagsBefore.rev && after.tags.join() === `#${names.tag}`, `(g) ${label} stores nothing and keeps the tag`);
     }
     await hideKeyboard();
-    // Back only while the picker is still up (else Back would close the project).
+
     if (tagged(await screen(), 'project-tag-input')) sh('input keyevent KEYCODE_BACK');
     await waitFor('the tag picker to close', (current) => !tagged(current, 'project-tag-input'), 10_000);
 
-    // (h) Notes: typed; Preview shows the typed draft and stores nothing (RN previews the unsaved notes); Back stores them, as
-    // RN's blur on close does.
+
     const notesBefore = stored('before');
     {
         await tap(tagged(await revealTag('project-notes-toggle'), 'project-notes-toggle'));
         nodes = await revealTag('project-notes-input');
         await typeText(tagged(nodes, 'project-notes-input'), names.notes);
-        // RN's KeyboardAvoidingView: with the keyboard up the list is shorter and the field stays in it.
+
         const typed = await waitFor('the notes field above the keyboard', (current) => {
             const input = tagged(current, 'project-notes-input');
             const list = mainList(current);
@@ -442,7 +416,7 @@ try {
     row = await expectWrite('(h) Back stores the typed notes', notesBefore, (current) => current.supportNotes === names.notes);
     nodes = await openDetails(names.project);
 
-    // (i) Attachments inside Details: Add link, then Remove.
+
     row = await write('(i) Add link', async () => {
         await tap(tagged(await revealTag('project-attachment-add-link'), 'project-attachment-add-link'));
         nodes = await waitFor('the link sheet', (current) => Boolean(tagged(current, 'attachment-link-input')), 15_000);
@@ -451,12 +425,12 @@ try {
         await tap(tagged(await screen(), 'attachment-link-save') ?? fail('no Save on the link sheet'));
     }, (current) => current.attachmentList.some((item) => item.uri === names.link && !item.deletedAt));
     row = await write('(i) Remove', async () => {
-        // The block's rows are read after the write: wait for the link's row and its Remove.
+
         nodes = await revealIn((current) => Boolean(textNode(current, en['attachments.remove'])), 'the link row\'s Remove');
         await tap(textNode(nodes, en['attachments.remove']));
     }, (current) => current.attachmentList.some((item) => item.uri === names.link && item.deletedAt));
 
-    // (j) Dates: the picker's OK takes the day it opens on (today for an empty date); then Clear.
+
     const today = localDay();
     row = await write('(j) Start date', async () => { await tap(tagged(await revealTag('project-start-date-picker'), 'project-start-date-picker')); await pickToday(); },
         (current) => current.startDate === today);
@@ -465,22 +439,22 @@ try {
     const reviewStart = Date.now();
     row = await write('(j) Review date', async () => { await tap(tagged(await revealTag('project-review-date-picker'), 'project-review-date-picker')); await pickToday(); },
         (current) => Boolean(current.reviewAt));
-    // RN's picker keeps the time of day it opened on (now): an instant within a minute of the tap, on today's date.
-    // RN's Android picker answers the hour and minute it opened on, seconds and milliseconds 0.
+
+
     check(Math.abs(Date.parse(row.reviewAt) - reviewStart) < 120_000 && /:00\.000Z$/.test(row.reviewAt), `(j) Review date stored at the opened hour and minute, seconds 0: ${row.reviewAt}`);
     row = await write('(j) Clear Start date', async () => {
         nodes = await revealTag('project-start-date-picker');
         await tap(withDescription(nodes, `${en['common.clear']} ${en['taskEdit.startDateLabel']}`) ?? fail('no Clear beside Start Date'));
     }, (current) => current.startDate === null);
 
-    // (k) The title: edited in the header, stored on Done.
+
     row = await write('(k) Title', async () => {
         nodes = await revealIn((current) => Boolean(tagged(current, 'project-title-input')), 'the title');
         await typeText(tagged(nodes, 'project-title-input'), names.renamed);
         sh('input keyevent KEYCODE_ENTER');
     }, (current) => current.title === names.renamed);
     await hideKeyboard();
-    // A typed title Back leaves with is stored too (RN's end of editing on close); then Done names it back.
+
     const titleBefore = stored('before');
     nodes = await revealIn((current) => Boolean(tagged(current, 'project-title-input')), 'the title');
     await typeText(tagged(nodes, 'project-title-input'), names.backTitle);
@@ -495,8 +469,7 @@ try {
     await hideKeyboard();
     await openDetails();
 
-    // (l) Restart replay: stopped before the engine saw it, the boot's replay stores it; stopped after core's reply, the replay
-    // stores nothing more.
+
     let before = stored('before');
     let stopped = await stopAt('before', 'projectEdit', async () => {
         await tap(tagged(await revealTag('project-status-picker'), 'project-status-picker'));
@@ -522,14 +495,13 @@ try {
     check(row.tags.includes(`#${names.replayTag}`) && row.rev === before.rev + 1, `(l) the tag stored once through the replay (rev ${before.rev} → ${row.rev})`);
     processId = relaunched.processId;
 
-    // (l) A typed title (stored when the notes field takes the focus), then typed notes and Back, killed before the engine
-    // sees the notes: Back journaled them at once, so the boot's replay stores them; the title and the notes are stored once each.
+
     nodes = await openDetails();
     before = stored('before');
     nodes = await revealIn((current) => Boolean(tagged(current, 'project-title-input')), 'the title');
     await typeText(tagged(nodes, 'project-title-input'), names.killTitle);
     await tap(tagged(await revealTag('project-notes-toggle'), 'project-notes-toggle'));
-    // The notes field takes the focus: the title lets go and is stored (the fields lock while it saves).
+
     await tap(tagged(await revealTag('project-notes-input'), 'project-notes-input'));
     await waitFor('the title stored', () => stored().title === names.killTitle, 30_000);
     await waitFor('the notes field free again', (current) => tagged(current, 'project-notes-input')?.enabled === 'true', 15_000);
@@ -550,7 +522,7 @@ try {
     }, (current) => current.title === names.renamed);
     await hideKeyboard();
 
-    // (m) After the restarts: the reopened Details shows core's labels for every stored value.
+
     nodes = await openDetails();
     metadata = coreMetadata('m');
     for (const label of [metadata.statusLabel, metadata.typeLabel, metadata.sequentialScopeLabel ?? '', metadata.areaLabel, metadata.tagsLabel,
@@ -560,8 +532,8 @@ try {
     }
     check(metadata.sections.length === 1 && metadata.sections[0].title === names.edited, '(m) core lists the one stored section');
     check(pid() === processId && !bootFailure(await screen()), '(m) one process since the last replay, no boot failure');
-    // (n) Clear Due and Review: each stored once, and the fixture leaves no project due for review or due today in the shared
-    // development data (Focus's "Projects to review" and the other checks' lists stay as they were).
+
+
     for (const [field, label] of [['dueDate', en['taskEdit.dueDateLabel']], ['reviewAt', en['projects.reviewAt']]]) {
         row = await write(`(n) Clear ${label}`, async () => {
             nodes = await revealIn((current) => Boolean(withDescription(current, `${en['common.clear']} ${label}`)), `Clear ${label}`);
@@ -569,7 +541,7 @@ try {
         }, (current) => current[field] === null);
     }
 
-    // (o) Per section (#1429): RN's three Flow Mode choices; each tap stores exactly that mode.
+
     row = await write('(o) Flow Mode → Parallel', async () => tap(tagged(await revealTag('project-flow-mode-parallel'), 'project-flow-mode-parallel')),
         (current) => current.isSequential === 0);
     const flowSection = row.sections[0];
@@ -593,7 +565,7 @@ try {
         await waitFor('the section manager to close', (current) => !tagged(current, 'project-section-manager'), 10_000);
     }
     {
-        // The regression: leaving the project and opening its Details again shows Per section and writes nothing.
+
         const before = stored('before');
         await tap(button(await screen(), 'Back') ?? fail('no Back in the project header'));
         await waitFor('the Projects list', (current) => !inProject(current), 15_000);

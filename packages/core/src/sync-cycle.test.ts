@@ -124,8 +124,7 @@ describe('performSyncCycle', () => {
         }
     });
 
-    // Sync bookkeeping (lastSyncAt/history) changes every cycle by design; the
-    // entity surface is what a rewrite loop would keep churning.
+
     const stableDocument = (data: AppData) => JSON.stringify({
         tasks: data.tasks, projects: data.projects, sections: data.sections,
         areas: data.areas, people: data.people,
@@ -160,8 +159,7 @@ describe('performSyncCycle', () => {
             return { data, section: archived.sections[0] };
         };
 
-        // What a <=1.3.0 peer publishes: it purges the expired section on load,
-        // then its dangling-reference repair clears the task's sectionId.
+
         const peerPurgedRemote = (data: AppData): AppData => ({
             ...structuredClone(data),
             sections: [],
@@ -192,8 +190,8 @@ describe('performSyncCycle', () => {
             const first = await cycle();
             const remoteAfterFirst = stableDocument(remote);
             const second = await cycle();
-            // The loop this guards against rewrites the remote document on every
-            // cycle, so convergence means an unchanged remote entity surface.
+
+
             expect(stableDocument(remote)).toEqual(remoteAfterFirst);
             return { archive, first, second, remote };
         };
@@ -254,9 +252,8 @@ describe('performSyncCycle', () => {
     });
 
     it('still merges a non-empty remote when the empty-remote skip flag is set', async () => {
-        // The local-only upload fast path sets skipEmptyRemoteMerge; the skip
-        // must never discard a real remote document if that flag is ever set on
-        // a cycle whose readRemote answered with data (review finding, #1001).
+
+
         const local = mockAppData([createMockTask('local-1', '2023-01-02')]);
         const incoming = mockAppData([createMockTask('remote-1', '2023-01-03')]);
         let written: AppData | null = null;
@@ -275,10 +272,8 @@ describe('performSyncCycle', () => {
     });
 
     it('still merges a remote with no entities but a settings key when the empty-remote skip flag is set', async () => {
-        // The empty-remote check compared five entity arrays but never
-        // `settings` (#A3), so a remote document holding only a settings
-        // change (no tasks/projects/sections/areas/people) was treated as
-        // "empty" and discarded whenever the fast-path flag was armed.
+
+
         const local = mockAppData([createMockTask('local-1', '2023-01-02')]);
         const incoming: AppData = { ...mockAppData(), settings: { theme: 'dark' } };
         let written: AppData | null = null;
@@ -585,7 +580,7 @@ describe('performSyncCycle', () => {
             tasks: [],
             projects: [
                 {
-                    // Missing id on purpose to simulate corrupted remote payload.
+
                     title: 'Broken',
                     status: 'active',
                     color: '#000000',
@@ -946,8 +941,7 @@ describe('performSyncCycle', () => {
             now: () => '2026-01-01T00:00:00.000Z',
         })).rejects.toThrow('Local changes detected during sync');
 
-        // The refused final write wrote nothing, so the first write's marker stays on disk: the
-        // next cycle takes the pending-write path and settles it (no cleanup save on a stale exit).
+
         expect(localWrites).toHaveLength(2);
         expect(localWrites[0].settings.pendingRemoteWriteAt).toBe('2026-01-01T00:00:00.000Z');
         expect(localWrites[1].settings.pendingRemoteWriteAt).toBeUndefined();
@@ -996,7 +990,7 @@ describe('performSyncCycle', () => {
             now: () => '2026-01-01T00:00:00.000Z',
         })).rejects.toThrow('Local changes detected during sync');
 
-        // Nothing after the stale exit writes: the remote never got the merge, so the marker stays.
+
         expect(localWrites).toHaveLength(1);
         expect(localWrites[0].settings.pendingRemoteWriteAt).toBe('2026-01-01T00:00:00.000Z');
         expect(localWrites[0].settings.pendingRemoteWriteRetryAt).toBeUndefined();
@@ -1060,7 +1054,7 @@ describe('performSyncCycle', () => {
             readLocal: async () => mockAppData([createMockTask('task-1', '2024-01-01T00:00:00.000Z')]),
             readRemote: async () => mockAppData(),
             writeLocal: async () => undefined,
-            // A callback that changes the document in place: a task pointing at a project nobody has.
+
             prepareRemoteWrite: async (data) => {
                 data.tasks[0] = { ...data.tasks[0], projectId: 'missing-project' };
             },

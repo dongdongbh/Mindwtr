@@ -134,9 +134,7 @@ describe('desktop Local API task reads', () => {
     expect((await service.listTasks({ projectId: 'project-1' })).map((row) => row.id)).toEqual(['next']);
   });
 
-  // The native filter (local_api.rs filter_tasks) runs before the Node filter, so it may only ever drop tasks the
-  // Node filter drops too. Same queries, same data: a server that ignores the parameters (the old full fetch) and
-  // one that applies them the way Rust does must give identical results.
+
   test('server-side filtering returns exactly what the full fetch returned', async () => {
     const rows = [...tasks, task('blank-deleted', { deletedAt: '' }), task('focused-done', { status: 'done', isFocusedToday: true }),
       task('focused-deleted', { isFocusedToday: true, deletedAt: iso }), task('numeric-focus', { isFocusedToday: 1 as unknown as boolean })];

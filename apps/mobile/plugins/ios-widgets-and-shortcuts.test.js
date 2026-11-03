@@ -29,7 +29,7 @@ describe('ios-widgets-and-shortcuts', () => {
       PBXBuildFile: {}, PBXFileReference: {}, PBXGroup: {},
     } } };
     project.addBuildPhase([], 'PBXSourcesBuildPhase', 'Sources', 'APP');
-    // Older generated projects named this phase after the target.
+
     project.addBuildPhase(['Existing.swift'], 'PBXSourcesBuildPhase', 'MindwtrWidgets', 'WIDGET');
     const group = project.addPbxGroup(['Existing.swift'], 'MindwtrWidgets', 'MindwtrWidgets');
     const options = {
@@ -187,7 +187,7 @@ describe('ios-widgets-and-shortcuts', () => {
     const compactSource = fs.readFileSync(path.join(widgetsDir, 'MindwtrCompactWidget.swift'), 'utf8');
     const defaultURL = '.widgetURL(safeMindwtrURL(MindwtrWidgetListNavigation.defaultDestination))';
 
-    // Selecting a list replaces focusUri, so it cannot be the blank-space route.
+
     expect(tasksSource).toContain('focusUri: nonEmpty(openUri) ?? focusUri');
     for (const source of [tasksSource, compactSource]) {
       expect(source).toContain(defaultURL);
@@ -322,13 +322,13 @@ describe('ios-widgets-and-shortcuts', () => {
     expect(source).toContain('"pending-captures"');
 
     const backgroundIntent = source.slice(source.indexOf('struct MindwtrBackgroundCaptureIntent'));
-    // Background capture must never foreground the app or open deep links.
+
     expect(backgroundIntent).toContain('.background');
     expect(backgroundIntent).not.toContain('.foreground');
     expect(backgroundIntent).not.toContain('UIApplication');
     expect(backgroundIntent).not.toContain('MindwtrSiriCaptureLauncher.open');
 
-    // No SQLite or store writes from Swift: the queue file is the only output.
+
     expect(source).not.toContain('sqlite');
     expect(source).not.toContain('SQLite');
   });
@@ -354,8 +354,8 @@ describe('ios-widgets-and-shortcuts', () => {
     expect(backgroundIntent).toContain('dueDate: dueDate');
     expect(backgroundIntent).toContain('startDate: startDate');
     expect(backgroundIntent).toContain('"Added to Mindwtr."');
-    // The dialog must not promise a specific project placement -- the drain
-    // decides that, and an unknown project falls back to Inbox.
+
+
     expect(backgroundIntent).not.toMatch(/dialog:\s*"[^"]*Inbox[^"]*"/);
   });
 
@@ -371,11 +371,7 @@ describe('ios-widgets-and-shortcuts', () => {
     expect(source).toContain('mindwtr-ios-shortcuts-snapshot');
     expect(source).toContain('UserDefaults(suiteName: appGroup)');
 
-    // The store's `items(forList:)` takes the iOS 16-only `MindwtrGetTasksList`
-    // while the deployment target is 15.1 -- the enclosing enum must carry an
-    // iOS 16 guard or this is a hard compile error the CI validator can't
-    // catch (it only checks IntentModes/phrases/@Parameter defaults, not
-    // signature availability).
+
     expect(source).toContain('@available(iOS 16.0, *)\nprivate enum MindwtrShortcutsSnapshotStore');
 
     const getTasksIntent = source.slice(source.indexOf('struct MindwtrGetTasksIntent'));
@@ -383,8 +379,8 @@ describe('ios-widgets-and-shortcuts', () => {
     expect(getTasksIntentBody).toContain('.background');
     expect(getTasksIntentBody).not.toContain('.foreground');
     expect(getTasksIntentBody).not.toContain('UIApplication');
-    // The intent must never touch the store or SQLite -- it only reads the
-    // app-maintained snapshot.
+
+
     expect(getTasksIntentBody).not.toContain('sqlite');
     expect(getTasksIntentBody).not.toContain('SQLite');
   });
@@ -407,26 +403,20 @@ describe('ios-widgets-and-shortcuts', () => {
     expect(source).toContain('URLQueryItem(name: "task", value: taskId)');
     expect(source).toContain('return identifiers.compactMap { itemById[$0] }');
 
-    // Reindexing must be driven by the app's refresh path, never by an
-    // intent's perform().
+
     const getTasksIntent = source.slice(
       source.indexOf('struct MindwtrGetTasksIntent'),
       source.indexOf('enum MindwtrShortcutsSpotlightIndexer')
     );
     expect(getTasksIntent).not.toContain('reindexIfNeeded');
 
-    // Get Tasks: a project override must be stated in the summary, not just
-    // implemented, per the complete-sentence rule.
+
     expect(getTasksIntent).toContain('overridden by \\(\\.$project) if set');
 
-    // Fixed-format date parsing/formatting needs a fixed locale (Apple
-    // QA1480) or non-ASCII digit locales silently drop the date on the RN
-    // drain side.
+
     expect(source).toContain('formatter.locale = Locale(identifier: "en_US_POSIX")');
 
-    // Spotlight must clear stale entries before reindexing -- indexAppEntities
-    // is additive and never removes completed/deleted/capped-out tasks on its
-    // own.
+
     const spotlightIndexer = source.slice(source.indexOf('enum MindwtrShortcutsSpotlightIndexer'));
     const deleteIndex = spotlightIndexer.indexOf('deleteAllSearchableItems');
     const indexEntities = spotlightIndexer.indexOf('indexAppEntities(entities)');
@@ -519,9 +509,7 @@ describe('ios-widgets-and-shortcuts', () => {
   });
 });
 
-// The Control Center control names its action in the widget extension, but iOS runs a
-// foreground control intent inside the app, and only if the app target has a type with the same
-// name. One copy alone is a control that does nothing (feedback 4bf8d547).
+
 describe('Control Center quick capture intent', () => {
   const read = (relativePath) => fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
   const intentBlock = (source) => {
@@ -540,7 +528,7 @@ describe('Control Center quick capture intent', () => {
       expect(copy).toMatch(/openAppWhenRun: Bool \{\s*true/);
       expect(copy).toContain('-> some IntentResult {');
     }
-    // Only the app can open the screen; the extension copy must not try to open a URL.
+
     expect(appCopy).toContain('MindwtrSiriCaptureLauncher.openQuickCapture()');
     expect(extensionCopy).not.toContain('OpenURLIntent(');
   });

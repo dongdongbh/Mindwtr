@@ -15,10 +15,7 @@ type ChecklistTargetPickerProps = {
     onSelect: (targetId: string) => void;
 };
 
-/**
- * Add to checklist's task picker (#1467): open tasks, ones that already have a checklist first, searched by title.
- * Mounted only while open, so rows do not subscribe to every task change.
- */
+
 export function ChecklistTargetPicker({ sourceId, tc, t, onClose, onSelect }: ChecklistTargetPickerProps) {
     const [query, setQuery] = useState('');
     const tasks = useTaskStore((state) => state.tasks);

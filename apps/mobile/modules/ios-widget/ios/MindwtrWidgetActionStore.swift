@@ -20,9 +20,7 @@ struct MindwtrWidgetActionIdentity: Equatable, Sendable {
     let completionToken: String?
 }
 
-// Pure read-only projection rules shared by the WidgetKit renderer and the
-// Linux-compatible Swift package tests. This never claims, removes, or
-// acknowledges an action; the app remains the only task-data writer.
+
 enum MindwtrWidgetActionProjection {
     static let defaultListId = "focus"
     static let fallbackListId = "next"
@@ -111,10 +109,7 @@ enum MindwtrWidgetActionProjection {
     }
 }
 
-// Pure list-route ownership shared by the WidgetKit renderer and the
-// Linux-compatible Swift tests. Cached payloads written before list openUri
-// existed still need to open the list they display, and a supplied URI may
-// never substitute a different app route.
+
 enum MindwtrWidgetListNavigation {
     static let defaultDestination = "mindwtr:///focus"
 
@@ -332,8 +327,8 @@ final class MindwtrWidgetActionStore: @unchecked Sendable {
     private func cancelLocked(id: String, now: Date?) throws -> Bool {
         try validateInput(id, field: "action id")
         return try withLockedState { state in
-            // Resolve the production clock only after acquiring the queue
-            // lock, so an Undo that waited across its deadline cannot win late.
+
+
             let nowMilliseconds = try milliseconds(for: now ?? Date())
             guard let index = state.pending.firstIndex(where: { $0.id == id }) else {
                 return (false, false)

@@ -17,7 +17,7 @@ type Fixture = {
 const fixture = JSON.parse(readFileSync(new URL('./notification-open-parity.fixtures.json', import.meta.url), 'utf8')) as Fixture;
 const log = (message: string, extra: Record<string, string>) => ['logInfo', `[Local Notifications] ${message}`, extra];
 
-/** What React Native's root layout does with a route: navigation, highlight, the Done write and its log line. */
+
 function perform(route: NotificationOpenRoute, tasks: Map<string, Task>, handled: Set<string>): unknown[][] {
     switch (route.type) {
         case 'none':

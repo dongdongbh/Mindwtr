@@ -49,8 +49,8 @@ describe('desktop update targets', () => {
         expect(isAutoUpdateCheckAllowed('winget')).toBe(true);
         expect(isAutoUpdateCheckAllowed('flatpak')).toBe(true);
         expect(isAutoUpdateCheckAllowed('unknown')).toBe(true);
-        // Not resolved yet — must stay quiet: the install might be a quiet
-        // channel that simply has not been identified yet (#829 rc.4 report).
+
+
         expect(isAutoUpdateCheckAllowed(null)).toBe(false);
         expect(isAutoUpdateCheckAllowed(undefined)).toBe(false);
     });
@@ -77,7 +77,7 @@ describe('desktop update targets', () => {
         expect(isUpdateReminderVersionTrusted('chocolatey', 'chocolatey')).toBe(true);
         expect(isUpdateReminderVersionTrusted('chocolatey', 'github-release')).toBe(false);
         expect(isUpdateReminderVersionTrusted('aur-source', 'aur')).toBe(true);
-        // Channels without their own feed rely on GitHub by design.
+
         expect(isUpdateReminderVersionTrusted('direct', 'github-release')).toBe(true);
     });
 });

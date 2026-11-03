@@ -1,5 +1,5 @@
-// Guided mind-sweep prompt catalog (issue #677).
-// Prompts are original Mindwtr wording — deliberately not the canonical GTD trigger list.
+
+
 export type MindSweepScope = 'all' | 'personal' | 'work';
 export type MindSweepGroupScope = 'personal' | 'work';
 

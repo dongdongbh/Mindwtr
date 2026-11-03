@@ -1,4 +1,4 @@
-// The parse, selection and notification rules live in core (context-automation.ts).
+
 export {
   ANDROID_CONTEXT_ACTIVATE_ACTION,
   ANDROID_CONTEXT_DEACTIVATE_ACTION,

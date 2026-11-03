@@ -1,9 +1,5 @@
-// File Sync's sync document: the versioned read and write a cycle makes, the recovery chain for a
-// damaged or missing document, encryption discovery, and the Android pick's folder step. Moved
-// from React Native's lib/storage-file.ts (S5) unchanged in behavior: every expo-file-system and
-// native-module call is now a call on the host's port, in the same order
-// (apps/mobile/lib/file-sync-parity.test.ts replays it). The pickers and the backup export stay
-// in React Native; native Android binds the same host over SafDocumentsCore.
+
+
 
 import { decodeUriSafe, sleep } from './async-utils';
 import {
@@ -37,11 +33,10 @@ import type { AppData } from './types';
 
 export const FILE_SYNC_ABSENT_FINGERPRINT = 'file:v1:absent';
 
-/** The File Sync host: the folder ports (mobile-file-sync-remote.ts) plus the platform, iOS
- *  bookmarks, the encryption state and the cipher. */
+
 export type MobileFileSyncFullHost = MobileFileSyncHost & {
     os(): string;
-    /** iOS security-scoped bookmark IO; a host without it answers false. */
+
     bookmarks: {
         supported(): boolean;
         readText(bookmark: string): Promise<string | null | undefined>;
@@ -54,17 +49,15 @@ export type MobileFileSyncFullHost = MobileFileSyncHost & {
     crypto: SyncCryptoPrimitives;
 };
 
-/** A picked sync folder: its data (empty when the folder has no sync file yet) and its file URI. */
+
 export type FileSyncPickResult = AppData & {
     __fileUri?: string;
     __fileBookmark?: string;
-    /** True when the selected sync folder is inside iCloud Drive. */
+
     __icloud?: boolean;
 };
 
-/** The sync document's bytes are not a Mindwtr document (empty, not JSON, or missing its lists).
- *  Only this error licenses "use local data and repair the file"; a provider error never does,
- *  even when its text names data.json. */
+
 export class SyncFileDocumentParseError extends Error {
     constructor(message: string, options?: { cause?: unknown }) {
         super(message);
@@ -73,9 +66,7 @@ export class SyncFileDocumentParseError extends Error {
     }
 }
 
-/** The sync document could not be proven whole (its provider reports no length) and does not
- *  parse, so it may be a cut-off read of real data: the cycle stops and never repairs from it
- *  (dd, 10-18). "conflict" in the text classifies it as a sync conflict. */
+
 export class FileSyncUnverifiedReadError extends Error {
     constructor() {
         super('File Sync read conflict: the sync file could not be proven complete and did not parse; nothing was written');
@@ -83,10 +74,7 @@ export class FileSyncUnverifiedReadError extends Error {
     }
 }
 
-/** The sync file is missing or broken while an earlier copy of it (a quarantine, stage, backup,
- *  `.previous` or `.tmp` that is not empty) sits beside it: that copy may hold rows nothing else
- *  has, so the cycle stops instead of repairing the folder from local data. Nothing is written,
- *  moved or deleted. "conflict" in the text classifies it as a sync conflict. */
+
 export class FileSyncRetainedGenerationError extends Error {
     constructor(public readonly retained: number) {
         super('File Sync conflict: the sync file is missing or damaged while an earlier copy of it is in the sync folder; nothing was written');
@@ -95,21 +83,16 @@ export class FileSyncRetainedGenerationError extends Error {
 }
 
 export interface SyncFileAccessOptions {
-    /** iOS security-scoped bookmark for the sync file or its folder. */
+
     bookmark?: string | null;
-    /**
-     * Sync-encryption key material (#1056). `null`/absent is the encryption-off path and
-     * behaves byte-for-byte as it did before this feature: same file name, same text APIs,
-     * same recovery chain. When present, `data.json` becomes `data.json.enc` and all IO
-     * switches to raw bytes.
-     */
+
+
     material?: SyncKeyMaterial | null;
-    /** Raw generation returned by `readSyncFileVersioned`. Presence opts the write into
-     * atomic quarantine/create-new CAS; the explicit absent sentinel means create-only. */
+
+
     expectedFingerprint?: string;
-    /** #1138: which sync location this read is against, stamped onto any encryption discovery
-     * it persists so the resulting lock cannot outlive the folder it was set for. Absent
-     * leaves the discovery unscoped, which re-checks on the next cycle rather than blocking. */
+
+
     locationScope?: string | null;
 }
 
@@ -121,8 +104,7 @@ export type SafContext = {
 
 export type ResolvedSafSyncFile = { uri: string; name: string; exists: boolean };
 
-/** File Sync's document reads and writes (React Native: lib/storage-file.ts; native Android: the
- *  same host over SafDocumentsCore). One instance per app: it keeps the folder resolution cache. */
+
 export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
     const remote = createMobileFileSyncRemote(host);
     const {
@@ -201,23 +183,19 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         return `${context.prefix}/tree/${context.treeIdEncoded}/document/${documentIdEncoded}`;
     };
 
-    /** Returns true when the sync folder lives inside iCloud Drive. */
+
     const isICloudUri = (uri: string): boolean => {
         const decoded = decodeUriSafe(uri);
         return decoded.includes('Mobile Documents') || decoded.includes('iCloud');
     };
 
-    /**
-     * Detect iCloud Optimize Storage eviction on iOS.
-     * When macOS/iOS evicts a file, the real file disappears and a hidden
-     * `.filename.icloud` placeholder appears instead.
-     */
+
     const isICloudEvicted = (fileUri: string): boolean => {
         if (host.os() !== 'ios') return false;
         if (!fileUri.startsWith('file://')) return false;
         try {
-            if (host.path.exists(fileUri)) return false; // Real file is present
-            // Check for .Name.icloud placeholder
+            if (host.path.exists(fileUri)) return false;
+
             const parts = fileUri.split('/');
             const name = parts.pop() ?? '';
             const parentUri = parts.join('/');
@@ -228,12 +206,11 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         }
     };
 
-    /** The folder's data.json (or legacy file) by display name, or null when a successful listing
-     *  found none. A listing failure propagates: "unreadable" is never "absent". */
+
     const listDirectoryForSyncFile = async (directoryUri: string): Promise<{ uri: string; name: string } | null> => {
         const entries = (await saf().listChildren(directoryUri)).map((entry) => ({
             uri: entry.uri,
-            // Document IDs are opaque; only a path-like provider puts the name in the URI's tail.
+
             name: entry.name || getUriLeafName(entry.uri),
         }));
         return entries.find((entry) => entry.name === SYNC_FILE_NAME)
@@ -242,7 +219,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
     };
 
     function sanitizeJsonText(raw: string): string {
-        // Strip BOM and trailing NULs which can appear with partial/unsafe writes.
+
         let text = raw.replace(/^\uFEFF/, '').trim();
         // eslint-disable-next-line no-control-regex
         text = text.replace(/\u0000+$/g, '').trim();
@@ -278,8 +255,6 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
     }
 
 
-
-
     function parseAppData(text: string): AppData {
         try {
             return parseAppDataUnchecked(text);
@@ -288,8 +263,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         }
     }
 
-    /** A SAF document's text, whole (SafDocumentsCore.readBytes), with whether a reported length
-     *  proved it whole. */
+
     const readSafText = async (fileUri: string): Promise<{ text: string; lengthVerified: boolean }> => {
         const read = await saf().readBytes(fileUri);
         return { text: new TextDecoder().decode(read.bytes), lengthVerified: read.lengthVerified };
@@ -302,13 +276,13 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
 
         const text = await host.path.readText(fileUri);
         if (text === null) {
-            // No path in the context: a sync folder's path can name the user or their files.
+
             host.log.info('Sync file does not exist', { scope: 'sync' });
         }
         return text;
     }
 
-    /** Whether the picked folder's listing holds this exact document. A listing failure throws. */
+
     const isListedInSafSyncFolder = async (documentUri: string): Promise<boolean> => {
         const context = parseSafContext(documentUri);
         if (!context) return false;
@@ -318,19 +292,15 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
     };
 
 
-    /** The display name each resolved SAF sync document was listed under. */
     const resolvedSyncNames = new Map<string, string>();
 
-    /** The picked tree's root document: the sync folder itself (the folder lock takes the same). */
+
     const safTreeRootUri = (uri: string): string | null => {
         const context = parseSafContext(uri);
         return context ? buildTreeDocumentUri(context, context.treeIdDecoded) : null;
     };
 
-    /** A SAF folder's sync document by display name: the listed one, or (confirmed absent) the
-     *  folder itself, with the name the first write publishes under. Nothing is created here; the
-     *  versioned write creates data.json when it publishes, so a folder never holds an empty
-     *  data.json that no one wrote. */
+
     const resolveSafSyncFile = async (uri: string): Promise<ResolvedSafSyncFile | null> => {
         const cached = syncUriResolutionCache.get(uri);
         if (cached) return { uri: cached, name: resolvedSyncNames.get(cached) ?? SYNC_FILE_NAME, exists: true };
@@ -354,8 +324,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         return { uri: documentUri, name: SYNC_FILE_NAME, exists: false };
     };
 
-    /** The sync document's own name for a resolved URI: the name it was listed under, the URI's
-     *  tail on a path-like provider, else data.json (a folder whose sync file is not written yet). */
+
     const syncLeafName = (resolvedUri: string): string => {
         const listed = resolvedSyncNames.get(resolvedUri);
         if (listed) return listed;
@@ -364,7 +333,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         return leaf === SYNC_FILE_NAME || leaf === LEGACY_SYNC_FILE_NAME ? leaf : SYNC_FILE_NAME;
     };
 
-    /** `createIfMissing` is accepted for the port's shape and never creates (see resolveSafSyncFile). */
+
     const resolveSyncFileUri = async (
         uri: string,
         _options?: { createIfMissing?: boolean }
@@ -374,9 +343,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         return (await resolveSafSyncFile(uri))?.uri ?? uri;
     };
 
-    /** The pick-time probe: File Sync writes by creating new files and renaming them, so a folder
-     *  is usable only if a new file can be created in it. A refused create refuses the folder; the
-     *  probe never writes into the existing sync file to prove anything. */
+
     const assertDirectoryWritable = async (directoryUri: string): Promise<void> => {
         const safPort = host.saf;
         if (!safPort) return;
@@ -390,10 +357,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             try {
                 await safPort.writeText(testUri, 'ok');
             } catch {
-                // Creating the test file already proved write access. Passthrough
-                // providers (e.g. RSAF over rclone crypt) can fail expo's canWrite
-                // pre-check on a just-created document while the provider's
-                // metadata query is still stale — don't block setup on that.
+
+
             }
             return;
         } catch (error) {
@@ -406,16 +371,13 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 try {
                     await safPort.delete(testUri);
                 } catch {
-                    // Ignore cleanup failures for the temp file.
+
                 }
             }
         }
     };
 
 
-    /** One `remote-read` line per File Sync document seam (#1056 diagnostics). Every path below
-     *  that can throw a SyncEncryption* error emits one first, so a shared log says what the
-     *  folder actually held. */
     const logSyncFileRead = (input: Parameters<typeof buildSyncEncryptionRemoteReadExtra>[0]): void => {
         host.encryption.logEvent(
             SYNC_ENCRYPTION_LOG_EVENTS.remoteRead,
@@ -432,25 +394,15 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
     const encryptedLeafNameFor = (resolvedUri: string): string =>
         syncEncryptedArtifactName(syncLeafName(resolvedUri));
 
-    /**
-     * Decision #2 detection, mirroring `webdavGetSyncDocument`'s reasoning exactly: only ever
-     * called when this device has NO key AND the plaintext read produced nothing usable, so a
-     * steadily-syncing plaintext install never pays for it. Persists the discovery (decision
-     * #5 — it must survive a restart) and returns true when the caller must fail closed.
-     *
-     * `plainBytes` is the plain-named file's raw content when it existed but failed to parse:
-     * a peer could have written ciphertext under the plain name, and ciphertext is never
-     * "invalid JSON to be repaired" (decision #4).
-     */
+
     const discoverEncryptedSyncFolder = async (
         resolvedUri: string,
         plainBytes: Uint8Array | null,
         locationScope?: string | null,
     ): Promise<boolean> => {
         const candidates: (Uint8Array | null)[] = [plainBytes];
-        // Discovery is a safety check, not a best-effort enhancement. If the folder cannot
-        // be enumerated or the sibling cannot be read, propagate the provider error: treating
-        // "unreadable" as "absent" would license a fresh plaintext repair beside ciphertext.
+
+
         const encUri = await resolveSyncArtifactSiblingUri(resolvedUri, encryptedLeafNameFor(resolvedUri), {
             createIfMissing: false,
         });
@@ -477,8 +429,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             }, locationScope);
             return true;
         }
-        // An existing `.enc` that read empty or headerless with no reported length proving it
-        // whole may be a cut-off read of real ciphertext: never license a plaintext write beside it.
+
+
         if (encBytes && isUnverifiedLengthRead(encBytes)) throw new FileSyncUnverifiedReadError();
         return false;
     };
@@ -492,18 +444,12 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             createIfMissing: false,
         });
         const bytes = encUri ? await readSyncArtifactBytes(encUri) : null;
-        // An empty `.enc` read with no reported length proving it whole may be cut off: it is not
-        // "no encrypted generation".
+
+
         if (bytes && bytes.length === 0 && isUnverifiedLengthRead(bytes)) throw new FileSyncUnverifiedReadError();
         if (!bytes || bytes.length === 0) {
-            // Inverse of discoverEncryptedSyncFolder: a peer ran the disable transition here, so
-            // the `.enc` artifact is gone and the plaintext original is back. Never "no data" —
-            // that would merge this device's store into a fresh plaintext generation and fork the
-            // folder, and this device never follows the remote down to plaintext on its own.
-            // A provider failure here is not proof that the plaintext generation is absent.
-            // Propagate it so the keyed cycle cannot recreate `.enc` from local data while a
-            // peer-restored plaintext document is merely unreadable.
-            // Found by the folder listing: a lookup of a file that is not there proves nothing.
+
+
             const plainUri = await resolveSyncArtifactSiblingUri(resolvedUri, syncLeafName(resolvedUri), {
                 createIfMissing: false,
             });
@@ -521,9 +467,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 await host.encryption.flush();
                 throw new SyncEncryptionRemotePlaintextError();
             }
-            // The typed plaintext check above wins; whatever remains (empty or whitespace bytes no
-            // reported length proved whole) may be a cut-off read of the restored plaintext, so it
-            // is never "no data here".
+
+
             if (plain && isUnverifiedLengthRead(plain)) throw new FileSyncUnverifiedReadError();
             logSyncFileRead({
                 artifact: encryptedLeafNameFor(resolvedUri),
@@ -534,10 +479,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             });
             return null;
         }
-        // Sealed under another salt = this device's key is for a different encryption
-        // generation (a passphrase set before the first sync here, or a peer's rotation).
-        // Persist the no-key downgrade so the unlock prompt (which re-derives from the
-        // remote's own salt) surfaces, instead of decrypting into a dead-end Auth failure.
+
+
         const foreign = detectForeignSaltArtifact(bytes, material);
         if (foreign) {
             logSyncFileRead({
@@ -570,11 +513,11 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         return parseAppData(new TextDecoder().decode(plaintext));
     };
 
-    // Read sync file from a stored path
+
     const readSyncFile = async (fileUri: string, options?: SyncFileAccessOptions): Promise<AppData | null> =>
         (await readSyncFileDetailed(fileUri, options)).data;
 
-    /** readSyncFile, saying whether the data came from a backup instead of the sync file itself. */
+
     const readSyncFileDetailed = async (
         fileUri: string,
         options?: SyncFileAccessOptions,
@@ -583,10 +526,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         try {
             const material = options?.material ?? null;
             if (material) {
-                // The bookmarked-IO shortcut below is text-only (the native module exposes
-                // readTextFile/writeTextFile), and ciphertext is not text. Encrypted folders
-                // use the byte path against the already-bookmark-resolved URI, which is the
-                // same access route the plaintext path falls back to when bookmarked IO fails.
+
+
                 const resolvedEncryptedUri = await resolveSyncFileUri(fileUri, { createIfMissing: false });
                 return fromSyncFile(await readEncryptedSyncFile(resolvedEncryptedUri, material, options?.locationScope));
             }
@@ -618,10 +559,10 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 host.log.info('Resolved sync path from directory URI to file URI', { scope: 'sync' });
             }
 
-            // Detect iCloud Optimize Storage eviction before attempting reads.
+
             if (isICloudEvicted(resolvedUri)) {
                 host.log.warn(ICLOUD_EVICTED_MESSAGE, { scope: 'sync' });
-                // Try the backup file before giving up.
+
                 const backupUri = resolvedUri.replace(/\/[^/]+$/, '/' + BACKUP_FILE_NAME);
                 try {
                     const backupContent = await readFileText(backupUri);
@@ -630,22 +571,20 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                         return { data: parseAppData(backupContent), fromBackup: true };
                     }
                 } catch {
-                    // Backup also unavailable.
+
                 }
                 throw new Error(ICLOUD_EVICTED_MESSAGE);
             }
 
-            // Syncthing (or other tools) can replace files while we're reading. Retry a few times.
+
             let lastError: unknown = null;
             for (let attempt = 0; attempt < 4; attempt += 1) {
                 try {
-                    // A SAF sync file is absent only when the folder's listing (which succeeded, or
-                    // threw) does not hold it: a lookup with no answer proves nothing. data.json is
-                    // created only when the versioned write publishes it.
+
+
                     const isSafUri = resolvedUri.startsWith('content://');
-                    // The folder itself (resolved with no sync file listed) holds no data, and a
-                    // sync file is absent only when the folder's listing (which succeeded, or threw)
-                    // does not hold it: a lookup with no answer proves nothing.
+
+
                     const absent = isSafUri && (resolvedUri === safTreeRootUri(resolvedUri)
                         || !(await isListedInSafSyncFolder(resolvedUri)));
                     const read = absent ? null : isSafUri
@@ -653,10 +592,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                         : { text: await readFileText(resolvedUri), lengthVerified: true };
                     const fileContent = read?.text ?? null;
                     if (!fileContent) {
-                        // "Nothing here" is also the exact shape of a folder a peer encrypted
-                        // and whose plaintext original it then removed — take one look before
-                        // reporting no data (and, with no data, letting the cycle write a
-                        // fresh plaintext file alongside the encrypted one).
+
+
                         if (await discoverEncryptedSyncFolder(resolvedUri, null, options?.locationScope)) {
                             throw new SyncEncryptionNoKeyError();
                         }
@@ -678,24 +615,20 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 } catch (error) {
                     if (error instanceof SyncEncryptionNoKeyError || error instanceof FileSyncUnverifiedReadError) throw error;
                     lastError = error;
-                    // Small backoff to allow file writes to finish.
+
                     await sleep(120 + attempt * 80);
                 }
             }
-            // Before the "invalid JSON" repair path can fire: ciphertext under the plain name
-            // is not corrupt JSON (decision #4). Read the raw bytes and check for MWENC1.
+
+
             const rawBytes = await readSyncArtifactBytes(resolvedUri).catch(() => null);
             if (await discoverEncryptedSyncFolder(resolvedUri, rawBytes, options?.locationScope)) {
                 throw new SyncEncryptionNoKeyError();
             }
             throw lastError;
         } catch (error) {
-            // Fail closed: neither a no-key discovery nor a failed decrypt may reach the
-            // "invalid JSON -> return null and repair" branch below. Defense in depth — no
-            // current MWENC1 error message matches that branch's regex, so removing these
-            // three lines does not fail a test today. They exist so that a future wording
-            // change ("...is not valid JSON container...") cannot silently turn a wrong
-            // passphrase into "no remote data, overwrite it".
+
+
             if (error instanceof FileSyncUnverifiedReadError) throw error;
             if (error instanceof SyncEncryptionNoKeyError
                 || error instanceof SyncEncryptionRemotePlaintextError
@@ -704,7 +637,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 throw error;
             }
             const message = String(error);
-            // Provide a clearer UX-oriented error.
+
             if (fileUri.startsWith('content://') && /Invalid URI|IllegalArgumentException/i.test(message)) {
                 throw new Error('Cannot access the selected sync file. Please re-select it in Settings → Sync.');
             }
@@ -713,7 +646,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 host.log.info('Invalid JSON in sync file; using local data.', { scope: 'sync', extra: { operation: 'read' } });
                 return fromSyncFile(null);
             }
-            // The error line keeps the code only: the diagnostics builder logs a message and stack, which here quote the path.
+
             host.log.error(new Error(fileSyncErrorCode(error)), { scope: 'sync', extra: { operation: 'read', message: 'Failed to read sync file' } });
             throw error;
         }
@@ -728,10 +661,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         settings: {},
     });
 
-    /** Reads the primary document bytes and their version through the same File transition
-     * port ordinary writes use. Recovery still delegates to the established reader, but the
-     * returned version always describes the primary generation that an atomic repair must
-     * replace (or the explicit absence it must create into). */
+
     const readSyncFileVersioned = async (
         fileUri: string,
         options?: SyncFileAccessOptions,
@@ -783,7 +713,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 try {
                     decrypted = parseAppData(new TextDecoder().decode(plaintext));
                 } catch (error) {
-                    // Decryption's own typed errors (above) win; only what remains is wrapped.
+
                     if (isUnverifiedLengthRead(snapshot.bytes)) throw new FileSyncUnverifiedReadError();
                     throw error;
                 }
@@ -810,15 +740,15 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                         source: 'primary',
                     };
                 } catch {
-                    // Keep the existing backup/invalid-JSON recovery behavior below. The raw
-                    // primary version remains the CAS target for any subsequent repair.
+
+
                 }
             }
         }
 
         if (!material && snapshot.bytes && isUnverifiedLengthRead(snapshot.bytes)) {
-            // No reported length proved these bytes whole, and they are empty or do not parse:
-            // they may be a cut-off read of real data. Encryption discovery still comes first.
+
+
             if (await discoverEncryptedSyncFolder(resolvedUri, snapshot.bytes, options?.locationScope)) {
                 throw new SyncEncryptionNoKeyError();
             }
@@ -827,8 +757,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
 
         const { data: recovered, fromBackup } = await readSyncFileDetailed(fileUri, options);
         if (!recovered || fromBackup) {
-            // B5 guard, after every typed encryption check above and in the reader: a missing or
-            // broken sync file is repaired only when no earlier copy of it could hold other rows.
+
+
             const retained = await listBlockingRetainedGenerations(resolvedUri);
             if (retained.length > 0) {
                 host.log.warn('File Sync stopped: an earlier copy of the sync file is in the folder', {
@@ -842,9 +772,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             data: recovered ?? emptyRemoteAppData(),
             fingerprint: snapshot.version ?? FILE_SYNC_ABSENT_FINGERPRINT,
             source: recovered ? 'recovery' : 'empty',
-            // Every fallback means the canonical generation is absent, empty, invalid, or
-            // was bypassed for recovery. Force one CAS-protected repair even when the
-            // recovered/default data is semantically identical to local state.
+
+
             needsRepair: true,
         };
     };
@@ -866,10 +795,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             throw new SyncEncryptionRemoteConflictError(`${name} changed before the File Sync write`);
         }
 
-        // Preserve the previous generation as the backup, best effort: only one this cycle can read
-        // (it parses, or it decrypts and parses) is worth keeping, and the rotation never writes into
-        // an existing file (FileSyncRemotePort.rotateBackup). A failed rotation never licenses an
-        // unconditional overwrite; the authoritative write below stays atomic either way.
+
         if (current.bytes && (material || !resolvedUri.startsWith('content://'))) {
             try {
                 const readable = material
@@ -898,7 +824,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 host.crypto,
             )
             : new TextEncoder().encode(content);
-        // The port's write answers its read-back of the installed document; a port that does not is read again.
+
         const written = (await remote.write(name, payload, expectedVersion)) ?? await remote.read(name);
         if (!written.bytes) throw new Error('Sync file write verification failed: file is empty after write.');
         if (material) {
@@ -913,9 +839,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         }
     };
 
-    // Write merged data back to sync file. Every write is the versioned (CAS) write: core's cycle
-    // always passes the fingerprint its read returned, and a write without one is refused rather
-    // than overwriting whatever the folder holds now.
+
     const writeSyncFile = async (fileUri: string, data: AppData, options?: SyncFileAccessOptions): Promise<void> => {
         try {
             if (options?.expectedFingerprint === undefined) {
@@ -930,8 +854,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         }
     };
 
-    /** The Android pick's folder step (after the system picker granted `directoryUri`): the folder's
-     *  sync file by name, the write probe, and the parsed data. Nothing is created here. */
+
     const prepareSafSyncFolder = async (directoryUri: string): Promise<FileSyncPickResult> => {
         const resolved = await resolveSafSyncFile(directoryUri);
         if (!resolved) {

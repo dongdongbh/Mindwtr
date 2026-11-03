@@ -53,12 +53,8 @@ export function CalendarPlanningPanel({
 
     if (isCollapsed) {
         return (
-            // The collapse button shows at every width, so the collapsed state
-            // must be expandable at every width too — hiding this below xl left
-            // no way back without widening the window (#977). Stacked below xl
-            // it is a labeled disclosure row, not a bare strip; at xl+ it is the
-            // side rail, with the button filling the full rail height so the
-            // whole strip is the click target.
+
+
             <aside className="rounded-lg border border-border bg-card p-2 shadow-sm">
                 <button
                     type="button"

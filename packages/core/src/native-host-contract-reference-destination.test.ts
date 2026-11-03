@@ -122,9 +122,8 @@ describe('Reference destination uses actual RN row filing', () => {
         const fixture = seed(); fixture.projects![1] = { ...fixture.projects![1], ...patch };
         const rn = await openSqliteHost(fixture); let expected: AppData; let expectedRaw: Awaited<ReturnType<typeof raw>>;
         try { const source = useTaskStore.getState()._tasksById.get(ID)!;
-            // RN's row picker never offers unavailable destinations. The
-            // programmatic updater may reactivate archived Projects; that is
-            // a different entry path and must not invent a row picker choice.
+
+
             if (available) expect((await useTaskStore.getState().updateTask(ID, buildTaskMovePatch({ kind: 'project', id: 'other' }, source))).success).toBe(true);
             await flushPendingSave(); expected = rows(); expectedRaw = await raw(rn);
         } finally { await rn.close(); }

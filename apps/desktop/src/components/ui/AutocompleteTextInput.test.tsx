@@ -159,7 +159,7 @@ describe('AutocompleteTextInput', () => {
 
         const input = screen.getByRole('combobox', { name: 'Assignee' });
         fireEvent.focus(input);
-        // A prevented mousedown on the list itself never blurs the input.
+
         expect(fireEvent.mouseDown(screen.getByRole('listbox'))).toBe(false);
         expect(screen.getAllByRole('option')).toHaveLength(2);
     });

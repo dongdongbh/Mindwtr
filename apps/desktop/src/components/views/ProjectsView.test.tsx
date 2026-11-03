@@ -561,14 +561,14 @@ describe('ProjectsView', () => {
         projectsViewStoreOverrides.current = { addArea, areas: [home] };
         render(<ProjectsView />);
 
-        // Manage areas: Create does nothing and the typed name stays.
+
         fireEvent.click(screen.getByRole('button', { name: 'Manage areas' }));
         fireEvent.change(screen.getByLabelText('New area name'), { target: { value: ' home ' } });
         fireEvent.click(screen.getByRole('button', { name: 'Create area' }));
         expect(addArea).not.toHaveBeenCalled();
         expect(screen.getByLabelText('New area name')).toHaveValue(' home ');
 
-        // The project's quick "new area" prompt: refused with the line, and it stays open.
+
         quickAreaName.current = 'HOME';
         fireEvent.click(screen.getByRole('button', { name: 'Request quick area' }));
         expect(screen.getByText('An area with this name already exists.')).toBeInTheDocument();

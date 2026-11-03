@@ -12,16 +12,16 @@ import { isTaskFinished } from './task-status';
 import { taskMatchesFilterSearchQuery } from './task-filter-selections';
 import type { AppSettings, FilterCriteria, Project, Task, TaskStatus } from './types';
 
-/** New status choices stay in the active GTD workflow; stored historical choices still read normally. */
+
 export const CONTEXTS_FILTER_STATUSES = ['inbox', 'next', 'waiting', 'someday'] as const satisfies readonly TaskStatus[];
 
-/** Contexts has a wider source than Focus. Apply status criteria before building the token index. */
+
 export function selectContextsFilterTasks(tasks: Task[], criteria: FilterCriteria, projects: Project[]): Task[] {
     const pool = criteria.statuses?.length ? tasks : tasks.filter((task) => !isTaskFinished(task));
     return applyFilter(pool, criteria, { projects, tokenMatchMode: 'all' });
 }
 
-/** Null for the Contexts union/no-context choices the saved criteria language cannot express. */
+
 export function getContextsSaveCriteria(criteria: FilterCriteria, tokens: string[], matchMode: ContextOrTagMatchMode, searchQueries: readonly string[] = []): FilterCriteria | null {
     if (searchQueries.some((query) => query.trim())) return null;
     if (!criteria.statuses?.length || criteria.statuses.some((status) => !CONTEXTS_FILTER_STATUSES.some((value) => value === status))) return null;

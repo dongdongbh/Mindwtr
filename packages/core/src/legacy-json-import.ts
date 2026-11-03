@@ -11,73 +11,47 @@ import { toStableSyncJson } from './sync-helpers';
 import { taskToSqliteRow } from './task-sync-schema';
 import type { AppData } from './types';
 
-/**
- * The React Native app's startup import of its AsyncStorage JSON backup
- * (`prepareSqliteData` in apps/mobile/lib/storage-adapter.ts), as one pure
- * decision, so a native host that replaces the RN app imports that backup
- * exactly as RN's next launch would have. The host reads the RN state, calls
- * {@link planLegacyJsonImport}, saves `merged` through its SqliteAdapter, checks
- * the re-read with {@link legacyImportMismatch}, and only then applies
- * `clearJsonAhead` and `setReconciled` to AsyncStorage.
- *
- * RN runs three steps at every launch:
- * - (a) the json-ahead marker is set: merge the backup into SQLite, then clear
- *   the marker; an absent or corrupt backup only clears the marker (#964);
- * - (b) SQLite has data and the one-time reconcile flag is unset: merge the
- *   backup once when it is a version-2 backup, then set the flag;
- * - (c) SQLite is empty: merge the backup over the empty data and set the flag.
- */
 
-/** AsyncStorage `mindwtr-data:startup-backup-version` of a backup the SQLite-era app maintains. */
 export const LEGACY_JSON_BACKUP_VERSION = '2';
 
-/** The tables RN counts to tell an empty SQLite database from one with data. */
+
 export const LEGACY_JSON_IMPORT_DATA_TABLES = [
     'tasks', 'projects', 'sections', 'areas', 'people', 'saved_filters', 'settings',
 ] as const;
 
 export type LegacyJsonImportState = {
-    /** `mindwtr-data:json-ahead-of-sqlite` is present. */
+
     jsonAhead: boolean;
-    /** `mindwtr-data:sqlite-json-reconcile-v1` is present. */
+
     reconciled: boolean;
-    /** `mindwtr-data:startup-backup-version`, or null when absent. */
+
     backupVersion: string | null;
-    /** The first present of `mindwtr-data`, `focus-gtd-data`, `gtd-todo-data`, `gtd-data`; null when none is. */
+
     backupJson: string | null;
 };
 
 export type LegacyJsonImportPlan = {
-    /** `imported`: save `merged`. `abandoned`: the backup was absent, corrupt, or not a version-2 backup. */
+
     outcome: 'imported' | 'abandoned' | 'none';
-    /** The RN step that acted: (a) `json-ahead`, (b) `reconcile`, (c) `migrate`. */
+
     path?: 'json-ahead' | 'reconcile' | 'migrate';
     reason?: 'backup-missing' | 'backup-corrupt' | 'backup-version';
-    /** Present only for `imported`: the full snapshot to save. */
+
     merged?: AppData;
-    /** Delete the json-ahead marker, after `merged` is saved. */
+
     clearJsonAhead: boolean;
-    /** Set the reconcile flag to '1', after `merged` is saved. */
+
     setReconciled: boolean;
-    /** RN's own diagnostic counts for an import. */
+
     counts?: { backupTasks: number; sqliteTasks: number; mergedTasks: number; tasksFromBackup: number };
-    /** Present only for `imported`: what {@link mergeLegacyJsonCopy} repaired, per class. */
+
     repairs?: SqliteCopyRepairCounts;
 };
 
-/** The three moves of RN's JSON copy into SQLite (RN's (a) json-ahead recovery, (b) reconcile, (c) first move). */
+
 export type LegacyJsonCopyMove = NonNullable<LegacyJsonImportPlan['path']>;
 
-/**
- * One move of RN's JSON copy into SQLite, as RN's storage adapter makes it and
- * a native host replacing RN must too: the copy is repaired first (rows SQLite
- * always rejects; see repairAppDataForSqlite, which fills from `current`
- * first), then merged over `current`. The sync merge starts from SQLite's
- * settings and drops the copy's device-local and unstamped ones, so into a
- * SQLite with no settings the copy's settings move whole, minus filters SQLite
- * cannot store; the first move also keeps the copy's keys beside settings a
- * second process wrote meanwhile. The reconcile merges settings as sync does.
- */
+
 export function mergeLegacyJsonCopy(current: AppData, rawCopy: AppData, move: LegacyJsonCopyMove) {
     const { data: copy, counts: repairs } = repairAppDataForSqlite(rawCopy, current);
     const result = mergeAppDataWithStats(current, copy);
@@ -92,7 +66,7 @@ export function mergeLegacyJsonCopy(current: AppData, rawCopy: AppData, move: Le
     return { ...result, repairs };
 }
 
-/** RN's `parseStoredAppDataJson`. Throws on JSON that does not parse, and on `null`. */
+
 export function parseLegacyJsonBackup(json: string): AppData {
     const data = JSON.parse(json) as AppData;
     return {
@@ -105,13 +79,7 @@ export function parseLegacyJsonBackup(json: string): AppData {
     };
 }
 
-/**
- * A replacement client must not turn unreadable backup authority into an empty
- * library. Run before opening its database. The import repairs what SQLite
- * always rejects (mergeLegacyJsonCopy), so a copy is also safe when its repaired
- * form passes; a copy the repair cannot make whole (lossy validation, duplicate
- * ids) is still refused.
- */
+
 export function assertNativeLegacyBackupSafe(state: Pick<LegacyJsonImportState, 'jsonAhead' | 'backupJson'>): void {
     if (state.backupJson === null && !state.jsonAhead) return;
     try {
@@ -122,17 +90,17 @@ export function assertNativeLegacyBackupSafe(state: Pick<LegacyJsonImportState, 
             if (raw[table] !== undefined && !Array.isArray(raw[table])) throw new Error();
         }
         const parsed = parseLegacyJsonBackup(state.backupJson);
-        // A host may run this at every start, so a copy that passes as it is costs no repair pass.
+
         if (validatesWhole(state.backupJson, parsed)) return;
         const repaired = repairAppDataForSqlite(parsed).data;
         if (!validatesWhole(JSON.stringify(repaired), repaired)) throw new Error();
     } catch {
-        // Never include backup contents or parser errors in the native UI/log.
+
         throw new Error('Legacy backup requires recovery before native upgrade');
     }
 }
 
-// Backup validation keeps every row, with unique ids, and changes no field of `source`.
+
 const validatesWhole = (json: string, source: AppData): boolean => {
     const validated = validateBackupJson(json);
     if (!validated.valid || !validated.data) return false;
@@ -144,7 +112,7 @@ const validatesWhole = (json: string, source: AppData): boolean => {
     return !legacyImportMismatch(source, validated.data);
 };
 
-/** RN's `sqliteHasAnyData`: any row in any of {@link LEGACY_JSON_IMPORT_DATA_TABLES}. */
+
 export async function sqliteHasAnyData(client: Pick<SqliteClient, 'get'>): Promise<boolean> {
     for (const table of LEGACY_JSON_IMPORT_DATA_TABLES) {
         const row = await client.get<{ count?: number }>(`SELECT COUNT(*) as count FROM ${table}`);
@@ -153,14 +121,7 @@ export async function sqliteHasAnyData(client: Pick<SqliteClient, 'get'>): Promi
     return false;
 }
 
-/**
- * RN's startup decision for `state`, given the validated SQLite load `current`
- * and whether SQLite held any row before the import (`sqliteHasData`).
- *
- * Idempotent: planning again after `merged` is saved (for example when the
- * AsyncStorage update failed) merges the same backup into data that already
- * holds it, which changes nothing and adds no task.
- */
+
 export function planLegacyJsonImport(
     state: LegacyJsonImportState,
     current: AppData,
@@ -195,13 +156,12 @@ export function planLegacyJsonImport(
 
     if (state.jsonAhead) {
         if (backup) {
-            // Saving `merged` always writes the settings row, so RN's next step sees
-            // data and runs the reconcile: it merges the same backup again (no change)
-            // or skips a non-version-2 backup, and sets the flag either way.
+
+
             return { ...imported('json-ahead', backup), clearJsonAhead: true, setReconciled: !state.reconciled };
         }
-        // Absent or corrupt: nothing to recover. SQLite is unchanged, so the
-        // reconcile sees the same backup and sets its flag; step (c) does nothing.
+
+
         return {
             outcome: 'abandoned', path: 'json-ahead', reason,
             clearJsonAhead: true, setReconciled: sqliteHasData && !state.reconciled,
@@ -209,7 +169,7 @@ export function planLegacyJsonImport(
     }
     if (sqliteHasData) {
         if (state.reconciled) return { outcome: 'none', clearJsonAhead: false, setReconciled: false };
-        // An old, unmarked snapshot may be stale; RN checks the version before it reads the backup.
+
         if (state.backupVersion !== LEGACY_JSON_BACKUP_VERSION) reason = 'backup-version';
         if (reason || !backup) {
             return { outcome: 'abandoned', path: 'reconcile', reason, clearJsonAhead: false, setReconciled: true };
@@ -217,7 +177,7 @@ export function planLegacyJsonImport(
         return { ...imported('reconcile', backup), clearJsonAhead: false, setReconciled: true };
     }
     if (!backup) {
-        // RN logs a backup that does not parse and leaves every AsyncStorage key alone.
+
         return reason === 'backup-corrupt'
             ? { outcome: 'abandoned', path: 'migrate', reason, clearJsonAhead: false, setReconciled: false }
             : { outcome: 'none', clearJsonAhead: false, setReconciled: false };
@@ -225,7 +185,7 @@ export function planLegacyJsonImport(
     return { ...imported('migrate', backup), clearJsonAhead: false, setReconciled: !state.reconciled };
 }
 
-// The adapter's own row writers: a row compares equal exactly when saveData would persist the same values.
+
 const ENTITY_ROWS = {
     tasks: taskToSqliteRow,
     projects: projectToSqliteRow,
@@ -233,10 +193,10 @@ const ENTITY_ROWS = {
     areas: areaToSqliteRow,
     people: personToSqliteRow,
 } as const;
-// Only fills a missing area or person timestamp, and the merge has already filled those.
+
 const FIXED_NOW = '1970-01-01T00:00:00.000Z';
 
-// SQLite stores null and missing alike, and core saves an absent savedFilters list as [].
+
 const withoutNulls = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(withoutNulls);
     if (!value || typeof value !== 'object') return value;
@@ -249,11 +209,7 @@ const comparableSettings = (settings: AppData['settings'] | undefined): string =
     return toStableSyncJson(copy);
 };
 
-/**
- * The first table, or `settings`, where `saved` (a SQLite re-read) does not hold
- * `merged` exactly; null when every entity row and the settings match. Rows are
- * compared as the adapter persists them, so null and missing are the same value.
- */
+
 export function legacyImportMismatch(merged: AppData, saved: AppData): string | null {
     for (const [table, toRow] of Object.entries(ENTITY_ROWS) as [keyof typeof ENTITY_ROWS, (item: never, nowIso: string) => unknown[]][]) {
         const rows = (data: AppData) => new Map((data[table] ?? []).map((item) => [item.id, JSON.stringify(toRow(item as never, FIXED_NOW))]));

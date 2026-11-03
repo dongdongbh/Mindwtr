@@ -21,9 +21,6 @@ import {
     type UserPromptState,
 } from './user-prompts';
 
-// The mobile apps' startup prompts beyond the shared queue (moved from React Native's app/_layout.tsx so the native app shows
-// the same prompts on the same rules): which builds may ask for a donation or remind about an update, the delays, and the
-// update reminder's GitHub read and text.
 
 export const resolveMobileDonationPromptAllowed = async (options: {
     platform: string;
@@ -38,8 +35,8 @@ export const resolveMobileDonationPromptAllowed = async (options: {
 export const ANNOUNCEMENT_STARTUP_DELAY_MS = 250;
 export const DONATION_PROMPT_STARTUP_DELAY_MS = 2000;
 export const UPDATE_REMINDER_STARTUP_DELAY_MS = 1750;
-// fetchMobileUpdateReminderInfo is a plain fetch with no timeout; cap present()
-// so a hung network never holds the single prompt slot for the whole session.
+
+
 export const UPDATE_REMINDER_FETCH_TIMEOUT_MS = 15000;
 export const UPDATE_REMINDER_RELEASES_API = 'https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest';
 export const UPDATE_REMINDER_RELEASES_URL = 'https://github.com/dongdongbh/Mindwtr/releases/latest';
@@ -63,7 +60,7 @@ type GitHubLatestRelease = {
 
 type UpdateReminderResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
 
-/** The host's fetch (RN's global fetch; the native app's through its host). */
+
 export type UpdateReminderFetcher = (url: string, init: { headers: Record<string, string> }) => Promise<UpdateReminderResponse>;
 
 export const resolveMobileUpdateReminderAllowed = async (options: {
@@ -106,7 +103,7 @@ export const fetchMobileUpdateReminderInfo = async (
     };
 };
 
-/** The app's words for [key], or the English [fallback] (RN's translateWithFallback; the default keeps English). */
+
 type ResolveText = (key: string, fallback: string) => string;
 
 export const buildUpdateReminderAnnouncement = (
@@ -131,14 +128,14 @@ export const buildUpdateReminderAnnouncement = (
     };
 };
 
-/** The prompt preview's announcement (RN's prompt test controls, a debug build's preview): the real window, test words. */
+
 export const PROMPT_TEST_ANNOUNCEMENT: AppAnnouncement = {
     id: 'prompt-test-announcement',
     title: 'Test announcement',
     body: 'This is the temporary announcement template test. It uses the same popup surface as a real maintainer announcement.',
 };
 
-/** The donation ask in the app language (its words: donationPrompt.*). */
+
 export const translateDonationPromptAnnouncement = (resolveText: ResolveText): AppAnnouncement => ({
     ...DONATION_PROMPT_ANNOUNCEMENT,
     title: resolveText('donationPrompt.title', DONATION_PROMPT_ANNOUNCEMENT.title),
@@ -156,18 +153,18 @@ export const translateDonationPromptAnnouncement = (resolveText: ResolveText): A
 });
 
 export type MobileStartupPromptInput = {
-    /** The device's key-value store (RN's AsyncStorage; the native app's RKStorage). */
+
     storage: {
         getItem: (key: string) => Promise<string | null>;
         setItem: (key: string, value: string) => Promise<void>;
     };
-    /** The first paint has data: a backup snapshot, the canonical load, or a failed load's empty store. */
+
     dataReady: boolean;
-    /** The canonical load finished without an error. */
+
     canonicalDataReady: boolean;
     mobileOnboardingDismissed: boolean;
     visibleDataCount: number;
-    /** The sync backend as the app's sync settings read it; a throw counts as off. */
+
     readSyncBackend: () => Promise<SyncBackend>;
     onSyncBackendReadError: (error: unknown) => void;
     updateReminderAllowed: boolean | null;
@@ -179,10 +176,7 @@ export type MobileStartupPromptInput = {
     getSupportPrompt: () => Parameters<typeof shouldShowDonationPrompt>[0]['supportPrompt'];
 };
 
-/**
- * The mobile apps' four startup prompts for the shared queue (startup-prompts.ts), highest first: first-run onboarding,
- * the maintainer announcement, the update reminder, and the donation ask.
- */
+
 export function buildMobileStartupPromptDescriptors(input: MobileStartupPromptInput): StartupPromptDescriptor[] {
     const {
         storage,
@@ -193,13 +187,13 @@ export function buildMobileStartupPromptDescriptors(input: MobileStartupPromptIn
         donationPromptAllowed,
         promptStateSnapshot,
     } = input;
-    // Onboarding waits for the canonical load: after a failed load the store is empty though the library may not be, and
-    // seeding Getting Started there could duplicate it and would dismiss the welcome sheet for good.
+
+
     const dataReady = input.dataReady && canonicalDataReady;
     return [
         {
-            // First-run onboarding outranks everything: a brand-new user must not meet
-            // an announcement or a donation ask before the welcome flow.
+
+
             id: 'onboarding',
             priority: 40,
             delayMs: 0,
@@ -221,8 +215,8 @@ export function buildMobileStartupPromptDescriptors(input: MobileStartupPromptIn
             },
         },
         {
-            // Maintainer announcement: when one is configured it also blocks the
-            // donation and update prompts (see their isEligible).
+
+
             id: 'announcement',
             priority: 30,
             delayMs: ANNOUNCEMENT_STARTUP_DELAY_MS,
@@ -241,8 +235,8 @@ export function buildMobileStartupPromptDescriptors(input: MobileStartupPromptIn
             },
         },
         {
-            // Update reminder: records the check on selection, then confirms an update
-            // actually exists before opening (declines otherwise).
+
+
             id: 'update-reminder',
             priority: 20,
             delayMs: UPDATE_REMINDER_STARTUP_DELAY_MS,
@@ -258,9 +252,8 @@ export function buildMobileStartupPromptDescriptors(input: MobileStartupPromptIn
                 });
             },
             onSelect: () => {
-                // Safe here and only here: the queue runs onSelect after this descriptor
-                // has won the slot, so the once-a-day check is never burned by a prompt
-                // that never ran.
+
+
                 void updateLocalUserPromptState(storage, (state) => recordUpdateReminderChecked(state, Date.now()))
                     .catch(input.onUpdateCheckRecordError);
             },
@@ -286,8 +279,8 @@ export function buildMobileStartupPromptDescriptors(input: MobileStartupPromptIn
             },
         },
         {
-            // Donation ask: lowest precedence; suppressed whenever an announcement is
-            // configured or an update reminder is showing (via the queue).
+
+
             id: 'donation',
             priority: 10,
             delayMs: DONATION_PROMPT_STARTUP_DELAY_MS,

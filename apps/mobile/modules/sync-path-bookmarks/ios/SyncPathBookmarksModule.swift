@@ -55,8 +55,7 @@ public class SyncPathBookmarksModule: Module {
         return nil
       }
 
-      // Keep one long-lived sandbox extension so legacy path-based access
-      // (ExpoFile fallback, sibling backup file) keeps working during sync.
+
       self.startActiveScopedAccess(resolved.url)
 
       var refreshedBookmark: String? = nil

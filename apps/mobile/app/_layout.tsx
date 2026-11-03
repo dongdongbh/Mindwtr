@@ -105,11 +105,7 @@ import { persistLastRoute, sanitizeAndroidActivityNavigationState } from '@/lib/
 import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
 import { useIosSceneDiagnostics } from '@/hooks/use-ios-scene-diagnostics';
 
-// Blurred screens stay mounted, so every store change re-rendered every list in
-// the stack: a #766 log showed three project task lists (tab route + two pushed
-// stack entries) each spending ~1s on the same 133 rows per tap. Freezing
-// non-focused screens skips those renders; state, scroll position and native
-// views are retained, and the screen re-renders with current data on focus.
+
 enableFreeze(true);
 
 let coreLoggerBridgeInstalled = false;
@@ -229,11 +225,10 @@ const getViewBreadcrumb = (pathname: string | null): string | null => {
 
 installCoreLoggerBridge();
 
-// Hermes has no crypto.subtle, so core's attachment integrity checks have nothing to
-// digest with until this is registered (see mobileSha256Hex).
+
 setSha256HexProvider(mobileSha256Hex);
 
-// Keep splash visible until app is ready.
+
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 markStartupPhase('js.root_layout.module_loaded');
 
@@ -292,8 +287,8 @@ function RootLayoutContentInner() {
   const settingsCalendarSystem = useTaskStore((state) => state.settings?.calendarSystem);
   const settingsTimeFormat = useTaskStore((state) => state.settings?.timeFormat);
   const mobileAppLockEnabled = useTaskStore((state) => state.settings?.security?.mobileAppLockEnabled === true);
-  // What the lock gate last reported (#1475). Links can run on dataReady before the gate mounts at first paint,
-  // so until it reports, an enabled lock counts as locked (a cold start always asks).
+
+
   const [appLocked, setAppLocked] = useState(true);
   const seedGettingStarted = useTaskStore((state) => state.seedGettingStarted);
   const visibleDataCount = useTaskStore((state) => (
@@ -314,8 +309,8 @@ function RootLayoutContentInner() {
   const [recoveredActivityNavigationState, setRecoveredActivityNavigationState] = useState<ReturnType<
     typeof sanitizeAndroidActivityNavigationState
   >>(null);
-  // Prompt state read once at startup so the descriptors below can answer
-  // `isEligible` synchronously; null until it lands (or if the read failed).
+
+
   const [promptStateSnapshot, setPromptStateSnapshot] = useState<UserPromptState | null>(null);
   const activeAnnouncement = testAnnouncement ?? ACTIVE_APP_ANNOUNCEMENT;
 
@@ -400,8 +395,8 @@ function RootLayoutContentInner() {
 
   useEffect(() => {
     if (!isFirstPaintReady || !recoveredActivityNavigationState) return undefined;
-    // A freshly delivered URL/share owns startup routing. The recovered root
-    // never replays or displaces an external one-shot action.
+
+
     if (incomingUrlKey > 0 || hasShareIntent || widgetLaunch.pending) {
       setRecoveredActivityNavigationState(null);
       return undefined;
@@ -422,7 +417,7 @@ function RootLayoutContentInner() {
           },
         });
       } catch {
-        // Optional same-process recovery fails back to Expo Router startup.
+
       }
       setRecoveredActivityNavigationState(null);
     };
@@ -440,16 +435,15 @@ function RootLayoutContentInner() {
   ]);
 
   useRootLayoutNotificationOpenHandler({
-    // A cold-start notification Complete action writes the store, so it waits
-    // for canonical data like the startup writers below.
+
+
     appReady: isFirstPaintReady && canonicalDataReady,
     disabled: sandboxMode,
     pathname,
     router,
   });
-  // Android drops notifications on reboot and OEMs drop them when they kill
-  // the app process; re-arm the persistent quick-capture notification (when
-  // enabled) on start and on every return to the foreground (#819).
+
+
   useEffect(() => {
     if (sandboxMode || !languageReady || Platform.OS !== 'android') return;
     return keepPersistentCaptureNotificationArmed(() => ({
@@ -458,10 +452,8 @@ function RootLayoutContentInner() {
       channelName: resolveText('captureNotification.channelName', 'Quick capture'),
     }));
   }, [languageReady, resolveText, sandboxMode]);
-  // Startup writers wait for canonical (SQLite) data, not the backup snapshot
-  // that paints first. A store write on top of the snapshot makes core discard
-  // the canonical load, and the session then runs on stale data. Their inputs
-  // (queue files, share intents, URLs) stay held until then.
+
+
   useRootLayoutContextAutomation({
     canonicalDataReady,
     disabled: sandboxMode,
@@ -511,12 +503,11 @@ function RootLayoutContentInner() {
     addBreadcrumb(breadcrumb);
   }, [pathname, sandboxMode]);
 
-  // Remember the screen the user is on so a reopen shortly after the OS kills
-  // the app resumes there instead of resetting to Focus (#842).
+
   const globalSearchParams = useGlobalSearchParams<{ projectId?: string; tab?: string }>();
   const routeProjectId = typeof globalSearchParams.projectId === 'string' ? globalSearchParams.projectId : undefined;
-  // History keeps its Done/Archived choice in this param, so the snapshot must
-  // carry it or the screen comes back on the wrong tab.
+
+
   const routeTab = typeof globalSearchParams.tab === 'string' ? globalSearchParams.tab : undefined;
   const lastRouteRef = useRef<{ pathname: string; projectId?: string; tab?: string }>({ pathname });
   useEffect(() => {
@@ -526,8 +517,8 @@ function RootLayoutContentInner() {
   }, [pathname, routeProjectId, routeTab, sandboxMode]);
   useEffect(() => {
     if (sandboxMode) return;
-    // The snapshot timestamp must reflect when the session left the app, not
-    // the last navigation — refresh it whenever the app goes to background.
+
+
     const subscription = AppState.addEventListener('change', (state) => {
       if (state !== 'background' && state !== 'inactive') return;
       const { pathname: lastPathname, projectId, tab } = lastRouteRef.current;
@@ -620,14 +611,10 @@ function RootLayoutContentInner() {
     };
   }, [sandboxMode]);
 
-  // Startup prompts share one gate and open one at a time. The descriptors
-  // below carry each prompt's own eligibility/present logic; the queue owns
-  // precedence (onboarding > announcement > update > donation), the startup
-  // delays, and session dismissal. See packages/core/src/startup-prompts.ts.
+
   const startupPromptsEnabled = !sandboxMode && process.env.NODE_ENV !== 'test';
-  // A failed load marks data ready with an empty store; the welcome sheet then waits (core's descriptors), and this line
-  // proves it held.
-  // Forced: a failed load leaves the store's settings empty, so the diagnostics switch reads off.
+
+
   const onboardingHeldLogged = useRef(false);
   const dataLoadFailed = useTaskStore((state) => Boolean(state.error));
   useEffect(() => {
@@ -681,8 +668,8 @@ function RootLayoutContentInner() {
     updateReminderAllowed,
     visibleDataCount,
   ]);
-  // dismiss/forceOpen/closeAll are stable across renders; depending on them
-  // (rather than on the queue object) keeps the prompt callbacks stable too.
+
+
   const {
     openId: startupPromptOpenId,
     dismiss: dismissStartupPrompt,
@@ -704,7 +691,7 @@ function RootLayoutContentInner() {
       });
     },
   });
-  // "Show onboarding again" from settings bypasses the gate entirely.
+
   useEffect(() => subscribeMobileOnboardingEvent(() => {
     setMobileOnboardingBusy(false);
     setMobileOnboardingError(null);
@@ -838,7 +825,7 @@ function RootLayoutContentInner() {
           extra: { error: error instanceof Error ? error.message : String(error) },
         });
       });
-    // Synced so the other installs on this dataset skip the same ask (#1237).
+
     const { settings, updateSettings } = useTaskStore.getState();
     void updateSettings({ supportPrompt: withSupportPromptShown(settings.supportPrompt, nowMs) });
   }, []);
@@ -961,9 +948,8 @@ function RootLayoutContentInner() {
   useEffect(() => {
     if (sandboxMode || !isFirstPaintReady) return undefined;
     let cancelled = false;
-    // Today's activity is recorded first so the snapshot the donation and update
-    // descriptors read already counts this launch. A failed read leaves the
-    // snapshot null, which keeps both prompts out of the queue for the session.
+
+
     recordLocalPromptActivity()
       .then((promptState) => {
         if (!cancelled) setPromptStateSnapshot(promptState);
@@ -1023,7 +1009,7 @@ function RootLayoutContentInner() {
     };
   }, [androidInstallerSource, isExpoGo, isFossBuild, sandboxMode]);
 
-  // Avoid mounting task screens against the empty default store before local hydration finishes.
+
   if (!isFirstPaintReady) {
     return null;
   }
@@ -1142,8 +1128,8 @@ function RootLayoutContentInner() {
 export default function RootLayout() {
   return (
     <MobileWorkspaceBootGate>
-      {/* The root layout resets each share once it handles it. The default reset on leaving 'active' would drop a
-          share held under the app lock when the Face ID prompt makes iOS report 'inactive' (#1475). */}
+      {
+                                                                                                       }
       <ShareIntentProvider options={{ resetOnBackground: false }}>
         <ThemeProvider>
           <LanguageProvider>

@@ -1,4 +1,4 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const csOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "Před začátkem",
     "attachments.webUploadRequiresCloud": "Nahrávání v prohlížeči vyžaduje synchronizaci s vlastním cloudovým serverem.",
@@ -115,7 +115,7 @@ export const csOverrides: Record<string, string> = {
         'settings.automationCaptureCopyFailed': "Token zachycení se nepodařilo zkopírovat.",
         'settings.automationCaptureLoadFailed': 'Nastavení automatizovaného zachytávání se nepodařilo načíst.',
         'settings.automationCaptureUpdateFailed': 'Nastavení automatizovaného zachytávání se nepodařilo aktualizovat.',
-        // Ratchet backfill (i18n-fallback-20260730-12): new en.ts keys
+
         'accessibility.skipToContent': 'Přeskočit na obsah',
         'accessibility.mainContent': 'Hlavní obsah',
         'quickAdd.pastedImageTitle': 'Snímek obrazovky',
@@ -2157,7 +2157,7 @@ export const csOverrides: Record<string, string> = {
         'settings.syncMobile.useRedirectUri': 'Použít přesměrovací URI',
         'settings.syncMobile.webdavEndpointIsReachable': 'Endpoint WebDAV je dostupný.',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'Vyčistit hlavu',
         'mindSweep.title': 'Vyčistit hlavu',
         'mindSweep.intro': 'Projděte několik seznamů podnětů a zapište vše, co vás napadne. Netřiďte ani neorganizujte — každá položka skončí ve schránce a zpracujete ji později.',

@@ -66,9 +66,7 @@ export type ReviewStepDefinition = {
     title: string;
 };
 
-// Weekly Review's per-step candidate lists live in core (ADR 0021); these
-// three types are re-exported under their historical local names so callers
-// of this controller don't need to change their imports.
+
 export type {
     CalendarReviewEntry as CalendarTaskReviewEntry,
     ContextReviewGroup,
@@ -297,7 +295,7 @@ export function useReviewModalController({
         }
         completingProjectRef.current = true;
         setCompletingProjectId(projectId);
-        // Keep the current review step stable while the store publishes the archive.
+
         setKeepProjectsStep(true);
         try {
             const result = await state.updateProject(projectId, { status: 'archived' });
@@ -389,15 +387,15 @@ export function useReviewModalController({
         }, 650);
     }, [handleClose]);
 
-    // Core owns the complete Weekly Review model (review-utils, review-views-model).
+
     const weeklyBuckets = useMemo(
         () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart, sections }),
         [projects, sections, settings?.weekStart, tasks],
     );
     const staleItems = weeklyBuckets.staleItems;
     const completion = getWeeklyReviewCompletion(weeklyBuckets, settings, labels);
-    // Deliberately over tasks (visible tasks), not the store's _tasksById
-    // (all tasks incl. hidden) — PERF-03 leaves this site alone on purpose.
+
+
     const stale = useMemo(() => getWeeklyReviewStale(staleItems, tasks, labels), [labels, staleItems, tasks]);
     const staleTasks = stale.tasks;
     const staleProjectItems = stale.projects;
@@ -425,7 +423,7 @@ export function useReviewModalController({
         try {
             apiKey = await loadAIKey(aiProvider);
         } catch (error) {
-            // An unreadable keystore fails like a request, never as an unhandled rejection.
+
             setAiError(getWeeklyReviewAnalysisError(error, t, '', settings));
             return;
         }
@@ -476,7 +474,7 @@ export function useReviewModalController({
     );
     const contextReviewGroups = weeklyBuckets.contextGroups;
 
-    // A project without an area color takes the theme tint when drawn.
+
     const projectReviewEntries = useMemo(
         () => getWeeklyReviewProjects(weeklyBuckets.projectEntries, areaById, labels),
         [areaById, labels, weeklyBuckets.projectEntries],
@@ -523,7 +521,7 @@ export function useReviewModalController({
 
     const navigateFromPreview = useCallback((navigate: () => void) => {
         if (!visible) return;
-        // UIKit must dismiss the child sheet, then the review, before changing routes.
+
         if (Platform.OS === 'ios') {
             pendingNavigationRef.current ??= { after: 'editor', navigate };
         } else {
@@ -551,8 +549,7 @@ export function useReviewModalController({
         navigateFromPreview(() => openProjectScreen(projectId));
     }, [navigateFromPreview]);
 
-    // From a review row, not the task editor: no child sheet is open, so on iOS
-    // only the review itself has to dismiss before the route changes (#1459).
+
     const handleOpenProject = useCallback((projectId: string) => {
         if (!visible) return;
         const navigate = () => openProjectScreen(projectId);

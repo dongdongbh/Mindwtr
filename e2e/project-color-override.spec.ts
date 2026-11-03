@@ -28,7 +28,7 @@ test('project color persists an explicit matching hue and resets to live Area in
     await page.reload();
     await openDetails();
     await expect.poll(savedOverride).toBe('#3b82f6');
-    // Simulate the persisted Area recolor arriving from another client.
+
     await page.evaluate(() => {
         const data = JSON.parse(localStorage.getItem('mindwtr-data')!);
         data.areas[0].color = '#ef4444';

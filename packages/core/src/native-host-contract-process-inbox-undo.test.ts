@@ -201,7 +201,7 @@ describe('Process Inbox public Undo', () => {
             const before = await snapshot(sqlite);
             expect(sqlite.host.inboxUndoPrepare({ request, decision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
             expect(await snapshot(sqlite)).toEqual(before);
-            // A coherent AFTER row is not proof that this original request saved.
+
             expect((await useTaskStore.getState().commitPreparedInboxEffect(decision.prepared.effect)).success).toBe(true);
             await flushPendingSave();
             expect(sqlite.host.inboxUndoPrepare({ request, decision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -356,7 +356,7 @@ describe('Process Inbox public Undo', () => {
         const sqlite = await openSqliteHost(seed());
         try {
             const decision = prepareDecision(sqlite);
-            // The historical v1 committer could have saved its effect without a request receipt.
+
             expect((await useTaskStore.getState().commitPreparedInboxEffect(decision.prepared.effect)).success).toBe(true);
             await flushPendingSave(); expect(await sqlite.receiptIds()).toEqual([]);
             await sqlite.restart(undefined, { recoveryLoad: true });
@@ -407,8 +407,7 @@ describe('Process Inbox public Undo', () => {
     });
 });
 
-// #1461: the native step view offers the chosen project's sections; the host
-// refuses a section from another project, and File it writes the picked one.
+
 describe('Process Inbox project section on the native host', () => {
     it('offers, checks and writes the chosen project section', async () => {
         const project = (id: string, title: string, order: number) => ({ id, title, status: 'active' as const, color: '#000', order,

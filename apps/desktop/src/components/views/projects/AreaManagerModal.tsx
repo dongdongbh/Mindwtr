@@ -50,7 +50,7 @@ export function AreaManagerModal({
     const newAreaLabel = resolveText('areas.new', 'New Area');
     const areaNamePlaceholder = resolveText('areas.namePlaceholder', 'Area name');
     const loadingLabel = resolveText('common.loading', 'Loading...');
-    // A live area has this name: creating it would add nothing, so Create is off and the line says why.
+
     const newAreaNameTaken = isManageAreaNameTaken('newArea', newAreaName, sortedAreas);
 
     return (
@@ -59,10 +59,8 @@ export function AreaManagerModal({
             labelledBy={titleId}
             placement="top"
             overlayClassName="pt-[15vh]"
-            // Capped so a long area list scrolls instead of running off the
-            // bottom of the window (#957). overflow stays visible: the row and
-            // new-area colour pickers are absolutely positioned menus that have
-            // to escape the panel.
+
+
             panelClassName="max-w-lg max-h-[70vh] overflow-visible"
         >
             <DialogHeader className="px-4 py-3 border-b flex items-center justify-between gap-2">
@@ -119,8 +117,8 @@ export function AreaManagerModal({
                     )}
                 </div>
             </DialogBody>
-            {/* Stays out of the scroll area so a long list can never push
-                the create row out of reach. */}
+            {
+                                               }
             <DialogFooter className="mx-4 border-t border-border/50 pt-3 pb-4 space-y-2">
                 <label className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
                     {newAreaLabel}

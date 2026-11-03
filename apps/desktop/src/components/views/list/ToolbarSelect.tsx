@@ -11,8 +11,7 @@ import { cn } from '../../../lib/utils';
 import { ModalPortal } from '../../ModalPortal';
 import { useDropdownPosition } from '../../ui/use-dropdown-position';
 
-// A themed, portaled listbox shared by list toolbars and task status pills.
-// The toolbar trigger keeps the old icon/caption/value frame (#861).
+
 const TOOLBAR_SELECT_TRIGGER =
     'relative flex h-9 items-center rounded-lg border pl-2 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40';
 const TOOLBAR_SELECT_LABEL = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground';
@@ -46,8 +45,7 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
 
     const selected = options.find((option) => option.value === value);
 
-    // Read the current value at open time without re-running the focus effect on
-    // every value change (an external change mid-navigation must not steal focus).
+
     const valueRef = useRef(value);
     valueRef.current = value;
 
@@ -63,10 +61,7 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
         return () => document.removeEventListener('mousedown', handleClick);
     }, [open]);
 
-    // Only on the closed→open transition, move focus to the selected option (or
-    // the first enabled one), so arrow keys start from the current value like a
-    // native select. Depending on `open` alone keeps a value change while the
-    // popup is open from yanking focus off the option the user navigated to.
+
     useEffect(() => {
         if (!open) return;
         const dropdown = dropdownRef.current;
@@ -76,8 +71,7 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
         active?.focus();
     }, [open]);
 
-    // Return focus to the trigger on keyboard/selection close so the user is not
-    // stranded on the removed portal node (outside clicks bypass this on purpose).
+
     const closeDropdown = () => {
         setOpen(false);
         triggerRef.current?.focus();
@@ -100,9 +94,7 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
         optionEls[nextIndex]?.focus();
     };
 
-    // stopPropagation keeps the enclosing View popover and app-wide shortcut
-    // handlers (some registered at the capture phase) from reacting to keys the
-    // open listbox consumes — the listbox is portaled outside any ancestor.
+
     const handleDropdownKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
         if (event.key === 'Escape') {
             event.preventDefault();
@@ -111,9 +103,8 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
             return;
         }
         if (event.key === 'Tab') {
-            // Close and hand focus back to the trigger, then let the browser move
-            // focus naturally from there — no preventDefault, so Tab/Shift+Tab
-            // don't leave the listbox visibly open while focus walks the portal.
+
+
             closeDropdown();
             return;
         }
@@ -218,8 +209,8 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
                                         selectValue(option.value);
                                     }}
                                     className={cn(
-                                        // `block` matters: inline-block buttons with percentage width
-                                        // blow up the popup's max-content width in Chromium.
+
+
                                         'block w-full text-left px-2 py-1 rounded focus:outline-none',
                                         option.disabled
                                             ? 'cursor-default text-muted-foreground opacity-50'

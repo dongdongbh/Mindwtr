@@ -1,12 +1,6 @@
-// This is the consolidation-law guard for the MCP task write-surface derivation
-// (task-write-fields.ts/task-field-schemas.ts): a test that only re-imports the already
-// derived TASK_CREATE_FIELD_NAMES/TASK_PATCH_FIELD_NAMES and asserts they equal themselves
-// would pass even if the derivation silently narrowed. This file instead (a) recomputes the
-// expected sets independently, straight from TASK_SYNC_FIELD_SCHEMA, in its own expression —
-// not by importing task-write-fields.ts's filter — so a bug in that file's filter shows up as
-// a mismatch here, and (b) asserts the REAL Zod tool schemas (addTaskSchema/updateTaskSchema)
-// actually carry every derived field, not just that the derivation constants look right in
-// isolation.
+
+
+
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { TIME_ESTIMATE_OPTIONS } from '@mindwtr/core';
@@ -23,8 +17,7 @@ import {
   TASK_WRITE_FIELD_EXCLUSIONS,
 } from './task-write-fields.js';
 
-// Mirrors what a field needs to reach mindwtr_add_task/mindwtr_update_task: writable per the
-// schema, and not the id/title identity fields those tools already expose their own way.
+
 const DEDICATED_FIELD_NAMES = new Set([
   'title', 'status', 'priority', 'energyLevel', 'assignedTo', 'startTime', 'dueDate',
   'recurrence', 'tags', 'contexts', 'description', 'projectId', 'sectionId', 'timeEstimate',
@@ -127,11 +120,7 @@ describe('MCP task write-surface derivation (TASK_SYNC_FIELD_SCHEMA -> Zod tool 
     for (const name of TASK_PATCH_FIELD_NAMES) expect(updateSection).toContain(`${name}?`);
   });
 
-  // Mutation-test evidence (per the consolidation law): manually removing 'checklist' from
-  // TASK_CREATE_FIELD_NAMES's filter in task-write-fields.ts (temporarily, while developing
-  // this test) made the second test above fail as expected; removing 'attachments' from
-  // TASK_WRITE_FIELD_EXCLUSIONS made the third test above fail (extra field not accounted
-  // for by DEDICATED_FIELD_NAMES/exclusions). Both were reverted before landing.
+
   test('closes the create-time gap: checklist, areaId, reviewAt, isFocusedToday reach mindwtr_add_task', () => {
     const shapeKeys = new Set(Object.keys(addTaskSchema.shape));
     for (const name of ['checklist', 'areaId', 'reviewAt', 'isFocusedToday']) {
@@ -139,8 +128,7 @@ describe('MCP task write-surface derivation (TASK_SYNC_FIELD_SCHEMA -> Zod tool 
     }
   });
 
-  // Zod 4 nests a nullable field's description inside its anyOf branch; LLM clients read the
-  // property's own description to pick fields, so the advertised update schemas must keep it.
+
   test('advertised update tools keep each generated field description on the property itself', async () => {
     const server = new McpServer({ name: 'field-descriptions-test', version: '1' });
     registerMindwtrTools(server, {} as MindwtrService, false, { localApi: false });

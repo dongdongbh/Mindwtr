@@ -149,7 +149,7 @@ describe('native Apple Reminders pure item preparation', () => {
             expect(() => validatePreparedNativeAppleReminderImportItem({ request, prepared: plan })).toThrow();
         const classification = classifyAppleReminderForImport(source.request.reminder, source.request.list.id, new Set(['native:not-a-uuid']));
         expect(classification.kind).toBe('duplicate');
-        // A later registry state does not change an already accepted plan's pure validation.
+
         expect(validatePreparedNativeAppleReminderImportItem({ request: source.request, prepared: plan })).toEqual(plan);
     });
     it('rejects every factory/task/result witness alteration and existing-mode creation authority', () => {

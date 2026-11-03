@@ -88,7 +88,7 @@ export function SomedayView() {
     [navBarInset],
   );
 
-  // What the screen lists, groups, counts and offers comes from core, shared with the native host.
+
   const baseSomedayTasks = useMemo(() => selectSomedayTasks(visibleTasks), [visibleTasks]);
   const filterOptions = useMemo(
     () => buildSomedayFilterOptions({ tasks: baseSomedayTasks, projects, settings, t }),
@@ -215,7 +215,7 @@ export function SomedayView() {
   };
   const moveProjectToSection = (project: Project, sectionId: string | undefined) => {
     setMovingProject(null);
-    // Built on the project as it is when the write is admitted, so a sync save's newer sections stay.
+
     void settleStoreAction(() => runStoreCommand(async () => {
       const latest = useTaskStore.getState().projects.find((candidate) => candidate.id === project.id) ?? project;
       const update = buildProjectViewSectionUpdate(latest, 'someday', sectionId);

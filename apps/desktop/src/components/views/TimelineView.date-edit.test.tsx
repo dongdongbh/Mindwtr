@@ -24,7 +24,7 @@ const down = (control: HTMLElement, x = 100) => fireEvent.pointerDown(control, {
 const move = (x: number) => fireEvent.pointerMove(window, { pointerId: 1, clientX: x });
 const up = (x: number) => fireEvent.pointerUp(window, { pointerId: 1, clientX: x });
 
-// jsdom lacks PointerEvent on some supported Node versions.
+
 class TestPointerEvent extends MouseEvent {
     pointerId: number;
     constructor(type: string, init: PointerEventInit) {

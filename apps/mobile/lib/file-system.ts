@@ -58,7 +58,7 @@ const ensureFileParentDirectory = (uri: string): void => {
   try {
     file.parentDirectory.create({ intermediates: true, idempotent: true });
   } catch {
-    // Ignore parent creation failures here and let the write/copy operation report a real error.
+
   }
 };
 
@@ -122,9 +122,7 @@ export const cacheDirectory = resolveDirectoryUri(
   LegacyFileSystem.cacheDirectory ?? null
 );
 
-/** Android-only: converts a file:// URI to a granted content:// URI so other
- *  apps (attachment viewers) can read it. Legacy API — the modern File class
- *  has no equivalent yet. */
+
 export const getContentUriAsync = async (uri: string): Promise<string> =>
   LegacyFileSystem.getContentUriAsync(uri);
 
@@ -283,9 +281,8 @@ export const StorageAccessFramework = {
           ? () => LegacyFileSystem.readAsStringAsync(uri, options)
           : null
     ),
-  // SAF documents are `content://` URIs, which the generic legacy writer cannot
-  // take; prefer the legacy module's own SAF writer, mirroring the read path
-  // above, so a failed native write still lands the bytes.
+
+
   writeAsStringAsync: async (uri: string, contents: string, options: WriteOptions = {}): Promise<void> =>
     withLegacyFallback(
       canUseModernApi()

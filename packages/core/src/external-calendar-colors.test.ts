@@ -39,16 +39,16 @@ describe('external calendar colors', () => {
         const sourceId = 'work-calendar';
         const hash = getExternalCalendarColorForId(sourceId);
 
-        // No explicit pick, no feed hint -> deterministic hash.
+
         expect(resolveExternalCalendarColor(sourceId)).toBe(hash);
 
-        // Feed hint present, no explicit pick -> feed color wins over hash.
+
         expect(resolveExternalCalendarColor(sourceId, undefined, '#123456')).toBe('#123456');
 
-        // Explicit pick present -> wins over both feed and hash.
+
         expect(resolveExternalCalendarColor(sourceId, '#2563EB', '#123456')).toBe('#2563EB');
 
-        // A malformed feed color falls through to the hash, never throws.
+
         expect(resolveExternalCalendarColor(sourceId, undefined, 'not-a-color')).toBe(hash);
     });
 
@@ -56,16 +56,13 @@ describe('external calendar colors', () => {
         const sourceId = 'legacy-calendar';
         const hash = getExternalCalendarColorForId(sourceId);
 
-        // A pre-existing calendar whose stored color happens to equal the
-        // hash default (the pre-#974 creation-time behavior) yields to a
-        // feed hint once one is available.
+
         expect(resolveExternalCalendarColor(sourceId, hash, '#123456')).toBe('#123456');
 
-        // With no feed hint, the stored value still resolves correctly
-        // (it equals the hash default either way).
+
         expect(resolveExternalCalendarColor(sourceId, hash, undefined)).toBe(hash);
 
-        // Picking any other swatch still wins outright, feed hint or not.
+
         const otherSwatch = EXTERNAL_CALENDAR_COLORS.find((color) => color !== hash)!;
         expect(resolveExternalCalendarColor(sourceId, otherSwatch, '#123456')).toBe(otherSwatch);
     });
@@ -75,13 +72,12 @@ describe('external calendar colors', () => {
         const hash = getExternalCalendarColorForId(sourceId);
         const otherSwatch = EXTERNAL_CALENDAR_COLORS.find((color) => color !== hash)!;
 
-        // Unset, and stored-equal-to-hash-default, are both "auto".
+
         expect(hasExplicitExternalCalendarColor(sourceId)).toBe(false);
         expect(hasExplicitExternalCalendarColor(sourceId, hash)).toBe(false);
         expect(hasExplicitExternalCalendarColor(sourceId, otherSwatch)).toBe(true);
 
-        // Must agree with the resolver: explicit wins over a feed hint,
-        // auto yields to it.
+
         expect(resolveExternalCalendarColor(sourceId, otherSwatch, '#123456')).toBe(otherSwatch);
         expect(resolveExternalCalendarColor(sourceId, hash, '#123456')).toBe('#123456');
     });
@@ -90,7 +86,7 @@ describe('external calendar colors', () => {
 describe('themeExternalCalendarDisplayColor', () => {
     it('remaps a pickable swatch under nord, case-insensitively', () => {
         expect(themeExternalCalendarDisplayColor('#2563eb', 'nord')).toBe('#5e81ac');
-        // The swatches are stored upper-case; the map is keyed lower-case.
+
         expect(themeExternalCalendarDisplayColor('#2563EB', 'nord')).toBe('#5e81ac');
     });
 
@@ -125,7 +121,7 @@ describe('themeExternalCalendarDisplayColor', () => {
         const hash = getExternalCalendarColorForId(sourceId);
         const otherSwatch = EXTERNAL_CALENDAR_COLORS.find((color) => color !== hash)!;
 
-        // The remap sits after resolution: storage-facing answers stay canonical.
+
         expect(resolveExternalCalendarColor(sourceId, otherSwatch)).toBe(otherSwatch);
         expect(hasExplicitExternalCalendarColor(sourceId, otherSwatch)).toBe(true);
         expect(themeExternalCalendarDisplayColor(otherSwatch, 'nord')).not.toBe(otherSwatch);

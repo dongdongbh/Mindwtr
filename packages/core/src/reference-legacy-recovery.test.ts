@@ -90,7 +90,7 @@ describe('legacy archived-project Reference recovery (#1198)', () => {
         const first = load(makeData());
         expect(first.applied).toContain('recover-legacy-project-references');
         expect(first.data.settings.migrations?.legacyReferenceRecoveryVersion).toBe(LEGACY_REFERENCE_RECOVERY_VERSION);
-        // A <=1.2.8 peer completes the recovered reference again on its own load.
+
         const relapsed = {
             ...first.data,
             tasks: [completeTaskForProjectArchive(first.data.tasks[0], now, 'older-device')],

@@ -1,19 +1,12 @@
-// The merge series' resume budget (measure-merge-device.mjs analyze --budget). The primary gate is the engine's longest
-// uninterrupted block during sync: one long block decides the tap p90 by how many taps happen to land in it, so the tap gate
-// alone passed or failed the same ~900 ms block by chance (D9b change 5). Known-good builds sit at about 330 / 375 ms
-// (median / p90), the regressed ones at 900+; 300 would fail the good ones.
+
+
 
 export const BLOCK_MEDIAN_MS = 450;
 export const BLOCK_P90_MS = 550;
-/** Good samples (traces that analyzed without an error) a budget run needs: about 160 measured taps. */
+
 export const BUDGET_SAMPLES = 20;
 
-/**
- * The verdict for one series: `pass`, `fail`, or `repeat` when the block gate and the tap gate disagree (run the series
- * again with `repeat`; a second disagreement fails as noisy). Too few good samples, no tap in the sync span, or too many
- * unanswered taps fail outright.
- * Returns `{ verdict, reasons }`.
- */
+
 export const budgetVerdict = (summary, { tapP90Ms, repeat = false }) => {
     const reasons = [];
     if (!(summary.samples >= BUDGET_SAMPLES)) {

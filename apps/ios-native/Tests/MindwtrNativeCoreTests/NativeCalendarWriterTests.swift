@@ -264,7 +264,7 @@ final class NativeCalendarWriterTests: XCTestCase {
         assertError(.invalid) { try details(notes: String(repeating: "a", count: 600_000), location: String(repeating: "b", count: 600_000)) }
         assertError(.invalid) { try create(title: String(repeating: "\u{1}", count: 200_000)) }
 
-        // Find the actual typed-detail ceiling, then add the maximum target ID.
+
         var lower = 0, upper = limit
         while lower + 1 < upper {
             let middle = (lower + upper) / 2
@@ -554,7 +554,7 @@ private final class WitnessedJobsProvider: NativeCalendarWriteWitnessing, @unche
     func calendars() throws -> [[String: Any]] { [] }
     func events(calendarIds: [String], start: Date, end: Date) throws -> [[String: Any]] { [] }
     func sources() throws -> [NativeCalendarSource] { try NativeCalendarWritePolicy.sources(policy) }
-    // The witnessed method is the tested dispatch; unrefined compatibility has its existing separate fake.
+
     func createCalendar(_ details: NativeCalendarCreateDetails) throws -> String { throw NativeCalendarWriteError.unavailable }
     func updateCalendar(calendarID: String, details: NativeCalendarUpdateDetails) throws { throw NativeCalendarWriteError.unavailable }
     func deleteCalendar(calendarID: String) throws { throw NativeCalendarWriteError.unavailable }

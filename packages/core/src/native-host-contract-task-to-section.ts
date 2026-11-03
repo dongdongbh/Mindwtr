@@ -10,7 +10,7 @@ import { planTaskToSection, taskEditValuesEqual, taskToSectionOrderMax } from '.
 import { requestRowId, taskRevisionOf, type NativeRequestReceipts } from './native-request-receipts';
 import { normalizeOptionalContainerId } from './task-container-rules';
 
-/** RN's editor Convert to section for the saved task the editor showed (RN saves the draft first). */
+
 export type NativeTaskToSectionRequest = { requestId: string; taskId: string; taskRevision: string };
 export type NativeTaskToSectionResult = { projectId: string; sectionId: string };
 export type NativePreparedTaskToSection = PreparedTaskToSection & {
@@ -23,14 +23,14 @@ const record = (value: unknown): value is Record<string, unknown> => Boolean(val
 const exact = (value: Record<string, unknown>, keys: readonly string[]) => Object.keys(value).length === keys.length
     && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
 const same = taskEditValuesEqual;
-// Object order changes when a native host encodes its journal; array order never does.
+
 export const canonicalJSON = (input: unknown): string => JSON.stringify(input, (_name, value) =>
     record(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value);
 const orderMax = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= -1;
 const fail = (code: 'INVALID_INPUT' | 'TASK_NOT_FOUND' | 'STALE_REVISION', message: string): NativeHostResult<never> =>
     ({ ok: false, error: { code, message } });
 
-/** Plain bounded JSON only, copied: the journal never holds a live store row. */
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number): boolean => {
         if (depth > 24) return false;
@@ -54,13 +54,13 @@ const readRequest = (value: unknown): NativeTaskToSectionRequest | null => {
         ? request as NativeTaskToSectionRequest : null;
 };
 
-/** The new rows' ids come from the request UUID: the section is the UUID itself, its tasks requestRowId of it. */
+
 const requestIds = (requestId: string) => {
     let next = 0;
     return () => (next++ === 0 ? requestId : requestRowId(requestId, `task-to-section:${next - 2}`));
 };
 
-/** The plan from the frozen consulted rows only: never the live store, the clock or a translator. */
+
 const expected = (prepared: NativePreparedTaskToSection) => {
     const { request, sourceBefore, project } = prepared;
     const sections: Section[] = prepared.sectionOrderMax >= 0 ? [{ id: `native-to-section-order-${request.requestId}`,
@@ -76,7 +76,7 @@ const expected = (prepared: NativePreparedTaskToSection) => {
         generateId: requestIds(request.requestId) });
 };
 
-/** Pure journal validation, including on a cold boot before SQLite is opened. */
+
 const readPrepared = (value: unknown): NativeTaskToSectionEnvelope | null => {
     const input = detach<Record<string, unknown>>(value);
     if (!input || !exact(input, ['request', 'prepared']) || !record(input.prepared)) return null;
@@ -162,7 +162,7 @@ export function createTaskToSectionMethods(deps: {
             return envelope ? { ok: true, value: envelope.prepared.result }
                 : fail('INVALID_INPUT', 'Prepared Convert to section request or journal does not match');
         },
-        /** Writes only on the frozen rows and orders (else STALE_REVISION, nothing written); a landed one answers its receipt. */
+
         async commitPreparedTaskToSection(input: NativeTaskToSectionEnvelope): Promise<NativeHostResult<NativeTaskToSectionResult>> {
             const envelope = readPrepared(input);
             if (!envelope) return fail('INVALID_INPUT', 'Prepared Convert to section request or journal does not match');

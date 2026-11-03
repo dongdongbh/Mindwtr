@@ -1,19 +1,6 @@
-/**
- * React Native's selection mode on the task lists (the bulk bar, the add-tag
- * dialog, the remove-tag picker, delete with Undo, Range and Bulk Organize) on
- * the Inbox, Waiting, Someday, Reference, Done and project lists, replayed
- * against the frozen parity fixture that core's task-list-bulk-actions and the
- * native host contract are tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit or stash every other change first, then run
- *   MINDWTR_CAPTURE_BULK_ACTIONS=1 MINDWTR_CAPTURE_BULK_ACTIONS_COMMIT=$(git rev-parse HEAD) bunx vitest run components/task-list/bulk-actions-parity.test.tsx
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code, so the provenance always names the code that ran.
- * Each scenario renders the real screen with the real core store, drives it
- * through its own rows, bar, dialogs and pickers, and records what a user sees
- * and what the store is asked to write.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -50,7 +37,7 @@ const CAPTURE = process.env.MINDWTR_CAPTURE_BULK_ACTIONS === '1';
 
 const english = vi.hoisted(() => {
   const state = { strings: {} as Record<string, string>, t: (key: string) => key };
-  // Stable, as the app's language context is: a new `t` per render would re-run every memo keyed on it.
+
   state.t = (key: string) => state.strings[key] ?? key;
   return state;
 });
@@ -167,8 +154,6 @@ vi.mock('../list-overflow-menu', () => ({
   ListOverflowMenu: (props: any) => React.createElement('ListOverflowMenu', props),
 }));
 
-// ---------------------------------------------------------------------------
-// Inputs
 
 export const TIME_ZONE = 'America/New_York';
 export const NOW = '2026-09-26T14:00:00.000Z';
@@ -376,8 +361,6 @@ export const scenarios: BulkScenario[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Harness
 
 const t = (key: string) => english.strings[key] ?? key;
 const writeLog: unknown[] = [];
@@ -444,7 +427,7 @@ const localDay = (date: Date) => [
   String(date.getFullYear()), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0'),
 ].join('-');
 
-/** A task row element's props, however many wrappers the list puts around SwipeableTaskItem. */
+
 const findRowProps = (node: unknown): Record<string, any> | null => {
   if (!node || typeof node !== 'object') return null;
   const element = node as { props?: Record<string, any> };
@@ -472,7 +455,7 @@ const toastEntries = () => toastLog.entries.splice(0).map(({ tone, title, messag
 });
 
 let taskSnapshot = new Map<string, string>();
-/** Every task the store changed since the last observation: [id, { field: [before, after] }]. */
+
 const changedTasks = () => {
   const next = new Map(useTaskStore.getState()._allTasks.map((entry) => [entry.id, JSON.stringify(normalize(entry))]));
   const changed: unknown[] = [];
@@ -481,7 +464,7 @@ const changedTasks = () => {
     if (before === json) continue;
     const previous = before ? JSON.parse(before) as Record<string, unknown> : {};
     const current = JSON.parse(json) as Record<string, unknown>;
-    // A key the store set to undefined reads as absent.
+
     const value = (entry: Record<string, unknown>, field: string) => JSON.stringify(entry[field] ?? '<undefined>');
     const fields = Array.from(new Set([...Object.keys(previous), ...Object.keys(current)]))
       .filter((field) => field !== 'revBy' && value(previous, field) !== value(current, field))
@@ -498,8 +481,8 @@ const observeBar = (root: ReactTestInstance) => {
   if (!bar) return null;
   return {
     count: textOf(hostOf(bar, 'Text')[0]),
-    // Frozen bulk-action controls shared with native. Reorder exits this mode;
-    // its new project-only shortcut is exercised separately below.
+
+
     buttons: hostOf(bar, 'TouchableOpacity').filter((node) => node.props.testID !== 'task-list-reorder-shortcut')
       .map((node) => [node.props.accessibilityLabel ?? null, textOf(node), node.props.disabled === true]),
   };
@@ -607,7 +590,7 @@ const observeOrganize = (root: ReactTestInstance) => {
   };
 };
 
-/** Someday's Move to section dialog while it is open. */
+
 const sectionMoveModalOf = (root: ReactTestInstance) => hostOf(root, 'Modal').find((modal) => (
   modal.props.visible && hostOf(modal, 'SomedaySectionPicker').some((picker) => !picker.props.createOnly)
 )) ?? null;
@@ -617,9 +600,9 @@ const observe = (root: ReactTestInstance) => {
   const sectionModal = sectionMoveModalOf(root);
   const sectionPicker = sectionModal ? hostOf(sectionModal, 'SomedaySectionPicker')[0] : null;
   return normalize({
-    // The task rows shown, in list order: [id, opens read-only].
+
     rows: rows.map((row) => [row.task.id, row.interactionDisabled === true]),
-    // Rows shown as selected, in list order.
+
     selected: rows.filter((row) => row.isMultiSelected === true).map((row) => row.task.id),
     selectionMode: rows.some((row) => row.selectionMode === true),
     bar: observeBar(root),
@@ -686,7 +669,7 @@ async function runOrganizeAction(root: ReactTestInstance, action: Extract<BulkSc
       const kind = action[1];
       const picker = hostOf(modal, kind === 'project' ? 'TaskEditProjectPicker' : 'TaskEditAreaPicker')[0].props;
       if (!picker.visible) throw new Error(`The ${kind} picker is closed`);
-      // As the picker does: the choice, then it closes.
+
       await act(async () => {
         if (action[2] === 'keep') picker.leadingOptions[0].onPress();
         else if (kind === 'project') picker.onSelectProject(action[2] === 'none' ? undefined : action[2]);
@@ -815,7 +798,7 @@ async function runAction(root: ReactTestInstance, action: BulkScenarioAction) {
       await runOrganizeAction(root, action);
       return;
     case 'includeArchivedProjects': {
-      // Reference's filter sheet switch, as its top content renders it.
+
       const toggle = hostOf(root, 'Switch')[0];
       if (!toggle) throw new Error('No archived projects switch');
       await act(async () => { toggle.props.onValueChange(true); });
@@ -828,7 +811,7 @@ const NO_CUES: Record<ProjectSequenceTaskCue, string> = { available: 'Available 
 const noCue = () => undefined;
 const ignore = () => undefined;
 
-/** The project workspace's list as ProjectDetailModal mounts it, with the bulk bar it pins above its toolbar. */
+
 function ProjectHarness({ sortBy = 'default' }: { sortBy?: TaskSortBy } = {}) {
   const [barProps, setBarProps] = React.useState<TaskListBulkBarProps | null>(null);
   const [reorderMode, setReorderMode] = React.useState(false);
@@ -900,10 +883,7 @@ async function runScenario(scenario: BulkScenario) {
   return observations;
 }
 
-/**
- * The commit a recapture runs at. It must be declared, equal HEAD, and the checkout
- * must hold no other change than this harness and its fixture.
- */
+
 function captureProvenance() {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: new URL('.', import.meta.url).pathname, encoding: 'utf8' });
   const head = git('rev-parse', 'HEAD').trim();
@@ -928,7 +908,7 @@ function captureProvenance() {
 describe('React Native task list selection mode parity fixture', () => {
   const originalTz = process.env.TZ;
   beforeAll(async () => {
-    // Some screens rely on the app's automatic JSX runtime; the test transform may emit classic calls.
+
     (globalThis as { React?: typeof React }).React = React;
     Alert.alert = (title: string, message?: string, buttons?: { text?: string; style?: string; onPress?: () => void }[]) => {
       alertLog.entries.push({ title, message, buttons });

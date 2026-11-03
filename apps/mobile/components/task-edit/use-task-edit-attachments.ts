@@ -97,7 +97,7 @@ export function useTaskEditAttachments({
     const settleDraftAttachments = React.useCallback((input: AttachmentDraftSettlementInput) => {
         if (isSandboxMode()) return;
         for (const { attachment } of planAttachmentDraftSettlement(input)) {
-            // Asked after the delete's own awaits: a file a live attachment holds again stays.
+
             void deleteManagedAttachmentFile(attachment, {
                 keep: () => {
                     const state = useTaskStore.getState();
@@ -454,7 +454,7 @@ export function useTaskEditAttachments({
                 : undefined;
             const speechReady = provider === 'whisper'
                 ? whisperModelReady || Boolean(modelPath?.trim())
-                // A self-hosted OpenAI-compatible server (#930) substitutes for a key.
+
                 : Boolean(apiKey) || (provider === 'openai' && Boolean(speechRuntime.baseUrl?.trim()));
             if (!speechReady) {
                 throw new Error(resolveText('attachments.transcriptionUnavailable', 'Speech-to-text is not ready. Check your AI settings and try again.'));
@@ -603,8 +603,8 @@ export function useTaskEditAttachments({
             setImagePreviewAttachment(plan.attachment);
             return;
         }
-        // Android: a real ACTION_VIEW open first — the share sheet below only
-        // reaches send/save targets, so a PDF "open" only offered saving it.
+
+
         if (await tryOpenWithAndroidViewer(plan.uri, plan.mimeType ?? undefined)) return;
         const available = await Sharing.isAvailableAsync().catch((error) => {
             logTaskWarn('[Sharing] availability check failed', error);

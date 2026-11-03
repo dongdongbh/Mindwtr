@@ -59,8 +59,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     storeState.updateTask = updateTask;
     storeState.updateProject = updateProject;
     storeState.persistSnapshot = persistSnapshot;
-    // Real `getProjectNextActionPromptData` on purpose: the stub this replaced
-    // dropped `scope` and the whole section-scoped branch, so #911 was untestable.
+
+
     return mockCore(importOriginal, () => storeState, {
         parseProjectNextActionInput: parseNextActionInput,
         flushPendingSave: flushSave,

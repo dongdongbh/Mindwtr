@@ -223,7 +223,7 @@ describe('partitionByReviewDate', () => {
 });
 
 describe('getAdvancedReviewDate', () => {
-    const localNow = new Date(2026, 5, 10, 15, 30); // 2026-06-10 15:30 local
+    const localNow = new Date(2026, 5, 10, 15, 30);
 
     it('returns a date-only value one week out for date-only review dates', () => {
         expect(getAdvancedReviewDate('2026-06-01', localNow)).toBe('2026-06-17');
@@ -248,7 +248,7 @@ describe('getAdvancedReviewDate', () => {
 });
 
 describe('getDailyReviewBuckets', () => {
-    const dailyNow = new Date(2026, 2, 1, 9, 0, 0); // 2026-03-01 09:00 local
+    const dailyNow = new Date(2026, 2, 1, 9, 0, 0);
 
     it('keeps a next task starting later today in the focus candidates (#867)', () => {
         const laterToday = createTask({
@@ -262,8 +262,7 @@ describe('getDailyReviewBuckets', () => {
         expect(buckets.focusCandidates.map((task) => task.id)).toEqual(['next-later-today']);
     });
 
-    // Inbox remains a global capture queue even when another review inventory
-    // opts into area narrowing.
+
     it('spans every area by default and keeps Inbox global with an area filter', () => {
         const project = createProject({ id: 'project-work', areaId: 'area-work' });
         const workTask = createTask({ id: 'inbox-work', status: 'inbox', projectId: project.id });
@@ -547,7 +546,7 @@ describe('getWeeklyReviewBuckets', () => {
             taskIds: entry.tasks.map((task) => task.id),
             nextActionState: entry.nextActionState,
         }))).toEqual([
-            // A waiting-only project is delegated, not stuck (#1086).
+
             { id: 'p-due', taskIds: ['due-waiting'], nextActionState: 'waiting' },
             { id: 'p-due-2', taskIds: [], nextActionState: 'none' },
             { id: 'p-active', taskIds: ['active-inbox', 'active-next'], nextActionState: 'next' },
@@ -563,8 +562,8 @@ describe('getWeeklyReviewBuckets', () => {
         expect(buckets.summary).toEqual({
             inboxCount: 2,
             activeProjectCount: 3,
-            // p-due is waiting-only and no longer counts as "without next action"
-            // (#1086); only the taskless p-due-2 does.
+
+
             projectsWithoutNextAction: 1,
             staleWaitingCount: 2,
         });
@@ -639,7 +638,7 @@ describe('getReviewOverviewGroups', () => {
         expect(groups[1]).toMatchObject({
             taskCount: 4,
             projectCount: 2,
-            // alpha is waiting-only — delegated, not "needs action" (#1086).
+
             needsActionCount: 0,
         });
         expect(groups[1].projectGroups.map((group) => ({

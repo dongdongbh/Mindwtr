@@ -57,10 +57,7 @@ export function getCalendarSourceFileName(value: string): string {
     return segments.length > 0 ? segments[segments.length - 1] : '';
 }
 
-/**
- * A subscription's URL as Settings lists it: a local file by name, a URL as core
- * masks it (its scheme and host only, never a user name, a password or the path).
- */
+
 export function maskCalendarSourceUrl(url: string): string {
     const trimmed = url.trim();
     if (!trimmed) return '';

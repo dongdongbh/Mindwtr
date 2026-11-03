@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import UIKit
 #endif
 
-/// Captured picker metadata only; this value never grants file or domain authority.
+
 struct NativeAttachmentPhotoSelection: Sendable {
     let loadType: String
     let preferredType: String?
@@ -19,7 +19,7 @@ struct NativeAttachmentPhotoSelection: Sendable {
             throw NativeAttachmentFilesError.invalidRequest
         }
         loadType = imageType
-        // Expo loads the first image type but dispatches on the first registered type.
+
         preferredType = types.first
         suggestedName = name
     }
@@ -82,8 +82,8 @@ enum NativeAttachmentPhotoEncoder {
         }
         #if canImport(UIKit)
         return try autoreleasepool {
-            // The actual PHPicker RN path constructs UIImage(data:) and does not
-            // call the legacy picker fixOrientation helper or a metadata strip pass.
+
+
             guard let image = UIImage(data: data) else { throw NativeAttachmentFilesError.unavailable }
             try checkCancellation()
             let encoded: Encoded
@@ -122,14 +122,13 @@ enum NativeAttachmentPhotoEncoder {
             return encoded
         }
         #else
-        // AppKit output is not UIKit encoding parity. Actual codec tests run on iOS.
+
         throw NativeAttachmentFilesError.unavailable
         #endif
     }
 }
 
-/// Only the serialized file jobs and primitive token cross queues. JS ownership
-/// bindings remain on the Engine's concrete ProviderCopyTurn.
+
 final class NativeAttachmentPhotoCapture: @unchecked Sendable {
     let id: UUID
     private let jobs: NativeAttachmentFileJobs
@@ -149,7 +148,7 @@ final class NativeAttachmentPhotoCapture: @unchecked Sendable {
     }
 }
 
-/// One selected provider load, not a durable receipt/transport framework.
+
 final class NativeAttachmentPhotoLoadFrame: @unchecked Sendable {
     private enum State { case waiting, copying, finished }
     private let lock = NSLock()
@@ -200,8 +199,8 @@ final class NativeAttachmentPhotoLoadFrame: @unchecked Sendable {
         let result: Result<NativeAttachmentFiles.ProviderCacheCopyReceipt, Error>
         if !failed, let url, let work { result = Result { try work(url) } }
         else { result = .failure(NativeAttachmentFilesError.unavailable) }
-        // A successfully created receipt survives a simultaneous cancellation
-        // for exact native pre-intent cleanup. This callback still holds its URL lease.
+
+
         lock.lock(); state = .finished
         let pending = continuation
         continuation = nil; capture = nil; progress = nil

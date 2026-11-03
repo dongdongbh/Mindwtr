@@ -50,18 +50,15 @@ export type AttachmentCleanupDeps = {
 };
 
 export type AttachmentCleanupGuards = {
-    /** Throws LocalSyncAbort when the cleanup snapshot no longer covers the
-     * current store. Call immediately before every irreversible delete. */
+
+
     ensureLocalSnapshotFresh: () => void;
     assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
 };
 
 const MAX_APPENDED_CLEANUP_ERROR_CHARS = 300;
 
-// Deliberately not core's sanitizeForLog: that sanitizer keeps a URL's host/path
-// (it only strips credentials and flagged query params), while a cleanup cause
-// should never carry a server URL at all. Strip URLs and Authorization/Basic
-// fragments outright, then cap the length (device test, 2026-09-02).
+
 const sanitizeAttachmentCleanupErrorDetail = (text: string): string => {
     const stripped = text
         .replace(/https?:\/\/\S+/gi, '[url]')
@@ -81,13 +78,7 @@ const describeAttachmentCleanupErrorForLog = (error: unknown): Error => {
     return new Error(sanitizedDetail ? `${prefix}: ${sanitizedDetail}` : prefix);
 };
 
-// Tauri plugin-fs surfaces a missing file as an ENOENT-style io error. Deleting
-// an already-gone orphan is the cleanup succeeding, not failing (device test,
-// 2026-09-02 logged a warning every cycle for work that was already done).
-//
-// Tauri rejects with a plain STRING, not an Error ("failed to get metadata of path: ... (os error
-// 2)"), and Windows localizes the sentence in front of the code. A tester's Russian Windows log
-// carried this warning 35 times per file because only Error objects were recognised here.
+
 const readCleanupErrorText = (error: unknown): string | null => {
     if (typeof error === 'string') return error;
     if (error instanceof Error) return error.message;
@@ -100,14 +91,11 @@ const isMissingLocalFileError = (error: unknown): boolean => {
     return text !== null && /no such file or directory|os error 2\b/i.test(text);
 };
 
-// The path we tried to operate on is the one piece of this error that can carry
-// a private attachment title (the on-disk name can equal the title, #1038-era
-// paths included) — redact exactly that known substring rather than guessing
-// at path shapes in general.
+
 const redactKnownPathFromError = (error: unknown, path: string | undefined): unknown => {
     if (!path) return error;
-    // Tauri's errors are plain strings; redacting only Error objects let the full path, Windows
-    // user name included, through into a tester's log.
+
+
     if (typeof error === 'string') {
         return error.includes(path) ? error.split(path).join('[attachment-path]') : error;
     }
@@ -159,9 +147,8 @@ export const deleteAttachmentFile = async (
     try {
         const { remove } = await import('@tauri-apps/plugin-fs');
         const normalizePath = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '');
-        // Same fallback the read paths use: a relocated portable profile leaves
-        // the recorded path stale, and the copy it names would otherwise stay in
-        // the current managed dir forever (#1038).
+
+
         normalizedRawUri = normalizePath(
             await resolveAttachmentReadPath(rawUri, attachment.id),
         );
@@ -272,10 +259,8 @@ export const cleanupOrphanedAttachments = async (
                 if (etag) {
                     await webdavDeleteFileVersioned(targetUrl, etag, requestOptions);
                 } else {
-                    // A server without strong ETags (Jianguoyun, some proxies) gets
-                    // the document written unconditionally already; refusing the
-                    // delete here only left the orphan on the server and a warning
-                    // in the log on every cycle, forever.
+
+
                     deps.logSyncInfo('WebDAV attachment removed without a version check; the server provides no strong ETag');
                     await webdavDeleteFile(targetUrl, requestOptions);
                 }
@@ -305,9 +290,8 @@ export const cleanupOrphanedAttachments = async (
         beforeEachRemoteDelete: yieldThenEnsureFresh,
         deleteLocalAttachment: (attachment) => deleteAttachmentFile(attachment, deps, guards),
         resolveRemoteDeleteAttachment,
-        // File Sync folders have no distributed GC tombstone. A lagging peer
-        // may still reselect any existing generation before its document CAS,
-        // so cleanup clears metadata but intentionally retains remote bytes.
+
+
         shouldRetainRemoteAttachment: backend === 'file' ? () => true : undefined,
         isRemoteMissingError: (error) => (
             error instanceof DropboxFileNotFoundError || getErrorStatus(error) === 404

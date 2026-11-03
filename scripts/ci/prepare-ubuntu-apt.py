@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Disable unused runner vendor feeds, never APT integrity verification.
+COMMAND_DESCRIPTION = """Disable unused runner vendor feeds, never APT integrity verification.
 
 Only used in the ephemeral Ubuntu Tauri/E2E jobs: their system packages come
 from Ubuntu, and Playwright downloads its own pinned Chromium. Leave other
@@ -50,7 +50,7 @@ def prepare_stanza(stanza):
 
 
 def prepare_sources(content):
-    # Retain separators so untouched Ubuntu stanzas remain byte-for-byte intact.
+
     parts = re.split(r"(\n[ \t]*\n)", content)
     return "".join(part if index % 2 else prepare_stanza(part)
                    for index, part in enumerate(parts))
@@ -72,6 +72,6 @@ def prepare(root):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=COMMAND_DESCRIPTION)
     parser.add_argument("apt_root", nargs="?", type=pathlib.Path, default=pathlib.Path("/etc/apt"))
     prepare(parser.parse_args().apt_root)

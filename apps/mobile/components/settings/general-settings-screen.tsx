@@ -50,11 +50,11 @@ export function GeneralSettingsScreen() {
     const systemLocale = typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function'
         ? Intl.DateTimeFormat().resolvedOptions().locale
         : '';
-    // Device-local Android integration (#1017): whether this device's active
-    // tasks/projects/areas are mirrored into Android's system-search index.
+
+
     const [appSearchEnabled, setAppSearchEnabled] = useState(false);
-    // Every control's options, labels and writes come from core's General model,
-    // shared with the native host. The device's locale fills the "System default" labels.
+
+
     const model = buildGeneralSettingsModel({
         settings,
         themeMode,
@@ -69,8 +69,8 @@ export function GeneralSettingsScreen() {
         t,
     });
     const { appearance, privacy, regional } = model;
-    // Re-picking the stored value writes nothing, as the native host's contract:
-    // a repeat write would stamp the synced settings as newer than they are.
+
+
     const writeSetting = (edit: GeneralSettingsEdit) => {
         const update = buildGeneralSettingsUpdate(settings, edit);
         if (update && !isGeneralSettingStored(settings, edit)) updateSettings(update).catch(console.error);
@@ -106,9 +106,8 @@ export function GeneralSettingsScreen() {
         setAppSearchEnabled(value);
         writeAppSearchIndexingEnabled(value).catch(console.error);
         if (value) {
-            // enableAppSearchIndexing re-reads the preference after its
-            // reindex finishes, so a quick toggle-off mid-flight wins
-            // instead of resurrecting documents and re-arming after OFF.
+
+
             enableAppSearchIndexing().catch(console.error);
         } else {
             wipeAppSearchIndex().catch(console.error);

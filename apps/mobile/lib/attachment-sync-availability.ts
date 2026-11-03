@@ -22,11 +22,6 @@ import {
 } from './cloudkit-sync';
 import { getSyncEncryptionMaterial } from './sync-encryption-state';
 
-// On-demand attachment fetch lives in core (`packages/core/src/mobile-attachment-availability.ts`)
-// so the native app runs the same rules. This module binds it to AsyncStorage, the encryption
-// state, Dropbox, CloudKit and core's transports. Every binding calls the imported function when
-// used, so tests that replace these modules still reach their mocks; the core object is made on
-// first use.
 
 export {
   getAttachmentAvailabilityPatch,
@@ -66,7 +61,7 @@ export const ensureAttachmentAvailableDetailed: MobileAttachmentAvailability['en
   attachment,
 ) => mobileAttachmentAvailability().ensureAttachmentAvailableDetailed(attachment);
 
-/** Compatibility wrapper for existing non-UI callers. Detailed callers retain conflicts. */
+
 export const ensureAttachmentAvailable: MobileAttachmentAvailability['ensureAttachmentAvailable'] = (
   attachment,
 ) => mobileAttachmentAvailability().ensureAttachmentAvailable(attachment);

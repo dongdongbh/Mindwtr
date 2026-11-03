@@ -19,3 +19,11 @@ On the connected OnePlus CPH2655 / Android 16, the fresh Dev bundle showed Sync 
 After Home, reconciliation logged `deferred-until-foreground`. Forcing that Dev job through JobScheduler invoked the background callback with JavaScript timers paused; the callback settled and Expo scheduled exactly one successor with another approximately 15-minute minimum delay. No registration mutation ran in the inactive pass. This proves a background invocation in an already loaded Dev runtime, not cold headless startup, remote sync success, or an exact OS cadence. The deliberately unreachable loopback backend prevents a real remote write.
 
 Evidence is under `/home/dd/.cache/mindwtr-checklist-focus/background-native/`, the `background-sync-settings.png` screenshot, and `metro-background.log`. Original four settings were restored individually, preserving other Dev data and settings. A fresh foreground launch confirmed Sync Off, unregistered the test worker, and left zero Dev jobs in JobScheduler. Dev and the task-owned Metro process were stopped and the task-owned ADB reverse removed. No production app or global device permission was changed.
+
+## Native CloudKit operation deadlines
+
+`CloudKitOperationTimeouts` applies native deadlines to every operation created by `CloudKitSyncManager` and `CloudKitChangeTracker`. JavaScript timers stop while iOS suspends the app, so the shared sync deadline cannot by itself bound a suspended CloudKit request. Native timeout errors use the existing transient CloudKit failure handling.
+
+The request inactivity timeout is 30 seconds. The total resource timeout is 180 seconds for record operations, leaving room within the JavaScript background run's four-minute deadline. Asset operations have a 600-second total timeout: a 50 MB attachment would otherwise need roughly 2.3 Mbit/s continuously to finish within 180 seconds, and foreground retries on slower links would fail repeatedly. The longer asset timeout also applies in foreground.
+
+`apply(to:resourceSeconds:)` reads the operation configuration, preserves its quality of service, sets both deadlines, and assigns the configuration back. `CKOperation.configuration` is an Objective-C copy property; mutating a getter result without assigning it back can lose the update.

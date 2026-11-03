@@ -161,15 +161,15 @@ interface TaskEditModalProps {
     task: Task | null;
     onClose: () => void;
     onDismiss?: () => void;
-    /** Return the store write's result (e.g. `updateTask(...)`) so a failed save can be reported. */
+
     onSave: (taskId: string, updates: Partial<Task>) => unknown;
     defaultTab?: 'task' | 'view';
-    /** Normal per-screen default used only when the device preference is Automatic. */
+
     automaticDefaultTab?: 'task' | 'view';
     onProjectNavigate?: (projectId: string) => void;
     onContextNavigate?: (context: string) => void;
     onTagNavigate?: (tag: string) => void;
-    /** Archived-project tasks remain inspectable, but every mutation is disabled. */
+
     readOnly?: boolean;
 }
 
@@ -262,8 +262,8 @@ function TaskEditModalInner({
         [allTasks, settings],
     );
     const { t, language } = useLanguage();
-    // Already identity-stable: resolveThemeTokens caches its result on the theme,
-    // so this only changes when a colour actually does (#766).
+
+
     const tc = useThemeColors();
     const adaptiveWindow = useAdaptiveWindow();
     const reducedMotion = useReducedMotion();
@@ -695,7 +695,7 @@ function TaskEditModalInner({
     const toggleCustomMonthDay = useCallback((day: number) => {
         setCustomMonthDays((current) => {
             if (!current.includes(day)) return [...current, day].sort((a, b) => a - b);
-            // The rule needs at least one day, so ignore the tap that would empty it.
+
             return current.length > 1 ? current.filter((value) => value !== day) : current;
         });
     }, []);
@@ -1161,7 +1161,7 @@ function TaskEditModalInner({
         });
         return 'closed-clean';
     };
-    // Blurred screens can freeze before another render; subscribe to the owner route directly.
+
     useEffect(() => navigation?.addListener('blur', () => navigationBlurRef.current()), [navigation]);
     useEffect(() => subscribeWidgetLaunch(() => navigationBlurRef.current()), []);
 
@@ -1472,7 +1472,7 @@ function TaskEditModalInner({
                 </AdaptiveModalSurface>
             </KeyboardAccessoryHost>
             <ToastViewport />
-            {/* Last child so the alert covers the header and the toasts (#940). */}
+            {                                                                      }
             <ThemedAlertHost />
         </Modal>
         {visible && !readOnly && completedAtPickerVisible ? (

@@ -1,22 +1,3 @@
-//! Device-local sync-encryption state and key cache (#1056, phase 2 of 3).
-//!
-//! This module owns everything about "is this device's sync folder encrypted, and what key
-//! opens it" on desktop. The MWENC1 container itself lives in `sync_crypto.rs`; the storage
-//! seams that use it live in `sync.rs` (file backend + WebDAV) and in the desktop TS layer
-//! (Dropbox, attachments). Naming and semantics mirror `packages/core/src/sync-encryption.ts`
-//! -- that file is the specification; this is the Rust half the file backend needs because
-//! Rust owns that backend's IO.
-//!
-//! Two things are persisted, deliberately in two different places:
-//!   * the state + salt + KDF params, in a device-local sidecar JSON next to config.toml.
-//!     None of it is secret (the salt and params are in every artifact header anyway) and
-//!     `get_sync_encryption_status` must be answerable without unlocking the OS keyring.
-//!   * the derived 32-byte key, base64, in the OS keyring. The passphrase itself is NEVER
-//!     persisted anywhere.
-//!
-//! Nothing here is ever synced: no encryption state, salt, params or key enters the synced
-//! document, the content signature, or config.toml.
-
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -33,18 +14,6 @@ use crate::sync_crypto::{
     SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 };
 
-// ---------------------------------------------------------------------------
-// Diagnostics trail (#1056 follow-up)
-//
-// Hand-mirrored from `packages/core/src/sync-encryption-diagnostics.ts` -- Rust cannot import
-// it, and the whole value of the trail is that a desktop log and a mobile log grep the same
-// way. Event names and field names are FIXED; if you add one here, add it there too.
-//
-// SECRETS: nothing in this section ever accepts a passphrase or key bytes. Salts are logged
-// as an 8-hex prefix (enough to tell two encryption generations apart), and a location scope
-// is logged as `<backend>#<digest>` because the scope string itself contains a WebDAV
-// username and a folder path.
-// ---------------------------------------------------------------------------
 
 pub(crate) const SYNC_ENCRYPTION_LOG_PREFIX: &str = "[sync-encryption]";
 pub(crate) const SYNC_ENCRYPTION_LOG_EVENT_STATE: &str = "state";
@@ -53,8 +22,6 @@ pub(crate) const SYNC_ENCRYPTION_LOG_EVENT_TRANSITION: &str = "transition";
 pub(crate) const SYNC_ENCRYPTION_LOG_EVENT_ERROR: &str = "error";
 pub(crate) const SYNC_ENCRYPTION_LOG_ABSENT: &str = "-";
 
-/// `[sync-encryption] <event> a=b c=d` -- one line, key=value pairs, same field names the TS
-/// builders emit into their structured `extra` maps.
 pub(crate) fn sync_encryption_diagnostic(event: &str, fields: &[(&str, String)]) -> String {
     let mut line = format!("{SYNC_ENCRYPTION_LOG_PREFIX} {event}");
     for (key, value) in fields {
@@ -66,9 +33,6 @@ pub(crate) fn sync_encryption_diagnostic(event: &str, fields: &[(&str, String)])
     line
 }
 
-/// First 8 hex characters of a salt, or `-`. Non-hex input is rejected outright rather than
-/// truncated, matching core's `syncEncryptionSaltPrefix`: a hand-edited or migration-corrupted
-/// sidecar must not put arbitrary text where a reader expects a salt generation.
 pub(crate) fn sync_encryption_salt_prefix(salt: Option<&str>) -> String {
     match salt {
         Some(value)
@@ -85,7 +49,6 @@ pub(crate) fn sync_encryption_salt_prefix_bytes(salt: &[u8]) -> String {
     sync_encryption_salt_prefix(Some(bytes_to_hex(salt).as_str()))
 }
 
-/// `m=65536,t=3,p=1`, or `-`.
 pub(crate) fn sync_encryption_kdf_label(params: Option<SyncCryptoKdfParams>) -> String {
     match params {
         Some(params) => format!("m={},t={},p={}", params.m_kib, params.t, params.p),
@@ -93,9 +56,6 @@ pub(crate) fn sync_encryption_kdf_label(params: Option<SyncCryptoKdfParams>) -> 
     }
 }
 
-/// FNV-1a/32 over UTF-16 code units -- byte-identical to core's `digest32`, which runs over
-/// `charCodeAt`. Not a security primitive: it exists only so two scope strings can be compared
-/// in a log that must not contain the folder path or the WebDAV username inside them.
 fn sync_encryption_digest32(value: &str) -> String {
     let mut hash: u32 = 0x811c_9dc5;
     for unit in value.encode_utf16() {
@@ -105,10 +65,6 @@ fn sync_encryption_digest32(value: &str) -> String {
     format!("{hash:08x}")
 }
 
-/// The backend name a scope was built for (`file`, `webdav`, `cloud`, …), or `-`. Every
-/// `backend=` field is derived from the SAME scope the line's `activeScope=` digests, so a
-/// line can never say `backend=file` while reporting a WebDAV location: the file-backend
-/// seams in this crate are also reached by the native WebDAV commands.
 pub(crate) fn sync_encryption_backend_label(scope: Option<&str>) -> String {
     let Some(scope) = scope.filter(|value| !value.trim().is_empty()) else {
         return SYNC_ENCRYPTION_LOG_ABSENT.to_string();
@@ -120,8 +76,6 @@ pub(crate) fn sync_encryption_backend_label(scope: Option<&str>) -> String {
         .unwrap_or_else(|| "scope".to_string())
 }
 
-/// `<backend>#<digest>` for a scope built by `sync_location_scope` / core's
-/// `buildSyncLocationScope`.
 pub(crate) fn sync_encryption_scope_label(scope: Option<&str>) -> String {
     let Some(scope) = scope.filter(|value| !value.trim().is_empty()) else {
         return SYNC_ENCRYPTION_LOG_ABSENT.to_string();
@@ -129,7 +83,6 @@ pub(crate) fn sync_encryption_scope_label(scope: Option<&str>) -> String {
     format!("{}#{}", sync_encryption_backend_label(Some(scope)), sync_encryption_digest32(scope))
 }
 
-/// Leaf name of a path -- `data.json.enc`, never the folder it sits in.
 pub(crate) fn sync_encryption_artifact_label(name: &str) -> String {
     let trimmed = name.trim_end_matches(['/', '\\']);
     match trimmed.rsplit(['/', '\\']).next() {
@@ -141,26 +94,12 @@ pub(crate) fn sync_encryption_artifact_label(name: &str) -> String {
 const SYNC_ENCRYPTION_STATE_FILE_NAME: &str = "sync-encryption-state.json";
 pub(crate) const KEYRING_SYNC_ENCRYPTION_KEY: &str = "sync_encryption_key_v1";
 
-/// Prefix on every error string a decrypt failure produces at a storage seam. The whole point
-/// of the class is that it must never be mistaken for "invalid JSON, try the next candidate /
-/// repair it": callers upstream (the read-recovery chain here, `classifySyncEncryptionFailure`
-/// in the desktop TS) branch on this prefix to stop the run and ask for the passphrase again.
 pub(crate) const SYNC_ENCRYPTION_TERMINAL: &str = "SYNC_ENCRYPTION_TERMINAL";
 
-/// The device-local state could not be read or validated. This is terminal for
-/// sync, but a passphrase cannot repair it, so UI callers need a distinct
-/// recovery path from ciphertext authentication failures.
 pub(crate) const SYNC_ENCRYPTION_STATE_UNAVAILABLE: &str = "SYNC_ENCRYPTION_STATE_UNAVAILABLE";
 
-/// Returned when a device with no key finds MWENC1 bytes where it expected the sync document.
-/// The command layer persists `remote-encrypted-no-key` before surfacing this to TS.
 pub(crate) const SYNC_ENCRYPTION_REMOTE_ENCRYPTED: &str = "SYNC_ENCRYPTION_REMOTE_ENCRYPTED";
 
-/// The inverse: returned when a device that HOLDS a key finds no encrypted artifact and a
-/// plaintext document in its place -- a peer disabled encryption at the sync location. The
-/// command layer persists `remote-plaintext` before surfacing it. Never auto-downgrades:
-/// following the remote to plaintext would let anyone with write access to the storage strip
-/// encryption from every device.
 pub(crate) const SYNC_ENCRYPTION_REMOTE_PLAINTEXT: &str = "SYNC_ENCRYPTION_REMOTE_PLAINTEXT";
 
 pub(crate) fn terminal_error(reason: impl std::fmt::Display) -> String {
@@ -178,16 +117,8 @@ pub(crate) fn is_terminal_error(error: &str) -> bool {
         || error.starts_with(SYNC_ENCRYPTION_REMOTE_PLAINTEXT)
 }
 
-/// `data.json` -> `data.json.enc`; `data.json.bak` -> `data.json.enc.bak`; `data.json.bak.previous`
-/// -> `data.json.enc.bak.previous`. The `.enc` marker goes immediately after the data-file stem
-/// and the FULL trailing suffix chain is carried verbatim after it -- never
-/// `data.json.bak.enc.previous`, a name nothing reads. Mirrors `syncEncryptedArtifactName` in
-/// packages/core/src/sync-encryption.ts.
 const KNOWN_ARTIFACT_SUFFIXES: [&str; 3] = [".bak", ".tmp", ".previous"];
 
-/// Peels every trailing known suffix off `name` (repeatedly -- `.bak.previous` is two), returning
-/// the bare stem plus the peeled suffixes re-joined in their ORIGINAL left-to-right order
-/// (peeling happens right-to-left, so the collected list is reversed before joining).
 fn split_trailing_suffix_chain(name: &str) -> (String, String) {
     let mut stem = name.to_string();
     let mut peeled: Vec<&'static str> = Vec::new();
@@ -220,7 +151,6 @@ pub(crate) fn bytes_to_hex(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
-    // `usize::is_multiple_of` is 1.87; this crate builds on an older MSRV.
     if hex.len() % 2 != 0 {
         return None;
     }
@@ -249,26 +179,18 @@ impl From<KdfParamsPayload> for SyncCryptoKdfParams {
     }
 }
 
-/// Device-local, never-synced. Mirrors core's `SyncEncryptionLocalState`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SyncEncryptionLocalState {
-    /// "off" | "enabled" | "remote-encrypted-no-key" | "remote-plaintext"
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub salt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kdf_params: Option<KdfParamsPayload>,
-    /// Which sync location the discovery states were discovered on (#1138). Mirrors core's
-    /// `SyncEncryptionLocalState.discoveredScope` and is built by the same derivation
-    /// (`file_sync_location_scope` in sync.rs for the file backend, core's
-    /// `buildSyncLocationScope` for the TS seams). `#[serde(default)]` so a sidecar written
-    /// before this field existed still parses -- strict parsing rejects unknown STATES, never
-    /// a missing optional.
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discovered_scope: Option<String>,
-    /// Only ever populated when the OS keyring is unavailable (portable mode, or a keyring
-    /// backend that refuses to store). See `store_cached_key`.
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -287,19 +209,10 @@ fn valid_transition_kind(kind: &str) -> bool {
     matches!(kind, TRANSITION_ENABLE | TRANSITION_DISABLE | TRANSITION_CHANGE_PASSPHRASE)
 }
 
-/// The states in which this device owns a usable key. `remote-plaintext` is one of them on
-/// purpose: dropping to "encryption off" there is exactly the silent downgrade the state
-/// exists to prevent, and the user's only sanctioned way out -- running the disable
-/// transition -- needs the key. Mirrors core's `SYNC_ENCRYPTION_KEYED_STATES`.
 pub(crate) fn state_holds_key(state: &str) -> bool {
     state == STATE_ENABLED || state == STATE_REMOTE_PLAINTEXT
 }
 
-// Serializes the sidecar's read-modify-write spans. Deliberately NOT
-// lock_config_read_modify_write: this file is not config.toml, nothing here goes through
-// read_config/write_config_files, and taking the config lock for it would add a second
-// reason to hold the app's outermost lock (and a nesting hazard) for no benefit. Poison-
-// recovering for the same reason the config locks are.
 fn sync_encryption_state_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -347,7 +260,6 @@ fn sync_state_parent_directory(parent: &Path) -> Result<(), String> {
 
 #[cfg(not(unix))]
 fn sync_state_parent_directory(_parent: &Path) -> Result<(), String> {
-    // Windows namespace durability comes from MOVEFILE_WRITE_THROUGH below.
     Ok(())
 }
 
@@ -369,7 +281,7 @@ fn windows_move_state_file_write_through(source: &Path, destination: &Path) -> R
 
     let source = windows_state_path_wide(source);
     let destination = windows_state_path_wide(destination);
-    // SAFETY: both buffers are NUL-terminated and remain alive for the call.
+
     if unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -501,8 +413,7 @@ fn write_state_file(path: &Path, state: Option<&SyncEncryptionLocalState>) -> Re
     }
     let serialized = serde_json::to_string_pretty(state)
         .map_err(|error| format!("Failed to encode sync encryption state: {error}"))?;
-    // Create-new + rename, the same discipline every other sync write uses: never reopen an
-    // existing file for truncating overwrite (#1001).
+
     let tmp = path.with_extension("json.tmp");
     let _ = std::fs::remove_file(&tmp);
     let mut file = OpenOptions::new()
@@ -526,10 +437,9 @@ fn write_state_file(path: &Path, state: Option<&SyncEncryptionLocalState>) -> Re
     .map_err(|error| format!("Failed to install sync encryption state: {error}"))
 }
 
-/// Reads the persisted state. `None` means the implicit, never-written 'off' default -- the
-/// state every existing install is in, which is why 'off' is represented by the ABSENCE of the
-/// file rather than a file saying "off" (an update must change nothing on disk by itself).
-pub(crate) fn read_local_state(app: &tauri::AppHandle) -> Result<Option<SyncEncryptionLocalState>, String> {
+pub(crate) fn read_local_state(
+    app: &tauri::AppHandle,
+) -> Result<Option<SyncEncryptionLocalState>, String> {
     let _guard = lock_sync_encryption_state();
     read_state_file(&sync_encryption_state_path(app))
 }
@@ -572,11 +482,6 @@ fn keyring_key_available(app: &tauri::AppHandle) -> Option<String> {
         .flatten()
 }
 
-/// ponytail: when the OS keyring is unavailable (portable mode, or a headless/locked backend),
-/// the derived key falls back into the owner-only sidecar in plaintext -- exactly what the
-/// WebDAV password and cloud token already do via secrets.toml, and consistent with the local
-/// SQLite database being unencrypted. The feature's threat model is the sync PROVIDER, not the
-/// local disk. Upgrade path if that ever changes: an OS-independent local KEK.
 fn store_cached_key(app: &tauri::AppHandle, key: &[u8; KEY_LEN]) -> Result<Option<String>, String> {
     let encoded = BASE64_STANDARD.encode(key);
     match crate::config::set_keyring_secret(app, KEYRING_SYNC_ENCRYPTION_KEY, Some(encoded.clone()))
@@ -600,9 +505,9 @@ fn decode_key(encoded: &str) -> Option<[u8; KEY_LEN]> {
     <[u8; KEY_LEN]>::try_from(raw.as_slice()).ok()
 }
 
-/// The full material every write seam needs (the key alone cannot build a header). An absent
-/// sidecar is the only implicit-off state; unreadable or invalid sidecars are terminal.
-pub(crate) fn resolve_key_material(app: &tauri::AppHandle) -> Result<Option<SyncKeyMaterial>, String> {
+pub(crate) fn resolve_key_material(
+    app: &tauri::AppHandle,
+) -> Result<Option<SyncKeyMaterial>, String> {
     let Some(state) = read_local_state(app)? else {
         return Ok(None);
     };
@@ -627,8 +532,6 @@ pub(crate) fn resolve_key_material(app: &tauri::AppHandle) -> Result<Option<Sync
     Ok(Some(SyncKeyMaterial { key, salt, params }))
 }
 
-/// True when this device believes the remote is encrypted, whether or not it has the key.
-/// Used by the seams to decide between the `.enc` names and the plaintext ones.
 pub(crate) fn is_encryption_enabled(app: &tauri::AppHandle) -> Result<bool, String> {
     Ok(read_local_state(app)?.is_some_and(|state| state_holds_key(&state.state)))
 }
@@ -644,8 +547,7 @@ pub(crate) fn persist_enabled_material(
             state: STATE_ENABLED.to_string(),
             salt: Some(bytes_to_hex(&material.salt)),
             kdf_params: Some(material.params.into()),
-            // A key proves this device owns the generation; the discovery scope described the
-            // lock it just left and must not linger.
+
             discovered_scope: None,
             fallback_key,
             incomplete_transition: None,
@@ -680,8 +582,6 @@ fn restore_sync_encryption_material_snapshot(
     app: &tauri::AppHandle,
     snapshot: &SyncEncryptionMaterialSnapshot,
 ) -> Result<(), String> {
-    // The sidecar/journal is the durable recovery authority. Restore it before
-    // the independent keyring domain so a crash always leaves the retry marker.
     write_local_state(app, snapshot.state.as_ref())?;
     if let KeyringMaterialSnapshot::Accessible(value) = &snapshot.keyring {
         crate::config::set_keyring_secret(app, KEYRING_SYNC_ENCRYPTION_KEY, value.clone())
@@ -735,12 +635,6 @@ pub(crate) fn persist_enabled_material_with_fence(
     )
 }
 
-/// Mirrors core's `markRemoteEncryptionDiscovered`: never downgrades a keyed device whose
-/// salt matches the discovery, and persists immediately so the state survives a restart
-/// without needing the user to acknowledge anything first. A keyed device under a DIFFERENT
-/// salt is provably holding a foreign key (a passphrase set before the first sync while a
-/// peer encrypted the remote, or a peer's rotation) and does downgrade -- the no-key state is
-/// the only one that surfaces the unlock prompt able to re-derive from the remote's own salt.
 pub(crate) fn mark_remote_encrypted_no_key(
     app: &tauri::AppHandle,
     salt: &[u8],
@@ -767,9 +661,6 @@ pub(crate) fn mark_remote_encrypted_no_key(
     )
 }
 
-/// Mirrors core's `markRemotePlaintextDiscovered`: only an `enabled` device can reach this
-/// state, and its salt/params/fallback key are carried over unchanged so the key stays
-/// resolvable for a disable transition or recovery after a verified encrypted read.
 pub(crate) fn mark_remote_plaintext(
     app: &tauri::AppHandle,
     scope: Option<&str>,
@@ -790,16 +681,6 @@ pub(crate) fn mark_remote_plaintext(
     )
 }
 
-/// Mirrors core's `isSyncEncryptionStateBlocked`: must this device refuse to sync against
-/// `active_scope` before touching the remote? A discovery with NO scope was written before
-/// #1138 and does NOT block -- the cycle re-checks the location like a fresh join and the read
-/// seams re-mark it with a scope. An unknown active scope blocks, because "don't know" must
-/// never license a plaintext write beside ciphertext.
-///
-/// The desktop file backend has no pre-read gate of its own today (a no-key state simply
-/// resolves no material, and the read seam re-discovers), so nothing in this crate calls this
-/// yet. It exists so that the rule has ONE definition per platform and a future gate cannot be
-/// written against the unscoped predicate that #1138 was.
 #[allow(dead_code)]
 pub(crate) fn sync_encryption_state_blocked(
     state: Option<&SyncEncryptionLocalState>,
@@ -819,11 +700,6 @@ pub(crate) fn sync_encryption_state_blocked(
     }
 }
 
-/// #1138: Unlock against a location that holds no encrypted document. From
-/// `remote-encrypted-no-key` that is the stale-lock exit -- the discovery described a location
-/// this device is no longer pointed at (or one since emptied), and this device holds no key,
-/// so clearing back to off loses nothing. Returns false (and changes nothing) from any other
-/// state: a keyed device finding no `.enc` is `remote-plaintext`'s business.
 pub(crate) fn clear_stale_remote_encrypted_no_key(app: &tauri::AppHandle) -> Result<bool, String> {
     let Some(current) = read_local_state(app)? else {
         return Ok(false);
@@ -870,20 +746,14 @@ pub(crate) struct SyncEncryptionStatus {
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kdf_params: Option<KdfParamsPayload>,
-    /// Whether the derived key is actually available on this device right now. Phase 3 needs
-    /// this to tell "enabled and working" from "enabled but the keyring entry is gone".
+
     pub has_key: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub incomplete_transition: Option<String>,
-    /// First 8 hex characters of the persisted salt, for the Diagnostics "Encryption" block.
-    /// Truncated HERE so the full salt never crosses the IPC boundary for a diagnostics read;
-    /// the key-material command is the only place that hands TS a whole salt, and it needs it.
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub salt_prefix: Option<String>,
-    /// The location a discovery state was bound to (#1138), ALREADY reduced to
-    /// `<backend>#<digest>`. Reduced HERE, like `salt_prefix`, so no raw scope -- it carries
-    /// the WebDAV username and the sync folder path -- ever exists on the JS side where a
-    /// future log line or debug print could pick it up under a name that reads as safe.
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discovered_scope_label: Option<String>,
 }
@@ -918,15 +788,6 @@ pub(crate) fn parse_key_material_payload(
     Ok(SyncKeyMaterial { key, salt, params: kdf_params.into() })
 }
 
-// ---------------------------------------------------------------------------
-// Commands
-//
-// All `(async)`: Argon2id at the default cost burns ~19 MiB and tens of milliseconds, and the
-// keyring call is IPC to another process -- either one on the webview's IPC thread freezes the
-// window (#1001). None of these read or write config.toml, so none takes
-// lock_config_read_modify_write; the sidecar has its own lock above.
-// ---------------------------------------------------------------------------
-
 #[tauri::command(async)]
 pub(crate) fn get_sync_encryption_status(
     app: tauri::AppHandle,
@@ -949,8 +810,6 @@ pub(crate) fn get_sync_encryption_status(
     Ok(sync_encryption_status_payload(state, has_key))
 }
 
-/// The status payload for one sidecar state. Pure so a test can assert what crosses IPC:
-/// the salt is truncated and the discovery scope is digested HERE, never on the JS side.
 fn sync_encryption_status_payload(
     state: SyncEncryptionLocalState,
     has_key: bool,
@@ -968,9 +827,6 @@ fn sync_encryption_status_payload(
     }
 }
 
-/// The key cache's `getKey`, and the material the TS-driven seams (Dropbox, and WebDAV under a
-/// config override) need to build headers. Rust's keyring is the single source of truth even
-/// for the backends TS drives -- desktop TS never keeps a cache of its own.
 #[tauri::command(async)]
 pub(crate) fn get_sync_encryption_key_material(
     app: tauri::AppHandle,
@@ -978,9 +834,6 @@ pub(crate) fn get_sync_encryption_key_material(
     Ok(resolve_key_material(&app)?.as_ref().map(SyncEncryptionKeyMaterialPayload::from))
 }
 
-/// The key cache's `setKey`, called by the TS transition orchestration once a WebDAV/Dropbox
-/// transition has completed. Persisting here (and not before) is what keeps the
-/// "never persist a backend's enabled flag before its first successful round-trip" rule.
 #[tauri::command(async)]
 pub(crate) fn set_sync_encryption_key_material(
     app: tauri::AppHandle,
@@ -992,14 +845,11 @@ pub(crate) fn set_sync_encryption_key_material(
     persist_enabled_material(&app, &material)
 }
 
-/// The key cache's `clearKey`. Also drops the persisted state back to the implicit 'off'.
 #[tauri::command(async)]
 pub(crate) fn clear_sync_encryption_key_material(app: tauri::AppHandle) -> Result<(), String> {
     clear_encryption_state(&app)
 }
 
-/// Argon2id derivation for the TS seams. Returns raw key bytes (base64); the passphrase is
-/// never persisted and never leaves this call.
 #[tauri::command(async)]
 pub(crate) fn derive_sync_encryption_key(
     passphrase: String,
@@ -1020,8 +870,6 @@ pub(crate) fn derive_sync_encryption_key(
     Ok(SyncEncryptionKeyMaterialPayload::from(&material))
 }
 
-/// Called by the TS seams (Dropbox / WebDAV-under-override) the moment they find ciphertext
-/// they have no key for.
 #[tauri::command(async)]
 pub(crate) fn mark_sync_encryption_remote_discovered(
     app: tauri::AppHandle,
@@ -1033,8 +881,6 @@ pub(crate) fn mark_sync_encryption_remote_discovered(
     mark_remote_encrypted_no_key(&app, &salt_bytes, kdf_params.into(), location_scope.as_deref())
 }
 
-/// Called by the TS seams (Dropbox / WebDAV-under-override) the moment they find the sync
-/// location back in plaintext while this device still holds a key.
 #[tauri::command(async)]
 pub(crate) fn mark_sync_encryption_remote_plaintext(
     app: tauri::AppHandle,
@@ -1051,7 +897,6 @@ pub(crate) fn mark_sync_encryption_transition_incomplete(
     begin_sync_encryption_transition(&app, &transition_kind)
 }
 
-// A successful read may repair only the same location/generation's stale marker.
 fn restore_verified_remote_encryption(
     current: &mut SyncEncryptionLocalState,
     salt: &str,
@@ -1117,9 +962,6 @@ mod tests {
         assert!(!restore_verified_remote_encryption(&mut state, "0102", params, "webdav-scope"));
     }
 
-    // Shared with packages/core/src/sync-encryption.test.ts — both languages' name mapping
-    // must agree on every case, including compound suffix chains (S1: `.bak.previous` was
-    // previously mis-mapped by matching only the LAST suffix instead of the full chain).
     const ARTIFACT_NAMES_JSON: &str =
         include_str!("../../../../packages/core/src/__fixtures__/sync-crypto/artifact-names.json");
 
@@ -1157,7 +999,7 @@ mod tests {
                 case.encrypted
             );
         }
-        // Defensive: a name with no marker comes back untouched.
+
         assert_eq!(plaintext_artifact_name("data.json"), "data.json");
     }
 
@@ -1177,9 +1019,6 @@ mod tests {
             .is_none());
     }
 
-    // #1138 (7): a sidecar written by 1.2.6 and earlier carries no `discoveredScope`. Strict
-    // parsing rejects unknown STATES, never a missing optional -- if this regressed, every
-    // existing desktop install would fail closed with StateUnavailable on first launch.
     #[test]
     fn state_file_parses_without_the_discovered_scope_field() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -1192,12 +1031,13 @@ mod tests {
         let parsed = read_state_file(&path).expect("read state").expect("state present");
         assert_eq!(parsed.state, STATE_REMOTE_ENCRYPTED_NO_KEY);
         assert_eq!(parsed.discovered_scope, None);
-        // ...and an unscoped discovery does NOT block, so the next cycle re-checks the
-        // location like a fresh join instead of refusing forever.
-        assert!(!sync_encryption_state_blocked(Some(&parsed), Some(r#"["file","/sync"]"#)));
+
+        assert!(!sync_encryption_state_blocked(
+            Some(&parsed),
+            Some(r#"["file","/sync"]"#)
+        ));
     }
 
-    // #1138 (7): the scope compare, mirroring core's `isSyncEncryptionStateBlocked`.
     #[test]
     fn blocked_only_for_the_location_the_discovery_was_made_on() {
         let scoped = |scope: Option<&str>, state: &str| SyncEncryptionLocalState {
@@ -1214,7 +1054,7 @@ mod tests {
         let no_key_here = scoped(Some(here), STATE_REMOTE_ENCRYPTED_NO_KEY);
         assert!(sync_encryption_state_blocked(Some(&no_key_here), Some(here)));
         assert!(!sync_encryption_state_blocked(Some(&no_key_here), Some(elsewhere)));
-        // An unknown active location is doubt, and doubt must not license a plaintext write.
+
         assert!(sync_encryption_state_blocked(Some(&no_key_here), None));
 
         assert!(sync_encryption_state_blocked(
@@ -1245,7 +1085,7 @@ mod tests {
         assert_eq!(read_state_file(&path).expect("read state"), Some(state));
         write_state_file(&path, None).expect("clear state");
         assert!(read_state_file(&path).expect("read cleared state").is_none());
-        // Clearing an already-absent file is not an error (idempotent disable).
+
         write_state_file(&path, None).expect("clear again");
     }
 
@@ -1493,10 +1333,6 @@ mod tests {
         assert!(!is_terminal_error("Invalid sync payload shape: expected an object"));
     }
 
-    // -----------------------------------------------------------------------
-    // Diagnostics trail (#1056 follow-up)
-    // -----------------------------------------------------------------------
-
     #[test]
     fn diagnostic_lines_are_one_grep_able_key_value_line() {
         let line = sync_encryption_diagnostic(
@@ -1505,7 +1341,6 @@ mod tests {
                 ("backend", "file".to_string()),
                 ("state", STATE_ENABLED.to_string()),
                 ("hasMaterial", "true".to_string()),
-                // An empty value must still render as the absent token, never as nothing.
                 ("kdf", String::new()),
             ],
         );
@@ -1521,15 +1356,12 @@ mod tests {
         assert_eq!(sync_encryption_salt_prefix_bytes(&[0xab; SALT_LEN]), "abababab");
         assert_eq!(sync_encryption_salt_prefix(None), "-");
         assert_eq!(sync_encryption_salt_prefix(Some("  ")), "-");
-        // The full salt must never appear.
+
         assert!(!sync_encryption_salt_prefix_bytes(&[0xab; SALT_LEN]).contains(&"ab".repeat(16)));
     }
 
     #[test]
     fn a_location_scope_is_logged_as_backend_plus_digest_never_the_path() {
-        // The two fixtures are pinned against core's `digest32`
-        // (packages/core/src/sync-encryption-diagnostics.test.ts). If either side's hash
-        // changes, both tests fail and the drift is caught here rather than in a support log.
         assert_eq!(
             sync_encryption_scope_label(Some(r#"["file","/home/u/Sync/data.json"]"#)),
             "file#eb9492f4"
@@ -1559,9 +1391,6 @@ mod tests {
 
     #[test]
     fn no_diagnostic_line_can_carry_a_passphrase_or_a_key() {
-        // The seams below are the only inputs the Rust trail ever formats. None of them takes
-        // a passphrase or key bytes, and this asserts that by feeding the real values in
-        // beside them and checking the rendered lines.
         let passphrase = "correct horse battery staple";
         let key = [0x5a_u8; KEY_LEN];
         let salt = [0xab_u8; SALT_LEN];
@@ -1609,9 +1438,9 @@ mod tests {
             assert!(!line.contains(passphrase), "passphrase leaked into: {line}");
             assert!(!line.contains(&bytes_to_hex(&key)), "key leaked into: {line}");
             assert!(!line.contains(&BASE64_STANDARD.encode(key)), "key leaked into: {line}");
-            // The salt is public but never logged in full.
+
             assert!(!line.contains(&bytes_to_hex(&salt)), "full salt leaked into: {line}");
-            // The scope names the sync folder; only its digest may appear.
+
             assert!(!line.contains("/home/u/Sync"), "sync path leaked into: {line}");
         }
         assert!(lines[0].starts_with("[sync-encryption] state"));
@@ -1646,9 +1475,6 @@ mod tests {
         );
     }
 
-    /// The scope carries a WebDAV URL and username. It must be digested before it crosses IPC,
-    /// exactly as the salt is truncated before it crosses -- a raw copy on the JS side under a
-    /// name that reads as already-safe is how a future log line leaks one.
     #[test]
     fn the_sync_encryption_status_payload_never_carries_a_raw_scope_or_a_whole_salt() {
         let salt = "07".repeat(16);
@@ -1673,8 +1499,6 @@ mod tests {
         assert!(json.contains(r#""saltPrefix":"07070707""#), "{json}");
     }
 
-    /// Rust only ever feeds this a value it hex-encoded itself, but a hand-edited or
-    /// migration-corrupted sidecar must not put arbitrary text in the salt column.
     #[test]
     fn a_sync_encryption_salt_prefix_rejects_non_hex_input() {
         assert_eq!(sync_encryption_salt_prefix(Some("deadBEEF00")), "deadbeef");
@@ -1683,8 +1507,6 @@ mod tests {
         assert_eq!(sync_encryption_salt_prefix(None), "-");
     }
 
-    /// #1138 diagnostics: `backend=` is derived from the same scope `activeScope=` digests, so
-    /// a native WebDAV read can never log itself as the file backend.
     #[test]
     fn a_sync_encryption_backend_label_names_the_scope_backend() {
         let webdav = r#"["webdav","https://dav.example.com/remote.php/dav/","alice"]"#;

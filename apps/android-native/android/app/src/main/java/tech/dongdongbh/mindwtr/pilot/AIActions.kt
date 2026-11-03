@@ -50,26 +50,18 @@ import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import java.util.concurrent.CancellationException
 
-/*
- * RN's AI actions on core's contract (native-host-contract-ai.ts): the task editor's copilot chips, Clarify and Break down
- * (TaskEditFormTab.tsx, use-task-edit-copilot.ts, use-task-edit-actions.ts), Process Inbox's Clarify (InboxCaptureCard.tsx),
- * the Weekly Review's analysis (review-modal.tsx) and the capture screen's copilot (capture-modal.tsx). Each request runs off the
- * engine (CoreHost.aiRequest) and writes nothing: an answer is RN's AIResponseModal whose buttons apply through the screen's own
- * edits (editTaskDraft, getInboxProcessingStep, runReviewAction's applySuggestions), or RN's alert. State lives in memory only.
- */
 
-/** RN's AIResponseModal on screen: core's title, message and buttons; a button's `apply` goes to [apply] (null: it only closes). */
 class AIAnswer(val title: String, val message: String?, val choices: List<JSONObject>, val apply: (Any) -> Unit)
 
-/** The Weekly Review's analysis as RN's controller keeps it (aiRan, aiError, aiSuggestions, aiSelectedIds). */
+
 data class ReviewAnalysis(val ran: Boolean = false, val error: String? = null, val suggestions: List<JSONObject> = emptyList(), val selected: Set<String> = emptySet())
 
 class AIActionsModel(private val shell: InboxViewModel) {
     private val main = Handler(Looper.getMainLooper())
-    /** The requests each scope still wants: a newer one, an input change or a close cancels a request (its provider call stops). */
+
     private val calls = AIRequestSlots<CoreHost.LongCall> { call -> shell.coreHost()?.cancel(call) }
 
-    /** One AI request off the engine in [scope]; [answered] gets its result, unless a newer call, an input change or a close cancelled it. */
+
     private fun ask(scope: String, name: String, input: JSONObject, answered: (Result<JSONObject>) -> Unit) {
         val runtime = shell.coreHost() ?: return
         val handle = CoreHost.LongCall()
@@ -80,24 +72,22 @@ class AIActionsModel(private val shell: InboxViewModel) {
         }, "mindwtr-ai-$scope").start()
     }
 
-    /** The action waiting on the provider ("editor", "inbox", "review"): its button shows RN's spinner and "Working...". */
+
     var working by mutableStateOf<String?>(null); private set
-    /** RN's AIResponseModal, and RN's alert (a title and a message, OK only). */
+
     var answer by mutableStateOf<AIAnswer?>(null); private set
     var alert by mutableStateOf<Pair<String, String>?>(null); private set
 
-    // ---- The task editor ----
 
-    /** Core's AI parts for the editor's draft (getTaskEditorAI): the buttons, the chips, the applied line. */
     var editorAI by mutableStateOf<JSONObject?>(null); private set
-    /** The copilot's kept suggestion and the chips applied so far, for this editor session. */
+
     private var suggestion: JSONObject? = null
     private var applied = JSONObject().put("tags", JSONArray())
     private var session: String? = null
-    /** The text the copilot was last asked about (core's `copilot.request.text`). */
+
     private var asked: String? = null
 
-    /** Core's AI parts for the draft as it is now, in the background; a new session starts its copilot afresh. */
+
     fun readEditor() {
         val editor = shell.editor ?: return
         if (editor.readOnly) { editorAI = null; return }
@@ -105,7 +95,7 @@ class AIActionsModel(private val shell: InboxViewModel) {
             cancelEditor()
             session = editor.session; suggestion = null; applied = JSONObject().put("tags", JSONArray()); asked = null; editorAI = null
         }
-        // Any edit while Clarify or Break down waits stops it, as the copilot's text change does (review C1 verification 5).
+
         if (working == "editor" && editorAsked != snapshot()) { calls.cancel("editor"); working = null }
         val input = JSONObject().put("id", editor.id).put("draft", JSONObject(draftJson(editor.fullDraft())))
             .put("copilot", JSONObject().put("suggestion", suggestion ?: JSONObject.NULL).put("applied", applied))
@@ -122,7 +112,7 @@ class AIActionsModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** The copilot for [text], once typing paused on it: an answer for text the editor no longer shows is dropped. */
+
     private fun askCopilot(forSession: String, text: String) {
         val editor = shell.editor?.takeIf { it.session == forSession && asked == text } ?: return
         val input = JSONObject().put("id", editor.id).put("draft", JSONObject(draftJson(editor.fullDraft())))
@@ -135,20 +125,20 @@ class AIActionsModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** The editor closed: its copilot and its Clarify or Break down stop. */
+
     fun cancelEditor() {
         calls.cancel("copilot", "editor")
         if (working == "editor") working = null
     }
 
-    /** A chip (or Apply all): core's draft edit, and the applied parts it leaves. */
+
     fun applyChip(chip: JSONObject) {
         applied = chip.getJSONObject("applied")
         shell.applyAIEdit(chip.getJSONObject("edit"))
         readEditor()
     }
 
-    /** The draft and checklist Clarify or Break down was asked on: an answer shows and applies only while the editor still holds them. */
+
     private var editorAsked: String? = null
     private fun snapshot(): String? = shell.editor?.let { "${it.session}\n${draftJson(it.fullDraft())}\n${JSONArray(it.checklistNow)}" }
     private fun editorFits(): () -> Boolean {
@@ -157,7 +147,7 @@ class AIActionsModel(private val shell: InboxViewModel) {
         return { asked != null && snapshot() == asked }
     }
 
-    /** RN's Clarify: core's dialog, whose buttons edit the draft (a new title, or the suggestion's title, estimate and context). */
+
     fun clarify() {
         val editor = shell.editor ?: return
         val fits = editorFits()
@@ -166,7 +156,7 @@ class AIActionsModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** RN's Break down: core's steps dialog; "Add steps" puts core's checklist on the draft (and a list task's status). */
+
     fun breakdown() {
         val editor = shell.editor ?: return
         val input = JSONObject().put("id", editor.id).put("draft", JSONObject(draftJson(editor.fullDraft()))).put("checklist", JSONArray(editor.checklistNow))
@@ -177,12 +167,7 @@ class AIActionsModel(private val shell: InboxViewModel) {
         }
     }
 
-    // ---- Process Inbox ----
 
-    /**
-     * Process Inbox's Clarify on the step shown: core's dialog, whose buttons are step edits sent in order. The answer shows
-     * and applies only on the session and step it was asked on (a Process Inbox opened again is a new session).
-     */
     fun inboxClarify(flow: InboxProcessing) {
         val asked = InboxStepKey.of(flow)
         val fits = { InboxStepKey.of(shell.processing) == asked }
@@ -194,17 +179,16 @@ class AIActionsModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** Process Inbox closed: its Clarify stops, and an answer on screen for it closes. */
+
     fun cancelInbox() {
         calls.cancel("inbox")
         if (working == "inbox") working = null
     }
 
-    // ---- The Weekly Review ----
 
     var review by mutableStateOf(ReviewAnalysis()); private set
 
-    /** RN's Run analysis on the stale step: core's suggestions (the actionable ones chosen), or its error line. */
+
     fun runAnalysis() {
         if (working != null || shell.coreHost() == null) return
         review = review.copy(ran = true, error = null)
@@ -222,7 +206,7 @@ class AIActionsModel(private val shell: InboxViewModel) {
 
     fun toggleSuggestion(id: String) { review = review.copy(selected = if (id in review.selected) review.selected - id else review.selected + id) }
 
-    /** RN's Apply (n): the chosen suggestions through runReviewAction's applySuggestions, each task at the revision the analysis read. */
+
     fun applySuggestions() {
         val chosen = review.suggestions.filter { it.getString("id") in review.selected }
         if (chosen.none { it.getBoolean("actionable") }) return
@@ -231,15 +215,13 @@ class AIActionsModel(private val shell: InboxViewModel) {
         shell.menu.act("reviewAction", JSONObject().put("type", "applySuggestions").put("suggestions", suggestions).put("taskRevisions", revisions))
     }
 
-    /** RN's review modal state goes with it. */
+
     fun leaveReview() { calls.cancel("review"); review = ReviewAnalysis(); if (working == "review") working = null }
 
-    // ---- The capture screen ----
 
-    /** The capture screen's question last asked: its screen session with core's `copilot.request` (captureCopilotKey). */
     private var captureAsked: String? = null
 
-    /** Core's capture view asks the copilot ([request]); once typing paused, requestAICopilot, and its answer as setSuggestion. */
+
     fun captureCopilot(session: String, request: JSONObject?) {
         val key = captureCopilotKey(session, request?.toString())
         if (key == captureAsked) return
@@ -252,22 +234,17 @@ class AIActionsModel(private val shell: InboxViewModel) {
                 result.exceptionOrNull()?.let { if (it !is CancellationException) Log.w(CoreHost.TAG, "AI copilot failed code=${it.message?.substringBefore(':')}") }
                 val reply = result.getOrNull() ?: return@ask
                 if (shell.captureModal.open?.session != session || captureAsked != key) return@ask
-                // No suggestion: an empty one, which core keeps as none.
+
                 shell.captureModal.edit(JSONObject().put("type", "setSuggestion").put("title", request.getString("title"))
                     .put("suggestion", reply.optJSONObject("suggestion") ?: JSONObject()))
             }
         }, CAPTURE_COPILOT_DELAY_MS)
     }
 
-    /** The capture screen closed: its copilot stops. */
+
     fun cancelCapture() { calls.cancel("capture"); captureAsked = null }
 
-    // ---- Answers ----
 
-    /**
-     * One AI action (Clarify, Break down, Process Inbox's Clarify) in [action]'s scope; its answer is shown while [fits] (its
-     * editor or step is still on screen), and a button's `apply` goes to [apply]. A cancelled one shows nothing.
-     */
     private fun request(action: String, name: String, input: JSONObject, fits: () -> Boolean, apply: (Any) -> Unit) {
         if (working != null || shell.coreHost() == null) return
         working = action
@@ -281,7 +258,7 @@ class AIActionsModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** Core's answer: nothing, RN's alert, RN's toast (its Open goes to Settings › AI), or RN's AIResponseModal. */
+
     private fun show(reply: JSONObject, apply: (Any) -> Unit) {
         when (reply.getString("kind")) {
             "alert" -> alert = reply.getString("title") to reply.getString("message")
@@ -295,7 +272,7 @@ class AIActionsModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** A button of the open answer: it closes, then applies what it carries (Cancel carries nothing). */
+
     fun choose(choice: JSONObject) {
         val open = answer ?: return
         answer = null
@@ -305,12 +282,12 @@ class AIActionsModel(private val shell: InboxViewModel) {
     fun dismiss() { answer = null; alert = null }
 
     private companion object {
-        /** RN's capture screen asks the copilot this long after the title last changed (capture-modal.tsx). */
+
         const val CAPTURE_COPILOT_DELAY_MS = 800L
     }
 }
 
-/** The Ionicons RN's editor copilot pill draws (@expo/vector-icons 15.0.3's glyph outlines, as SettingsIcons.kt builds them). */
+
 private object CopilotIonicons {
     val SparklesOutline = ionicon("SparklesOutline",
         "M81 2Q95 -5 102 9Q104 12 112 33Q120 54 121 55Q122 56 145 65Q172 76 175 82Q180 94 170 101Q168 102 144.5 111" +
@@ -347,7 +324,7 @@ private object CopilotIonicons {
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
-/** RN's AIResponseModal: a dimmed backdrop, the card with its title, its message (scrolled past 220), and one button per line. */
+
 @Composable
 fun AIResponseDialog(model: InboxViewModel, answer: AIAnswer) {
     val theme = LocalTheme.current
@@ -375,7 +352,7 @@ fun AIResponseDialog(model: InboxViewModel, answer: AIAnswer) {
     }
 }
 
-/** RN's Alert.alert with core's title and message, and OK. */
+
 @Composable
 fun AIAlert(model: InboxViewModel, alert: Pair<String, String>) {
     AlertDialog(
@@ -386,17 +363,14 @@ fun AIAlert(model: InboxViewModel, alert: Pair<String, String>) {
     )
 }
 
-/** The open AI answer or alert over any screen. */
+
 @Composable
 fun AIOverlays(model: InboxViewModel) {
     model.ai.answer?.let { AIResponseDialog(model, it) }
     model.ai.alert?.let { AIAlert(model, it) }
 }
 
-/**
- * The editor's AI rows under the title (TaskEditFormTab.tsx): Clarify and Break down with RN's spinner while one runs, the
- * copilot's suggested chips with Apply all and the hint, and the applied line.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EditorAIRows(model: InboxViewModel, locked: Boolean) {
@@ -441,14 +415,14 @@ fun EditorAIRows(model: InboxViewModel, locked: Boolean) {
     }
 }
 
-/** RN's copilotPill: a bordered pill on [fill] holding the chips or the applied line. */
+
 @Composable
 private fun CopilotPill(fill: Color, shape: RoundedCornerShape, modifier: Modifier, content: @Composable () -> Unit) {
     val c = LocalTheme.current.colors
     Column(modifier.clip(shape).background(fill).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp)) { content() }
 }
 
-/** RN's copilotChip: a part's value on the card color; a tap applies it. */
+
 @Composable
 private fun CopilotChip(label: String, tag: String, enabled: Boolean, apply: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -460,7 +434,7 @@ private fun CopilotChip(label: String, tag: String, enabled: Boolean, apply: () 
     }
 }
 
-/** RN's copilotApplyAll: the label in the tint. */
+
 @Composable
 private fun CopilotApplyAll(label: String, enabled: Boolean, apply: () -> Unit) {
     Box(Modifier.clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = "ai-apply-all"; if (enabled) onClick { apply(); true } else disabled() }
@@ -469,7 +443,7 @@ private fun CopilotApplyAll(label: String, enabled: Boolean, apply: () -> Unit) 
     }
 }
 
-/** The capture screen's copilot (capture-modal.tsx): the suggested chips in RN's round pill, and the applied line with Check. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CaptureCopilot(model: InboxViewModel, copilot: JSONObject, enabled: Boolean) {

@@ -35,8 +35,8 @@ describe('GettingStartedActions', () => {
         expect(onAction.mock.calls).toEqual([['capture'], ['inbox'], ['focus']]);
         act(() => tree.unmount());
     });
-    // Desktop's card hands off to the public guide; the mobile card stopped at
-    // the three chips, so the seeded tutorial had nowhere to go next.
+
+
     it('links to the getting-started guide in the app language', () => {
         let tree!: renderer.ReactTestRenderer;
         act(() => { tree = renderer.create(<GettingStartedActions onAction={vi.fn()} />); });

@@ -34,7 +34,7 @@ const fixture = (session: string | null = null) => {
 const scope = `tech.dongdongbh.mindwtr.nativeclient.dev:${'a'.repeat(64)}`;
 
 describe('Android Pomodoro alarm bridge', () => {
-    // The QuickJS wrapper hands a Kotlin null over as undefined: no record yet, and no RN record, on a fresh install.
+
     it('plans with no stored record when Kotlin passes null (undefined in the engine)', async () => {
         const port = fixture();
         expect((await port.pomodoroAlarmPlan(true, undefined, scope, '[]', '[]')).outcome).toBe('uninitialized');

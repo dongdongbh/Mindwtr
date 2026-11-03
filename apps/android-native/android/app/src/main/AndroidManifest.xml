@@ -3,15 +3,10 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- The network state core's sync reads (HostNetwork.kt), as RN's expo-network does. -->
+
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- RN's network security config (apps/mobile/plugins/android-network-security-config.js). -->
-    <!-- MindwtrApplication sets the widget module's hook (CoreWork) before any component of this process runs. -->
-    <!-- RN's backup rules, its files byte for byte (plugins/android-manifest-fixes.js; check-variant-identity.mjs compares them):
-         they name only a file that never exists, so neither cloud backup nor a device-to-device transfer copies anything
-         (Android 12+ still transfers an allowBackup="false" app's whole folder). supportsRtl as RN's: Arabic and Persian lay out
-         right to left. -->
+
     <application
         android:networkSecurityConfig="@xml/network_security_config"
         android:name=".MindwtrApplication"
@@ -24,15 +19,14 @@
         android:dataExtractionRules="@xml/mindwtr_data_extraction_rules"
         android:theme="@style/Theme.NativeDev">
 
-        <!-- RN's Gmail build gate (plugins/android-gmail-authorization.js): app/build.gradle.kts sets it per variant from RN's
-             rule; GmailAuthorization reads it, and check-variant-identity.mjs checks it. -->
+
         <meta-data android:name="MindwtrGmailEnabled" android:value="${gmailEnabled}" />
 
         <receiver
             android:name="androidx.profileinstaller.ProfileInstallReceiver"
             tools:node="remove" />
 
-        <!-- Settings › Data › Share log hands files/logs/mindwtr.log to the share sheet; nothing else is reachable. -->
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.diagnostics"
@@ -43,8 +37,7 @@
                 android:resource="@xml/diagnostics_paths" />
         </provider>
 
-        <!-- An attachment opened in another app or shared (Attachments.kt) is handed over under RN's provider authority
-             (expo-file-system's FileSystemFileProvider); only files/attachments/ is reachable, and only with a granted URI. -->
+
         <provider
             android:name=".AttachmentFileProvider"
             android:authorities="${applicationId}.FileSystemFileProvider"
@@ -55,8 +48,7 @@
                 android:resource="@xml/attachment_paths" />
         </provider>
 
-        <!-- singleTask, as RN's MainActivity: a link, share or note sent while the app runs reaches onNewIntent in the app's
-             own task. Not exported: only its alias below, with RN's filters, starts it from outside the app. -->
+
         <activity
             android:name=".MainActivity"
             android:exported="false"
@@ -65,10 +57,7 @@
             android:theme="@style/Theme.App.SplashScreen"
             android:windowSoftInputMode="adjustResize" />
 
-        <!-- RN's component name, <applicationId>.MainActivity: home-screen icons, pinned shortcuts and widgets launch it
-             (inventory section 6). It carries RN's entry points (plugins/android-app-shortcuts.js, app.json's share intent):
-             the launcher, links of the build's scheme, text and file shares, Google Assistant's
-             notes, and the app shortcuts. Every input is untrusted: core reads it (resolveNativeEntryPoint). -->
+
         <activity-alias
             android:name="${applicationId}.MainActivity"
             android:exported="true"
@@ -84,8 +73,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="${urlScheme}" />
             </intent-filter>
-            <!-- RN's share filters (app.json's expo-share-intent androidIntentFilters and androidMultiIntentFilters): text, and
-                 files of these types, one or several. -->
+
+
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -115,11 +104,7 @@
                 android:resource="@xml/mindwtr_shortcuts" />
         </activity-alias>
 
-        <!-- RN's widget components, quick capture dialog, capture intent receiver and Quick Settings tile come from RN's own
-             plugins, one overlay per build type (scripts/build-widgets.mjs; build/generated/widgets/<type>/AndroidManifest.xml). -->
 
-        <!-- RN's context automation receiver and its two filters (plugins/android-manifest-fixes.js), under RN's class name.
-             Exported as in RN: core reads the trigger (runContextAutomation), and nothing is written. -->
         <receiver
             android:name="tech.dongdongbh.mindwtr.contextautomation.ContextAutomationReceiver"
             android:exported="true">
@@ -136,22 +121,20 @@
             </intent-filter>
         </receiver>
 
-        <!-- The native Pomodoro's completion alarms (PomodoroAlarms.kt): only this app's AlarmManager sends them. -->
+
         <receiver
             android:name=".PomodoroAlarmReceiver"
             android:exported="false" />
 
-        <!-- Reminder alarms (Reminders.kt), as RN's alarm library declares its receivers (plugins/patch-alarm-notification-gradle.js).
-             An alarm and a notification's Done, Snooze and Dismiss come only from this app's own PendingIntents, so neither
-             receiver is exported (RN's AlarmReceiver is not either). -->
+
         <receiver
             android:name=".ReminderAlarmReceiver"
             android:exported="false" />
         <receiver
             android:name=".ReminderActionReceiver"
             android:exported="false" />
-        <!-- Exported as RN's AlarmBootReceiver is: each action is one only the system sends (a reboot, a clock or time zone change,
-             this app's update, exact alarms allowed); it only asks CoreWork to plan the alarms again. -->
+
+
         <receiver
             android:name=".ReminderRescheduleReceiver"
             android:exported="true">
@@ -163,30 +146,30 @@
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
-        <!-- RN's persistent quick-capture notification (modules/notification-open-intents, PersistentCaptureNotifier.kt reused as it
-             is): re-posts it when the user swipes it away; the app's own cancel() fires no delete intent. Not exported, as RN's. -->
+
+
         <receiver
             android:name="tech.dongdongbh.mindwtr.notificationopenintents.PersistentCaptureDismissReceiver"
             android:exported="false" />
     </application>
 
-    <!-- RN's app lock asks BiometricPrompt (AppLock.kt), as expo-local-authentication's manifest allows. -->
+
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <!-- RN's microphone (app.json's permissions): kept declared so an upgrade keeps the user's grant; RN's quick capture dialog
-         (QuickCaptureActivity, compiled in :widget) records with it. -->
+
+
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- The rest of RN's permissions (its libraries' normal ones), so the upgrade keeps RN's permission set: Wi-Fi state, audio
-         settings for recording, vibration. -->
+
+
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- RN's notifications (app.json's permissions): reminders and the context automation notification (CoreNotifications.kt). -->
+
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- RN's alarm library's (plugins/patch-alarm-notification-gradle.js): reminders come back after a reboot, and are exact where
-         the user allows it (Android 12+ asks; RN's exact-alarm notice opens that page). -->
+
+
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- RN's calendar pair (app.json's permissions, expo-calendar asks both): device calendars read (HostCalendars.kt), push in C4. -->
+
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 </manifest>

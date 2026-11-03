@@ -43,10 +43,7 @@ import {
     runMobileAttachmentLifecycle,
 } from './common';
 
-/** Which task/project an attachment id belongs to — CloudKit's upload metadata needs the
- *  owner, which the shared lifecycle's per-attachment callbacks don't carry. Deliberately
- *  holds no attachment reference: the attachment values come from the lifecycle's own
- *  working copy, so metadata can never describe a stale pre-patch object. */
+
 type AttachmentOwner = {
     ownerType: 'task' | 'project';
     ownerId: string;
@@ -74,9 +71,7 @@ const buildTargetUri = (attachmentsDir: string, attachment: Attachment): string 
     return `${attachmentsDir}${attachment.id}${ext}`;
 };
 
-// Handles a content:// uri that reached upload despite the general migration pre-pass — e.g. one
-// capped by createAttachmentLocalMigrationLimiter in a PRIOR sync round whose cap has since
-// reset. Preserved verbatim from before this file adopted the shared lifecycle.
+
 const ensureCloudKitAssetFile = async (
     attachment: Attachment,
     uri: string,
@@ -120,15 +115,12 @@ const buildMetadata = (
 });
 
 const applyFetchedMetadata = (attachment: Attachment, metadata: CloudKitAttachmentMetadata): void => {
-    // The merged sync document owns descriptive metadata. CloudKit asset metadata
-    // can lag behind title-only or MIME-only document edits because those edits do
-    // not upload a new byte generation. Only the byte-derived size is authoritative
-    // after fetching the asset; the installer has already recorded its exact hash.
+
+
     if (Number.isFinite(metadata.size ?? NaN)) attachment.size = metadata.size;
 };
 
-/** The next `settings.attachments` value once the flushed keys are dropped, or `undefined`
- *  when there was nothing to flush. Never writes to the input settings. */
+
 const flushPendingCloudKitDeletes = async (
     appData: AppData,
     signal?: AbortSignal,
@@ -163,7 +155,7 @@ export const syncCloudKitAttachments = async (
     if (!attachmentsDir) return false;
 
     const settingsPatch = await flushPendingCloudKitDeletes(appData, signal);
-    /** Fold both channels (attachment patches + settings) into one fresh document. */
+
     const fold = (patches: Map<string, Attachment>): AppData | false => {
         const next = withAttachmentSettingsPatch(applyAttachmentPatches(appData, patches), settingsPatch);
         return next !== appData ? next : false;
@@ -183,18 +175,16 @@ export const syncCloudKitAttachments = async (
         computeLocalFileHash: (path) => computeAttachmentFileHash(path),
         contentChangePhase: options.phase,
         isFatalError: (error) => isAttachmentSyncAbortError(error, signal),
-        // A cloudKey written by a different backend before a provider switch isn't a valid
-        // CloudKit record key, so CloudKit must still treat the attachment as needing upload.
+
+
         hasCloudCopy: (attachment) => Boolean(parseCloudKitAttachmentKey(attachment.cloudKey)),
-        // Outside a probe, a record that answered "not found" waits out its backoff.
+
         policy: { shouldDownload: (attachment) => options.activationProbe === true || !getWebdavDownloadBackoff(attachment.id) },
         onUpload: async (attachment, localPath, snapshot) => {
             const owned = ownerByAttachmentId.get(attachment.id);
             if (!owned) return false;
-            // A local content:// → managed-file migration must survive an upload
-            // failure (the bytes ARE in the managed dir), so its mutated flag is
-            // reported from the catch too — mirroring the validation-failure
-            // branch below.
+
+
             let migrated = false;
             try {
                 const assetFile = await ensureCloudKitAssetFile(attachment, localPath, attachmentsDir, signal);
@@ -219,8 +209,8 @@ export const syncCloudKitAttachments = async (
                     { signal },
                 );
                 attachment.cloudKey = buildCloudKitAttachmentKey(attachment.id);
-                // localStatus is already 'available' here: onUpload only runs when the
-                // lifecycle's own existsLocally check just passed, which is what set it.
+
+
                 if (Number.isFinite(assetFile.size ?? NaN)) attachment.size = assetFile.size ?? undefined;
                 reportProgress(attachment.id, 'upload', totalBytes, totalBytes, 'completed');
                 return true;
@@ -239,8 +229,8 @@ export const syncCloudKitAttachments = async (
             }
         },
         onUploadError: () => {
-            // onUpload's own catch above handles everything except the fatal (abort) case,
-            // which it rethrows — that never reaches here. Required by the lifecycle's contract.
+
+
         },
         onDownload: async (attachment, expectation) => {
             const recordName = parseCloudKitAttachmentKey(attachment.cloudKey);
@@ -256,8 +246,8 @@ export const syncCloudKitAttachments = async (
                 stagedUri = createAttachmentDownloadStagePath(attachmentsDir, attachment);
                 reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
                 const metadata = await fetchCloudKitAttachmentAsset(recordName, stagedUri, { signal });
-                // From this point the helper owns cleanup: it removes the stage
-                // only before native installation begins and preserves it after.
+
+
                 installerOwnsStage = true;
                 const installed = await installStagedAttachmentDownload({
                     attachment,
@@ -288,7 +278,7 @@ export const syncCloudKitAttachments = async (
                         'Attachment is no longer available',
                     );
                     logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);
-                    // The row stays live and keyed (core handleRemoteAttachmentNotFound).
+
                     if (options.activationProbe !== true) setWebdavDownloadBackoff(attachment.id, { status: 404 });
                     return handleRemoteAttachmentNotFound(attachment, options.activationProbe === true);
                 }
@@ -308,11 +298,8 @@ export const syncCloudKitAttachments = async (
     });
 
     for (const patch of patches.values()) allPatches.set(patch.id, patch);
-    // A completed pass is this backend's whole reconciliation: it refreshed every
-    // attachment's local presence and settled every transfer. Stamping it lets
-    // `hasPendingAttachmentSyncWork` keep the steady state quiet until the next one is due
-    // (audit F3). Never stamped for an activation probe, whose subject is the candidate
-    // configuration rather than the committed one the stamp names.
+
+
     if (!options.activationProbe) await markAttachmentPresenceReconciled();
     return fold(allPatches);
 };

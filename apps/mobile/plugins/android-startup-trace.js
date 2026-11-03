@@ -30,13 +30,6 @@ inline fun <T> startupSection(phase: String, block: () -> T): T {
 }
 `;
 
-// ContextAutomationReceiver.kt and ContextAutomationHeadlessService.kt used to be
-// generated here as template strings. They are now real, compiled, lintable
-// Kotlin source in the local Expo module at
-// apps/mobile/modules/context-automation/android/... (mirroring the
-// notification-open-intents module's structure), so this plugin no longer
-// writes them into the app's own package. android-manifest-fixes.js registers
-// them by fully-qualified name.
 
 const selfLaunchGuardFunction = `  private fun isSelfLaunchedIntent(intent: Intent?): Boolean {
     // MainActivity is exported, so any app can start it carrying taskId /

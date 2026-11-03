@@ -115,8 +115,7 @@ describe('TaskListHeader', () => {
     expect(html.indexOf('data-icon="sliders-horizontal"')).toBeLessThan(html.indexOf('Mind Sweep'));
   });
 
-  // A tinted border says "some filter is on" but not how many; a forgotten
-  // second filter then looks like missing tasks.
+
   it('shows how many filters are active on the compact Inbox filter button', () => {
     const html = renderHeader({
       directControls: true,
@@ -127,7 +126,7 @@ describe('TaskListHeader', () => {
 
     expect(html).toContain('aria-label="Filters: 3"');
     expect(html).toContain('>3<');
-    // No count while nothing is filtered.
+
     expect(renderHeader({ directControls: true, onOpenGroup: vi.fn() } as Partial<React.ComponentProps<typeof TaskListHeader>>))
       .not.toContain('>0<');
   });
@@ -180,11 +179,10 @@ describe('TaskListHeader', () => {
       hasActiveFilters: true,
     });
 
-    // Screen readers must hear the excluded state, not just see the strikethrough.
+
     expect(html).toContain('aria-label="Remove filter: #waiting (Excluded)"');
-    // Excluded chips add a third style layer (the strikethrough) that plain
-    // chips don't carry; the concrete line-through value is asserted where the
-    // renderer keeps real style objects (TaskListFiltersSheet.test).
+
+
     expect(html).toContain('2:[object Object]">#waiting');
   });
 

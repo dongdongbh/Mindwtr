@@ -127,7 +127,7 @@ vi.mock('@react-navigation/elements', () => ({
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const { mockCore } = await import('../test-support/mock-core');
-  // This suite drives the store hook itself, so it supplies its own.
+
   return mockCore(importOriginal, () => ({}), {
     isSandboxMode: () => sandboxModeMock.current,
     useTaskStore: mockUseTaskStore,
@@ -598,9 +598,8 @@ describe('mobile tab quick capture', () => {
   });
 
   it('routes a returnTo capture through the root capture screen instead of the tab sheet', () => {
-    // The tab sheet opens in place with no route change, so a caller that
-    // dismissed its own UI expecting a focus event on return (project quick
-    // add, #938) would be stranded on its base screen.
+
+
     let tree!: ReturnType<typeof create>;
 
     act(() => {
@@ -620,7 +619,7 @@ describe('mobile tab quick capture', () => {
     }));
     expect(getQuickCaptureSheets(tree)).toHaveLength(0);
 
-    // A plain capture still uses the in-place sheet.
+
     act(() => {
       tabProviderValue.current?.openQuickCapture();
     });
@@ -685,7 +684,7 @@ describe('mobile tab quick capture', () => {
   it('redirects root cold launch to Focus when no recent session is stored', async () => {
     let tree!: ReturnType<typeof create>;
 
-    // Session restore reads storage asynchronously before redirecting.
+
     await act(async () => {
       tree = create(<Index />);
     });
@@ -763,8 +762,8 @@ describe('mobile tab quick capture', () => {
     })[0];
     if (!rail) throw new Error('expanded rail not found');
     const style = flattenStyle(rail.props.style);
-    // The full-height rail extends under system bars; every action must end
-    // above the taskbar, with its normal 16 dp breathing room still intact.
+
+
     expect(style.paddingBottom).toBe(72);
     expect(883 - Number(style.paddingBottom)).toBeLessThan(883 - safeAreaMock.bottom);
   });
@@ -850,10 +849,8 @@ describe('mobile tab quick capture', () => {
   });
 
   it('boosts the capture FAB to the high-emphasis M3 primary role under Material', () => {
-    // Capture is Mindwtr's most important action, so under M3 the FAB uses the
-    // high-emphasis FAB role (primary/onPrimary), not the deliberately subdued
-    // primaryContainer. Other primary buttons stay primaryContainer (canonical),
-    // preserving M3's emphasis hierarchy with capture at the top.
+
+
     mockThemeTokens.value = {
       isMaterial: true,
       roles: {

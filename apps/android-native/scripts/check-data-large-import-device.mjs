@@ -1,6 +1,6 @@
-// Settings › Data's largest TickTick and Mindwtr CSV imports on the S23 and their Undo (pass native-import-large): check-data-device.mjs's
-// LI rows alone. Same arguments and exit codes.
-//   node apps/android-native/scripts/check-data-large-import-device.mjs <adb-serial>
+
+
+
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 

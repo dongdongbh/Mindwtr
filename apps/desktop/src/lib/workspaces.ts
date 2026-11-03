@@ -1,27 +1,24 @@
 import { isTauriRuntime } from './runtime';
 import { invokeNative } from './tauri-invoke';
 
-// Isolated desktop workspaces (#1473). The native side owns the list and the
-// active id; switching restarts the app, so nothing here holds per-workspace
-// state beyond what the current process opened with.
 
 export { DEFAULT_WORKSPACE_ID, getActiveWorkspaceId } from './workspace-storage-scope';
 
 export type WorkspaceInfo = {
     id: string;
-    /** Empty for the default workspace until the user names it. */
+
     name: string;
     color: string | null;
     isDefault: boolean;
-    /** The workspace's data folder, shown so a user can pass it to the MCP server or CLI. */
+
     dataDir: string;
 };
 
 export type WorkspaceList = {
     activeId: string;
-    /** False when the profile folder could not be migrated this run. */
+
     available: boolean;
-    /** workspaces.toml exists but could not be read; the default workspace opened. */
+
     unreadable: boolean;
     workspaces: WorkspaceInfo[];
 };
@@ -35,7 +32,7 @@ export async function listWorkspaces(): Promise<WorkspaceList | null> {
     return await invokeNative<WorkspaceList>('list_workspaces');
 }
 
-/** Fired on window after a workspace is added, renamed or deleted. */
+
 export const WORKSPACES_CHANGED_EVENT = 'mindwtr:workspaces-changed';
 
 const announceChange = () => {
@@ -57,7 +54,7 @@ export async function deleteWorkspace(id: string): Promise<void> {
     try {
         await invokeNative('delete_workspace', { id });
     } finally {
-        // A delete that removed the entry but not every file still changed the list.
+
         announceChange();
     }
 }
@@ -71,12 +68,7 @@ export class WorkspaceSaveError extends Error {
 
 const SWITCH_FLUSH_TIMEOUT_MS = 10_000;
 
-/**
- * Saves pending local changes, then asks the native side to record the new
- * workspace and restart. No sync runs first: an unreachable server must never
- * block opening another workspace. A failed or hung save cancels the switch,
- * because the restart would drop the unsaved change.
- */
+
 export async function switchWorkspace(
     id: string,
     flush: () => Promise<void>,

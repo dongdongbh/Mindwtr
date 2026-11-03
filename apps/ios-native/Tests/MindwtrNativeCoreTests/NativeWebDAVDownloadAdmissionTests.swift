@@ -239,8 +239,8 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
         var winner = attachment(hash: hash(bytes)); winner["contentMtimeMs"] = 1; winner["contentSize"] = 1
         let managedBefore = try FileManager.default.contentsOfDirectory(atPath: managed.path)
         let cacheBefore = try FileManager.default.contentsOfDirectory(atPath: cache.path)
-        // Ordinary mode reaches the real Cloud remote-winner branch. Its presence
-        // HEAD is allowed; the coded GET refusal must not retry or install bytes.
+
+
         for headers in responseHeaders {
             let value = try host(plans: [plan(winner, provider: "selfhosted", activationProbe: false)], bytes: bytes, headers: headers)
             try await start(value); let count = state.recorded.filter { $0 == "GET" }.count
@@ -268,8 +268,8 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
         let installed = try await probe(exact); try assertInstalled(installed, bytes: bytes)
         XCTAssertEqual(installed["warnings"] as? [[String: String]], [])
         XCTAssertEqual(try rows(), before); XCTAssertEqual(state.recorded.filter { $0 == "GET" }.count, exactCount + 1)
-        // Present-CAS retains the displaced inode at the engine's first owned
-        // preservation slot and leaves its lock; no journal or staging may remain.
+
+
         let preservedName = ".mindwtr-preserved-" + String(hash(Data(source.path.utf8)).prefix(32)) + "-0"
         let lockName = ".mindwtr-attachment-installer.lock", preserved = managed.appendingPathComponent(preservedName)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managed.path).sorted(), (managedBefore + [preservedName, lockName]).sorted())
@@ -347,9 +347,8 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
 
     func testValidEncryptedWireRefusesBeforeDecryptThenExactWireCapInstallsPlaintext() async throws {
         let plain = Data([0,255,128,1]), selected = attachment(hash: hash(plain), pending: true)
-        // Maintained MWENC1 header (54 bytes), with deterministic synthetic AES-256
-        // material. CryptoKit supplies an independent wire oracle; the real native
-        // crypto/shared decoder must authenticate it on the successful path.
+
+
         var header = Data("MWENC1".utf8); header.append(contentsOf: [1,1,64,0,0,0,1,0,0,0,1,1])
         header.append(Data(count: 16)); header.append(Data(count: 12)); header.append(contentsOf: [20,0,0,0,0,0,0,0])
         XCTAssertEqual(header.count, 54)

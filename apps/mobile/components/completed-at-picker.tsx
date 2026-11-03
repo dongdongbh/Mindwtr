@@ -5,7 +5,7 @@ import { normalizeTimeSpentMinutes, resolveTaskEditorBackdatedCompletion, tFallb
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 type CompletedAtPickerProps = {
-    /** ISO timestamp the picker starts from; defaults to now. */
+
     initialValue?: string;
     initialTimeSpentMinutes?: number;
     showTimeSpent?: boolean;
@@ -21,10 +21,7 @@ const toValidDate = (value?: string): Date => {
     return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 };
 
-/**
- * Date + time picker for a task's completion timestamp. iOS shows a single
- * datetime spinner in a modal; Android chains the native date and time dialogs.
- */
+
 export function CompletedAtPicker({
     initialValue,
     initialTimeSpentMinutes,

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 
-// Serialized into the verified synthetic Benchmark WebView by WebDriver.
-// Keep this function self-contained: it is not bundled into the application.
+
 export function installNativeInvokeProbe() {
   const stateKey = '__mindwtrNativeInvokeCompletionProbeV1';
   const target = window.__mindwtrNativeInvokeTransport;
@@ -40,7 +39,7 @@ export function installNativeInvokeProbe() {
         settledMs,
         outcome,
       });
-    } catch { /* Benchmark diagnostics must never change invoke behavior. */ }
+    } catch {                                                                }
   };
 
   state.wrapper = function (...args) {
@@ -78,7 +77,7 @@ export function installNativeInvokeProbe() {
         ]);
       } catch {
         state.observationFailures += 1;
-        // An unusual thenable must still be returned unchanged.
+
       }
     } else {
       complete(entry, 'fulfilled', entry.returnedMs);
@@ -90,7 +89,7 @@ export function installNativeInvokeProbe() {
   target.invoke = state.wrapper;
 }
 
-// Also serialized into the WebView. Restoration happens before evidence is copied.
+
 export function stopNativeInvokeProbe() {
   const stateKey = '__mindwtrNativeInvokeCompletionProbeV1';
   const state = window[stateKey];
@@ -99,13 +98,13 @@ export function stopNativeInvokeProbe() {
   let publishedTargetOwned = false;
   let wrapperOwned = false;
   let wrapperRestored = false;
-  try { publishedTargetOwned = window.__mindwtrNativeInvokeTransport === target; } catch { /* Invalid evidence below. */ }
-  try { wrapperOwned = !!target && target.invoke === state.wrapper; } catch { /* Invalid evidence below. */ }
+  try { publishedTargetOwned = window.__mindwtrNativeInvokeTransport === target; } catch {                               }
+  try { wrapperOwned = !!target && target.invoke === state.wrapper; } catch {                               }
   if (wrapperOwned) {
     try {
       target.invoke = state.original;
       wrapperRestored = target.invoke === state.original;
-    } catch { /* Invalid evidence below; do not touch a later owner. */ }
+    } catch {                                                           }
   }
   const ownershipLost = !publishedTargetOwned || !wrapperOwned || !wrapperRestored;
   state.stopped = true;

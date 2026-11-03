@@ -32,13 +32,7 @@ type UseTaskItemSubmitParams = {
     settlePersistedAttachmentSave: (attachments: Attachment[]) => void;
 };
 
-/**
- * The editor save as one store command, merged field by field onto the latest row by core's saveTaskDraftOntoLatest:
- * only the fields the draft changed since [base] are written, and a list another device changed too is merged (tags and
- * contexts by token, the checklist by item id, attachments by mergeTaskDraftAttachments). A single value takes the
- * draft's (last write wins). Answers the row it saved, read before any sync save can publish over it, as the base for
- * the next save of this session.
- */
+
 const saveDraftOnLatest = async (id: string, base: Task, patch: Partial<Task>, beforeWrite?: () => void) => {
     let saved: Task | undefined;
     const result = await saveTaskDraftOntoLatest(id, base, patch, {
@@ -58,7 +52,7 @@ type TaskItemSubmitOptions = {
     statusOverride?: TaskStatus;
     completedAtOverride?: string;
     timeSpentMinutesOverride?: number;
-    /** Save the draft but leave the editor mounted for a chained durable action. */
+
     keepEditing?: boolean;
 };
 
@@ -81,7 +75,7 @@ export function useTaskItemSubmit({
     cancelAttachmentSaveBeforeStoreUpdate,
     settlePersistedAttachmentSave,
 }: UseTaskItemSubmitParams) {
-    // The row this edit session last saved: the next save's base, so the editor's own saves are not conflicts.
+
     const savedRef = useRef<{ opened: Task; saved: Task } | null>(null);
     const inFlightRef = useRef<Promise<StoreActionResult | undefined> | null>(null);
     const latestRef = useRef({ draft, editAttachments, baselineTask });
@@ -114,10 +108,8 @@ export function useTaskItemSubmit({
             if (options?.completedAtOverride !== undefined) {
                 patch.completedAt = options.completedAtOverride;
             }
-            // Presence check, not `!== undefined`: an explicit undefined override
-            // means "the time-spent field was shown but left blank," which clears
-            // timeSpentMinutes rather than leaving it untouched (mirrors mobile's
-            // completed-at-picker.tsx / #896).
+
+
             if (options && 'timeSpentMinutesOverride' in options) {
                 patch.timeSpentMinutes = options.timeSpentMinutesOverride;
             }

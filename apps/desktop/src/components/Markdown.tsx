@@ -7,8 +7,8 @@ import { InternalMarkdownLink, type InternalMarkdownLinkContext, useInternalMark
 const TASK_LIST_RE = /^(\s*)(?:[-*+]\s+)?\[( |x|X)\]\s+(.+)$/;
 const BULLET_LIST_RE = /^(\s*)[-*+]\s+(.+)$/;
 const ORDERED_LIST_RE = /^(\s*)(\d+)([.)])\s+(.+)$/;
-// Two spaces (or one tab) per level, the same width the core Tab indent helper and
-// the mobile renderer use, so a nested item previews at the same depth everywhere.
+
+
 const LIST_DEPTH_INDENT_PX = 14;
 const getListIndentDepth = (indent: string): number => (
     Math.max(0, Math.floor(indent.replace(/\t/g, '    ').length / 2))

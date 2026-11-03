@@ -16,7 +16,7 @@ const project = (id: string, extra: Partial<Project> = {}): Project => ({
     createdAt: AT, updatedAt: AT, ...extra,
 });
 
-// Kept independent of the shared policy: the four RN loops before extraction.
+
 const legacy = (kind: TaxonomyKind, action: TaxonomyAction, name: string, to: string | null,
     values: string[]): string[] => {
     const key = (value: string) => kind === 'tag' ? normalizeTagId(value) : value.trim().toLowerCase();

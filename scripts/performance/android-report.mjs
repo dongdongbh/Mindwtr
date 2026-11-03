@@ -14,8 +14,8 @@ export function parseAndroidReport(csv, phases, metadata) {
     && run.total_time_ms !== '' && Number.isFinite(Number(run.total_time_ms)) && Number(run.total_time_ms) >= 0
     && (metadata.scenario === 'warm' || unique.has(run.run)));
   const metrics = { [metadata.scenario === 'hot' ? 'nativeResumeDispatch' : 'initialDisplay']: summarize(valid.map((run) => Number(run.total_time_ms))) };
-  // Cold is measured since JS profiler load; resume is measured since AppState active.
-  // A warm native activity may reuse or recreate JS. Do not mix those clocks.
+
+
   if (metadata.scenario !== 'warm') metrics[metadata.scenario === 'cold' ? 'jsInteractive' : 'jsResume'] = summarize(valid.map((run) => unique.get(run.run)));
   return { schemaVersion: 1, metadata, sampleCount: runs.length, invalidSamples: runs.length - valid.length,
     warnings: valid.length < 100 ? ['Fewer than 100 valid samples: p95 is descriptive only, not a regression gate.'] : [], metrics };

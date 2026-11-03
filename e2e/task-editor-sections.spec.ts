@@ -45,14 +45,14 @@ for (const presentation of ['inline', 'modal']) {
             await expect(scheduling).toHaveAttribute('aria-expanded', 'true');
             await expect(details).toHaveAttribute('aria-expanded', 'false');
 
-            // Populated sections open once; later edits respect manual collapse.
+
             await scheduling.click();
             await editor.getByRole('combobox', { name: 'Title', exact: true }).fill('Plan the spring garden');
             await expect(scheduling).toHaveAttribute('aria-expanded', 'false');
 
             await page.setViewportSize({ width: 1280, height });
 
-            // The padding is part of the target, including just below the border.
+
             expect((await sectionGeometry(details)).headerHeight).toBeGreaterThanOrEqual(40);
             await details.click({ position: { x: 10, y: 3 } });
             await expect(details).toHaveAttribute('aria-expanded', 'true');
@@ -63,7 +63,7 @@ for (const presentation of ['inline', 'modal']) {
             await expect(details).toBeFocused();
             await page.screenshot({ path: testInfo.outputPath(`${presentation}-${height}-details.png`) });
 
-            // Keyboard opening also reveals the section and retains toggle focus.
+
             await details.press('Space');
             await scheduling.focus();
             await scheduling.press('Enter');

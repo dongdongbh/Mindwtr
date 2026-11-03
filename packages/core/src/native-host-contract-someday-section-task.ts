@@ -81,7 +81,7 @@ const selectedSection = (raw: readonly ViewSectionDefinition[], id: string): Vie
     if (matches.length !== 1) return null;
     return sortViewSectionDefinitions(raw).includes(matches[0]) ? matches[0] : null;
 };
-// Validation reads the reminder default back from the frozen row, which inherits it; the journal keeps its shape.
+
 const expectedTask = (prepared: NativePreparedSomedaySectionTask,
     taskReminderDefault: 'send' | 'skip' = prepared.task.suppressMindwtrReminders === true ? 'skip' : 'send'): Task | null => {
     const section = prepared.request.sectionId === null ? undefined : prepared.sectionWitness;
@@ -97,14 +97,14 @@ const expectedTask = (prepared: NativePreparedSomedaySectionTask,
     });
     return built.ok ? built.task : null;
 };
-// SQLite hydration materializes a missing recurrence as null. Compare the same
-// canonical hydrated shape on both sides, including every persisted column.
+
+
 const hydrated = (task: Task): Task => {
     const row = taskToSqliteRow(task);
     return taskFromSqliteRow(Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, row[index]])));
 };
 
-/** Pure cold-journal validation; no store or SQLite access. */
+
 export function validatePreparedSomedaySectionTask(input: unknown): NativeHostResult<NativeSomedaySectionTaskResult> {
     const envelope = detach<NativeSomedaySectionTaskEnvelope>(input);
     if (!envelope || !isNativeJsonWithinBytes(envelope, LIMIT) || !safeJsonStrings(envelope)
@@ -154,7 +154,7 @@ export function createSomedaySectionTaskMethods(deps: {
             if (matches.length === 1 && !matches[0].deletedAt && !matches[0].purgedAt
                 && sameTaskSqliteRow(hydrated(matches[0]), hydrated(prepared.task)))
                 return { ok: true, value: prepared.result };
-        } catch { /* A malformed stored row cannot acknowledge a creation. */ }
+        } catch {                                                             }
         return fail('STALE_REVISION', 'Someday task creation outcome is not present');
     };
     const sectionStillMatches = (prepared: NativePreparedSomedaySectionTask): boolean => {
@@ -247,7 +247,7 @@ export function createSomedaySectionTaskMethods(deps: {
                 }));
                 return settleWrite(written, prepared.result);
             });
-            // Receipts, including durable ones, cannot acknowledge a later edit or deletion.
+
             return outcome.ok ? target(prepared) : outcome;
         },
     };

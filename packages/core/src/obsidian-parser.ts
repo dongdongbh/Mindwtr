@@ -151,7 +151,7 @@ export const extractObsidianTags = (text: string): string[] => {
     return uniqueObsidianStrings(tags);
 };
 
-/** One inline tag, with the same character set as the existing tag extractor. */
+
 export const normalizeObsidianRequiredInlineTag = (value: string | null | undefined): string => {
     const tag = normalizeObsidianTagValue(value ?? '');
     if (!tag && !(value ?? '').trim()) return '';
@@ -337,7 +337,7 @@ export const parseObsidianDataviewData = (text: string): ObsidianDataviewData | 
         const key = normalizeDataviewKey(field.key);
         if (!key) continue;
         if (key === 'project' || key === 'projects') {
-            // One push per item: QuickJS (native Android) refuses a call with more than 65535 arguments.
+
             for (const item of splitDataviewListValue(field.value)) projects.push(item);
             continue;
         }

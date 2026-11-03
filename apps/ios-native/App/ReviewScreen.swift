@@ -242,7 +242,7 @@ struct ReviewGuideScreen: View {
                             ForEach(scheduledItems.indices, id: \.self) { index in guideItem(scheduledItems[index]) }
                         }
                     }
-                    // A folded group should not offer pages containing only its hidden rows.
+
                     let visibleTotal = view.number("total") - (scheduledGroup && !scheduledExpanded ? content.object("scheduled").number("count") : 0)
                     if items.count < visibleTotal {
                         ReviewAction(title: model.label("common.more"), enabled: model.reviewActionsEnabled, palette: palette, id: "review-guide-more") {
@@ -438,7 +438,7 @@ struct ReviewGuideScreen: View {
         }
     }
 
-    /// RN's Open project link (#1459): under an expanded project's last row, or under its card when it has none.
+
     @ViewBuilder private func openProjectLink(after index: Int, in items: [CoreObject]) -> some View {
         let item = items[index]
         let projectID = item.text("type") == "project" ? item.text("id") : item.text("projectId")

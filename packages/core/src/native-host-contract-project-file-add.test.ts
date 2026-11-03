@@ -470,7 +470,7 @@ describe('prepared Project-owned file Add foundation', () => {
                 rawToken.request.expected.attachments = [];
                 rawToken.prepared.request.expected.attachments = [];
                 expect(env.host.validatePreparedProjectFileAddWrite(rawToken)).toMatchObject({ ok: true });
-                // Initial prepare still requires the actual host's current token exactly.
+
                 expect(await env.host.prepareProjectFileAddWrite(rawToken.request)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
             } else expect(frozen.prepared.scope.project).not.toHaveProperty('attachments');
             expect(env.host.validatePreparedProjectFileAddWrite(frozen)).toMatchObject({ ok: true });
@@ -552,7 +552,7 @@ describe('prepared Project-owned file Add foundation', () => {
         const env = await openSqliteHost({ projects: [project('target', { attachments: [originalFile, link] }),
             project('other', { attachments: [originalFile], viewSectionIds: [] })], settings: { deviceId: 'files-device' } });
         try {
-            // A settled database with valid raw metadata; Add must preserve the row even when its display codec omits false.
+
             await flushPendingSave();
             await env.client().run('UPDATE projects SET attachments = ?, viewSectionIds = ? WHERE id = ?',
                 [JSON.stringify([originalFile]), '[]', 'other']);

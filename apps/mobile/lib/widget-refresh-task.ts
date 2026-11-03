@@ -5,7 +5,7 @@ import { mobileStorage, quiesceMobileStorage } from './storage-adapter';
 import { logInfo, logWarn } from './app-log';
 import { updateMobileWidgetFromStore } from './widget-service';
 
-// Selection changes need a fresh projection, even with sync disabled.
+
 export const WIDGET_REFRESH_TASK_NAME = 'MindwtrWidgetRefresh';
 let pending: Promise<void> = Promise.resolve();
 export function runWidgetRefreshTask(): Promise<void> {

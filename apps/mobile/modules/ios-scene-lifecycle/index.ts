@@ -83,7 +83,7 @@ const validRecord = (value: unknown): value is IosSceneDiagnosticRecord => {
     && Number(record.count) <= 1_000_000;
 };
 
-/** Drains only fixed, privacy-safe fields from the bounded native queue. */
+
 export function drainIosSceneDiagnostics(): IosSceneDiagnosticRecord[] {
   try {
     const raw = getNativeModule()?.drainDiagnostics?.();
@@ -98,7 +98,7 @@ export function drainIosSceneDiagnostics(): IosSceneDiagnosticRecord[] {
   }
 }
 
-/** A wake-up edge; records remain in the native queue until drained. */
+
 export function subscribeIosSceneDiagnostics(
   listener: () => void,
 ): IosSceneDiagnosticsSubscription {
@@ -113,12 +113,7 @@ export function subscribeIosSceneDiagnostics(
   }
 }
 
-/**
- * Asks iOS to keep the app running in the background until the returned release is called
- * (#1432). Returns null off iOS, on an older build without the native function, or when iOS
- * grants no time. `onExpire` runs at most once, when iOS ends the time first; native has
- * already ended the task then, so a later release only cleans up.
- */
+
 export function beginIosBackgroundTask(
   name: string,
   onExpire: () => void,
@@ -146,14 +141,14 @@ export function beginIosBackgroundTask(
       if (event?.id === taskId && finish()) onExpire();
     });
   } catch {
-    // Without the event, iOS still ends the task itself when the time runs out.
+
   }
   return () => {
     if (!finish()) return;
     try {
       nativeModule.endBackgroundTask?.(taskId);
     } catch {
-      // Native ignores an id it no longer holds; nothing else to release.
+
     }
   };
 }

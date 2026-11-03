@@ -199,13 +199,13 @@ const readUndoEnvelope = (value: unknown): NativeSomedaySectionMoveUndoEnvelope 
         ? envelope as unknown as NativeSomedaySectionMoveUndoEnvelope : null;
 };
 
-/** Pure cold-journal validation before SQLite opens. */
+
 export const validatePreparedSomedaySectionMove = (value: unknown): NativeHostResult<NativeSomedaySectionMoveResult> => {
     const envelope = readMoveEnvelope(value);
     return envelope ? { ok: true, value: envelope.prepared.result }
         : fail('INVALID_INPUT', 'Prepared Someday section move is malformed');
 };
-/** Pure cold-journal validation before SQLite opens. */
+
 export const validatePreparedSomedaySectionMoveUndo = (value: unknown): NativeHostResult<NativeSomedaySectionMoveResult> => {
     const envelope = readUndoEnvelope(value);
     return envelope ? { ok: true, value: envelope.prepared.result }

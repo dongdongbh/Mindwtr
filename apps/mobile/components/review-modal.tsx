@@ -136,9 +136,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
     const closeText = closeLabel && closeLabel !== 'common.close' ? closeLabel : 'Close';
     const onFilled = filledButton.textColor ?? tc.onTint;
 
-    // Every step's rows share one actions object so stepping through the review
-    // does not hand each row a fresh set of arrows (#766). The handlers come
-    // from the controller, so they are read through a ref rather than closed over.
+
     const rowSourcesRef = useRef({ handleTaskPress, handleStatusChange, handleDelete });
     rowSourcesRef.current = { handleTaskPress, handleStatusChange, handleDelete };
     const rowActions = useMemo<TaskRowActions>(() => ({
@@ -159,7 +157,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         }
     }, [showInboxProcessing, showMindSweep, showShareCard, visible]);
 
-    // Formatted each render: the app's date settings can change while the review is open.
+
     const calendarView = getWeeklyReviewCalendar(externalCalendarReviewItems, calendarReviewItems, labels, safeFormatDate);
 
     const renderSummaryRow = (good: boolean, text: string) => (
@@ -388,8 +386,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         );
     };
 
-    // One card for a project in the Projects step and in the Stale step (#1459):
-    // tap to see its tasks, edit them in place, add one, or open the project.
+
     const renderProjectEntry = (entry: (typeof projectReviewEntries)[number], meta?: string) => {
         const isExpanded = expandedProject === entry.project.id;
         return (

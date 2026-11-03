@@ -15,8 +15,6 @@ import { logError, logInfo, logWarn } from './app-log';
 import { mobileFileSync } from './file-sync-host';
 import { createSyncPathBookmark } from './sync-path-bookmarks';
 
-// File Sync's document reads and writes live in core (mobile-file-sync.ts, moved there in S5)
-// and run on this app's host (file-sync-host.ts). The pickers and the backup export stay here.
 
 export {
     FILE_SYNC_ABSENT_FINGERPRINT,
@@ -26,13 +24,13 @@ export {
     type SyncFileAccessOptions,
 } from '@mindwtr/core';
 
-// StorageAccessFramework is part of the legacy FileSystem module
+
 const StorageAccessFramework = FileSystem.StorageAccessFramework;
 
 interface PickResult extends AppData {
     __fileUri?: string;
     __fileBookmark?: string;
-    /** True when the selected sync folder is inside iCloud Drive. */
+
     __icloud?: boolean;
 }
 
@@ -74,12 +72,12 @@ const writeWithModernFileApi = (fileUri: string, content: string): void => {
     file.write(content);
 };
 
-// Pick a sync file and return both the parsed data and the file URI
+
 export const pickAndParseSyncFile = async (): Promise<PickResult | null> => {
     try {
         const result = await DocumentPicker.getDocumentAsync({
             type: 'application/json',
-            copyToCacheDirectory: false, // Keep original path for persistent access
+            copyToCacheDirectory: false,
         });
 
         if (result.canceled) {
@@ -91,7 +89,7 @@ export const pickAndParseSyncFile = async (): Promise<PickResult | null> => {
         if (!fileContent) throw new Error('Sync file does not exist');
         const data = parseAppData(fileContent);
 
-        // Return data with file URI and iCloud flag attached
+
         return {
             ...data,
             __fileUri: fileUri,
@@ -130,7 +128,7 @@ const assertIosDirectoryWritable = async (
                 file.delete();
             }
         } catch {
-            // Ignore cleanup failures for test file.
+
         }
     }
 };
@@ -154,11 +152,8 @@ const assertIosFileWritable = async (fileUri: string): Promise<void> => {
 };
 
 export type PickSyncFolderOptions = {
-    /** iOS only: asked before falling back from the folder picker to the
-     *  backup-file picker (providers like Google Drive, OneDrive, and ownCloud
-     *  gray out folder selection). The fallback sheet looks identical to the
-     *  one just dismissed, so without an explanation users never discover it —
-     *  or get an uninvited second picker on a plain cancel (#1068, #210). */
+
+
     confirmFileFallback?: () => Promise<boolean>;
 };
 
@@ -273,18 +268,18 @@ export const pickAndParseSyncFolder = async (options?: PickSyncFolderOptions): P
     }
 };
 
-// Export data for backup - allows saving to local directory on Android
+
 export const exportData = async (data: AppData): Promise<void> => {
     try {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `mindwtr-backup-${timestamp}.json`;
         const jsonContent = JSON.stringify(data, null, 2);
 
-        // On Android, try SAF to let user pick save location
+
         if (Platform.OS === 'android' && StorageAccessFramework) {
             try {
                 void logInfo('Export attempting SAF', { scope: 'sync' });
-                // Request permission to a directory
+
                 const permissions = await StorageAccessFramework.requestDirectoryPermissionsAsync();
                 void logInfo('Export SAF permissions', {
                     scope: 'sync',
@@ -295,7 +290,7 @@ export const exportData = async (data: AppData): Promise<void> => {
 
                 const directoryUri = permissions.directoryUri;
                 if (permissions.granted && directoryUri) {
-                    // Create the file in the selected directory
+
                     const fileUri = await StorageAccessFramework.createFileAsync(
                         directoryUri,
                         filename,
@@ -322,7 +317,7 @@ export const exportData = async (data: AppData): Promise<void> => {
             });
         }
 
-        // Fallback: Use cache + share sheet
+
         const fileUri = FileSystem.cacheDirectory + filename;
         void logInfo('Export writing backup to cache before share', { scope: 'sync' });
         await FileSystem.writeAsStringAsync(fileUri, jsonContent);

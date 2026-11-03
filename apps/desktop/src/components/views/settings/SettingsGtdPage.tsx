@@ -167,7 +167,7 @@ type TaskEditorLayoutUpdate = {
     presentation?: TaskEditorPresentation;
 };
 
-// The task editor layout these settings resolve to: saved order first, then new fields; hidden falls back to the defaults.
+
 const resolveTaskEditorLayout = (settings: AppSettings) => {
     const flags = resolveFeatureFlags(settings);
     const defaultVisible = new Set<TaskEditorFieldId>(DEFAULT_TASK_EDITOR_VISIBLE);
@@ -243,8 +243,8 @@ export function SettingsGtdPage({
     const pomodoroLinkTask = safeSettings.gtd?.pomodoro?.linkTask === true;
     const pomodoroAutoStartBreaks = safeSettings.gtd?.pomodoro?.autoStartBreaks === true;
     const pomodoroAutoStartFocus = safeSettings.gtd?.pomodoro?.autoStartFocus === true;
-    // Defaults on: the alert is the point of the timer, and an off-by-default
-    // switch is what made #528 read as broken.
+
+
     const pomodoroCompletionAlert = safeSettings.gtd?.pomodoro?.completionAlert !== false;
     const [pomodoroFocusDraft, setPomodoroFocusDraft] = useState(String(pomodoroCustomDurations.focusMinutes));
     const [pomodoroBreakDraft, setPomodoroBreakDraft] = useState(String(pomodoroCustomDurations.breakMinutes));
@@ -259,8 +259,7 @@ export function SettingsGtdPage({
         setDefaultScheduleTimeDraft(defaultScheduleTime);
     }, [defaultScheduleTime]);
 
-    // Each group write is built from the settings as stored when it is admitted, so a key another
-    // device synced since this page rendered stays. [build] changes only the edited key.
+
     const saveFromLatest = (
         build: (latest: AppSettings) => Partial<AppSettings> | null,
         failure: string,
@@ -371,7 +370,7 @@ export function SettingsGtdPage({
                 return fieldId;
         }
     };
-    // [build] answers the layout keys to change (and the feature flags, if any) for the latest settings.
+
     const saveTaskEditor = (
         build: (latest: AppSettings) => { next: TaskEditorLayoutUpdate; features?: FeatureSettings } | null,
     ) => {
@@ -391,7 +390,7 @@ export function SettingsGtdPage({
         }, 'Failed to update task editor layout');
     };
     const toggleFieldVisibility = (fieldId: TaskEditorFieldId) => {
-        // The value the page shows decides, as the feature toggles do: another device's change since is not flipped back.
+
         const hide = !hiddenSet.has(fieldId);
         saveTaskEditor((latest) => {
             const { order, hidden: nextHidden } = resolveTaskEditorLayout(latest);

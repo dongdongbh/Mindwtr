@@ -20,8 +20,7 @@ import { isLikelyOfflineSyncError } from './sync-service-utils';
 import { DropboxUnauthorizedError } from './dropbox';
 import type { MergeStats } from './sync-types';
 
-// Moved with the rules from apps/mobile/lib/sync-service.test.ts, which still runs against
-// React Native's re-exports.
+
 describe('mobile sync utils', () => {
   const emptyEntityStats = {
     localTotal: 0,

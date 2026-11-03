@@ -1,16 +1,6 @@
-/**
- * What a tap on a mobile reminder notification, or on one of its buttons, opens or does.
- * Moved from React Native's hooks/root-layout/use-root-layout-notification-open-handler.ts
- * so the native app routes taps by the same rules.
- *
- * - Dismiss and Snooze open nothing: the notification layer handles them (Snooze is a new
- *   alarm of its own, see buildReminderSnooze).
- * - Done completes the task and opens nothing. It applies once per notification: the
- *   route's `actionKey` names the tap, and an actionable task is the only one it changes.
- * - Otherwise: a task or project review reminder opens Review; a task opens its editor
- *   from Focus; a project opens Projects; a context automation opens its context; a daily
- *   digest opens Daily Review; the weekly review opens Weekly Review.
- */
+
+
+
 import { isTaskActionable } from './task-status';
 import type { Task } from './types';
 
@@ -33,12 +23,12 @@ export type NotificationOpenRoute =
     | { type: 'daily-review'; openToken: string }
     | { type: 'weekly-review'; openToken: string };
 
-/** What Done writes. */
+
 export const REMINDER_COMPLETE_UPDATE = { status: 'done', isFocusedToday: false } as const;
 
 export type ReminderCompletionBlocker = 'task-not-found' | 'task-deleted' | 'not-actionable';
 
-/** Why Done leaves this task alone, or null when it completes it. */
+
 export function getReminderCompletionBlocker(task: Pick<Task, 'status' | 'deletedAt'> | undefined): ReminderCompletionBlocker | null {
     if (!task) return 'task-not-found';
     if (task.deletedAt) return 'task-deleted';
@@ -60,11 +50,7 @@ function isDailyReviewOpen(kind: string | undefined, notificationId: string): bo
 
 const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
 
-/**
- * The route for one notification tap. Fields that are not text are ignored. `now` stamps
- * open tokens when the payload has no notification ID; `nextTaskOpenSequence` numbers task
- * opens, so the same notification reopens the editor every time.
- */
+
 export function resolveNotificationOpenRoute(
     payload: unknown,
     clock: { now: () => number; nextTaskOpenSequence: () => number },

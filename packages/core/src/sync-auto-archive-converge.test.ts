@@ -6,7 +6,7 @@ import { mergeAppDataWithStats } from './sync';
 import { createMockTask, mockAppData } from './sync-test-utils';
 import type { AppData, Task } from './types';
 
-// #1430: two devices auto-archive the same completed task before they exchange changes.
+
 const NOW = '2026-10-21T14:00:00.000Z';
 const base: Task = {
     ...createMockTask('synthetic-task', '2026-10-12T22:29:51.174Z'),
@@ -30,7 +30,7 @@ const expectConvergedPair = (a: Task, b: Task, archivedAt: string) => {
     expect(ba.stats.tasks.conflicts).toBe(0);
     expect(mergedTask(ab).archivedAt).toBe(archivedAt);
     expect(mergedTask(ba)).toEqual(mergedTask(ab));
-    // Fixed point: a peer holding either input (an old 1.3.6 client included) adopts the result, no ping-pong.
+
     for (const input of [a, b]) {
         for (const result of [merge(mergedTask(ab), input), merge(input, mergedTask(ab))]) {
             expect(result.stats.tasks.conflicts).toBe(0);

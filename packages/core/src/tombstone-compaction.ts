@@ -13,11 +13,7 @@ const SQLITE_NEUTRAL_FALSE_FIELDS = new Set([
     'perSectionFlow',
 ]);
 
-// normalizeTaskForLoad no longer backfills pushCount: 0 on purged tombstones
-// (task-status.ts, fixed by 0642ab52e / #766), but rows persisted before that
-// fix still carry a stored 0. Without this neutral-zero carve-out, those
-// legacy rows re-flag as uncompacted and take a rev bump on every merge,
-// which changes the sync fingerprint and re-triggers the next cycle forever.
+
 const NEUTRAL_ZERO_FIELDS = new Set(['pushCount']);
 
 const hasValuesOutsideCompactedTombstone = (
@@ -25,20 +21,15 @@ const hasValuesOutsideCompactedTombstone = (
     compacted: Record<string, unknown>,
 ): boolean => Object.entries(value).some(([key, item]) => (
     item !== undefined
-    // The SQLite row codec rehydrates absent columns as explicit null
-    // (e.g. completedAtBeforeProjectArchive), and null ≡ missing everywhere
-    // in sync. Without this, every SQL-loaded tombstone re-flags as
-    // uncompacted and takes an uncounted rev bump per cycle — the #766
-    // rev-only rewrite of every purged row that kept sync re-triggering
-    // while tombstoneRepairs read 0 (the bump happened in the stats-discarding
-    // pre-cycle merge, not the counted one).
+
+
     && !(item === null && compacted[key] === undefined)
     && !(item === false && compacted[key] === undefined && SQLITE_NEUTRAL_FALSE_FIELDS.has(key))
     && !(item === 0 && compacted[key] === undefined && NEUTRAL_ZERO_FIELDS.has(key))
     && JSON.stringify(item) !== JSON.stringify(compacted[key])
 ));
 
-// Keep only conflict metadata plus neutral fields required by each entity schema.
+
 export const compactPurgedTaskTombstone = (task: Task): Task => {
     if (!task.purgedAt) return task;
     return {

@@ -13,8 +13,8 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class WriteRedirectRefusalTest {
-  // A WebDAV server that answers a PUT with `301 Location: <same path>`, a GET of
-  // /dav/old with a 301 to /dav/data.json, and a GET of /dav/data.json with 200.
+
+
   private val server = ServerSocket(0)
   private val seen: MutableList<String> = Collections.synchronizedList(mutableListOf())
   private val base = "http://127.0.0.1:${server.localPort}"

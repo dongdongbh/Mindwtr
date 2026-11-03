@@ -3,7 +3,7 @@ import { createNativeHostContract, type NativeAboutHost, type NativeHostResult }
 import { MOBILE_ONBOARDING_STORAGE_KEY } from './first-run-onboarding';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 
-// A maintainer announcement (ACTIVE_APP_ANNOUNCEMENT is null in the shipped code), so its window and dismissal can be pinned.
+
 vi.mock('./announcements', async (importOriginal) => ({
     ...await importOriginal<typeof import('./announcements')>(),
     ACTIVE_APP_ANNOUNCEMENT: { id: 'v1.4-notes', title: 'What is new', body: 'Notes', action: { type: 'feedback', label: 'Tell us' } },

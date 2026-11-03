@@ -118,9 +118,7 @@ describe.each(CONFIGS)("$name Vitest coverage config", ({ name, config }) => {
   });
 });
 
-// A harness timeout, not a performance budget: full-screen render tests need
-// 3-5 s on a quiet machine and were seen at 11.4 s on a busy one, so Vitest's
-// 5 s default failed them at random. Budgets live in the perf suite.
+
 describe("Vitest harness timeout", () => {
   test.each([
     { name: "desktop", config: desktopConfig as ConfigObject },
@@ -129,8 +127,7 @@ describe("Vitest harness timeout", () => {
     expect(config.test?.testTimeout).toBe(30_000);
   });
 
-  // Core's SQLite-host contract tests boot a real database per test and
-  // passed 5 s under shared-host and CI load (seen at 6.3 s on a runner).
+
   test("core waits 20 s before calling a test hung", () => {
     expect((coreConfig as ConfigObject).test?.testTimeout).toBe(20_000);
   });

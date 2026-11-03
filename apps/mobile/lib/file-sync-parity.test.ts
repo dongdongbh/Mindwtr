@@ -6,16 +6,10 @@ import * as nodeCrypto from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2.js';
 import type { AppData } from '@mindwtr/core';
 
-// File Sync's parity fixture (S5): every call React Native's File Sync makes to expo-file-system
-// and to its native modules, with each scenario's result and the folder it leaves, frozen from the
-// corrected HEAD before the code moves into core. Payloads are SHA-256 digests, the cipher's
-// randomness is seeded, and only timestamps and scratch names are normalized, so different bytes
-// never trace alike. The move must replay this trace call for call. Regenerate only on purpose:
-// FILE_SYNC_PARITY_UPDATE=1 bunx vitest run lib/file-sync-parity.test.ts
 
 const fs = vi.hoisted(() => ({ files: new Map<string, Uint8Array>(), trace: [] as unknown[][] }));
-/** Test faults: SAF reads with no reported length, an iOS bookmark, a failing modern text read,
- *  and a peer that changes the folder just before a matching call runs. */
+
+
 const fault = vi.hoisted(() => ({
   listing: null as Error | null,
   readOnlyCreate: false,
@@ -241,7 +235,7 @@ const nodeQuickCrypto: SyncCryptoNativeModule = {
   createCipheriv: (a, k, i) => nodeCrypto.createCipheriv(a, k, i) as never,
   createDecipheriv: (a, k, i) => nodeCrypto.createDecipheriv(a, k, i) as never,
   createHash: (a) => nodeCrypto.createHash(a) as never,
-  // Seeded, so ciphertext, salts and nonces repeat run to run and their digests can be frozen.
+
   randomBytes: (size) => {
     const out = new Uint8Array(size);
     for (let offset = 0; offset < size; offset += 32) {
@@ -264,9 +258,7 @@ const json = (title: string) => new TextEncoder().encode(JSON.stringify(appData(
 
 const digest = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex').slice(0, 16);
 
-/** Values with nothing that changes between runs: scratch names (clock and Math.random) are
- *  numbered in order of first use, timestamps are masked, and byte payloads and long strings
- *  become their length plus a SHA-256 digest, so different payloads never normalize alike. */
+
 const normalizer = () => {
   const names = new Map<string, string>();
   const text = (value: string): string => value
@@ -291,7 +283,7 @@ const normalizer = () => {
   return { entry: (entry: unknown[]) => entry.map(value), value, name: text };
 };
 
-/** A scenario's result: its value, or the error's name and message. */
+
 const settle = async (run: Promise<unknown>): Promise<unknown> => {
   try {
     return { value: (await run) ?? null };
@@ -305,7 +297,7 @@ const setPlatform = async (os: 'android' | 'ios') => {
   (Platform as { OS: string }).OS = os;
 };
 
-/** A peer that changes the folder once, just before the first call `match` accepts. */
+
 const peerBefore = (match: (entry: unknown[]) => boolean, change: () => void) => {
   fault.peer = (entry) => {
     if (!match(entry)) return false;
@@ -316,7 +308,7 @@ const peerBefore = (match: (entry: unknown[]) => boolean, change: () => void) =>
 const callOn = (name: string, pattern: RegExp) => (entry: unknown[]) =>
   entry[0] === name && typeof entry[1] === 'string' && pattern.test(entry[1]);
 
-/** The native lock as an Android build has it, recording each call. */
+
 const recordingLock = () => {
   let tokens = 0;
   return {

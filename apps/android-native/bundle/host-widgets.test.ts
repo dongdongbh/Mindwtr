@@ -2,14 +2,11 @@ import { afterEach, describe, expect, it, setSystemTime } from 'bun:test';
 import { consoleLogger, NO_FOCUS_WIDGET_FILTER, resetForTests, setFocusWidgetFilter, setLogger, useTaskStore, type LogPayload } from '@mindwtr/core';
 import { createWidgetPublisher, type WidgetBridge } from './host-widgets';
 
-// The widget publication on leaving the app (ProcessCoreHost's "background"): RN flushes a refresh still waiting; it does not
-// build the whole payload again when nothing changed. At 5,000 tasks that build held the engine about 300 ms on the S23, right
-// when a leave-time sync starts its read.
 
 const bridge = (stale = false) => {
     const calls = { builds: 0, published: [] as string[] };
     const value: WidgetBridge = {
-        // publish() asks ready() once per build, before it reads the store.
+
         ready: () => { calls.builds += 1; return true; },
         inputs: () => ({ systemColorScheme: 'light', systemLocale: 'en-US', listSelections: [], stale }),
         publish: (payload) => { calls.published.push(payload); },
@@ -82,7 +79,7 @@ describe('native Android widget publisher and the widget chooser', () => {
         const widgets = createWidgetPublisher(value);
         widgets.publish();
         const first = JSON.parse(calls.published[0]);
-        // The chooser offers every context by name; the list comes only for a placed choice (core's androidWidgetProjectionOptions).
+
         expect(first.contexts.map((option: { id: string }) => option.id)).toEqual(['context:@desk']);
         expect(first.lists['context:@desk']).toBeUndefined();
 
@@ -93,8 +90,7 @@ describe('native Android widget publisher and the widget chooser', () => {
     });
 });
 
-// A cold start at 5,000 tasks asked for two full publications within 260 ms (a CoreWork job's end, then the first screen's held
-// one), 185 and 146 ms on core's one thread while the first screen's reads waited. The second built the same payload.
+
 describe('native Android widget publisher with nothing changed', () => {
     afterEach(() => { setSystemTime(); resetForTests(); });
 
@@ -129,13 +125,13 @@ describe('native Android widget publisher with nothing changed', () => {
     });
 });
 
-// RN e572040d3 (#1468): the tester's line that a Focus widget's "Available actions" variant was published, and how many rows it added.
+
 describe('native Android widget publisher and the Focus widget\'s available actions', () => {
     afterEach(() => { setLogger(consoleLogger); resetForTests(); });
 
     it('logs RN\'s v1.3.8/widget-focus-available line only when a placed Focus widget adds the section', () => {
         resetForTests();
-        // An earlier test's Focus filter (priority high) would hide the task.
+
         setFocusWidgetFilter(NO_FOCUS_WIDGET_FILTER);
         const now = new Date().toISOString();
         const day = new Date(Date.now() - 2 * 86_400_000);

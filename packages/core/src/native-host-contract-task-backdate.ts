@@ -1,13 +1,6 @@
-/**
- * RN's completion-time picker (apps/mobile/components/completed-at-picker.tsx) for a host that completes rows through
- * completeTask (native Android), bca5e3e7e. A row completes at a picked time (a long-press on the swipe tray's Done or the
- * status menu's Done), and a finished row's "Completed:" date edits its time. The editor's long-press on Done edits its draft
- * instead (editTaskDraft's backdatedCompletion, which also takes this picker's local day and time). The picker starts where
- * RN's does: now for a row's Done, the stored completion (else the last change) for an edit, the draft's start in the editor.
- * Android shows RN's date dialog, then its time dialog, then, for a Done with Time Spent on (Pomodoro with Link task, RN's
- * timeSpentEnabled), RN's card with the minutes.
- * iOS uses its own prepared coordinators (native-host-contract-task-checklist.ts).
- */
+
+
+
 import { getArchiveCompletedAtPickerStart, resolvePickedCompletedAt } from './archive-view-model';
 import type { DateFormatter } from './date';
 import { tFallback } from './i18n';
@@ -24,14 +17,14 @@ import type { Task } from './types';
 
 type Translate = (key: string) => string;
 
-/** 'complete': a row's Done at a picked time; 'edit': a finished row's time; 'editor': the open editor's Done (its draft). */
+
 export type NativeCompletedAtPickerMode = 'complete' | 'edit' | 'editor';
 
 export type NativeCompletedAtPicker = {
     mode: NativeCompletedAtPickerMode; taskId: string; taskRevision: string;
-    /** The date dialog's day (yyyy-MM-dd) and the time dialog's time (HH:mm). */
+
     day: string; time: string;
-    /** RN's card after the time dialog, only when Time Spent is offered: its words and the minutes it starts with. */
+
     timeSpent: null | { title: string; label: string; placeholder: string; value: string; cancel: string; save: string };
 };
 
@@ -41,7 +34,7 @@ export type NativeTaskCompletedAtRequest = {
 
 const id = (value: unknown): value is string => typeof value === 'string' && Boolean(value.trim()) && value.length <= 500;
 
-/** The picked day and time as RN's card shows them before Save (the app's date format). */
+
 export const formatPickedCompletedAt = (formatDate: DateFormatter, day: string, time: string): string | null => {
     const iso = resolvePickedCompletedAt(day, time);
     return iso ? formatDate(iso, 'Pp', iso) : null;
@@ -66,15 +59,13 @@ export function createTaskBackdateMethods(deps: {
             return deps.save();
         },
     });
-    /** RN's canBackdateCompletion (a row's Done: not done yet) and onEditCompletedAt (a finished, not cancelled row). */
+
     const offered = (task: Task, mode: 'complete' | 'edit') => (mode === 'complete'
         ? task.status !== 'done' : isTaskCompleted(task) && !isTaskCancelled(task));
 
     return {
-        /**
-         * Where the picker starts and whether its Time Spent card shows (RN's showTimeSpent: a Done, with Time Spent on). The
-         * editor sends its draft's completedAt and timeSpentMinutes (RN's getTaskEditorBackdatedCompletionStart).
-         */
+
+
         getCompletedAtPicker(input: {
             taskId: string; mode: NativeCompletedAtPickerMode; draft?: { completedAt?: string | null; timeSpentMinutes?: number | null };
         }): NativeHostResult<{ picker: NativeCompletedAtPicker | null }> {
@@ -97,7 +88,7 @@ export function createTaskBackdateMethods(deps: {
                 ? getTaskEditorBackdatedCompletionStart(task, { completedAt: typeof draft.completedAt === 'string' ? draft.completedAt : '',
                     timeSpentMinutes: draftMinutes })
                 : null;
-            // A row's Done starts now; an edit at the stored time; the editor at its draft's start (now when it has none).
+
             const at = mode === 'complete' ? now : mode === 'edit' ? null : (start?.initialValue ? new Date(start.initialValue) : now);
             const { day, time } = at
                 ? { day: formatDate(at, 'yyyy-MM-dd'), time: formatDate(at, 'HH:mm') }
@@ -118,7 +109,7 @@ export function createTaskBackdateMethods(deps: {
             } } };
         },
 
-        /** RN's card line: the picked day and time in the app's date format. */
+
         getPickedCompletedAtLabel(input: { day: string; time: string }): NativeHostResult<{ label: string }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -126,11 +117,7 @@ export function createTaskBackdateMethods(deps: {
             return label ? { ok: true, value: { label } } : fail('INVALID_INPUT', 'A local day and time are required');
         },
 
-        /**
-         * A row's picked completion (RN's applyCompletedAt), journaled under `requestId`: 'complete' sets Done at the picked
-         * minute, with the minutes typed when Time Spent is on; 'edit' moves a finished task's completion time. `taskRevision`
-         * is the row's: a task changed since is refused (STALE_REVISION).
-         */
+
         async setTaskCompletedAt(input: NativeTaskCompletedAtRequest): Promise<NativeHostResult<{ id: string; completed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -159,7 +146,7 @@ export function createTaskBackdateMethods(deps: {
                 try {
                     logInfo('Native completion time saved', { scope: 'native-host', category: 'storage', force: true, context: {
                         releaseCheck: 'v1.3.8/native-backdated-completion', outcome: input.mode } });
-                } catch { /* a diagnostic line never changes the write */ }
+                } catch {                                                 }
             }
             return result;
         },

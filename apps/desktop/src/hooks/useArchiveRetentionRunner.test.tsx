@@ -16,7 +16,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
 }));
 vi.mock('../store/ui-store', () => ({ useUiStore: { getState: () => ({ editingTaskId: harness.editingTaskId }) } }));
 vi.mock('../lib/app-log', () => ({ logError: vi.fn(async () => undefined) }));
-// A stored backend with disconnected Dropbox credentials: selected, but unable to sync right now.
+
 vi.mock('../lib/sync-service', () => ({
     SyncService: {
         getPersistedSyncConfigurationSnapshot: async () => ({
@@ -97,7 +97,7 @@ describe('useArchiveRetentionRunner', () => {
         act(() => window.dispatchEvent(new Event('focus')));
         await settle();
         expect(harness.run).toHaveBeenLastCalledWith({ syncConfigured: false });
-        // An unreadable sync configuration must not count as "sync is off".
+
         harness.syncBackend.mockRejectedValue(new Error('config unavailable'));
         act(() => window.dispatchEvent(new Event('focus')));
         await settle();

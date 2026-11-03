@@ -56,7 +56,7 @@ describe('task date coherence', () => {
 
     it('uses a frozen local start day for date-only due replay across timezone changes', () => {
         const task = { startTime: '2026-11-01T02:30:00.000Z', dueDate: '2026-10-31' };
-        // The same instant is Oct 31 locally at preparation, Nov 1 in UTC.
+
         vi.stubEnv('TZ', 'UTC');
         expect(isTaskDateCoherent(task, { startLocalDay: '2026-10-31' })).toBe(true);
         expect(isTaskDateCoherent({ ...task, dueDate: '2026-10-30' }, { startLocalDay: '2026-10-31' })).toBe(false);

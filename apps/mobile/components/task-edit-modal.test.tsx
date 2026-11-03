@@ -121,8 +121,8 @@ vi.mock('../hooks/use-theme-tokens', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: resolveThemeTokens caches its result, so a
-  // fresh literal per call would fake instability the app never sees (#766).
+
+
   const themeColors = {
     bg: '#000',
     cardBg: '#111',
@@ -156,7 +156,7 @@ vi.mock('./task-edit/TaskEditViewTab', () => ({
 }));
 
 vi.mock('./task-edit/TaskEditFormTab', () => ({
-  // The Focus star sits in the form's Title row; render it so tests can press it.
+
   TaskEditFormTab: (props: any) => React.createElement('TaskEditFormTab', props, props.focusStar
     ? React.createElement('FocusStar', {
       testID: 'task-edit-focus-star',
@@ -469,7 +469,7 @@ describe('TaskEditModal', () => {
       createdAt: '2026-10-14T00:00:00.000Z', updatedAt: '2026-10-14T00:00:00.000Z',
       ...(kind === 'projected' ? { isProjectedRecurringTask: true, sourceTaskId: 'recurrence-source' } : {}),
     };
-    // Even a projected instance accidentally present in the list cannot expose a reference.
+
     taskEditStore.current!._allTasks = kind === 'projected' ? [task] : [];
     let tree!: renderer.ReactTestRenderer;
     await act(async () => {
@@ -959,8 +959,8 @@ describe('TaskEditModal', () => {
   });
 
   it('mounts a themed alert host inside its modal', () => {
-    // Alerts raised from the editor (e.g. the layout help button) are invisible
-    // on iOS without a host inside the presented modal (#940).
+
+
     let tree!: renderer.ReactTestRenderer;
     act(() => {
       tree = renderer.create(
@@ -1116,8 +1116,8 @@ describe('TaskEditModal', () => {
       const viewTab = tree.root.find((node) => (
         node.props.mergedTask?.id === 't1' && typeof node.props.applyChecklistUpdate === 'function'
       ));
-      // The preview keeps the typed-but-not-submitted item here; the save path
-      // reads it synchronously instead of waiting for the input to blur.
+
+
       act(() => {
         viewTab.props.pendingChecklistDraftRef.current = draft;
       });
@@ -2049,7 +2049,7 @@ describe('TaskEditModal', () => {
     );
     const formTab = tree!.root.findAll((node) => typeof node.props.renderField === 'function')[0];
 
-    // A nested form button must receive the first tap while its input owns the keyboard.
+
     expect(findPager().props.keyboardShouldPersistTaps).toBe('handled');
     expect(findPager().props.scrollEnabled).toBe(true);
 
@@ -2233,8 +2233,8 @@ describe('TaskEditModal', () => {
         );
         await Promise.resolve();
       });
-      // The form tab is mocked, so the field props (the editor's recurrence seam)
-      // are read off the element renderField would have mounted.
+
+
       const fieldProps = () => tree.root
         .find((node) => Array.isArray(node.props.basicFields))
         .props.renderField('recurrence').props;

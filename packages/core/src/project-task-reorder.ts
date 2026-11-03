@@ -119,7 +119,7 @@ export const projectTaskOrderIdentities = (items: ProjectReorderFlatItem<Task>[]
         ? { type: 'section', id: item.group.id, sectionId: item.group.sectionId ?? null }
         : { type: 'task', id: item.task.id });
 
-/** An exact, compact precondition; text/Notes do not enter the ordering identity. */
+
 export function projectTaskOrderToken(input: {
     project: Project; sections: readonly Section[]; tasks: readonly Task[];
     sortBy: TaskSortBy; items: readonly ProjectTaskOrderIdentity[];
@@ -134,15 +134,15 @@ export function projectTaskOrderToken(input: {
         sections: byId(input.sections).map((row) => ({ id: row.id, order: row.order })),
         tasks: byId(input.tasks).map((row) => ({ id: row.id, sectionId: row.sectionId ?? null,
             order: row.order ?? null, orderNum: row.orderNum ?? null })),
-        // Swift persists the prepared envelope with sorted JSON keys. Rebuild
-        // each identity so that roundtrip cannot change this exact token.
+
+
         items: input.items.map((item) => item.type === 'section'
             ? { type: 'section', id: item.id, sectionId: item.sectionId }
             : { type: 'task', id: item.id }),
     });
 }
 
-/** Move a task after a typed predecessor, then ask RN's drop resolver for its destination. */
+
 export function planProjectTaskOrderMove(
     items: ProjectReorderFlatItem<Task>[], taskId: string, after: ProjectTaskOrderAnchor,
 ): { items: ProjectReorderFlatItem<Task>[]; drop: ProjectReorderDropPlan; changed: boolean } | null {

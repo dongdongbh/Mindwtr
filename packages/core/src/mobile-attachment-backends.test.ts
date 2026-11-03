@@ -117,7 +117,7 @@ const setup = (options: {
     encryption: { logSyncEncryptionEvent: async () => undefined },
     installer,
     installerMayBeMissing: () => false,
-    // Skips the WebDAV request spacing; no test here waits on a timer.
+
     timersPaused: () => true,
     uploads: { createUploadTask: options.createUploadTask ?? (() => null) },
   });
@@ -137,7 +137,7 @@ const setup = (options: {
 
 const webdavConfig = { url: `${BASE_URL}/data.json`, username: 'user', password: 'pw' };
 
-/** The host's native file hash (design D9b W7 hashes in native code, never bytes read into JS), over the memory files. */
+
 const nativeHash = (env: ReturnType<typeof setup>) => env.installer.hashAttachmentFileGeneration.mockImplementation(
   async (path: string) => ({ sha256: (await computeSha256Hex(env.memory.read(path)!))!, size: env.memory.read(path)!.byteLength, modificationTimeMs: 1 }),
 );
@@ -364,7 +364,7 @@ describe('WebDAV attachment pass', () => {
     const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
     const { backends, memory, lines, files } = setup({
       maxWebdavBufferedUploadBytes: 8 * 1024 * 1024,
-      // Keep the remote generation selected so prepare really reaches content hashing.
+
       core: { webdavFileExists: async () => true },
     });
     memory.put(LOCAL_URI, LOCAL);
@@ -589,7 +589,7 @@ describe('WebDAV attachment pass', () => {
       };
       return { core, webdavPutFileVersioned, webdavGetFile };
     };
-    // A host whose fetch refuses an oversized body while receiving it (the native hosts' HostIo and NativeHTTPJobs).
+
     const setupBounded = (options: Parameters<typeof setup>[0] = {}) => setup({ boundedWebdavResponses: true, ...options });
     const adoptionLine = (lines: ReturnType<typeof setup>['lines']) => (
       lines.find((line) => line.extra?.releaseCheck === 'v1.3.7/webdav-weak-etag-adopt')
@@ -677,8 +677,8 @@ describe('WebDAV attachment pass', () => {
     });
 
     it('with encryption on and a stale recorded size, never records a plaintext remote copy', async () => {
-      // The recorded size predicts an encrypted length equal to the real plaintext's length; the length check against the
-      // local file's real size is what refuses this copy, and the encrypted-artifact check backs it up.
+
+
       const plaintext = new Uint8Array(encryptedSyncArtifactByteLength(LOCAL.byteLength)).fill(5);
       const server = unversionedServer('W/"weak"', plaintext);
       const { backends, memory, lines } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
@@ -753,8 +753,8 @@ describe('WebDAV attachment pass', () => {
   });
 
   it('records a streamed upload only once a HEAD at the same URL finds its size', async () => {
-    // The native uploader follows a redirect by itself: a 307 stores the file elsewhere and a
-    // 303 stores nothing, yet the task answers 2xx.
+
+
     const task = { uploadAsync: vi.fn(async () => ({ status: 201 })), cancelAsync: vi.fn(async () => undefined) };
     const { backends, memory, lines } = setup({
       createUploadTask: () => task,
@@ -862,7 +862,7 @@ describe('WebDAV attachment pass', () => {
       ['the HEAD finds another size (another writer created it)', { confirmed: false, redirected: false, status: 200 }],
       ['the HEAD finds no file', { confirmed: false, redirected: false, status: 404 }],
     ])('keeps a 412 unsynced for a retry when %s', async (_case, proof) => {
-      // A 412 proves only that some file exists there, not that it holds these bytes.
+
       const { result, lines, logs } = await run(conflict, proof);
 
       expect(attachmentOf(result)?.cloudKey).toBeUndefined();
@@ -1031,9 +1031,9 @@ describe('WebDAV attachment pass', () => {
         nativeHash(env);
         env.memory.put(LOCAL_URI, local);
         await env.backends.syncWebdavAttachments(withAttachment(await remoteOnly(bytes)), webdavConfig, BASE_URL);
-        // The file at the target is not adopted: the GET runs and the installer decides (a different file is kept, never named).
+
         expect(webdavGetFile).toHaveBeenCalledTimes(1);
-        // A hashless attachment has nothing to compare: its target is never hashed.
+
         if (bytes === null) expect(env.installer.hashAttachmentFileGeneration).not.toHaveBeenCalled();
       }
     });
@@ -1045,18 +1045,18 @@ describe('WebDAV attachment pass', () => {
       env.memory.put(LOCAL_URI, LOCAL);
       const data = withAttachment(fileAttachment({ fileHash: (await computeSha256Hex(LOCAL))! }));
       const puts = () => requests.filter((request) => request.method === 'PUT').length;
-      // One cycle: the final pending-upload flush and the post-merge pass share the cycle's admission. The PUT reached the
-      // server, but its answer was lost (500): the second phase does not send it again.
+
+
       const cycle = createAttachmentTransferAdmission();
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: cycle });
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: cycle });
       expect(puts()).toBe(1);
-      // The next cycle tries once more.
+
       const next = createAttachmentTransferAdmission();
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
       expect(puts()).toBe(2);
-      // New content is a new key in the same cycle: it transfers once.
+
       env.memory.put(LOCAL_URI, REMOTE);
       const edited = withAttachment(fileAttachment({ fileHash: (await computeSha256Hex(REMOTE))! }));
       await env.backends.syncWebdavAttachments(edited, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
@@ -1066,7 +1066,7 @@ describe('WebDAV attachment pass', () => {
   });
 
   it('leaves the row live and keyed when the remote answers 404; only a probe marks its trial copy unrecoverable', async () => {
-    // A tombstone would sync to every device, and a location still holding the file would then delete it.
+
     const { backends } = setup({
       core: { webdavGetFile: vi.fn(async () => { throw httpError(404); }) },
     });
@@ -1080,8 +1080,8 @@ describe('WebDAV attachment pass', () => {
   });
 
   it('backs off a download that answered 404, so the next pass does not ask again', async () => {
-    // A row kept without its file (unreachable-attachments) comes back live after each 404;
-    // without the backoff it would take a download slot on every pass.
+
+
     const webdavGetFile = vi.fn(async (): Promise<ArrayBuffer> => { throw httpError(404); });
     const { backends } = setup({ core: { webdavGetFile } });
     const data = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
@@ -1463,8 +1463,8 @@ describe('self-hosted cloud attachment pass', () => {
   });
 
   it('sends every upload through the checked byte PUT, never the native uploader', async () => {
-    // The native uploader follows a redirect by itself (a 303 to /health answers the same
-    // {"ok":true}), and servers before 1.2.7 have no HEAD to prove where the file landed.
+
+
     const task = { uploadAsync: vi.fn(async () => ({ status: 200, body: '{"ok":true}' })), cancelAsync: vi.fn(async () => undefined) };
     const createUploadTask = vi.fn(() => task);
     const cloudPutFile = vi.fn(async () => undefined);
@@ -1658,9 +1658,7 @@ describe('File Sync attachment pass', () => {
     });
   });
 
-  // A device's encryption enable seals the attachments in place first and the document last (runEnableSyncEncryptionOverRemote).
-  // Cut off between the two (the app killed, the phone off), the folder holds sealed attachments beside a plaintext data.json, and
-  // the device that started it waits on its transition journal. Another device with encryption off reads that data.json as usual.
+
   describe('in a folder an interrupted encryption enable left partly encrypted', () => {
     const sealedPeer = () => encryptSyncArtifact(new TextEncoder().encode('peer attachment'), material, defaultSyncCryptoPrimitives);
 
@@ -1690,8 +1688,7 @@ describe('File Sync attachment pass', () => {
       expect(attachmentOf(result)?.cloudKey).toBeDefined();
     });
 
-    // The check stays cheap (a SAF header read costs ~26 ms on a phone): a referenced entry whose size is its record's plaintext
-    // size is plaintext (sealing always adds a fixed overhead); the first and last entries in Enable's own order are always judged.
+
     const plain = (index: number) => new TextEncoder().encode(`referenced attachment ${index}`);
     const referenced = (index: number, fields: Partial<Attachment> = {}): Attachment => fileAttachment({
       id: `r${index}`, title: `r${index}.txt`, uri: '', localStatus: 'missing', cloudKey: `attachments/r${index}.txt`, size: plain(index).length, ...fields,
@@ -1748,7 +1745,7 @@ describe('File Sync attachment pass', () => {
         .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
     });
 
-    // Enable skips the installer's lock file (mobile-file-sync-remote.ts), so it never takes the first slot (S5 review2 P3-A).
+
     it('judges the first real entry, not the installer lock file that sorts before it', async () => {
       const { backends, memory } = setup();
       memory.put(LOCAL_URI, LOCAL);
@@ -1760,8 +1757,7 @@ describe('File Sync attachment pass', () => {
         .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
     });
 
-    // A Disable on a provider that refused to delete its quarantine copy leaves `.mindwtr-et-q-*` sealed bytes in a plaintext
-    // folder; it is no attachment, and judging it would pause the folder for good (S5 review2 P3-B).
+
     it('does not refuse a plaintext folder for a sealed transition scratch copy left in attachments/', async () => {
       const { backends, memory } = setup();
       memory.put(LOCAL_URI, LOCAL);
@@ -1774,8 +1770,7 @@ describe('File Sync attachment pass', () => {
       expect(attachmentOf(result)?.cloudKey).toBeDefined();
     });
 
-    // A header read that fails for a present entry (a cloud provider that has not downloaded a peer's file yet) proves nothing:
-    // the upload waits for the next cycle, as the WebDAV and Dropbox probe does (S5 review2 P3-C). Only an entry gone passes.
+
     it('fails closed when a present entry cannot be read, and passes an entry gone since the listing', async () => {
       const unreadable = setup();
       unreadable.memory.put(LOCAL_URI, LOCAL);
@@ -1783,7 +1778,7 @@ describe('File Sync attachment pass', () => {
       unreadable.memory.put(`${SYNC_DIR}c.txt`, plain(2));
       unreadable.memory.fail('readBytesRange', new Error('The provider could not open the document'), `${SYNC_DIR}a.txt`);
       const waited = await unreadable.backends.syncFileAttachments(withRecords(), 'file:///sdcard/Mindwtr/data.json');
-      // The upload failed and waits for the next cycle: no plaintext generation joined the folder.
+
       expect(waited === false || !attachmentOf(waited)?.cloudKey).toBe(true);
       expect(unreadable.memory.calls.some((call) => call.startsWith(`writeBytes ${SYNC_DIR}`) || call.startsWith(`copy `) && call.includes(`-> ${SYNC_DIR}`))).toBe(false);
 
@@ -1795,8 +1790,7 @@ describe('File Sync attachment pass', () => {
       expect(attachmentOf(result)?.cloudKey).toBeDefined();
     });
 
-    // Desktop's Enable (sync.rs collect_sync_folder_attachments) also seals files in a subfolder of attachments/ that is not a
-    // recovery folder, in path order: one that sorts first is where a cut-off desktop Enable starts.
+
     it('judges the first file of a subfolder that sorts before every other entry', async () => {
       const { backends, memory } = setup();
       memory.put(LOCAL_URI, LOCAL);
@@ -1810,8 +1804,7 @@ describe('File Sync attachment pass', () => {
       expect(headReads(memory)).toEqual([`readBytesRange ${SYNC_DIR}Archive/x.txt`]);
     });
 
-    // An interrupted Enable seals attachments/ one entry at a time in name order (mobile-file-sync-remote.ts nonDocumentEntries),
-    // so it always seals the first entry before any other: ciphertext only between plaintext ends is not a cut-off Enable.
+
     it('does not refuse an unreferenced sealed entry between plaintext first and last entries', async () => {
       const { backends, memory } = setup();
       memory.put(LOCAL_URI, LOCAL);
@@ -1904,7 +1897,7 @@ describe('File Sync attachment pass', () => {
 
       memory.put(`${ATTACHMENTS}%2Fr1.txt`, await encryptSyncArtifact(plain('r1.txt'), material, defaultSyncCryptoPrimitives));
       unsized.add('r1.txt');
-      // The next pass uploads a new attachment beside the folder's three referenced entries and its first upload.
+
       const next = synced as AppData;
       memory.put(`${MANAGED}att-2.txt`, LOCAL);
       next.tasks[0].attachments!.push(fileAttachment({ id: 'att-2', title: 'att-2.txt', uri: `${MANAGED}att-2.txt` }));

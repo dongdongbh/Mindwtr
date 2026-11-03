@@ -1,5 +1,5 @@
-// Keep this at /sw.js: existing installations must receive the replacement.
-// No fetch handler: navigation and authentication belong to the browser.
+
+
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting());
 });

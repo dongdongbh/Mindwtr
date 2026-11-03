@@ -37,11 +37,7 @@ export function useLocalDayKey(enabled = true): string {
   return dayKey;
 }
 
-/**
- * Re-renders the consumer at the next local midnight and when the earliest
- * upcoming timed start arrives. The midnight wake schedules tomorrow's timed
- * starts as well as revealing date-only tasks (#995).
- */
+
 export function useFutureStartRevealTick(
   tasks: ReadonlyArray<{ startTime?: string }>,
   enabled = true,

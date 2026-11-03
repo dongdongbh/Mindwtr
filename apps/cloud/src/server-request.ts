@@ -39,46 +39,29 @@ export type ServerConfig = {
     rateLimiter: RateLimiter;
     maxPerWindow: number;
     unauthorizedResponse: (req: Request, token?: string | null) => Response;
-    /**
-     * Reserves a new namespace while admission is locked. Routes that cannot
-     * create a namespace may deliberately provide a no-op.
-     */
+
+
     initializeNamespace: (filePath: string) => Promise<void> | void;
     runWithNamespaceAdmission: <T>(handler: () => Promise<T>, signal?: AbortSignal) => Promise<T>;
-    /**
-     * Which HTTP methods on this route must pass the namespace write cap before the
-     * handler runs. Defaults to every method except GET/HEAD (i.e. every write).
-     * Override only when a route's writes are known not to create a new namespace
-     * (see /v1/attachments/:path DELETE, which never mutates without an existing file).
-     */
+
+
     guardMethods?: (method: string) => boolean;
-    /**
-     * Set only on POST /v1/capture: a capture-only token (#1178) authenticates
-     * there as its owner's namespace and is refused with 403 on every other route.
-     */
+
+
     acceptsCaptureTokens?: boolean;
-    /**
-     * Starts the capped body read right after auth and rate checks, before any
-     * admission wait, and hands the result to the handler as `ctx.body`. An unread
-     * body is buffered by the runtime without a cap, so a route whose writes can
-     * wait on admission reads actively. Return undefined to skip a method.
-     */
+
+
     readBodyBeforeAdmission?: (req: Request, signal: AbortSignal) => Promise<unknown> | undefined;
 };
 
 const defaultGuardMethods = (method: string): boolean => method !== 'GET' && method !== 'HEAD';
 
-/** Strips a trailing slash the same way for every route; the one normalization both server.ts's dispatch and withNamespace's rate-limit key must agree on. */
+
 export function normalizeRequestPathname(url: URL): string {
     return url.pathname.replace(/\/+$/, '') || '/';
 }
 
-/**
- * The namespace write cap: in "any token" mode (no allowlist configured), a token
- * that hasn't written data yet may only do so while the server is under
- * maxAnyTokenNamespaces total namespaces. Exported so admission can recheck the
- * cap after acquiring the process-safe global lock.
- */
+
 export function ensureNamespaceWriteAllowed(cfg: Pick<ServerConfig, 'allowedAuthTokens' | 'dataDir' | 'maxAnyTokenNamespaces'>, key: string): Response | null {
     if (cfg.allowedAuthTokens) return null;
     if (namespaceExists(cfg.dataDir, key)) return null;
@@ -91,15 +74,7 @@ export function ensureNamespaceWriteAllowed(cfg: Pick<ServerConfig, 'allowedAuth
     return null;
 }
 
-/**
- * The auth + rate-limit + namespace-cap preamble every namespaced route needs, in
- * one place so a new write route can't skip the namespace guard by omission (the
- * bug this replaces: /v1/attachments/orphans copied the preamble by hand and
- * dropped the guard). `handler` runs only once all checks pass; its return value
- * is passed straight through. Returns Response | null to leave room for a future
- * caller that wants "not my route" fall-through semantics; none of today's callers
- * use it.
- */
+
 export async function withNamespace(
     req: Request,
     url: URL,
@@ -114,18 +89,17 @@ export async function withNamespace(
     const captureToken = lookupCaptureToken(cfg.dataDir, token);
     if (captureToken) {
         if (!cfg.acceptsCaptureTokens || req.method !== 'POST') return errorResponse('Capture-only token', 403);
-        // A capture token lives only as long as its owner's full token is allowlisted...
+
         if (cfg.allowedAuthTokens && !cfg.allowedAuthTokens.keys.has(captureToken.namespaceKey)) {
             return cfg.unauthorizedResponse(req, token);
         }
-        // ...and its namespace exists: it must never create one or pass admission.
+
         if (!namespaceExists(cfg.dataDir, captureToken.namespaceKey)) return errorResponse('Capture token namespace missing', 403);
         key = captureToken.namespaceKey;
         scope = 'capture';
     } else {
-        // Revocation removes the mapping. In any-token mode, that must end the
-        // capture credential rather than admitting it as an unrelated full token.
-        // Explicitly allowlisted full tokens retain their configured authority.
+
+
         if (!cfg.allowedAuthTokens && isGeneratedCaptureTokenShape(token)) {
             logInfo('Unmapped capture credential refused in any-token mode', {
                 outcome: 'refused',
@@ -146,8 +120,8 @@ export async function withNamespace(
         req,
         signal ? AbortSignal.any([signal, bodyAbort.signal]) : bodyAbort.signal,
     );
-    // Observe a failure at once so it is never unhandled while admission waits;
-    // the handler still sees it when it awaits `body`.
+
+
     void body?.catch(() => undefined);
     let bodyHandedOff = false;
     try {
@@ -158,7 +132,7 @@ export async function withNamespace(
         return await handler({ key, filePath, scope, body });
     } finally {
         if (!bodyHandedOff && body) {
-            // A RequestAbortError reason: the body reader reuses it as its error.
+
             bodyAbort.abort(createRequestAbortError('Request refused before its body was read'));
         }
     }
@@ -175,9 +149,8 @@ async function admitNamespaceWrite(
     if (scope === 'full' && guardMethods(method)) {
         if (!cfg.allowedAuthTokens && !namespaceExists(cfg.dataDir, key)) {
             const admissionResponse = await cfg.runWithNamespaceAdmission(async (): Promise<Response | null> => {
-                // Recheck after taking the process-safe global lock. Write routes
-                // reserve a valid empty document here, keeping the lock window short:
-                // untrusted request bodies are validated after admission.
+
+
                 const namespaceResponse = ensureNamespaceWriteAllowed(cfg, key);
                 if (namespaceResponse) return namespaceResponse;
                 const filePath = join(cfg.dataDir, `${key}.json`);

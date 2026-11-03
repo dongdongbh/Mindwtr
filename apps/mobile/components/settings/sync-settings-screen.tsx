@@ -199,7 +199,7 @@ function SyncSettingsView({
     }, [updateSettings]);
 
     const updateSyncPreferences = (partial: Partial<Record<SyncPreferenceKey, boolean>>) => {
-        // Built from the latest stored preferences, so one another device changed stays.
+
         updateSettingsFromLatest((latest) => buildSyncPreferencesUpdate(latest.syncPreferences, partial), { write: updateSettings, read: () => useTaskStore.getState().settings })
             .catch(logSettingsError);
     };
@@ -296,7 +296,7 @@ function SyncSettingsView({
         void refreshRecoverySnapshots();
     }, [refreshRecoverySnapshots]);
 
-    // A backup a process death cut short while it was written into a picked folder is removed when Data opens again.
+
     useEffect(() => {
         if (mode === 'data') void cleanupInterruptedBackupExport();
     }, [mode]);
@@ -392,7 +392,7 @@ function SyncSettingsView({
         supportsNativeICloudSync,
         t,
     });
-    // The history and the last error drop URL credentials and the configured secrets.
+
     const syncHistoryEntries = buildSyncHistoryLines(settings.lastSyncHistory, t, (at) => new Date(at).toLocaleString(), redactText);
     const isGettingStartedActionBusy = gettingStartedBusy || isBackupBusy || isSyncing;
     const sandboxEntryBlocked = sandboxBusy
@@ -410,8 +410,8 @@ function SyncSettingsView({
         isEncryptionCapableBackend,
     } = resolveSyncBackendSelection({ syncBackend, cloudProvider, isFossBuild, supportsCloudKit: supportsNativeICloudSync });
     const backendSelection = { isCloudSyncSelected, isSelfHostedSyncSelected, isDropboxSyncSelected, isCloudKitSyncSelected, isEncryptionCapableBackend };
-    // The attachment worklist a transition converts is derived from this document —
-    // without it, phase 2 leaves every attachment in plaintext.
+
+
     const encryptionAppData = useMemo(
         () => ({ tasks, projects, sections, areas, settings }),
         [areas, projects, sections, settings, tasks],

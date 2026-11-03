@@ -80,7 +80,7 @@ describe('Inbox Organize destination creation parity', () => {
             const result = value(await db.host.commitPreparedInboxOrganizeDestinationCreate(command));
             expect(result).toEqual({ id: restore ? 'old-area' : ID, changed: true });
             expect(rows()).toEqual(expected); expect(await raw(db)).toEqual(sql); expect(await db.receiptIds()).toEqual([ID]);
-            if (!restore) expect(useTaskStore.getState()._allTasks).toEqual(beforeTasks); // Create then Cancel does not apply tasks.
+            if (!restore) expect(useTaskStore.getState()._allTasks).toEqual(beforeTasks);
             if (kind === 'project') expect(useTaskStore.getState()._projectsById.get(ID)).toMatchObject({
                 color: initial.areas?.find((area) => area.id === draft.areaChoice)?.color ?? DEFAULT_PROJECT_COLOR,
                 isSequential: true, rev: 1,
@@ -278,7 +278,7 @@ describe('creation boundary regressions', () => {
     it('rejects a fabricated unselected Inbox witness against real saved authority, not only structurally', async () => {
         clock(); const db = await open(seed());
         try { const command = await prepare(db); const forged = clone(command);
-            forged.prepared.scope.inbox.tasks.push(task('invented')); // A coherent additional unselected row, with no planned task effects.
+            forged.prepared.scope.inbox.tasks.push(task('invented'));
             expect(value(db.host.validatePreparedInboxOrganizeDestinationCreate(forged))).toEqual({ id: ID, changed: true });
             const before = await raw(db);
             expect(await db.host.commitPreparedInboxOrganizeDestinationCreate(forged)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -370,7 +370,7 @@ it('rejects Area creation from a disabled control and rejects a coherently forge
         const offered = value(db.host.getBulkActions({ list: 'inbox', taskIds: input.taskIds, params: input.params,
             organize: { draft: input.draft }, picker: { kind: 'area', query: input.name, offset: 0, limit: 100 } }));
         expect(offered.organize?.area.disabled).toBe(true);
-        expect(offered.picker?.create?.name).toBe('Another area'); // Generic picker behavior remains compatible.
+        expect(offered.picker?.create?.name).toBe('Another area');
         const before = await raw(db);
         expect(await db.host.prepareInboxOrganizeDestinationCreate(input)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         const forged = clone(allowed); forged.request = input; forged.prepared.request = input;

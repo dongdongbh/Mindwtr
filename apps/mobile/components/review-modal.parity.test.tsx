@@ -1,13 +1,6 @@
-/**
- * React Native's Weekly Review, replayed against the `weeklyReview` part of the
- * review views parity fixture (packages/core/src/review-views-parity.fixtures.json).
- * MINDWTR_CAPTURE_REVIEW_VIEWS=1 rewrites that part.
- *
- * Each scenario opens the real modal with the real core store, steps through it,
- * expands lists, pauses and resumes, adds project tasks and finishes, and records
- * what a user sees, what the store is asked to write and what the device stores.
- * Rows, the task editor and the nested sheets are stand-ins that record props.
- */
+
+
+
 import React from 'react';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -241,7 +234,7 @@ const hasStyle = (node: ReactTestInstance, style: object) => {
 };
 const within = (root: ReactTestInstance, style: object) => visibleNodes(root).filter((node) => typeof node.type === 'string' && hasStyle(node, style));
 
-// RN completion is covered separately below until the native/shared fixture supports it.
+
 const baselineTexts = (node: ReactTestInstance): string[] => {
   if (String(node.props.testID ?? '').startsWith('review-complete-project-')) return [];
   if (String(node.type) === 'Modal' && !node.props.visible) return [];

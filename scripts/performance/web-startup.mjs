@@ -35,7 +35,7 @@ const artifactHash = hash.digest('hex');
 const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 const dirty = Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim());
 const url = `http://127.0.0.1:${port}`;
-// strictPort prevents accidentally measuring someone else's server.
+
 let server;
 let browser;
 let failed = false;
@@ -46,8 +46,8 @@ try {
   for (const size of sizes) {
     const seed = fixture(size);
     const samples = [];
-    // One unmeasured warm-up per fixture, then sequential fresh contexts (cold browser cache).
-    // This is NOT a cold OS/process benchmark: browser process and server caches are warm.
+
+
     for (let run = 0; run <= runs; run++) {
       const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US', timezoneId: 'UTC' });
       const page = await context.newPage();
@@ -68,8 +68,7 @@ try {
           .filter((mark) => mark.name.startsWith('mindwtr.')).map((mark) => [mark.name.slice(8), mark.startTime])));
         if (!Number.isFinite(marks.local_data_ready) || marks.interactive_ready < marks.local_data_ready) throw new Error('Invalid readiness ordering');
 
-        // End-to-end automation latency includes Playwright dispatch/polling. Keep it
-        // separate from app-only startup marks and compare only this same harness.
+
         const input = page.getByPlaceholder(/add task/i);
         const navigationMs = await profileStage('inbox', async () => {
           const navigationStart = performance.now();
@@ -85,8 +84,8 @@ try {
         const captureVisibleMs = performance.now() - captureStart;
         await page.waitForFunction((title) => JSON.parse(localStorage.getItem('mindwtr-data') ?? '{}').tasks?.some((task) => task.title === title), title);
         const capturePersistedMs = performance.now() - captureStart;
-        // Assert real production virtualization, including after scrolling; a
-        // jsdom mount alone cannot establish that the browser window is bounded.
+
+
         const taskList = page.getByRole('list', { name: 'Task list', exact: true });
         const mountedRowsBefore = await taskList.locator('[data-task-id]').count();
         let mountedRowsAfter = mountedRowsBefore;
@@ -95,8 +94,8 @@ try {
           await expect(page.getByTestId('virtualized-task-list')).toBeVisible();
           const firstIds = await taskList.locator('[data-task-id]').evaluateAll((rows) => rows.map((row) => row.dataset.taskId));
           const scrollStart = performance.now();
-          // Capture scrolls to the newly added bottom row; traverse back to
-          // the top (or the bottom when a future UI leaves capture at the top).
+
+
           await taskList.evaluate((list) => { list.scrollTop = list.scrollTop > list.clientHeight ? 0 : list.scrollHeight; });
           await expect.poll(() => taskList.locator('[data-task-id]').evaluateAll((rows) => rows.map((row) => row.dataset.taskId))).not.toEqual(firstIds);
           await taskList.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));

@@ -234,8 +234,8 @@ describe('TaskEditViewTab', () => {
   });
 
   it('shows the projected recurrence date in the read-only preview', () => {
-    // The projected date is computed from "now"; freeze it so the
-    // hardcoded 2026-07-09 expectation stays valid after that date passes.
+
+
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 3, 12, 0, 0));
     let tree!: renderer.ReactTestRenderer;
@@ -403,7 +403,7 @@ describe('TaskEditViewTab', () => {
     }
   });
 
-  // #1055: the read-only preview can grow the checklist it already renders.
+
   it('adds checklist items from the preview without opening the form tab', () => {
     const applyChecklistUpdate = vi.fn();
     const renderPreview = (checklist: any[], onApply = applyChecklistUpdate, readOnly = false) => {
@@ -460,7 +460,7 @@ describe('TaskEditViewTab', () => {
       && typeof node.props.onSubmitEditing === 'function'
     ));
 
-    // A task with no checklist must not grow a new field.
+
     expect(findAddInputs(renderPreview([]))).toHaveLength(0);
 
     const tree = renderPreview([{ id: 'item-1', title: 'Bread', isCompleted: false }]);
@@ -481,7 +481,7 @@ describe('TaskEditViewTab', () => {
     expect(findAddInputs(tree)[0].props.value).toBe('');
     expect(findAddInputs(tree)[0].props.blurOnSubmit).toBe(false);
 
-    // Empty submit is a no-op, not an empty item.
+
     renderer.act(() => {
       findAddInputs(tree)[0].props.onSubmitEditing();
     });
@@ -552,8 +552,7 @@ describe('TaskEditViewTab', () => {
     ]);
   });
 
-  // The Save button lives outside this tab, so typed-but-not-submitted text has
-  // to be readable from the save path without waiting for a blur.
+
   it('mirrors unsubmitted add-item text into the pending draft ref', () => {
     const applyChecklistUpdate = vi.fn();
     const pendingChecklistDraftRef = { current: '' };
@@ -613,8 +612,7 @@ describe('TaskEditViewTab', () => {
     });
     expect(pendingChecklistDraftRef.current).toBe('Milk');
 
-    // Return commits the item, so the ref must not keep a copy that the save
-    // path would then add a second time.
+
     renderer.act(() => {
       addInput().props.onSubmitEditing();
     });
@@ -799,7 +797,7 @@ describe('TaskEditViewTab', () => {
       'Completed **source**',
       '[Pending link](https://example.com)\nwrapped detail',
     ]);
-    // #1416: the list ticks like a checklist; the reference keeps no status row.
+
     expect(tree.root.findAllByType(Text).filter((node) => node.props.children === '•')).toHaveLength(0);
     const boxes = tree.root.findAll((node) => node.props.accessibilityRole === 'checkbox' && typeof node.type !== 'string');
     expect(boxes.map((node) => node.props.accessibilityState)).toEqual([{ checked: true }, { checked: false }]);

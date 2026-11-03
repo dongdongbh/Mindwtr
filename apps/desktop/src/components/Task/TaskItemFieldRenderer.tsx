@@ -102,7 +102,7 @@ export type MonthlyRecurrenceInfo = {
     interval: number;
 };
 
-/** Locale- and settings-derived facts the field editors render against. */
+
 export type TaskEditorEnv = {
     t: (key: string) => string;
     language: string;
@@ -113,7 +113,7 @@ export type TaskEditorEnv = {
     showObsidianNoteAttachment: boolean;
 };
 
-/** Token/person option lists (lazily loaded by useTaskItemProjectContext). */
+
 export type TaskEditorOptionLists = {
     allContextOptions: string[];
     allTagOptions: string[];
@@ -122,7 +122,7 @@ export type TaskEditorOptionLists = {
     assignedToOptions: string[];
 };
 
-/** The slice of useTaskItemAttachments the attachments field consumes. */
+
 export type TaskEditorAttachments = {
     attachmentError: string | null;
     visibleEditAttachments: Attachment[];
@@ -214,8 +214,8 @@ export function TaskItemFieldRenderer({
     const showDescriptionPreview = descriptionPreview.visible;
     const toggleDescriptionPreview = descriptionPreview.toggle;
     const editDescriptionFromPreview = descriptionPreview.editSource;
-    // Draft values and their setField bindings, under the names the field
-    // editors below were written against.
+
+
     const {
         description: editDescription,
         startTime: editStartTime,
@@ -519,7 +519,7 @@ export function TaskItemFieldRenderer({
         const pastedSelection = { start: textarea.selectionStart, end: textarea.selectionEnd };
         const files = images.map((file) => new File([file], file.name || `clipboard.${getImageExtension(file)}`, { type: file.type }));
         void addDroppedFileAttachments(files).then((imported) => {
-            // A collapsed field may unmount while the owning task draft still retains the attachment.
+
             if (!descriptionRendererActiveRef.current || !imported || (imported.length === 0 && !text)) return;
             const value = latestDescriptionRef.current;
             const start = value === pastedValue ? pastedSelection.start : value.length;
@@ -629,9 +629,8 @@ export function TaskItemFieldRenderer({
         if (descriptionAudioState !== 'recording') {
             setDescriptionAudioError(null);
             try {
-                // No fixed name: a failed transcription keeps this file as an
-                // attachment (below), and a reused name would let the next take
-                // overwrite it and a later success delete it (#1245).
+
+
                 descriptionCaptureRef.current = await startAudioCapture();
                 setDescriptionAudioState('recording');
             } catch (error) {
@@ -690,11 +689,8 @@ export function TaskItemFieldRenderer({
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setDescriptionAudioError(message || tFallback(t, 'attachments.transcriptionFailed', 'Transcription failed. Please try again.'));
-            // The transcript was the only thing that would have carried the
-            // words, and it never arrived. Keep the recording and attach it to
-            // the task instead of deleting it (#1245). Transcription runs for
-            // many seconds, so the list to append to is the one the store holds
-            // now, never the one captured when this callback was built.
+
+
             const { tasks: currentTasks } = useTaskStore.getState();
             const existing = currentTasks.find((item) => item.id === taskId);
             if (capture && existing) {
@@ -711,8 +707,8 @@ export function TaskItemFieldRenderer({
                 };
                 appendRetainedAttachment(retainedAttachment, existing.attachments ?? []);
                 try {
-                    // Appended on the row as it is when the write is admitted, so an attachment a sync
-                    // save brought meanwhile is kept.
+
+
                     const updateResult = await updateTaskFromLatest(taskId, (latest) => ({
                         attachments: [...(latest.attachments ?? []), retainedAttachment],
                     }));
@@ -903,7 +899,7 @@ export function TaskItemFieldRenderer({
                     ];
                 const applyRelativeStartOffset = (amountValue: number, unitValue: NonNullable<Task['relativeStartOffset']>['unit']) => {
                     if (!editDueDate || !Number.isFinite(amountValue)) return;
-                    // 0 is valid: start on the due date itself.
+
                     const magnitude = Math.max(0, Math.floor(amountValue));
                     const offset = { amount: magnitude === 0 ? 0 : -magnitude, unit: unitValue };
                     const computedStart = computeRelativeStartTime(editDueDate, offset);
@@ -1216,8 +1212,8 @@ export function TaskItemFieldRenderer({
                 />
             );
         case 'timeEstimate':
-            // Time spent is opt-in: it only appears while the Pomodoro timer's
-            // task linking is engaged, so the default editor stays estimate-only.
+
+
             if (!timeSpentEnabled) {
                 return <TimeEstimateField t={t} value={editTimeEstimate} onChange={setEditTimeEstimate} />;
             }

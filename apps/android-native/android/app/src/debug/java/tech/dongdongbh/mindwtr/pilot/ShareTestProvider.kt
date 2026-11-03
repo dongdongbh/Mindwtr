@@ -10,13 +10,7 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileNotFoundException
 
-/**
- * Debug builds only (scripts/check-share-files-device.mjs): the other app of a file share. It serves the files the check put in
- * its own folder, `files/share-test/`, and nothing else: a URI names one file there by its bare name
- * (`content://<applicationId>.sharetest/<mode>/<name>`), never a path. The mode is the provider's answer the check needs:
- * `file` (name, size and type), `nosize` (no size: core checks the size after the copy), `nometa` (an empty cursor and no type,
- * RN's #1117 fallbacks), `gone` (the file cannot be opened). Read-only.
- */
+
 class ShareTestProvider : ContentProvider() {
     private fun file(uri: Uri): File {
         val segments = uri.pathSegments
@@ -60,10 +54,10 @@ class ShareTestProvider : ContentProvider() {
 
     private companion object {
         val MODES = setOf("file", "nosize", "nometa", "gone")
-        /** The check's file types, fixed (a phone's own MIME table may differ): `exe` is one core blocks. */
+
         val TYPES = mapOf("pdf" to "application/pdf", "png" to "image/png", "csv" to "text/csv", "bin" to "application/octet-stream",
             "exe" to "application/x-msdownload", "txt" to "text/plain")
-        /** A bare file name: no separator, no leading dot (so never `..`). */
+
         val NAME = Regex("^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$")
     }
 }

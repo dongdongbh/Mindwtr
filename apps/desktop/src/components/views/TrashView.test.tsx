@@ -62,13 +62,13 @@ describe('TrashView', () => {
         expect(screen.getByText('Items in Trash are removed for good after 90 days')).toBeInTheDocument();
     });
 
-    // The area filter is app-wide, and mobile's Trash has always honoured it.
+
     it('honours the app-wide area filter', () => {
         const workTask: Task = { ...recentTask, id: 'work-task', title: 'Work deleted task', areaId: 'area-work' };
         const workProject: Project = { ...olderProject, id: 'work-project', title: 'Work deleted project', areaId: 'area-work' };
         useTaskStore.setState({
-            // `_allAreas` on purpose: the store derives the visible `areas`
-            // list from it, and a bare `areas` write is dropped.
+
+
             _allAreas: [
                 { id: 'area-work', name: 'Work', order: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
             ],
@@ -90,7 +90,7 @@ describe('TrashView', () => {
         expect(screen.queryByText('Work deleted project')).not.toBeInTheDocument();
     });
 
-    // Purge cannot be undone, so Clear Trash may only delete what the screen lists.
+
     const renderWithHiddenWorkArea = () => {
         const workTask: Task = { ...recentTask, id: 'work-task', title: 'Work deleted task', areaId: 'area-work' };
         const workProject: Project = { ...olderProject, id: 'work-project', title: 'Work deleted project', areaId: 'area-work' };
@@ -116,10 +116,10 @@ describe('TrashView', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Clear Trash' }));
         const dialog = screen.getByRole('dialog');
-        expect(dialog).toHaveTextContent('1');            // counts the shown set
+        expect(dialog).toHaveTextContent('1');
         expect(dialog).not.toHaveTextContent(/all trashed/i);
-        // The counts and the translated sentence are two lines, never joined by a
-        // hard-coded ". " that no locale controls.
+
+
         const description = dialog.querySelector('p')!;
         expect(description.textContent).toBe('1 tasks · 1 Projects\nThis action cannot be undone.');
         expect(description.className).toContain('whitespace-pre-line');
@@ -178,8 +178,7 @@ describe('TrashView', () => {
         });
     });
 
-    // The confirmed set is the set the dialog counted. An item that arrives while
-    // the dialog is open was never shown, so it must survive the purge.
+
     it('purges only the items the dialog was opened for', async () => {
         useTaskStore.setState({
             _allAreas: [
@@ -194,12 +193,12 @@ describe('TrashView', () => {
             </LanguageProvider>
         );
 
-        // Nothing is hidden yet, so the dialog claims the whole trash.
+
         fireEvent.click(screen.getByRole('button', { name: 'Clear Trash' }));
         const dialog = screen.getByRole('dialog');
         expect(dialog).toHaveTextContent('all trashed tasks and projects');
 
-        // A sync merge lands a trashed task the area filter hides.
+
         const arrivingTask: Task = { ...recentTask, id: 'arriving-task', title: 'Arriving deleted task', areaId: 'area-work' };
         act(() => {
             useTaskStore.setState({
@@ -233,8 +232,7 @@ describe('TrashView', () => {
         });
     });
 
-    // Trash registered no task-list scope at all, so every key that works in the
-    // seven other lists silently did nothing here.
+
     describe('keyboard scope', () => {
         const olderTask: Task = {
             ...recentTask,
@@ -287,9 +285,7 @@ describe('TrashView', () => {
             });
         });
 
-        // updateTask writes to a tombstone happily, so an unmodified scope would
-        // mark a deleted task done / move its status while the row sat unchanged
-        // in Trash. Restore and purge are the only writes this view offers.
+
         it('leaves the status chords unbound rather than mutating a deleted task', () => {
             renderWithKeys();
 
@@ -331,7 +327,7 @@ describe('TrashView', () => {
             const purgedTask = useTaskStore.getState()._allTasks.find((task) => task.id === recentTask.id);
             expect(purgedTask?.purgedAt).toBeTruthy();
         });
-        // The unselected project stays in the trash untouched.
+
         expect(useTaskStore.getState()._allProjects.find((project) => project.id === olderProject.id)?.purgedAt).toBeUndefined();
     });
 });

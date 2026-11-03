@@ -31,8 +31,8 @@ final class NativeCaptureLinesHostTests: XCTestCase {
         return try XCTUnwrap(NativeJSON.jsonObject(with: Data(db.execute(sql, parametersJSON: json(params)).utf8)) as? [[String: Any]])
     }
     private func backupEntries() throws -> [String] {
-        // Startup GC may create empty family directories. Refusal must preserve
-        // their contents and create no operation, reservation or snapshot bytes.
+
+
         var entries: [String] = []
         for family in ["backup-operations", "backup-snapshots"] {
             let directory = root.appendingPathComponent(family)
@@ -65,8 +65,8 @@ final class NativeCaptureLinesHostTests: XCTestCase {
             let args = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(raw["argumentsJSON"] as? String).utf8)) as? [String])
             reference = try JSONDecoder().decode(NativeBackupOperationReference.self, from: Data(XCTUnwrap(args.first).utf8))
         } else {
-            // A first journal write can fail before promotion. The warm host
-            // still owns this command; its immutable manifest is already durable.
+
+
             let id = try XCTUnwrap(firstID)
             let bytes = try Data(contentsOf: root.appendingPathComponent("backup-operations/" + id + "/manifest.json"))
             reference = NativeBackupOperationReference(id: id,
@@ -162,7 +162,7 @@ final class NativeCaptureLinesHostTests: XCTestCase {
             let repeated = try await core.retryPending()
             XCTAssertNil(repeated)
             await core.close()
-            // Each boundary is a new isolated physical library.
+
             try FileManager.default.removeItem(at: root)
             root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".mindwtr-native-tests/" + UUID().uuidString)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -175,8 +175,8 @@ final class NativeCaptureLinesHostTests: XCTestCase {
             let unrelated = try await single(core, title: "Unrelated original")
             let (input, ids) = try await request(core, text: "First +NewLinesProject\nSecond +NewLinesProject")
             var committedRepliesLost = 0
-            // Shared flush retries a transient failed acknowledgment. Keep losing
-            // every COMMIT reply until this call reports its retained command.
+
+
             faults.afterSQL = { sql in
                 if sql.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "COMMIT" {
                     committedRepliesLost += 1; throw HostFailure("Injected committed ACK")
@@ -189,9 +189,8 @@ final class NativeCaptureLinesHostTests: XCTestCase {
             let landed = try rows("SELECT * FROM tasks WHERE id IN (?, ?) ORDER BY id", ids)
             XCTAssertEqual(landed.count, ids.count)
             let expected = try json(landed)
-            // Lines replay uses exact landed rows, not a durable request receipt.
-            // Manufacturing missing-row crash states must never remove rows
-            // protected by a matching committed receipt or terminal outcome.
+
+
             XCTAssertTrue(try rows("SELECT request_id FROM native_request_receipts WHERE request_id IN (?, ?)", ids).isEmpty)
             await core.close()
             if partial != "all" { _ = try rows("DELETE FROM tasks WHERE id = ?", [ids[1]]) }
@@ -271,7 +270,7 @@ final class NativeCaptureLinesHostTests: XCTestCase {
         replayFaults.beforeSQL = { sql in
             let upper = sql.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             if upper.hasPrefix("CREATE TRIGGER"), upper.contains("INTO TASKS") { taskTriggerDefinitions += 1 }
-            // The exact table boundary also excludes top-level tasks_fts maintenance.
+
             if upper.range(of: "^(?:INSERT(?:\\s+OR\\s+\\w+)?\\s+INTO|REPLACE\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+TASKS(?:\\s|\\()",
                            options: .regularExpression) != nil { taskWrites.append(sql) }
         }
@@ -330,8 +329,8 @@ final class NativeCaptureLinesHostTests: XCTestCase {
             await core.close()
             var envelope = try object(plan), prepared = try XCTUnwrap(envelope["prepared"] as? [String: Any])
             var tasks = try XCTUnwrap(prepared["tasks"] as? [[String: Any]])
-            // Canonical frozen rows are authority; changing a valid title does not
-            // invalidate them. These corruptions violate the actual pure grammar.
+
+
             switch corruption {
             case "revision": tasks[0]["rev"] = 2
             case "status": tasks[0]["status"] = "unknown-native-status"
@@ -339,8 +338,8 @@ final class NativeCaptureLinesHostTests: XCTestCase {
             default: tasks[0]["unknownNativeField"] = true
             }
             prepared["tasks"] = tasks; envelope["prepared"] = prepared
-            // Valid immutable file hashes do not grant domain authority. Rebuild the
-            // fixture's manifest/reference so only shared pure validation can refuse.
+
+
             try files.discard(reference, provenRejected: true)
             let changed = try files.prepare(id: reference.id, planJSON: json(envelope),
                 newSnapshot: (name: original.snapshot.name, content: snapshot), existingSnapshot: nil)

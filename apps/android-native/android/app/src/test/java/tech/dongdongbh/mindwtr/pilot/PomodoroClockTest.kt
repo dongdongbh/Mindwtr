@@ -4,7 +4,7 @@ import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** The card's on-screen countdown: core's formatPomodoroClock and its rounding up from the phase's end, ASCII in every language. */
+
 class PomodoroClockTest {
     @Test fun formatsAsCore() {
         val original = Locale.getDefault()

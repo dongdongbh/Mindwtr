@@ -89,7 +89,7 @@ describe('guarded mixed Trash bulk Restore', () => {
             const restored = useTaskStore.getState()._projectsById.get('p')!;
             expect(restored.areaId).toBeUndefined();
             expect(restored.color).toBe(version === 1 ? '#3b82f6' : '#94a3b8');
-            // Restart the same file, including its private durable request receipt.
+
             await sqlite.restart(undefined, { recoveryLoad: true });
             const before = await raw(sqlite);
             expect(value(await methods().commitPreparedTrashItemsRestore(frozen))).toEqual({ count: 1 });
@@ -318,7 +318,7 @@ describe('guarded mixed Trash bulk Restore', () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); const data = seed(); delete data.settings!.deviceId;
         const sqlite = await openSqliteHost(data);
         try {
-            // Boot may initialize its own policy device; stage a genuinely missing saved/current device.
+
             const saved = await getStorageAdapter().getData({ rawTasks: true }); delete saved.settings.deviceId;
             await getStorageAdapter().saveData(saved); useTaskStore.setState({ settings: saved.settings });
             const host = methods(), command = await prepare(host);

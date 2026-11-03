@@ -1,21 +1,6 @@
-// Toolbars and selection mode check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-toolbars-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays), captures six tasks with titles unique to this
-// run (A with the fixed context @6901 and B in the Inbox, C and D starred, E and F archived), and checks against core's own
-// views on a copy of the app's database: (a) the Inbox's Filters picker, found through its search, narrows the rows as core
-// does, and Clear widens them; a sort choice is one write and the rows follow core's order; (b) rotation and process death keep
-// the Inbox's open filter sheet and its selection; (c) a bulk move of the two selected rows is one core write; (d) the @6901
-// Focus filter narrows Focus as core does, its Save under an injected failed commit stores nothing and Try again stores one
-// saved filter under its request UUID, which is then deleted; (e) Focus's Reorder drag writes only the moved tasks; (f)
-// Archived: a completion time stores core's picked value once, and Select all → Restore to Inbox moves exactly core's rows.
-// Back leaves each mode before its screen (RN's #1415, ca5eee151, 90a0e079e): the Inbox's selection, Focus's Reorder and
-// Archived's selection each end on Back, with the screen still open. It
-// touches only the development package (it refuses any other APK), never launches over another app, puts the Inbox sort back,
-// restores rotation and clears its debug properties on exit. Leave the device on its home screen before running. It needs host
-// `bun`, and Android 11 or later (the reorder drag uses `input motionevent`).
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -46,21 +31,21 @@ const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/toolbars-check');
 const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
-// Digits for titles and tokens: the keyboard guard allows only an English layout, and digits never compose.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const titles = { a: `69${run}1`, b: `69${run}2`, c: `69${run}3`, d: `69${run}4`, e: `69${run}5`, f: `69${run}6` };
-// One fixed context, so runs add no new token.
+
 const CONTEXT = '@6901';
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
 const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
-// Core on the copy runs in the phone's time zone: a completion time is a local day and time.
+
 const timeZone = sh('getprop persist.sys.timezone') || undefined;
 const commands = (operation, outcome = 'saved') => device.logs(pid(), TAG).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = () => {
     const dir = resolve(work, 'db');
     rmSync(dir, { recursive: true, force: true });
@@ -69,7 +54,7 @@ const pullDatabase = () => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/** Core's views on a copy (the first window of each), and the stored tasks titled as this run's. */
+
 const core = () => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -119,19 +104,19 @@ const core = () => JSON.parse(execFileSync('bun', ['-e', `
 `], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, TZ: timeZone, CHECK_DB: pullDatabase(), CHECK_TITLES: JSON.stringify(titles), CHECK_CONTEXT: CONTEXT, CHECK_RUN: run } })
     .trim().split('\n').pop());
 
-// ---- UI (core's English) ----
+
 const inPopup = (nodes) => Boolean(tagged(nodes, 'quick-capture'));
 const onInbox = (nodes) => !inPopup(nodes) && !tagged(nodes, 'menu-screen') && tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes));
 const inScreen = (title) => (nodes) => Boolean(tagged(nodes, 'menu-screen')) && hasText(nodes, title);
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
-// A clickable row's label can sit on a child node with the row's own bounds (Archived's rows): read it there.
+
 const rowLabel = (nodes, row) => row.text || row['content-desc']
     || nodes.find((node) => node !== row && node.bounds === row.bounds && (node.text || node['content-desc']))?.['content-desc'] || '';
 const rowTitles = (nodes) => taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1]).map((node) => rowLabel(nodes, node));
 const selectedCount = (nodes) => Number(nodes.map((node) => new RegExp(`^(\\d+) ${en['bulk.selected']}$`).exec(node.text ?? '')?.[1]).find(Boolean) ?? NaN);
 const filterSheet = (nodes) => Boolean(withDescription(nodes, en['filters.label'])) && hasText(nodes, en['filters.label']);
 const all = en['common.all'];
-/** Opens the popup from + and saves [text] ('%s' is a space for `input text`); the popup closes on Save, as in RN. */
+
 const capture = async (text, shown) => {
     let nodes = await screen();
     if (!inPopup(nodes)) nodes = await device.openCapture();
@@ -141,17 +126,17 @@ const capture = async (text, shown) => {
     await waitFor(`"${shown}" in the capture field`, (current) => tagged(current, 'capture-title')?.text === shown, 15_000);
     await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), onInbox, 'the capture to close the popup');
 };
-/** Types [text] into the field labelled [label] (its end focused first). */
+
 const typeInto = async (label, text) => {
     await device.focusAtEnd(withDescription(await screen(), label) ?? fail(`no field "${label}"`));
     requireAppFront();
     sh(`input text '${text}'`);
-    // A field that holds text reports no content-desc on this phone, so the typed text is read from the focused field.
+
     return waitFor(`"${text}" in "${label}"`, (current) => current.find((node) => node.class === 'android.widget.EditText' && node.focused === 'true')?.text === text, 10_000);
 };
 const back = async (done) => {
     requireAppFront();
-    // An open keyboard takes the first Back (run 50 stayed on History), so close it first.
+
     if (/mInputShown=true/.test(sh('dumpsys input_method'))) {
         sh('input keyevent KEYCODE_BACK');
         await waitFor('the keyboard to close', () => !/mInputShown=true/.test(sh('dumpsys input_method')), 5_000);
@@ -159,7 +144,7 @@ const back = async (done) => {
     sh('input keyevent KEYCODE_BACK');
     return waitFor('Back', done, 15_000);
 };
-/** A long-press on the row titled [title] (RN starts selection mode with it), well inside the row. */
+
 const longPress = async (title) => {
     const row = taskRows(await screen()).find((node) => node.text === title) ?? fail(`no row ${title} on screen`);
     const [x1, y1, x2, y2] = box(row);
@@ -168,7 +153,7 @@ const longPress = async (title) => {
     sh(`input swipe ${x} ${Math.round((y1 + y2) / 2)} ${x} ${Math.round((y1 + y2) / 2)} 900`);
     await sleep(600);
 };
-/** RN's hold-then-drag (the reorder screen): a finger down, held past the long press, moved in steps, and lifted. */
+
 const holdAndDrag = async (x, y, toY) => {
     requireAppFront();
     const steps = 8;
@@ -176,7 +161,7 @@ const holdAndDrag = async (x, y, toY) => {
     sh(`input motionevent DOWN ${x} ${y}; sleep 0.8; ${moves.join('; ')}; sleep 0.3; input motionevent UP ${x} ${toY}`);
     await sleep(1200);
 };
-/** Taps [node] only after the screen holds still (a list that grows moves the row under the finger). */
+
 const tapStill = async (find, expected, description) => {
     const nodes = await device.settle();
     return tapExpecting(find(nodes) ?? fail(`no ${description} target on screen`), expected, description);
@@ -185,8 +170,8 @@ const tapStill = async (find, expected, description) => {
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
-    // Leave the app on its Inbox tab: the other checks start there.
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
+
     try {
         for (let step = 0; step < 4 && front().includes(`${PKG}/`); step += 1) {
             const nodes = await screen();
@@ -196,15 +181,15 @@ const restore = async () => {
         }
         const nodes = await screen();
         if (front().includes(`${PKG}/`) && tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE}`); } catch {                   }
 };
 
 let originalSort = null;
-/** The Inbox's Sort control, then core's option labelled [label] in the modal. */
+
 const chooseSort = async (label) => {
     const control = (await screen()).find((node) => node['content-desc']?.startsWith(`${en['sort.label']}: `)) ?? fail('no Sort control');
     const nodes = await tapExpecting(control, (current) => hasText(current, label), 'the sort modal');
@@ -226,7 +211,7 @@ try {
     sh('settings put system user_rotation 0');
     await waitFor('the Inbox', onInbox, 60_000);
 
-    // The run's own captures, with core's quick-add tokens: a context, the star (/*), and Archived.
+
     await capture(`${titles.a}%s${CONTEXT}`, `${titles.a} ${CONTEXT}`);
     await capture(titles.b, titles.b);
     await capture(`${titles.c}%s/*`, `${titles.c} /*`);
@@ -236,7 +221,7 @@ try {
     let seen = core();
     check(Object.values(titles).every((title) => seen.stored[title].length === 1), 'the six captures are stored once each');
 
-    // (a) The sort: core's option other than the stored one (Newest puts this run's captures on top), one write, core's order.
+
     originalSort = seen.sort.find((option) => option.selected) ?? fail('core marks no sort selected');
     const pick = seen.sort.find((option) => option.value === (originalSort.value === 'created-desc' ? 'created' : 'created-desc')) ?? fail('core offers no created sort');
     const sortsBefore = commands('taskListSort');
@@ -250,14 +235,14 @@ try {
     }, 15_000);
     check(seen.sortBy === pick.value && commands('taskListSort') === sortsBefore + 1, `(a) Sort "${pick.label}" is one setTaskListSort write, and the rows follow core's order`);
     if (pick.value === 'created') {
-        // The stored sort was Newest already: put it back now, so this run's captures sit on top.
+
         await chooseSort(originalSort.label);
         await waitFor('the sort back', () => core().sortBy === originalSort.value, 10_000);
         originalSort = null;
-        seen = core(); // the filtered rows below follow the restored sort
+        seen = core();
     }
 
-    // (a) Filters: the contexts picker, found through its search, narrows the Inbox as core does; Clear widens it again.
+
     nodes = await device.toTop();
     nodes = await tapExpecting(withDescription(nodes, `${en['filters.label']}: ${all}`) ?? fail('no Filters control'), filterSheet, 'the filter sheet');
     nodes = await tapExpecting(withDescription(nodes, `${en['filters.contexts']}: ${all}`) ?? fail('no contexts row'),
@@ -276,12 +261,12 @@ try {
     await tapExpecting(button(nodes, en['filters.clear']) ?? fail('no Clear'), (current) => rowTitles(current).includes(titles.b), 'Clear');
     check(true, '(a) Clear widens the Inbox again');
 
-    // (b) Selection mode and the open filter sheet survive rotation and process death.
+
     nodes = await device.settle(await device.toTop());
     await longPress(titles.a);
     nodes = await waitFor('selection mode', (current) => selectedCount(current) === 1, 10_000);
     nodes = await tapExpecting(withDescription(nodes, `${en['filters.label']}: ${all}`) ?? fail('no Filters control'), filterSheet, 'the filter sheet');
-    // The sheet is its own window, so the "1 selected" bar under it is not in the dump; (c) reads it after Back.
+
     const kept = filterSheet;
     sh('settings put system user_rotation 1');
     await waitFor('landscape: the sheet over one selected row', kept, 20_000);
@@ -298,7 +283,7 @@ try {
     await waitFor('the sheet over one selected row after process death', kept, 60_000);
     check(true, '(b) rotation and process death keep the Inbox\'s filter sheet open');
 
-    // (c) The sheet closes on Back; a tap adds B; Move to Next is one write for both rows, as core plans it.
+
     nodes = await back((current) => !filterSheet(current) && selectedCount(current) === 1);
     check(true, '(b) the selection is still one row after rotation and process death');
     nodes = await tapStill((current) => taskRows(current).find((node) => node.text === titles.b), (current) => selectedCount(current) === 2, 'B selected');
@@ -309,14 +294,14 @@ try {
     seen = core();
     check(seen.stored[titles.a][0].status === 'next' && seen.stored[titles.b][0].status === 'next' && commands('bulkAction') === bulkBefore + 1,
         '(c) Move to Next on two selected rows is one bulk write; both are stored Next');
-    // (c) Back leaves selection mode first: the Inbox stays open with no row selected.
+
     nodes = await device.settle(await device.toTop());
     await longPress(taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1])[0]?.text ?? fail('no Inbox row to select'));
     await waitFor('selection mode', (current) => selectedCount(current) === 1, 10_000);
     nodes = await back((current) => Number.isNaN(selectedCount(current)));
     check(tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes)), '(c) Back ended the Inbox\'s selection mode, and the Inbox stayed open');
 
-    // (d) Focus: the @6901 filter narrows Focus as core does.
+
     nodes = await tapExpecting(tab(await screen(), en['tab.next']) ?? fail('no Focus tab'), (current) => tabSelected(current, en['tab.next']), 'Focus');
     const focusSheet = (current) => hasText(current, en['filters.label']) && Boolean(withDescription(current, en['common.close']));
     nodes = await tapExpecting(withDescription(await device.toTop(), en['filters.label']) ?? fail('no Focus Filters button'), focusSheet, 'Focus\'s filter sheet');
@@ -326,7 +311,7 @@ try {
     nodes = await tapExpecting(button(await screen(), en['common.back']) ?? fail('no Back'), (current) => Boolean(withDescription(current, `${en['filters.contexts']}: ${CONTEXT}`)), 'the sheet');
     const focusRowsShown = (current) => taskRows(current).map((node) => node.text);
     nodes = await tapExpecting(button(nodes, en['common.done']) ?? fail('no Done'), (current) => !focusSheet(current), 'the sheet to close');
-    // Earlier runs' A rows (Next, @6901) stay in Focus, so this run's A can sit below the fold under the timer card: reveal it.
+
     await waitFor('the narrowed Focus', (current) => focusRowsShown(current).length > 0 && !focusRowsShown(current).includes(titles.b)
         && focusRowsShown(current).every((title) => seen.focusFiltered.includes(title)), 15_000);
     nodes = await device.reveal(titles.a);
@@ -334,7 +319,7 @@ try {
     check(focusRowsShown(nodes).every((title) => seen.focusFiltered.includes(title)) && !seen.focusFiltered.includes(titles.b),
         `(d) ${CONTEXT} narrows Focus to core's rows (${seen.focusFiltered.length})`);
 
-    // (d) Save the filter under a failed commit: nothing stored, the request UUID on disk; Try again stores one saved filter.
+
     nodes = await tapExpecting(withDescription(await device.toTop(), en['filters.label']) ?? fail('no Focus Filters button'), focusSheet, 'Focus\'s filter sheet');
     const saveLabel = 'Save';
     nodes = await tapExpecting(withDescription(nodes, saveLabel) ?? fail('no Save in the sheet'), (current) => Boolean(withDescription(current, 'Filter name')), 'the Save filter dialog');
@@ -356,7 +341,7 @@ try {
         '(d) its delete (after core\'s question) is one write');
     await tapExpecting(button(await screen(), en['filters.clear']) ?? fail('no Clear'), (current) => !button(current, en['filters.clear']), 'Clear');
 
-    // (e) Reorder: the last of Today's Focus dragged up one place is one write, and only the tasks whose place changed are written.
+
     seen = core();
     if (seen.reorder.length < 2) fail(`Today's Focus has ${seen.reorder.length} starred task(s); the drag needs two`);
     const order = seen.reorder.map((row) => row.id);
@@ -380,13 +365,13 @@ try {
     const replaced = order.filter((id) => seen.focused[id]?.order !== before[id]?.order).sort();
     check(rewritten.length > 0 && JSON.stringify(rewritten) === JSON.stringify(replaced), `(e) only the ${replaced.length} task(s) whose place changed were written`);
     await tapExpecting(button(await screen(), en['common.done']) ?? fail('no Done'), (current) => !withDescription(current, seen.reorder[0].positionLabel), 'Done');
-    // (e) Back leaves Reorder first: Focus stays open.
+
     nodes = await tapExpecting(withDescription(await device.toTop(), `${en['projects.reorderTasks']}, ${en['focus.reorderScreenHint']}`) ?? fail('no Reorder'),
         (current) => Boolean(withDescription(current, seen.reorder[0].positionLabel)), 'the reorder screen again');
     nodes = await back((current) => !withDescription(current, seen.reorder[0].positionLabel));
     check(tabSelected(nodes, en['tab.next']), '(e) Back ended Reorder, and Focus stayed open');
 
-    // (f) Archived: this run's two rows (core's search), a completion time, then Select all → Restore to Inbox.
+
     nodes = await tapExpecting(tab(await screen(), en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
     nodes = await tapExpecting(withDescription(await device.settle(nodes), seen.historyTile) ?? fail('no History tile'), inScreen(en['nav.history']), 'History');
     nodes = await tapExpecting(tab(nodes, en['nav.archived']), (current) => tabSelected(current, en['nav.archived']), 'the Archived tab');
@@ -410,7 +395,7 @@ try {
     const selectAll = `${en['bulk.select']} ${en['common.all']}`;
     nodes = await tapExpecting(button(await screen(), en['bulk.select']) ?? fail('no Select'), (current) => Boolean(button(current, selectAll)), 'selection');
     nodes = await tapExpecting(button(nodes, selectAll), (current) => hasText(current, `2 ${en['bulk.selected']}`), 'Select all');
-    // (f) Back leaves the selection first: Archived stays open with its rows; then Select all again for the restore.
+
     nodes = await back((current) => !hasText(current, `2 ${en['bulk.selected']}`) && Boolean(button(current, en['bulk.select'])));
     check(tabSelected(nodes, en['nav.archived']) && rowTitles(nodes).includes(titles.e), '(f) Back ended Archived\'s selection, and Archived stayed open');
     nodes = await tapExpecting(button(nodes, en['bulk.select']), (current) => Boolean(button(current, selectAll)), 'selection again');
@@ -420,7 +405,7 @@ try {
     seen = core();
     check(seen.stored[titles.e][0].status === 'inbox' && seen.stored[titles.f][0].status === 'inbox' && seen.archivedCount === archivedBefore - 2,
         '(f) Select all → Restore to Inbox moved exactly core\'s two rows, in one write');
-    // The search box empty again (Archived keeps it for the session), then back to the Inbox tab.
+
     await device.focusAtEnd(withDescription(await screen(), en['common.search']) ?? fail('no search box'));
     requireAppFront();
     sh(`input keyevent ${Array(run.length).fill('KEYCODE_DEL').join(' ')}`);
@@ -428,7 +413,7 @@ try {
     await back((current) => !tagged(current, 'menu-screen'));
     await tapExpecting(tab(await screen(), en['tab.inbox']), onInbox, 'the Inbox tab');
 
-    // The stored sort as it was.
+
     if (originalSort) {
         await chooseSort(originalSort.label);
         await waitFor('the sort back', () => core().sortBy === originalSort.value, 10_000);

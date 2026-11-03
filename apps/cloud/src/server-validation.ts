@@ -21,10 +21,8 @@ import {
     type Task,
     type TaskStatus,
 } from '@mindwtr/core';
-// Relative path (not '@mindwtr/core/...'): TASK_RECURRENCE_FIELD_KEYS is the shared home for
-// the recurrence object's field-key allowlist (see that file's header). This file isn't part
-// of the native-schema CI job's zero-install import chain, but the relative path is harmless
-// here and keeps the pattern consistent with task-sync-schema.ts's sibling imports below.
+
+
 import { TASK_RECURRENCE_FIELD_KEYS } from '../../../packages/core/src/task-recurrence-fields';
 import {
     CLOUD_AREA_CREATION_ALLOWED_PROP_KEYS,
@@ -531,9 +529,7 @@ type EntityPropsConfigEntry = {
     validateValues?: (value: Record<string, unknown>) => string | null;
 };
 
-// One allowlist-plus-value-check config per (entity, create|patch) pair, replacing
-// eight near-identical validate{Task,Project,Section,Area}{Creation,Patch}Props
-// functions that differed only by this data.
+
 const ENTITY_PROPS_CONFIG: Record<EntityPropsKind, EntityPropsConfigEntry> = {
     task: {
         allowedKeys: {
@@ -573,9 +569,8 @@ export function validateEntityProps<K extends EntityPropsKind>(
     const noun = ENTITY_PROPS_NOUN[mode];
     if (!isRecord(value)) return { ok: false, error: `Invalid ${kind} ${noun}` };
     const config = ENTITY_PROPS_CONFIG[kind];
-    // REST mutations must follow Task's single free-text assignee contract.
-    // Keep legacy document reads tolerant so existing malformed data remains
-    // accessible and repairable; do not silently coerce or rewrite it on read.
+
+
     if (kind === 'task' && value.assignedTo != null && typeof value.assignedTo !== 'string') {
         return { ok: false, error: 'Invalid task assignedTo: expected a string or null' };
     }
@@ -606,9 +601,8 @@ export function pickTaskList(
     data: AppData,
     opts: { includeDeleted: boolean; includeCompleted: boolean; status?: TaskStatus | null; query?: string; isFocusedToday?: boolean }
 ): Task[] {
-    // "not completed" means neither done nor archived (isTaskFinished) - expressed here as
-    // the two descriptor fields that together mean the same thing (includeArchived covers
-    // archived, excludeStatuses covers done), rather than a bespoke isTaskFinished filter.
+
+
     let tasks = data.tasks.filter((t) => taskMatchesQuery(t, {
         status: opts.status ?? undefined,
         includeDeleted: opts.includeDeleted,
@@ -617,8 +611,8 @@ export function pickTaskList(
         isFocusedToday: opts.isFocusedToday,
     }));
     if (opts.query && opts.query.trim()) {
-        // filterTasksBySearch, not searchAll: searchAll slices to SEARCH_RESULT_LIMIT (200)
-        // before this route paginates, silently capping totals — same fix as /v1/search.
+
+
         const matchingTaskIds = new Set(filterCloudTasksBySearch(tasks, filterNotDeleted(data.projects), opts.query).map((task) => task.id));
         tasks = tasks.filter((task) => matchingTaskIds.has(task.id));
     }

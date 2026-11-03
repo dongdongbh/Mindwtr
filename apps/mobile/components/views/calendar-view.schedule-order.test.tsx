@@ -37,7 +37,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
 });
 
 vi.mock('react-native-gesture-handler', () => {
-  // Every builder method returns the chain, whichever ones the view uses.
+
   const gesture = () => new Proxy({}, { get: () => () => gesture() });
   return {
     Gesture: { Pan: gesture, Tap: gesture, Race: (...items: unknown[]) => items, Simultaneous: (...items: unknown[]) => items },
@@ -136,8 +136,7 @@ describe('CalendarView schedule list order (#1240)', () => {
     mocked.tasks = [];
   });
 
-  // The planning list is a footer, not a header: a header pushed the scheduled
-  // days (the reason the screen exists) off the first screenful.
+
   it('keeps the planning list below the scheduled days', () => {
     const scheduled = new Date();
     scheduled.setHours(9, 0, 0, 0);

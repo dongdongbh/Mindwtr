@@ -22,7 +22,7 @@ const enableTauri = () => {
     (window as any).__TAURI_INTERNALS__ = {};
 };
 
-/** Minimal ScriptProcessor graph good enough to drive one capture cycle. */
+
 const installFakeWebAudio = () => {
     const track = { stop: vi.fn() };
     const stream = { getTracks: () => [track] };
@@ -126,8 +126,8 @@ describe('startAudioCapture — fallback', () => {
     });
 
     it('falls back to web capture when the native recorder refuses to start', async () => {
-        // This is the defect the shared module fixes: the task editor used to
-        // hard-fail here instead of recording through the page.
+
+
         enableTauri();
         const { processor } = installFakeWebAudio();
         tauriMocks.invoke.mockRejectedValue(new Error('no audio device'));

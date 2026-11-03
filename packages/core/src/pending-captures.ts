@@ -1,22 +1,6 @@
-// The pending-captures queue: native code appends one JSON file per item under
-// the app's `pending-captures/` directory while the app is closed (the iOS
-// Shortcut #845, the Watch #1175, the Android quick-capture dialog #1169 and
-// capture intent, the widget check-offs #1173), and every task write happens
-// here, through the normal store path, so revisions, save tracking and sync
-// merge behavior stay intact. Moved from React Native's
-// `apps/mobile/lib/pending-captures.ts` so the native app drains the same queue
-// with the same rules. The host lists, reads and deletes queue files (the queue
-// port) and supplies its log.
-//
-// Each item is stored once. A capture with a UUID id is created under that id,
-// so a replay finds the task it made. A check-off or defer is checked against the
-// device's record of the last queued command applied to its task: a replay of
-// that command, or an older one, writes nothing. A queue file is deleted only
-// after the store saved its write (and a command's record): a kill between them
-// replays the item, and the replay writes nothing.
-//
-// `audio` items need the host's audio port and `pomodoro` items its Pomodoro
-// controller; without them they stay in the queue untouched.
+
+
+
 import { prepareCaptureTask, type CaptureAssemblyInput } from './capture';
 import { normalizeShortcutTags } from './capture-deeplink';
 import { safeParseDate } from './date';
@@ -38,7 +22,7 @@ const captureStatus = (value: unknown): CaptureStatus | undefined => (
 );
 type CaptureDestination = { defaultStatus?: CaptureStatus; status?: CaptureStatus };
 
-// A new task to add (the iOS Shortcut and the Android dialog; `kind` absent).
+
 export type PendingCapture = CaptureDestination & {
     kind?: 'capture' | 'text';
     id: string;
@@ -49,13 +33,12 @@ export type PendingCapture = CaptureDestination & {
     createdAt?: string;
     dueDate?: string;
     startDate?: string;
-    // Which native writer queued the item; absent for the iOS Shortcut.
+
     source?: string;
     outboxRetried?: true;
 };
 
-// A check-off from the Android widget ring (#1173 phase 2): the task is
-// completed through the normal store path when the app next runs.
+
 export type PendingCompletion = {
     kind: 'complete';
     id: string;
@@ -114,16 +97,7 @@ const trimOrUndefined = (value: unknown): string | undefined => {
     return trimmed ? trimmed : undefined;
 };
 
-// The Shortcut's "Due date"/"Start date" parameters are a native Date picker,
-// so Swift always hands back a value with a time component even when the
-// user only picked a day. Collapsing to the local calendar day here (same
-// sanitization spirit as a deep link's task props: never trust the raw
-// string, never fail the capture on garbage input) guarantees these fields
-// stay date-only and never arm a due/start reminder, matching the v1
-// guardrail that background captures don't schedule notifications (#755).
-// ponytail: always drops any time component rather than trying to infer
-// user intent from it; revisit if Shortcuts-sourced reminder times are ever
-// requested.
+
 function sanitizeStructuredDateInput(raw: unknown): string | undefined {
     const trimmed = trimOrUndefined(raw);
     if (!trimmed) return undefined;
@@ -159,7 +133,7 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
     if (!id) return null;
     const createdAt = trimOrUndefined(record.createdAt);
     const source = trimOrUndefined(record.source);
-    // Destination metadata is optional: old/invalid fields must never lose a capture.
+
     const defaultStatus = captureStatus(record.defaultStatus);
     const status = captureStatus(record.status);
     const destination: CaptureDestination = {
@@ -254,12 +228,7 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
     };
 }
 
-// The structured `project` field (an id or a title) is the Shortcut's own
-// project picker, distinct from a parsed `+Project` token in the title. It
-// never creates projects and silently drops unknown ones — the task still
-// lands in the Inbox where processing catches it. (A parsed `+Project` token
-// DOES create an unknown project, same as the in-app quick add — see
-// drainPendingCaptureQueue.)
+
 function resolveStructuredProjectId(capture: PendingCapture, projects: readonly Project[]): string | undefined {
     if (!capture.project) return undefined;
     const ref = capture.project.toLowerCase();
@@ -270,7 +239,7 @@ function resolveStructuredProjectId(capture: PendingCapture, projects: readonly 
 }
 
 export function buildPendingCaptureTaskProps(capture: PendingCapture, projects: Project[]): Partial<Task> {
-    // Same rule as planCaptureTask (#1452): a start date files the default Inbox into Next.
+
     const props: Partial<Task> = {
         status: capture.status ?? resolveCaptureStatusForStart({ startTime: capture.startDate }, capture.defaultStatus ?? 'inbox'),
     };
@@ -288,68 +257,65 @@ export function buildPendingCaptureTaskProps(capture: PendingCapture, projects: 
     return props;
 }
 
-/** The store the queue writes through, and the host's Pomodoro controller. */
+
 export type PendingCaptureStoreDeps = {
     addTask: (
         title: string,
         initialProps?: Partial<Task>,
         options?: { captureId: string },
     ) => Promise<unknown>;
-    // Completes a widget check-off the way the task list's status change does.
+
     updateTask: (id: string, updates: Partial<Task>) => Promise<unknown>;
     addProject: (title: string, color: string, initialProps?: Partial<Project>) => Promise<Project | null>;
     projects: Project[];
     areas: Area[];
-    // Parse context, same as the in-app capture sheet: `@contexts`, `#tags` and
-    // `%People` in a queued title only match what already exists if they are here.
+
+
     tasks: Task[];
     people: Person[];
     settings: AppData['settings'];
-    /** Fresh all-task state, including tombstones, for commands and capture replay checks. */
+
     getTasks?: () => Task[];
-    /** Fresh all-project state, including tombstones, for the project a capture made. */
+
     getProjects?: () => Project[];
-    /** Resolves once the store's writes are durable; throws when they are not. */
+
     flushPendingSave?: () => Promise<void>;
     applyPomodoroCommand?: (command: PendingPomodoro) => Promise<'applied' | 'already-applied' | 'stale'>;
 };
 
-/** The queue directory's files, by name. */
+
 export type PendingCaptureQueuePort = {
-    /** The directory's file names; null when the directory does not exist. */
+
     list(): Promise<string[] | null>;
     read(name: string): Promise<string>;
-    /** Deletes one queue file; a file already gone is not an error. */
+
     delete(name: string): Promise<void>;
 };
 
-/** The host's recorded audio: where an item's WAV is, its transcription, and its removal. */
+
 export type PendingCaptureAudioPort = {
-    /** The item's WAV file, confined to the directory its writer owns; null when the item's path is not acceptable. */
+
     resolvePath(capture: PendingAudioCapture): string | null;
-    /** Without it a valid audio item stays queued. */
+
     transcribe?: (audioPath: string, settings: AppData['settings']) => Promise<string | null>;
-    /** Deletes a WAV file; a file already gone is not an error. */
+
     delete(audioPath: string): Promise<void>;
 };
 
-/**
- * The device's record of the last queued command applied to each task, as one
- * text value. It stays on the device and is never synced.
- */
+
 export type PendingCaptureRecordPort = {
     read(): Promise<string | null>;
     write(value: string): Promise<void>;
 };
 
-/** The key React Native (AsyncStorage) and the native app (RKStorage) keep that record under. */
+
 export const PENDING_CAPTURE_LAST_APPLIED_STORAGE_KEY = 'mindwtr:pending-captures:last-applied:v1';
 const LAST_APPLIED_KEEP_MS = 14 * 24 * 60 * 60 * 1000;
 type LastApplied = { tapMs: number; id: string; at: number; outcome?: string };
 
 type PendingCaptureLogContext = { scope: string; force?: boolean; extra?: Record<string, unknown> };
 
-/** React Native's app log shape. No task content, path or identifier goes into it. */
+
 export type PendingCaptureLog = {
     info(message: string, context: PendingCaptureLogContext): unknown;
     warn(message: string, context: PendingCaptureLogContext): unknown;
@@ -357,23 +323,18 @@ export type PendingCaptureLog = {
 };
 
 export type PendingCaptureDrainDeps = PendingCaptureStoreDeps & {
-    /** Persist/send a terminal Watch receipt only after durable task and ordering writes. */
+
     settleWatchChecklist?: (id: string, outcome: string) => Promise<void>;
     queue: PendingCaptureQueuePort;
     lastApplied: PendingCaptureRecordPort;
     log: PendingCaptureLog;
-    /** Without it every `audio` item stays in the queue untouched. */
+
     audio?: PendingCaptureAudioPort;
-    /**
-     * Drains only the `audio` items and leaves every other item for another drain (the native host's journaled ingest): a
-     * transcription waits on the network, which a journaled operation's deadline must not.
-     */
+
+
     audioOnly?: boolean;
-    /**
-     * Told of each capture, check-off or defer a failure left unfinished: `owed` once its store write landed but its save, its
-     * applied-command record or its file delete did not finish (a later change to that task must wait for the retry);
-     * `queued` when nothing of it landed (a later drain is enough).
-     */
+
+
     onUnfinished?: (state: 'owed' | 'queued') => void;
 };
 
@@ -416,21 +377,15 @@ const resultId = (result: unknown): string | undefined => {
     return trimOrUndefined((result as { id?: unknown }).id);
 };
 
-// Parse a capture's title with the same quick-add grammar and options as the
-// in-app capture sheet (quick-capture-sheet.tsx ~line 428), so a background
-// Shortcut capture like `/due:friday @errands #personal +Project` behaves
-// identically to typing it into the capture box (#895). The structured
-// `project`/`tags` fields from the Shortcut still win over parsed tokens —
-// same precedence as a surface's own picker beating a typed `+Project`.
+
 async function assembleCaptureTask(
     capture: PendingCapture,
     { addProject, projects, areas, tasks, people, settings }: Pick<PendingCaptureStoreDeps, 'addProject' | 'projects' | 'areas' | 'tasks' | 'people' | 'settings'>,
     log: PendingCaptureLog,
 ): Promise<{ title: string; props: Partial<Task> } | null> {
     try {
-        // Relative dates (`/due:friday`, "tomorrow") resolve against the moment
-        // the Shortcut ran, not the later drain — a capture queued Monday night
-        // means that Monday's "tomorrow" even if the app first opens on Wednesday.
+
+
         const capturedAt = capture.createdAt ? new Date(capture.createdAt) : null;
         const now = capturedAt && !Number.isNaN(capturedAt.getTime()) ? capturedAt : new Date();
         const parsed = parseQuickAdd(capture.title, projects, now, areas,
@@ -460,33 +415,25 @@ async function assembleCaptureTask(
                     taskProps.tags = Array.from(new Set([...(taskProps.tags ?? []), ...structuredTags]));
                 }
 
-                // The Shortcut's own date pickers beat a parsed /due: or /start:
-                // token in the title, same precedence as project/tags above.
+
                 if (capture.dueDate) taskProps.dueDate = capture.dueDate;
                 if (capture.startDate) taskProps.startTime = capture.startDate;
                 return taskProps;
             },
         });
 
-        // Never drop a capture: any parse/prepare failure (invalid date command,
-        // empty title, project-create failure) falls back to the legacy verbatim
-        // behavior. Background has no UI to surface parse errors.
+
         if (!prepared.success) return null;
         return { title: prepared.title, props: prepared.props };
     } catch (error) {
-        // A throw anywhere above must not abort the drain loop for the captures
-        // behind this one — fall back to the verbatim capture, same as a parse
-        // failure.
+
+
         void log.error(error, { scope: 'shortcuts', extra: { message: 'Failed to assemble pending capture' } });
         return null;
     }
 }
 
-// A queued check-off can sit for days (widget ring, Watch, a phone that was
-// off), so the completion is stamped with the tap time rather than the moment
-// the app happened to drain the queue. Core anchors after-completion recurrence
-// on the same value. A missing, unparseable or future timestamp (clock skew)
-// falls back to core's "now" by omitting the field.
+
 function resolveQueuedCompletedAt(completion: PendingCompletion): string | undefined {
     const raw = completion.completedAt ?? completion.createdAt;
     if (!raw) return undefined;
@@ -495,8 +442,7 @@ function resolveQueuedCompletedAt(completion: PendingCompletion): string | undef
     return parsed.toISOString();
 }
 
-// At-least-once: a task already done, archived, deleted or unknown is a no-op and the
-// file still goes away. The success line is the phase-2 release check.
+
 export async function applyPendingCompletion(
     completion: PendingCompletion,
     { updateTask, tasks, getTasks }: Pick<PendingCaptureStoreDeps, 'updateTask' | 'tasks' | 'getTasks'>,
@@ -536,10 +482,7 @@ async function applyPendingDefer(
     return outcome;
 }
 
-/**
- * Resolve against current data; never replace the Watch's old copy of the list. One store command reads the task and
- * writes its list (store-write-gate.ts), so a list a sync save published meanwhile is the one the tick lands on.
- */
+
 export function applyPendingChecklist(
     command: PendingChecklist,
     deps: Pick<PendingCaptureStoreDeps, 'tasks' | 'getTasks' | 'projects' | 'getProjects' | 'updateTask'>,
@@ -556,7 +499,7 @@ async function applyPendingChecklistNow(
     const items = task.checklist ?? [];
     const matches = items.filter((item) => item.id === command.itemId && item.title === command.itemTitle);
     if (matches.length !== 1) return 'changed';
-    // A completion may already have advanced recurrence before a crash at the save/receipt boundary.
+
     if (matches[0].isCompleted === command.isCompleted) return 'applied';
     const project = (deps.getProjects?.() ?? deps.projects).find((entry) => entry.id === task.projectId);
     if (task.status === 'archived' || task.status === 'reference'
@@ -568,7 +511,7 @@ async function applyPendingChecklistNow(
     return isFailedResult(result) ? null : 'applied';
 }
 
-/** Ingests every queue item it can, oldest file name first (Watch commands in tap order); resolves to the count ingested. */
+
 export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): Promise<number> {
     const {
         addTask,
@@ -591,9 +534,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         onUnfinished,
     } = deps;
 
-    // A +Project a capture makes is named by the capture: a replay finds it,
-    // renamed or not, and never makes a second one. One deleted or archived
-    // since is not used again, and the capture keeps its verbatim title.
+
     const captureAddProject = (captureId: string | undefined): PendingCaptureStoreDeps['addProject'] => (
         captureId === undefined ? addProject : async (title, color, props) => {
             const id = generateDeterministicUUID(`${captureId}:project:${title.trim().toLowerCase()}`);
@@ -644,14 +585,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         isWatchCommand(entry.capture) ? watchCommands[nextWatchCommand++] : entry
     ));
 
-    // A check-off or defer is judged against the last queued command applied to
-    // its task (the record port: its tap time and id, pruned after 14 days). One
-    // tapped before that command is older than a state the user already has, and
-    // one with that id is a replay of a command whose queue delete failed after
-    // it landed: either is removed with no write. In-app edits, sync and load
-    // migrations never make a command stale. A command without a time applies as
-    // before. Per item: store write, durable save, record, file delete. An
-    // unreadable record keeps the commands queued for a later drain.
+
     const tapTimeOf = (command: PendingCompletion | PendingDefer): number => (
         safeParseDate(command.createdAt ?? (command.kind === 'complete' ? command.completedAt : undefined))?.getTime() ?? Number.NaN
     );
@@ -673,7 +607,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 });
             }
         } catch {
-            // A record this app wrote but cannot parse starts over: commands apply as before it existed.
+
         }
         return record;
     };
@@ -692,7 +626,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         const now = Date.now();
         record.set(command.taskId, { tapMs, id: command.id, at: now });
         for (const [taskId, entry] of record) {
-            // Watch checklist commands can remain offline indefinitely; their item ordering cannot expire.
+
             if (!taskId.startsWith('["watch-checklist",') && now - entry.at > LAST_APPLIED_KEEP_MS) record.delete(taskId);
         }
         await lastApplied.write(JSON.stringify(Object.fromEntries(record)));
@@ -708,16 +642,15 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
     for (const { capture, name } of orderedEntries) {
         if (audioOnly && capture?.kind !== 'audio') continue;
         if (!capture) {
-            // Only our own native writers write here, so an unparsable file is
-            // corruption, not a transient failure — retrying forever would
-            // re-log on every foreground.
+
+
             void log.warn('Discarding malformed pending capture', { scope: 'shortcuts', extra: { name } });
             await queue.delete(name).catch(() => undefined);
             continue;
         }
 
         if (capture.kind === 'checklist') {
-            // Older hosts retain this command until they can acknowledge its durable result.
+
             if (!deps.settleWatchChecklist || !flushPendingSave) { onUnfinished?.('queued'); continue; }
             const record = await (appliedRecord ??= readLastApplied());
             if (!record) { onUnfinished?.('queued'); continue; }
@@ -743,7 +676,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                     scope: 'capture', extra: { releaseCheck: 'v1.3.5/watch-checklist', outcome },
                 });
             } catch {
-                // No later command may leapfrog an unrecorded write.
+
                 onUnfinished?.('owed');
                 break;
             }
@@ -762,8 +695,8 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 onUnfinished?.('owed');
                 continue;
             }
-            // A record that did not reach the disk still removes the file: kept, it would apply again after the user changed
-            // the task (only a process death between the save and the delete leaves it, and the next start drains first).
+
+
             const recorded = outcome === 'completed' || outcome === 'already-done'
                 ? await remember(capture, record).then(() => true, () => false)
                 : true;
@@ -811,8 +744,8 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 onUnfinished?.('owed');
                 continue;
             }
-            // A record that did not reach the disk still removes the file: kept, it would apply again after the user changed
-            // the task (only a process death between the save and the delete leaves it, and the next start drains first).
+
+
             const recorded = outcome === 'deferred' || outcome === 'already-deferred'
                 ? await remember(capture, record).then(() => true, () => false)
                 : true;
@@ -880,17 +813,15 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
             }
 
             const currentTasks = getTasks?.() ?? tasks;
-            // Android's recorder and the Watch both name an item by a UUID, so it
-            // doubles as the capture id: the task gets that id, and a replay finds it.
+
+
             const captureId = isAndroidQuickCapture || UUID_PATTERN.test(capture.id) ? normalizedCaptureId : undefined;
             const existingCaptureTask = captureId
                 ? currentTasks.find((task) => task.id.toLowerCase() === captureId)
                 : undefined;
             if (existingCaptureTask) {
-                // A prior attempt may have durably created the task but crashed
-                // before queue cleanup. Tombstones count too: deleting the task
-                // must not make the same native capture reappear. The Watch keeps
-                // its own failure path: a throw ends the drain, the rest is silent.
+
+
                 let replayResult: unknown;
                 try {
                     replayResult = await addTask(
@@ -1018,8 +949,8 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                     continue;
                 }
             } else {
-                // Preserve the existing Watch failure behavior; Android catches
-                // locally so later text captures cannot be stranded behind it.
+
+
                 result = await addTask(title, props, ...(captureId ? [{ captureId }] : []));
             }
             if (
@@ -1046,8 +977,8 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 }
                 continue;
             }
-            // The queue must be gone before its WAV: otherwise a failed queue
-            // delete can replay an item whose audio was already removed.
+
+
             await audio.delete(resolvedAudioPath).catch(() => undefined);
             ingested += 1;
             logAndroidCaptureDestination(log, capture, props.status, false);
@@ -1067,11 +998,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
             continue;
         }
 
-        // Every native writer emits a UUID id, so it doubles as the capture id:
-        // core makes it the task id, so a crash between the store write and the
-        // queue delete cannot duplicate the task. A capture already stored under
-        // its id is a replay and writes nothing, not even a +Project it names.
-        // Non-UUID ids (the iOS Shortcut) keep the legacy path.
+
         const captureId = UUID_PATTERN.test(capture.id) ? capture.id.toLowerCase() : undefined;
         const storedTask = captureId ? (getTasks?.() ?? tasks).find((task) => task.id.toLowerCase() === captureId) : undefined;
         const stored = storedTask !== undefined;
@@ -1083,8 +1010,8 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
             const result = assembled
                 ? await addTask(assembled.title, assembled.props, ...captureOptions)
                 : await addTask(capture.title, buildPendingCaptureTaskProps(capture, projects), ...captureOptions);
-            // A different id back means the capture id did not take; retain the file
-            // rather than risk a second task, exactly like the audio branch.
+
+
             if (
                 isFailedResult(result)
                 || (captureId && resultId(result)?.toLowerCase() !== captureId)
@@ -1094,8 +1021,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
             }
         }
 
-        // Delete only after the store write resolved; a crash in between at
-        // worst re-ingests one capture.
+
         try {
             await flushPendingSave?.();
             await queue.delete(name);

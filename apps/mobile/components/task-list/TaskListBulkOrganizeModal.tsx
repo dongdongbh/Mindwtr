@@ -64,7 +64,7 @@ export function TaskListBulkOrganizeModal({
 }: TaskListBulkOrganizeModalProps) {
   const filledButton = useFilledButtonColors();
   const keyboardInset = useAndroidKeyboardInset(visible);
-  // The dialog's choices, as core's draft: the native host keeps the same one.
+
   const [draft, setDraft] = useState(EMPTY_BULK_ORGANIZE_DRAFT);
   const editDraft = useCallback((edit: BulkOrganizeDraftEdit) => {
     setDraft((current) => applyBulkOrganizeDraftEdit(current, edit));
@@ -122,7 +122,7 @@ export function TaskListBulkOrganizeModal({
   const activeProjects = useMemo(() => getBulkOrganizeProjectOptions(projects), [projects]);
   const activeAreas = useMemo(() => getBulkOrganizeAreaOptions(areas), [areas]);
 
-  // Labels, the choices shown and whether Apply may run come from core, as the native host shows them.
+
   const dialog = buildBulkOrganizeDialogModel({ draft, projects: activeProjects, areas: activeAreas, selectedCount, t });
   const selectedProjectId = dialog.project.selectedId;
   const selectedAreaId = dialog.area.selectedId;
@@ -137,7 +137,7 @@ export function TaskListBulkOrganizeModal({
       }) : BULK_ORGANIZE_NONE;
       if (!savedId) return;
       setDestinationError(null);
-      // A project choice also resets the area to Keep.
+
       editDraft({ type: kind === 'project' ? 'setProject' : 'setArea', value: savedId });
     } catch {
       setDestinationError(kind === 'project' ? dialog.createFailed.project : dialog.createFailed.area);

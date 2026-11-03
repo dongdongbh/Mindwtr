@@ -9,8 +9,6 @@ import {
 } from '@mindwtr/core/task-filter-selections';
 import { normalizeFilterCriteria, type SavedFilter, type Task, type TaskMetadataFilterVisibility } from '@mindwtr/core';
 
-// The hook only. The predicates it feeds are shared with desktop, so they are
-// covered where they live: packages/core/src/task-filter-selections.test.ts.
 
 const ALL_VISIBLE: TaskMetadataFilterVisibility = {
   energyLevel: true,
@@ -44,7 +42,7 @@ const task: Task = {
 
 let tree: ReactTestRenderer | null = null;
 
-/** Renders the hook and returns a handle whose `.current` is always the latest result. */
+
 function renderSelections(options: Partial<TaskFilterSelectionsOptions> = {}) {
   const handle: { current: TaskFilterSelections } = { current: null as never };
   function Harness(props: { options: Partial<TaskFilterSelectionsOptions> }) {
@@ -173,7 +171,7 @@ describe('useTaskFilterSelections', () => {
     act(() => handle.current.toggleToken('@work'));
     expect(taskMatchesFilterSelections(task, handle.current)).toBe(true);
 
-    // Excluding the parent tag drops the child tag too.
+
     act(() => handle.current.toggleToken('#client'));
     act(() => handle.current.toggleToken('#client'));
     expect(handle.current.excludedTokens).toEqual(['#client']);
@@ -247,8 +245,8 @@ describe('useTaskFilterSelections', () => {
     act(() => handle.current.applySaved(savedFilter));
     expect(handle.current.activeSavedFilterId).toBe('filter-desk');
     expect(handle.current.tokens).toEqual(['@desk']);
-    // The saved filter still filters by its own criteria, including the area
-    // no picker can express.
+
+
     expect(handle.current.criteria).toMatchObject({ contexts: ['@desk'], areas: ['area-1'] });
     expect(handle.current.canSave).toBe(false);
 
@@ -361,7 +359,7 @@ describe('useTaskFilterSelections', () => {
       locationQuery: '',
     });
 
-    // Detached and shown again, the hidden selections do not come back.
+
     act(() => handle.current.unbindSaved());
     rerender({ view: 'focus', visibility: ALL_VISIBLE, savedFilters: [savedFilter], ...retain });
     expect(handle.current).toMatchObject({ priorities: [], energyLevels: [], timeEstimates: [], locationQuery: '' });
@@ -426,7 +424,7 @@ describe('useTaskFilterSelections', () => {
     expect(handle.current.showContextMatchMode).toBe(true);
     expect(handle.current.showTagMatchMode).toBe(false);
 
-    // 'all' is the default, so the task carrying only one of them drops out.
+
     expect(taskMatchesFilterSelections(task, handle.current)).toBe(false);
     act(() => handle.current.setMatchMode('context', 'any'));
     expect(handle.current.criteria.contextMatchMode).toBe('any');

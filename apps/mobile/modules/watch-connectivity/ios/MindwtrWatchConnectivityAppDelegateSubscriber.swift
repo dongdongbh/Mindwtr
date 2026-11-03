@@ -6,8 +6,8 @@ public final class MindwtrWatchConnectivityAppDelegateSubscriber: ExpoAppDelegat
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        // Watch background deliveries can arrive before React Native starts.
-        // The receiver owns no database access, so it is safe to activate here.
+
+
         MindwtrWatchConnectivityReceiver.shared.activateAtLaunch()
         return true
     }

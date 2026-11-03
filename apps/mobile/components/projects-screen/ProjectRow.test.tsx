@@ -239,8 +239,7 @@ describe('ProjectRow', () => {
     expect(onToggleProjectFocus).toHaveBeenCalledWith('project-1');
   });
 
-  // The star is icon-only, so its label is the whole affordance for a screen
-  // reader — and it must speak the reader's language.
+
   it('names the focus action through the translator', () => {
     const translate = (key: string) => ({
       'projects.addToFocus': 'Zum Fokus hinzufügen',

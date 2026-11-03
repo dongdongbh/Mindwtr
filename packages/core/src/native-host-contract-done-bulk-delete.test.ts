@@ -7,7 +7,7 @@ import { flushPendingSave, getStorageAdapter, resetForTests, useTaskStore } from
 import type { Task } from './types';
 import { deterministicHash128 } from './uuid';
 
-// Each forced failed save waits the store's real retry backoff (250+500+1000+2000 ms), so one such test takes ~3.8 s alone.
+
 vi.setConfig({ testTimeout: 30_000 });
 
 const NOW = '2026-10-02T13:00:00.000Z';
@@ -45,13 +45,13 @@ const prepareUndo = async (host: ReturnType<typeof methods>, deletion: NativeArc
 };
 const rows = () => clone(buildSaveSnapshot(useTaskStore.getState()));
 const canonical = async () => getStorageAdapter().saveData(buildSaveSnapshot(useTaskStore.getState()));
-// Reproduce Task181's unchanged canonical payload bytes, not just its prefix.
+
 const receiptMethod = (prefix: string, envelope: unknown) => {
     const payload = JSON.stringify([prefix, envelope], (_name, item) => item && typeof item === 'object' && !Array.isArray(item)
         ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
     return `${prefix}:${deterministicHash128(payload).map((part) => part.toString(16).padStart(8, '0')).join('')}`;
 };
-// Same complete rowid/table oracle used by the retained Archive family cases.
+
 const raw = async (sqlite: Awaited<ReturnType<typeof openSqliteHost>>) => Object.fromEntries(await Promise.all([
     'tasks', 'projects', 'sections', 'areas', 'people', 'settings', 'saved_filters', 'schema_migrations', 'calendar_sync',
 ].map(async (table) => [table, await sqlite.sql(`SELECT rowid AS _rowid, * FROM ${table} ORDER BY rowid`)])));
@@ -165,8 +165,8 @@ describe('guarded Done bulk Delete and Undo', () => {
         clock(); const sqlite = await openSqliteHost(seed());
         try {
             const host = methods(); const stale = await prepare(host);
-            // Missing parents are legal, so an empty captured scope is not
-            // intrinsically malformed. Existing durable parents make it stale.
+
+
             const omittedParent = clone(stale); omittedParent.prepared.projects = [];
             expect(host.validatePreparedArchivedTasksDelete(omittedParent).ok).toBe(true);
             const initial = await raw(sqlite);

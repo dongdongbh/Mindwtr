@@ -67,7 +67,7 @@ export const referenceTasksRemoveTagScope = (request: TagRequest,
 const tagUpdates = (request: TagRequest, scope: NativeReferenceTasksMoveScope, at: string) =>
     buildBulkTaskTokenUpdates(request.taskIds, buildEntityMap(scope.tasks.map((row) => historyRowLoadProjection(row, at))), 'tags', request.tags, 'remove');
 
-/** Same RN planner as Add tag; only the shared token builder's operation differs. */
+
 export const referenceTasksRemoveTagEffect = (prepared: Pick<TagPrepared,
     'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates'>): NativeReferenceTasksRemoveTagPrepared['effect'] | null =>
     referenceTasksTagEffect(prepared, tagUpdates(prepared.request, prepared.scope, prepared.updateAt),
@@ -248,7 +248,7 @@ export function createTasksRemoveTagMethods(deps: {
             if (confirmed.ok) {
                 try { logInfo(`Native ${label} bulk Remove tag confirmed`, { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-remove-tag' : 'v1.3.4/ios-reference-bulk-remove-tag', count: confirmed.value.count, outcome: 'removed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },
@@ -267,7 +267,7 @@ export function createReferenceTasksRemoveTagMethods(deps: Parameters<typeof cre
     };
 }
 
-// The store's Reference removeTag action reads these here: it cannot import this module (store-reference-batch-modules.ts).
+
 referenceBatchModules.shared = { historyRowLoadProjection, NativeReceiptSqliteAdapter };
 referenceBatchModules.removeTag = (input) => {
     const prepared = input as NativeReferenceTasksRemoveTagPrepared;

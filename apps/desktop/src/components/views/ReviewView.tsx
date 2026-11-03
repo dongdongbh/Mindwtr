@@ -184,7 +184,7 @@ export function ReviewView() {
         if (previous?.id === highlightTaskId && previous.at === highlightTaskAt) return;
         const target = tasksById[highlightTaskId];
         if (!target) return;
-        // Consume each navigation once so later scope/filter choices still win.
+
         revealedHighlightRef.current = { id: highlightTaskId, at: highlightTaskAt };
         if (getReviewOverviewTasks([target], 'all').length === 0) return;
         const revealInAll = scope === 'all' || !isTaskDueForReview(target, new Date(nowTick));
@@ -262,7 +262,7 @@ export function ReviewView() {
         exitSelectionMode();
     }, [filterStatus, exitSelectionMode]);
 
-    // Grouping reorders the rows, so the keyboard walks the grouped order.
+
     const keyboardVisibleTasks = useMemo(
         () => (isGrouping ? [...groupedTasks, ...(showLaterInSequence ? laterGroupedTasks : [])].flatMap((group) => group.tasks) : renderedReviewTasks),
         [groupedTasks, isGrouping, laterGroupedTasks, renderedReviewTasks, showLaterInSequence],
@@ -391,8 +391,8 @@ export function ReviewView() {
                         aria-label={t('common.search')}
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
-                        // lg:min-w-48: beside the filter cluster the box needs a floor, or the
-                        // cluster keeps its full width and squeezes it down to its padding.
+
+
                         className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 lg:min-w-48"
                     />
                     <div className="flex flex-wrap items-center gap-2 lg:justify-end">

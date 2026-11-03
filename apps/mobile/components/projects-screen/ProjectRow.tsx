@@ -30,7 +30,7 @@ type ProjectRowProps = {
     onDuplicateProject: (projectId: string) => void;
     onOpenProject: (project: Project) => void;
     onToggleProjectFocus: (projectId: string) => void;
-    /** Present only when the project can move that way in the shown list (#1263). */
+
     onMoveUp?: () => void;
     onMoveDown?: () => void;
     onMoveToArea?: () => void;
@@ -90,7 +90,7 @@ export function ProjectRow({
         );
     };
 
-    // Keep the existing long-press and accessibility actions alongside the visible menu.
+
     const moveActions = [
         onMoveUp && { name: 'moveUp', label: t('projects.moveUp'), run: onMoveUp },
         onMoveDown && { name: 'moveDown', label: t('projects.moveDown'), run: onMoveDown },

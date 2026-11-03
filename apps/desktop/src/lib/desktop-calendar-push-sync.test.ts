@@ -29,8 +29,8 @@ const setStoreTasks = (tasks: Task[]) => {
 };
 
 const setStoreProjectsAndSections = (projects: Project[], sections: Section[]) => {
-    // Write the canonical `_all*` collections; the store derives the visible
-    // `projects`/`sections` arrays and id maps from them.
+
+
     useTaskStore.setState({ _allProjects: projects, _allSections: sections });
 };
 
@@ -128,9 +128,8 @@ describe('desktop calendar push sync', () => {
             endDate: '2026-01-11',
             allDay: true,
         }));
-        // EventKit counts every day the [start, end] range touches, so the
-        // instant end must stay inside the same local day (#1065) while the
-        // exclusive date-only endDate above keeps the Linux ICS path correct.
+
+
         const details = createEvent.mock.calls[0][0];
         const endInstant = new Date(details.end);
         expect(endInstant.getFullYear()).toBe(2026);
@@ -198,8 +197,8 @@ describe('desktop calendar push sync', () => {
         expect(enabledEnd.getHours()).toBe(11);
 
         createEvent.mockClear();
-        // Feature off: the stored estimate stays on the task but stops
-        // stretching the pushed event (the 30-minute default takes over).
+
+
         useTaskStore.setState((state) => ({ ...state, settings: { ...state.settings, features: { timeEstimates: false } } }));
         setStoreTasks([makeTask({ id: 'task-2', startTime: '2026-01-10T09:00:00', timeEstimate: '2hr' })]);
         await runFullDesktopCalendarPushSync();

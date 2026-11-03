@@ -451,7 +451,7 @@ final class ProjectFileAddHostTests: XCTestCase {
             XCTAssertTrue(fired(), "durable-\(owner): \(refusalDiagnostic(refusal))")
             let captured = try state(), file = try target(captured), identity = try inode(file)
             let envelope = try object(XCTUnwrap(captured["envelopeJSON"] as? String)), prepared = try XCTUnwrap(envelope["prepared"] as? [String: Any]), attachment = try XCTUnwrap(prepared["attachment"] as? [String: Any])
-            // Bypass the host deliberately: SQLite has a live ref JSC has never loaded.
+
             _ = try sql("UPDATE \(owner) SET attachments=? WHERE id=?", [try json([attachment]), owner == "tasks" ? "sibling-task" : "sibling-project"])
             let rows = try projectRows(), other = try otherRows()
             await refused { _ = try await host.abandonProjectFileAdd(requestId: id) }
@@ -589,8 +589,8 @@ final class ProjectFileAddHostTests: XCTestCase {
         XCTAssertLessThanOrEqual(encoded.count, 8 * 1024 * 1024)
         try encoded.write(to: journal)
     }
-    // Build the sealed historical counterpart of a real retained publication.
-    // This fixture changes no native source/stage/publication descriptor proof.
+
+
     private func historicalFixture(_ original: [String: Any]) throws -> [String: Any] {
         var state = original, envelope = try object(XCTUnwrap(state["envelopeJSON"] as? String))
         var request = try XCTUnwrap(envelope["request"] as? [String: Any])

@@ -17,9 +17,7 @@ class HostSyncLockTest {
         }
     }
 
-    // Holding a real lease needs Android's Uri, file descriptors and the JNI library (no Robolectric here), so this test only
-    // pins the refusals and that close() keeps refusing. close() calls SyncFileLockCore.destroy, whose drain RN's
-    // SyncFileLockModuleTest covers (drainHeldSyncFileLocks); the device check proves a held lease is released (4b, 4c).
+
     @Test
     fun aTokenTheHostDoesNotHoldIsRefusedBeforeAndAfterClose() {
         val lock = HostSyncLock(SyncFileLockCore { error("no folder is opened in this test") })

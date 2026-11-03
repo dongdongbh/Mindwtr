@@ -43,7 +43,7 @@ import { formatTrashCounts } from './trash-view-model';
 import type { Area, Project, Task } from './types';
 
 const fixture = loadListViewsFixture();
-/** The fixture minus the rendered text dump, which only the React Native capture checks. */
+
 const frozen = (observations: Record<string, unknown>[]) => observations.map(({ text: _text, ...rest }) => rest);
 
 describe('list views: core reproduces the React Native screens', () => {
@@ -89,7 +89,7 @@ describe('list views: core reproduces the React Native screens', () => {
         freezeClock(fixture.trash.now);
         const recorder = createWriteRecorder();
         await seedListViewsStore(fixture.trash, scenario, recorder);
-        // What mobile's root layout applies; the capture pinned the device locale.
+
         const settings = fixture.trash.settings[scenario.settings];
         configureDateFormatting({ language: 'en', dateFormat: settings.dateFormat, calendarSystem: settings.calendarSystem, timeFormat: settings.timeFormat, systemLocale: 'en-US' });
         const observed = await replayTrash(createTrashCoreBackend(t), scenario, recorder);
@@ -190,7 +190,7 @@ describe('contexts view filters', () => {
         expect(stale.tokenChips).toContainEqual(expect.objectContaining({ token: 'work', count: 0, selected: true }));
     });
 
-    // ponytail: one wall-clock bound on a busy machine; the growth it guards against was 17 s at 5,000 tasks.
+
     it('derives Contexts for 5,000 tasks with distinct tokens within the search/filter/sort budget', () => {
         const tasks = Array.from({ length: 5000 }, (_, index) => task({
             id: `perf-${index}`,
@@ -208,8 +208,8 @@ describe('contexts view filters', () => {
             }
             best = Math.min(best, performance.now() - started);
         }
-        // The 130 ms budget (docs/performance/budgets.md) is for a quiet device; shared CI runners
-        // went past it at 130.2 ms, so this guards the 17 s growth with a 1 s bound.
+
+
         expect(best).toBeLessThan(1000);
     });
 

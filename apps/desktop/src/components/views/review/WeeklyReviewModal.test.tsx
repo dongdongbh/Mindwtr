@@ -348,7 +348,7 @@ describe('WeeklyReviewGuideModal', () => {
             id, name: id, url: '', enabled: id !== 'disabled',
         }));
         const start = new Date();
-        // Keep the fixture on one calendar day even when CI runs near midnight.
+
         start.setHours(12, 0, 0, 0);
         const end = new Date(start.getTime() + 60 * 60 * 1000);
         const events = calendars.map((calendar) => ({
@@ -510,9 +510,8 @@ describe('WeeklyReviewGuideModal', () => {
                 timeEstimate: '1hr',
                 timeSpentMinutes: 45,
             })],
-            // No `features` key at all: time estimates default ON, so the
-            // look-back must render. `features?.timeEstimates === true` read
-            // this as OFF and hid the rows for everyone at defaults.
+
+
             settings: {
                 weekStart: 'monday',
                 gtd: {
@@ -526,7 +525,7 @@ describe('WeeklyReviewGuideModal', () => {
 
         expect(screen.getByText('1 completed task(s) had an estimate')).toBeInTheDocument();
         expect(screen.getByText('Estimated: 1h')).toBeInTheDocument();
-        // Pomodoro still defaults OFF, so the tracked line stays hidden.
+
         expect(screen.queryByText('Tracked on those tasks: 45m')).not.toBeInTheDocument();
     });
 
@@ -538,7 +537,7 @@ describe('WeeklyReviewGuideModal', () => {
         expect(screen.getByTestId('task-stale-1')).toBeInTheDocument();
         expect(screen.getByText(/days inactive|staleDaysInactive/)).toBeInTheDocument();
 
-        // Saving anything (a checklist item, a title) stamps updatedAt with "now".
+
         const touched = { ...staleTask, updatedAt: new Date().toISOString() };
         act(() => {
             useTaskStore.setState({ _allTasks: [touched], tasks: [touched] });
@@ -547,7 +546,7 @@ describe('WeeklyReviewGuideModal', () => {
         expect(screen.getByTestId('task-stale-1')).toBeInTheDocument();
         expect(screen.queryByText(/days inactive|staleDaysInactive/)).not.toBeInTheDocument();
 
-        // A task that leaves Next/Waiting is done with this step.
+
         const done = { ...touched, status: 'done' as const };
         act(() => {
             useTaskStore.setState({ _allTasks: [done], tasks: [done] });

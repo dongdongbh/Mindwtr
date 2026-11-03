@@ -186,7 +186,7 @@ describe('selected Task Download private JS producer', () => {
         const f = fixture(); f.secret(null);
         const selected = createNativeTaskAttachmentPreparation(f.bindings, f.channels);
         await selected.prepareAttachmentAvailableDetailed(attachment());
-        await selected.prepareAttachmentAvailableDetailed(attachment()); // second callback is refused; reads remain cached
+        await selected.prepareAttachmentAvailableDetailed(attachment());
         expect(f.secretCalls).toEqual(['mindwtr_webdav_password']); expect(f.legacyCalls).toEqual(['@mindwtr_webdav_password']);
         await f.run(); expect(f.secretCalls).toEqual(['mindwtr_webdav_password', 'mindwtr_webdav_password']);
     });
@@ -205,7 +205,7 @@ describe('selected Task Download private JS producer', () => {
     });
 
     it('answers a 404 as unavailable without an installed/source claim, and never removes the attachment', async () => {
-        // A tombstone would sync to every device, and a location still holding the file would then delete it.
+
         const f = fixture(); f.status(404); const result = await f.run(attachment({ fileHash: digest(BYTES) }));
         expect(result.status).toBe('unavailable'); expect(f.sources).toEqual([]); expect(f.memory.files.size).toBe(0);
     });

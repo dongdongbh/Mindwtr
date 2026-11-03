@@ -1,6 +1,6 @@
-// Archive retention's host binding (host-entry archiveRetention, review N10): the shipped bundle over a bridge whose RN sync backend
-// key holds what a test stores. A backend the host cannot read counts as selected (a680d9594), so the run waits for this session's
-// first sync instead of purging.
+
+
+
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import vm from 'node:vm';

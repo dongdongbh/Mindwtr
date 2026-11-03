@@ -1,19 +1,6 @@
-/**
- * The calendar task composer state machine, shared by desktop and mobile.
- *
- * Both platforms open the composer at a slot, edit the same four fields and run
- * the same save cascade (invalid range → title → task → overlap → quick-add
- * draft → invalid date commands → start/due coherence → auto-created project →
- * create). Only the *inputs* differ: desktop keys the start on a `yyyy-MM-dd`
- * string plus a `<input type="time">` value, mobile on a `Date` plus a free-text
- * time field. So the platform parses its own inputs into `startAt` and this
- * module owns everything downstream.
- *
- * Store writes still run through the normal `addTask`/`addProject`/`updateTask`
- * actions, which stamp `rev`, timestamps and defaults. This module sequences
- * those actions and returns one explicit outcome; the platform only maps error
- * codes to localized strings and updates view state after success.
- */
+
+
+
 import {
     DEFAULT_CALENDAR_DAY_START_HOUR,
     addCalendarMinutes,
@@ -43,34 +30,34 @@ export type CalendarComposerErrorCode =
 
 export type CalendarComposerError = {
     code: CalendarComposerErrorCode;
-    /** Extra text the platform appends to the localized message (e.g. the rejected date commands). */
+
     detail?: string;
 };
 
 export type CalendarComposerState = {
     durationMinutes: number;
-    /** Raw end-time input; parsed against `startAt`, so it survives partial typing. */
+
     endTimeValue: string;
     error: CalendarComposerError | null;
     mode: CalendarComposerMode;
     query: string;
     selectedTaskId: string | null;
-    /** Resolved start, or null while the platform's own date/time inputs do not parse. */
+
     startAt: Date | null;
     title: string;
 };
 
 export type CalendarComposerDeps = {
-    /** Platform free-slot search (day bounds and snapping differ per platform). */
+
     findFreeSlot: (day: Date, durationMinutes: number, excludeTaskId?: string) => Date | null;
-    /** Platform estimate→minutes resolver, already bound to the time-estimates feature flag. */
+
     timeEstimateToMinutes: (estimate: Task['timeEstimate']) => number;
 };
 
 export type CalendarComposerOpenOptions = {
     durationMinutes?: number;
     mode?: CalendarComposerMode;
-    /** Pre-selected task, resolved from the platform store. */
+
     task?: Task | null;
 };
 
@@ -92,10 +79,10 @@ export type CalendarComposerSaveIntent =
 
 export type CalendarComposerSaveContext = {
     areas?: Area[];
-    /** Overlap check for the composed slot; excludes the task being rescheduled. */
+
     isSlotFree: (start: Date, durationMinutes: number, excludeTaskId?: string) => boolean;
     now?: Date;
-    /** `buildQuickAddParseOptions(settings, state)`, so the composer parses like quick add. */
+
     parseOptions?: QuickAddParseOptions;
     projects?: Project[];
 };
@@ -147,7 +134,7 @@ export function openComposerAt(
     };
 }
 
-/** Opens at the first free slot of `date`, falling back to the default day start. */
+
 export function openComposerForDate(
     date: Date,
     options: Omit<CalendarComposerOpenOptions, 'durationMinutes'> | undefined,
@@ -163,7 +150,7 @@ export function openComposerForDate(
     return openComposerAt(slot ?? fallback, { durationMinutes, mode: options?.mode, task }, deps);
 }
 
-/** `start` is null while the platform's date/time inputs do not parse; the end time is then left alone. */
+
 export function setComposerStart(state: CalendarComposerState, start: Date | null): CalendarComposerState {
     if (!start) return { ...state, error: null, startAt: null };
     return {
@@ -184,7 +171,7 @@ export function setComposerDuration(state: CalendarComposerState, durationMinute
     };
 }
 
-/** Keeps the raw text while it is unusable, and snaps it to the derived duration once it parses. */
+
 export function setComposerEndTime(state: CalendarComposerState, endTimeValue: string): CalendarComposerState {
     const start = state.startAt;
     const end = start ? parseCalendarTimeOnDate(start, endTimeValue) : null;
@@ -226,7 +213,7 @@ export function selectComposerTask(
     };
 }
 
-/** Assigning the auto-created project clears the parsed area, matching quick add. */
+
 export function applyComposerCreatedProject(
     draft: CalendarComposerTaskDraft,
     projectId: string,
@@ -278,8 +265,7 @@ export function prepareComposerSave(
     }
     if (!draft.title) return composerError('title_required');
 
-    // A `+Project` naming an unknown (or archived) project still captures: the
-    // platform creates the project first, then applies it to the draft.
+
     return {
         draft: { props: draft.props, title: draft.title },
         kind: 'create',
@@ -303,7 +289,7 @@ const thrownFailure = (cause: unknown): CalendarComposerSaveFailure => ({
     cause,
 });
 
-/** Validate and durably apply one composer state through the normal store actions. */
+
 export async function executeComposerSave(
     state: CalendarComposerState,
     context: CalendarComposerSaveContext,
@@ -335,8 +321,7 @@ export async function executeComposerSave(
         return thrownFailure(cause);
     }
 
-    // Validation above proves this is a Date; retain the guard for type safety if
-    // the validation cascade changes later.
+
     if (!state.startAt) return actionFailure();
     return { kind: intent.kind, start: state.startAt, success: true };
 }

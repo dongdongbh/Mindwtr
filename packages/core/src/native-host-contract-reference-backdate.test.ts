@@ -7,7 +7,7 @@ import { resolveTaskEditorBackdatedCompletion } from './task-editor-model';
 import type { NativeReferenceTaskBackdateEnvelope, NativeReferenceTaskBackdateRequest } from './native-host-contract-task-checklist';
 import type { AppData, Task } from './types';
 import { retainTaxonomyEffects } from './taxonomy-catalog';
-// Raw-byte preservation cases catalog existing labels before their baseline; legacy RN/native parity cases remain uncatalogued.
+
 
 const uuidState = vi.hoisted(() => ({ count: 0 }));
 vi.mock('./uuid', async original => ({ ...await original<typeof import('./uuid')>(),

@@ -54,10 +54,8 @@ const waitForAbort = async <T>(
     const promise = Promise.resolve(operation);
     if (!signal) return promise;
     if (signal.aborted) {
-        // The operation may already have been invoked by the caller before the
-        // signal check. Observe its eventual rejection even though cancellation
-        // wins this race, otherwise an abort-aware fetcher can surface it as an
-        // unhandled rejection after the bounded call has returned.
+
+
         void promise.catch(() => undefined);
         onAbort?.();
         throw getAbortSignalReason(signal, 'Request cancelled');
@@ -166,8 +164,8 @@ const parseUrlSecurityParts = (rawUrl: string): UrlSecurityParts | null => {
         protocol = String(parsed.protocol || '').toLowerCase();
         hostname = typeof parsed.hostname === 'string' ? parsed.hostname.toLowerCase() : '';
     } catch {
-        // Fall back below. Some React Native URL shims parse the protocol but
-        // do not expose hostname for plain local HTTP names.
+
+
     }
 
     const authorityMatch = trimmed.match(/^([a-z][a-z0-9.+-]*:)?\/\/([^/?#]*)/i);
@@ -234,9 +232,8 @@ export const isAllowedInsecureUrl = (rawUrl: string, options: InsecureUrlOptions
 
 export const isConnectionAllowed = (rawUrl: string, options: ConnectionAllowedOptions = {}): boolean => {
     if (isAllowedInsecureUrl(rawUrl, options)) return true;
-    // Explicit user opt-in (#920): the app cannot tell a private DNS/VPN/Tailscale
-    // hostname from a public one, so the toggle vouches for the host. Callers warn
-    // via isManualInsecureOverride when this branch is what admitted the URL.
+
+
     if (!options.allowInsecureHttp) return false;
     return parseUrlSecurityParts(rawUrl)?.protocol === 'http:';
 };
@@ -252,10 +249,8 @@ export const assertSecureUrl = assertConnectionAllowed;
 export const toUint8Array = async (
     data: ArrayBuffer | Uint8Array | Blob
 ): Promise<Uint8Array<ArrayBuffer>> => {
-    // Vitest/browser/native callers can hand us a typed array created in a
-    // different JavaScript realm, where `instanceof Uint8Array` is false.
-    // ArrayBuffer.isView is realm-safe and keeps those bytes on the binary
-    // path instead of incorrectly treating the view as a Blob.
+
+
     if (ArrayBuffer.isView(data)) {
         const view = data as Uint8Array;
         return new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice();
@@ -284,23 +279,13 @@ export const concatChunks = (chunks: Uint8Array[], total: number): Uint8Array =>
     return merged;
 };
 
-/**
- * Ceiling on anything we download from a sync remote. 2x the per-attachment upload
- * cap because the same getters also fetch the sync document itself, which is not an
- * attachment and so is not bounded by that cap -- it needs headroom above it.
- */
+
 export const MAX_DOWNLOAD_BYTES = 2 * DEFAULT_MAX_FILE_SIZE_BYTES;
 
-/**
- * Ceiling for the sync document itself, which is a whole library and has nothing to do
- * with the per-attachment cap -- a big library legitimately exceeds it. Well above any
- * plausible library (a 100k-task export is single-digit MB) while still bounding what a
- * hostile or broken server can make us allocate.
- */
+
 export const MAX_SYNC_DOCUMENT_BYTES = 1024 * 1024 * 1024;
 
-/** An HTTP error body only ever becomes a message suffix, so it needs a much smaller
- *  ceiling than a document -- and it is attacker-controlled on every failure path. */
+
 export const MAX_ERROR_BODY_BYTES = 64 * 1024;
 
 export class ResponseTooLargeError extends Error {
@@ -313,7 +298,7 @@ export class ResponseTooLargeError extends Error {
     }
 }
 
-/** A native transport refused its buffered body; ordinary RN reader limits stay separate. */
+
 export const isHostResponseTooLargeError = (
     error: unknown,
 ): error is Error & { code: 'response-too-large'; limitBytes: number } => {
@@ -336,16 +321,12 @@ const cancelUnlockedResponseBody = (res: Response): void => {
         const reader = body.getReader?.();
         void reader?.cancel().catch(() => undefined);
     } catch {
-        // Cancellation is best-effort; the original protocol/consumer failure
-        // remains authoritative.
+
+
     }
 };
 
-/**
- * Reads a response body with a hard byte ceiling. A server-declared Content-Length is
- * only ever used to reject early and to report progress -- never to size an allocation,
- * so a lying or absent header still aborts once the running total passes the limit.
- */
+
 export const readResponseBody = async (
     res: Response,
     onProgress?: (loaded: number, total: number) => void,
@@ -371,8 +352,8 @@ export const readResponseBody = async (
         try {
             void reader.cancel().catch(() => undefined);
         } catch {
-            // A transport abort remains authoritative even if a test double or
-            // native stream throws synchronously while acknowledging cancellation.
+
+
         }
     };
     const chunks: Uint8Array[] = [];
@@ -394,11 +375,7 @@ export const readResponseBody = async (
     return toArrayBuffer(concatChunks(chunks, received));
 };
 
-/**
- * The native hosts' fetch (host-polyfills.js) decodes a body that is strict UTF-8 off the engine thread and marks the
- * response with the body's size in bytes (after gzip). Its text under the same byte limit, or null for any other response:
- * read that one's bytes.
- */
+
 export const readDecodedResponseText = async (
     res: Response,
     limitBytes: number,
@@ -410,9 +387,7 @@ export const readDecodedResponseText = async (
     return await waitForAbort(res.text(), signal);
 };
 
-/** Text counterpart of {@link readResponseBody}: `res.text()` is unbounded. Streams when
- *  the response exposes a body or arrayBuffer, so a lying content-length still aborts
- *  mid-read; a response offering only `text()` is length-checked after the fact. */
+
 export const readResponseText = async (
     res: Response,
     limitBytes: number,
@@ -433,7 +408,7 @@ export const readResponseText = async (
     return text;
 };
 
-/** Consume and discard a response while retaining the caller's timeout/abort lifetime. */
+
 export const discardResponseBody = async (
     res: Response,
     signal?: AbortSignal,
@@ -465,38 +440,22 @@ export const createProgressStream = (bytes: Uint8Array, onProgress: (loaded: num
     });
 };
 
-/**
- * Methods whose request carries a body worth stealing. `fetch` drops the Authorization
- * header cross-origin but replays the BODY, so a compromised endpoint answering a PUT
- * with `307 Location: attacker.example` would be handed the whole sync document. Reads
- * keep the default `follow` -- WebDAV servers legitimately 301 collection URLs.
- * React Native ignores `redirect`: its Android OkHttp client hands these methods'
- * redirects back unfollowed (SyncHttpClientPackage.kt) and the check below refuses them.
- * On iOS it follows them without the Authorization header: a 303 turns the write into a
- * GET that can answer 200, and a 301, 302, 307 or 308 re-sends it to the new URL. So the
- * check also refuses a write answered from another URL. Known ceiling: a redirect back to
- * the same URL cannot be seen there. expo-file-system's streamed uploads use their own clients;
- * see `uploadWebdavFileWithFileSystem`; self-hosted uploads always take the buffered PUT.
- */
+
 const NO_REDIRECT_METHODS = new Set(['PUT', 'POST', 'PATCH', 'DELETE']);
-/** The statuses undici refuses under `redirect: 'error'`. */
+
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-/** Logs a refused write redirect (method and status only, never the URL) and throws what
- *  undici throws under `redirect: 'error'`, so every platform fails the same way. */
+
 export const refuseWriteRedirect = (context: { releaseCheck: string; method: string; status: number }): never => {
     logWarn('Write request redirect refused', { scope: 'http', category: 'network', context });
     throw new TypeError('fetch failed: unexpected redirect');
 };
 
 const UNRESERVED_CHAR = /^[A-Za-z0-9\-._~]$/;
-/** Characters a path or query may carry as written (RFC 3986 pchar, `/` and `?`). */
+
 const PATH_OR_QUERY_CHAR = /^[A-Za-z0-9\-._~!$&'()*+,;=:@/?]$/;
 
-/** RFC 3986 6.2.2 percent-encoding normalization. An escape of an unreserved character is
- *  decoded and every other escape keeps its meaning with uppercase hex (`%2F` is not `/`).
- *  A character a client would escape (space, `|`, non-ASCII, a stray `%`) is escaped as UTF-8,
- *  so it matches however OkHttp, NSURL or the url crate spelled it. */
+
 const normalizePercentEncoding = (text: string): string => {
     let normalized = '';
     for (let index = 0; index < text.length;) {
@@ -522,7 +481,7 @@ const normalizePercentEncoding = (text: string): string => {
     return normalized;
 };
 
-/** RFC 3492 Punycode for one label; host labels are short, so no overflow guard. */
+
 const encodePunycode = (label: string): string => {
     const base = 36;
     const tMin = 1;
@@ -570,9 +529,7 @@ const encodePunycode = (label: string): string => {
     return output;
 };
 
-/** A lowercase host name in its ASCII (IDNA) form: every non-ASCII label as `xn--` Punycode,
- *  which is how OkHttp, NSURL and the url crate report it. Throws on a label longer than DNS
- *  allows (63), which no client can resolve. */
+
 const asciiHostname = (host: string): string => (typeof host.normalize === 'function' ? host.normalize('NFC') : host)
     .split(/[.。．｡]/)
     .map((label) => {
@@ -582,7 +539,7 @@ const asciiHostname = (host: string): string => (typeof host.normalize === 'func
     })
     .join('.');
 
-/** RFC 3986 dot-segment removal: OkHttp applies it to every URL it reports. */
+
 const removeDotSegments = (path: string): string => {
     const segments = path.split('/');
     const kept: string[] = [];
@@ -597,7 +554,7 @@ const removeDotSegments = (path: string): string => {
     return kept.join('/') || '/';
 };
 
-/** The 16-bit groups of one side of an IPv6 literal's `::`; the last group may be IPv4. */
+
 const parseIpv6Groups = (text: string): number[] | null => {
     if (!text) return [];
     const groups: number[] = [];
@@ -615,9 +572,7 @@ const parseIpv6Groups = (text: string): number[] | null => {
     return groups;
 };
 
-/** An IPv6 literal (without brackets) as bracketed groups in shortest hex, so every spelling of
- *  one address (`2001:0db8:0:0::1`, `2001:db8::1`, an embedded IPv4 tail) compares equal. The zone
- *  after `%` is kept as written. Anything that does not parse is compared as written. */
+
 const canonicalIpv6 = (literal: string): string => {
     const zoneAt = literal.indexOf('%');
     const address = zoneAt < 0 ? literal : literal.slice(0, zoneAt);
@@ -630,15 +585,14 @@ const canonicalIpv6 = (literal: string): string => {
     const missing = 8 - head.length - tail.length;
     if (halves.length === 2 ? missing < 1 : missing !== 0) return `[${literal}]`;
     const groups = [...head, ...new Array<number>(missing).fill(0), ...tail];
-    // OkHttp reports an IPv4-mapped address (`::ffff:192.168.1.5`) as the plain IPv4 host.
+
     if (!zone && groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
         return [groups[6] >> 8, groups[6] & 255, groups[7] >> 8, groups[7] & 255].join('.');
     }
     return `[${groups.map((group) => group.toString(16)).join(':')}${zone}]`;
 };
 
-/** A host the WHATWG URL parser (the url crate under Tauri) reads as IPv4 (`127.1`,
- *  `0x7f.0.0.1`, `0177.0.0.1`, `2130706433`) as a dotted quad; null for any other host. */
+
 const numericIpv4Host = (host: string): string | null => {
     const parts = host.split('.');
     if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
@@ -654,16 +608,11 @@ const numericIpv4Host = (host: string): string | null => {
     return [3, 2, 1, 0].map((shift) => Math.floor(address / 256 ** shift) % 256).join('.');
 };
 
-/** An http(s) URL cut down to what a redirect changes: scheme, host, port, path and query.
- *  A native client reports a URL it did not redirect in its own spelling (host case, default
- *  port, userinfo, fragment, percent-encoding, dot segments, punycode, IPv6 zeros, IPv4-mapped
- *  and shorthand IPv4 hosts, host escapes, `\` for `/`), and each of those is evened out here by
- *  string, since React Native's URL class normalizes none of them. Nothing that a redirect can
- *  change is dropped. */
+
 const comparableHttpUrl = (rawUrl: string): string | null => {
-    // In an http(s) URL a `\` before the query is a `/` (WHATWG), as the url crate reports it.
+
     const trimmed = rawUrl.trim();
-    // Throws on a lone surrogate, which a native client replaces by U+FFFD.
+
     encodeURI(trimmed);
     const queryAt = trimmed.search(/[?#]/);
     const url = queryAt < 0
@@ -676,12 +625,12 @@ const comparableHttpUrl = (rawUrl: string): string | null => {
     const portMatch = authority.match(/:(\d*)$/);
     const encodedHost = portMatch ? authority.slice(0, -portMatch[0].length) : authority;
     const ipv6 = encodedHost.match(/^\[(.*)\]$/);
-    // OkHttp and the url crate percent-decode a host before reporting it.
+
     let host = encodedHost;
     try {
         host = decodeURIComponent(encodedHost).toLowerCase();
     } catch {
-        // An escape that is not UTF-8 is compared as written.
+
     }
     const comparableHost = ipv6 ? canonicalIpv6(ipv6[1]) : numericIpv4Host(host) ?? asciiHostname(host);
     const port = portMatch?.[1] ? Number(portMatch[1]) : null;
@@ -691,9 +640,7 @@ const comparableHttpUrl = (rawUrl: string): string | null => {
     return `${scheme}://${comparableHost}:${comparablePort}${path}?${query}`;
 };
 
-/** Whether a response names a URL other than the one asked for. An answer without a URL
- *  (undici hides none, test doubles and some polyfills report '') is never a redirect, and
- *  neither is one this check cannot read: it never throws and never refuses on doubt. */
+
 export const isAnsweredFromAnotherUrl = (requestedUrl: string, answeredUrl: unknown): boolean => {
     if (typeof answeredUrl !== 'string' || !answeredUrl) return false;
     try {
@@ -706,9 +653,7 @@ export const isAnsweredFromAnotherUrl = (requestedUrl: string, answeredUrl: unkn
     }
 };
 
-/** Appended to a timeout message when the timer fired far later than its delay:
- *  the app was suspended by the OS with the request in flight. Sync treats it
- *  like a dropped connection (retry later, no failure banner). */
+
 export const SUSPENDED_REQUEST_MESSAGE = 'the request was interrupted while the app was suspended';
 const SUSPENDED_REQUEST_FACTOR = 3;
 
@@ -727,9 +672,8 @@ export const fetchWithTimeoutAndConsume = async <T>(
     const timeoutId = abortController
         ? setTimeout(() => {
             didTimeout = true;
-            // A timer that fires hours late means the OS froze the process with
-            // the request in flight (Android cached-app freezer, doze); the
-            // socket is dead and the "timeout" is really an interruption.
+
+
             firedAfterSuspension = Date.now() - startedAt > timeoutMs * SUSPENDED_REQUEST_FACTOR;
             abortController.abort(createAbortError(timeoutMessage));
         }, timeoutMs)
@@ -779,10 +723,8 @@ export const fetchWithTimeoutAndConsume = async <T>(
                 () => cancelUnlockedResponseBody(response),
             );
         } finally {
-            // Status-only consumers can return normally for expected misses (404,
-            // Dropbox metadata 409) without ever locking the response stream. Close
-            // that body as eagerly as rejection/abort paths so the connection cannot
-            // stay occupied by an unbounded or malicious error payload.
+
+
             cancelUnlockedResponseBody(response);
         }
     } catch (error) {
@@ -806,9 +748,7 @@ export const fetchWithTimeoutAndConsume = async <T>(
     }
 };
 
-/** Header-only compatibility helper. Callers that consume a response body must use
- * `fetchWithTimeoutAndConsume` so the request timeout and external abort listener stay
- * active until that consumption settles. */
+
 export const fetchWithTimeout = (
     url: string,
     init: RequestInit,

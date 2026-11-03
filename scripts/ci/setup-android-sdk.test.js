@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 function runSetup(packages) {
-  // Tiny disposable mock SDK; no downloads or dependency/build output.
+
   const root = mkdtempSync(join(tmpdir(), 'mindwtr-sdk-setup-'));
   fixtures.push(root);
   const tools = join(root, 'cmdline-tools', '16.0', 'bin');

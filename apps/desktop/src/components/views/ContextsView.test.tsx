@@ -14,7 +14,7 @@ import { CALENDAR_TASK_DRAG_MIME, setCalendarTaskDragData } from '../../lib/cale
 import { clearUndoableAction, takeUndoableAction } from '../../lib/undo-registry';
 import { holdSyncSave } from '../../test/hold-sync-save';
 
-// Its own key, separate from the view state above: see the note in ContextsView.
+
 const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
 
 const initialTaskState = useTaskStore.getState();
@@ -90,7 +90,7 @@ describe('ContextsView', () => {
         expect(screen.queryByText('Someday meeting')).not.toBeInTheDocument();
         expect(screen.getByText('Next meeting')).toBeInTheDocument();
         expect(screen.queryByText('Far future meeting')).not.toBeInTheDocument();
-        // Reapply, then deselect the saved chip: its status subset must leave with it.
+
         fireEvent.click(screen.getByRole('button', { name: 'Emma saved' }));
         fireEvent.click(screen.getByRole('button', { name: 'Emma saved' }));
         expect(screen.getByText('Far future meeting')).toBeInTheDocument();
@@ -322,7 +322,7 @@ describe('ContextsView', () => {
         expect(getByText('Plan launch')).toBeInTheDocument();
     });
 
-    // #1428: a nested row after its parent row shows only "/leaf", indented; its name stays the full token.
+
     it('shows nested contexts and tags under their parent with a short label', () => {
         const tasks = [
             makeTask('emma', { title: 'Emma', contexts: ['@person/emma'] }),
@@ -390,7 +390,7 @@ describe('ContextsView', () => {
         expect(view.queryByText('Office task')).not.toBeInTheDocument();
     });
 
-    // #1427: a plain click switches to the token; Ctrl/Cmd-click or Ctrl/Cmd+Enter adds it.
+
     it('switches token on click and combines on Ctrl/Cmd-click or Ctrl/Cmd+Enter', () => {
         const tasks = [
             makeTask('alice', { title: 'Alice only', contexts: ['@alice'] }),
@@ -568,8 +568,7 @@ describe('ContextsView', () => {
 
         selectToolbarOption('Group', 'Status');
 
-        // Status names also appear as filter chips, so assert on the group
-        // header shape (a span next to the count) via duplicate presence.
+
         expect(getAllByText('Next').length).toBeGreaterThan(1);
         expect(getAllByText('Waiting').length).toBeGreaterThan(1);
         expect(getAllByText('Someday').length).toBeGreaterThan(1);
@@ -626,7 +625,7 @@ describe('ContextsView', () => {
         fireEvent.click(view.getByRole('button', { name: 'Select' }));
         fireEvent.click(view.getByRole('button', { name: 'Select All' }));
 
-        // The folded group renders no rows, so it contributes no tasks to act on.
+
         expect(view.getAllByRole('checkbox', { name: 'Select task' }).map((checkbox) => (
             (checkbox as HTMLInputElement).checked
         ))).toEqual([true]);
@@ -774,7 +773,7 @@ describe('ContextsView', () => {
         expect(text.indexOf('Plan launch')).toBeLessThan(text.indexOf('Write brief'));
     });
 
-    // #1415: Priority joins the shared list sort while Priorities is on.
+
     it('offers the Priority sort while Priorities is on and stores it as the shared list sort', () => {
         const tasks = [
             makeTask('task-low', { title: 'Low task', contexts: ['@Office'], priority: 'low' }),

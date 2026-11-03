@@ -1,14 +1,6 @@
-// The mobile attachment sync passes, one per remote: WebDAV, the self-hosted cloud, Dropbox and
-// File Sync. Each walks the document's file attachments, uploads local bytes the remote lacks,
-// downloads remote bytes the device lacks and returns the folded document (or `false` when
-// nothing changed). They moved here from React Native's
-// `apps/mobile/lib/attachment-sync-backends/{webdav,cloud,dropbox,file}.ts` so the native apps
-// run the same rules; each host binds them to its file IO, native installer and transports.
-//
-// Data safety: bytes are uploaded before `cloudKey` is recorded, and the metadata is published
-// only after that. A remote 404 leaves the row live and backs off (an activation probe marks its trial copy unrecoverable), a failed
-// download never deletes local bytes, `pendingContentUpload` survives until the edited bytes
-// are on the remote, and a new WebDAV upload is sent with `If-None-Match: *`.
+
+
+
 import type { AppData, Attachment } from './types';
 import { applyAttachmentContentStat, type LocalFileStat } from './attachment-change-detection';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
@@ -90,8 +82,7 @@ import {
 import type { MobileAttachmentInstaller } from './mobile-attachment-installer';
 import type { MobileCloudSyncConfig, MobileSyncLogPort } from './mobile-sync-service';
 
-/** Core functions called through here so a host's tests can replace them the way they
- *  replace `@mindwtr/core`. A host that passes nothing gets core's own. */
+
 export type MobileAttachmentBackendsCoreFunctions = {
   withRetry: typeof withRetry;
   webdavFileExists: typeof webdavFileExists;
@@ -109,7 +100,7 @@ export type MobileAttachmentBackendsCoreFunctions = {
   uploadDropboxFileVersioned: typeof uploadDropboxFileVersioned;
   isDropboxConflictError(error: unknown): boolean;
   isDropboxFileNotFoundError(error: unknown): boolean;
-  /** The largest File Sync attachment the pass reads into memory to seal. */
+
   maxFileSyncBufferedPlaintextBytes(): number;
 };
 
@@ -134,11 +125,11 @@ const CORE_FUNCTIONS: MobileAttachmentBackendsCoreFunctions = {
 };
 
 export type MobileAttachmentBackendsHost = {
-  /** Only File Sync uses it: scratch stats, stage writes and SAF creates. */
+
   fs: MobileAttachmentFileSystemPort;
   files: MobileAttachmentFiles;
   common: MobileAttachmentCommon;
-  /** File Sync's native hash and its immutable, journaled publication. */
+
   installer: Pick<
     MobileAttachmentInstaller,
     | 'abandonFileSyncAttachmentPublication'
@@ -152,21 +143,20 @@ export type MobileAttachmentBackendsHost = {
     | 'retainFileSyncAttachmentPublicationForInvalidTarget'
   >;
   log: Pick<MobileSyncLogPort, 'sanitize'>;
-  /** Optional wire-byte admission for a host's buffered WebDAV transport.
-   * Each pass reserves encryption-envelope bytes when material is present. */
+
+
   maxWebdavBufferedUploadBytes?: number;
-  /** Optional wire-byte admission for Cloud's plaintext buffered PUT. */
+
   maxCloudBufferedUploadBytes?: number;
-  /** The host's fetch refuses a response body over its ceiling while receiving it (the native hosts' HostIo and
-   *  NativeHTTPJobs). Only then does a WebDAV upload download an unversioned remote copy to compare it; React Native's
-   *  fetch buffers the whole body first, so there it keeps refusing. */
+
+
   boundedWebdavResponses?: boolean;
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
 };
 
 export type CloudAttachmentSyncOptions = {
   activationProbe?: boolean;
-  /** The sync cycle's transfer admission, shared by its attachment phases (design D9b W7). */
+
   transferAdmission?: AttachmentTransferAdmission;
   assertCurrent?: () => void;
   assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
@@ -176,35 +166,31 @@ export type CloudAttachmentSyncOptions = {
 
 export type DropboxAttachmentSyncOptions = {
   activationProbe?: boolean;
-  /** The sync cycle's transfer admission, shared by its attachment phases (design D9b W7). */
+
   transferAdmission?: AttachmentTransferAdmission;
   phase?: 'prepare' | 'post-merge';
   resolveAccessToken?: DropboxAccessTokenResolver;
   signal?: AbortSignal;
   assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
-  /** #1056: seal bytes before upload / open them after download. Null = encryption off. */
+
   material?: SyncKeyMaterial | null;
 };
 
 const CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS = 35_000;
 
-/** The local file name a download installs under: the cloud key's last segment. */
+
 const downloadFilename = (attachment: Attachment): string => (
   attachment.cloudKey?.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`
 );
 
-// Thrown only for a local file that has become unreadable (e.g. a revoked SAF permission).
-// Caught inside `onUpload`'s own catch below so `markAttachmentUnrecoverable`'s mutation is
-// tracked via onUpload's return value — mutations from `onUploadError` are NOT seen by the
-// shared lifecycle's own `didMutate` tracking, only onUpload/onDownload return values are.
+
 class LocalReadFailure extends Error {
   constructor(public readonly cause: unknown) {
     super('Attachment local file is unreadable');
   }
 }
 
-/** An upload the self-hosted cloud or Dropbox accepted; its metadata is published only after
- *  the loop, so a later throw in the pass records nothing. */
+
 type PendingUploadMutation = {
   attachment: Attachment;
   cloudKey: string;
@@ -238,11 +224,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
   const core: MobileAttachmentBackendsCoreFunctions = { ...CORE_FUNCTIONS, ...host.core };
   const { fs, files, common, installer } = host;
 
-  /**
-   * Design D9b W7: before a GET, a file already at the download's deterministic target path is adopted when its SHA-256
-   * (the host's native hash, never bytes read into JS) equals the attachment's fileHash. That is a download the last cycle
-   * installed before its save was refused. No fileHash, another hash or no native hash: the ordinary GET runs.
-   */
+
   const adoptVerifiedDownloadTarget = async (attachment: Attachment, targetPath: string): Promise<boolean> => {
     const expected = attachment.fileHash?.trim().toLowerCase();
     if (!isSha256Hex(expected) || !targetPath) return false;
@@ -283,11 +265,11 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       activationProbe?: boolean;
       activationContinuation?: boolean;
       phase?: 'prepare' | 'post-merge';
-      /** #1056: seal bytes before upload / open them after download. Null = encryption off. */
+
       material?: SyncKeyMaterial | null;
       assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
       onTransferBatchDeferred?: () => void;
-      /** The sync cycle's transfer admission, shared by its attachment phases (design D9b W7). */
+
       transferAdmission?: AttachmentTransferAdmission;
     } = {}
   ): Promise<AppData | false> => {
@@ -297,9 +279,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       ? undefined
       : Math.max(0, maxWebdavBufferedUploadBytes - (material ? encryptedSyncArtifactByteLength(0) : 0));
     const assertUploadStat = maxBufferedPlaintextBytes === undefined ? undefined : (stat: LocalFileStat | null) => {
-      // Validate the source size before computing its encrypted length. Clamping the
-      // plaintext cap to zero keeps existing validators valid even when the wire cap
-      // cannot hold an empty envelope; the second check refuses that case on demand.
+
+
       assertBufferedAttachmentUploadSize(stat?.size ?? NaN, maxBufferedPlaintextBytes);
       if (material) {
         assertBufferedAttachmentUploadSize(encryptedSyncArtifactByteLength(stat!.size), maxWebdavBufferedUploadBytes!);
@@ -328,13 +309,11 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     };
 
     const attachmentsDirUrl = `${baseSyncUrl}/${ATTACHMENTS_DIR_NAME}`;
-    // Stays unconditional and outside the try below: it makes no request, and a refused
-    // connection is not a "directory already exists" failure to shrug off — swallowing it
-    // let the whole insecure pass continue (SEC-10a).
+
+
     assertMobileWebdavConnection(attachmentsDirUrl, webDavConfig.allowInsecureHttp);
-    // Only a PUT needs the collection to exist; HEAD and GET do not. This used to run on
-    // every pass, which cost one MKCOL per idle cycle for anyone with a synced attachment
-    // (audit F3), so it is now deferred to just before the first upload of a pass.
+
+
     let attachmentsDirEnsured = false;
     const ensureRemoteAttachmentsDir = async (): Promise<void> => {
       if (attachmentsDirEnsured) return;
@@ -352,8 +331,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         if (isSyncRemoteMutationFenceError(error)) throw error;
         files.logAttachmentWarn('Failed to ensure WebDAV attachments directory', error);
       }
-      // Set only once the call did not throw a fatal error, so a fence loss that aborts
-      // this upload does not silently skip the MKCOL for a later retry.
+
+
       attachmentsDirEnsured = true;
     };
 
@@ -362,12 +341,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     const attachmentsById = collectAttachmentsById(appData);
 
     files.pruneWebdavDownloadBackoff();
-    // See `isAttachmentPresenceReconciliationDue`: an uploaded attachment's key is derived
-    // from its id and its bytes never change, so the presence pass below can only ever
-    // discover a server-side deletion — worth proving daily, not hourly (audit F3). An
-    // activation probe is different: it has to prove the candidate backend holds every object
-    // right now. Later batches in that same guarded trial retain the earlier proof,
-    // avoiding repeated HEADs. A separate activation always reconciles and never stamps.
+
+
     const reconcilePresence = options.activationProbe
       ? options.activationContinuation !== true
       : await files.isAttachmentPresenceReconciliationDue();
@@ -376,9 +351,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       presence: reconcilePresence ? 'reconcile' : 'skipped',
     });
 
-    // Every pass writes only to per-attachment copies and records them here; the patches are
-    // folded into a fresh document at the end. `attachmentsById` is updated alongside so a
-    // later pass reads the earlier pass's values.
+
     const allPatches = await common.migrateAttachmentsLocallyBeforeSync(
       attachmentsById, signal, maxBufferedPlaintextBytes, assertUploadStat,
     );
@@ -386,8 +359,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     let abortedByRateLimit = false;
     const presenceCandidates: Attachment[] = [];
 
-    // Preserve mobile's existing gated local prepass, then pass only readable, eligible
-    // attachments to the shared tri-state remote proof below.
+
     for (const attachment of attachmentsById.values()) {
       if (!reconcilePresence) break;
       assertAttachmentSyncNotAborted(signal);
@@ -467,26 +439,19 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       }
     }
 
-    // Throttle policy: per-run upload/download caps, plus the same rate-limit abort the pre-pass
-    // above already tripped. Passed to the shared lifecycle as optional `policy` hooks.
+
     let uploadCount = 0;
     let uploadLimitLogged = false;
     let downloadCount = 0;
     let downloadLimitLogged = false;
     const unversionedRemote = { adopted: 0, refused: 0 };
 
-    /**
-     * A remote file at an upload's key that has no strong ETag cannot be overwritten safely (the key is shared by every
-     * version of the attachment). When our own PUT stored it and the save recording it was refused or lost, every later
-     * cycle would refuse again, and sync stayed blocked on "Attachment upload incomplete". So GET it, bounded to the
-     * size our upload of the local file would have, and treat it as uploaded only when its plaintext hashes to the local
-     * file's hash. With encryption on it must be an encrypted artifact: a plaintext copy is never recorded.
-     */
+
     const remoteHoldsLocalBytes = async (
       uploadUrl: string, cloudKey: string, localPath: string, statedLength: string | null,
     ): Promise<boolean> => {
       if (!host.boundedWebdavResponses) return false;
-      // The file's own size: the attachment's recorded size can be stale.
+
       const size = (await files.statAttachmentFile(localPath))?.size;
       if (size === undefined) return false;
       const wireBytes = material ? encryptedSyncArtifactByteLength(size) : size;
@@ -532,11 +497,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     };
 
     const shouldDownload = (attachment: Attachment): boolean => {
-      // The backoff is keyed by attachment id, not by destination, so it is stale
-      // for the candidate backend an activation probe has to prove right now. A
-      // deferred download would leave the attachment `unproven` and fail activation
-      // (core sync-run `classifyActivationAttachmentProof` allows `deferred` only
-      // for the file backend).
+
+
       if (!options.activationProbe && files.getWebdavDownloadBackoff(attachment.id)) return false;
       if (downloadCount >= WEBDAV_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC) {
         if (!downloadLimitLogged) {
@@ -626,9 +588,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             bytes: String(uploadBytes),
             cloudKey,
           });
-          // The FileSystem uploader streams the LOCAL file straight to the server, so it
-          // can only ever send plaintext. With encryption on we must go through the
-          // read-seal-PUT path below instead.
+
+
           const uploadedWithFileSystem = material ? false : await core.withRetry(
             async () => {
               await waitForSlot();
@@ -658,10 +619,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
               },
             }
           );
-          // The native uploader follows a redirect by itself: a 307 or 308 stores the file at
-          // another URL and a 303 stores nothing, yet the task answers 2xx. Record the cloud
-          // key only once a HEAD at this URL, not after a redirect, finds the file (with the
-          // uploaded size when it states one).
+
+
           const findUploadAtUrl = async () => {
             const sentBytes = (await files.statAttachmentFile(localPath))?.size ?? uploadBytes;
             return core.withRetry(async () => {
@@ -678,9 +637,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           if (uploadedWithFileSystem) {
             const landed = await findUploadAtUrl();
             if (landed.redirected) {
-              // A redirected HEAD (a download CDN, or a write redirect) proves nothing about this
-              // URL, so the bytes go once more through the buffered PUT, whose redirect core
-              // refuses. An attachment is never left unsynced for good by an unprovable stream.
+
+
               storedByStream = false;
               files.logAttachmentInfo('WebDAV streamed upload unproven after a redirected HEAD; sending it through the checked PUT', {
                 id: attachment.id,
@@ -723,10 +681,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
                 }
               );
             } catch (error) {
-              // After a stream this PUT is create-only, and the HEAD before the stream found no
-              // file here. A 412 now says some file exists, not that it holds these bytes (another
-              // writer may have created it), so it is recorded only when the same HEAD proof finds
-              // it; otherwise it stays unsynced and the next sync sends it as an overwrite.
+
+
               if (isHostResponseTooLargeError(error)) throw error;
               if (!(uploadedWithFileSystem && getErrorStatus(error) === 412)) throw error;
               const stored = await findUploadAtUrl();
@@ -740,8 +696,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           if (!Number.isFinite(attachment.size ?? NaN) && Number.isFinite(size ?? NaN)) {
             attachment.size = Number(size);
           }
-          // localStatus is already 'available' here: onUpload only runs when the lifecycle's own
-          // existsLocally check just passed, which is what set it.
+
+
           reportProgress(attachment.id, 'upload', uploadBytes, uploadBytes, 'completed');
           files.logAttachmentInfo('Attachment uploaded', {
             id: attachment.id,
@@ -778,10 +734,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         }
       },
       onUploadError: () => {
-        // Every recoverable case (rate limit, unreadable local file, generic failure) is already
-        // handled inside onUpload's own catch above and reports its mutation via the return value,
-        // so `didMutate` stays accurate. Fatal (abort) errors are rethrown there and never reach
-        // here. This only exists because the shared lifecycle's contract requires the callback.
+
+
       },
       onDownload: async (attachment, expectation) => {
         if (!attachment.cloudKey) return false;
@@ -807,7 +761,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           }
           const status = getErrorStatus(error);
           if (status === 404) {
-            // The row stays live; the backoff frees its download slot.
+
             if (!options.activationProbe) files.setWebdavDownloadBackoff(attachment.id, error);
             files.logAttachmentInfo('WebDAV attachment not found (404); row kept', {
               id: attachment.id,
@@ -817,9 +771,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           }
           throw error;
         }
-        // Decrypt BEFORE hashing and before writing: `fileHash` is plaintext-domain (it
-        // lives in the synced document and must stay stable across re-encryptions), and
-        // local attachment files are always stored plaintext.
+
+
         const bytes = await common.openAttachmentBytesFromDownload(
           fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer),
           material,
@@ -850,9 +803,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         return statusChanged;
       },
       onDownloadError: (attachment, error) => {
-        // Rate-limit and 404 are handled inside onDownload's own try/catch above, since only
-        // onDownload's return value can signal a mutation back to the lifecycle. Only "other"
-        // (retry-exhausted / hash-validation / write) errors reach here.
+
+
         if (!options.activationProbe) files.setWebdavDownloadBackoff(attachment.id, error);
         reportProgress(
           attachment.id,
@@ -898,7 +850,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             releaseCheck: 'v1.3.5/webdav-host-download-limit', operation: 'download', outcome: 'refused',
           });
         } catch {
-          // Diagnostics must not replace the original fatal transport refusal.
+
         }
         throw error;
       }
@@ -908,7 +860,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             releaseCheck: 'v1.3.5/webdav-host-upload-limit', operation: 'upload', outcome: 'refused',
           });
         } catch {
-          // Diagnostics must not replace the fatal admission refusal.
+
         }
         throw new WebdavHostUploadLimitError();
       }
@@ -925,9 +877,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     const attachmentsDir = await files.getAttachmentsDir();
 
     const attachmentsById = collectAttachmentsById(appData);
-    // This backend runs its own loop rather than the shared lifecycle, so it does the same
-    // bookkeeping by hand: write to a per-attachment working copy, record it here, and put it
-    // back into `attachmentsById`. The patches are folded into a fresh document at the end.
+
+
     const allPatches = await common.migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal, maxCloudBufferedUploadBytes);
     const recordPatch = (attachment: Attachment): void => {
       allPatches.set(attachment.id, attachment);
@@ -937,12 +888,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     const pendingUploadMutations: PendingUploadMutation[] = [];
     const cloudRequestOptions = getMobileCloudRequestOptions(cloudConfig.allowInsecureHttp);
 
-    // #1119 follow-up: prove the server still holds every blob this device has a cloudKey for,
-    // at most once a day, before the loop below decides what to upload. This backend has no
-    // folder listing to lean on (the self-hosted server exposes none), so it is one bounded
-    // probe per attachment — see `cloudAttachmentExists` for why that probe is a capped GET
-    // and not a HEAD. Anything cleared here falls into the ordinary upload branch in the same
-    // pass. (Mirrors desktop's pre-pass in apps/desktop/src/lib/sync-attachment-backends.ts.)
+
     const reconcilePresence = options.activationProbe || await files.isAttachmentPresenceReconciliationDue();
     const presenceProven = !reconcilePresence || await common.reconcileRemoteAttachmentPresence({
       label: 'Cloud',
@@ -956,9 +902,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           ...cloudRequestOptions,
           token: cloudConfig.token,
           ...(options.signal ? { signal: options.signal } : {}),
-          // React Native's transport buffers the whole reply before resolving, so the GET
-          // fallback would download every attachment instead of probing it. Without a HEAD
-          // route on the server this phone simply cannot tell, and tells nobody otherwise.
+
+
           partialBodyReads: false,
           onHeadUnsupported: () => files.logAttachmentInfo('Sync server is too old for attachment presence checks', {
             reason: 'no-head-route',
@@ -981,9 +926,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         : 'confirmed-not-found';
       if (localPresence === 'unreadable') continue;
       const existsLocally = localPresence === 'present';
-      // This provider cannot bind its recovery GET and replacement PUT to one
-      // remote generation. Preserve the pending identity until local bytes return
-      // (or a later merge supersedes it) instead of risking a stale overwrite.
+
+
       if (
         options.phase !== 'prepare'
         && attachment.pendingContentUpload === true
@@ -1090,10 +1034,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         continue;
       }
 
-      // Self-hosted Cloud deliberately keeps missing remote attachments on-demand.
-      // A stale file that is already present is different: merged metadata selected
-      // the remote generation, so converge it through the same native present-CAS
-      // installer used by the shared lifecycle rather than uploading stale bytes.
+
       if (remoteWinnerExpectation && attachmentsDir && attachment.cloudKey) {
         try {
           assertCloudNotAborted(options.signal);
@@ -1139,7 +1080,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         continue;
       }
 
-      // SEC-07: same containment the shared lifecycle applies via `canUploadFrom`.
+
       if (
         options.phase !== 'prepare'
         && (!attachment.cloudKey || attachment.pendingContentUpload === true)
@@ -1185,10 +1126,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             shouldPropagateError = true;
             throw error;
           }
-          // Always the buffered PUT (bounded by the attachment size cap), never the native
-          // streamed uploader: that one follows a redirect by itself (a 303 to /health answers
-          // the same {"ok":true}), and servers before 1.2.7 have no HEAD to prove where the file
-          // landed. Core refuses a redirected buffered PUT.
+
+
           assertCloudNotAborted(options.signal);
           const readResult = await files.readAttachmentBytesForUpload(snapshot.sourcePath);
           if (readResult.readFailed) throw readResult.error;
@@ -1228,20 +1167,13 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           if (isHostResponseTooLargeError(error)) throw error;
           if (maxCloudBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) throw error;
           if (shouldPropagateError || isAbortLikeError(error, options.signal)) {
-            // The deterministic target may have existed before this attempt. Leaving
-            // an unreferenced successful PUT for orphan cleanup is safe; deleting it
-            // here could erase another device's winning blob.
+
+
             throw error;
           }
           const status = Number((error as { status?: unknown } | null)?.status);
-          // Only what the server said about THESE BYTES may be treated as final: a body over
-          // its limit (413), or content it refuses by name (400 `Blocked …`). Every other 400
-          // is about the server, not the file — `Invalid attachment path` answers a storage
-          // folder that became a symbolic link or moved, and it hits every upload at once — so
-          // it stays an ordinary retryable failure. Core's cloudPutFile carries the body as
-          // `refusalText`.
-          // Bounded like desktop's client-side refusals: a first upload becomes terminal;
-          // a replacement stays pending but this content identity is no longer retried.
+
+
           const refusesTheseBytes = status === 413
             || (status === 400 && isBlockedAttachmentContentRefusal(error));
           if (refusesTheseBytes && !options.activationProbe) {
@@ -1298,10 +1230,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       reportProgress(pending.attachment.id, 'upload', pending.totalBytes, pending.totalBytes, 'completed');
     }
 
-    // Same rule as WebDAV: only a pass whose presence proof ran to the end may advance the
-    // stamp, so a probe the server could not answer retries next cycle instead of parking the
-    // repair for a day. Never stamped for an activation probe, whose subject is the candidate
-    // configuration rather than the committed one the stamp names.
+
     if (reconcilePresence && presenceProven && !options.activationProbe) {
       await files.markAttachmentPresenceReconciled();
     }
@@ -1322,7 +1251,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused',
           });
         } catch {
-          // Diagnostics must not replace the original transport refusal.
+
         }
         throw error;
       }
@@ -1332,7 +1261,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             releaseCheck: 'v1.3.5/cloud-host-upload-limit', operation: 'upload', outcome: 'refused',
           });
         } catch {
-          // Diagnostics must not replace the fatal admission refusal.
+
         }
         throw new CloudHostUploadLimitError();
       }
@@ -1349,9 +1278,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     if (!dropboxClientId) return false;
     const attachmentsDir = await files.getAttachmentsDir();
     const attachmentsById = collectAttachmentsById(appData);
-    // This backend runs its own loops rather than the shared lifecycle, so it does the same
-    // bookkeeping by hand: write to a per-attachment working copy, record it here, and put it
-    // back into `attachmentsById`. The patches are folded into a fresh document at the end.
+
+
     const allPatches = await common.migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal);
     const recordPatch = (attachment: Attachment): void => {
       allPatches.set(attachment.id, attachment);
@@ -1362,12 +1290,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       return nextData !== appData ? nextData : false;
     };
 
-    // #1119 follow-up: prove Dropbox still holds every blob this device has a cloudKey for,
-    // at most once a day, before the loop below decides what to upload. One `list_folder`
-    // answers the whole pass however many attachments there are; a listing that fails proves
-    // nothing and clears nothing. Anything cleared here falls into the ordinary upload branch
-    // in the same pass, so the repair completes without waiting for another cycle.
-    // (Mirrors desktop's pre-pass in apps/desktop/src/lib/sync-attachment-backends.ts.)
+
     const reconcilePresence = options.activationProbe || await files.isAttachmentPresenceReconciliationDue();
     const presenceProven = !reconcilePresence || await common.reconcileRemoteAttachmentPresence({
       label: 'Dropbox',
@@ -1457,7 +1380,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         }
       }
 
-      // SEC-07: same containment the shared lifecycle applies via `canUploadFrom`.
+
       if (
         options.phase !== 'prepare'
         && (!attachment.cloudKey || attachment.pendingContentUpload === true)
@@ -1608,7 +1531,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         continue;
       }
       if (!options.activationProbe && options.transferAdmission?.has(attachment, 'download')) continue;
-      // The WebDAV not-found backoff, id-keyed: a row kept without its file must not take a slot every pass.
+
       if (!options.activationProbe && files.getWebdavDownloadBackoff(attachment.id)) continue;
       if (!options.activationProbe && downloadCount >= DROPBOX_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC) {
         files.logAttachmentInfo('Dropbox attachment download limit reached', {
@@ -1634,8 +1557,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           fetcher,
           options.resolveAccessToken,
         );
-        // Decrypt before hashing/writing: `fileHash` is plaintext-domain and the local
-        // attachments directory always holds plaintext.
+
+
         const bytes = await common.openAttachmentBytesFromDownload(
           data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
           options.material,
@@ -1703,10 +1626,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       }
     }
 
-    // Same rule as WebDAV: only a pass whose presence proof ran to the end may advance the
-    // stamp, so a listing the server could not answer retries next cycle instead of parking
-    // the repair for a day. Never stamped for an activation probe, whose subject is the
-    // candidate configuration rather than the committed one the stamp names.
+
     if (reconcilePresence && presenceProven && !options.activationProbe) {
       await files.markAttachmentPresenceReconciled();
     }
@@ -1721,9 +1641,9 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     options: {
       activationProbe?: boolean;
       phase?: 'prepare' | 'post-merge';
-      /** #1056: seal bytes before they land in the sync folder. Null = encryption off. */
+
       material?: SyncKeyMaterial | null;
-      /** The sync cycle's transfer admission, shared by its attachment phases (design D9b W7). */
+
       transferAdmission?: AttachmentTransferAdmission;
     } = {}
   ): Promise<AppData | false> => {
@@ -1739,9 +1659,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     const syncDir = await files.resolveFileSyncDir(syncPath);
     if (!syncDir) return false;
 
-    // The folder lease is already held by the sync cycle. Recover only exact
-    // scratch paths durably reserved by this device; never infer ownership by
-    // scanning the shared attachments directory.
+
     if (syncDir.type === 'file') {
       await installer.recoverFileSyncAttachmentPublications(syncDir.attachmentsDirUri);
     }
@@ -1760,10 +1678,9 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       }
     };
 
-    // Memoized across the whole pass: every attachment that needs a SAF lookup this round shares
-    // one directory listing rather than re-reading it per attachment.
+
     let safEntriesByName: Map<string, string> | null = null;
-    /** The sizes the same listing gave, by name (null where the provider listed none), and its folders. */
+
     let safEntrySizes = new Map<string, number | null>();
     let safEntryDirectories = new Set<string>();
     const refreshSafEntriesByName = async (): Promise<Map<string, string>> => {
@@ -1779,19 +1696,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     const getSafEntriesByName = async (): Promise<Map<string, string>> => (
       safEntriesByName ?? refreshSafEntriesByName()
     );
-    // No key here, yet an encryption enable cut off on another device left sealed attachments in the folder beside a plaintext
-    // data.json (it seals attachments first, the document last). Before this pass writes its first plaintext generation, the
-    // folder is checked for ciphertext; the refusal ends the cycle, which marks the location partly encrypted. An Enable seals
-    // every entry of attachments/ in place, one at a time in compareSyncTransitionEntryNames order (core's transition,
-    // mobile-file-sync-remote.ts nonDocumentEntries; desktop's sync.rs collect_sync_folder_attachments sorts by bytes, the same
-    // order for ASCII names), so a cut-off Enable has always sealed its first entry. Judged:
-    // - the first and the last entry, as core's Enable lists them;
-    // - the first file as desktop's Enable lists them: no transition scratch, and a non-recovery subfolder that sorts first is
-    //   entered (desktop seals the files inside it);
-    // - every entry a record names, by size first: sealing adds a fixed overhead, so an entry listed at its record's plaintext
-    //   size is plaintext with no read.
-    // Any other judged entry costs one 64-byte header read (a SAF read is ~26 ms on a phone). Sizes and folders come from the
-    // SAF listing the pass already made, or a path folder's stat (a byte read can start an iCloud download).
+
+
     type ListedEntry = { uri: string; size: () => Promise<number | null>; directory: () => Promise<boolean> };
     const statPathEntry = (uri: string) => fs.getInfo(uri).catch((): { exists?: boolean; isDirectory?: boolean; size?: number } => ({}));
     const listFolder = async (dirUri: string, top: boolean): Promise<Map<string, ListedEntry>> => {
@@ -1822,10 +1728,10 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       name.startsWith('.mindwtr-encryption-stage-') || name.startsWith('.mindwtr-encryption-quarantine-')
     );
     const isTransitionScratch = (name: string) => name.includes('.mindwtr-et-') || name.endsWith('.enctransition');
-    // Not an attachment, and skipped by Enable (mobile-file-sync-remote.ts): RN's installer lock, and a transition's scratch, which a
-    // Disable whose quarantine delete the provider refused can leave sealed beside plaintext (S5 review2 P3-A, P3-B).
+
+
     const isNotAttachment = (name: string) => name === '.mindwtr-attachment-installer.lock' || isTransitionScratch(name) || isRecoveryFolderName(name);
-    // An entry listed and gone since: its read names a missing file (a path's ENOENT, a SAF document's FileNotFoundException).
+
     const isEntryGoneError = (error: unknown): boolean => {
       const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code.toUpperCase() : '';
       if (code === 'ENOENT' || code === 'ERR_FILE_NOT_FOUND') return true;
@@ -1848,7 +1754,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       for (const name of [coreOrder[0], coreOrder[coreOrder.length - 1], ...coreOrder.filter((each) => plaintextSizes.has(each))]) {
         if (name !== undefined) judged.set(name, top.get(name)!);
       }
-      // Desktop's first file: descend into a first-sorting subfolder (bounded: a folder tree has finite depth).
+
       let folder = top;
       let prefix = '';
       for (let depth = 0; depth < 8; depth += 1) {
@@ -1866,9 +1772,9 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         assertAttachmentSyncNotAborted(signal);
         const plaintextSize = plaintextSizes.get(name);
         if (typeof plaintextSize === 'number' && await entry.size() === plaintextSize) continue;
-        // A subfolder has no header (desktop's first file inside one is judged above); nor has an entry gone since the listing.
+
         if (await entry.directory()) continue;
-        // Any other failed read fails closed: the upload waits for a cycle that can read it, as the WebDAV and Dropbox probe does.
+
         const head = await fs.readBytesRange(entry.uri, 0, 64).catch((error: unknown) => {
           if (isEntryGoneError(error)) return null;
           throw error;
@@ -1884,24 +1790,11 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     const remoteFilenameFor = (cloudKey: string, attachment: { id: string; title: string }): string =>
       cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
 
-    // File-backend-specific pre-pass, interleaving two things per attachment (matching this
-    // backend's pre-lifecycle shape exactly): the shared local-migration step, then a
-    // reconciliation check unique to this backend — unlike the other backends, an already
-    // cloudKey'd attachment isn't assumed to still be on the remote, since this backend syncs to a
-    // plain folder a user could have edited directly. So every local, existing attachment gets its
-    // remote presence checked here regardless of cloudKey state; if missing, clearing cloudKey
-    // lets the lifecycle below re-upload it through its normal hasCloudCopy-false path.
-    // The remote-presence half of the pre-pass below is periodic, not per-cycle: it can only
-    // discover a file removed from the sync folder behind the app's back, and paying two native
-    // stats per attachment on every idle cycle to re-learn that nothing moved is the local
-    // half of audit F3. The local-migration half is NOT gated — an unmigrated attachment is
-    // real pending work that `hasPendingAttachmentSyncWork` reports on every cycle.
-    // An activation probe must prove the candidate folder holds every object right now, so it
-    // always reconciles and never stamps (the stamp names the committed configuration).
+
     const reconcilePresence = options.activationProbe || await files.isAttachmentPresenceReconciliationDue();
     const migrateAttachmentLocally = files.createAttachmentLocalMigrationLimiter();
-    // Both steps write only to a per-attachment working copy, recorded here and put back into
-    // `attachmentsById` so the lifecycle below reads the pre-pass's values.
+
+
     const allPatches = new Map<string, Attachment>();
     for (const original of attachmentsById.values()) {
       assertAttachmentSyncNotAborted(signal);
@@ -1970,11 +1863,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         || isAttachmentUploadAdmissionError(error)
         || isSyncEncryptionPartlyEncryptedError(error)
       ),
-      // Normal background sync leaves remote-only files for on-demand fetch. An
-      // activation probe is different: its cloned snapshot must prove that every
-      // referenced object exists before settings commit. Marking the clone
-      // available is only the proof signal consumed by the shared probe; neither
-      // localStatus nor this clone is persisted.
+
+
       onDownload: async (attachment, expectation) => {
         if (!attachment.cloudKey) return false;
         const filename = remoteFilenameFor(attachment.cloudKey, attachment);
@@ -2052,14 +1942,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         }
         if (!options.activationProbe) return false;
         if (!remoteExists) {
-          // A blob the folder does not hold yet is not a verdict on File Sync: a
-          // replicator (Syncthing, a mounted drive) can deliver it after the
-          // switch. Keep the key and leave the record missing so core's
-          // activation proof defers it (its `backend === 'file'` accept path
-          // needs the key to still be there), exactly as the desktop backend
-          // does. Clearing the key here turned that path into a refusal on
-          // every phone while the same folder activated on the desktop
-          // (2026-09-06 feedback).
+
+
           files.logAttachmentWarn('File Sync activation left an attachment the folder does not hold yet', undefined, {
             releaseCheck: 'v1.3.0/mobile-file-activation-absent-blob',
           });
@@ -2111,8 +1995,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             throw new Error('File Sync attachment generation is unreadable');
           }
           if (initialPresence === 'confirmed-not-found') {
-            // Manual removal of the corrupt canonical generation is an explicit
-            // recovery action; do not keep its bounded collision history latched.
+
+
             await installer.clearFileSyncAttachmentPublicationRecovery(targetUri);
           }
           if (initialPresence === 'present') {
@@ -2137,9 +2021,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             await installer.abandonFileSyncAttachmentPublication(reservation).catch(() => undefined);
             throw error;
           }
-          // No catch from here on: the durable exact-path reservation owns the verified
-          // stage. The next locked cycle removes it before retry; corrupt canonical
-          // collisions also retain a bounded device-local attempt count.
+
+
           const currentPresence = await files.getLocalAttachmentPresence(targetUri);
           if (currentPresence === 'unreadable') {
             throw new Error('File Sync attachment generation is unreadable');
@@ -2237,8 +2120,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           }
         }
         recordPublishedGeneration();
-        // localStatus is already 'available' here: onUpload only runs when the lifecycle's own
-        // existsLocally check just passed, which is what set it.
+
+
         return true;
       },
       onUploadError: (attachment, error) => {

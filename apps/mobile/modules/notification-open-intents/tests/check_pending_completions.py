@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Compile the real Kotlin queue against fake preferences; requires cached Gradle Kotlin/JSON jars."""
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import os

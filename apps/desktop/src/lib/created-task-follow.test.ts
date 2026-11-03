@@ -39,7 +39,7 @@ describe('followCreatedTaskAfterEdit (#1243)', () => {
         expect(resolveViewForTask({ status: 'waiting' })).toBe('waiting');
         expect(resolveViewForTask({ status: 'inbox' })).toBe('inbox');
         expect(resolveViewForTask({ status: 'archived' })).toBe('archived');
-        // Next hides a task whose start date has not arrived; Review shows it.
+
         expect(resolveViewForTask({ status: 'next', startTime: '2999-01-01' })).toBe('review');
         expect(resolveViewForTask({ status: 'next', startTime: '2999-01-01', projectId: 'p1' })).toBe('projects');
     });
@@ -92,7 +92,7 @@ describe('followCreatedTaskAfterEdit (#1243)', () => {
         useUiStore.setState({ editingTaskId: 'task-2' });
         useUiStore.setState({ editingTaskId: null });
 
-        // The switch away from task-1 ended its session and moved once; task-2 closing is not ours.
+
         expect(navigated).toEqual(['next']);
     });
 });

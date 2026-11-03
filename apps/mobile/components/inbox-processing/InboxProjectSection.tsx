@@ -36,7 +36,7 @@ type Props = {
   handleCreateProjectEarly: () => void;
   handleConvertToProject: () => void;
   selectProjectEarly: (id: string | null) => void;
-  /** The chosen project's sections; the picker shows only when there are some (#1461). */
+
   projectSections?: Section[];
   selectedSectionId?: string | null;
   selectSection?: (id: string | null) => void;
@@ -181,7 +181,7 @@ export function InboxProjectSection({
     );
   };
 
-  // Active projects first, then Someday / Waiting after a heading (#1467).
+
   const projectGroups = groupProjectsForPicker(filteredProjects, areas);
   const renderProjectChip = (project: Project) => {
     const projectColor = getProjectAccentColor(project, areaById);
@@ -294,10 +294,10 @@ export function InboxProjectSection({
             <Text style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>
               {t('process.nextAction')}
             </Text>
-            {/* Enter chains into a fresh action row (desktop parity) and keeps
-                the keyboard up — blurring here collapses the Android keyboard
-                inset and makes the sheet visibly jump (#827 rc.3 feedback).
-                The Create project button is the only way to finish the step. */}
+            {
+
+
+                                                                                }
             <TextInput
               value={nextActionDraft}
               onChangeText={setNextActionDraft}
@@ -363,8 +363,8 @@ export function InboxProjectSection({
       <View style={styles.stepQuestionRow}>
         <Folder size={20} color={tc.text} accessible={false} />
         <Text style={[styles.stepQuestion, styles.stepQuestionInline, { color: tc.text }]}>
-          {/* The "more than one step?" question is its own step now; this
-              section is the answer's field, whichever way it went. */}
+          {
+                                                                      }
           {showProjectField && convertToProject ? t('projects.title') : t('inbox.assignProjectQuestion')}
         </Text>
       </View>

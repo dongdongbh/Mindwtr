@@ -389,9 +389,7 @@ describe('cloud sync http helpers', () => {
         });
     });
 
-    // Only the server's own "these bytes are not allowed" answers may ever be treated as
-    // final. A `400 Invalid attachment path` is about the server's storage folder and hits
-    // every upload at once, so counting it would soft-delete every waiting attachment.
+
     describe('upload refusals', () => {
         const refusalResponse = (status: number, body: string) =>
             ({
@@ -418,7 +416,7 @@ describe('cloud sync http helpers', () => {
             const error = await putRejection(400, JSON.stringify({ error: serverMessage }));
 
             expect(isBlockedAttachmentContentRefusal(error)).toBe(true);
-            // The server's words stay off the message, which is what reaches the logs.
+
             expect((error as Error).message).not.toContain('Blocked');
         });
 
@@ -566,7 +564,7 @@ describe('cloudAttachmentExists (#1119 follow-up)', () => {
         text: async () => '',
     } as unknown as Response);
 
-    /** A GET whose body would have to be streamed to be read. */
+
     const streamingFileResponse = (read: ReturnType<typeof vi.fn>) => ({
         ok: true,
         status: 200,
@@ -639,7 +637,7 @@ describe('cloudAttachmentExists (#1119 follow-up)', () => {
                 .resolves.toBe(true);
             expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method))
                 .toEqual(['HEAD', 'GET']);
-            // The one-byte ceiling rejects on the declared length, so no chunk is ever read.
+
             expect(read).not.toHaveBeenCalled();
         });
 
@@ -658,7 +656,7 @@ describe('cloudAttachmentExists (#1119 follow-up)', () => {
 
             await expect(cloudAttachmentExists(url, { fetcher, partialBodyReads: false, onHeadUnsupported }))
                 .resolves.toBeNull();
-            // The GET would be a full download on this transport, not a probe.
+
             expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method)).toEqual(['HEAD']);
             expect(onHeadUnsupported).toHaveBeenCalledTimes(1);
         });

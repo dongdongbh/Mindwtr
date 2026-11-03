@@ -1,5 +1,5 @@
-// Run on macOS: swiftc apps/mobile/ios-app-intents/MindwtrSavedListCatalog.swift
-// apps/mobile/tests/ios-saved-list/SavedListCatalogCheck.swift -o /path/to/check && /path/to/check
+
+
 import Foundation
 
 @main

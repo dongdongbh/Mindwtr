@@ -1,4 +1,4 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const arOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "قبل البدء",
     "settings.desktopAppLockDesc": "اطلب Windows Hello أو Touch ID (أو كلمة مرور Mac) عند فتح Mindwtr وبعد ابتعادك. هذا يخفي نافذة التطبيق فقط؛ يظل بإمكان أداة macOS وواجهة API المحلية وخادم MCP قراءة بياناتك.",
@@ -1566,7 +1566,7 @@ export const arOverrides: Record<string, string> = {
         'captureNotification.text': 'انقر للالتقاط إلى صندوق الوارد',
         'captureNotification.channelName': 'التقاط سريع',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'تفريغ الذهن',
         'mindSweep.title': 'تفريغ الذهن',
         'mindSweep.intro': 'تنقّل بين بضع قوائم من المحفّزات ودوّن كل ما يخطر ببالك. لا تُصفِّ ولا تُنظّم — كل عنصر يذهب إلى البريد الوارد لترتيبه لاحقًا.',

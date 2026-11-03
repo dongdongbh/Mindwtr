@@ -7,12 +7,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Skip and Cancel send the editor's draft save as core's checklist save reads it (device run: INVALID_INPUT before the fix). */
+
 class EditorActionSaveTest {
     private val date = JSONObject().put("value", "null").put("label", "").put("hasTime", false).put("dateOnly", "null")
         .put("picker", JSONObject().put("date", "").put("time", "")).put("quickDates", JSONArray())
 
-    /** The smallest editor model core could send: one task with an empty checklist. */
+
     private val model = EditorModel.of(JSONObject().put("version", 1).put("id", "t").put("readOnly", false)
         .put("scheduleBase", JSONObject().put("dueDate", JSONObject.NULL)).put("recurrenceBase", JSONObject().put("recurrence", JSONObject.NULL).put("showFutureRecurrence", JSONObject.NULL))
         .put("focusStar", JSONObject()).put("draft", JSONObject().put("title", "Task"))

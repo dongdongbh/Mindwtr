@@ -6,12 +6,7 @@ import { openSqliteHost, requestId as newRequestId } from './screen-parity.repla
 import type { SqliteClient } from './sqlite-adapter';
 import { resetForTests, useTaskStore } from './store';
 
-/**
- * Settings › Data's Getting Started row through the native host contract over SQLite (D1b design §0 fix 3): the seed's rows
- * and its request receipt commit in one transaction, so a replay after process death either finds the receipt and writes
- * nothing, or finds nothing and seeds once. Never the old gap: rows committed, receipt lost, and a title match that a newer
- * seed copy no longer finds.
- */
+
 const value = <T,>(result: NativeHostResult<T>): T => {
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
     return result.value;
@@ -47,11 +42,11 @@ describe('native Getting Started: one transaction for the seed and its receipt',
         const input = { requestId: newRequestId(), language: 'de' };
         failReceipts = true;
         expect((await env.host.seedGettingStarted(input)).ok).toBe(false);
-        // Process death: the queued retries die with the process.
+
         resetForTests();
         failReceipts = false;
         expect(await starterRows(env)).toEqual([]);
-        // An app update changed one German tutorial title before the replay.
+
         STARTER_SEED_STRINGS.de['starter.focus.title'] = `${focusTitle} (neu)`;
         await env.restart();
         const reply = value(await env.host.seedGettingStarted(input));
@@ -64,8 +59,7 @@ describe('native Getting Started: one transaction for the seed and its receipt',
         expect(await env.receiptIds()).toEqual([input.requestId]);
     });
 
-    // RN's GettingStartedActions (8c189a212): the seeded project's view carries the workflow line, the three actions in RN's order
-    // and the guide link in the app language; any other project carries none.
+
     it('the seeded project shows RN\'s Getting Started actions and guide link; another project none', async () => {
         env = await openSqliteHost({}, wrap);
         const reply = value(await env.host.seedGettingStarted({ requestId: newRequestId(), language: 'en' }));

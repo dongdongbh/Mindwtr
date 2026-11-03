@@ -8,7 +8,7 @@ if (!version) {
     process.exit(1);
 }
 
-// Regex to validate version (simple semver)
+
 if (!/^\d+\.\d+\.\d+$/.test(version)) {
     console.error('Error: Version must be in format x.y.z');
     process.exit(1);
@@ -41,7 +41,7 @@ filesToUpdate.forEach(file => {
         newContent = JSON.stringify(json, null, 2) + '\n';
     } else if (file.type === 'expo-json') {
         const json = JSON.parse(content);
-        // Nested key support for app.json
+
         const keys = file.key.split('.');
         let obj = json;
         for (let i = 0; i < keys.length - 1; i++) {
@@ -50,8 +50,8 @@ filesToUpdate.forEach(file => {
         obj[keys[keys.length - 1]] = version;
         newContent = JSON.stringify(json, null, 2) + '\n';
     } else if (file.type === 'toml') {
-        // Simple regex replacement for Cargo.toml
-        // Matches version = "x.y.z"
+
+
         newContent = content.replace(/^version = ".*"$/m, `version = "${version}"`);
     }
 

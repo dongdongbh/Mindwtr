@@ -180,8 +180,8 @@ struct SettingsScreen: View {
         }
         .onChange(of: deleteConfirmPresented) { presented in
             guard !presented else { return }
-            // A system dismissal may publish before its destructive Button action.
-            // Defer implicit-cancel cleanup so that action can retain frozen Options.
+
+
             DispatchQueue.main.async {
                 if !deleteConfirmAnswered && !deleteConfirmPresented { model.cancelSomedaySectionDelete() }
             }
@@ -551,7 +551,7 @@ struct SettingsScreen: View {
                 .disabled(!model.settingsSyncEncryptionActionEnabled(action))
                 .accessibilityIdentifier("sync-encryption-" + model.settingsSyncEncryptionActionID(action))
         default:
-            EmptyView() // Unsupported rows are refused by CoreModel before adoption.
+            EmptyView()
         }
     }
 
@@ -1420,7 +1420,7 @@ struct SettingsScreen: View {
                                 .fixedSize(horizontal: false, vertical: true).padding(14)
                                 .accessibilityIdentifier("calendar-device-empty")
                         }
-                        // Swift String equality merges Unicode-equivalent calendar IDs.
+
                         ForEach(calendars.indices, id: \.self) { index in
                             let calendar = calendars[index]
                             palette.border.frame(height: 0.5)
@@ -2364,7 +2364,7 @@ struct SettingsScreen: View {
                         .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                         .id(section.text("key"))
                         .onChange(of: section.flag("open")) { open in
-                            // Settle the scroll position after a large list shrinks to its heading.
+
                             if !open { scroll.scrollTo(section.text("key"), anchor: .top) }
                         }
                     }
@@ -3187,7 +3187,7 @@ struct SettingsScreen: View {
     }
 }
 
-/// One shared card for Settings and the locally owned pending-task sheet.
+
 struct DiagnosticsCard: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -3531,7 +3531,7 @@ private struct DiagnosticsActivitySheet: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
-// RN About actions share the existing Settings destination and page-owned OS handoff.
+
 private struct AboutSettingsCard: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette

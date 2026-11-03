@@ -22,7 +22,7 @@ struct MindwtrWidgetListPayload: Decodable {
     let dateLabel: String?
     let sections: [MindwtrWidgetSection]?
     let items: [MindwtrWidgetTaskItem]?
-    // Optional so snapshots written by older app versions remain decodable.
+
     let openUri: String?
 }
 
@@ -85,7 +85,7 @@ struct MindwtrTasksWidgetPayload: Decodable {
     let headerTitle: String
     let subtitle: String
     let dateLabel: String?
-    // Optional: payloads written before the field existed may still be cached.
+
     let focusedCount: Int?
     let items: [MindwtrWidgetTaskItem]
     let sections: [MindwtrWidgetSection]?
@@ -139,7 +139,7 @@ struct MindwtrTasksWidgetPayload: Decodable {
         at date: Date = Date()
     ) -> MindwtrTasksWidgetPayload {
         var normalizedId = nonEmpty(listId) ?? "focus"
-        // The Focus variant (#1468) is Focus with a third section; a payload without it draws plain Focus.
+
         var focusListId = "focus"
         if normalizedId == mindwtrFocusAvailableListId {
             normalizedId = "focus"
@@ -189,8 +189,8 @@ struct MindwtrTasksWidgetPayload: Decodable {
         if let list = lists?[listId] {
             let isFocus = listId == "focus" || listId == mindwtrFocusAvailableListId
             return replacingRoot(
-                // The default is the short localized Today label published at
-                // the root. Explicit lists use their own localized title.
+
+
                 title: isFocus ? headerTitle : list.title,
                 dateLabel: isFocus ? (list.dateLabel ?? self.dateLabel) : list.dateLabel,
                 sections: list.sections ?? [],
@@ -235,7 +235,7 @@ struct MindwtrTasksWidgetPayload: Decodable {
         upcomingOnly: Bool
     ) -> MindwtrTasksWidgetPayload {
         func isVisible(_ item: MindwtrWidgetTaskItem) -> Bool {
-            // Membership and headers belong to the same app-published snapshot.
+
             if upcomingOnly || item.isUpcomingPreview {
                 return true
             }
@@ -304,7 +304,7 @@ private extension MindwtrWidgetTaskItem {
     }
 }
 
-/// Core's WIDGET_FOCUS_AVAILABLE_LIST_ID: Focus plus Next Actions whose start date has arrived (#1468).
+
 let mindwtrFocusAvailableListId = "focus:available"
 
 func nonEmpty(_ value: String?) -> String? {
@@ -366,7 +366,7 @@ enum MindwtrTasksWidgetSnapshotStore {
         let payload = loadPayload(for: family)
         let pendingActions = (try? MindwtrWidgetActionStore.appGroupStore().pendingActions()) ?? []
         let calendar = Calendar.current
-        // Upcoming rows say Today/Tomorrow, so a new entry starts each local day (#1455).
+
         let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
         let dates = MindwtrWidgetActionProjection.timelineDates(
             pendingActions: pendingActions,
@@ -741,10 +741,7 @@ private struct MindwtrTasksWidgetView: View {
         return columns
     }
 
-    // The payload's palette is already the resolved preset/theme colors (built by
-    // apps/mobile/lib/widget-data.ts); Swift's job is to decode it, not to
-    // re-classify it. Adaptive modes need Swift's own colorScheme because the
-    // JS side can't observe a later system change ahead of render.
+
     private func resolvePalette(_ payload: MindwtrTasksWidgetPayload) -> MindwtrWidgetPalette {
         let mode = (payload.themeMode ?? "system")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -953,7 +950,7 @@ func hexColor(_ hex: String) -> Color {
     case 6:
         (r, g, b, a) = (int >> 16, int >> 8 & 0xFF, int & 0xFF, 255)
     case 8:
-        // Supports CSS-style #RRGGBBAA payload values.
+
         (r, g, b, a) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
     default:
         (r, g, b, a) = (15, 23, 42, 255)
@@ -983,14 +980,14 @@ struct MindwtrTasksWidget: Widget {
         .configurationDisplayName("Mindwtr")
         .description("Focus tasks and quick capture")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
-        // The view already owns its padding and budgets task rows from that space.
-        // System margins otherwise leave medium widgets with no room for a row.
+
+
         .contentMarginsDisabled()
     }
 }
 
 struct MindwtrLegacyTasksWidget: Widget {
-    // Preserve installed widgets when upgrading from the static configuration.
+
     let kind: String = mindwtrWidgetKind
 
     var body: some WidgetConfiguration {

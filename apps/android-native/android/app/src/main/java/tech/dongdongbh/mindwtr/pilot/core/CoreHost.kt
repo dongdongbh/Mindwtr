@@ -27,123 +27,97 @@ import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-/** [database]'s library bytes as they are on disk now: the database file and its write-ahead log, in full (pass D1c §3.4). */
+
 internal fun libraryFileBytes(database: File): Long = database.length() + File(database.path + "-wal").length()
 
-/**
- * QuickJS and SQLite share one worker thread; Compose never enters either runtime.
- * [rnDataDir] is set only when [databaseFile] is the React Native app's database:
- * then the JS host may apply RN's AsyncStorage change after it imported RN's backup.
- * [io] runs the JS host's fetch and secret calls off this thread; their answers come back in [callAsync]'s pump loop.
- * [logFile] is RN's diagnostics log (DiagnosticsLogFile.RELATIVE_PATH under the app's files directory).
- * [keyValue] is RN's AsyncStorage (RKStorage): the device keys RN keeps there, read and written in place.
- */
+
 class CoreHost(
     private val databaseFile: File,
     private val rnDataDir: File? = null,
     private val io: HostIo,
     private val journalDir: File,
-    /** A write's deviceWrites (a setting's device-local part), kept with the journal sequence that set each key. */
+
     private val devices: DeviceWrites,
     private val logFile: File,
     private val keyValue: RnKeyValue,
-    /** The pending-captures queue's files (host-entry's queue port), and core's attachment file port. */
+
     private val files: HostFiles,
-    /** RN's attachment installer: core's native installer port. */
+
     private val installer: HostInstaller,
-    /** Reminder alarms' platform side (host-reminders.ts's bridges); null: this host plans no alarms. */
+
     private val reminders: Reminders? = null,
-    /** RN's home-screen widgets (bundle/host-widgets.ts publishes through it); null: this host has none. */
+
     private val widgets: HostWidgets? = null,
-    /** The background sync job kept scheduled or cancelled, as core decides (CoreWork.scheduleSync); null: this host has none. */
+
     private val scheduleBackgroundSync: ((Boolean) -> Unit)? = null,
-    /** The build as Settings › About reports it (AboutSettings.kt aboutAppInfo, JSON); null: this host has no About. */
+
     private val appInfo: String? = null,
-    /** Settings › Data's restore, merge and import files between prepare and commit (BackupOperations); null: this host has none. */
+
     private val backups: BackupOperations? = null,
-    /** The device calendars core's external calendars read (bundle/host-calendar.ts); null: this host reads none. */
+
     private val calendars: HostCalendars? = null,
-    /** Android system search (bundle/host-app-search.ts); null: this host indexes nothing. */
+
     private val appSearch: HostAppSearch? = null,
-    /** File Sync's SAF folder calls (bundle/host-sync.ts, pass S5); null: this host has no File Sync. */
+
     private val documents: HostDocuments? = null,
-    /** File Sync's folder lock (RN's SyncFileLockCore); null: this host has no File Sync. */
+
     private val syncLock: HostSyncLock? = null,
-    /** RN's Gmail authorization (GmailAuthorization.call, bundle/host-gmail.ts); null: this host has no Gmail capture. */
+
     private val gmail: ((String, (Result<Any?>) -> Unit) -> Unit)? = null,
-    /** Core's Gmail receipt store's file calls and SQL (HostGmailReceipts); null with [gmail]. */
+
     private val gmailReceipts: HostGmailReceipts? = null,
-    /** The capture popup's microphone (HostVoice.call, bundle/host-voice.ts); null: this host records nothing. */
+
     private val voice: ((String, (Result<Any?>) -> Unit) -> Unit)? = null,
 ) {
-    /**
-     * Reminder alarms on the platform (pilot/Reminders.kt): core's plan applied in core's order, the notification permission as RN
-     * reads it, and React Native's old alarms cancelled once. Engine thread.
-     */
+
+
     interface Reminders {
-        /**
-         * Core's NativeReminderAlarmPlan (JSON, with the channel's name): `writeAhead` stored, cancels, alarms, then `alarms` stored.
-         * Answers how many alarms Android refused (each skipped; the next plan makes them again).
-         */
+
+
         fun apply(plan: String): Int
         fun permissionGranted(): Boolean
-        /** React Native's alarms cancelled and its alarm maps removed; how many were cancelled (0 once none is left). */
+
         fun cleanupRn(): Int
-        /** `{ dropped, notQueued }` since the last call, then zero (ReminderReceiverCounts). */
+
         fun receiverCounts(): String
-        /** `{ fired, shown }`: ids of alarms that showed (ReminderLedger), and of reminder notifications still in the tray. */
+
         fun ledger(): String
     }
 
     companion object {
         const val TAG = "MindwtrNativeDev"
-        /** Rows per saveWarm slice: about 10 ms of engine time on the S23, the longest a call waits behind the warm. */
+
         const val SAVE_WARM_SLICE = 500
         const val SAVE_WARM_MAX_MS = 30_000L
-        /** Must match NATIVE_ERROR in bundle/host-entry.ts. */
+
         private const val NATIVE_ERROR = "!MindwtrNativeError:"
 
-        /**
-         * An operation's deadline: the longest core timeout it can wrap. A contract read or command waits at most on core's
-         * storage (STORAGE_TIMEOUT_MS, 15 s), inside core's request timeout (DEFAULT_TIMEOUT_MS, 30 s).
-         */
+
         const val OPERATION_DEADLINE_MS = 30_000L
-        /** An operation that sends requests: HostIo's ceiling for one request, plus core's 30 s for the work around it. */
+
         const val NETWORK_DEADLINE_MS = HostIo.CALL_TIMEOUT_MS + OPERATION_DEADLINE_MS
-        /** A project's attachment commands (Attachments.kt ATTACHMENT_KINDS): each copies a picked file, which a slow provider stretches. */
+
         private val ATTACHMENT_COMMANDS = setOf("attachmentAddFile", "attachmentLinks", "attachmentRemove")
 
-        /**
-         * An operation's deadline: a request's (NETWORK_DEADLINE_MS) for an attachment command, on its first send and on the journal's
-         * replay alike, so a slow copy never stops the host; [OPERATION_DEADLINE_MS] for everything else.
-         */
+
         fun deadlineOf(method: String, args: List<Any?>): Long = when {
             method == "menuCommand" && args.firstOrNull() in ATTACHMENT_COMMANDS -> NETWORK_DEADLINE_MS
             method == BackupOperations.METHOD -> BACKUP_DEADLINE_MS
             else -> OPERATION_DEADLINE_MS
         }
 
-        /**
-         * Settings › Data's inspect, prepare and commit: each parses or writes a whole library (up to the measured transfer limit),
-         * which takes longer than a task command on a large one.
-         */
+
         const val BACKUP_DEADLINE_MS = 120_000L
 
-        /** How long a timed-out operation may take to end once cancelled, before the host stops for good. */
+
         const val DRAIN_MS = 10_000L
-        /** One idle pump turn takes host-call answers and due timers until this much time has passed (D9). */
+
         const val PUMP_TURN_MS = 8
-        /**
-         * How long a caller waits for a long operation ([callLong]: a Sync screen command, whose sync can make several requests
-         * of up to HostIo's 5 min each). Past it the caller stops waiting; the operation holds no engine time, so it goes on.
-         */
+
+
         const val SYNC_WAIT_MS = 30 * 60 * 1000L
 
-        /**
-         * A Kotlin exception must not cross the QuickJS JNI boundary: the
-         * wrapper keeps calling JNI with it pending and the process aborts.
-         * Return it as a marked string; host-entry.ts throws it inside JS.
-         */
+
         private fun guarded(work: (Array<out Any?>) -> Any?) = JSCallFunction { args ->
             try { work(args) } catch (error: Throwable) { NATIVE_ERROR + (error.message ?: error.javaClass.simpleName) }
         }
@@ -156,12 +130,12 @@ class CoreHost(
     private val startedAt = System.nanoTime()
     private var context: QuickJSContext? = null
     private var sqlite: SqliteBridge? = null
-    /** The write-ahead journal (WriteJournal), opened at start on this thread. */
+
     private var journal: WriteJournal? = null
     private val functions = HashMap<String, JSFunction>()
-    /** Set when an operation outlived its deadline and its drain. The engine is gone, so that operation never resumes. */
+
     @Volatile private var stopped: String? = null
-    /** ICU collators by "sensitivity:numeric", made and used on the engine thread only. */
+
     private val collators = HashMap<String, Collator>()
     private var hostObject: JSObject? = null
     @Volatile private var engineThread: Thread? = null
@@ -169,30 +143,28 @@ class CoreHost(
         executeExistingDelayedTasksAfterShutdownPolicy = false
         removeOnCancelPolicy = true
     }
-    /** The next idle pump ([schedulePump]) and when it runs (uptime); engine thread only. */
+
     private var pumpTask: ScheduledFuture<*>? = null
     private var pumpAt = Long.MAX_VALUE
-    /** Long operations ([callLong]) by id, each answered from the pump; engine thread only. */
+
     private val watched = HashMap<String, CompletableFuture<String>>()
-    /**
-     * The JS host's events (bundle/host-sync.ts): sync's badge and finished-cycle count, an automatic sync's warning. Called on
-     * the engine thread, so a listener only hands the text on and never calls back into this host.
-     */
+
+
     @Volatile var onEvent: ((String) -> Unit)? = null
 
     private fun <T> onEngine(work: () -> T): T {
         if (Thread.currentThread() === engineThread) return work()
-        // The caller's wait, queue and run, as a trace section (merge profiling: how long a call waits behind the engine's other work).
+
         return traced("core:wait") { onEngineQueued(work) }
     }
 
-    /** [work] on the engine, queued behind the tasks before it; the caller waits. */
+
     private fun <T> onEngineQueued(work: () -> T): T {
         val task = synchronized(lifecycleLock) {
             check(shutdown == null) { "Core host is closed" }
             executor.submit(Callable { work() })
         }
-        // Rethrow the engine's own exception: callers match "SAVE_FAILED" on its message.
+
         return try { task.get() } catch (failure: ExecutionException) { throw failure.cause ?: failure }
     }
 
@@ -202,16 +174,7 @@ class CoreHost(
         functions.getOrPut(method) { host.getJSFunction(method) }.call(*args)
     }
 
-    /**
-     * [legacyState] and [legacyBackup] come from LegacyRnStoreGuard; both are "" for the dev database.
-     *
-     * SQLite opens and takes its recovery checkpoint on the caller's thread while the engine thread loads the bundle. No SQL
-     * runs before the checkpoint: the bridge's SQL calls take the database from [opened] (they would wait for it), and boot,
-     * the first caller, starts only after the engine owns it. From then on only the engine thread uses it.
-     *
-     * With [preflight] (LegacyRnStoreGuard.preflightNeeded) core's legacyCheck runs first, once the bundle has loaded: a refusal
-     * ends the start before anything opens the RN database, so neither the import nor the checkpoint touches it.
-     */
+
     fun start(bundle: CoreBundle, legacyState: String = "", legacyBackup: String = "", preflight: Boolean = false): JSONObject {
         val opened = FutureTask {
             val database = traced("core:sqliteOpen") { SqliteBridge(databaseFile) }
@@ -229,7 +192,7 @@ class CoreHost(
             executor.submit(Callable {
                 Trace.beginSection("core:journalOpen")
                 journal = WriteJournal(journalDir, log = { Log.i(TAG, it) }, floor = devices.highestSequence())
-                // Before boot: an operation folder no journal entry names was never committed, or its entry already settled.
+
                 backups?.let { ops -> runCatching { ops.cleanup(pendingBackupIds()) }.onFailure { Log.w(TAG, "Native Android backup cleanup failed ${it.javaClass.simpleName}") } }
                 Trace.endSection()
                 Trace.beginSection("core:contextCreate")
@@ -237,9 +200,9 @@ class CoreHost(
                 Trace.endSection()
                 context = engine
                 install(engine, database)
-                // A fetch or secret answer queued while no call runs wakes the idle pump, which settles it at once.
+
                 io.wake = { runCatching { executor.execute { idlePump() } } }
-                // An aborted file call's stalled document read ends (fileAbort), and each call's reader is forgotten when it ends.
+
                 io.abortReader = files::abortRead
                 io.readDone = files::readDone
                 load(engine, database, bundle)
@@ -249,28 +212,28 @@ class CoreHost(
             try {
                 onEngine {
                     loading.get()
-                    // Its answer is null, not an object, so the answer is read here rather than through callAsync.
+
                     val checked = answer("legacyCheck", arrayOf(legacyState, legacyBackup), OPERATION_DEADLINE_MS)
                     check(checked.getBoolean("ok")) { checked.getString("error") }
                 }
             } catch (failure: Throwable) {
-                // The database never opened: close only the engine.
+
                 onEngine { closeOnEngine() }
                 throw (failure as? ExecutionException)?.cause ?: failure
             }
         }
         opened.run()
-        // The engine runs this after the load (one thread, in order).
+
         return onEngine {
             try {
                 loading.get()
                 sqlite = database()
-                // Debug builds only (debugProperty is empty in a release): the deadline rows' slow reads and writes (pass D1c).
+
                 if (BuildConfig.DEBUG) data.failNextRead = debugFault("channel_fail") == "read-once"
-                // This host journals every write (WriteJournal), so core requires each write's replay tokens. A journaled backup commit
-                // boots in recovery: no load maintenance runs before its replay, so the document it was prepared against is unchanged.
+
+
                 activationOwed = pendingBackupIds().isNotEmpty()
-                // Sized to the library on disk (its write-ahead log too), so a large one loads within its own budget (pass D1c §3.4).
+
                 val bootDeadline = sized(OPERATION_DEADLINE_MS, libraryFileBytes())
                 (if (activationOwed) callAsync("bootRecovery", legacyState, legacyBackup, "journaled", storageBudget(), deadlineMs = bootDeadline)
                 else callAsync("boot", legacyState, legacyBackup, "journaled", storageBudget(), deadlineMs = bootDeadline)).also { netCheck() }
@@ -282,33 +245,27 @@ class CoreHost(
         }
     }
 
-    /** Set when this boot ran in recovery (a journaled backup commit was pending): normal activation waits for its replay. */
+
     @Volatile private var activationOwed = false
 
-    /** The operation ids of the journal's backup commits. */
+
     private fun pendingBackupIds(): Set<String> = checkNotNull(journal).pending().filter { it.method == BackupOperations.METHOD }
         .mapNotNull { runCatching { JSONObject(it.args[0] as String).getString("id") }.getOrNull() }.toSet()
 
-    /**
-     * The arguments host-entry takes for [method]: a backup commit's journaled reference and name, with a read handle over its
-     * checked plan between (pass D1c: core reads the plan through the data channel, which checks the same hash again).
-     */
+
     private fun sendArgs(method: String, args: Array<out Any?>): Array<out Any?> {
         if (method != BackupOperations.METHOD) return args
         val (plan, sha256) = checkNotNull(backups).plan(args[0] as String, args[1] as String)
-        // The frozen budget goes too: core gives the commit's reload the same storage budget (pass D1c review 2 #1).
+
         return arrayOf(args[0], data.openRead(plan, expectedSha256 = sha256), args[1], deadline(method, args.toList()))
     }
 
-    /**
-     * A sent backup commit's plan handle ends with its answer (core closes it once read, the channel drops it on a read failure;
-     * this frees one core never read, as when the commit was refused before it). A call past its deadline leaves its handle.
-     */
+
     private fun dropSent(method: String, sent: Array<out Any?>) {
         if (method == BackupOperations.METHOD) (sent.getOrNull(1) as? String)?.let(data::drop)
     }
 
-    /** [method]'s reply, or a refusal (never sent) when its backup files fail their identity check. */
+
     private fun answerChecked(method: String, args: Array<out Any?>, deadlineMs: Long): JSONObject {
         val sent = try { sendArgs(method, args) } catch (mismatch: BackupOperations.Mismatch) {
             Log.w(TAG, "Native Android backup operation refused before send: ${mismatch.message}")
@@ -317,12 +274,7 @@ class CoreHost(
         return try { answer(method, sent, deadlineMs) } finally { dropSent(method, sent) }
     }
 
-    /**
-     * A backup commit's final reply, on its first send and on the journal's replay alike: the result record (outcome and Undo
-     * snapshot) is on disk before the entry settles, and the operation's folder goes only once the entry left the journal. True
-     * once it left. Debug builds only: `debug.mindwtr.native.backup_stop` = `settle-fail` keeps the entry (as a failed delete
-     * does), `after-settle` ends the process before the result shows.
-     */
+
     private fun backupFinish(entry: WriteJournal.Entry?, args: List<Any?>, result: JSONObject, replay: Boolean): Boolean {
         val ops = checkNotNull(backups)
         val reference = args[0] as String
@@ -337,7 +289,7 @@ class CoreHost(
             replay && WriteJournal.malformed(error) -> "unresolved"
             else -> "refused"
         }
-        // A failure keeps core's error text, so a start after a death shows it (DataTransfer.leftover) rather than dropping it.
+
         ops.writeResult(JSONObject().put("requestId", id).put("operation", operation).put("outcome", outcome)
             .put("reply", reply ?: JSONObject.NULL).put("undoSnapshot", if (error == null && operation != "restore") args[1] as String else "")
             .put("error", error ?: ""))
@@ -353,15 +305,12 @@ class CoreHost(
         return settled
     }
 
-    /** Where the bundle came from at start: "hit" (its cached bytecode), or why the source ran (BytecodeCache.Read). */
+
     @Volatile private var bundleOutcome = ""
     @Volatile private var bundleSource: CoreBundle? = null
     private var cacheWriter: Thread? = null
 
-    /**
-     * The bundle into [engine]: its cached bytecode when the cache's key matches, without reading the source; else the
-     * source. Bytecode that fails to run is dropped with its engine, and a new engine runs the source.
-     */
+
     private fun load(first: QuickJSContext, database: () -> SqliteBridge, bundle: CoreBundle) {
         var engine = first
         val cached = bundle.cache?.let { cache -> bundle.hash.takeIf { it.isNotEmpty() }?.let(cache::read) }
@@ -386,11 +335,7 @@ class CoreHost(
         }
     }
 
-    /**
-     * After first content (ProcessCoreHost.contentShown): a start that ran the source compiles the bundle on a thread of its
-     * own, on an engine of its own, and writes the cache for the next start. It writes only bytecode compiled from bytes whose
-     * SHA-256 it has just checked against the bundle's key. Once per host; a failure only logs (the next start runs the source).
-     */
+
     fun cacheBytecode() {
         val writer = synchronized(lifecycleLock) {
             if (bundleOutcome == "hit" || cacheWriter != null || shutdown != null) return
@@ -411,13 +356,13 @@ class CoreHost(
         writer.start()
     }
 
-    /** The native bridge, `globalThis.__mindwtrNative`, on a new [engine]; [database] waits for SQLite's recovery checkpoint. */
+
     private fun install(engine: QuickJSContext, database: () -> SqliteBridge) {
         val bridge = engine.createNewJSObject()
         bridge.setProperty("sqlRun", guarded { args -> traced("sql:run") { database().run(args[0] as String, args[1] as String) }; null })
         bridge.setProperty("sqlAll", guarded { args -> traced("sql:all") { database().all(args[0] as String, args[1] as String) } })
         bridge.setProperty("sqlExec", guarded { args -> traced("sql:exec") { database().exec(args[0] as String) }; null })
-        // The bundle's boot steps as trace sections (Perfetto): a name opens one, "" closes the open one.
+
         bridge.setProperty("trace", guarded { args ->
             (args[0] as String).let { if (it.isEmpty()) Trace.endSection() else Trace.beginSection(it.take(127)) }
             null
@@ -430,16 +375,15 @@ class CoreHost(
                 ByteArray(length).also(random::nextBytes).forEach { out.put(it.toInt() and 0xff) }
             }.toString()
         })
-        // `{ clearJsonAhead, setReconciled }`, decided by core's planLegacyJsonImport after the saved import is read back.
+
         bridge.setProperty("rnStateCommit", guarded { args ->
             val change = JSONObject(args[0] as String)
             LegacyRnStoreGuard.commitRnState(checkNotNull(rnDataDir) { "No React Native state in this build" },
                 change.getBoolean("clearJsonAhead"), change.getBoolean("setReconciled"))
             null
         })
-        // QuickJS has no Intl: the host's Intl.Collator and localeCompare sort by these ICU collation keys, from the device
-        // locale's collator as Hermes uses on Android, so titles order as in RN ("éclair" before "Zoo"). The key's bytes
-        // become chars 1-255 (the trailing 0 dropped), so comparing two keys as strings compares them as ICU does.
+
+
         bridge.setProperty("collationKey", guarded { args ->
             val options = args[1] as String
             val collator = collators.getOrPut(options) {
@@ -456,27 +400,27 @@ class CoreHost(
             val bytes = collator.getCollationKey(args[0] as String).toByteArray()
             String(CharArray(bytes.size - 1) { (bytes[it].toInt() and 0xff).toChar() })
         })
-        // The host's Intl.DateTimeFormat and Date's toLocale*String: Android's ICU, resolved and formatted as Hermes does.
+
         val dates = IcuDateTimeFormat()
         bridge.setProperty("dateTimeFormat", guarded { args -> dates.reply(args[0] as String, args[1] as String, (args[2] as Number).toDouble()) })
-        // Debug builds only: check-intl-device.mjs's cases, logged once the bundle (and so the polyfill) is loaded.
+
         if (debugFault("intl_check") == "1") engine.globalObject.setProperty("__mindwtrIntlCheck", true)
-        // A diagnostic line must never fail the caller: coerce and swallow.
+
         bridge.setProperty("log", guarded { args -> runCatching { Log.i(TAG, args.getOrNull(0).toString()) }; null })
-        // fetch and the secret calls (host-polyfills.js): each only starts here; HostIo runs it off this thread and
-        // queues its answer, and the polyfill settles it when the pump loop below takes that answer with ioNext.
+
+
         bridge.setProperty("netFetch", guarded { args -> io.fetch(args[0] as String) })
         bridge.setProperty("netAbort", guarded { args -> io.abort(args[0] as String); null })
         bridge.setProperty("secretCall", guarded { args -> io.secret(args[0] as String) })
-        // Sync encryption's Argon2id and AES-GCM (HostCrypto): started here, run on HostIo's crypto thread, settled as a fetch.
+
         bridge.setProperty("cryptoCall", guarded { args -> io.crypto(args[0] as String) })
         bridge.setProperty("ioNext", guarded { _ -> io.next() })
         bridge.setProperty("ioBody", guarded { _ -> io.body() })
-        // RN's diagnostics log file: core's diagnostics-log.ts decides every write; this is its file IO.
+
         val logs = DiagnosticsLogFile(logFile)
         bridge.setProperty("logFile", guarded { args -> logs.run(args[0] as String, args.getOrNull(1)?.toString().orEmpty()) })
-        // RN's AsyncStorage (RnKeyValue): reads answer JSON (a value, or AsyncStorage's [[key, value]] pairs); a write is on disk
-        // when it returns.
+
+
         bridge.setProperty("kvGet", guarded { args -> JSONArray().put(keyValue.get(args[0] as String) ?: JSONObject.NULL).toString() })
         bridge.setProperty("kvSet", guarded { args -> kvFault(); keyValue.set(args[0] as String, args[1] as String); null })
         bridge.setProperty("kvRemove", guarded { args -> keyValue.remove(args[0] as String); null })
@@ -484,55 +428,54 @@ class CoreHost(
         bridge.setProperty("kvMultiSet", guarded { args -> keyValue.multiSet(JSONArray(args[0] as String).let { pairs ->
             List(pairs.length()) { pairs.getJSONArray(it).let { pair -> pair.getString(0) to pair.getString(1) } } }); null })
         bridge.setProperty("kvMultiRemove", guarded { args -> keyValue.multiRemove(stringList(args[0] as String)); null })
-        // Debug builds only (check-ai-device.mjs): RN's AI consent record goes before boot, so the check sees RN's question again.
+
         if (debugFault("ai_consent_reset") == "1") keyValue.remove("mindwtr-ai-provider-consent-v1")
-        // Debug builds only (check-about-device.mjs): the day's heartbeat and the update check's day go before boot, so the check
-        // sees this boot's heartbeat and About's silent check (RN's keys: core's HEARTBEAT_LAST_SENT_DAY_KEY, UPDATE_BADGE_*).
+
+
         if (debugFault("about_reset") == "1") keyValue.multiRemove(listOf("mindwtr-analytics-last-heartbeat-day", "mindwtr-update-last-check",
             "mindwtr-update-available", "mindwtr-update-latest"))
-        // An event for the screens: handed on as text; a listener that throws never reaches JS.
+
         bridge.setProperty("hostEvent", guarded { args -> runCatching { onEvent?.invoke(args[0] as String) }; null })
-        // The pending-captures queue (core's ingestPendingCaptures): app-private files only.
+
         bridge.setProperty("fileList", guarded { args -> files.list(args[0] as String) })
         bridge.setProperty("fileRead", guarded { args -> files.readText(args[0] as String) })
         bridge.setProperty("fileDelete", guarded { args -> queueStop(); files.delete(args[0] as String); null })
-        // Settings › Data's files by handle (DataChannel, pass D1c): Kotlin made every handle; core never names a path.
+
         bridge.setProperty("dataRead", guarded { args -> data.read(args[0] as String) })
         bridge.setProperty("dataWrite", guarded { args -> data.write(args[0] as String, args[1] as String); null })
         bridge.setProperty("dataClose", guarded { args -> data.close(args[0] as String).let { JSONObject().put("bytes", it.bytes).put("sha256", it.sha256).toString() } })
-        // Debug builds only (pass D1c's device checks): a debug property, read by host-entry's delays across engine turns and
-        // its controls (bundle debugProp).
+
+
         if (BuildConfig.DEBUG) bridge.setProperty("debugProp", guarded { args -> debugFault(args[0] as String) })
-        // Debug builds only (step 0 of pass D1c): QuickJS's own memory at a Data operation's checkpoints, in logcat.
+
         if (BuildConfig.DEBUG) bridge.setProperty("memProbe", guarded { args -> Log.i(TAG, "Native Android memory probe at=${args[0]} quickjsMiB=${engine.memoryUsedSize / (1024 * 1024)}"); null })
-        // Core's attachment file port (bundle/host-attachments.ts): each call only starts here; HostIo runs it on its files
-        // thread and the pump settles it, as a fetch. The folders are named as expo-file-system names them.
+
+
         bridge.setProperty("fileCall", guarded { args -> io.file(args[0] as String, files::call) })
-        // RN's attachment installer (HostInstaller): install and hash, on the same thread, after the file calls before them.
+
         bridge.setProperty("installerCall", guarded { args -> io.file(args[0] as String, installer::call) })
-        // File Sync (pass S5): the SAF folder's documents and the folder lock. A call naming a `content://` uri (every document
-        // call, the lock's acquire) runs on a daemon thread of its own; the lock's revalidate and release and the pick slot run
-        // on the files thread. fileAbort ends a call not yet started; a lock release is never cancelled (host-polyfills.js).
+
+
         documents?.let { folder -> bridge.setProperty("documentCall", guarded { args -> io.file(args[0] as String, folder::call) }) }
         syncLock?.let { lock -> bridge.setProperty("syncLockCall", guarded { args -> io.file(args[0] as String, lock::call) }) }
-        // A managed attachment's delete, at once on this thread: core asked who owns the file in this same turn (host-attachments.ts).
+
         bridge.setProperty("fileDeleteNow", guarded { args -> files.deleteNow(args[0] as String); null })
-        // A file call whose operation passed its deadline: HostIo ends it (a copy stalled on a document provider), so the operation
-        // drains and the host never stops (host-polyfills.js fileChannel's cancel).
+
+
         bridge.setProperty("fileAbort", guarded { args -> io.fileAbort(args[0] as String); null })
         bridge.setProperty("fileDirectories", guarded { _ ->
             JSONObject().put("document", files.documentDirectory).put("cache", files.cacheDirectory).toString()
         })
-        // The device calendars (host-calendar.ts): each call only starts here; HostIo runs it on its calendar thread and the pump
-        // settles it, as a fetch. A permission prompt answers when the user does, holding no thread meanwhile.
+
+
         calendars?.let { device -> bridge.setProperty("calendarCall", guarded { args -> io.calendar(args[0] as String, device::call) }) }
-        // Android system search (host-app-search.ts): a call only starts here (on HostIo's calendar thread, as a device calendar
-        // call) and AppSearch answers through the pump; `appSearchInfo` is whether it runs here and the build's link scheme.
+
+
         appSearch?.let { search ->
             bridge.setProperty("appSearchInfo", guarded { _ -> search.info() })
             bridge.setProperty("appSearchCall", guarded { args -> io.calendar(args[0] as String, search::call) })
         }
-        // Reminder alarms (host-reminders.ts): core's plan applied, the notification permission, RN's old alarms cancelled once.
+
         reminders?.let { alarms ->
             bridge.setProperty("alarmApply", guarded { args -> alarms.apply(args[0] as String) })
             bridge.setProperty("notificationsAllowed", guarded { _ -> alarms.permissionGranted() })
@@ -540,57 +483,50 @@ class CoreHost(
             bridge.setProperty("reminderReceiverCounts", guarded { _ -> alarms.receiverCounts() })
             bridge.setProperty("reminderLedger", guarded { _ -> alarms.ledger() })
         }
-        // RN's widget module (HostWidgets): the publication's device inputs, and core's payload to store and draw.
+
         widgets?.let { widgets ->
             bridge.setProperty("widgetInputs", guarded { _ -> widgets.inputs() })
             bridge.setProperty("widgetPublish", guarded { args -> widgets.publish(args[0] as String); null })
             bridge.setProperty("widgetAppState", guarded { _ -> widgets.appState() })
         }
         scheduleBackgroundSync?.let { schedule -> bridge.setProperty("bgSyncSchedule", guarded { args -> schedule(args[0] as Boolean); null }) }
-        // Gmail capture (host-gmail.ts): RN's five authorization calls, each only started here and settled by the pump, as a fetch;
-        // core's receipt store's file calls and SQL at once on this thread, as op-sqlite's executeSync runs on RN's JS thread.
+
+
         gmail?.let { authorization -> bridge.setProperty("gmailCall", guarded { args -> io.gmail(args[0] as String, authorization) }) }
         gmailReceipts?.let { receipts ->
             bridge.setProperty("gmailFile", guarded { args -> receipts.file(args[0] as String, args[1] as String, args[2] as String) })
             bridge.setProperty("gmailSql", guarded { args -> receipts.sql(args[0] as String, args[1] as String, args[2] as String) })
         }
-        // Voice capture (host-voice.ts): the microphone's calls, started here and settled by the pump, as a fetch.
+
         voice?.let { call -> bridge.setProperty("voiceCall", guarded { args -> io.voice(args[0] as String, call) }) }
         engine.globalObject.setProperty("__mindwtrNative", bridge)
-        // The build's flavor (D8): core reads it as RN's isFossBuild.
+
         engine.globalObject.setProperty("__mindwtrFossBuild", BuildConfig.FOSS)
-        // The build's version, channel and endpoints for About, feedback and the heartbeat (host-about.ts).
+
         appInfo?.let { engine.globalObject.setProperty("__mindwtrAppInfo", it) }
     }
 
-    /**
-     * Core's getFocus: its sections in its order, the first [limit] rows of each, for the control state [controls] (JSON; ""
-     * reads the flat Focus) after a control's [controlEdit] (JSON, or ""), with the device's group [folds] (a JSON id array, or "").
-     */
+
     fun focus(limit: Int, controls: String = "", controlEdit: String = "", folds: String = ""): JSONObject =
         callAsync("focus", limit, controls, controlEdit, folds)
 
-    /** Core's getFocusSectionWindow for the same [controls] and [folds]. A changed Focus fails with "STALE_REVISION: …". */
+
     fun focusWindow(key: String, offset: Int, limit: Int, revision: String, controls: String = "", folds: String = ""): JSONObject =
         callAsync("focusWindow", key, offset, limit, revision, controls, folds)
 
-    /** Core's openQuickCapture: the popup's empty draft and its starting options. */
+
     fun openQuickCapture(): JSONObject = callAsync("captureOpen")
 
-    /** Core's getQuickCaptureView with [json] (`{ text, options, picker? }`) unchanged. */
+
     fun quickCaptureView(json: String): JSONObject = callAsync("captureView", json)
 
-    /** Core's editQuickCapture with [json] (`{ text, options, edit, picker? }`) unchanged. */
+
     fun editQuickCapture(json: String): JSONObject = callAsync("captureEdit", json)
 
-    /** Core's submitQuickCapture with [json] unchanged; its captureId makes a retry exact. */
+
     fun submitQuickCapture(json: String): JSONObject = callAsync("captureSubmit", json)
 
-    /**
-     * Core's createQuickCaptureSnapshot, written into [snapshots] through the data channel (pass D1c: the library's text never
-     * crosses into Kotlin) and published as RecoverySnapshots.write would, sparing [protect]; the name written, or null when
-     * core took none.
-     */
+
     fun createQuickCaptureSnapshot(snapshots: File, protect: () -> Set<String>): String? {
         snapshots.mkdirs()
         val written = File(snapshots, ".capture-${java.util.UUID.randomUUID()}.pending")
@@ -601,17 +537,14 @@ class CoreHost(
         } finally { data.drop(handle) }
     }
 
-    /**
-     * RN's export file for [format] ("json", "csv", "tasknotes") written into [file] through the data channel; core refuses a
-     * library over [maxBytes] before it serializes anything. `{ fileName, bytes }`.
-     */
+
     fun dataExport(format: String, file: File, maxBytes: Long): JSONObject {
         val handle = data.openWrite(file, base64 = format == "tasknotes")
         try { return callAsync("dataExportFile", format, handle, maxBytes, deadlineMs = sized(OPERATION_DEADLINE_MS, libraryFileBytes())) }
         finally { data.drop(handle) }
     }
 
-    /** Debug builds (check-data-device D0): [source] read and written back into [copy] through the bridge; `{ bytes, sha256 }` of the copy. */
+
     fun dataChannelRoundTrip(source: File, copy: File): JSONObject {
         val read = data.openRead(source)
         val write = data.openWrite(copy)
@@ -619,155 +552,122 @@ class CoreHost(
         finally { data.drop(read); data.drop(write) }
     }
 
-    /** Core's submitQuickCaptureLines with [json] unchanged; one capture ID per line. */
+
     fun submitQuickCaptureLines(json: String): JSONObject = callAsync("captureLines", json)
 
-    /** Core's submitQuickCapturePickerQuery with [json] unchanged; its requestId makes a create's retry exact. */
+
     fun submitQuickCapturePickerQuery(json: String): JSONObject = callAsync("capturePicker", json)
 
-    /** Core's submitCaptureModal (the capture screen's Save) with [json] unchanged; its captureId makes a retry exact. */
+
     fun submitCaptureModal(json: String): JSONObject = callAsync("captureModalSubmit", json)
 
-    /** Core's submitCaptureModalLines (the capture screen's Create tasks) with [json] unchanged; one capture ID per line. */
+
     fun submitCaptureModalLines(json: String): JSONObject = callAsync("captureModalLines", json)
 
-    /** Core's completeTask; [taskRevision] is the row's: a task changed since is refused (STALE_REVISION). */
+
     fun completeTask(id: String, taskRevision: String): JSONObject = callAsync("complete", id, taskRevision)
 
-    /** Core's undoTaskCompletion with completeTask's `undo` and the task's `id` ([json]): RN's completion Undo. */
+
     fun undoTaskCompletion(json: String): JSONObject = callAsync("completeUndo", json)
 
-    /** Core's undoInboxDecision with a Process Inbox commit's `undoReceipt` ([json]): RN's Undo of that decision. */
+
     fun undoInboxDecision(json: String): JSONObject = callAsync("inboxDecisionUndo", json)
 
-    /** Core's setTaskFocus to the target [focused], at the row's [taskRevision]. A reply with `blocked` wrote nothing. */
+
     fun setTaskFocus(id: String, focused: Boolean, taskRevision: String): JSONObject = callAsync("taskFocus", id, focused, taskRevision)
 
-    /** Core's setProjectFocus to the target [focused], at the row's [projectRevision]. `{ blocked: "" }` wrote nothing. */
+
     fun setProjectFocus(id: String, focused: Boolean, projectRevision: String): JSONObject = callAsync("projectFocus", id, focused, projectRevision)
 
-    /** Core's createProject; [areaId] "" is no area, and [requestId] is kept for the exact retry. */
+
     fun createProject(title: String, areaId: String, requestId: String): JSONObject =
         callAsync("createProject", title, areaId, requestId)
 
-    /** Core's getAreaFilter: the trigger label, the summary, and each option with its `next` selection. */
+
     fun areaFilter(): JSONObject = callAsync("areaFilter")
 
-    /** Core's setAreaFilter with one of getAreaFilter's `next` selections, unchanged. */
+
     fun setAreaFilter(selectionJson: String): JSONObject = callAsync("setAreaFilter", selectionJson)
 
-    /** Core's searchTasks with [json] (`{ query, filters, limit }`) unchanged. */
+
     fun searchTasks(json: String): JSONObject = callAsync("search", json)
 
-    /** Core's saveSearch with [json] (`{ query, name, requestId }`) unchanged. */
+
     fun saveSearch(json: String): JSONObject = callAsync("saveSearch", json)
 
-    /** Core's startInboxProcessing in [mode] ('guided' or 'quick'). */
+
     fun startInboxProcessing(mode: String): JSONObject = callAsync("inboxStart", mode)
 
-    /** Core's getInboxProcessingStep with [json] unchanged: one edit, a mode, or a reload after the editor, for the step on screen. */
+
     fun inboxProcessingStep(json: String): JSONObject = callAsync("inboxStep", json)
 
-    /** Core's commitInboxProcessingStep with [json] unchanged; its requestId makes a retry exact. */
+
     fun commitInboxProcessingStep(json: String): JSONObject = callAsync("inboxCommit", json)
 
-    /** Core's skipInboxProcessingTask with [json] unchanged. */
+
     fun skipInboxProcessingTask(json: String): JSONObject = callAsync("inboxSkip", json)
 
-    /** Core's endInboxProcessing; it writes nothing. */
+
     fun endInboxProcessing(sessionId: String): JSONObject = callAsync("inboxEnd", sessionId)
 
-    /** A Menu tab read (host-entry.ts MENU_READS: the More sheet, the lists, their collections) with [json], its input, unchanged. */
+
     fun menuRead(name: String, json: String): JSONObject = callAsync("menuRead", name, json)
 
-    /** A Menu tab command (host-entry.ts MENU_COMMANDS) with [json] unchanged; its request or capture UUID makes a retry exact. */
+
     fun menuCommand(name: String, json: String): JSONObject = callAsync("menuCommand", name, json)
 
-    /**
-     * A Menu command journaled now, on the caller's thread, ahead of its send: its later [menuCommand] finds the same entry
-     * (the journal never holds a request twice), and a death before then leaves it for the boot's replay. Project details'
-     * edits only: what the user typed is on disk the moment the field lets go or Back is pressed.
-     */
+
     fun journalAhead(name: String, json: String) {
         require(name == "projectEdit") { "$name is not journaled ahead" }
         checkNotNull(journal) { "The write journal is not open" }.append("menuCommand", listOf(name, json))
     }
 
-    /** Core's getTaskEditorModel for one task: its draft, the fields to show by section, and each field's choices. */
+
     fun taskEditorModel(id: String): JSONObject = callAsync("editorModel", id)
 
-    /**
-     * Core's editTaskDraft: the editor model for [draftJson] after one control's edit ([editJson], "" for none), laid out for the
-     * editor's own checklist ([checklistJson], unsaved items included; "" for the saved one).
-     * It writes nothing; the editor saves the returned draft with saveTaskDraft.
-     */
+
     fun editTaskDraft(id: String, draftJson: String, editJson: String, checklistJson: String = ""): JSONObject =
         callAsync("editDraft", JSONObject().put("id", id).put("draft", JSONObject(draftJson))
             .apply { if (editJson.isNotEmpty()) put("edit", JSONObject(editJson)) }
             .apply { if (checklistJson.isNotEmpty()) put("checklist", JSONArray(checklistJson)) }.toString())
 
-    /** Core's getTaskView with [json] (`{ id, draft?, checklist?, offset?, limit?, revision? }`) unchanged: RN's View tab. */
+
     fun taskView(json: String): JSONObject = callAsync("taskView", json)
 
-    /**
-     * Core's editTaskChecklist: one checklist edit ([editJson], "" for none: the Form tab's field as it is) on [draftJson] and
-     * [checklistJson]. It writes nothing; saveTaskDraft saves the checklist with the draft.
-     */
+
     fun editTaskChecklist(id: String, draftJson: String, checklistJson: String, editJson: String): JSONObject =
         callAsync("editChecklist", JSONObject().put("id", id).put("draft", JSONObject(draftJson)).put("checklist", JSONArray(checklistJson))
             .apply { if (editJson.isNotEmpty()) put("edit", JSONObject(editJson)) }.toString())
 
-    /**
-     * Core's resetTaskChecklist, written at once; [requestId] makes a retry only finish a failed save, and [taskRevision] (getTaskView's)
-     * refuses a task changed since (STALE_REVISION).
-     */
+
     fun resetTaskChecklist(id: String, requestId: String, taskRevision: String): JSONObject =
         callAsync("resetChecklist", JSONObject().put("id", id).put("requestId", requestId).put("taskRevision", taskRevision).toString())
 
-    /** Core's getTaskEditorSuggestions for a context, tag, or person input's whole text as typed. */
+
     fun editorSuggestions(id: String, field: String, query: String, limit: Int): JSONObject =
         callAsync("editorSuggestions", id, field, query, limit)
 
-    /**
-     * [baseJson], [patchJson], [checklistJson] and [attachmentsJson] (each half `{ base, value }`, "" when unchanged) go to core's
-     * saveTaskDraft unchanged, in one write; core decides everything. [requestId] makes a repeat answer the first reply (core's receipt).
-     */
+
     fun saveTaskDraft(id: String, baseJson: String, patchJson: String, checklistJson: String, attachmentsJson: String, requestId: String): JSONObject =
         callAsync("saveDraft", JSONObject().put("id", id).put("base", JSONObject(baseJson)).put("patch", JSONObject(patchJson))
             .apply { if (checklistJson.isNotEmpty()) put("checklist", JSONObject(checklistJson)) }
             .apply { if (attachmentsJson.isNotEmpty()) put("attachments", JSONObject(attachmentsJson)) }.put("requestId", requestId).toString())
 
-    /**
-     * The status menu and the Restore and Next swipes: [baseJson] and [patchJson] go to core's updateTask unchanged, with the
-     * request's [requestId].
-     */
+
     fun updateTask(id: String, baseJson: String, patchJson: String, requestId: String): JSONObject =
         callAsync("update", JSONObject().put("id", id).put("base", JSONObject(baseJson)).put("patch", JSONObject(patchJson))
             .put("requestId", requestId).toString())
 
-    /**
-     * Core's ingestPendingCaptures: the queue's captures, check-offs and defers stored, each file deleted once its write is on
-     * disk. A journaled write under [requestId]; its replay drains again, and each item's own id makes that write nothing twice.
-     */
+
     fun ingestPendingCaptures(requestId: String): JSONObject = callAsync("ingest", requestId)
 
-    /**
-     * The widget's queued recordings made into tasks (host-entry.ts ingestAudio, core's ingestPendingAudio). A transcription waits
-     * on the network, so it never holds the engine ([callLong]); not journaled, since each task takes its capture's UUID.
-     */
+
     fun ingestPendingAudio(): JSONObject = callLong("ingestAudio")
 
-    /**
-     * RN's automatic Archive retention (host-entry.ts archiveRetention, core's runArchiveRetention): nothing runs while
-     * [editorOpen], or before this session synced while a backend is selected. `{ outcome, purged, skipped }`. Not journaled: a
-     * run that did not finish runs again from the latest store.
-     */
+
     fun archiveRetention(editorOpen: Boolean): JSONObject = callAsync("archiveRetention", editorOpen)
 
-    /**
-     * A line of the runner's (CoreWork, the queue drain) through core's logger: logcat, and RN's diagnostics log file while Debug
-     * logging is on, its fields in [context]. It never fails its caller: a line that cannot go through core goes to logcat.
-     */
+
     fun logLinkHandoff(outcome: String, surface: String) {
         runCatching { callAsync("logLinkHandoff", outcome, surface) }
     }
@@ -776,96 +676,69 @@ class CoreHost(
         runCatching { callAsync("logLine", message, context.toString()) }.onFailure { Log.i(TAG, "$message $context") }
     }
 
-    /** Core's runContextAutomation with [json] (`{ action, context }`): `{ notification }`, the details to post, or null. */
+
     fun contextAutomation(json: String): JSONObject = callAsync("contextAutomation", json)
 
-    /**
-     * Reminder alarms (bundle/host-reminders.ts): React Native's old alarms cancelled once, core's plan applied now, then again on
-     * core's timers (a store change, the capped window's top-up). `{ active, permissionGranted, ask }`: `ask` while a reminder
-     * feature is on and notifications are not allowed, where RN asks for the permission at start.
-     */
+
     fun remindersStart(): JSONObject = callAsync("remindersStart")
 
-    /** Android system search's start (core's syncWithPreference): a full reindex and live indexing when the switch is on. */
+
     fun appSearchStart(): JSONObject = callAsync("appSearchStart")
 
-    /** After General's system search switch was stored: the index follows it (core's enable or wipe). */
+
     fun appSearchApply(): JSONObject = callAsync("appSearchApply")
 
-    /** Debug device check: the ids in the system search index (`{ ids }`), never titles. */
+
     fun appSearchIds(): JSONObject = callAsync("appSearchIds")
 
-    /**
-     * Core's reminder plan applied now: [mode] "cycle", "rebuild" to remake every alarm (a reboot dropped them, exact alarms were just
-     * allowed), or "fired" to make the daily or weekly alarm [key] that fired again at its next time.
-     */
+
     fun remindersCycle(mode: String, key: String = ""): JSONObject = callAsync("remindersCycle", mode, key)
 
-    /**
-     * The native Pomodoro's alarm plan (core's pomodoroAlarmPlan, PomodoroAlarms.kt): [raw] is the stored record (null for none),
-     * [pending] and [delivered] core's inventories as JSON arrays.
-     */
+
     fun pomodoroAlarmPlan(granted: Boolean, raw: String?, scope: String, pending: String, delivered: String): JSONObject =
         callAsync("pomodoroAlarmPlan", granted, raw, scope, pending, delivered)
 
-    /** A plan's effects are applied and its record stored: core logs the tester's line (`v1.3.8/native-pomodoro-alarm`). */
+
     fun pomodoroAlarmSaved(outcome: String): JSONObject = callAsync("pomodoroAlarmSaved", outcome)
 
-    /** The native Pomodoro card (core's buildNativePomodoroPanel, the session iOS built); [presentation] is `{ collapsed, lastEvent }`. */
+
     fun pomodoroPanelRead(presentation: String): JSONObject = callAsync("pomodoroPanelRead", presentation)
 
-    /** A window of the Pomodoro picker's tasks (core's getPomodoroTaskWindow, RN's card list). */
+
     fun pomodoroTasks(json: String): JSONObject = callAsync("pomodoroTasks", json)
 
-    /** Core's plan for a Pomodoro action ([request]: core's NativePomodoroRequest): `{ kind: "noop" }` or `{ kind: "prepared", planJSON }`. */
+
     fun pomodoroTransitionPrepare(request: String): JSONObject = callAsync("pomodoroTransitionPrepare", request)
 
-    /**
-     * The prepared plan, saved with its receipt in one transaction (the task credit too), journaled: a replay sends the same plan,
-     * which its receipt answers once it landed, and which a moved session refuses (STALE_REVISION, nothing owed).
-     */
+
     fun pomodoroTransitionCommit(planJSON: String): JSONObject = callAsync("pomodoroTransitionCommit", planJSON, false)
 
-    /** RN's Pomodoro alert owed at the upgrade (core's pomodoroLegacyAlert): [raw] RN's record, [upgradedAtMs] when this app replaced RN. */
+
     fun pomodoroLegacyAlert(raw: String?, upgradedAtMs: Long): JSONObject = callAsync("pomodoroLegacyAlert", raw, upgradedAtMs)
 
-    /** A reminder's Done (core's completeReminderTask), journaled under [requestId]: a retry or a replay writes nothing twice. */
+
     fun reminderDone(requestId: String, taskId: String): JSONObject = callAsync("reminderDone", requestId, taskId)
 
-    /** A reminder's Snooze (core's snoozeReminder) with [json] (`{ requestId, requestedAt, details }`), journaled: the alarm to make. */
+
     fun reminderSnooze(json: String): JSONObject = callAsync("reminderSnooze", json)
 
-    /**
-     * The home-screen widgets published now if what they show changed (bundle/host-widgets.ts), and stored and drawn before this
-     * returns: after a CoreWork job, and when the app comes to the front. [leave]: the app left the front, so only a change still
-     * waiting is published (RN's flush); the whole payload is not built again.
-     */
+
     fun refreshWidgets(leave: Boolean = false) {
         if (leave) callAsync("widgetsRefresh", "leave") else {
-            // The build waits for core to be quiet, bounded; leaving the app flushes at once.
+
             awaitQuiet()
             callAsync("widgetsRefresh")
         }
         widgets?.settle()
     }
 
-    /**
-     * Waits on the caller's thread until core is quiet (no call queued, none for [WidgetRefreshGate.QUIET_MS]), at most
-     * [WidgetRefreshGate.MAX_WAIT_MS]: work nothing on screen needs yet (the widget build, a resume's reminder cycle) lets the
-     * screen's reads go first. [stop] true ends the wait at once; the bound counts from [askedAt]; [quietSince] counts as a call
-     * (a resume, before the screen sent its first read). Never on the engine thread.
-     */
+
     fun awaitQuiet(askedAt: Long = SystemClock.uptimeMillis(), quietSince: Long = 0, stop: () -> Boolean = { false }): String {
         if (Thread.currentThread() === engineThread) return "engine"
         return WidgetRefreshGate.await(SystemClock::uptimeMillis, Thread::sleep, { maxOf(lastCallAt, quietSince) }, ::engineBusy, stop, askedAt)
     }
 
-    /**
-     * The first save's one-time work done ahead (core's saveWarm: the store tasks' save rows, then the boot read's fingerprints,
-     * about 108 + 72 ms at 5,000 tasks on the S23), in slices of [SAVE_WARM_SLICE] while the engine is quiet: no call queued and none
-     * for [WidgetRefreshGate.QUIET_MS]. A call that comes waits at most one slice, and the next slice waits for quiet again. Off the
-     * engine thread; it gives up after [SAVE_WARM_MAX_MS] (a save then does the rest itself, as before).
-     */
+
     fun warmFirstSave() {
         if (Thread.currentThread() === engineThread) return
         val startedAt = SystemClock.uptimeMillis()
@@ -879,95 +752,76 @@ class CoreHost(
         }
     }
 
-    /** When a call other than the widget refresh and the save warm last went to the engine (uptime ms), for [WidgetRefreshGate]. */
+
     @Volatile private var lastCallAt = 0L
 
-    /** A task is waiting to run on the engine now (a delayed one, the idle pump or a deadline check, does not count). */
+
     private fun engineBusy(): Boolean = executor.queue.any { (it as? java.util.concurrent.Delayed)?.getDelay(TimeUnit.MILLISECONDS)?.let { d -> d <= 0 } ?: true }
 
-    /** Core's receipts older than 30 days go; ProcessCoreHost calls it once, after a boot replay that left no entry. */
+
     fun pruneReceipts(): JSONObject = callAsync("pruneReceipts")
 
-    /**
-     * Core's setLanguage: [stored] is RN's saved language ("" for none), [system] the device locale tag.
-     * A debug build lets `debug.mindwtr.native.language` replace [stored] for the language check.
-     */
+
     fun language(stored: String, system: String): JSONObject =
         callAsync("language", debugFault("language").ifEmpty { stored }, system)
 
-    /** Core's getStrings for [keys], in the language core chose. */
+
     fun strings(keys: List<String>): JSONObject = callAsync("strings", JSONArray(keys).toString())
 
-    /** RN's theme as core resolves it: [stored] is RN's device-local `@mindwtr_theme` ("" for none). */
+
     fun theme(stored: String): JSONObject = callAsync("theme", stored)
 
-    /** Core's language with a settled synced `settings.language` first ([stored]: RN's device key), and the key's write to mirror it. */
+
     fun languageSaved(stored: String, system: String): JSONObject = callAsync("languageSaved", stored, system)
 
-    /** Core's General row for RN's app lock (its `value` is the stored setting); an owed save does not block it. */
+
     fun appLock(): JSONObject = callAsync("appLock")
 
-    /** Settings › Data's Share log: core's diagnostics log file, made when missing; `path` is null when it cannot be made. */
+
     fun logShare(): JSONObject = callAsync("logShare")
 
-    /**
-     * The library's bytes as SQLite counts them (pages × page size, never the write-ahead log's copies): Settings › Data's transfer
-     * admission, and the measure core's import commit keeps within its Undo's admission (D1b §0 fix 2).
-     */
+
     fun databaseBytes(): Long = callAsync("backupLibraryBytes").getLong("bytes")
 
-    /** Core's failure toast (`{ title, message }`) for a Data operation in [operation] mode that did not land with [error]. */
+
     fun backupFailureModel(operation: String, error: String, limitMb: Long): JSONObject = callAsync("backupDocumentFailureModel", operation, error, limitMb)
 
-    /** Settings › Data's files between this host and core, by handle (pass D1c). */
+
     val data = DataChannel()
 
-    /**
-     * Settings › Data's time budget (BackupBudget, pass D1c §3.4). Debug builds only: `debug.mindwtr.native.budget_ms_per_mib`
-     * replaces its per-MiB rate (the deadline checks of check-data-device.mjs).
-     */
+
     private val budget: BackupBudget get() = debugFault("budget_ms_per_mib").toLongOrNull()?.takeIf { it > 0 }
         ?.let { BackupBudget.DEFAULT.copy(msPerMiB = it) } ?: BackupBudget.DEFAULT
 
-    /**
-     * Debug builds only (check-data-device's controls, pass D1c code review): `debug.mindwtr.native.d1c_control=pre-d1c` or
-     * `fixed-deadlines` gives every Data deadline its value before pass D1c ([old]), so a deadline row must fail under it.
-     */
+
     private fun sized(old: Long, bytes: Long): Long = if (debugFault("d1c_control") in setOf("pre-d1c", "fixed-deadlines")) old else budget.ms(bytes)
 
-    /** [bytes]' budget (an operation's file and library), for the deadline a backup commit freezes into its manifest. */
+
     fun budgetMs(bytes: Long): Long = budget.ms(bytes)
 
     private fun libraryFileBytes(): Long = libraryFileBytes(databaseFile)
 
-    /** [method]'s deadline: a backup commit's is the one frozen in its manifest, on its first send and every replay alike. */
+
     private fun deadline(method: String, args: List<Any?>): Long =
         if (method == BackupOperations.METHOD) frozenBudget(args[0] as String) else deadlineOf(method, args)
 
-    /** Backup commit [reference]'s budget, frozen in its manifest (a debug control's old 120 s). */
+
     private fun frozenBudget(reference: String): Long =
         if (debugFault("d1c_control") in setOf("pre-d1c", "fixed-deadlines")) BACKUP_DEADLINE_MS
         else backups?.budgetMs(reference, budget) ?: BACKUP_DEADLINE_MS
 
-    /** The storage read budget host-entry sizes its loads by (Android only; iOS keeps core's 15 s). */
+
     private fun storageBudget(): String = JSONObject().put("baseMs", budget.baseMs).put("msPerMiB", budget.msPerMiB)
         .put("storageTimeoutMs", budget.ms(libraryFileBytes())).toString()
 
-    /**
-     * Settings › Data: core's preview of the staged copy [file] ([format] "json", "json-restore", or an importer's, whose bytes
-     * go as base64 [base64]), read through the data channel; it writes nothing.
-     */
+
     fun backupInspect(file: File, base64: Boolean, metadataJson: String, format: String): JSONObject {
         val handle = data.openRead(file, base64)
         try { return callAsync("backupDocumentInspectFile", handle, metadataJson, format, deadlineMs = sized(BACKUP_DEADLINE_MS, file.length() + libraryFileBytes())) }
         finally { data.drop(handle) }
     }
 
-    /**
-     * Core's frozen plan for [inputJson] (`{ requestId, mode, snapshotName, metadata, admission }`) from [source]: core writes
-     * the recovery snapshot into [recovery] (null for a snapshot restore) and the plan into [plan], at most [maxPlanBytes], through
-     * the data channel, and answers `{ plan: { bytes, sha256 }, recovery: { bytes, sha256 } | null }`. A failure leaves neither file.
-     */
+
     fun backupPrepare(source: File, base64: Boolean, inputJson: String, recovery: File?, plan: File, maxPlanBytes: Long): JSONObject {
         val handles = ArrayList<String>()
         try {
@@ -978,19 +832,19 @@ class CoreHost(
         } finally { handles.forEach(data::drop) }
     }
 
-    /** The journaled commit of a published plan ([BackupOperations.publish]'s reference); core's reply. */
+
     fun backupCommit(referenceJson: String, snapshotName: String): JSONObject = callAsync("backupDocumentCommit", referenceJson, snapshotName)
 
-    /** Core's result toast for a commit's reply. */
+
     fun backupResultModel(replyJson: String): JSONObject = callAsync("backupDocumentResultModel", replyJson)
 
-    /** RN's last screen at a cold start: `{ route: { pathname, params? } | null }` (core's parseRestorableLastRoute). */
+
     fun sessionRestoreRead(): JSONObject = callAsync("sessionRestoreRead")
 
-    /** Stores the screen on show as RN's last screen (core's buildLastRouteSnapshot); [ageMs] dates it back (debug checks). */
+
     fun sessionRestoreWrite(pathname: String, paramsJson: String, ageMs: Long): JSONObject = callAsync("sessionRestoreWrite", pathname, paramsJson, ageMs)
 
-    /** Before a leftover result offers Undo: core holds the attachment files of recovery snapshot [snapshot] again (`{ held }`). */
+
     fun backupUndoHold(snapshot: File): JSONObject {
         val handle = data.openRead(snapshot, false)
         try {
@@ -998,107 +852,70 @@ class CoreHost(
         } finally { data.drop(handle) }
     }
 
-    /** Core's question before restoring snapshot [name]: [mode] "undo" (a result's Undo) or "restore" (a Recovery snapshots row). */
+
     fun backupSnapshotModel(name: String, mode: String): JSONObject = callAsync("backupSnapshotRestoreModel", name, mode)
 
-    /** Settings › Data's Clear log: core deletes the diagnostics log file. */
+
     fun logClear(): JSONObject = callAsync("logClear")
 
-    /**
-     * Sync (bundle/host-sync.ts), after the boot's validated load and journal replay: core's automatic triggers start and the
-     * app's first sync is asked for. [appState] is RN's AppState ("active" or "background"). Each of these answers the sync
-     * badge and the finished-cycle count (`{ badge, color, cycles }`).
-     */
+
     fun syncStart(appState: String): JSONObject = callAsync("syncStart", appState)
 
-    /** RN's AppState change: resuming or leaving runs core's triggers. */
+
     fun syncAppState(appState: String): JSONObject = callAsync("syncAppState", appState)
 
-    /** The device's network state ([json]: `{ isConnected, isInternetReachable }`, as expo-network reads it). */
+
     fun syncNetwork(json: String): JSONObject = callAsync("syncNetwork", json)
 
-    /** The sync badge and the finished-cycle count now. */
+
     fun syncState(): JSONObject = callAsync("syncState")
 
-    /**
-     * Core's background run (bundle/host-sync.ts backgroundSync) for CoreWork's capture and sync jobs, after the start order:
-     * [trigger] "capture" or "scheduled", [stored] what the queue drains stored. It syncs for up to core's 4 min deadline, so it
-     * never holds the engine ([callLong]); it settles with the run. `{ schedule }`: whether the sync job runs again. Debug builds
-     * only: `debug.mindwtr.native.bgsync_deadline_ms` shortens that deadline, for check-bgsync-device.mjs.
-     */
+
     fun backgroundSync(trigger: String, stored: Int): JSONObject =
         callLong("backgroundSync", trigger, stored, debugFault("bgsync_deadline_ms").toIntOrNull() ?: 0)
 
-    /** A list's pull down to sync (host-sync.ts pullSync): one manual cycle under core's rules, `{ indicator, toast }`; long. */
+
     fun pullSync(): JSONObject = callLong("pullSync")
 
-    /**
-     * A Settings › Sync screen command (host-entry.ts MENU_COMMANDS, one of WriteJournal.UNJOURNALED) with [json] unchanged. It
-     * may sync for minutes, so it never holds the engine ([callLong]); it is never journaled (it can carry a password).
-     */
+
     fun syncCommand(name: String, json: String): JSONObject = callLong("menuCommand", name, json)
 
-    /**
-     * An AI request (host-entry.ts AI_REQUESTS) with [json] unchanged: it waits on the provider for up to RN's longest request
-     * timeout (5 min), so it never holds the engine ([callLong]). It is a read: nothing to journal.
-     */
+
     fun aiRequest(name: String, json: String, handle: LongCall = LongCall()): JSONObject = callLong("aiRequest", name, json, handle = handle)
 
-    /**
-     * A Settings › About request (host-entry.ts ABOUT_REQUESTS) with [json] unchanged: an update check, a feedback send, the
-     * heartbeat, the prompts' active day or the store review's gate. Each may wait on the network, so it never holds the engine
-     * ([callLong]); none is a journaled write.
-     */
+
     fun aboutRequest(name: String, json: String): JSONObject = callLong("aboutRequest", name, json)
 
-    /** One of RN's AsyncStorage values (RnKeyValue), read on the engine thread; null when it has none. */
+
     fun rnValue(key: String): String? = onEngine { keyValue.get(key) }
 
-    /**
-     * An attachment's Download, Open (the bytes first) or the editor's draft settlement (host-entry.ts ATTACHMENT_REQUESTS) with
-     * [json] unchanged: a download waits on the network for minutes, so it never holds the engine ([callLong]). None is a journaled
-     * write: a project download's availability fields are identity-guarded and run again by the next Download or sync.
-     */
+
     fun attachmentRequest(name: String, json: String): JSONObject = callLong("attachmentRequest", name, json)
 
-    /**
-     * Settings › Calendar's device calls and a screen's calendar reload (host-entry.ts CALENDAR_REQUESTS) with [json] unchanged: a
-     * permission prompt waits on the user and Test on every subscription's fetch, so it never holds the engine ([callLong]). None
-     * is a journaled write: the screen's open and Grant access store only RN's device copies, as RN's mount does.
-     */
+
     fun calendarRequest(name: String, json: String): JSONObject = callLong("calendarRequest", name, json)
 
-    /**
-     * Settings › GTD › Capture's Gmail section (host-gmail.ts requests) with [json] unchanged: `{ value }` or `{ errorKey }`. Connect
-     * waits on the account picker and Google's consent screen (up to RN's 180 s), Check now on Gmail, so it never holds the engine
-     * ([callLong]). None is a journaled write.
-     */
+
     fun gmailRequest(name: String, json: String): JSONObject = callLong("gmailRequest", name, json)
 
-    /**
-     * The capture popup's voice calls (host-entry.ts voiceRequest: open, close, start, stop, state). A start waits on the permission
-     * prompt and the microphone, a stop on the save, so neither holds the engine ([callLong]); a save retries by its capture ID.
-     */
+
     fun voiceRequest(name: String, json: String): JSONObject = callLong("voiceRequest", name, json)
 
-    /**
-     * A long call's handle: [cancel] frees the thread that waits on it at once and aborts its operation's signal
-     * (host-entry.ts abort), so its provider call stops. Main thread safe: nothing here waits for the engine.
-     */
+
     class LongCall {
         @Volatile internal var id: String? = null
         @Volatile internal var done: CompletableFuture<String>? = null
         @Volatile internal var cancelled = false
     }
 
-    /** [handle]'s call is no longer wanted (its input changed, its screen closed): see [LongCall]. */
+
     fun cancel(handle: LongCall) {
         handle.cancelled = true
         handle.done?.completeExceptionally(CancellationException("The AI request was cancelled"))
         runCatching { synchronized(lifecycleLock) { if (shutdown == null) executor.execute { abortLong(handle) } } }
     }
 
-    /** Engine thread: [handle]'s operation's signal fires (its answer still settles through the pump, which forgets it). */
+
     private fun abortLong(handle: LongCall) {
         val id = handle.id ?: return
         if (context == null || stopped != null) return
@@ -1106,31 +923,23 @@ class CoreHost(
         handle.done?.completeExceptionally(CancellationException("The AI request was cancelled"))
     }
 
-    /** Core's getProjects: its Active, Deferred, and Archived groups in its order. */
-    /** The Projects list with core's long-press moves (#1263): Android's own read, so iOS's `projects` keys stay exact. */
+
     fun projects(): JSONObject = callAsync("projectList")
 
-    /** Core's getProjectDetail. A changed project fails with "STALE_REVISION: …". */
+
     fun projectDetail(id: String, offset: Int, limit: Int, revision: String): JSONObject =
         callAsync("projectDetail", id, offset, limit, revision)
 
-    /**
-     * Debug-build fault injection for the device checks, and the language override at boot.
-     * Read once per task command, on the engine thread. Release builds return
-     * "" before reading anything, so no property can reach them.
-     */
+
     private fun debugFault(name: String): String = debugProperty(name)
 
-    /**
-     * Debug builds only: with `debug.mindwtr.native.net_check=<port>`, core's WebDAV calls and the secret calls run against
-     * check-net-device.mjs's server on 127.0.0.1:<port> (adb reverse) once, after boot, and log their outcomes.
-     */
+
     private fun netCheck() {
         val port = debugFault("net_check").ifEmpty { return }
         runCatching { callAsync("netCheck", port, deadlineMs = NETWORK_DEADLINE_MS) }
             .onSuccess { Log.i(TAG, "Native Android net check $it") }
             .onFailure { Log.w(TAG, "Native Android net check failed", it) }
-        // Operations past a short deadline: "drain" ends once cancelled; "stuck" cannot, so the host stops and this boot fails.
+
         for (mode in listOf("drain", "stuck")) {
             runCatching { callAsync("netDeadline", port, mode, deadlineMs = 1_500L) }
                 .onFailure { Log.i(TAG, "Native Android net deadline $mode: ${it.message}") }
@@ -1147,15 +956,7 @@ class CoreHost(
         if (ms > 0) Thread.sleep(minOf(ms, 60_000L))
     }
 
-    /**
-     * Every host call. A write ([WriteJournal.WRITES]) is on disk in the journal before the engine sees it, and core's reply
-     * settles it: a final reply drops it, SAVE_FAILED keeps it for the owed retry, and no reply (a timeout, a stopped engine,
-     * process death) keeps it for the next boot's replay.
-     *
-     * A caller off the engine thread never holds the engine while its operation waits (D9): the engine starts the operation and
-     * answers at once when it ended in that turn; otherwise the operation goes on in the pump's turns ([pollCalls]), and the
-     * host calls queued meanwhile run between them. A caller on the engine thread (a nested call) pumps until its answer.
-     */
+
     private fun callAsync(method: String, vararg args: Any?, deadlineMs: Long = deadline(method, args.toList())): JSONObject {
         if (method != "widgetsRefresh" && method != "saveWarm") lastCallAt = SystemClock.uptimeMillis()
         val done = CompletableFuture<JSONObject>()
@@ -1167,35 +968,35 @@ class CoreHost(
             finish(begin(method, args, deadlineMs, done), answerChecked(method, args, deadlineMs))
             return wait()
         }
-        // The caller's whole wait, queue, start and answer, as one trace section (merge profiling).
+
         return traced("core:wait") {
             onEngineQueued {
                 stopped?.let { throw IllegalStateException(it) }
-                // A journaled write waits for the write before it (writeQueue); a read starts now.
+
                 begin(method, args, deadlineMs, done).let { if (writeQueue.admit(it)) start(it) }
             }
             wait()
         }
     }
 
-    /** A host call on its way: its operation's id, its journal entry (a write), the debug stop hook, and its caller's answer. */
+
     private class Call(val method: String, val args: Array<out Any?>, val deadlineMs: Long, val entry: WriteJournal.Entry?, val stop: String,
                        val done: CompletableFuture<JSONObject>) {
         var id = ""
         var deadlineAt = 0L
-        /** Its deadline check, cancelled once it is answered (D9 review: no check outlives its call). */
+
         var deadlineCheck: ScheduledFuture<*>? = null
-        /** The arguments as sent (a backup commit's carry its plan handle, which ends with the call). */
+
         var sent: Array<out Any?> = emptyArray()
     }
 
-    /** Calls whose operation has not answered yet, in start order; engine thread only. */
+
     private val calls = ArrayList<Call>()
 
-    /** Journaled writes start one at a time, in the journal's order (D9a review); engine thread only. */
+
     private val writeQueue = WriteQueue<Call> { it.entry != null }
 
-    /** [call] ended: the write waiting behind it starts in the engine's next task (never inside this call's own poll). */
+
     private fun startNextWrite(call: Call) {
         val next = writeQueue.ended(call) ?: return
         runCatching {
@@ -1206,13 +1007,13 @@ class CoreHost(
         }.onFailure { next.done.completeExceptionally(it) }
     }
 
-    /** [method]'s journal entry on disk (a write) and the debug hooks before its send; engine thread. */
+
     private fun begin(method: String, args: Array<out Any?>, deadlineMs: Long, done: CompletableFuture<JSONObject>): Call {
         val entry = if (method in WriteJournal.WRITES) checkNotNull(journal).append(method, args.toList()) else null
         val stop = if (entry != null) debugFault("journal_stop") else ""
         if (entry != null) {
             checkNotNull(sqlite).failCommits = debugFault("fail_commit") == "1"
-            // A Menu command's own name (`gettingStarted`), never `menuCommand`.
+
             sqlite?.stopAfterCommit = debugFault("commit_stop") == WriteJournal.key(method, args.toList())
             debugDelay("delay_before_ms")
             journalStop(stop, "before", entry)
@@ -1220,7 +1021,7 @@ class CoreHost(
         return Call(method, args, deadlineMs, entry, stop, done)
     }
 
-    /** [call]'s reply [result]: the debug hooks after it, its journal entry settled, then its caller answered; engine thread. */
+
     private fun finish(call: Call, result: JSONObject) {
         call.deadlineCheck?.cancel(false)
         if (call.entry != null) {
@@ -1238,12 +1039,9 @@ class CoreHost(
         startNextWrite(call)
     }
 
-    /**
-     * Starts [call]'s operation. One that ended in this turn is answered now, without pumping: a screen's read never runs the
-     * work queued behind it (a sync's continuation). Otherwise the pump's turns carry it, and a check at its deadline ends it.
-     */
+
     private fun start(call: Call) = traced("core:${call.method}") {
-        // A backup commit's files that fail their identity check are refused here and never sent (answerChecked's rule).
+
         val sent = try { sendArgs(call.method, call.args) } catch (mismatch: BackupOperations.Mismatch) {
             Log.w(TAG, "Native Android backup operation refused before send: ${mismatch.message}")
             finish(call, JSONObject().put("ok", false).put("error", "INVALID_INPUT: Backup operation files do not match"))
@@ -1262,13 +1060,13 @@ class CoreHost(
                 executor.execute { idlePump() }
             }
         }
-        // This start may have finished other calls' operations (a promise they awaited).
+
         settleWatched()
         pollCalls()
         schedulePump()
     }
 
-    /** Answers each call whose operation answered, and ends each one past its deadline; engine thread, after every pump turn. */
+
     private fun pollCalls() {
         if (calls.isEmpty() || context == null || stopped != null) return
         for (call in calls.toList()) {
@@ -1284,10 +1082,7 @@ class CoreHost(
         }
     }
 
-    /**
-     * [call] passed its deadline: its signal fires, its fetches reject and new host calls are refused, so it ends now, before
-     * the failure is reported. One that still has not ended stops the host: no JS runs again, so it never resumes.
-     */
+
     private fun expire(call: Call) {
         call.deadlineCheck?.cancel(false)
         call("cancel", call.id)
@@ -1305,12 +1100,7 @@ class CoreHost(
         startNextWrite(call)
     }
 
-    /**
-     * A long operation (a Sync screen command, an AI request) that never holds the engine: it starts here, then the idle pump and
-     * every other call's pump advance it while the caller waits on this thread. Only an unjournaled write or a read comes here, so
-     * no journaled write skips the journal. Past [SYNC_WAIT_MS] the caller stops waiting; nothing holds the engine, so nothing
-     * needs to stop.
-     */
+
     private fun callLong(method: String, vararg args: Any?, handle: LongCall = LongCall()): JSONObject {
         require(method !in WriteJournal.WRITES || WriteJournal.unjournaled(method, args.toList())) { "$method is a journaled write" }
         check(Thread.currentThread() !== engineThread) { "A long operation is waited for off the engine thread" }
@@ -1321,7 +1111,7 @@ class CoreHost(
             (call(method, *args) as String).also {
                 watched[it] = done
                 handle.id = it
-                // Cancelled before it started: its signal fires now.
+
                 if (handle.cancelled) abortLong(handle)
                 idlePump()
             }
@@ -1329,7 +1119,7 @@ class CoreHost(
         val answer = try {
             done.get(SYNC_WAIT_MS, TimeUnit.MILLISECONDS)
         } catch (_: TimeoutException) {
-            // Past the wait: the operation's signal fires too, so its requests stop (the pump settles and forgets it).
+
             onEngine { abortLong(handle) }
             throw IllegalStateException("Core $method timed out")
         } catch (failure: ExecutionException) {
@@ -1338,29 +1128,25 @@ class CoreHost(
         return replyValue(JSONObject(answer))
     }
 
-    /** A polyfill function the idle pump calls often, kept once per engine (closeOnEngine drops it). */
+
     private fun global(engine: QuickJSContext, name: String): JSFunction = functions.getOrPut("global:$name") { engine.globalObject.getJSFunction(name) }
 
-    /** Hands each long operation that answered to its waiting caller; engine thread. */
+
     private fun settleWatched() {
         if (watched.isEmpty()) return
         for (id in watched.keys.toList()) (call("poll", id) as String?)?.let { watched.remove(id)?.complete(it) }
     }
 
-    /**
-     * Engine work between host calls: due timers (auto-sync's pacing, a debounced save) and the answers of host calls started
-     * outside one (a sync's requests). Engine thread; a stopped or closed host pumps nothing.
-     */
+
     private fun idlePump() {
-        // A pump a host-call answer woke replaces the one scheduled for a timer: schedulePump below sets the next.
+
         pumpTask?.cancel(false)
         pumpTask = null
         pumpAt = Long.MAX_VALUE
         val engine = context ?: return
         if (stopped != null) return
-        // One bounded turn (D9): one answer or due timer at a time (__pumpOne), each timed with the promise jobs it set off
-        // (they run before the call returns), until PUMP_TURN_MS has passed. What is left waits for the next turn, queued
-        // behind the host calls that came meanwhile.
+
+
         val turnStart = SystemClock.uptimeMillis()
         var ran = 0
         runCatching {
@@ -1374,15 +1160,12 @@ class CoreHost(
         settleWatched()
         pollCalls()
         if (context == null || stopped != null) return
-        // The turn ended on its budget with an item just run: there may be more, so the next turn is queued now.
+
         if (ran > 0) runCatching { executor.execute { idlePump() } }
         schedulePump()
     }
 
-    /**
-     * The next idle pump, when the next timer is due (a host call's answer wakes it through HostIo). A pump already due earlier
-     * stays; engine thread.
-     */
+
     private fun schedulePump() {
         val engine = context ?: return
         if (stopped != null) return
@@ -1395,12 +1178,12 @@ class CoreHost(
         pumpTask = executor.schedule({ idlePump() }, delay, TimeUnit.MILLISECONDS)
     }
 
-    /** Operation [method]'s reply, `{ ok, value }` or `{ ok: false, error }`; one past [deadlineMs] is cancelled and throws. */
+
     private fun answer(method: String, args: Array<out Any?>, deadlineMs: Long): JSONObject = traced("core:$method") {
         val id = call(method, *args) as String
         val answer = pumpUntil(id, deadlineMs) ?: run {
-            // Past its deadline: its signal fires, its fetches reject and new host calls are refused, so it ends now, before
-            // the failure is reported. One that still has not ended stops the host: no JS runs again, so it never resumes.
+
+
             call("cancel", id)
             if (pumpUntil(id, DRAIN_MS) == null) {
                 val reason = "Core host stopped: $method did not end after its deadline"
@@ -1413,7 +1196,7 @@ class CoreHost(
             schedulePump()
             throw IllegalStateException("Core $method timed out")
         }
-        // Work this call's pump advanced: a long operation or a waiting call it finished, and the timers it left.
+
         settleWatched()
         pollCalls()
         schedulePump()
@@ -1422,34 +1205,25 @@ class CoreHost(
 
     private fun JSONObject.error(): String? = if (getBoolean("ok")) null else getString("error")
 
-    /** The recovery boot's normal activation (host-entry resumeActivation), once its backup commits settled. Engine thread. */
+
     private fun resumeActivation() {
-        // The library its replays left, read again: activation loads it (pass D1c review 3 #15).
+
         val result = answer("resumeActivation", emptyArray(), sized(OPERATION_DEADLINE_MS, libraryFileBytes()))
         if (!result.getBoolean("ok")) throw IllegalStateException(result.getString("error"))
         activationOwed = false
         Log.i(TAG, "Native Android recovery boot activation resumed")
     }
 
-    /**
-     * Core's reply to a write, on the first send and on the journal's [replay] alike: a success's deviceWrites (a setting's
-     * device-local part) are on disk first (a replay's only for keys no newer write set), then [entry] settles (a replay core
-     * refuses as malformed is set aside); true once it left the journal. A device write that fails throws before the entry
-     * settles, so the entry stays for a retry or the next boot.
-     */
+
     private fun settle(entry: WriteJournal.Entry?, result: JSONObject, replay: Boolean): Boolean {
         result.optJSONObject("value")?.optJSONArray("deviceWrites")?.let { devices.store(it, entry?.sequence, replay) }
         return entry != null && checkNotNull(journal).settle(entry, result.error(), replay)
     }
 
-    /** What one replay did: requests [sent], [dropped] after a final reply, entries [left], and the failure that stopped it. */
+
     data class Replay(val sent: Int, val dropped: Int, val left: Int, val owed: String?)
 
-    /**
-     * The journal's requests, sent again in journal order, one at a time, each exactly as first sent: at boot (ProcessCoreHost,
-     * after the validated load and before any screen gets this host), and as the owed retry of a replay that stopped. A reply
-     * that keeps its entry (SAVE_FAILED), or no reply, stops the replay; that entry and the ones after it wait for the retry.
-     */
+
     fun replayJournal(): Replay = onEngine {
         stopped?.let { throw IllegalStateException(it) }
         Trace.beginSection("core:replayJournal")
@@ -1472,8 +1246,8 @@ class CoreHost(
                 break
             }
             if (WriteJournal.keeps(error)) { owed = error; break }
-            // The recovery boot's last backup commit has its final reply: normal activation (load maintenance) runs now, before
-            // the entries after it, and before sync or any screen.
+
+
             if (index == lastBackup && activationOwed) resumeActivation()
         }
         if (owed == null && activationOwed) resumeActivation()
@@ -1484,11 +1258,7 @@ class CoreHost(
         }
     }
 
-    /**
-     * Debug builds only (check-journal-device.mjs): [stop] is `debug.mindwtr.native.journal_stop`; set to `<at>:<op>`, the
-     * process dies at [at] ("before": the entry is on disk and the engine has not seen it; "after": core replied and the entry
-     * is not settled) of the write [op] (the method, or a Menu command's name). A replay never stops.
-     */
+
     private fun journalStop(stop: String, at: String, entry: WriteJournal.Entry) {
         val op = if (entry.method == "menuCommand") entry.args[0] else entry.method
         if (stop != "$at:$op") return
@@ -1496,11 +1266,7 @@ class CoreHost(
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
-    /**
-     * Debug builds only (check-runner-device.mjs): with `debug.mindwtr.native.queue_stop=delete`, the process dies before a
-     * queue file's delete, so after that item's write and save.
-     */
-    /** Debug builds only (check-runner-device.mjs, an owed drain): `debug.mindwtr.native.fail_kv_set` = 1 refuses an RKStorage write. */
+
     private fun kvFault() = check(debugFault("fail_kv_set") != "1") { "Injected RKStorage write failure" }
 
     private fun queueStop() {
@@ -1509,7 +1275,7 @@ class CoreHost(
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
-    /** Pumps timers and host call answers until operation [id] answers (its JSON), or null once [ms] have passed. */
+
     private fun pumpUntil(id: String, ms: Long): String? {
         val engine = checkNotNull(context)
         val pump = engine.globalObject.getJSFunction("__pumpTimers")
@@ -1519,7 +1285,7 @@ class CoreHost(
             traced("core:pump") { pump.call() }
             (call("poll", id) as String?)?.let { return it }
             val delay = (nextDelay.call() as? Number)?.toLong() ?: 1L
-            // An open fetch or secret call wakes the loop as soon as its answer is queued.
+
             if (io.busy()) io.await(if (delay < 0) 25L else minOf(delay, 25L))
             else if (delay > 0) Thread.sleep(minOf(delay, 25L))
         }
@@ -1537,7 +1303,7 @@ class CoreHost(
         calls.clear()
         writeQueue.close().forEach { it.done.completeExceptionally(IllegalStateException(stopped ?: "Core host is closed")) }
         io.close()
-        // Every File Sync lease this process still holds (its JNI and private authority locks) goes with the host.
+
         runCatching { syncLock?.close() }
         runCatching { gmailReceipts?.close() }
         try {
@@ -1561,10 +1327,7 @@ class CoreHost(
     }
 }
 
-/**
- * A device check's debug property `debug.mindwtr.native.<name>`. Release builds return "" before reading anything,
- * so no property can reach them.
- */
+
 fun debugProperty(name: String): String {
     if (!BuildConfig.DEBUG) return ""
     return runCatching {
@@ -1573,17 +1336,13 @@ fun debugProperty(name: String): String {
     }.getOrDefault("")
 }
 
-/** [work] as an android.os.Trace section named [name] (startup profiling with Perfetto); almost free while no trace records. */
+
 internal inline fun <T> traced(name: String, work: () -> T): T {
     Trace.beginSection(name)
     try { return work() } finally { Trace.endSection() }
 }
 
-/**
- * The JS host's bundle: [hash] is the SHA-256 of its body, from its own first line (BytecodeCache.bundleKey; "" when
- * missing, which turns the cache off), [cache] its compiled form (null: the source runs every start), and [bytes] reads it.
- * The source is read only when it runs or is compiled.
- */
+
 class CoreBundle(val hash: String, val cache: BytecodeCache?, val bytes: () -> ByteArray) {
     fun source(): String = String(bytes(), Charsets.UTF_8)
 }

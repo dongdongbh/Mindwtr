@@ -1,28 +1,5 @@
 #!/usr/bin/env node
 
-// Validates an npm workspace lockfile on two axes:
-//
-//   1. package.json <-> package-lock.json agreement (the original check).
-//   2. The lockfile honors the scalar pins in the ROOT package.json
-//      "overrides" block. Opt-in via --check-overrides, because the mobile
-//      FOSS lock (checked through this same script by
-//      check-mobile-foss-lock-sync.js) is a separate channel that does not
-//      track the root pins.
-//
-// (2) exists because npm never reads the root manifest in this layout, so the
-// npm lockfiles that feed the Flathub source mirror resolved without the
-// security-pin block that Bun applies to every other channel. Without this
-// assertion the two graphs drift apart silently.
-//
-// Divergence policy — a resolved version that differs from its pin is:
-//   - OLDER than the pin  -> FAILURE. This is the direction the pin exists to
-//     prevent; a pinned-out version is back in the graph.
-//   - NEWER than the pin  -> warning. Not a security regression, and forcing
-//     these back down is a separate judgement call.
-//   - OLDER, but on a NESTED path that is dev-only (e.g. eslint's private
-//     minimatch@3.1.5) -> warning by default. These never reach a shipped
-//     bundle, and pinning them would drag a lint-only dependency across a
-//     major version. Set MINDWTR_LOCK_OVERRIDE_STRICT=1 to make them fail.
 
 const fs = require('fs');
 const path = require('path');
@@ -125,8 +102,7 @@ function shouldSkipSpec(spec) {
   return SKIP_SPEC_PREFIXES.some((prefix) => spec.startsWith(prefix));
 }
 
-// Every scalar pin in the root "overrides" block, checked against each resolved
-// copy of that package in the lockfile. See the policy note at the top.
+
 function collectOverrideDivergences(lockJson) {
   const rootPackageJson = readJson(ROOT_PACKAGE_JSON);
   const pins = Object.entries(rootPackageJson.overrides || {})

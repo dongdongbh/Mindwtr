@@ -1,4 +1,3 @@
-//! Desktop prototype. Credentials stay in the OS vault; receipts are private device state.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::RngCore;
 use rusqlite::{params, Connection};
@@ -131,7 +130,6 @@ struct SystemVault {
 }
 impl Vault for SystemVault {
     fn get(&self) -> Result<Option<String>> {
-        // The shared getter treats portable storage as absent; Gmail must fail closed.
         if crate::storage::is_portable_mode() {
             return Err(error("storage"));
         }
@@ -303,7 +301,7 @@ fn receipts(path: &Path) -> Result<Connection> {
             .map_err(|_| error("storage"))?;
         transaction.commit().map_err(|_| error("storage"))?;
     }
-    // An existing receipt file is evidence, even if damaged; never recreate its history.
+
     for (table, expected) in [("receipts", RECEIPTS_SCHEMA), ("control", CONTROL_SCHEMA)] {
         let actual: String = connection
             .query_row(
@@ -340,7 +338,6 @@ impl Context {
         self.current(&mut state, generation).map(|_| ())
     }
     fn set_blocked(&self, state: &mut Runtime, blocked: bool) -> Result<()> {
-        // Runtime stops first even if durable storage is unavailable.
         if blocked {
             state.blocked = true;
         }
@@ -505,7 +502,7 @@ impl Context {
             credentials.enabled = false;
             self.persist(&credentials)?;
             state.credentials = Some(credentials);
-            // A disabled configuration can still verify the selected label.
+
             self.set_blocked(&mut state, false)?;
             generation
         };
@@ -696,7 +693,7 @@ impl Context {
     fn connect(&self, open_browser: impl FnOnce(&str) -> Result<()>) -> Result<GmailStatus> {
         let generation = {
             let mut state = self.lock()?;
-            // Google revocation can revoke the entire grant, including a fresh reconnect.
+
             if state.revoking {
                 return Err(error("network"));
             }
@@ -893,7 +890,7 @@ fn body_text(part: &MimePart, depth: usize) -> Result<Option<String>> {
     if !text.is_empty() {
         return Ok(Some(text.join("\n")));
     }
-    // HTML-only mail is parsed through the existing mail parser's text conversion.
+
     if part.mime_type.eq_ignore_ascii_case("text/html") {
         if part.body.attachment_id.is_some() || (part.body.size > 0 && part.body.data.is_none()) {
             return Err(error("other"));
@@ -1071,8 +1068,6 @@ fn vault_namespace(identifier: &str, config_path: &std::path::Path) -> String {
     digest(&format!("{identifier}:{}", config_path.to_string_lossy()))
 }
 
-/// The keyring entry name of a config path's Gmail vault. Each workspace has
-/// its own config path, so its own entry (#1473).
 pub(crate) fn vault_name(identifier: &str, config_path: &std::path::Path) -> String {
     format!("gmail-capture:{}", vault_namespace(identifier, config_path))
 }
@@ -1527,7 +1522,7 @@ mod tests {
                     .kind,
                 "network"
             );
-            // A second disconnect/cancel cannot release the first request's guard.
+
             context.lock().unwrap().invalidate();
             context.disconnect().unwrap();
             assert!(context.lock().unwrap().revoking);
@@ -1732,9 +1727,8 @@ mod tests {
         for state in ["wrong", "expected"] {
             let mut stream = TcpStream::connect(address).unwrap();
             if state == "expected" {
-                // Queue before completion so another test cannot reuse the closed listener's port.
                 let stream = TcpStream::connect(address).unwrap();
-                // macOS rejects timeout changes after the queued connection has been reset.
+
                 stream
                     .set_read_timeout(Some(Duration::from_secs(1)))
                     .unwrap();

@@ -59,7 +59,7 @@ PY
 
 IFS=$'\t' read -r RUNTIME_ID RUNTIME_VERSION SIMULATOR_NAME SIMULATOR_UDID DEVICE_TYPE <<< "$SELECTION"
 if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ]; then
-  # Never install the smoke app into a developer's persistent simulator.
+
   SIMULATOR_NAME="Mindwtr CI ${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
   SIMULATOR_UDID="$(xcrun simctl create "$SIMULATOR_NAME" "$DEVICE_TYPE" "$RUNTIME_ID")"
 fi

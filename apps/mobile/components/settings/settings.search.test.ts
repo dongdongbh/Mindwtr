@@ -15,9 +15,7 @@ import {
     type SettingsMenuRowId,
 } from './settings.constants';
 
-// Real English translator backed by the actual core en locale table. Mirrors
-// language-context's `t`, which returns the key itself when a translation is
-// missing — so this catches any keyword key that doesn't resolve.
+
 const t = (key: string): string => getEnglishI18nValue(key) ?? key;
 
 const ROW_TITLE_KEY: Record<SettingsMenuRowId, string> = {
@@ -38,11 +36,7 @@ function visibleRowIds(query: string): SettingsMenuRowId[] {
     );
 }
 
-// Snapshot of the hand-authored SETTINGS_MENU_KEYWORD_KEYS this task replaced
-// with a derivation from core's SETTINGS_SEARCH_PAGE_KEYS roster. Pinned
-// verbatim (not re-derived) so the superset check below can't shrink in
-// lockstep with a bug in the new derivation — see COMMON-20260726.md's "a test
-// that iterates the new thing cannot catch the new thing shrinking".
+
 const PREVIOUS_SETTINGS_MENU_KEYWORD_KEYS: Record<SettingsMenuRowId, readonly string[]> = {
     general: [
         'settings.appearance', 'settings.theme', 'settings.language', 'settings.weekStart',
@@ -91,9 +85,8 @@ describe('settings menu search index', () => {
         expect(normalizeSettingsScreen('gtd-task-editor')).toBe('gtd-task-editor');
         expect(normalizeSettingsScreen('unknown')).toBe('main');
     });
-    // Regression guard for the review's HIGH finding: keyword keys were guessed
-    // from desktop naming and silently resolved to nothing. Every listed key
-    // must be a real English translation, or search misses that content.
+
+
     it('every keyword key resolves to a real English translation', () => {
         const unresolved: string[] = [];
         for (const keys of Object.values(SETTINGS_MENU_KEYWORD_KEYS)) {
@@ -105,12 +98,7 @@ describe('settings menu search index', () => {
         expect(unresolved).toEqual([]);
     });
 
-    // The bug this task fixes: the old guard only checked that mobile's keys
-    // RESOLVE, never that they COVER. A key present on desktop and silently
-    // absent from mobile's list was invisible here and nothing failed. This
-    // pins the pre-fix hand-authored list and asserts the new,
-    // core-roster-derived list is a strict superset of it, row by row — never
-    // a same-size "round trip" of the new roster against itself.
+
     it('the new derived roster is a superset of every previously indexed key', () => {
         for (const row of ROW_IDS) {
             const previous = PREVIOUS_SETTINGS_MENU_KEYWORD_KEYS[row];
@@ -120,13 +108,7 @@ describe('settings menu search index', () => {
         }
     });
 
-    // Coverage direction, the actual point of the task: every desktop
-    // settings-search key not on core's exclusion list must have SOME row on
-    // mobile whose keywords resolve to the same English text (mobile
-    // namespaces some labels under settings.mobile.*/gtdMobile.*/syncMobile.*
-    // — a different key, the same text — see settings.constants.ts's
-    // MOBILE_SEARCH_KEY_OVERRIDES). A key silently dropped here means a real
-    // setting becomes unfindable through mobile search.
+
     it('every available desktop settings-search key is discoverable somewhere on mobile', () => {
         const mobileTexts = new Set(
             Object.values(SETTINGS_MENU_KEYWORD_KEYS)
@@ -137,8 +119,8 @@ describe('settings menu search index', () => {
         const missing: string[] = [];
         for (const entry of SETTINGS_SEARCH_INDEX) {
             if (entry.key in SETTINGS_SEARCH_MOBILE_EXCLUSIONS) continue;
-            // Mobile has no background-sync control; scheduling follows the
-            // automatic platform policy and must not lead to a dead result.
+
+
             if (entry.key === 'backgroundSync') continue;
             const text = getEnglishI18nValue(resolveSettingsSearchI18nKey(entry.key));
             if (text && !mobileTexts.has(text)) missing.push(`${entry.key} -> "${text}"`);
@@ -147,27 +129,25 @@ describe('settings menu search index', () => {
     });
 
     it('surfaces the right row for real setting labels and hides unrelated rows', () => {
-        // "pomodoro" is a GTD sub-screen setting, not a menu title.
+
         expect(visibleRowIds('pomodoro')).toEqual(['gtd']);
-        // The exact content the review flagged as missing before the fix:
+
         expect(visibleRowIds('todoist')).toEqual(['data']);
         expect(visibleRowIds('ticktick')).toEqual(['data']);
         expect(visibleRowIds('omnifocus')).toEqual(['data']);
-        // "areas" is a Manage sub-setting (areas.manage -> "Areas").
+
         expect(visibleRowIds('areas')).toEqual(['manage']);
-        // AI provider indexed on the Advanced row.
+
         expect(visibleRowIds('anthropic')).toEqual(['advanced']);
         expect(visibleRowIds('official website')).toEqual(['about']);
     });
 
-    // The mobile-only settings this task found genuinely missing from search
-    // despite existing (with working i18n keys) on their own screens.
+
     it('finds the settings this task discovered were missing from the mobile index', () => {
         expect(visibleRowIds('clean up quick add')).toEqual(['gtd']);
         expect(visibleRowIds('editor typing help')).toEqual(['gtd']);
-        // Android-only, so it is absent from desktop's roster and no derived
-        // key covers it — general-settings-screen renders it behind
-        // isAppSearchSupported().
+
+
         expect(visibleRowIds('expose to system search')).toEqual(['general']);
     });
 
@@ -187,18 +167,16 @@ describe('settings menu search index', () => {
         expect(text).toContain('pomodoro timer');
     });
 
-    // #884 follow-up: the row still navigates to its sub-screen, but while
-    // searching its second line names the setting that matched and the path to
-    // it — the same "Page → Section" data desktop shows in its results list.
+
     it('reports which setting matched a row and where it lives', () => {
         expect(findSettingsMenuMatch('gtd', t('settings.gtd'), t, 'clean up quick add')).toEqual({
             title: 'Clean up quick add text',
             path: 'GTD → Default capture method',
         });
-        // Preset editing is retired; estimates remain available on tasks, but
-        // Settings no longer advertises a configuration destination for them.
+
+
         expect(findSettingsMenuMatch('gtd', t('settings.gtd'), t, 'estimate')).toBeNull();
-        // A row that matched on its own title has no inner setting to report.
+
         expect(findSettingsMenuMatch('gtd', t('settings.gtd'), t, 'gtd')).toBeNull();
         expect(findSettingsMenuMatch('gtd', t('settings.gtd'), t, '  ')).toBeNull();
     });

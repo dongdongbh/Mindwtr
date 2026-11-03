@@ -283,7 +283,7 @@ describe('Sync document lifecycle', () => {
                 createdAt: '2026-07-01T10:00:00.000Z', updatedAt: '2026-07-02T11:00:00.000Z',
             },
         ]);
-        // Two peers repairing the same raw document must publish the same bytes.
+
         expect(second.data).toEqual(first.data);
         expect(() => toRemoteSyncDocument(first.data)).not.toThrow();
         expect(parseSyncDocument(structuredClone(first.data), 'remote')).toEqual({ ok: true, data: first.data });

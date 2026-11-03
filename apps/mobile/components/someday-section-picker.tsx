@@ -27,7 +27,7 @@ type SomedaySectionPickerProps = {
   optionsStyle?: StyleProp<ViewStyle>;
   optionStyle?: StyleProp<ViewStyle>;
   optionTextStyle?: StyleProp<TextStyle>;
-  /** Open the existing name prompt directly from a list-level New section action. */
+
   createOnly?: boolean;
   onCancelCreate?: () => void;
 };

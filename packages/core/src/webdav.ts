@@ -29,8 +29,8 @@ import {
 import { encryptSyncArtifact, inspectSyncArtifact, SYNC_ARTIFACT_MAGIC_TEXT, SyncCryptoUnsupportedError, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
 
 export interface WebDavOptions {
-    /** Download ceiling for this call. Defaults to the per-attachment cap; the sync
-     *  document is not an attachment and passes MAX_SYNC_DOCUMENT_BYTES instead. */
+
+
     maxBytes?: number;
     username?: string;
     password?: string;
@@ -41,14 +41,11 @@ export interface WebDavOptions {
     onProgress?: (loaded: number, total: number) => void;
     allowInsecureHttp?: boolean;
     allowWeakFingerprint?: boolean;
-    /** Internal one-shot write mode. A legacy plaintext document without a usable
-     * generation cannot safely retry after an ambiguous response. */
+
+
     disableParentCollectionRetry?: boolean;
-    /** Fence reads only: a body larger than maxBytes cannot be a fence record, and some
-     * servers (Koofr, #1113) answer the GET for a missing file with a large HTML page
-     * instead of 404. Reports such a response as an absent file; the caller's create-only
-     * conditional write still guards against a real racing peer. Never set this for a
-     * document read - an oversized document must fail, not read as absent. */
+
+
     treatOversizeAsAbsent?: boolean;
 }
 
@@ -64,7 +61,7 @@ export type RemoteJsonWriteResult = RemoteFileMetadata;
 
 export type WebDavDocumentVersion = {
     exists: boolean;
-    /** A syntactically valid strong ETag, or null when the server did not supply one. */
+
     strongEtag: string | null;
 };
 
@@ -94,8 +91,7 @@ class WebDavSyncDocumentReadError extends Error {
     }
 }
 
-/** Accept only RFC-style strong entity tags. Weak, unquoted, empty, or control-bearing
- * values are not safe compare-and-swap validators. */
+
 export const normalizeStrongWebdavEtag = (raw: string | null | undefined): string | null => {
     const value = raw?.trim() ?? '';
     if (value.length < 2 || /^W\//i.test(value) || value[0] !== '"' || value[value.length - 1] !== '"') {
@@ -109,8 +105,7 @@ export const normalizeStrongWebdavEtag = (raw: string | null | undefined): strin
     return value;
 };
 
-/** Native WebDAV appends the same marker to invalid-JSON errors so the renderer can
- * preserve the GET validator before the shared repair path catches the error. */
+
 export const getWebdavDocumentVersionFromError = (error: unknown): WebDavDocumentVersion | null => {
     if (error instanceof WebDavSyncDocumentReadError) return error.documentVersion;
     const message = error instanceof Error ? error.message : String(error ?? '');
@@ -170,12 +165,8 @@ function encodeBase64Utf8(value: string): string {
 }
 
 function buildHeaders(options: WebDavOptions): Record<string, string> {
-    // Android's fetch (OkHttp) adds `Accept-Encoding: gzip` on its own, and a
-    // compressing proxy in front of the server (nginx, Cloudflare) then serves
-    // `data.json` with a weak `W/"…"` ETag while the octet-stream probe file
-    // keeps a strong one. Desktop's reqwest never asks for compression, so the
-    // same server passed there and failed only on Android (#1056). Conditional
-    // writes need the strong ETag, so ask for the bytes as stored.
+
+
     const headers: Record<string, string> = { 'Accept-Encoding': 'identity', ...(options.headers || {}) };
     if (options.username && typeof options.password === 'string') {
         headers.Authorization = `Basic ${encodeBase64Utf8(`${options.username}:${options.password}`)}`;
@@ -213,10 +204,7 @@ type HttpRemoteFileFingerprintOptions = {
     warnOnceKey?: string;
 };
 
-// Nextcloud/ownCloud users paste the browser address of the Files app
-// (…/apps/files/… or …?dir=/Folder) instead of the WebDAV endpoint; every
-// request then 404s with an unactionable "MKCOL failed (404)" (#1084).
-// Kept under 200 chars: the desktop probe toast slices reasons to 200.
+
 const WEBDAV_WEB_UI_URL_ERROR = 'This looks like the Nextcloud/ownCloud web page address, not a WebDAV address. Copy the WebDAV URL from Files → File settings (like https://server/remote.php/dav/files/USERNAME/).';
 
 const looksLikeWebUiUrl = (url: string): boolean => {
@@ -301,9 +289,7 @@ export const __webdavTestUtils = {
     resetWeakFingerprintWarnings: () => warnedWeakFingerprintSources.clear(),
 };
 
-// String surgery, not URL component mutation: React Native's URL classes
-// serialize the original href after `pathname = ...`, so the parent of
-// `/dav/data.json` came back as `/dav/data.json` on mobile (#1132).
+
 const getWebdavParentCollectionUrl = (url: string): string | null => {
     try {
         const suffixStart = url.search(/[?#]/);
@@ -403,9 +389,8 @@ const ensureWebdavParentCollectionsBeforePut = async (
     try {
         await ensureWebdavParentCollections(url, options);
     } catch (error) {
-        // Some WebDAV servers report an ambiguous MKCOL 409 for an existing
-        // collection that cannot be verified with PROPFIND. Retry the PUT and
-        // let that final response decide whether the upload can proceed.
+
+
         if (!isWebdavMkcolConflictError(error)) {
             throw error;
         }
@@ -590,7 +575,7 @@ const fetchWebdavPutAndConsumeError = async (
     },
 );
 
-/** One GET supplies both document bytes and the strong validator governing the later PUT. */
+
 async function webdavGetVersionedBytesOrNull(
     url: string,
     options: WebDavOptions,
@@ -613,8 +598,8 @@ async function webdavGetVersionedBytesOrNull(
                 throw error;
             }
             const strongEtag = normalizeStrongWebdavEtag(res.headers.get('etag'));
-            // [preferText]: a body the host already decoded is plaintext unless it starts with the artifact magic; one that
-            // does is read again as its exact bytes and inspected whole (the native hosts' Response reads a second time).
+
+
             const text = preferText ? await readDecodedResponseText(res, MAX_SYNC_DOCUMENT_BYTES, signal) : null;
             if (text !== null && !text.startsWith(SYNC_ARTIFACT_MAGIC_TEXT)) return { bytes: null, text, exists: true, strongEtag };
             return {
@@ -687,34 +672,25 @@ async function putWebdavBytes(
 }
 
 export type WebDavSyncDataOptions = WebDavOptions & {
-    /** Full key material (key + salt + params, e.g. from the local key cache combined
-     *  with the locally-recorded salt/params). Omitting this is the encryption-off path
-     *  and is byte-for-byte identical to calling webdavGetJson/webdavPutJson directly —
-     *  same URL, same request shape, same errors (backward-compat invariant #1). */
+
+
     material?: SyncKeyMaterial;
     cryptoPrims?: SyncCryptoPrimitives;
-    /** null creates only if absent; a strong ETag replaces only that exact generation.
-     * Required by webdavPutSyncDocument and ignored by reads. */
+
+
     expectedEtag?: string | null;
-    /** Explicit compatibility path for an existing plaintext document on a
-     * provider that supplies no strong ETag. Callers must reread and compare the
-     * remote snapshot immediately before writing. It is deliberately one-shot
-     * and is rejected whenever encryption material is present. */
+
+
     legacyUnconditionalPlaintext?: boolean;
 };
 
 export type WebDavSyncDataResult<T> = WebDavDocumentVersion & (
     | { state: 'data'; data: T | null }
-    /** The remote has a valid `.enc` (or, defensively, plain-named ciphertext) artifact
-     *  this call has no key for. Callers persist this via
-     *  sync-encryption.ts's markRemoteEncryptionDiscovered and must not treat it as
-     *  "no data" or attempt any repair/rotation. */
+
+
     | { state: 'encrypted-no-key'; salt: Uint8Array; params: import('./sync-crypto').SyncCryptoKdfParams }
-    /** This call has a key, the `.enc` artifact is gone, and a plaintext document is in its
-     *  place: a peer disabled encryption at the sync location. Callers persist this via
-     *  sync-encryption.ts's markRemotePlaintextDiscovered and abort the cycle — merging would
-     *  fork the folder, and writing plaintext would let whoever removed the ciphertext strip
-     *  encryption from every device. */
+
+
     | { state: 'remote-plaintext' }
 );
 
@@ -722,19 +698,7 @@ const unexpectedWebdavArtifact = (message: string): never => {
     throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(message));
 };
 
-/**
- * Encryption-aware sync-document read. `url` is always the PLAIN document URL — this
- * function derives the `.enc` URL itself when `material` is supplied.
- *
- * Detection of a peer that already enabled encryption (decision #2): only probed when
- * `material` is absent AND the plain read comes back empty/missing, which is exactly
- * the "nothing here" shape a first-sync or a post-enable plaintext-deleted remote both
- * produce — an existing, steadily-syncing plaintext installation's plain read succeeds
- * every cycle and never reaches the probe, so it costs that install nothing (invariant
- * #1). A plain-named body that fails JSON.parse is also inspected for MWENC1 magic
- * before falling back to the existing "invalid JSON" error, per decision #4: ciphertext
- * is never treated as corrupt JSON to repair.
- */
+
 export async function webdavGetSyncDocument<T>(
     url: string,
     options: WebDavSyncDataOptions = {},
@@ -743,9 +707,8 @@ export async function webdavGetSyncDocument<T>(
     if (material) {
         const remote = await webdavGetVersionedBytesOrNull(syncEncryptedArtifactName(url), webdavOptions);
         if (!remote.bytes) {
-            // Mirror of the off-state probe below, in the other direction, and gated the same
-            // way: only the "nothing at my name" shape pays for it, so a healthy encrypted
-            // install never reaches it.
+
+
             const plain = await webdavGetVersionedBytesOrNull(url, webdavOptions);
             if (isPlaintextSyncArtifact(plain.bytes)) {
                 return { state: 'remote-plaintext', exists: true, strongEtag: plain.strongEtag };
@@ -757,9 +720,8 @@ export async function webdavGetSyncDocument<T>(
             }
             return { state: 'data', data: null, exists: false, strongEtag: null };
         }
-        // Sealed under another salt = this device's key is for a different encryption
-        // generation; report it as a no-key discovery (which can prompt for the passphrase)
-        // instead of decrypting into a dead-end Auth failure.
+
+
         const foreign = detectForeignSaltArtifact(remote.bytes, material);
         if (foreign) return { state: 'encrypted-no-key', salt: foreign.salt, params: foreign.params, exists: true, strongEtag: remote.strongEtag };
         const plaintext = await decryptRemoteArtifactOrThrow(remote.bytes, material.key, cryptoPrims);
@@ -935,9 +897,7 @@ export async function webdavPutFile(
     }
 }
 
-/** Versioned byte read for encryption transitions. The strong ETag comes from the same
- * GET response as the bytes; an existing response without one is returned explicitly so
- * the transition can refuse an unsafe mutation. */
+
 export async function webdavGetFileVersionedWithServerTime(
     url: string,
     options: WebDavOptions = {},
@@ -982,7 +942,7 @@ export async function webdavGetFileVersionedWithServerTime(
     );
 }
 
-/** Compatibility shape for transition callers that only need bytes + strong generation. */
+
 export async function webdavGetFileVersioned(
     url: string,
     options: WebDavOptions = {},
@@ -1043,9 +1003,8 @@ const removeAccidentalWebdavProbeResidue = async (
     if (!current.version) {
         throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV capability-probe residue');
     }
-    // A short-lived Android URL fallback regression could serialize the unique probe URL
-    // back to data.json. Remove only our three byte-exact probe bodies, and only against
-    // the generation read with those bytes, so a concurrent repair wins instead.
+
+
     await webdavDeleteFileVersioned(documentUrl, current.version, options);
     return true;
 };
@@ -1130,8 +1089,8 @@ const assertWebdavConditionalWriteSupport = async (
         created = false;
     } finally {
         if (created && hasSafeProbeVersion) {
-            // Cleanup is never unconditional. Reread because a server that ignored one of
-            // the deliberate conflicts may have advanced the unique probe generation.
+
+
             const latest = await webdavGetFileVersioned(probeUrl, options).catch(() => null);
             if (latest?.bytes && latest.version) {
                 await webdavDeleteFileVersioned(probeUrl, latest.version, options).catch(() => undefined);
@@ -1146,10 +1105,7 @@ export type WebdavSyncCompatibilityPolicy = {
     requireStrongEtag?: boolean;
 };
 
-/** Validates the ordinary plaintext endpoint and reports whether it supports the full
- * generation contract. Legacy mode is observational only. When encryption requires
- * strong ETags, an absent data.json runs the unique conditional-write probe instead of
- * being mistaken for a legacy server; existing unversioned bytes still fail before any write. */
+
 export async function probeWebdavSyncCompatibility(
     documentUrl: string,
     options: WebDavOptions = {},
@@ -1180,13 +1136,8 @@ export async function probeWebdavSyncCompatibility(
     try {
         await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
     } catch (error) {
-        // Observational mode (encryption off): a server can serve strong ETags yet
-        // fail the conditional-write proof (Fastmail accepts a create that
-        // If-None-Match: * must refuse, #1113). Before rc.2->1.2.5 asked for
-        // uncompressed responses (942afdd84), such servers arrived with weak ETags
-        // and were classed legacy without any probe write, and plaintext sync worked.
-        // Keep that posture: class them legacy instead of failing the cycle. With
-        // encryption required the proof stays mandatory, so the error propagates.
+
+
         if (!policy.requireStrongEtag && error instanceof SyncEncryptionRemoteVersionUnavailableError) {
             return 'legacy-plaintext';
         }
@@ -1195,10 +1146,7 @@ export async function probeWebdavSyncCompatibility(
     return 'strong-etag';
 }
 
-/** Preflights the generation contract required by encrypted WebDAV sync and encryption
- * transitions. An existing document must carry a strong ETag. A unique probe then proves
- * create-only, stale-replacement, and stale-delete conditions are enforced, not merely accepted as headers.
- * Cleanup rereads and conditionally deletes the probe; it never issues an unguarded delete. */
+
 export async function assertWebdavStrongEtagSupport(
     documentUrl: string,
     options: WebDavOptions = {},
@@ -1214,15 +1162,14 @@ export async function assertWebdavStrongEtagSupport(
     }
     if (current.bytes !== null) {
         if (!current.version) throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
-        // Preserve the previous Test Connection contract: the exact GET that proves a
-        // strong generation must also prove that every non-empty data.json body is JSON.
-        // Empty/whitespace-only bodies remain accepted, including after a UTF-8 BOM.
+
+
         parseOptionalWebdavJson(new TextDecoder().decode(current.bytes));
     }
     await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
 }
 
-/** CAS byte write used only by encryption transitions. `null` is create-only. */
+
 export async function webdavPutFileVersioned(
     url: string,
     data: ArrayBuffer | Uint8Array | Blob,
@@ -1303,15 +1250,7 @@ export async function webdavHeadFile(
     });
 }
 
-/**
- * Proves a streamed upload landed where it was sent. expo-file-system's upload task follows a
- * redirect by itself: a 307 or 308 stores the file at another URL and a 303 stores nothing,
- * yet the task answers 2xx. Confirmed when a HEAD answers 2xx from this same URL (not after a
- * redirect, by core's write-redirect comparison) and, when it states a size, the uploaded
- * size; reads already ask for `Accept-Encoding: identity`, so a compressing server reports
- * the stored length. A redirected HEAD (a download CDN, or a write redirect) proves nothing
- * either way and is reported as such.
- */
+
 export async function webdavConfirmUploadedFile(
     url: string,
     expectedBytes: number,
@@ -1377,8 +1316,7 @@ export async function webdavDeleteFile(
     );
 }
 
-/** Conditional delete for an artifact whose strong ETag was captured by the transition
- * read. Missing or changed targets are conflicts, never idempotent success. */
+
 export async function webdavDeleteFileVersioned(
     url: string,
     expectedEtag: string,

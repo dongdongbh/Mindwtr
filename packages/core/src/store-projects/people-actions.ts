@@ -28,7 +28,7 @@ export const resolvePersonAddition = (people: readonly Person[], name: string): 
         ?? people.find((person) => person.deletedAt && matches(person)) ?? null;
 };
 
-/** The RN addPerson policy, retaining arbitrary initialProps and omitted metadata. */
+
 export function planPersonAddition(people: readonly Person[], name: string, props: Partial<Person> | undefined,
     id: string, deviceId: string, now: string):
     { kind: 'live' | 'fresh' | 'restored'; before: Person | null; person: Person } | null {
@@ -50,7 +50,7 @@ export function planPersonAddition(people: readonly Person[], name: string, prop
     return { kind: before ? 'restored' : 'fresh', before, person };
 }
 
-/** Reuse the Manage editor's omission of blank fields, especially on restoration. */
+
 export function personCreateProps(request: { name: string; note: string; referenceLink: string }): Partial<Person> | undefined {
     const write = planManageEditorSave({ type: 'newPerson' }, { ...request, color: '' }, {})?.[0];
     return write?.kind === 'addPerson' ? write.props : undefined;
@@ -59,14 +59,14 @@ export function personCreateProps(request: { name: string; note: string; referen
 export const samePersonAdditionRow = (left: Person, right: Person): boolean =>
     taskEditValuesEqual(personToSqliteRow(left, left.updatedAt), personToSqliteRow(right, right.updatedAt));
 
-/** Canonical persisted fields only; SQLite NULL optional values become omitted JSON keys. */
+
 export function personPersistedSnapshot(person: Person): Person {
     const values = personToSqliteRow(person, person.updatedAt);
     return JSON.parse(JSON.stringify(personFromSqliteRow(Object.fromEntries(
         PERSON_SQLITE_COLUMNS.map((column, index) => [column, values[index]])), person.updatedAt))) as Person;
 }
 
-/** Deleting a managed Person retains every Task's raw assignment and contexts. */
+
 export const personDeleteUpdates = (now: string): Pick<Person, 'deletedAt'> => ({ deletedAt: now });
 
 export function personDeleteEffect(person: Person, deviceId: string, now: string): PreparedPersonDelete['effect'] {
@@ -91,7 +91,7 @@ export const createPeopleActions = ({
             const people = planned.before
                 ? replaceEntitiesInArray(state._allPeople, [planned.person])
                 : [...state._allPeople, planned.person];
-            // Retain the previous restore result when initialProps changes the row's ID.
+
             person = planned.before && planned.before.id !== planned.person.id ? null : planned.person;
             persist(set, debouncedSave, state, { people, ...(device.updated ? { settings: device.settings } : {}) });
             return { _allPeople: people, lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt),
@@ -194,8 +194,8 @@ export const createPeopleActions = ({
             const people = replaceEntitiesInArray(durablePeople, effect.people.map(({ after }) => after));
             const tasks = replaceEntitiesInArray(durable.tasks, effect.tasks.map(({ after }) => after));
             const settings = input.deviceIdToInitialize ? { ...durable.settings, deviceId: input.deviceIdToInitialize } : durable.settings;
-            // Persist complete durable rows; display-only load cleanup is not a write.
-            // Changed Tasks keep that existing UI projection except for rename policy fields.
+
+
             const memoryTasks = tasks.map((row) => {
                 const existing = state._allTasks.find((candidate) => candidate.id === row.id);
                 const pair = effect.tasks.find(({ after }) => after.id === row.id);

@@ -4,7 +4,7 @@ import { buildPomodoroAlarmDetails, isExplicitPomodoroAlarmCancellation, isPomod
 import { decodeNativePomodoroSession } from './native-pomodoro-session';
 import type { AppSettings } from './types';
 
-/** Saved timer policy only. Native owns permission, durable publication and notification inventory. */
+
 export function buildNativePomodoroAlarmIntent(input: {
     raw: string | null; settings: AppSettings; nowMs: number; t: (key: string) => string;
 }) {
@@ -13,7 +13,7 @@ export function buildNativePomodoroAlarmIntent(input: {
     const cancel = (reason: 'completion-alert-off' | 'timer-not-running') => ({
         kind: 'cancel' as const, reason, preserveDue: !isExplicitPomodoroAlarmCancellation(reason), observedAtMs: input.nowMs,
     });
-    // Explicit off may withdraw owned alarms even when timer storage cannot be decoded.
+
     if (input.settings.gtd?.pomodoro?.completionAlert === false) return cancel('completion-alert-off');
     if (input.raw === null) return { kind: 'uninitialized' as const };
     const state = decodeNativePomodoroSession(input.raw), session = state.session;
@@ -29,17 +29,10 @@ export function buildNativePomodoroAlarmIntent(input: {
         details: buildPomodoroAlarmDetails(title, message, { phase: phase + '-complete' }) };
 }
 
-/** RN's own late limit (its library's discardStaleOneShot): an alert more than a day late is dropped. */
+
 export const NATIVE_POMODORO_LATE_LIMIT_MS = 24 * 60 * 60 * 1000;
 
-/**
- * The RN Pomodoro alert owed at the native Android upgrade. RN's alarm that fell due after the native app replaced RN
- * (`upgradedAtMs`: PackageInfo.lastUpdateTime at the first native start, never firstInstallTime, which is RN's) and
- * before its first start was dropped, because RN's receiver is gone. It is shown once at that start (the host's delivery
- * ledger keeps it to once: RN's record does not change), at most a day late, as RN's boot receiver would show it. An
- * alarm due before the upgrade was RN's to show; one still ahead is armed from the adopted session. `raw` is RN's stored
- * record (POMODORO_ALARM_STORAGE_KEY).
- */
+
 export function buildNativePomodoroLegacyAlert(input: {
     raw: string | null; settings: AppSettings; nowMs: number; upgradedAtMs: number; t: (key: string) => string;
 }) {

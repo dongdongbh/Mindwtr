@@ -57,7 +57,7 @@ const asError = (value: unknown): Error => (
     value instanceof Error ? value : new Error(String(value))
 );
 
-/** Remove first, then parse. A malformed or stale request always boots personal. */
+
 export async function consumeMobileSandboxBootRequest(
     storage: BootRequestStorage = AsyncStorage,
 ): Promise<{ settings: AppSettings | null; error?: Error }> {
@@ -71,7 +71,7 @@ export async function consumeMobileSandboxBootRequest(
     return { settings: parseSandboxBootRequest(raw) };
 }
 
-/** Configure the one storage adapter this JS runtime will use before hydration. */
+
 async function initializeMobileWorkspaceFromStorage(
     storage: BootRequestStorage = AsyncStorage,
 ): Promise<MobileWorkspaceBootstrap> {
@@ -98,7 +98,7 @@ async function initializeMobileWorkspaceFromStorage(
     };
 }
 
-/** Strict Mode may remount the gate; consume and initialize exactly once per JS runtime. */
+
 export function initializeMobileWorkspace(
     storage: BootRequestStorage = AsyncStorage,
 ): Promise<MobileWorkspaceBootstrap> {
@@ -134,11 +134,7 @@ const assertBeforeDeadline = (deadline: WorkspaceTransitionDeadline): void => {
     if (Date.now() >= deadline.expiresAt) throw new WorkspaceTransitionTimeoutError();
 };
 
-/**
- * A timed-out AsyncStorage write cannot be cancelled. Keep the exclusive lease
- * until that exact write settles and its exact value is gone, so a late write
- * cannot resurrect a boot request or race a retry. Cleanup failure stays locked.
- */
+
 const cleanOwnedBootRequestThenRelease = (
     writePromise: Promise<void>,
     request: string,
@@ -157,7 +153,7 @@ const cleanOwnedBootRequestThenRelease = (
             releaseTransitionLock();
         })
         .catch(() => {
-            // Fail closed. A possibly-live request must keep the transition lease.
+
         });
 };
 
@@ -199,7 +195,7 @@ const assertPersistenceHealthy = (status: PersistenceStatus): void => {
     if (status.failed) throw new Error('Personal data has unsaved changes');
 };
 
-/** Flush until the read-only status is idle and remains idle for a microtask turn. */
+
 const waitForStablePersistence = async (
     dependencies: WorkspaceSwitchDependencies,
     deadline: WorkspaceTransitionDeadline,
@@ -220,7 +216,7 @@ const waitForStablePersistence = async (
     }
 };
 
-/** An admitted sync may merge after the first flush, and its save may queue native work. */
+
 const drainPersonalWorkspace = async (
     dependencies: WorkspaceSwitchDependencies,
     deadline: WorkspaceTransitionDeadline,
@@ -328,7 +324,7 @@ export async function reloadIntoMobileSandbox(
                 },
             });
         }
-        // Keep the transition lease through reload. The new JS runtime owns the next workspace.
+
         await dependencies.reload();
     } catch (error) {
         setWorkspaceSwitching(false);
@@ -370,7 +366,7 @@ export async function reloadIntoPersonalWorkspace(
         setWorkspaceSwitching(false);
         if (requestRemoval) {
             void requestRemoval.then(releaseTransitionLock).catch(() => {
-                // A failed removal may leave a boot request live. Keep the lease.
+
             });
         } else {
             releaseTransitionLock();

@@ -4,8 +4,7 @@ import { mergeAppData } from './sync';
 import { normalizeAppData } from './sync-normalization';
 import { sanitizeAppDataForRemote } from './sync-helpers';
 
-// A row kept without its file (unreachable-attachments.ts) at this location: once another device
-// uploads the file here, the merge must take that device's key, whatever key format each location uses.
+
 const STAMP = '2026-07-01T00:00:00.000Z';
 const HASH = 'a'.repeat(64);
 const doc = (cloudKey: string, extra: object = {}): AppData => normalizeAppData({
@@ -19,7 +18,7 @@ const keyOf = (data: AppData) => data.tasks[0]!.attachments![0]!.cloudKey;
 
 describe('merge of an attachment kept without its file', () => {
     it.each([
-        // The kept key sorts after the uploaded one, and before it.
+
         ['cloudkit:att', 'attachments/att.pdf'],
         ['attachments/att.pdf', `attachments/att.${'f'.repeat(64)}.pdf`],
     ])('takes the key another device uploaded here (kept %s, uploaded %s)', (keptKey, uploadedKey) => {
@@ -28,7 +27,7 @@ describe('merge of an attachment kept without its file', () => {
         const kept = new Set(['att']);
 
         expect(keyOf(mergeAppData(local, incoming, { preferIncomingAttachmentCloudKeyIds: kept }))).toBe(uploadedKey);
-        // Without the record the merge keeps its deterministic winner.
+
         expect(keyOf(mergeAppData(local, incoming))).toBe([keptKey, uploadedKey].sort().pop());
     });
 
@@ -42,7 +41,7 @@ describe('merge of an attachment kept without its file', () => {
     });
 
     it('still removes the row when another device deleted the attachment, with or without the record', () => {
-        // A real delete is a tombstone in the synced data, never a "not found": it must win as before.
+
         const local = doc('attachments/att.pdf');
         const deleted = doc('attachments/att.pdf', { deletedAt: '2026-07-02T00:00:00.000Z', updatedAt: '2026-07-02T00:00:00.000Z' });
 

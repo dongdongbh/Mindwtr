@@ -12,7 +12,7 @@ import * as logger from './logger';
 import type { AppData, Project, Section, Task } from './types';
 
 const AT = '2026-10-01T12:00:00.000Z';
-// The 'done' child must stay done: a fixed completion date would age past auto-archive's 7 days and turn it archived on load.
+
 const DONE_AT = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 const ID = 'project-lifecycle';
 const COMPLETE_ID = '8bebf523-dd4e-40dc-9fce-37e456295d49';
@@ -78,7 +78,7 @@ async function open(start: AppData = initial(), shouldFail: () => boolean = () =
         saves: () => saves, reopen: async () => open(durable, shouldFail, recoveryLoad) };
 }
 
-// A peer can edit a child while its Project is archived, even though local UI edits are disabled.
+
 async function peerEditTask(id: string, updates: Partial<Task>) {
     const state = useTaskStore.getState();
     useTaskStore.setState({ _allTasks: state._allTasks.map((row) => row.id === id
@@ -279,7 +279,7 @@ describe('prepared Project Complete and Reactivate', () => {
             context: { releaseCheck: 'v1.3.8/project-archive-taxonomy', operation: 'native-lifecycle' } });
         diagnostic.mockRestore();
         const nativeCompleted = snapshot();
-        // Complete archives the children, so their tokens are retained in the saved catalogue.
+
         expect(getSavedTaxonomyTokens(nativeCompleted.settings, 'context')).toEqual(['@home']);
         expect(getSavedTaxonomyTokens(nativeCompleted.settings, 'tag')).toEqual(['#kept']);
         value(await native.host.commitPreparedProjectLifecycle(native.prepare('reactivate')));

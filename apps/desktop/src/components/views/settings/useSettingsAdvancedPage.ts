@@ -32,10 +32,7 @@ type UseSettingsAdvancedPageOptions = {
     t: Pick<SettingsLabels, 'localApiPortInvalid' | 'networkProxyInvalid'>;
 };
 
-/**
- * Local API server, network proxy and hardware acceleration state. Returns
- * members already named as props so SettingsView can spread them.
- */
+
 export function useSettingsAdvancedPage({
     loadEnabled = true,
     isTauri,
@@ -71,7 +68,7 @@ export function useSettingsAdvancedPage({
     const [desktopRenderingBusy, setDesktopRenderingBusy] = useState(false);
     const [appLockAvailability, setAppLockAvailability] = useState<AppLockAvailability>({ supported: false, available: false });
 
-    // The sample workspace cannot change device settings, so the lock row hides there.
+
     useEffect(() => {
         if (!loadEnabled || !isTauri || isSandboxMode()) return;
         let cancelled = false;
@@ -147,8 +144,8 @@ export function useSettingsAdvancedPage({
             return;
         }
         try {
-            // Native sync requests read the proxy from config.toml; keep it in
-            // step with the setting or they keep going out direct (#864).
+
+
             await syncNativeProxyUrl(trimmedProxyUrl);
         } catch (error) {
             reportError('Failed to apply proxy to native sync', error);
@@ -157,8 +154,8 @@ export function useSettingsAdvancedPage({
         }
         await updateSettings({
             network: {
-                // Empty string is an explicit clear; undefined would read as
-                // "never configured" and skip the native mirror on startup.
+
+
                 proxyUrl: trimmedProxyUrl,
             },
         });

@@ -103,13 +103,13 @@ function DraggableTask({
     onDragEnd();
   }, [onDrop, onDragEnd]);
 
-  // Tap gesture for editing
+
   const tapGesture = Gesture.Tap()
     .onEnd(() => {
       runOnJS(onTap)(task);
     });
 
-  // On mobile the board columns are stacked vertically, so status drag is vertical.
+
   const panGesture = Gesture.Pan()
     .activateAfterLongPress(180)
     .activeOffsetY([-12, 12])
@@ -133,7 +133,7 @@ function DraggableTask({
       zIndex.value = 1;
     });
 
-  // Combine gestures - tap works immediately, drag requires hold
+
   const composedGesture = Gesture.Race(
     panGesture,
     tapGesture
@@ -383,7 +383,7 @@ export function BoardView() {
   const { areaById, resolvedAreaFilter, visibleTasks } = useVisibleTaskContext();
   const badges = useMemo(() => getBoardProjectBadges(projects, areaById), [projects, areaById]);
 
-  // Tasks visible after the global area filter, before the board-level filter bar.
+
   const areaActiveTasks = useMemo(() => selectBoardTasks(visibleTasks), [visibleTasks]);
 
   const filterOptions = useMemo(() => getBoardFilterOptions({
@@ -399,8 +399,8 @@ export function BoardView() {
     setSearchQuery('');
   }, []);
   const selections = useTaskFilterSelections({
-    // Board keeps its title search in the always-visible bar, so the sheet only
-    // owns criteria pickers (the focus variant omits a duplicate search field).
+
+
     view: 'focus',
     t,
     visibility: BOARD_FILTER_VISIBILITY,
@@ -416,9 +416,8 @@ export function BoardView() {
     tokens: selectedFilterTokens,
   } = selections;
   useEffect(() => {
-    // The former Board filter treated multiple tokens as ANY by default. Keep
-    // that behavior while still exposing the shared Any/All controls once two
-    // included tokens of the same kind are selected.
+
+
     if (!selectedFilterTokens.some((token) => token.startsWith('@')) && contextMatchMode !== 'any') {
       setMatchMode('context', 'any');
     }
@@ -454,7 +453,7 @@ export function BoardView() {
   const searchActive = summary.searchActive;
   const boardFiltersActive = summary.active;
 
-  // Apply the board filter bar (search / contexts / tags / dates / projects) and group by status.
+
   const columns = useMemo(() => buildBoardColumns({
     tasks: areaActiveTasks, criteria, searchQuery, projects, now: new Date(), t,
   }), [areaActiveTasks, criteria, searchQuery, projects, t]);
@@ -541,7 +540,7 @@ export function BoardView() {
 
     if (newColumnIndex < 0 || newColumnIndex >= BOARD_COLUMNS.length || !currentTask) return;
 
-    // Into another column the drop has no position; inside its own column, where it lands.
+
     let target: { columnIds: string[]; afterId?: string | null } = { columnIds: [] };
     if (newColumnIndex === currentColumnIndex) {
       if (dragCenterY === null) return;
@@ -881,7 +880,7 @@ export function BoardView() {
         )}
       />
 
-      {/* Task Edit Modal */}
+      {                     }
       <TaskEditModal
         visible={!!editingTask}
         task={editingTask}
@@ -1069,7 +1068,7 @@ const styles = StyleSheet.create({
   taskCard: {
     borderRadius: 8,
     padding: 12,
-    // marginBottom removed - handled by container for swipe support
+
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,

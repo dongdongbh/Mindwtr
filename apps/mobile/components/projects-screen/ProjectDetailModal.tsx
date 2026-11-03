@@ -82,8 +82,8 @@ type ProjectDetailModalProps = {
     onOpenAreaPicker: () => void;
     onOpenQuickAdd: (project: Project) => void;
     onOpenTagPicker: () => void;
-    // The open project lives in the screen's state (it persists edits on close),
-    // so in-modal edits report back instead of owning it.
+
+
     onProjectChange: (project: Project) => void;
     onTaskSortByChange: (sortBy: TaskSortBy) => void;
     project: Project | null;
@@ -110,7 +110,7 @@ function ProjectSectionManagerModal({
     canManage: boolean;
     deleteSection: (id: string) => Promise<unknown> | unknown;
     onClose: () => void;
-    /** The project's Flow mode is Per section: each row offers its section's flow (#1429). */
+
     perSectionFlow: boolean;
     projectId: string;
     reorderSections: (projectId: string, orderedIds: string[]) => Promise<unknown> | unknown;
@@ -412,7 +412,7 @@ function ProjectSectionManagerModal({
                     )}
                 </View>
             </View>
-            {/* Its own delete/reorder confirms fire while this sheet is up (#940). */}
+            {                                                                         }
             <ThemedAlertHost />
         </Modal>
     );
@@ -425,10 +425,8 @@ function ProjectDetailScrollFrame({
     backgroundColor: string;
     children: React.ReactNode;
 }) {
-    // The task list (normal mode) or the reorder DraggableFlatList owns the
-    // scroll, so the frame is a plain flex column. The previous ScrollView +
-    // manually windowed list positioned rows from height estimates, which made
-    // the list shift as scrolls settled (#831).
+
+
     return (
         <KeyboardAvoidingView
             behavior={Platform.OS === 'android' ? 'height' : undefined}
@@ -648,8 +646,8 @@ export function ProjectDetailModal({
         } catch { if (colorGeneration.current === generation) setColorError(true); }
         finally { if (colorGeneration.current === generation) setColorSaving(false); }
     };
-    // A stored 'timeEstimate' project sort reverts to default order while the
-    // feature is off — list, sort sheet and label all read this one value (#1107).
+
+
     const projectTaskSortBy = resolveTaskSortByForFeatures(storedProjectTaskSortBy, settings);
     const {
         commitSelectedProjectNotes,
@@ -700,9 +698,8 @@ export function ProjectDetailModal({
     const [showStartDatePicker, setShowStartDatePicker] = React.useState(false);
     const [showDueDatePicker, setShowDueDatePicker] = React.useState(false);
     const [showReviewPicker, setShowReviewPicker] = React.useState(false);
-    // Persisted device-locally so the choice survives app restarts, matching
-    // desktop's localStorage-backed toggle (#1030). Global, like desktop —
-    // per-project memory stays a possible follow-up.
+
+
     const [showCompletedTasks, setShowCompletedTasksState] = React.useState(false);
     const showCompletedTouchedRef = React.useRef(false);
     React.useEffect(() => {
@@ -744,8 +741,8 @@ export function ProjectDetailModal({
         : selectedProject;
     const taskListOptions = getProjectDetailTaskListOptions(taskListProject, showCompletedTasks);
     const canManageProjectSections = !isArchivedProject;
-    // Reorder mode always renders one self-scrolling DraggableFlatList (section
-    // headers are fixed rows inside it), so it owns the scroll for every project.
+
+
     const projectReorderOwnsScroll = projectTaskReorderMode;
     const showCompletedLabel = showCompletedTasks
         ? tFallback(t, 'common.hideCompleted', 'Hide completed')
@@ -841,7 +838,7 @@ export function ProjectDetailModal({
         projectTaskBulkBarPropsRef.current = props;
         setProjectTaskBulkBarProps(props);
     }, []);
-    // The Modal takes Android Back before the task list's listener: leave selection mode first (#1415).
+
     const handleRequestClose = React.useCallback(() => {
         const bulkBar = projectTaskBulkBarPropsRef.current;
         if (bulkBar) {
@@ -981,10 +978,8 @@ export function ProjectDetailModal({
         }
         setShowStatusMenu(false);
     };
-    // Archive without a native confirm: the action is fully reversible (the same
-    // button slot becomes Reactivate, task statuses are restored), and Alert.alert
-    // can present behind the pageSheet detail modal on iOS, leaving the button
-    // apparently dead.
+
+
     const handleArchiveSelectedProject = () => {
         updateMutableSelectedProject({ status: 'archived' });
     };
@@ -1048,9 +1043,8 @@ export function ProjectDetailModal({
         if (typeof requestAnimationFrame === 'function') {
             requestAnimationFrame(scrollToOffset);
         }
-        // A freshly mounted list clamps the jump until enough rows render, and
-        // each clamped jump renders more — keep retrying briefly, stopping as
-        // soon as the list reaches (or the user scrolls past) the target.
+
+
         let attempts = 0;
         const retry = () => {
             if (projectDetailScrollOffsetRef.current >= offsetY - 1) return;
@@ -1061,12 +1055,7 @@ export function ProjectDetailModal({
         setTimeout(retry, 250);
     }, []);
 
-    // Exiting reorder mode is handled inside TaskList: it scrolls the
-    // remounted task FlatList to the region the reorder view was showing.
-    // Restoring the pre-reorder offset here instead yanked the viewport away
-    // from where the dragged task just landed (#784). Only the saved offset is
-    // reset — the list mounts at 0 and mounting fires no scroll event, so a
-    // stale value would leak into the next bulk-bar restore.
+
     const prevProjectReorderOwnsScrollRef = React.useRef(projectReorderOwnsScroll);
     React.useLayoutEffect(() => {
         const wasReordering = prevProjectReorderOwnsScrollRef.current;
@@ -1094,8 +1083,7 @@ export function ProjectDetailModal({
         resetProjectDetailScroll();
     }, [resetProjectDetailScroll, selectedProject?.id]);
 
-    // Opening the modal, closing it, or swapping the open project all start from
-    // a collapsed details panel with every menu and picker shut.
+
     React.useEffect(() => {
         setProjectTaskReorderMode(false);
         setSectionManagerVisible(false);
@@ -1146,8 +1134,7 @@ export function ProjectDetailModal({
         };
     }, []);
 
-    // Scrolls away with the task rows as the list's ListHeaderComponent in
-    // normal mode; stays pinned above the self-scrolling reorder list in reorder mode.
+
     const projectDetailListHeader = selectedProject ? (
         <>
             {onGettingStartedAction && isGettingStartedProject(selectedProject, selectedProjectTasks ?? []) && (
@@ -1768,8 +1755,8 @@ export function ProjectDetailModal({
             onRequestClose={handleRequestClose}
             onDismiss={onDismiss}
         >
-            {/* Android Modal content needs its own gesture root; the screen root does not cover Modal.
-                https://docs.swmansion.com/react-native-gesture-handler/docs/fundamentals/installation/#android */}
+            {
+                                                                                                                  }
             <GestureHandlerRootView style={{ flex: 1 }}>
                 <KeyboardAccessoryHost backgroundColor={tc.bg}>
                     <SafeAreaView style={[styles.projectDetailRoot, { backgroundColor: tc.bg }]} edges={safeAreaEdges}>
@@ -1829,7 +1816,7 @@ export function ProjectDetailModal({
                                 {projectTaskPinnedToolbar}
                                 {projectTaskSelectionBulkBar}
                                 <ProjectDetailScrollFrame backgroundColor={tc.bg}>
-                                {/* Pinned outside the list's padded content: it keeps the list's padding (listContent). */}
+                                {                                                                                          }
                                 {projectTaskReorderMode ? (
                                     <View style={styles.projectReorderHeader} testID="project-reorder-header">{projectDetailListHeader}</View>
                                 ) : null}
@@ -1909,9 +1896,8 @@ export function ProjectDetailModal({
                                         />
                                     ) : null}
                                     {taskListOptions.enableProjectReorder && hasProjectTaskOrderTargets ? (
-                                        // Kept visible but disabled under a custom sort: hiding
-                                        // the row read as "manual ordering doesn't exist" to
-                                        // users who had a sort active (Discord report).
+
+
                                         <ProjectOptionRow
                                             description={sortIsActive && !projectTaskReorderMode
                                                 ? tFallback(t, 'projects.reorderNeedsDefaultSort', 'Available when Sort is Default')
@@ -2004,9 +1990,8 @@ export function ProjectDetailModal({
                                         icon="trash-outline"
                                         label={t('common.delete')}
                                         onPress={() => {
-                                            // Same confirm and outcome as the swipe action on the
-                                            // project list; the project goes to Trash and its tasks
-                                            // stay, unassigned (#1142).
+
+
                                             setProjectActionsVisible(false);
                                             const projectId = selectedProject.id;
                                             Alert.alert(
@@ -2074,7 +2059,7 @@ export function ProjectDetailModal({
                     </SafeAreaView>
                 </KeyboardAccessoryHost>
                 <ToastViewport />
-                {/* Last child so the alert covers the header and the toasts (#940). */}
+                {                                                                      }
                 <ThemedAlertHost />
             </GestureHandlerRootView>
         </Modal>

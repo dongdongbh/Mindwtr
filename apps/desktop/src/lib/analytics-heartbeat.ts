@@ -110,9 +110,7 @@ export const getDesktopVersion = async (): Promise<string> => {
 
 type StartupAnalyticsSettings = { heartbeatEnabled: boolean; profileId: string | null };
 
-// Read straight from storage: the heartbeat fires before the store finishes
-// loading. A first run after upgrade may not have the profile id yet; the next
-// day's heartbeat carries it.
+
 const getStartupAnalyticsSettings = async (): Promise<StartupAnalyticsSettings> => {
     try {
         const data = isTauriRuntime()

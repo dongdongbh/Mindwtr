@@ -23,7 +23,7 @@ export type GlobalSearchFilterPresentation = {
     clear: string;
 };
 
-/** Shared, exhaustive filter vocabulary for desktop and mobile search. */
+
 export function getGlobalSearchFilterPresentation(
     t: (key: string) => string,
 ): GlobalSearchFilterPresentation {
@@ -75,18 +75,13 @@ export type ComputeGlobalSearchResultsInput = {
     locationQuery?: string;
     duePreset: DuePreset;
     scope: GlobalSearchScope;
-    /** Raw or normalized week-start setting; resolved via getWeekStartsOnIndex. */
+
     weekStart?: string | null;
     ftsResults?: SearchResults | null;
-    /**
-     * The query string the ftsResults were fetched for. FTS answers arrive
-     * debounced and async, so while the user is typing they describe an OLDER
-     * query; merging them in front of the fresh in-memory results made the
-     * list reshuffle on every keystroke. When provided and different from
-     * `query`, ftsResults are ignored until a matching answer arrives.
-     */
+
+
     ftsQuery?: string | null;
-    /** Visible result window. RN shows 50; native hosts may request up to 100. */
+
     limit?: number;
 };
 
@@ -129,14 +124,7 @@ const hasPositiveTaskIdLookup = (query: string) => {
     );
 };
 
-/**
- * Merge policy: full-text results are UNIONED with the in-memory fallback, not
- * substituted for it. FTS wins ordering (its hits come first) but can miss what
- * the in-memory matcher finds - field terms, hierarchical tokens, and rows
- * written since the last index update - so replacing it would silently drop
- * real matches. `limited`/`limit` propagate from either source so the "200+"
- * label stays honest about a truncated source.
- */
+
 const mergeSearchResults = (ftsResults: SearchResults, fallbackResults: SearchResults): SearchResults => {
     const seenTaskIds = new Set(ftsResults.tasks.map((task) => task.id));
     const seenProjectIds = new Set(ftsResults.projects.map((project) => project.id));
@@ -153,11 +141,7 @@ const mergeSearchResults = (ftsResults: SearchResults, fallbackResults: SearchRe
     };
 };
 
-/**
- * FTS decides membership and ordering, while the live collections decide what a
- * known entity looks like. An absent id can be an unloaded archive hit, so only
- * an explicit live tombstone suppresses a cached result.
- */
+
 const rehydrateSearchResults = (
     ftsResults: SearchResults,
     tasks: Task[],
@@ -192,11 +176,7 @@ const rehydrateSearchResults = (
     };
 };
 
-/**
- * The single global-search pipeline for every platform: takes already-fetched
- * FTS results plus the raw collections and filter state, returns the rendered
- * result list. Pure - no storage adapter, no React, no platform imports.
- */
+
 export const computeGlobalSearchResults = ({
     query,
     tasks,
@@ -258,7 +238,7 @@ export const computeGlobalSearchResults = ({
     const areaById = new Map(areas.map((area) => [area.id, area]));
 
     const matchesArea = (areaId?: string | null) => {
-        // An id pointing at a deleted area belongs in the "No area" bucket.
+
         const normalized = areaId && areaById.has(areaId) ? areaId : null;
         if (selectedArea === 'all') return true;
         if (selectedArea === 'none') return !normalized;
@@ -300,8 +280,8 @@ export const computeGlobalSearchResults = ({
         if (hasStatusFilter) {
             if (!selectedStatuses.includes(task.status)) return false;
         } else {
-            // A positive `id:` term is an unambiguous request for one task, so it
-            // outranks the default done/archived/reference hiding.
+
+
             if (!shouldBypassDefaultStatusHiding && !includeCompleted && isTaskCompleted(task)) return false;
             if (!shouldBypassDefaultStatusHiding && !includeReference && task.status === 'reference') return false;
         }
@@ -315,8 +295,7 @@ export const computeGlobalSearchResults = ({
         return true;
     });
 
-    // Matches that only the default done/archived exclusion is hiding. Surfacing
-    // them keeps the search honest: a completed task must stay findable (#806).
+
     const hiddenCompletedTaskCount = !hasStatusFilter
         && !includeCompleted
         && !shouldBypassDefaultStatusHiding

@@ -207,7 +207,7 @@ describe('applyMarkdownPairInsertion', () => {
     });
 
     it('does not auto-close quotes, angle brackets, or braces at the cursor', () => {
-        // Only Markdown-relevant pairs auto-close; these fight prose and pasted URLs (discussion #742).
+
         expect(applyMarkdownPairInsertion('say ', 'say "', { start: 4, end: 4 })).toBeNull();
         expect(applyMarkdownPairInsertion('say ', "say '", { start: 4, end: 4 })).toBeNull();
         expect(applyMarkdownPairInsertion('say ', 'say <', { start: 4, end: 4 })).toBeNull();
@@ -294,11 +294,11 @@ describe('applyMarkdownPairInsertion', () => {
     });
 
     it('does not resolve a typed/pasted "constructor" through Object.prototype (SEC-13)', () => {
-        // Collapsed-cursor path (shouldAutoPairInsertion / applyCollapsedPairInsertion).
+
         expect(
             applyMarkdownPairInsertion('', 'constructor', { start: 11, end: 11 }),
         ).toBeNull();
-        // Selection-replacement path (MARKDOWN_INSERTION_PAIRS lookup).
+
         expect(
             applyMarkdownPairInsertion('read docs', 'constructor', { start: 0, end: 9 }),
         ).toBeNull();

@@ -30,10 +30,7 @@ const WARNING_STAGES = new Set<IosShareDiagnosticEvent['stage']>([
   'submit-rejected',
 ]);
 
-/**
- * Recognizes only expo-share-intent's app handoff URL shape. The URL itself is
- * never returned or logged; an unexpected fragment is reduced to `unknown`.
- */
+
 export function classifyIosShareHandoffUrl(url: string | null | undefined): IosSharePayloadType | null {
   if (typeof url !== 'string') return null;
   const match = /^(?:mindwtr|mindwtr-dev):\/\/dataUrl=[^#]*(?:#([^?#]*))?$/i.exec(url);
@@ -45,11 +42,7 @@ export function classifyIosShareHandoffUrl(url: string | null | undefined): IosS
   return 'unknown';
 }
 
-/**
- * Release diagnostics are best effort: logging must never delay or alter share
- * routing and capture. This wrapper contains both synchronous logger failures
- * and rejected logger promises, including test mocks that return undefined.
- */
+
 export function logIosShareDiagnostic(event: IosShareDiagnosticEvent): void {
   if (Platform.OS !== 'ios') return;
   const context = {
@@ -66,6 +59,6 @@ export function logIosShareDiagnostic(event: IosShareDiagnosticEvent): void {
       : logInfo('iOS incoming share diagnostic', context);
     void Promise.resolve(result).catch(() => undefined);
   } catch {
-    // Diagnostics must never become part of the capture control flow.
+
   }
 }

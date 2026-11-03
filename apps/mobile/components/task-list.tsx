@@ -152,13 +152,9 @@ export function buildTaskListActivitySessionOwnerId(options: {
 
 export type TaskListGroupBy = TaskGroupBy;
 
-/**
- * The project workspace mode, in one prop. None of it means anything to the
- * three status screens, so it stays behind a single seam instead of widening
- * the interface they read — see ProjectTaskList, its only author.
- */
+
 export interface TaskListProjectOptions {
-  /** Scopes the list to one project; also switches on the project-only chrome. */
+
   id: string;
   sortBy?: TaskSortBy;
   includeArchived?: boolean;
@@ -168,7 +164,7 @@ export interface TaskListProjectOptions {
   sequenceCueLabels?: Record<ProjectSequenceTaskCue, string>;
   enableBulkOrganize?: boolean;
   enableReorder?: boolean;
-  /** Historical project workspace: rows remain viewable but expose no mutations. */
+
   readOnly?: boolean;
   reorderMode?: boolean;
   onReorderModeChange?: (active: boolean) => void;
@@ -178,15 +174,12 @@ const NO_PROJECT_OPTIONS: Partial<TaskListProjectOptions> = {};
 const NO_TASKS: Task[] = [];
 const NO_SECTIONS: Section[] = [];
 
-/** What the list shows: which tasks, in what order, grouped how. */
+
 interface TaskListContentProps {
   statusFilter: TaskStatus | 'all';
   title: string;
-  /**
-   * Render this pool instead of the store's own. The project workspace scopes
-   * the list this way; the reference pile below still reads the full visible
-   * pool, because a tag-matched reference can live in another project (#1000).
-   */
+
+
   taskSource?: Task[];
   viewSortBy?: TaskSortBy;
   onChangeViewSortBy?: (value: TaskSortBy) => void;
@@ -195,20 +188,20 @@ interface TaskListContentProps {
   project?: TaskListProjectOptions;
 }
 
-/** The scroll container itself: which render path, its padding, refs and scroll events. */
+
 interface TaskListScrollProps {
   contentPaddingBottom?: number;
-  /** Element rendered inside the virtualized list, scrolling away with the rows (e.g. the project sheet's details/notes header). */
+
   listHeaderComponent?: React.ReactElement | null;
-  /** Ref to the underlying FlatList (virtualized path only). */
+
   listRef?: React.Ref<FlatList>;
-  /** Scroll events from the virtualized list (virtualized path only). */
+
   onListScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
 }
 
-/** Everything drawn around the rows: header, empty state, filter and sort controls. */
+
 interface TaskListChromeProps {
-  /** Put the neutral overflow in the native navigation header instead of an inline row. */
+
   overflowPlacement?: 'inline' | 'navigation';
   showHeader?: boolean;
   showSort?: boolean;
@@ -235,9 +228,9 @@ function TaskListNavigationOverflow({ headerRight }: { headerRight: () => React.
   return null;
 }
 
-/** Which interactions this instance is allowed to offer at all. */
+
 interface TaskListCapabilityProps {
-  /** Stable semantic scope for Activity-remount recovery when a screen mounts peer lists with identical titles. */
+
   activitySessionScope?: string;
   defaultEditTab?: 'task' | 'view';
   enableBulkActions?: boolean;
@@ -246,11 +239,7 @@ interface TaskListCapabilityProps {
   onBulkBarPropsChange?: (props: TaskListBulkBarProps | null) => void;
 }
 
-// Flat on the wire on purpose: TaskList is React.memo'd and sits on the app's
-// hottest render path (#766), so nesting these groups into object props would
-// break memoisation on every parent render unless every call site memoised them
-// by hand. `project` is the one exception, and it earns it: ProjectTaskList is
-// its only author and memoises it there, once.
+
 export interface TaskListProps
   extends TaskListContentProps, TaskListScrollProps, TaskListChromeProps, TaskListCapabilityProps {}
 
@@ -331,9 +320,8 @@ function TaskListComponent({
     getFocusedCount,
   } = useTaskStore((state) => ({
     tasks: taskSource ?? (includeArchived ? state._allTasks : state.tasks),
-    // References tag-matched to the project can live in other projects, so the
-    // reference pile reads the full visible pool even when taskSource narrows
-    // the main list to one project's tasks (#1000).
+
+
     allVisibleTasks: state.tasks,
     projects: state.projects,
     allProjects: state._allProjects ?? state.projects,
@@ -366,13 +354,12 @@ function TaskListComponent({
   const [includeArchivedReferenceProjects, setIncludeArchivedReferenceProjects] = useState(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reduceMotion = useReducedMotion();
-  // Tracks the highlightTaskId we already scrolled to, so an id is centred once
-  // (when it first appears in the rendered data) rather than re-scrolling on
-  // every unrelated list re-render during its ~3.5s highlight window (#916).
+
+
   const scrolledHighlightIdRef = useRef<string | null>(null);
   const pullSync = useManualPullSync();
 
-  // Dynamic colors based on theme
+
   const themeColors = useThemeColors();
 
   const listContentStyle = useMemo(() => {
@@ -443,8 +430,8 @@ function TaskListComponent({
     viewSortBy,
   });
   const activeGroupBy: TaskListGroupBy = groupBy ?? 'none';
-  // Folds are per list and per axis. Project views group by section instead, so
-  // they share nothing with these and keep their own Completed toggle below.
+
+
   const { collapsedGroupIds, toggleGroup } = useCollapsedTaskGroups(statusFilter, activeGroupBy);
   const localDayKey = useLocalDayKey(activeGroupBy === 'completedDate');
   const handleChangeGroupBy = onChangeGroupBy;
@@ -497,8 +484,7 @@ function TaskListComponent({
   const canBulkOrganizeSelection = canBulkOrganizeInbox || canBulkOrganizeProject;
   const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
 
-  // Track the last-seen signal so a remount (e.g. toggling reorder mode swaps the
-  // scroll container component type) doesn't re-open the sheet from a stale value.
+
   const lastFilterOpenSignalRef = useRef(externalFilterOpenSignal);
   useEffect(() => {
     if (externalFilterOpenSignal === lastFilterOpenSignalRef.current) return;
@@ -544,7 +530,7 @@ function TaskListComponent({
   }, [exitSelectionMode, projectReadOnly, projectReorderMode, selectionMode, setProjectReorderMode]);
 
   const taskListDeriveStartedAt = Date.now();
-  // Inbox, Reference and Done are core's status-list model, shared with the native host.
+
   const statusListKind: StatusListKind | null = !projectId && (statusFilter === 'inbox' || statusFilter === 'reference' || statusFilter === 'done')
     ? statusFilter
     : null;
@@ -581,8 +567,8 @@ function TaskListComponent({
       return isVisibleInArea(task) && matchesStatus;
     });
   }, [allProjects, areaById, includeArchived, includeArchivedReferenceProjects, includeDone, projectById, projectId, projects, resolvedAreaFilter, statusFilter, statusListKind, tasks]);
-  // Scanning every visible task for its tokens only pays off once the sheet is
-  // open; until then the selected ones are all the chips anyone can see.
+
+
   const statusListFilterOptions = useMemo(() => (statusListKind
     ? buildStatusListFilterOptions({
       kind: statusListKind,
@@ -616,7 +602,7 @@ function TaskListComponent({
       ?? getUsedTaskTokens(filterableTasks, (task) => [...(task.contexts ?? []), ...(task.tags ?? [])], { includeAncestors: true });
   }, [filterableTasks, filtersVisible, selections.tokens, selections.excludedTokens, statusListFilterOptions]);
   const archivedReferenceFilterActive = statusFilter === 'reference' && includeArchivedReferenceProjects;
-  // Inbox, Reference and Done: the header's chips and counts and the empty state, as core summarizes them.
+
   const filterSummary = useMemo(() => (statusListKind
     ? buildStatusListFilterSummary({
       kind: statusListKind,
@@ -654,8 +640,7 @@ function TaskListComponent({
     : null) ?? emptyActionLabel;
   const filteredEmptyAction = hasActiveTaskFilters ? clearAllFilters : onEmptyAction;
 
-  // A project's list (which tasks, their order, its sections, and the Completed
-  // and Reference piles) is one core model, shared with the native host.
+
   const projectTaskList = useMemo(() => {
     if (!projectId) return null;
     return buildProjectTaskListModel({
@@ -701,8 +686,8 @@ function TaskListComponent({
 
   const statusListModel = useMemo(() => {
     if (!statusListKind) return null;
-    // localDayKey is not read here; it is in the dependency list so crossing
-    // midnight re-buckets the completedDate axis.
+
+
     void localDayKey;
     return buildStatusListModel({
       kind: statusListKind,
@@ -730,10 +715,8 @@ function TaskListComponent({
     if (statusListModel) return statusListModel.orderedTasks;
     return sortTasksBy(filteredTasks, sortBy);
   }, [filteredTasks, projectTaskList, sortBy, statusListModel]);
-  // #784 next-round evidence: the visible order at Task-order enter/exit. An
-  // exit digest that differs from what the list later shows — with no Drop
-  // line between — proves the order changed after the write, and the id:order
-  // pairs name the field. Only logs on mode transitions.
+
+
   const previousReorderModeRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (!projectId) return;
@@ -765,8 +748,8 @@ function TaskListComponent({
         : { type: 'task', task: item.task, ...(item.groupId ? { groupId: item.groupId } : { reorderSectionId: item.task.sectionId }) }));
     }
     if (activeGroupBy !== 'none') {
-      // localDayKey is not read here; it is in the dependency list so crossing
-      // midnight re-buckets the completedDate axis.
+
+
       void localDayKey;
       return buildTaskGroupSections({
         groupBy: activeGroupBy,
@@ -779,8 +762,8 @@ function TaskListComponent({
     }
     return orderedTasks.map((task): ListItem => ({ type: 'task', task, reorderSectionId: task.sectionId }));
   }, [activeGroupBy, areas, collapsedGroupIds, localDayKey, orderedTasks, projectById, projectTaskList, statusListModel, t]);
-  // Android can leave filtered rows detached when clipping flips off after a
-  // long list shrinks. Keep clipping on until this list unmounts (#1272).
+
+
   const clipListSubviewsRef = useRef(false);
   clipListSubviewsRef.current ||= shouldRemoveClippedSubviews(listItems.length);
   const loggedRetainedClippingRef = useRef(false);
@@ -841,13 +824,7 @@ function TaskListComponent({
   const getListItemKey = useCallback((item: ListItem) => (
     item.type === 'section' ? `section-${item.id}` : (item.groupId ? `${item.groupId}:${item.task.id}` : item.task.id)
   ), []);
-  // The row key never folds in the list index: a moved row must keep its
-  // identity so its mounted state moves with it.
-  // No getItemLayout here on purpose: rows have variable heights, and frames
-  // built from estimates shift every offset when a real measurement lands,
-  // visibly nudging the list as a scroll settles (#831). Native measurement
-  // keeps the scroll position anchored and also removes the estimate-vs-row
-  // disagreement behind the 2026-07-06 mid-list gap report.
+
 
   const projectReorderGroups = useMemo<ProjectTaskReorderGroup<Task>[]>(() => {
     if (!canUseProjectReorder) return [];
@@ -866,8 +843,8 @@ function TaskListComponent({
     () => projectReorderFlatItems.some((item) => item.type === 'header'),
     [projectReorderFlatItems],
   );
-  // Grouping by completion only says anything in a list of finished work, so
-  // Done gets the extra axis rather than every list growing it (#945).
+
+
   const groupByOptions: readonly TaskListGroupBy[] = statusFilter === 'done'
     ? DONE_LIST_GROUP_OPTIONS
     : TASK_LIST_GROUP_OPTIONS;
@@ -875,8 +852,8 @@ function TaskListComponent({
   const groupByLabel = getGroupByLabel(activeGroupBy);
   const groupLabel = tFallback(t, 'list.groupBy', 'Group');
   const showGroupControl = !projectId && Boolean(handleChangeGroupBy);
-  // Keep the draggable pan handler on the handle strip so vertical scrolling still works.
-  // DraggableFlatList gesture props: https://github.com/computerjazz/react-native-draggable-flatlist#props
+
+
   const projectDragHitSlop = useMemo(() => ({
     bottom: 0,
     left: -Math.max(windowWidth - 96, 0),
@@ -890,16 +867,11 @@ function TaskListComponent({
     setProjectReorderMode(!projectReorderMode);
   }, [canUseProjectReorder, exitSelectionMode, projectReorderMode, setProjectReorderMode]);
 
-  // Entering Task order mounts a fresh DraggableFlatList at the top; start it on
-  // the task the user was looking at instead (#765). The first visible task is
-  // tracked via native viewability (no manual frames — see #831), and the entry
-  // scroll retries briefly because a freshly mounted list clamps the jump until
-  // enough rows render.
+
   const firstViewableTaskIdRef = useRef<string | null>(null);
   const reorderListRef = useRef<FlatList<ProjectReorderFlatItem<Task>> | null>(null);
-  // The normal FlatList's ref is owned by the parent (listRef prop); keep an
-  // internal handle too so this component can scroll a freshly added row into
-  // view without stealing the parent's ref.
+
+
   const internalListRef = useRef<FlatList<ListItem> | null>(null);
   const taskListScrollOffsetRef = useRef(0);
   const pendingActivityScrollOffsetRef = useRef<number | null>(null);
@@ -975,7 +947,7 @@ function TaskListComponent({
       try {
         reorderListRef.current?.scrollToIndex({ index: info.index, animated: false, viewPosition: 0 });
       } catch {
-        // List changed under the retry; the estimated offset stands.
+
       }
     }, 120);
   }, []);
@@ -991,9 +963,8 @@ function TaskListComponent({
     );
     if (index <= 0) return undefined;
     projectReorderScrollOffsetRef.current = 0;
-    // How long entering Task order leaves the viewport parked on unrendered
-    // rows: the entry jump only sticks once the target has rendered, so the
-    // settle time IS the blank window slow devices report (#784).
+
+
     const enteredAt = Date.now();
     let entryLogged = false;
     const logEntrySettled = (retriesUsed: number) => {
@@ -1012,15 +983,15 @@ function TaskListComponent({
       try {
         reorderListRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
       } catch {
-        // Out-of-render index without getItemLayout — the failed handler covers it.
+
       }
     };
     let attempts = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const retry = () => {
       timer = null;
-      // Stop once the list actually moved off the top (a clamped first jump
-      // keeps it at 0) or the retries run out.
+
+
       if (projectReorderScrollOffsetRef.current > 1) {
         logEntrySettled(attempts);
         return;
@@ -1043,13 +1014,7 @@ function TaskListComponent({
     };
   }, [canUseProjectReorder, projectReorderMode]);
 
-  // Exiting Task order returns the normal list to the region the REORDER view
-  // was showing, not the pre-reorder offset — after dragging a task to the
-  // top, restoring the old offset yanked the viewport away from where the
-  // task just landed, which read as the reorder not sticking (#784). Anchor
-  // on the first task in the reorder viewport (fixed-height rows make that a
-  // plain division) and scroll the remounted normal list to it; offset ~0
-  // needs nothing, since the list mounts at the top.
+
   const prevProjectReorderExitRef = useRef(projectReorderMode);
   useEffect(() => {
     const wasReordering = prevProjectReorderExitRef.current;
@@ -1079,18 +1044,12 @@ function TaskListComponent({
       (item) => item.type === 'task' && item.task.id === anchorTaskId,
     );
     if (index < 0) return;
-    // In-bounds index: an unmeasured row reports through onScrollToIndexFailed,
-    // which runs the estimate-then-retry path below.
+
+
     internalListRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
   }, [listItems, projectReorderMode]);
 
-  // FlatList row heights vary, so a scrollToIndex to an unmeasured row reports
-  // failure via this callback; estimate the offset, jump there, then retry the
-  // exact index once rows near the target have mounted (mirrors the
-  // reorder-mode fallback). The retry runs 120ms later against a list that may
-  // have shrunk or reordered meanwhile, and scrollToIndex throws an invariant
-  // for an out-of-bounds index — swallow that instead of crashing; the row is
-  // already near the estimated offset.
+
   const handleListScrollToIndexFailed = useCallback(
     (info: { index: number; averageItemLength: number }) => {
       const list = internalListRef.current;
@@ -1101,20 +1060,14 @@ function TaskListComponent({
         try {
           internalListRef.current?.scrollToIndex({ index: info.index, animated: false, viewPosition: 0.5 });
         } catch {
-          // List changed under the retry; the estimated offset stands.
+
         }
       }, 120);
     },
     [],
   );
 
-  // Scroll a highlighted task into view once it is actually present in the
-  // rendered row model. Driven by the shared highlightTaskId, so a task captured
-  // through the quick-capture sheet flashes and scrolls here without stacking
-  // scrolls: each id centres once (see
-  // scrolledHighlightIdRef). Normal mode only — reorder swaps in a different
-  // list. A task filtered out of this view never enters listItems, so nothing
-  // scrolls (#916).
+
   useEffect(() => {
     if (!highlightTaskId) {
       scrolledHighlightIdRef.current = null;
@@ -1129,9 +1082,8 @@ function TaskListComponent({
     scrolledHighlightIdRef.current = highlightTaskId;
     const list = internalListRef.current;
     if (!list) return;
-    // An unmeasured target row does not throw here — VirtualizedList reports it
-    // through the onScrollToIndexFailed prop, which runs the estimate-then-retry
-    // path. The index is in bounds (found in listItems above), so no try/catch.
+
+
     list.scrollToIndex({ index, viewPosition: 0.5, animated: !reduceMotion });
   }, [highlightTaskId, listItems, projectReorderMode, reduceMotion]);
 
@@ -1142,13 +1094,11 @@ function TaskListComponent({
     if (!moved || moved.type !== 'task') return;
     const plan = resolveProjectReorderDropPlan(params.data, moved.task.id);
     if (!plan) return;
-    // DraggableFlatList already renders this order, but the persisted store
-    // update below is asynchronous. Preserve the list the user can currently
-    // see so exiting Task order before the store rerenders anchors to the
-    // post-drop viewport instead of stale props (#784).
+
+
     lastDroppedProjectReorderItemsRef.current = params.data;
-    // #784 next-round evidence: what the drop asked for, so a later mismatch
-    // separates "wrong write" from "write lost afterwards".
+
+
     const movedAt = plan.orderedIds.indexOf(moved.task.id);
     void logInfo('[Reorder] Drop', {
       scope: 'project',
@@ -1174,7 +1124,7 @@ function TaskListComponent({
       void Promise.resolve(reorderProjectTasks(projectId, plan.orderedIds, plan.sectionId, moved.task.id)).catch(reportFailure);
       return;
     }
-    // Crossing a header re-homes the task into the section it was dropped in.
+
     void (async () => {
       await Promise.resolve(updateTask(moved.task.id, {
         sectionId: plan.sectionId ?? undefined,
@@ -1309,8 +1259,8 @@ function TaskListComponent({
         visibleItemCount: listItemCountForDiagnostics,
       });
     });
-    // The editor closes above, so the save result has to reach `reportSaveResult`
-    // or a `{ success: false }` write reads as saved.
+
+
     return result;
   }, [clearTaskListActivitySession, listItemCountForDiagnostics, performanceRoute, projectId, projectReadOnly]);
 
@@ -1327,9 +1277,8 @@ function TaskListComponent({
   const sortOptions = statusFilter === 'done'
     ? DONE_TASK_LIST_SORT_OPTIONS
     : TASK_LIST_SORT_OPTIONS;
-  // Single-status lists (inbox/next/waiting/someday/done/reference) repeat the same status on every
-  // row, so show a compact icon button to change status instead of the redundant status-name badge.
-  // The 'all' list keeps the labeled badge because its rows have mixed statuses.
+
+
   const statusBadgeAsIconForList = statusFilter !== 'all';
   const hideChecklistProgressForList = statusFilter === 'inbox';
   const handleTaskStatusChange = useCallback((taskId: string, status: TaskStatus) => {
@@ -1347,10 +1296,7 @@ function TaskListComponent({
     return result;
   }, [listItemCountForDiagnostics, performanceRoute, updateTask]);
 
-  // The row handlers are rebuilt on every render because they close over the
-  // current list (selectableOrderedTaskIds above all), so rows reach them through
-  // one object that never changes identity and reads the latest closures from a
-  // ref (#766). A row that captured old ids would break range select.
+
   const rowActionSourcesRef = useRef({
     deleteTask,
     handleEditTask,
@@ -1493,8 +1439,8 @@ function TaskListComponent({
   ]);
 
   const toggleSection = useCallback((section: Extract<ListItem, { type: 'section' }>) => {
-    // The project Completed pile is a fixed part of that screen with its own
-    // single boolean; every other collapsible header is a grouping heading.
+
+
     if (section.synthetic === 'completed') {
       setCompletedTasksCollapsed((value) => !value);
       return;
@@ -1754,14 +1700,11 @@ function TaskListComponent({
       )}
 
       {projectReorderMode && canUseProjectReorder ? (
-        // One flat self-scrolling list for sectioned and section-less projects alike:
-        // section headers are fixed rows, so dragging a task past a header drops it
-        // into that section (per-section nested lists could never move tasks across
-        // sections, and the nested variant also disabled windowing — #784).
+
+
         <DraggableFlatList
-          // DraggableFlatList forwards its ref to the inner FlatList but types
-          // it as the gesture-handler wrapper; the runtime instance is the RN
-          // FlatList the scroll calls need.
+
+
           ref={reorderListRef as never}
           data={projectReorderFlatItems}
           keyExtractor={(item) => item.key}
@@ -1781,10 +1724,8 @@ function TaskListComponent({
           maxToRenderPerBatch={12}
           windowSize={7}
           removeClippedSubviews={false}
-          // DraggableFlatList's outer container takes containerStyle; `style`
-          // lands on the inner FlatList. Without flex on the container it
-          // auto-sizes to the inner list's flex basis of 0, rendering an
-          // empty screen in reorder mode (#784).
+
+
           containerStyle={styles.projectDragSelfScrollList}
           style={styles.projectDragSelfScrollList}
           contentContainerStyle={styles.projectDragSelfScrollContent}
@@ -1806,12 +1747,11 @@ function TaskListComponent({
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           {...TASK_LIST_WINDOWING_PROPS}
-          // Android enables clipping once the list grows large; the ref keeps
-          // it enabled when filtering shrinks the list again.
+
+
           removeClippedSubviews={clipListSubviewsRef.current}
-          // iOS only bounces (and thus allows pull-to-refresh) when content
-          // exceeds the viewport unless bounce is forced; short lists like a
-          // freshly processed Inbox must still be able to pull to sync.
+
+
           alwaysBounceVertical
           refreshControl={
             <RefreshControl

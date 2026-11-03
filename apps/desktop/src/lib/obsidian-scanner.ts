@@ -519,7 +519,7 @@ export async function scanObsidianVault(
         await walkDirectory(absolutePath, normalizedScanFolder, 0);
     }
 
-    // One line per scan: the feedback upload keeps only the tail of the log.
+
     logInlineTagFilter(config, inlineTasks.length);
     return {
         tasks: sortObsidianTasks(detectedTaskNotes ? taskNotesTasks : inlineTasks),

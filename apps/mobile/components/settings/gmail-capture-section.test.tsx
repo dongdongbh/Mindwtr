@@ -124,8 +124,7 @@ describe('RN Gmail settings', () => {
         act(() => tree.unmount());
     });
 
-    // A damaged receipts file is moved aside and capture restarts off (gmail-capture-storage.ts): the screen says why and what to
-    // do, in the error style, until the user starts capture again. A silent stop is not OK (Gmail design review, 10-25).
+
     it('says plainly that the captured-mail record was reset, until capture is started again', async () => {
         gmail.status.mockResolvedValue(connected());
         gmail.receiptsReset.mockReturnValue(true);
@@ -143,7 +142,7 @@ describe('RN Gmail settings', () => {
         act(() => tree.unmount());
     });
 
-    // Any other action (Connect, Cancel, Check now) keeps the notice: capture is still off and the reason still holds.
+
     it('keeps the reset notice through other actions, and Disconnect clears it', async () => {
         gmail.status.mockResolvedValue(connected());
         gmail.receiptsReset.mockReturnValue(true);

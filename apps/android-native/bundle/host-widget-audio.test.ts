@@ -2,8 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import type { AppData, PendingAudioCapture } from '@mindwtr/core';
 import { createWidgetAudioPort, type WidgetAudioBindings } from './host-widget-audio';
 
-// The widget's queued recordings on the native host (widget-audio-20261028-05): RN's audio port over core's speech resolver and
-// dispatch (voice pass V3): Gemini, OpenAI and OpenAI-compatible servers; local Whisper (V4) leaves the recording queued.
 
 const DOCS = 'file:///data/user/0/tech.dongdongbh.mindwtr.nativeclient.dev/files/';
 const ID = '22222222-2222-4abc-8def-222222222222';
@@ -66,10 +64,10 @@ describe('the widget audio port', () => {
             [{}, undefined, 'not-configured'],
             [{}, { enabled: false, provider: 'gemini' }, 'not-configured'],
             [{ loadKey: async () => '' }, { enabled: true, provider: 'gemini' }, 'not-configured'],
-            // RN's transcribePendingAudio: no key and no server, no transcript.
+
             [{}, { enabled: true, provider: 'openai' }, 'not-configured'],
             [{}, { enabled: true, provider: 'whisper' }, 'provider-unsupported'],
-            // A FOSS build uses local Whisper whatever is stored, as RN's.
+
             [{ isFossBuild: true }, { enabled: true, provider: 'gemini' }, 'provider-unsupported'],
             [{}, { enabled: true, provider: 'parakeet' }, 'not-configured'],
         ];
@@ -83,8 +81,7 @@ describe('the widget audio port', () => {
         expect(empty.waiting).toEqual(['empty']);
     });
 
-    // Core's resolver, not an inline copy: Parakeet reads as speech off even with a key on hand, and OpenAI with its key reaches
-    // OpenAI. The old inline code agreed on Parakeet (it mapped it to off as well) but answered provider-unsupported for OpenAI.
+
     it('reads the provider through core\'s resolver: Parakeet off, OpenAI with a key transcribed', async () => {
         const path = `${DOCS}quick-capture-audio/${ID}.wav`;
         const parakeet = harness({ loadKey: async () => 'any-key' });

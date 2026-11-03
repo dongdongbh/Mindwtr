@@ -98,7 +98,7 @@ const freezeClock = () => {
 };
 
 describe('native host contract: task View tab', () => {
-    /** The View tab as core's model builds it straight from the store. */
+
     const direct = (shown: Task, readOnly = false) => {
         const state = useTaskStore.getState();
         const format = createDateFormatter({ language: 'en', systemLocale: 'en-US' });
@@ -157,7 +157,7 @@ describe('native host contract: task View tab', () => {
         const row = view.rows.find((entry) => entry.type === 'checklist');
         expect(row?.type === 'checklist' && row.items.map((entry) => [entry.id, entry.title, entry.completed])).toEqual([['c1', 'Milk **2%**', true], ['new', 'Eggs', false]]);
         expect(view.checklistBase).toEqual(TASKS[0].checklist);
-        // The draft rides in the revision.
+
         expect(view.revision).not.toBe(value(host.getTaskView({ id: 't-list' })).revision);
         expect(writes).toEqual([]);
     });
@@ -175,9 +175,9 @@ describe('native host contract: task View tab', () => {
         const row = view.rows.find((entry) => entry.type === 'attachments');
         expect(row?.type === 'attachments' && row.items.map((entry) => [entry.id, entry.title])).toEqual([['a2', 'Docs']]);
         expect(view.attachmentsBase).toEqual(saved);
-        // The draft list rides in the revision, as the draft and checklist do.
+
         expect(view.revision).not.toBe(value(host.getTaskView({ id: 't-list', draft: draftOf('t-list'), checklist: TASKS[0].checklist! })).revision);
-        // A read-only task shows its saved attachments; a list that is not one is refused.
+
         expect(value(host.getTaskView({ id: 't-archived', attachments: draftAttachments })).rows.some((entry) => entry.type === 'attachments')).toBe(false);
         expect(host.getTaskView({ id: 't-list', attachments: [{ id: 'x' }] as never })).toMatchObject(invalid);
         expect(writes).toEqual([]);
@@ -286,12 +286,12 @@ describe('native host contract: checklist edits', () => {
         const added = value(host.editTaskChecklist({ id: 't-open', draft, checklist, edit: { kind: 'add' } }));
         expect(added.focusId).toBe(added.checklist[2].id);
         expect(added.checklist[2]).toEqual({ id: added.focusId, title: '', isCompleted: false });
-        // Return on an empty item and a blank add input only end editing.
+
         const blank = [...checklist, item('b', false, ' ')];
         expect(value(host.editTaskChecklist({ id: 't-open', draft, checklist: blank, edit: { kind: 'insertAfter', index: 2 } })))
             .toMatchObject({ changed: false, checklist: blank, focusId: null });
         expect(value(host.editTaskChecklist({ id: 't-open', draft, checklist: blank, edit: { kind: 'add' } }))).toMatchObject({ changed: false });
-        // Without an edit: the Form tab's field.
+
         expect(value(host.editTaskChecklist({ id: 't-open', draft, checklist })).field).toEqual(buildTaskChecklistFieldModel({ checklist, isReference: false, t }));
         expect(writes).toEqual([]);
         expect(stored('t-open').checklist).toEqual(TASKS[2].checklist);
@@ -306,7 +306,7 @@ describe('native host contract: checklist edits', () => {
         expect(allDone.draft).toEqual(setTaskDraftField(draft, 'status', 'done'));
         const reopened = value(host.editTaskChecklist({ id: 't-list', draft: allDone.draft, checklist: allDone.checklist, edit: { kind: 'append', title: 'Butter' } }));
         expect(reopened.draft.status).toBe('next');
-        // Reset's draft half on a done list task.
+
         const reset = value(host.editTaskChecklist({ id: 't-done', draft: draftOf('t-done'), checklist: stored('t-done').checklist as ChecklistItem[], edit: { kind: 'uncheckAll' } }));
         expect(reset.draft.status).toBe('next');
         expect(reset.checklist.every((entry) => !entry.isCompleted)).toBe(true);
@@ -323,12 +323,12 @@ describe('native host contract: checklist edits', () => {
         expect(ticked.draft).toEqual(draft);
         expect(ticked.field).toMatchObject({ label: 'List', canReset: true });
         expect(ticked.field.items.map((entry) => entry.struck)).toEqual([true, true]);
-        // The store write the editor saves, and a direct one, leave it a reference.
+
         expect(await useTaskStore.getState().updateTask('t-list', { checklist: ticked.checklist })).toMatchObject({ success: true });
         expect(stored('t-list')).toMatchObject({ status: 'reference', checklist: ticked.checklist });
         expect(stored('t-list').completedAt).toBeUndefined();
         expect(stored('t-list').isFocusedToday).toBeFalsy();
-        // Reset unchecks every entry and keeps it a reference.
+
         writes.length = 0;
         const reset = await host.resetTaskChecklist({ id: 't-list', requestId: generateUUID(), taskRevision: taskRevisionOf(stored('t-list')) });
         expect(reset).toMatchObject({ ok: true });
@@ -393,19 +393,19 @@ describe('native host contract: saving the checklist with the draft (saveTaskDra
         const host = await openHost();
         const draft = draftOf('t-list');
         const base = stored('t-list').checklist as ChecklistItem[];
-        // Tick every item (the draft turns Done), then set the status back to the loaded Next.
+
         const ticked = value(host.editTaskChecklist({ id: 't-list', draft, checklist: base, edit: { kind: 'toggle', index: 1 } }));
         expect(ticked.draft.status).toBe('done');
         const edited = value(host.editTaskDraft({ id: 't-list', draft: ticked.draft, edit: { type: 'fields', patch: { status: 'next' } } })).draft;
         expect(edited.status).toBe('next');
-        // Status equals the loaded value, so the host sends no status.
+
         value(await host.saveTaskDraft({
             requestId: generateUUID(),
             id: 't-list', base: {}, patch: {}, checklist: { base, value: [...ticked.checklist, item('blank', true, '  ')] },
         }));
         expect(writes).toEqual([['updateTask', 't-list', { checklist: [item('c1', true, 'Milk **2%**'), item('c2', true, 'Bread')] }]]);
         expect(stored('t-list').status).toBe('next');
-        // A checklist already saved, with no other change, writes nothing.
+
         writes.length = 0;
         const rev = stored('t-list').rev;
         const current = stored('t-list').checklist as ChecklistItem[];
@@ -426,7 +426,7 @@ describe('native host contract: saving the checklist with the draft (saveTaskDra
         })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION', message: 'Task changed while editing: checklist' } });
         expect(writes).toEqual([]);
         expect(stored('t-open').title).toBe('Open list');
-        // A checklist that already holds the new value is no conflict.
+
         expect(await host.saveTaskDraft({
             requestId: generateUUID(),
             id: 't-open', base: { title: 'Open list' }, patch: { title: 'Renamed' }, checklist: { base, value: [item('o1', true), item('o2')] },
@@ -466,7 +466,7 @@ describe('native host contract: saving the checklist with the draft (saveTaskDra
 });
 
 describe('native host contract: Reset checklist', () => {
-    /** The reset's input: the saved task's revision as the View tab showed it. */
+
     const reset = (host: Host, id: string, requestId = generateUUID()) => ({ id, requestId, taskRevision: value(host.getTaskView({ id })).taskRevision });
 
     it('resets the saved checklist and reopens a Done task; an open checklist writes nothing', async () => {
@@ -481,7 +481,7 @@ describe('native host contract: Reset checklist', () => {
         expect(value(await host.resetTaskChecklist(reset(host, 't-open')))).toEqual({ id: 't-open', checklist: TASKS[2].checklist });
         expect(writes).toEqual([]);
         expect(stored('t-open').rev).toBe(rev);
-        // No saved checklist (items added in this editor only): nothing to write; the host reopens its draft items.
+
         expect(value(await host.resetTaskChecklist(reset(host, 't-empty')))).toEqual({ id: 't-empty', checklist: [] });
         expect(writes).toEqual([]);
         expect(await host.resetTaskChecklist(reset(host, 't-archived'))).toMatchObject(invalid);
@@ -496,12 +496,12 @@ describe('native host contract: Reset checklist', () => {
         expect(await host.resetTaskChecklist(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED', message: 'disk unavailable' } });
         expect(writes).toHaveLength(1);
         saveData.mockResolvedValue(undefined);
-        // The receipt answers before the revision, which the write moved.
+
         const retried = await host.resetTaskChecklist(input);
         expect(retried.ok).toBe(true);
         expect(writes).toHaveLength(1);
         expect((saveData.mock.lastCall?.[0] as { tasks: Task[] }).tasks.find((entry) => entry.id === 't-done')).toMatchObject({ status: 'next', checklist: [item('d1'), item('d2')] });
-        // A lost reply repeats the request: the same answer, no write, no save.
+
         const saves = saveData.mock.calls.length;
         expect(await host.resetTaskChecklist(input)).toEqual(retried);
         expect(saveData).toHaveBeenCalledTimes(saves);
@@ -513,7 +513,7 @@ describe('native host contract: Reset checklist', () => {
         const host = await openHost();
         const input = reset(host, 't-done');
         value(await host.resetTaskChecklist(input));
-        // The user ticks an item again.
+
         await useTaskStore.getState().updateTask('t-done', { checklist: [item('d1', true), item('d2')] });
         writes.length = 0;
         const { result, wrote } = await replayAfterRestart((restarted) => restarted.resetTaskChecklist(input));
@@ -526,14 +526,14 @@ describe('native host contract: Reset checklist', () => {
     it('refuses a request ID reused for another task, and invalid input', async () => {
         freezeClock();
         const host = await openHost();
-        // As the journaling Android host: each write must carry its replay tokens.
+
         setNativeReplayTokens('required');
         const done = reset(host, 't-done');
         value(await host.resetTaskChecklist(done));
         expect(await host.resetTaskChecklist({ ...reset(host, 't-list'), requestId: done.requestId })).toMatchObject(invalid);
         expect(await host.resetTaskChecklist({ ...reset(host, 't-done'), requestId: 'not-a-uuid' })).toMatchObject(invalid);
         expect(await host.resetTaskChecklist({ id: 'missing', requestId: generateUUID(), taskRevision: 'r' })).toMatchObject({ ok: false, error: { code: 'TASK_NOT_FOUND' } });
-        // The reset carries the revision the View tab showed.
+
         expect(await host.resetTaskChecklist({ id: 't-list', requestId: generateUUID() } as never)).toMatchObject(invalid);
     });
 });

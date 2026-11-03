@@ -1,11 +1,7 @@
 import { resolveThemeTokens, type ThemeColors, FALLBACK_THEME_COLORS } from './use-theme-tokens';
 import { useTheme, type ThemeContextType } from '../contexts/theme-context';
 
-// Re-export the generic color shape from its source-of-truth module so existing
-// import sites (`import { ThemeColors, useThemeColors } from './use-theme-colors'`)
-// keep working unchanged. The dependency is strictly one-directional:
-// use-theme-colors → use-theme-tokens (use-theme-tokens imports nothing from here),
-// so there is no import cycle for Metro to mishandle at module-init time.
+
 export type { ThemeColors };
 export { FALLBACK_THEME_COLORS };
 

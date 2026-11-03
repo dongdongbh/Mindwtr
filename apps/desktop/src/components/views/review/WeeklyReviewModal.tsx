@@ -193,8 +193,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const aiEnabled = settings?.ai?.enabled === true;
     const includeContextStep = settings?.gtd?.weeklyReview?.includeContextStep !== false;
     const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
-    // One core derivation owns every Weekly Review candidate, project-health,
-    // stale-item, and completion-summary decision.
+
+
     const weeklyBuckets = useMemo(
         () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart, sections }),
         [projects, sections, settings?.weekStart, tasks],
@@ -206,14 +206,11 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
             return acc;
         }, {} as Record<string, string>);
     }, [staleItems]);
-    // Deliberately over tasks (visible tasks), not the store's _tasksById
-    // (all tasks incl. hidden) — PERF-03 leaves this site alone on purpose.
+
+
     const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
-    // Any save bumps updatedAt, so a stale task stops being stale the moment it is
-    // touched. Its row is also its inline editor, so dropping the row closed the
-    // editor mid-edit (adding a checklist item did it). Every task this review has
-    // listed stays listed, in its first order, while it is still Next or Waiting, and
-    // the step keeps counting as having work, so the review does not jump ahead (#1262).
+
+
     const seenStaleTasksRef = useRef(new Map<string, number>());
     const staleTaskEntries = useMemo(() => {
         const stillStale = new Set<string>();
@@ -242,7 +239,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         () => new Map(projectEntries.map((entry) => [entry.project.id, entry])),
         [projectEntries],
     );
-    // A stale project opens in its own list: the review closes first (#1459).
+
     const openProject = (projectId: string) => runAfterTaskEditExit(() => {
         onClose();
         useUiStore.getState().setProjectView({ selectedProjectId: projectId });
@@ -250,9 +247,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     });
     const contextReviewGroups = weeklyBuckets.contextGroups;
     const calendarReviewItems = weeklyBuckets.calendarItems;
-    // Only used for the "nothing waiting/someday at all" empty state; the
-    // step content itself renders due+unscheduled and a collapsible
-    // "not due yet" section from waitingGroups/somedayGroups directly.
+
+
     const waitingTasks = useMemo(
         () => [...waitingGroups.due, ...waitingGroups.scheduled, ...waitingGroups.unscheduled],
         [waitingGroups],
@@ -269,9 +265,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const reviewLookBack = weeklyBuckets.lookBack;
     const estimatedDuration = formatTimeSpentLabel(reviewLookBack.estimatedMinutes);
     const trackedDuration = formatTimeSpentLabel(reviewLookBack.trackedMinutes);
-    // Time estimates default ON, so `=== true` read the default as OFF and hid
-    // the look-back (and the tracked row under it) for everyone who never
-    // touched the setting. Both flags go through resolveFeatureFlags.
+
+
     const { pomodoro: pomodoroEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
     const showEstimateLookBack = reviewLookBack.estimatedTaskCount > 0 && timeEstimatesEnabled;
     const showTrackedLookBack = showEstimateLookBack
@@ -319,7 +314,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         }
     }, [currentStep, displayedStep, setCurrentStep]);
     const stepScrollRef = useRef<HTMLDivElement>(null);
-    // Each step opens at its top, not at the previous step's scroll position (#1471).
+
     useLayoutEffect(() => {
         if (stepScrollRef.current) stepScrollRef.current.scrollTop = 0;
     }, [displayedStep]);
@@ -483,8 +478,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                 },
             });
             const response = await provider.analyzeReview({ items: staleItems });
-            // Filter here, not in the apply path, so what is displayed and what
-            // can be written never diverge.
+
+
             const suggestions = filterReviewSuggestionsToKnownIds(
                 response.suggestions || [],
                 staleItems.map((item) => item.id),
@@ -574,9 +569,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         const trimmed = value.trim();
         if (!trimmed) return null;
 
-        // Same quick-add grammar as the quick-add box, matching the project
-        // next-action prompt (#859). Read people lazily: the prompt is rare
-        // and the modal shouldn't subscribe to more of the store for it.
+
         const state = useTaskStore.getState();
         const { title, props, invalidDateCommands } = parseProjectNextActionInput(trimmed, {
             projectId: targetProject.projectId,
@@ -604,8 +597,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
 
     const saveAndEditProjectTask = (value: string) => {
         void createProjectTaskFromPrompt(value).then((taskId) => {
-            // The new task renders as a TaskItem in the project step; claiming
-            // editingTaskId opens its inline editor without leaving the review.
+
+
             if (taskId) runAfterTaskEditExit(() => setEditingTaskId(taskId));
         });
     };
@@ -880,7 +873,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                     </div>
                                 ))}
                                 {staleProjectItems.map((item) => {
-                                    // Tap a stale project to see its tasks, edit them in place, add one, or open it (#1459).
+
                                     const entry = projectEntryById.get(item.id.slice('project:'.length));
                                     const expanded = Boolean(entry) && expandedStaleProjectId === entry?.project.id;
                                     return (
@@ -1060,7 +1053,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                                     className={cn(
                                                         "text-xs px-2 py-1 rounded-full",
                                                         nextActionState === 'next' && "bg-success/10 text-success",
-                                                        // Delegated, not stuck: amber, not the red alarm (#1086).
+
                                                         nextActionState === 'waiting' && "bg-warning/10 text-warning",
                                                         nextActionState === 'none' && "bg-destructive/10 text-destructive",
                                                         nextActionState === 'deferred' && "bg-muted text-muted-foreground",

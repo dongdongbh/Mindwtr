@@ -19,7 +19,7 @@ private struct TaskDraftDirection: ViewModifier {
     }
 }
 
-/// Core owns field layout, draft edits, preview formatting and acknowledged saves.
+
 struct TaskViewSheet: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -461,8 +461,8 @@ struct TaskViewSheet: View {
 
     private func scrollChecklistFocus(_ reader: ScrollViewProxy) {
         guard let index = focusedChecklistIndex else { return }
-        // iOS 17 applies the keyboard inset after its notification. Scrolling
-        // in that callback clamps to the old viewport and can hide the new row.
+
+
         DispatchQueue.main.async {
             guard focusedChecklistIndex == index, model.taskChecklistFocusIndex == index,
                   editing, !readOnly, !checklistReordering,
@@ -1175,11 +1175,8 @@ struct TaskViewSheet: View {
     }
 
     private func endEditingBeforeAction() {
-        // Resign synchronously in the input action, before SwiftUI removes or
-        // disables a focused UITextView. Letting `.disabled(frozen)` resign it
-        // during layout can re-enter UIKit keyboard updates on iOS 27.
-        // The checklist binding receives its final synchronous editing callback
-        // here, before the action's Task sets busy and freezes checklist input.
+
+
         _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         model.commitTaskRelativeInput()
         model.commitTaskRecurrenceInputs()
@@ -1638,8 +1635,8 @@ private struct NativePhotoPicker: UIViewControllerRepresentable {
                 completion(.failure(CocoaError(.userCancelled)), pickerID)
                 return
             }
-            // Retain the selected provider; its temporary representation is
-            // acquired and captured only by the typed native facade.
+
+
             completion(.success(results.map(\.itemProvider)), pickerID)
         }
     }
@@ -1776,7 +1773,7 @@ struct NativeMarkdownContent: View {
                                              onReference: referenceHandler(blockIndex, itemIndex: index))
                             .accessibilityValue(block.text("type") == "taskList" ? strings.text(item.flag("checked") ? "common.done" : "status.active") : "")
                     }
-                    // ponytail: indent caps at eight levels; use horizontal scrolling if deeper nesting must stay distinct.
+
                     .padding(.leading, CGFloat(min(max(0, item.number("depth")), 8)) * 14)
                 }
             }
@@ -1787,7 +1784,7 @@ struct NativeMarkdownContent: View {
     }
 }
 
-// Validation does not normalize or decode the original external link.
+
 enum NativeMarkdownLinkURL {
     static func externalURL(_ href: String) -> URL? {
         guard let url = URL(string: href),
@@ -2195,9 +2192,7 @@ private struct TaskScheduleField: View {
     }
 }
 
-/// Converts only core's machine picker components. Stored date strings and
-/// displayed labels never pass through Foundation formatting here. The wheel
-/// itself keeps the platform locale/calendar, as RN's native spinner does.
+
 enum TaskDatePickerComponents {
     private static func formatter(_ format: String, timeZone: TimeZone = .current) -> DateFormatter {
         let formatter = DateFormatter()
@@ -2235,8 +2230,8 @@ enum TaskDatePickerComponents {
     }
 
     private static func instantFormatter() -> DateFormatter {
-        // JS ISO instants use a proleptic Gregorian calendar and astronomical
-        // years. Local date/time wheel components keep their existing calendar.
+
+
         let codec = formatter("uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", timeZone: TimeZone(secondsFromGMT: 0)!)
         codec.gregorianStartDate = Date(timeIntervalSince1970: -8_640_000_000_000)
         return codec
@@ -2485,8 +2480,8 @@ private struct TaskBackdatedCompletionDialog: View {
                 VStack(alignment: .leading, spacing: 12) {
                     ScrollView { form }
                     .scrollDismissesKeyboard(.interactively)
-                    // Keep this one form mounted as the keyboard changes the
-                    // available height; replacing it loses the focused input.
+
+
                     .frame(maxHeight: max(120, min(dynamicTypeSize.isAccessibilitySize ? .infinity : 360, geometry.size.height - 132)))
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("task-backdate-scroll")
@@ -3100,7 +3095,7 @@ private struct TaskDestinationPicker: View {
 private struct TaskDestinationChoice: Identifiable {
     let value: CoreObject
     let kind: String
-    // Lazy stacks flatten nested ForEach children; group-local indices collide.
+
     var id: String { kind + "-" + value.text("id") }
 }
 

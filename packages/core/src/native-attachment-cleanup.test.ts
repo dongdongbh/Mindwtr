@@ -67,7 +67,7 @@ describe('native bounded attachment cleanup witness', () => {
 
     it('keeps live references on either parent kind, including restorable soft-deleted parents', () => {
         const live = { id: 'other', kind: 'file', uri: targetURI, cloudKey: 'attachments/other.pdf' };
-        // The durable projection deliberately has no parent deletedAt: only purgedAt removes its references.
+
         expect(prepare(projection([row(), row('restorable-task', [live])]), candidate)).toBeNull();
         expect(prepare(projection([row()], [row('restorable-project', [live])]), candidate)).toBeNull();
         expect(prepare(projection([row()], [row('purged-project', [live], 'purged')]), candidate)).not.toBeNull();

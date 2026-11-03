@@ -2,7 +2,7 @@
 #import <LocalAuthentication/LocalAuthentication.h>
 #include <stdbool.h>
 
-/// True when the Mac can run the owner check (Touch ID or the account password).
+
 bool mindwtr_app_lock_available(void) {
     @autoreleasepool {
         LAContext *context = [[LAContext alloc] init];
@@ -11,8 +11,7 @@ bool mindwtr_app_lock_available(void) {
     }
 }
 
-/// Runs the owner check and blocks the calling (background) thread until the
-/// user answers. 0 success, 1 cancelled, 2 failed, 3 unavailable.
+
 int mindwtr_app_lock_authenticate(const char *reason_cstr) {
     @autoreleasepool {
         LAContext *context = [[LAContext alloc] init];

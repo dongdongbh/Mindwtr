@@ -11,11 +11,7 @@ import android.text.style.StrikethroughSpan
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 
-/**
- * Backs a widget's list; the adapter intent names the kind whose rows it serves.
- * The Tasks kind shows the Focus screen's sections (#1173): header rows plus
- * task rows with a priority dot and the project or area under the title.
- */
+
 class TasksWidgetService : RemoteViewsService() {
   override fun onGetViewFactory(intent: Intent): RemoteViewsFactory = TasksWidgetFactory(
     applicationContext,
@@ -30,7 +26,7 @@ class TasksWidgetFactory(
   private val appWidgetId: Int,
   snapshot: WidgetPayload? = null,
 ) : RemoteViewsService.RemoteViewsFactory {
-  /** One list row: a section header or a task. */
+
   sealed class Row {
     data class Header(val title: String, val detail: String?) : Row()
     data class Task(val item: WidgetPayload.Item) : Row()
@@ -59,7 +55,7 @@ class TasksWidgetFactory(
       .payload)
   }
 
-  /** Direct collections and the legacy service share the exact same rows. */
+
   private fun setSnapshot(snapshot: WidgetPayload) {
     payload = snapshot.displaySnapshot(emptySet()).payload
     val requestedListId = when (kind) {
@@ -85,8 +81,8 @@ class TasksWidgetFactory(
     val palette = WidgetRenderer.palette(context, appWidgetId, payload)
     return when (row) {
       is Row.Header -> RemoteViews(context.packageName, R.layout.mindwtr_widget_section).apply {
-        // Section rows live inside the ListView, so the parent's blank-space
-        // click cannot receive their taps. Use its existing explicit row template.
+
+
         setOnClickFillInIntent(
           R.id.mindwtr_widget_section,
           Intent().setData(Uri.parse(payload.openUriFor(listId))),
@@ -119,18 +115,16 @@ class TasksWidgetFactory(
     val struck = item.id.isNotEmpty() && CheckoffStore.isStruck(context, item.id)
     val title = boundedDisplayText(item.title)
     views.setTextViewText(R.id.mindwtr_widget_item_title, if (struck) struck(title) else title)
-    // Priority ring: the priority colour, grey when the task has none; filled
-    // while a check-off waits for its undo window or for the app to ingest it.
+
+
     views.setImageViewResource(
       R.id.mindwtr_widget_item_priority,
       if (struck) R.drawable.mindwtr_widget_circle else R.drawable.mindwtr_widget_ring,
     )
     item.priorityColor?.let { views.setInt(R.id.mindwtr_widget_item_priority, "setColorFilter", it) }
       ?: views.setThemeColor(R.id.mindwtr_widget_item_priority, "setColorFilter", palette?.mutedText, R.color.mindwtr_widget_muted_text)
-    // The ring checks the task off or undoes it only inside the short window;
-    // later stale taps reconcile presentation without touching the queue.
-    // Without an action here the tap fell through
-    // to the row and opened the app, which read as "check-off does nothing".
+
+
     views.setViewVisibility(R.id.mindwtr_widget_item_ring_target, if (item.id.isEmpty()) View.GONE else View.VISIBLE)
     if (item.id.isNotEmpty()) {
       views.setOnClickFillInIntent(R.id.mindwtr_widget_item_ring_target, Intent().setData(Uri.parse(WidgetTapActivity.checkoffUri(item.id))))
@@ -158,18 +152,14 @@ class TasksWidgetFactory(
       views.setTextColor(R.id.mindwtr_widget_item_context, palette.mutedText)
       views.setInt(R.id.mindwtr_widget_item_divider, "setBackgroundColor", palette.border)
     }
-    // Merged into the renderer's row template, which fixes component + action
-    // and leaves the data to this row: the task's own sheet, else Focus.
+
+
     val rowUri = if (item.id.isNotEmpty()) WidgetTapActivity.peekUri(item.id) else payload.focusUri
     views.setOnClickFillInIntent(R.id.mindwtr_widget_item, Intent().setData(Uri.parse(rowUri)))
     return views
   }
 
-  /**
-   * A fixed palette color, else the theme's resource color. From API 31 the
-   * launcher resolves the resource itself when it applies the row, so a
-   * day/night switch recolors cached rows without the app publishing again.
-   */
+
   private fun RemoteViews.setThemeColor(viewId: Int, method: String, color: Int?, colorRes: Int) {
     when {
       color != null -> setInt(viewId, method, color)
@@ -205,7 +195,7 @@ class TasksWidgetFactory(
     private fun boundedDisplayText(value: String): String =
       if (value.length <= MAX_DISPLAY_TEXT) value else value.take(MAX_DISPLAY_TEXT - 1) + "…"
 
-    /** Sectioned rows when the list carries sections, else the flat list. */
+
     fun buildBaseRows(list: WidgetPayload.ListPayload, compact: Boolean = false): List<Row> {
       if (list.sections.isEmpty()) return list.items.map { Row.Task(it) }
       return list.sections.flatMap { section ->
@@ -213,7 +203,7 @@ class TasksWidgetFactory(
       }
     }
 
-    /** Legacy test/helper surface: old payloads have no total, so no synthetic footer. */
+
     fun buildRows(list: WidgetPayload.ListPayload, compact: Boolean = false): List<Row> =
       buildBaseRows(list, compact)
 

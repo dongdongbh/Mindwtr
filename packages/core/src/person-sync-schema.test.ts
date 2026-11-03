@@ -10,9 +10,7 @@ import {
     PERSON_SYNC_SCHEMA_VERSION,
 } from './person-sync-schema';
 
-// Frozen snapshot of the hand-written literals these lists replaced (as of the
-// parity-entities follow-up, 2026-07-24). See the equivalent comment in
-// project-sync-schema.test.ts — same rules apply here.
+
 const PRE_REFACTOR_PERSON_SQLITE_COLUMNS = [
     'id', 'name', 'note', 'referenceLink', 'rev', 'revBy', 'createdAt', 'updatedAt', 'deletedAt',
 ];
@@ -61,9 +59,7 @@ describe('Person sync schema contract', () => {
         expect(sorted(PERSON_SQLITE_COLUMNS)).toEqual(sorted(expectedColumns));
     });
 
-    // Snapshot-equality guards: PERSON_SQLITE_COLUMNS, PERSON_SQLITE_MIGRATION_COLUMNS, and
-    // PERSON_UPSERT_UPDATE_CLAUSE are all generated from PERSON_SYNC_FIELD_SCHEMA now
-    // instead of hand-maintained literals.
+
     it('derives PERSON_SQLITE_COLUMNS identical to the pre-refactor literal, in order', () => {
         expect(PERSON_SQLITE_COLUMNS).toEqual(PRE_REFACTOR_PERSON_SQLITE_COLUMNS);
     });

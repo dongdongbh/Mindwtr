@@ -144,8 +144,7 @@ export function KeybindingHelpModal({
         { keys: 'Insert', labelKey: 'keybindings.list.newTask', fallbackLabel: 'Focus add-task input' },
     ];
 
-    // Keep this table in sync with the parser inventory mirrored by
-    // SLASH_COMMANDS in TaskInput.tsx (#869) and the quickAdd.help string.
+
     const quickAddSyntax: HelpItem[] = [
         { keys: '/start:<when>', labelKey: 'taskEdit.startDateLabel' },
         { keys: '/due:<when>', labelKey: 'taskEdit.dueDateLabel' },
@@ -153,8 +152,8 @@ export function KeybindingHelpModal({
         { keys: '/note:<text>', labelKey: 'taskEdit.descriptionLabel' },
         { keys: '/link:<url>', labelKey: 'attachments.addLink' },
         { keys: '/energy:<level>', labelKey: 'taskEdit.energyLevel' },
-        // The parser drops /priority: while the Priorities feature is off, so the
-        // help table must not advertise it (#1107).
+
+
         ...(prioritiesEnabled
             ? [{ keys: '/priority:<level>', labelKey: 'taskEdit.priorityLabel' }]
             : []),

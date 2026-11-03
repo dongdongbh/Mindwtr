@@ -239,10 +239,7 @@ describe('cloudkit-sync abort handling', () => {
         expect(cloudKitSync.ensureSubscription).not.toHaveBeenCalled();
     });
 
-    // The mobile background sync run arms this deadline (setMobileSyncRequestDeadline,
-    // shared with background-safe-fetch.ts) so a run resumed from suspension past it
-    // aborts at once rather than starting — or trusting the result of — another
-    // native CloudKit call. See background-sync-task.ts and CloudKitSyncManager.swift.
+
     describe('mobile sync wall-clock deadline', () => {
         afterEach(() => {
             setBackgroundSafeFetchDeadline(null);
@@ -256,9 +253,8 @@ describe('cloudkit-sync abort handling', () => {
         });
 
         it('rejects once the deadline passes while a native call is in flight, even though it succeeded', async () => {
-            // The call itself succeeds, but the deadline lapses while it is running
-            // (e.g. the app was suspended mid-call and only resumed after it) — the
-            // AFTER check must still fail the run rather than trust that result.
+
+
             cloudKitSync.ensureZone.mockImplementation(async () => {
                 setBackgroundSafeFetchDeadline(Date.now() - 1);
             });
@@ -269,12 +265,7 @@ describe('cloudkit-sync abort handling', () => {
         });
     });
 
-    // CloudKitOperationTimeouts.apply gives every CKOperation a 30s request
-    // timeout; CloudKit then reports it as a plain network-failure-class error.
-    // Only the elapsed time may decide whether that is logged as a timeout: the
-    // one thing that crosses the bridge is CKError.localizedDescription, which
-    // iOS translates, so the message here is German on purpose — matching
-    // English words in it would leave most testers' logs empty.
+
     it('logs a slow native failure as a timeout whatever language the phone reports it in', async () => {
         vi.useFakeTimers();
         try {
@@ -329,8 +320,8 @@ describe('cloudkit-sync abort handling', () => {
 });
 
 describe('cloudkit-sync change token and purge invariants', () => {
-    // Real AsyncStorage semantics: the token the write path reads back is the
-    // one the read path stored, so a wrongly-advanced token is observable.
+
+
     const storage = new Map<string, string>();
 
     const makeTask = (id: string, overrides: Record<string, unknown> = {}) => ({
@@ -382,7 +373,7 @@ describe('cloudkit-sync change token and purge invariants', () => {
 
         await writeRemoteCloudKit(makeAppData());
 
-        // Advancing past a conflicted save would skip those records forever.
+
         expect(storage.get(CLOUDKIT_CHANGE_TOKEN_KEY)).toBe('token-1');
         expect(cloudKitSync.fetchChanges).not.toHaveBeenCalled();
     });
@@ -399,7 +390,7 @@ describe('cloudkit-sync change token and purge invariants', () => {
         expect(cloudKitSync.ensureZone).toHaveBeenCalledTimes(1);
         expect(cloudKitSync.fetchAllRecords).toHaveBeenCalled();
         expect(remote).not.toBeNull();
-        // The old token belonged to the deleted zone; the trailing fetch supplies the new one.
+
         expect(cloudKitSync.fetchChanges).toHaveBeenLastCalledWith(null);
         expect(storage.get(CLOUDKIT_CHANGE_TOKEN_KEY)).toBe('token-fresh');
         expect(storage.get(CLOUDKIT_ZONE_CREATED_KEY)).toBe('1');

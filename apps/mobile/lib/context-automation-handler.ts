@@ -10,7 +10,7 @@ import {
 
 import { sendMobileImmediateNotification } from './notification-service';
 
-// The throttle's rules and its accepted ceilings live in core (context-automation.ts).
+
 export {
   CONTEXT_AUTOMATION_MAX_STARTS_PER_WINDOW,
   CONTEXT_AUTOMATION_RATE_WINDOW_MS,
@@ -18,8 +18,7 @@ export {
 } from '@mindwtr/core';
 export type { ResolveContextAutomationText } from '@mindwtr/core';
 
-// One throttle for the foreground link and the headless wake, made on first use:
-// tests replace @mindwtr/core as a whole.
+
 let throttle: ContextAutomationThrottle | null = null;
 
 export function __resetContextAutomationDedupeForTests(): void {

@@ -15,9 +15,6 @@ import { createMobileAttachmentBackends, type MobileAttachmentBackendsCoreFuncti
 import { WebDavRemoteWriteConflictError } from './webdav';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 
-// Design D9b W7, run per backend (design §7 "W7, run per backend" and "W7 bounds"): whole sync cycles through
-// runSharedSyncCycle, the real SqliteAdapter (a foreign write voids the cycle's read token, so a sliced cycle's save is
-// refused), and the real mobile attachment backends. Only the remote transports and the native installer are fakes.
 
 const require = createRequire(import.meta.url);
 type Database = { exec(sql: string): void; prepare(sql: string): { run(...p: unknown[]): unknown; all(...p: unknown[]): unknown[] } };
@@ -38,7 +35,7 @@ const table = (cells: Cell[]) => cells.map((cell) => [cellName(cell), cell] as c
 const bytes = (text: string) => new TextEncoder().encode(text);
 const sha = async (data: Uint8Array) => (await computeSha256Hex(data))!;
 const UP = bytes('A: the bytes this device uploads');
-// Same length as UP, so only the content check tells them apart.
+
 const OTHER = bytes('B: bytes another writer put here');
 const DOWN = bytes('the bytes another device uploaded');
 const WRONG = bytes('an unrelated local file');
@@ -60,10 +57,10 @@ const idOfKey = (key: string) => key.split('/').pop()!.split(/[.-]/)[0];
 
 type Transfer = { cycle: number; id: string; dir: 'put' | 'get' };
 
-/** Everything that survives a restart: the database, the device's files and key-value store, and the remote. */
+
 const createWorld = async (cell: Cell) => {
     const db = new DatabaseSync(':memory:');
-    // After a process death (world.dead) nothing reaches the database, the files or the remote until the next start.
+
     const alive = () => { if (world.dead) throw new Error('the process is dead'); };
     const client: SqliteClient = {
         run: async (sql, params = []) => { alive(); db.prepare(sql).run(...params); },
@@ -80,9 +77,9 @@ const createWorld = async (cell: Cell) => {
         dead: false,
         transfers: [] as Transfer[],
         remoteDoc: null as AppData | null,
-        /** At each remote document write that references the upload's key: the bytes the remote then held there. */
+
         upBlobAtDocWrite: [] as (Uint8Array | undefined)[],
-        /** Test faults: called before a transfer; a throw fails it (after the server stored a PUT). */
+
         onTransfer: undefined as undefined | ((transfer: Transfer) => void),
         upKey: '',
         downKey: '',
@@ -117,7 +114,7 @@ const createWorld = async (cell: Cell) => {
             const blob = blobs.get(keyOf(url));
             return { exists: Boolean(blob), etag: blob ? etagOf(blob.version) : null, fingerprint: null, lastModified: null, contentLength: blob ? String(blob.data.byteLength) : null };
         },
-        // If-None-Match: * for a new file, If-Match for an overwrite: a stale or missing condition is a 412.
+
         webdavPutFileVersioned: async (url, data, _type, expectedEtag) => {
             const blob = blobs.get(keyOf(url));
             if (blob ? expectedEtag !== `"v${blob.version}"` : expectedEtag !== null) throw new WebDavRemoteWriteConflictError(412);
@@ -137,8 +134,8 @@ const createWorld = async (cell: Cell) => {
         },
         downloadDropboxFile: async (_token, path) => get(path),
     };
-    // The native installer's rules (AttachmentFileInstallerCore.kt): an absent-expectation install keeps an existing file
-    // only when it holds the same bytes, a present expectation replaces only the named generation; anything else conflicts.
+
+
     const installer = {
         hashAttachmentFileGeneration: vi.fn(async (path: string) => {
             const data = memory.read(path);
@@ -171,7 +168,7 @@ const createWorld = async (cell: Cell) => {
         clearFileSyncAttachmentPublicationRecovery: vi.fn(async () => undefined),
     };
 
-    // This device holds `up` (local bytes, no remote copy); the remote document holds `down` (a remote copy, no local bytes).
+
     const up: Attachment = {
         id: 'up', kind: 'file', title: 'up.txt', uri: UP_URI, localStatus: 'available', size: UP.byteLength,
         createdAt: STAMP, updatedAt: STAMP, ...(cell.hashed ? { fileHash: await sha(UP) } : {}),
@@ -189,15 +186,15 @@ const createWorld = async (cell: Cell) => {
 };
 type World = Awaited<ReturnType<typeof createWorld>>;
 
-/** The remote bytes of a key: a blob, or a file in the File Sync folder. */
+
 const remoteBytes = (w: World, key: string) => (w.world.cell.backend === 'file'
     ? w.world.memory.read(`${FOLDER}${key.split('/').pop()}`)
     : w.world.blobs.get(key)?.data);
 
-/** A device start: a fresh adapter, attachment host and store on the world's database, files and remote. */
+
 const startDevice = async (w: World) => {
     const { world } = w;
-    // Every port of this process stops at its death: a call after it throws, as a dead process runs nothing.
+
     const mortal = <T extends object>(target: T): T => new Proxy(target, {
         get: (object, property, receiver) => {
             const value = Reflect.get(object, property, receiver);
@@ -220,7 +217,7 @@ const startDevice = async (w: World) => {
         fs, files, installer, crypto: {} as never, encryption: { logSyncEncryptionEvent: async () => undefined },
         installerMayBeMissing: () => false, timersPaused: () => true, uploads: { createUploadTask: () => null },
     });
-    // The native hosts' fetch bounds a body while receiving it (D9b slices only on native Android).
+
     const backends = createMobileAttachmentBackends({ fs, files, common, installer, log, core, boundedWebdavResponses: true });
     const adapter = new SqliteAdapter(world.client, { rejectConcurrentWrites: true });
     let inMemory = await adapter.getData();
@@ -253,7 +250,7 @@ const startDevice = async (w: World) => {
         syncAttachments,
     };
 
-    /** One cycle. `refuse`: a foreign write lands before the cycle's first local save, which voids its read token. */
+
     const run = async (refuse: boolean): Promise<SyncRunResult> => {
         world.cycle += 1;
         let saves = 0;
@@ -284,7 +281,7 @@ const startDevice = async (w: World) => {
                 sanitizeLogMessage: (message) => message,
                 logSyncError: async () => null,
                 logMergeSummary: () => undefined,
-                // Native Android's sliced cycle: token-checked reads and saves.
+
                 sliceYield: async () => undefined,
             },
             store: {
@@ -311,10 +308,10 @@ const startDevice = async (w: World) => {
                 formatErrorMessage: (error) => (error instanceof Error ? error.message : String(error)),
                 finalizeErrorStatus: async () => undefined,
                 finalizeSuccess: async () => undefined,
-                // The mobile service's gate (mobile-sync-service.ts shouldRunAttachmentPhase).
+
                 shouldRunAttachmentPhase: (data) => files.hasPendingAttachmentSyncWork(data, { contentCheckEnabled: true }),
             },
-            // The mobile service's policy.
+
             policy: {
                 preSyncAttachmentsBeforeFastCheck: true,
                 enableReadCheckSkip: false,
@@ -332,14 +329,14 @@ const downloadsInSync = (cell: Cell) => cell.backend === 'webdav' || cell.backen
 const transfersOf = (w: World, filter: Partial<Transfer>) => w.world.transfers.filter((t) => (
     (filter.cycle === undefined || t.cycle === filter.cycle) && (filter.id === undefined || t.id === filter.id) && (filter.dir === undefined || t.dir === filter.dir)));
 
-/** Each started cycle makes at most one transfer per attachment and direction. */
+
 const expectBoundedTransfers = (w: World) => {
     const counts = new Map<string, number>();
     for (const t of w.world.transfers) counts.set(`${t.cycle}|${t.id}|${t.dir}`, (counts.get(`${t.cycle}|${t.id}|${t.dir}`) ?? 0) + 1);
     expect([...counts].filter(([, count]) => count > 1)).toEqual([]);
 };
 
-/** No attachment ever names local bytes whose hash differs from its fileHash. */
+
 const expectNoWrongBytes = async (w: World, data: AppData) => {
     for (const attachment of attachmentsOf(data).values()) {
         if (attachment.localStatus !== 'available' || !attachment.uri) continue;
@@ -359,7 +356,7 @@ describe('design D9b W7 per backend: three refused saves, then a restart', () =>
             await expectNoWrongBytes(w, await device.adapter.getData());
             expectBoundedTransfers(w);
         }
-        // Each refused save left the remote document unwritten.
+
         expect(w.world.upBlobAtDocWrite).toEqual([]);
 
         device = await startDevice(w);
@@ -375,14 +372,14 @@ describe('design D9b W7 per backend: three refused saves, then a restart', () =>
         const down = attachmentsOf(local).get('down')!;
         expect(up).toMatchObject({ localStatus: 'available', uri: UP_URI, cloudKey: w.world.upKey, fileHash: await sha(UP) });
         if (!downloadsInSync(cell)) {
-            // File Sync and Cloud leave remote-only files for an on-demand fetch: a cycle never fetches them.
+
             expect(down).toMatchObject({ cloudKey: w.world.downKey, localStatus: 'missing' });
             expect(w.world.memory.calls.filter((call) => call.startsWith(`copy ${FOLDER}`))).toEqual([]);
         } else {
             expect(down).toMatchObject({ localStatus: 'available', uri: DOWN_TARGET, cloudKey: w.world.downKey, fileHash: await sha(DOWN) });
             expect(w.world.memory.read(DOWN_TARGET)).toEqual(DOWN);
         }
-        // The remote holds both blobs and the document references them.
+
         expect(remoteBytes(w, w.world.upKey)).toEqual(UP);
         expect(remoteBytes(w, w.world.downKey)).toEqual(DOWN);
         const remote = attachmentsOf(w.world.remoteDoc!);
@@ -390,14 +387,12 @@ describe('design D9b W7 per backend: three refused saves, then a restart', () =>
         expect(remote.get('down')).toMatchObject({ cloudKey: w.world.downKey });
         expect(w.world.upBlobAtDocWrite.every((data) => data !== undefined && Buffer.from(data).equals(Buffer.from(UP)))).toBe(true);
 
-        // Uploads have no proof: every started cycle sends them again, except File Sync, whose generation file is
-        // immutable and verified by its hash before it is recorded, and WebDAV without a strong ETag, which cannot
-        // overwrite: each later cycle GETs the file once and records it when its content matches.
+
         const unversioned = cell.backend === 'webdav' && cell.etag !== 'strong';
         expect(transfersOf(w, { id: 'up', dir: 'put' })).toHaveLength(cell.backend === 'file' || unversioned ? 1 : 4);
         expect(transfersOf(w, { id: 'up', dir: 'get' })).toHaveLength(unversioned ? 3 : 0);
-        // Downloads are reused only after a hash check: with a fileHash only the first cycle GETs, and the file it
-        // installed is adopted with zero GETs after each refusal and after the restart. A hashless one GETs every cycle.
+
+
         expect(transfersOf(w, { id: 'down', dir: 'get' })).toHaveLength(!downloadsInSync(cell) ? 0 : cell.hashed ? 1 : 4);
         if (cell.hashed && downloadsInSync(cell)) {
             expect(device.lines.some((line) => line.extra?.releaseCheck === 'v1.3.7/attachment-download-reuse')).toBe(true);
@@ -421,7 +416,7 @@ describe('design D9b W7: a file at the download target', () => {
                 expect(transfersOf(w, { id: 'down', dir: 'get' })).toHaveLength(0);
                 expect(down).toMatchObject({ localStatus: 'available', uri: DOWN_TARGET });
             } else {
-                // The GET runs; the installer keeps the unrelated file and the record never names it.
+
                 expect(transfersOf(w, { id: 'down', dir: 'get' })).toHaveLength(1);
                 expect(down.localStatus === 'available' && down.uri === DOWN_TARGET).toBe(false);
                 expect(w.world.memory.read(DOWN_TARGET)).toEqual(WRONG);
@@ -435,8 +430,8 @@ describe('design D9b W7: the process dies inside a download install (crash point
     it.each(table(cells))('%s: the staged file is never adopted or recorded, and the next start GETs again and converges', async (_name, cell) => {
         const w = await createWorld(cell);
         const install = w.installer.installAttachmentFileGeneration.getMockImplementation()!;
-        // The process dies inside the first install: after the staged file is written, before it is moved onto the target.
-        // From then on nothing of that process reaches the database, the files, the key-value store or the remote.
+
+
         w.installer.installAttachmentFileGeneration.mockImplementationOnce(async () => {
             w.world.dead = true;
             throw new Error('the process died');
@@ -449,7 +444,7 @@ describe('design D9b W7: the process dies inside a download install (crash point
         w.world.dead = false;
         w.installer.installAttachmentFileGeneration.mockImplementation(install);
         const restarted = await startDevice(w);
-        // The durable state the death left names no file at the target.
+
         await expectNoWrongBytes(w, await restarted.adapter.getData());
         expect(await restarted.run(false), restarted.warnings.join('\n')).toMatchObject({ success: true });
         const local = await restarted.adapter.getData();
@@ -465,7 +460,7 @@ describe('design D9b W7: another writer replaces the uploaded blob right after o
     it.each(table(cells))('%s: the next cycle PUTs A again before anything references it, and never records B', async (_name, cell) => {
         const w = await createWorld(cell);
         const device = await startDevice(w);
-        // Another writer replaces A with B at the same key as soon as our PUT stored A, before anything after it in the cycle.
+
         let replaced = false;
         w.world.onTransfer = (transfer) => {
             if (replaced || transfer.id !== 'up' || transfer.dir !== 'put') return;
@@ -484,11 +479,11 @@ describe('design D9b W7: another writer replaces the uploaded blob right after o
         await expectNoWrongBytes(w, local);
         expect(w.world.memory.read(UP_URI)).toEqual(UP);
         expect(attachmentsOf(local).get('up')?.fileHash).toBe(await sha(UP));
-        // No document write ever referenced the key while it held B.
+
         expect(w.world.upBlobAtDocWrite.every((data) => data !== undefined && Buffer.from(data).equals(Buffer.from(UP)))).toBe(true);
         if (cell.backend === 'file' || (cell.backend === 'webdav' && cell.etag !== 'strong')) {
-            // File Sync: the generation is immutable and named by its hash, so a corrupt one is refused, never re-recorded
-            // or overwritten. WebDAV without a strong ETag refuses an unconditional overwrite. Both stay unpublished.
+
+
             expect(result.success).toBe(false);
             expect(attachmentsOf(local).get('up')?.cloudKey).toBeUndefined();
             expect(attachmentsOf(w.world.remoteDoc!).has('up')).toBe(false);
@@ -508,7 +503,7 @@ describe('design D9b W7: one transfer per attachment and direction across a cycl
         w.world.onTransfer = (t) => { if (t.cycle === 1 && t.id === 'down' && t.dir === 'get') throw httpError(500); };
         await device.run(false);
         expect(transfersOf(w, { id: 'down', dir: 'get', cycle: 1 })).toHaveLength(1);
-        // After a restart (WebDAV's download backoff is in memory) the next cycle GETs it once and converges.
+
         w.world.onTransfer = undefined;
         const restarted = await startDevice(w);
         expect(await restarted.run(false)).toMatchObject({ success: true });
@@ -516,8 +511,7 @@ describe('design D9b W7: one transfer per attachment and direction across a cycl
         expect(attachmentsOf(await restarted.adapter.getData()).get('down')).toMatchObject({ localStatus: 'available', uri: DOWN_TARGET });
     });
 
-    // A real cycle cannot send one upload twice (c2 review P3-2: prepare defers uploads, and a pending upload fails the
-    // remote write). The admission still guards each backend, so these call one backend twice with one cycle admission.
+
     it('Dropbox: a PUT whose answer is lost is sent once per cycle admission', async () => {
         const w = await createWorld({ backend: 'dropbox', hashed: true, etag: 'strong' });
         const device = await startDevice(w);
@@ -549,7 +543,7 @@ describe('design D9b W7: one transfer per attachment and direction across a cycl
         const second = await call(cycle);
         expect(touches()).toBe(afterFirst);
         expect(second === false ? undefined : attachmentsOf(second).get('up')?.cloudKey).toBeUndefined();
-        // The next cycle verifies the stored generation and records it, with no second publication.
+
         w.world.onTransfer = undefined;
         const next = await call(createAttachmentTransferAdmission());
         expect(next === false ? undefined : attachmentsOf(next).get('up')?.cloudKey).toBe(w.world.upKey);

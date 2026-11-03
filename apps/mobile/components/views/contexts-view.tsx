@@ -154,7 +154,7 @@ export function ContextsView() {
     setMatchMode('all');
   }, [requestedTokens]);
 
-  // The counts depend only on the tasks: count once per store change, not per selection.
+
   const contextsIndex = useMemo(() => buildContextsTokenIndex(scopedTasks, { includeFinished: true }), [scopedTasks]);
   const model = buildContextsViewModel({
     index: contextsIndex,
@@ -163,7 +163,7 @@ export function ContextsView() {
     matchMode,
     searchQuery,
   });
-  // Aligned with model.tokenChips: a child chip after its parent shows "/leaf" (#1428).
+
   const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
   const tasksById = useMemo(
     () => tasks.reduce((acc, task) => {
@@ -221,9 +221,7 @@ export function ContextsView() {
     return updateTask(taskId, updates);
   };
 
-  // The row handlers are re-created on every render of this screen, so rows
-  // reach them through one object that never changes identity and reads the
-  // latest values from a ref (#766).
+
   const rowSourcesRef = useRef({ handleStatusChange, handleDelete, toggleMultiSelect });
   rowSourcesRef.current = { handleStatusChange, handleDelete, toggleMultiSelect };
   const rowActions = useMemo<TaskRowActions>(() => ({
@@ -270,7 +268,7 @@ export function ContextsView() {
     : t('taskEdit.contextsPlaceholder');
   const matchModeLabels = getContextsMatchModeLabels(t);
   const emptyState = getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: selectedContexts }, t);
-  // The shared list sort (settings.taskSortBy), as Inbox's direct Sort control shows it (#1415).
+
   const sortAccessibilityLabel = getTaskListHeaderText({
     sortByLabel: getTaskSortByLabel(model.sortBy, t),
     hasActiveFilters: false,
@@ -282,8 +280,8 @@ export function ContextsView() {
     if (!bulkTokenPicker || !hasSelection) return;
     await runBulkAction(tokenPickerTitle, async () => {
       setBulkTokenPicker(null);
-      // One store command builds each list from the task as stored and writes it: a sync save admitted
-      // first may have published a token another device added, and the rows on screen lack it.
+
+
       const outcome = await runStoreCommand(() => editContextsTaskTokens({ batchUpdateTasks }, {
         taskIds: selectedIdsArray,
         tasksById: Object.fromEntries(useTaskStore.getState()._tasksById),
@@ -305,7 +303,7 @@ export function ContextsView() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={[styles.container, { backgroundColor: tc.bg }]}>
-        {/* Search box for contexts */}
+        {                             }
         <View style={[styles.searchContainer, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
           <TextInput
             style={[styles.searchInput, { backgroundColor: tc.inputBg, color: tc.text }]}
@@ -492,7 +490,7 @@ export function ContextsView() {
 
         <View style={styles.content}>
           {selectionMode ? (
-            // Same look as the task lists' bulk bar (TaskListBulkBar); Contexts keeps its own actions.
+
             <View style={[bulkStyles.bulkBar, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
               <View style={bulkStyles.bulkStatusRow}>
                 <Text style={[bulkStyles.bulkCount, { color: tc.secondaryText }]}>
@@ -638,7 +636,7 @@ export function ContextsView() {
           visible={sortModalVisible}
         />
 
-        {/* Task Edit Modal */}
+        {                     }
         <TaskEditModal
           visible={editingTask !== null}
           task={editingTask}

@@ -48,7 +48,7 @@ const errorMessages: Record<GmailCaptureErrorKind, string> = {
     other: 'Gmail capture failed.',
 };
 
-// Never surface a provider response, URL, mailbox content, or credential in an error.
+
 export const toGmailCaptureError = (error: unknown): GmailCaptureError => {
     const kind = error && typeof error === 'object' && 'kind' in error ? error.kind : 'other';
     const safeKind = typeof kind === 'string' && Object.prototype.hasOwnProperty.call(errorMessages, kind)
@@ -118,7 +118,7 @@ export function createGmailCaptureRuntime(transport: GmailCaptureTransport) {
     let configChanging = false;
     let activeController: GmailCaptureController | null = null;
 
-    // Invalidate queued writes before the transport yields, including a failed change.
+
     const changeConfiguration = async <T>(work: () => Promise<T>): Promise<T> => {
         const generation = ++configGeneration;
         configChanging = true;
@@ -184,7 +184,7 @@ export function createGmailCaptureRuntime(transport: GmailCaptureTransport) {
                 if (!isCurrent() || !config.available || !config.connected || !config.enabled || !config.labelId || !config.accountId) return;
                 let imported = 0;
                 for (let round = 0; round < (options.maxRoundsPerCycle ?? 10); round += 1) {
-                    // Network fetches stay outside the store writer gate.
+
                     const batch = await poll();
                     if (!isCurrent() || batch.accountId !== config.accountId) return;
                     const saved = await runStoreCommand(async () => {
@@ -202,7 +202,7 @@ export function createGmailCaptureRuntime(transport: GmailCaptureTransport) {
                             });
                             const added = await options.addTasks(items);
                             if (!added.success) throw { kind: 'storage' };
-                            // Once admitted, finish persistence even if the connection changes mid-save.
+
                             try {
                                 await options.flushPendingSave();
                             } catch {

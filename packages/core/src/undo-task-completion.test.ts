@@ -8,9 +8,7 @@ import { runSyncStoreSave } from './store-write-gate';
 import type { Task } from './types';
 import { formatTaskMarkedDoneMessage, formatTaskMovedMessage, restoreTaskSnapshot, undoTaskCompletion } from './undo-task-completion';
 
-// The two keys ship with different placeholder conventions ('{title}' vs
-// '{{title}}'); the formatters interpret the keys as they are, so both platforms
-// get the same text from one home instead of hand-rolling a `.replace` each.
+
 describe('task action toast text', () => {
     const passthrough = (key: string) => key;
 
@@ -32,7 +30,7 @@ describe('task action toast text', () => {
     });
 
     it('inserts a title or section name literally, even with $ replacement patterns', () => {
-        // String.replace expands $&, $$ and $1 in a replacement string.
+
         const title = 'Pay $& and $$ {{status}}';
         expect(formatTaskMarkedDoneMessage(passthrough, title)).toBe(`${title} marked Done`);
         expect(formatTaskMovedMessage(passthrough, title, 'waiting')).toBe(`${title} moved to waiting`);
@@ -53,7 +51,7 @@ describe('undo of a processed task after sync changed it', () => {
         useTaskStore.setState({ settings: { deviceId: 'this-device' }, _allTasks: [row({})] });
         let release!: () => void;
         const held = new Promise<void>((resolve) => { release = resolve; });
-        // The decision is done; a sync save publishes the other device's new tag before the Undo is admitted.
+
         const save = runSyncStoreSave(async () => {
             await held;
             useTaskStore.setState({ _allTasks: [row({ rev: 3, revBy: 'other-device', tags: ['remote'] })] });
@@ -74,8 +72,7 @@ describe('undo of a processed task after sync changed it', () => {
     });
 });
 
-// Coordinator decision 10-25: an Undo never deletes an edit. The next occurrence a completion spawned goes away with the Undo, as
-// RN's, unless it was edited since it was made (another device's edit synced in during the toast); then it stays.
+
 describe('undo of a recurring completion', () => {
     beforeEach(() => {
         resetForTests();

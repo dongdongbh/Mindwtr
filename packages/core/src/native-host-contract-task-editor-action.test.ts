@@ -59,7 +59,7 @@ describe('runTaskEditorAction', () => {
         expect(await host.runTaskEditorAction(input)).toEqual({ ok: true,
             value: { kind: 'convertToSection', outcome: 'unchanged', projectId: 'p', sectionId: uuid(1) } });
         expect(saves()).toBe(count);
-        // After a restart (a new contract), the journal's replay still finds the section and writes nothing.
+
         const cold = await open({ tasks: data().tasks, sections: data().sections });
         expect(await cold.host.runTaskEditorAction(input)).toMatchObject({ ok: true, value: { outcome: 'unchanged', sectionId: uuid(1) } });
         expect(cold.data().sections).toHaveLength(1);
@@ -194,7 +194,7 @@ describe('runTaskEditorAction', () => {
         const { host } = await open({ tasks: [task(), task({ id: 'other', title: 'Paint the hall' })] }, () => failing);
         expect(await host.runTaskEditorAction(action(31, 'cancel', { save: { base: {}, patch: {}, scheduleBase } }))).toMatchObject({ ok: true });
         expect(await host.runTaskEditorAction(action(32, 'cancelUndo', { cancelRequestId: uuid(31) }))).toMatchObject({ ok: true });
-        // A second Undo tap finds the task restored while an unrelated change waits for a save that fails.
+
         void useTaskStore.getState().updateTask('other', { title: 'Queued' });
         failing = true;
         const again = action(33, 'cancelUndo', { cancelRequestId: uuid(31) });

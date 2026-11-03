@@ -98,7 +98,7 @@ const featureIntersectionArea = (
   const measuredWidth = right - left;
   const measuredHeight = bottom - top;
 
-  // Separating features can be represented as a zero-width or zero-height line.
+
   return feature.orientation === 'vertical'
     ? Math.max(1, measuredWidth) * Math.max(0, measuredHeight)
     : Math.max(0, measuredWidth) * Math.max(1, measuredHeight);
@@ -248,8 +248,8 @@ export const resolveAdaptiveWindow = ({
   const dimensionsMatchSnapshot = nativeSnapshot ? (() => {
     const widthMatches = Math.abs(nativeSnapshot.width - width) <= 48;
     const orientationMatches = (nativeSnapshot.width >= nativeSnapshot.height) === (width >= height);
-    // adjustResize can shorten the React root while WindowMetrics and folding
-    // feature coordinates correctly remain relative to the full activity window.
+
+
     const isVerticallyClippedViewport = widthMatches && height < nativeSnapshot.height - 48;
     return widthMatches && (orientationMatches || isVerticallyClippedViewport);
   })() : false;
@@ -267,9 +267,8 @@ export const resolveAdaptiveWindow = ({
   const foregroundFrame = activeFeature
     ? splitFrameAroundFeature(safeFrame, activeFeature, navigationPlacement)
     : safeFrame;
-  // A side rail may use the full safe height around a vertical hinge. Around a
-  // horizontal/tabletop hinge it must fit in one contiguous pane, both for the
-  // expanded eligibility decision and for its rendered frame.
+
+
   const navigationFrame = activeFeature?.orientation === 'horizontal'
     ? foregroundFrame
     : safeFrame;

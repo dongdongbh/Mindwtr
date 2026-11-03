@@ -41,12 +41,6 @@ import {
   uploadDropboxFileVersioned,
 } from './dropbox-sync';
 
-// The WebDAV, self-hosted cloud, Dropbox and File Sync attachment passes live in core
-// (`packages/core/src/mobile-attachment-backends.ts`) so the native app runs the same rules.
-// This module binds them to expo-file-system, the native installer, the app log, Dropbox and
-// core's transports. Every binding calls the imported function when used, so tests that replace
-// these modules still reach their mocks; the core object is made on first use. CloudKit (iOS
-// only) stays here.
 
 export { syncCloudKitAttachments } from './attachment-sync-backends/cloudkit';
 export type { CloudAttachmentSyncOptions, DropboxAttachmentSyncOptions } from '@mindwtr/core/mobile-attachment-backends';

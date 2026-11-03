@@ -37,8 +37,8 @@ type FsEvent = {
 
 export type LocalDataWatcherDependencies = {
     readDataJson: () => Promise<AppData>;
-    /** Read-only storage snapshot for the pre-apply no-op check — never applies
-     *  anything to the store. */
+
+
     readStorageSnapshot: () => Promise<AppData>;
     refreshStorageData: (isResultStillRelevant?: () => boolean) => Promise<void>;
     watchFile: (path: string, callback: (event: FsEvent) => void) => Promise<unknown>;
@@ -194,10 +194,8 @@ export const createLocalDataWatcherController = (
     let hasPendingSqliteChangeDuringSelfWrite = false;
     let pendingSqliteChangePaths: string[] = [];
     let pendingExternalChange = false;
-    // Set by stop() when it drops a real pending change (StrictMode/HMR/
-    // teardown mid-debounce); consumed by the next start() to recover it.
-    // Ordinary first-start at launch never sets this, so start() doesn't run
-    // a merge against a still-unhydrated store.
+
+
     let droppedPendingChangeAtStop = false;
     let mergeInFlight: Promise<void> | null = null;
     let mergeInFlightGeneration: number | null = null;
@@ -257,10 +255,8 @@ export const createLocalDataWatcherController = (
 
     type SnapshotTraceSummary = {
         dataSig: string;
-        /**
-         * Per-collection signatures are diagnostics only and are absent unless
-         * logging is enabled — see the gate in `buildSnapshotTraceSummary`.
-         */
+
+
         tasksSig?: string;
         projectsSig?: string;
         sectionsSig?: string;
@@ -282,12 +278,8 @@ export const createLocalDataWatcherController = (
         const areas = Array.isArray(normalized.areas) ? normalized.areas : [];
         const people = Array.isArray(normalized.people) ? (normalized.people ?? []) : [];
         const settings = normalized.settings ?? {};
-        // `dataSig` drives the no-op refresh detection in `runSqliteRefresh`, so it
-        // is always computed. The six per-collection signatures are for logging
-        // only, and each one costs another full stable-stringify of that
-        // collection — on a large store that is megabytes of transient string per
-        // refresh, twice per refresh. Gate them behind the same logging switch
-        // `sync-service.ts` uses for its payload traces.
+
+
         const detailed = normalized.settings?.diagnostics?.loggingEnabled === true;
         const dataSig = await localDataWatcherDependencies.hashPayload(toStableJson(normalized));
         const [tasksSig, projectsSig, sectionsSig, areasSig, peopleSig, settingsSig] = detailed
@@ -320,13 +312,13 @@ export const createLocalDataWatcherController = (
     const prefixSnapshotTraceSummary = (prefix: string, summary: SnapshotTraceSummary): Record<string, string> =>
         Object.fromEntries(
             Object.entries(summary)
-                // An absent per-collection signature means logging was off when the
-                // summary was built; omit it rather than reporting an empty digest.
+
+
                 .filter(([, value]) => value !== undefined)
                 .map(([name, value]) => [`${prefix}${name.charAt(0).toUpperCase()}${name.slice(1)}`, value as string]),
         );
 
-    /** Reports a change only when both signatures were actually computed. */
+
     const changed = (name: string, before: string | undefined, after: string | undefined): Record<string, string> =>
         before === undefined || after === undefined ? {} : { [name]: String(before !== after) };
 
@@ -347,15 +339,15 @@ export const createLocalDataWatcherController = (
         };
     };
 
-    /** Filter out iCloud placeholder events (.icloud files, lock files). */
+
     const isRelevantSyncEvent = (paths: string[]): boolean => {
         return paths.some((p) => {
             const name = getPathBasename(p);
-            // Ignore iCloud placeholder stubs (.filename.icloud)
+
             if (name.endsWith('.icloud')) return false;
-            // Ignore our own advisory lock file
+
             if (name === '.mindwtr.lock') return false;
-            // Ignore temp files from atomic writes
+
             if (name.endsWith('.tmp')) return false;
             return true;
         });
@@ -363,8 +355,8 @@ export const createLocalDataWatcherController = (
 
     const isRelevantSqliteEvent = (paths: string[], dbPath: string): boolean => {
         const dbName = getPathBasename(dbPath);
-        // WAL carries committed writes. The shared-memory file can move during
-        // read/lock activity, so watching it makes fetchData feed itself.
+
+
         const sqliteNames = new Set([dbName, `${dbName}-wal`]);
         return paths.some((path) => sqliteNames.has(getPathBasename(path)));
     };
@@ -446,8 +438,8 @@ export const createLocalDataWatcherController = (
         };
 
         sqliteEditUnlockUnsubscribe = localDataWatcherDependencies.subscribeStore(drainAfterUnlock);
-        // Close the subscribe-after-check race if the editor unlocked just before
-        // the subscription became active.
+
+
         drainAfterUnlock();
     };
 
@@ -608,10 +600,8 @@ export const createLocalDataWatcherController = (
                 return isCurrentWatcherGeneration(generation) ? canonical : null;
             } catch (error) {
                 if (!isCurrentWatcherGeneration(generation)) return null;
-                // Storage adapters mark a payload before starting their durable
-                // write. Restore the previous tokens when that write rejects so a
-                // failed attempt cannot suppress the external snapshot that still
-                // needs to be persisted.
+
+
                 pendingSelfWrites = pendingSelfWritesBeforeAttempt;
                 if (isTerminalMergedPersistError(error)) throw error;
                 if (attempt === MAX_MERGED_PERSIST_ATTEMPTS) throw error;
@@ -664,10 +654,8 @@ export const createLocalDataWatcherController = (
     };
 
     async function mergeExternalData(generation: number): Promise<void> {
-        // Full-document sync, imports/restores, and this watcher all enter this
-        // lane before reading their current inputs. A data transfer acquires its
-        // store-write barrier only after it reaches the front of the same lane, so
-        // the watcher never waits on that barrier while holding an earlier lock.
+
+
         await runSerializedSyncDocumentWriteOperation(async () => {
             if (!isCurrentWatcherGeneration(generation)) return;
             try {
@@ -770,13 +758,8 @@ export const createLocalDataWatcherController = (
                     '[local-data-watcher] SQLite refresh start',
                     prefixSnapshotTraceSummary('before', beforeSummary),
                 );
-                // Compare BEFORE applying: fetchData replaces every store
-                // object identity even when the content is byte-identical,
-                // which re-rendered and re-measured the visible list — the
-                // Inbox "flicker" of #1079 (launch, window restore, and the
-                // sync self-write echoes this watcher chases). A read-only
-                // snapshot costs less than the fetch it replaces. Fail open:
-                // a failed probe falls through to the normal refresh.
+
+
                 try {
                     const candidateSummary = await buildSnapshotTraceSummary(
                         await localDataWatcherDependencies.readStorageSnapshot(),
@@ -792,7 +775,7 @@ export const createLocalDataWatcherController = (
                         return;
                     }
                 } catch {
-                    // Probe unavailable — refresh as before the probe existed.
+
                 }
                 if (!isCurrentWatcherGeneration(generation)) return;
                 await localDataWatcherDependencies.refreshStorageData(
@@ -862,9 +845,8 @@ export const createLocalDataWatcherController = (
         }
 
         if (!options.immediate) {
-            // A distinct filesystem event represents a fresh opportunity to read
-            // the database. Give it its own bounded retry allowance without
-            // cancelling a retry that is already queued for the same lane.
+
+
             delayedSqliteRefreshRetryCount = 0;
             localDataWatcherDependencies.logInfo(
                 '[local-data-watcher] SQLite event received',
@@ -875,9 +857,8 @@ export const createLocalDataWatcherController = (
                 if (now < sqliteSelfWriteUntil) {
                     sqliteSuppressedSelfWriteEvents += 1;
                 }
-                // The no-op window suppresses watcher feedback, but a WAL event can
-                // also be a real concurrent writer. Coalesce every ignored event
-                // and drain it once the active suppression window closes.
+
+
                 hasPendingSqliteChangeDuringSelfWrite = true;
                 pendingSqliteChangePaths = paths.slice(0, 8);
                 scheduleSqliteIgnoreDrain();
@@ -994,9 +975,7 @@ export const createLocalDataWatcherController = (
         }
     }
 
-    // Cheap: rearmExhaustedWatchChannel below is a no-op unless a channel is
-    // actually exhausted, so this is safe to call from a frequent trigger
-    // (window focus) without the cost of a full disk refresh.
+
     function rearmExhaustedWatchers(): void {
         rearmExhaustedWatchChannel(dataWatchChannel);
         rearmExhaustedWatchChannel(sqliteWatchChannel);
@@ -1030,7 +1009,7 @@ export const createLocalDataWatcherController = (
                             releaseCheck: 'v1.3.0/watcher-property-order',
                         });
                     } catch {
-                        // Diagnostics must not discard the retained self-write.
+
                     }
                 }
             } catch {
@@ -1055,7 +1034,7 @@ export const createLocalDataWatcherController = (
             try {
                 localDataWatcherDependencies.logWarn(`[local-data-watcher] Failed to ${label}: ${String(error)}`);
             } catch {
-                // Teardown must continue even if diagnostics are unavailable.
+
             }
         }
     }
@@ -1142,12 +1121,7 @@ export const createLocalDataWatcherController = (
         });
     };
 
-    // A channel that exhausted its retry budget (scheduleWatchRegistrationRetry
-    // above) stays blind until something re-arms it — no timer keeps trying on
-    // its own. Coarse triggers (refreshFromDiskNow below) give it one fresh
-    // shot per call by resetting the count; if that attempt also exhausts, the
-    // per-burst cap applies again and it goes quiet until the next trigger, so
-    // this can never spin unbounded on a permanently dead path.
+
     const rearmExhaustedWatchChannel = (channel: WatchChannelState): void => {
         if (!channel.path || channel.unwatch || channel.registration || channel.retryTimer) return;
         if (channel.retryCount < MAX_WATCH_REGISTRATION_RETRIES) return;
@@ -1181,8 +1155,8 @@ export const createLocalDataWatcherController = (
                 (event) => {
                     const paths = normalizePathsFromEvent(event);
                     if (paths.length === 0) return;
-                    // Skip iCloud placeholder events, lock files, and temp files to
-                    // avoid spurious merges from iCloud Drive housekeeping operations.
+
+
                     if (!isRelevantSyncEvent(paths)) return;
                     void handleExternalChange();
                 },
@@ -1213,13 +1187,7 @@ export const createLocalDataWatcherController = (
 
         await Promise.all(registrations);
 
-        // A write can land in the 750ms debounce right before a stop/start
-        // (StrictMode/HMR/teardown) — stop() clears pendingExternalChange and
-        // cancels that timer, so without this the change is only observed if
-        // data.json changes again. Only run this when stop() actually dropped
-        // one: an ordinary first start() at launch can beat fetchData, and
-        // merging against the still-empty store here would persist a
-        // full-document save with no CAS baseline and stomp the real load.
+
         if (droppedPendingChangeAtStop) {
             droppedPendingChangeAtStop = false;
             await handleExternalChange({ immediate: true, ignoreSelfWindow: true });
@@ -1228,9 +1196,8 @@ export const createLocalDataWatcherController = (
 
     function stop(): void {
         watcherGeneration += 1;
-        // A real change is about to be dropped only if one was actually
-        // pending (debounced or mid-debounce) — not on an ordinary stop with
-        // nothing queued.
+
+
         if (pendingExternalChange || debounceTimer) {
             droppedPendingChangeAtStop = true;
         }
@@ -1278,9 +1245,8 @@ export const createLocalDataWatcherController = (
         deferredSqliteChangePaths = [];
         pendingExternalChange = false;
         pendingSelfWrites = [];
-        // Aligned with resetForTests: a stale ignore window or hash from before
-        // this stop() must not suppress or short-circuit the next start()'s
-        // observations.
+
+
         ignoreUntil = 0;
         lastKnownHash = '';
         sqliteIgnoreUntil = 0;

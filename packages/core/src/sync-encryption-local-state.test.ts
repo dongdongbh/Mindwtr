@@ -96,7 +96,7 @@ describe('sync encryption local state', () => {
         plain.set(WEBDAV_URL_KEY, 'https://dav.example.com/sync');
         plain.set(WEBDAV_USERNAME_KEY, 'alice');
         await expect(store.getSyncEncryptionStatus()).resolves.toEqual({ state: 'off', incompleteTransition: undefined, partlyEncrypted: true });
-        // Another folder is whole: the card offers Enable there, and its sync runs.
+
         plain.set(WEBDAV_URL_KEY, 'https://dav.example.com/other');
         await expect(store.getSyncEncryptionStatus()).resolves.toEqual({ state: 'off', incompleteTransition: undefined });
     });
@@ -109,7 +109,7 @@ describe('sync encryption local state', () => {
         plain.set(SYNC_ENCRYPTION_STATE_KEY, JSON.stringify({ state: 'enabled', discoveredSalt: '0a0b', discoveredParams: KDF }));
         await expect(store.getSyncEncryptionMaterial()).rejects.toBeInstanceOf(SyncEncryptionKeyMissingError);
 
-        // A truncated keystore entry is "no key", not a short key.
+
         secrets.set(SYNC_ENCRYPTION_KEY_KEY, bytesToBase64(KEY.slice(0, 16)));
         await expect(store.getSyncEncryptionMaterial()).rejects.toBeInstanceOf(SyncEncryptionKeyMissingError);
 
@@ -121,7 +121,7 @@ describe('sync encryption local state', () => {
             params: KDF,
         });
 
-        // `remote-plaintext` keeps its key: dropping to "off" would be a silent downgrade.
+
         store.reset();
         plain.set(SYNC_ENCRYPTION_STATE_KEY, JSON.stringify({ state: 'remote-plaintext', discoveredSalt: '0a0b', discoveredParams: KDF }));
         await expect(store.getSyncEncryptionMaterial()).resolves.not.toBeNull();
@@ -176,14 +176,14 @@ describe('sync encryption local state', () => {
     });
 
     it('reads a remembered partly encrypted location as off for every other location\'s posture', async () => {
-        // Off with only the partly encrypted location remembered: encryption is still off. Read as a non-keyed discovery
-        // state, it deferred every other location's attachment pre-sync phase forever (no discovery is ever on record there).
+
+
         const { plain, store } = createHarness();
         plain.set(SYNC_ENCRYPTION_STATE_KEY, JSON.stringify({ state: 'off', partlyEncryptedScope: '["webdav","https://dav.example.com/mixed/data.json","bob"]' }));
         await expect(store.isSyncEncryptionPostureUnestablished(WEBDAV_SCOPE, true)).resolves.toBe(false);
         await expect(store.isSyncEncryptionPostureUnestablished(WEBDAV_SCOPE, false)).resolves.toBe(true);
 
-        // An off state mid-transition stays unknown.
+
         store.reset();
         plain.set(SYNC_ENCRYPTION_STATE_KEY, JSON.stringify({ state: 'off', incompleteTransition: 'enable' }));
         await expect(store.isSyncEncryptionPostureUnestablished(WEBDAV_SCOPE, true)).resolves.toBe(true);

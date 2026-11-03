@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Validated Google Play edit transactions for Android release workflows."""
-
 from __future__ import annotations
+COMMAND_DESCRIPTION = """Validated Google Play edit transactions for Android release workflows."""
+
 
 import argparse
 import copy
@@ -42,11 +42,11 @@ MAX_VERSION_CODE = 2_100_000_000
 
 
 class GooglePlayApiError(RuntimeError):
-    """The Android Publisher API rejected a known request."""
+    pass
 
 
 class CommitOutcomeUnknown(RuntimeError):
-    """A commit request lost its response, so retrying could duplicate publication."""
+    pass
 
 
 def _redact_secrets(text: str, token: str | None = None) -> str:
@@ -67,7 +67,6 @@ class Transport(Protocol):
 
 
 class GooglePlayTransport:
-    """Fixed-origin Android Publisher transport with environment-only auth."""
 
     def __init__(self) -> None:
         token = os.environ.get("GOOGLE_PLAY_ACCESS_TOKEN", "")
@@ -409,7 +408,6 @@ def _cleanup_after_failure(
 
 
 def read_max_version_code(package_name: str, transport: Transport) -> int:
-    """Return the highest version code visible across all tracks."""
 
     validated_package = _package_name(package_name)
     edit_id = _edit_id(transport.request("POST", _edit_root(validated_package), json_body={}))
@@ -486,7 +484,6 @@ def control_rollout(
     percentage: float | None,
     transport: Transport,
 ) -> dict[str, object]:
-    """Inspect or mutate one exact production rollout without uploading artifacts."""
 
     validated_package = _package_name(package_name)
     normalized_action = _string(action, "action").lower()
@@ -498,8 +495,8 @@ def control_rollout(
         raise ValueError("Google Play automatic rollout discovers the production versionCode")
     validated_version_code: int | None = None
     if version_code is None:
-        # A release preflight asks for the production state before it knows the
-        # target, so status alone may discover the newest production release.
+
+
         if normalized_action not in {"auto", "status"}:
             raise ValueError("Google Play rollout versionCode is required")
     else:
@@ -563,8 +560,8 @@ def control_rollout(
 
         if validated_version_code is None:
             if maximum_version_code == 0:
-                # An empty production track accepts a first staged release, so a
-                # status read must report it instead of refusing the release.
+
+
                 if normalized_action == "status" and not releases:
                     _cleanup_edit(validated_package, edit_id, transport)
                     return {
@@ -636,8 +633,8 @@ def control_rollout(
                 "versionCode": validated_version_code,
                 "action": normalized_action,
                 "status": status,
-                # Only completed and halted let another staged production release
-                # publish; see _validate_staged_production_state.
+
+
                 "open": status not in {"completed", "halted"},
                 "percentage": None if fraction is None else fraction * 100,
                 "committed": False,
@@ -729,8 +726,7 @@ def control_rollout(
             target["status"] = "completed"
             target.pop("userFraction", None)
 
-        # Track updates name only the changed release; Google Play retains the others.
-        # https://developers.google.com/android-publisher/tracks#staged_rollouts
+
         track_update = {"track": "production", "releases": [target]}
         transport.request("PUT", track_path, json_body=track_update)
         _commit_edit(validated_package, edit_id, transport)
@@ -762,7 +758,6 @@ def _validate_staged_production_state(
     expected_version_code: int,
     transport: Transport,
 ) -> None:
-    """Reject a conflicting production state before uploading a staged release."""
 
     track_path = f"{_edit_root(package_name, edit_id)}/tracks/production"
     track_response = _mapping(
@@ -820,7 +815,6 @@ def _validate_staged_production_state(
 
 
 def publish_release(plan: object, transport: Transport) -> dict[str, object]:
-    """Validate and publish one AAB and all requested mutations in one edit."""
 
     validated = _validated_plan(plan)
     package_name = str(validated["package"])
@@ -899,9 +893,8 @@ def publish_release(plan: object, transport: Transport) -> dict[str, object]:
             transport.request(
                 "PUT",
                 f"{_edit_root(package_name, edit_id)}/tracks/{_component(track)}",
-                # Google keeps prior releases untouched when only the changed
-                # release is supplied. This also avoids resubmitting a fallback.
-                # https://developers.google.com/android-publisher/tracks
+
+
                 json_body={"track": track, "releases": [release]},
             )
             published_tracks.append(track)
@@ -951,7 +944,7 @@ def _write_result(path: Path, result: object) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=COMMAND_DESCRIPTION)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     maximum = subparsers.add_parser("max-version-code")
@@ -964,7 +957,7 @@ def _parser() -> argparse.ArgumentParser:
 
     rollout = subparsers.add_parser("rollout")
     rollout.add_argument("--package", required=True)
-    # status alone may omit the versionCode; every mutation still names its target.
+
     rollout.add_argument("--version-code", type=int)
     rollout.add_argument("--action", required=True, choices=sorted(ROLLOUT_ACTIONS))
     rollout.add_argument("--percentage", type=float)

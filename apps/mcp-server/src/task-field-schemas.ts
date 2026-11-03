@@ -1,12 +1,6 @@
-// Builds the Zod object shapes for mindwtr_add_task/mindwtr_update_task's generic per-field
-// inputs from TASK_CREATE_FIELD_NAMES/TASK_PATCH_FIELD_NAMES (task-write-fields.ts), which are
-// themselves derived from TASK_SYNC_FIELD_SCHEMA. Adding a field to that descriptor with
-// cloudWrite 'create-patch'/'patch' means adding ONE entry to TASK_FIELD_ZOD_SCHEMAS below —
-// everything else (which tool exposes it, nullable-on-update wrapping) follows automatically.
-//
-// This file needs `zod`, so — unlike task-write-fields.ts — it must NOT be imported by
-// scripts/check-synced-field-parity.ts (that script's "native-schema" CI job runs without
-// `bun install`, so `zod` wouldn't resolve there).
+
+
+
 import * as z from 'zod';
 
 import type { Task } from './queries.js';
@@ -18,11 +12,7 @@ import {
 import { TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fields.js';
 import { viewSectionIdsSchema } from './view-sections.js';
 
-// Per-field structural (shape-only) Zod type for every generated task field. Semantic
-// validation beyond shape (recurrence compatibility, relativeStartOffset/timeSpentMinutes/
-// repeatReminderMinutes round-tripping through core's normalizers) happens separately in
-// input-validation.ts's normalize* helpers, applied in index.ts's normalizeAddTaskInput/
-// normalizeUpdateTaskInput — mirroring how the existing hand-written recurrence field works.
+
 const TASK_FIELD_ZOD_SCHEMAS: Partial<Record<keyof Task, z.ZodTypeAny>> = {
   viewSectionIds: viewSectionIdsSchema,
   cancelledAt: z.string().datetime({ offset: true }).describe('Cancellation time in ISO format; archives the task without completion or another recurrence'),
@@ -59,19 +49,16 @@ const fieldSchemaFor = (name: keyof Task): z.ZodTypeAny => {
   return schema;
 };
 
-// Booleans have no "clear it" state distinct from false, so — unlike every other generated
-// field — they stay plain `.optional()` on update rather than `.nullable().optional()`
-// (matches the pre-existing hand-written `isFocusedToday: z.boolean().optional()`).
+
 const BOOLEAN_FIELD_NAMES = new Set<keyof Task>(['showFutureRecurrence', 'isFocusedToday', 'suppressMindwtrReminders']);
 
-// Zod 4 keeps .describe() on the inner schema, and JSON Schema then nests it inside the
-// nullable anyOf branch. Repeat it on the wrapper so clients see it on the property itself.
+
 export const nullableOptional = <T extends z.ZodTypeAny>(schema: T) => {
   const wrapped = schema.nullable().optional();
   return schema.description ? wrapped.describe(schema.description) : wrapped;
 };
 
-/** Shape for mindwtr_add_task's generated fields (merge into the tool's z.object alongside title/quickAdd). */
+
 export const buildTaskCreateFieldsShape = (): Record<string, z.ZodTypeAny> => {
   const shape: Record<string, z.ZodTypeAny> = {};
   for (const name of TASK_CREATE_FIELD_NAMES) {
@@ -80,11 +67,11 @@ export const buildTaskCreateFieldsShape = (): Record<string, z.ZodTypeAny> => {
   return shape;
 };
 
-/** Shape for mindwtr_update_task's generated fields (merge into the tool's z.object alongside id/title). */
+
 export const buildTaskUpdateFieldsShape = (): Record<string, z.ZodTypeAny> => {
   const shape: Record<string, z.ZodTypeAny> = {};
   for (const name of TASK_PATCH_FIELD_NAMES) {
-    // Inheritance is explicit; null must not silently discard a reminder choice.
+
     shape[name] = BOOLEAN_FIELD_NAMES.has(name) || name === 'reminderPolicy'
       ? fieldSchemaFor(name).optional()
       : nullableOptional(fieldSchemaFor(name));

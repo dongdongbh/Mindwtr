@@ -26,11 +26,11 @@ describe('remote mutation fence provider ports', () => {
 
         expect(webdavMutationFenceUrl('https://dav.example/root/data.json?ignored=1'))
             .toBe('https://dav.example/root/.mindwtr-sync-fence-v1.json');
-        // React Native URL classes accept component writes but serialize the
-        // original href; the derivation must not depend on URL mutation (#1132).
+
+
         const OriginalURL = globalThis.URL;
         class InertURL extends OriginalURL {
-            override set pathname(_value: string) { /* swallowed, like RN */ }
+            override set pathname(_value: string) {                          }
             override get pathname(): string { return super.pathname; }
         }
         globalThis.URL = InertURL as unknown as typeof URL;
@@ -96,9 +96,8 @@ describe('remote mutation fence provider ports', () => {
 
 describe('oversized fence responses (#1113)', () => {
     it('reads a non-404 response too large to be a fence as an absent file', async () => {
-        // Koofr answers the GET for a missing file with a large HTML page instead
-        // of 404; before the fix this rejected with ResponseTooLargeError and no
-        // encryption transition could start.
+
+
         const hugeHtml = `<html>${'x'.repeat(8_192)}</html>`;
         const fetcher = vi.fn(async () => new Response(hugeHtml, {
             status: 200,

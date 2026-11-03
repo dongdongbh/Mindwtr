@@ -17,9 +17,6 @@ import type { TaskStore } from './store-types';
 import type { AppSettings, Attachment, SpeechToTextSettings } from './types';
 import { generateUUID } from './uuid';
 
-// RN's voice capture rules without React, Expo or whisper.rn (apps/mobile use-quick-capture-audio.ts and speech-to-text.ts
-// import them from here; the native app binds the same ports). Each port is what RN passes in: its store, its file delete, its
-// logger, its clock format and id, so RN's tests still pin them.
 
 export type SpeechProvider = 'openai' | 'gemini' | 'whisper';
 
@@ -30,7 +27,7 @@ export type SpeechToTextConfig = Omit<SpeechToTaskCaptureConfig, 'provider'> & {
     parseModel?: string;
     modelPath?: string;
     isFossBuild?: boolean;
-    // Only meaningful for provider 'openai' — see resolveOpenAITranscribeEndpoint.
+
     baseUrl?: string;
 };
 
@@ -70,7 +67,7 @@ export type ResolvedSpeechToTextRuntimeSettings = {
     enabled: boolean;
     model: string;
     modelPath?: string;
-    // Only set for provider 'openai' — see resolveOpenAITranscribeEndpoint.
+
     baseUrl?: string;
     language?: string;
     mode: AudioCaptureMode;
@@ -78,7 +75,7 @@ export type ResolvedSpeechToTextRuntimeSettings = {
     isFossBuild: boolean;
 };
 
-/** The speech settings a capture runs with; a FOSS build always runs local Whisper (RN reads [isFossBuild] from Expo). */
+
 export const resolveSpeechToTextRuntimeSettings = (
     speech: SpeechToTextSettings | undefined,
     options: { isFossBuild: boolean }
@@ -99,7 +96,7 @@ export const resolveSpeechToTextRuntimeSettings = (
     };
 };
 
-/** RN's app-log logWarn, as the dispatch calls it. */
+
 export type SpeechLogWarn = (message: string, options: { scope: string; force?: boolean; extra?: Record<string, string> }) => unknown;
 
 const assertSpeechProviderAllowedForRuntime = (provider: SpeechProvider, fossBuild: boolean, logWarn: SpeechLogWarn): void => {
@@ -113,8 +110,8 @@ const assertSpeechProviderAllowedForRuntime = (provider: SpeechProvider, fossBui
 };
 
 const resolveOpenAIParseModel = (value?: string) => {
-    // The transcript parse step wants a cheap fast model; gpt-4o-mini (the old
-    // choice) is retiring, so route to the current cost-efficient default.
+
+
     if (!value) return OPENAI_DEFAULT_MODEL;
     const lower = value.toLowerCase();
     if (lower.startsWith('gpt-4o')) return OPENAI_DEFAULT_MODEL;
@@ -122,21 +119,18 @@ const resolveOpenAIParseModel = (value?: string) => {
 };
 
 export type SpeechCapturePorts = {
-    /** The recording's bytes and type, for Gemini and OpenAI. */
+
     readBytes: () => Promise<{ bytes: Uint8Array; mimeType: string }>;
-    /** OpenAI's multipart upload of the recording. */
+
     withOpenAIUpload: <T>(send: (upload: OpenAISpeechUpload) => Promise<T>) => Promise<T>;
-    /** Local Whisper's transcript of the recording. */
+
     transcribeLocal: () => Promise<string>;
     logWarn: SpeechLogWarn;
-    /** The cloud providers' fetch; the global one when unset (RN). */
+
     fetcher?: typeof fetch;
 };
 
-/**
- * RN's provider dispatch (processAudioCapture): a FOSS build refuses a cloud provider; Gemini and OpenAI transcribe remotely
- * (core's runRemoteSpeechToTaskCapture), Whisper on the device. [isFossBuild] is the build's, resolved by the caller.
- */
+
 export async function dispatchSpeechCapture(
     config: SpeechToTextConfig,
     isFossBuild: boolean,
@@ -166,12 +160,7 @@ export async function dispatchSpeechCapture(
     return runSpeechToTaskCapture(config, { transcribe: ports.transcribeLocal });
 }
 
-// ---- The quick-capture rules (RN's use-quick-capture-audio.ts) ----
 
-/**
- * A recording's mime type by its extension (with the dot, any case): one table for the capture attachment and the speech upload,
- * which disagreed on .webm (RN voice bug 3). Anything else is m4a's.
- */
 export const getAudioMimeType = (extension: string): string => {
     switch (extension.toLowerCase()) {
         case '.aac':
@@ -203,10 +192,10 @@ export const isQuickCaptureSpeechReady = ({
     speechEnabled: boolean;
     provider: string;
     apiKey?: string;
-    // Only meaningful for provider 'openai': a self-hosted OpenAI-compatible
-    // server (#930) substitutes for a key.
+
+
     baseUrl?: string;
-    /** The Whisper model file is on the device. A stored model path alone is not: its file may be gone (RN voice bug 1). */
+
     whisperModelReady: boolean;
 }) => {
     if (!speechEnabled) return false;
@@ -215,10 +204,7 @@ export const isQuickCaptureSpeechReady = ({
     return Boolean(apiKey);
 };
 
-/**
- * RN's recording format (decision Q1): Whisper with a ready model records 16 kHz WAV (whisper.rn's PCM recorder, transcribed
- * on the device); every other capture records expo-audio's HIGH_QUALITY preset, m4a/AAC, for the cloud providers.
- */
+
 export const resolveQuickCaptureAudioFormat = ({
     speechEnabled,
     provider,
@@ -229,21 +215,18 @@ export const resolveQuickCaptureAudioFormat = ({
     whisperModelReady: boolean;
 }): 'wav' | 'm4a' => (speechEnabled && provider === 'whisper' && whisperModelReady ? 'wav' : 'm4a');
 
-/** Whether the recording stays on the task: Settings › GTD's "save audio" unless off, and always when nothing can transcribe it. */
+
 export const shouldSaveQuickCaptureAudio = (settings: Pick<AppSettings, 'gtd'> | null | undefined, canTranscribeSpeech: boolean): boolean =>
     settings?.gtd?.saveAudioAttachments !== false || !canTranscribeSpeech;
 
-/** The task's title until a transcript replaces it: "Audio note" and the local time ([label] is quickAdd.audioNoteTitle). */
+
 export const buildAudioNoteTitle = (
     label: string,
     now: Date,
     formatDate: (value: Date, pattern: string) => string = safeFormatDate,
 ): string => `${label} ${formatDate(now, 'Pp')}`;
 
-/**
- * The recording as the task's attachment, also kept for recovery while the task saves. [size] is set (even undefined) only
- * when the caller read it: RN's Whisper path reads it here, its m4a path once the file moved.
- */
+
 export const buildQuickCaptureAudioAttachment = (input: {
     title: string;
     uri: string;
@@ -266,18 +249,14 @@ export const buildQuickCaptureAudioAttachment = (input: {
     };
 };
 
-/** The store a speech result writes to: core's useTaskStore (RN passes its own, so its tests can stand one in). */
+
 export type QuickCaptureAudioStore = {
     getState: () => Pick<TaskStore, 'tasks' | 'projects' | 'settings' | 'addProject' | 'updateTask' | 'deleteTask'>;
 };
 
 export type SpeechApplyResult = 'applied' | 'empty' | 'skipped';
 
-/**
- * A transcript's fields on the saved task, in one store command that builds them on the task as stored then: the updates, and
- * its suggested project matched by title in the task's area, or made, only while the task still has none. [titleAtSave] is the
- * task's title when it saved: a title changed since (typed by the user meanwhile) stays (voice V3 review N11).
- */
+
 export async function applySpeechResult(
     taskId: string,
     result: SpeechToTaskResult,
@@ -291,8 +270,8 @@ export async function applySpeechResult(
     const { updates, suggestedProjectTitle } = buildTaskUpdatesFromSpeechResult(existing, result, currentSettings);
     if (!Object.keys(updates).length && !suggestedProjectTitle) return 'empty';
     let outcome: SpeechApplyResult = 'applied';
-    // Built again on the task as stored when the write is admitted: a sync save admitted first may publish newer tags, or a
-    // project. The suggested project is matched or made only here, so a task a sync filed meanwhile gets none (RN voice bug 2).
+
+
     await runStoreCommand(async () => {
         const state = store.getState();
         const latest = state.tasks.find((task) => task.id === taskId);
@@ -323,7 +302,7 @@ export async function applySpeechResult(
     return outcome;
 }
 
-/** An empty transcript: the task goes, then each of its recording files once ([deleteFile] keeps RN's safe-delete rules). */
+
 export async function discardEmptySpeechTask<F extends { uri?: string | null }>(
     taskId: string,
     files: (F | null | undefined)[],

@@ -3,9 +3,8 @@ import { useTaskStore } from '@mindwtr/core';
 import { setNativeInvokeTransport } from './tauri-invoke';
 
 const invokeMock = vi.fn();
-// tauriStorage reaches Rust through invokeNative. Replacing the transport keeps
-// the call synchronous (these tests drive save ordering with fake timers) and
-// the runtime stub gets past invokeNative's off-Tauri guard.
+
+
 (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {};
 setNativeInvokeTransport(((command: string, args?: Record<string, unknown>) => (
     args === undefined ? invokeMock(command) : invokeMock(command, args)
@@ -55,9 +54,7 @@ const resetStoreSnapshot = () => {
     useTaskStore.setState({ editLockCount: 0 });
 };
 
-// #913: save_data can hang without ever rejecting, so the normal catch block
-// never runs. tauriStorage.saveData must surface that through the store's
-// error channel (observation only) without changing save/retry semantics.
+
 describe('tauriStorage.saveData stuck-save warning (#913)', () => {
     beforeEach(() => {
         vi.useFakeTimers();
@@ -898,8 +895,7 @@ describe('tauriStorage.saveData stuck-save warning (#913)', () => {
     });
 });
 
-// saveTask is the incremental persistence path for updateTask/completeTask —
-// same hang-without-rejecting shape as saveData, sharing the same warning helper.
+
 describe('tauriStorage.saveTask stuck-save warning (#913)', () => {
     beforeEach(() => {
         vi.useFakeTimers();

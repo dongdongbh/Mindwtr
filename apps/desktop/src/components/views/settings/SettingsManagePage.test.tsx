@@ -77,13 +77,13 @@ describe('SettingsManagePage Someday sections', () => {
     });
 
     it('edits one Someday section and keeps every other stored entry as it is, in stored order', async () => {
-        // A newer app's entry this build cannot show.
+
         const folder = { kind: 'folder', children: ['books'] };
         const films = { id: 'films', title: 'Films', order: 1 };
         const books = { id: 'books', title: 'Books to read', order: 0 };
         const trips = { id: 'trips', title: 'Trips', order: 2 };
         const updateSettings = vi.fn(async () => undefined);
-        // Sync adds Trips while the delete confirmation is open.
+
         const requestConfirmation = vi.fn(async () => {
             useTaskStore.setState({ settings: { gtd: { viewSections: { someday: [films, folder as never, books, trips] } } } });
             return true;
@@ -259,7 +259,7 @@ describe('Manage saved contexts and tags', () => {
         let reject!: (reason: Error) => void;
         let finish!: () => void;
         const change = vi.fn().mockImplementationOnce(() => {
-            // The real store publishes its inventory before persistence has finished.
+
             useTaskStore.setState({ _allTasks: useTaskStore.getState()._allTasks.map((task) => ({ ...task, contexts: mode === 'rename' ? ['@outside'] : [] })), settings: { taxonomy: { contexts: [mode === 'rename'
                 ? { ...entry, token: '@outside', rev: 2 }
                 : { ...entry, deletedAt: stamp, rev: 2 }] } } });

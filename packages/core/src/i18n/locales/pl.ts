@@ -1,4 +1,4 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const plOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "Przed rozpoczęciem",
     "attachments.webUploadRequiresCloud": "Przesyłanie w przeglądarce wymaga synchronizacji z własnym serwerem w chmurze.",
@@ -1555,7 +1555,7 @@ export const plOverrides: Record<string, string> = {
         'captureNotification.text': 'Dotknij, aby zapisać do Skrzynki',
         'captureNotification.channelName': 'Szybkie przechwytywanie',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'Oczyść umysł',
         'mindSweep.title': 'Oczyść umysł',
         'mindSweep.intro': 'Przejdź przez kilka list podpowiedzi i zapisz wszystko, co przyjdzie ci do głowy. Nie filtruj i nie porządkuj — każda pozycja trafi do skrzynki odbiorczej, ogarniesz ją później.',

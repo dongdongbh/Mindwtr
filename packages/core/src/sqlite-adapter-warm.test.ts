@@ -6,8 +6,7 @@ import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter, warmTaskRowEntries } from './sqlite-adapter';
 import type { AppData, Task } from './types';
 
-// The first save after a cold start built every task's row (about 108 ms at 5,000 tasks on the S23's QuickJS). The native host
-// warms the rows while idle, through the same row cache the save uses.
+
 const AT = '2026-10-27T10:00:00.000Z';
 const directories: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -17,7 +16,7 @@ const library = (count: number): AppData => ({
         createdAt: AT, updatedAt: AT, rev: 1, revBy: 'device', pushCount: 0 } as Task)),
     projects: [], sections: [], areas: [], people: [], settings: { deviceId: 'device' },
 });
-// A library on disk, then a cold adapter (as after a process start) and its full read.
+
 const cold = async (data: AppData) => {
     const dir = mkdtempSync(join(tmpdir(), 'warm-adapter-')); directories.push(dir);
     const file = join(dir, 'warm.sqlite');
@@ -50,7 +49,7 @@ describe('warming the first save\'s task rows', () => {
             warmRows(warm.read.tasks);
             const next = change(warm.read);
             const warmed = await stringifiesDuring(() => warm.adapter.saveData(next));
-            // Unwarmed: a fingerprint per read row and per task row. Warmed: the read rows' fingerprints and the one changed task.
+
             expect(unwarmed).toBeGreaterThanOrEqual(600);
             expect(warmed).toBeLessThanOrEqual(unwarmed - 290);
             expect(await rows(warm.sql)).toBe(await rows(plain.sql));
@@ -67,12 +66,10 @@ describe('warming the first save\'s task rows', () => {
     });
 });
 
-// The boot read's fingerprints (the first save's baseline: what counts as changed or omitted), built ahead from the same read
-// object. They are used only for that read object with no write since; the read rows are private to the adapter, and every
-// consumer copies their primitive values (mapping functions, rememberRawReadRow), so no caller can change them in place.
+
 const warmAll = (adapter: SqliteAdapter, tasks: readonly Task[]) => {
     warmRows(tasks);
-    while (!adapter.warmReadFingerprints(50)) { /* slices of 50 */ }
+    while (!adapter.warmReadFingerprints(50)) {                    }
 };
 
 describe('warming the first save\'s read fingerprints', () => {
@@ -107,7 +104,7 @@ describe('warming the first save\'s read fingerprints', () => {
         const plainDb = await cold(data);
         const warmDb = await cold(data);
         try {
-            // A raw caller's own full read (getData({ rawTasks: true })) is also the read the first save compares with.
+
             const plain = await plainDb.adapter.getData({ rawTasks: true });
             const warm = await warmDb.adapter.getData({ rawTasks: true });
             warmAll(warmDb.adapter, warm.tasks);
@@ -124,16 +121,16 @@ describe('warming the first save\'s read fingerprints', () => {
     });
 });
 
-// Review of the fingerprint warm (guard probes): each fails if its guard is dropped from fingerprintsFromLastRead.
+
 describe('the warmed read fingerprints are used only for the same read with no write since', () => {
     const title = async (sql: ReturnType<typeof openScratchSqlite>) => (await sql.client.all<{ title: string }>('SELECT title FROM tasks WHERE id = ?', ['t3']))[0].title;
 
     it('ignores them after this adapter wrote between the warm and the save (writesStarted)', async () => {
         const { sql, adapter, read } = await cold(library(10));
         try {
-            while (!adapter.warmReadFingerprints(3)) { /* slices of 3 */ }
+            while (!adapter.warmReadFingerprints(3)) {                   }
             await adapter.saveTask({ ...read.tasks[3], title: 'B' });
-            // The read's own row for t3 is older than the database now: the save compares with fresh fingerprints and writes it back.
+
             await adapter.saveData(read);
             expect(await title(sql)).toBe('Task 3');
         } finally { sql.close(); }
@@ -150,7 +147,7 @@ describe('the warmed read fingerprints are used only for the same read with no w
         const adapter = new SqliteAdapter(sql.client, { rejectConcurrentWrites: true });
         try {
             const read = await adapter.getData();
-            while (!adapter.warmReadFingerprints(3)) { /* slices of 3 */ }
+            while (!adapter.warmReadFingerprints(3)) {                   }
             const other = openScratchSqlite(file);
             await other.client.run('UPDATE tasks SET title = ? WHERE id = ?', ['B', 't3']);
             other.close();

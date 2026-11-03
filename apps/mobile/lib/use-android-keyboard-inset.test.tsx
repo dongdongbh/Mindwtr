@@ -54,7 +54,7 @@ describe('useAndroidKeyboardInset', () => {
       return subscribe(event, callback);
     });
     const inputRef = React.createRef<import('react-native').TextInput>();
-    // The input is a native boundary; this test only needs its mounted identity.
+
     inputRef.current = {} as import('react-native').TextInput;
     function ModalProbe({ active = true }: { active?: boolean }) {
       return <Text>{`inset:${useAndroidKeyboardInset(active, inputRef)}`}</Text>;
@@ -186,14 +186,13 @@ describe('useKeyboardInset', () => {
     });
     expect(insetText(tree)).toBe('inset:300');
 
-    // A frame change (predictive bar toggled) updates from the new top edge.
+
     act(() => {
       listeners.get('keyboardWillChangeFrame')?.({ endCoordinates: { screenY: 540, height: 300 } });
     });
     expect(insetText(tree)).toBe('inset:260');
 
-    // A frame change that slides the keyboard offscreen must read 0 even
-    // though endCoordinates.height still reports the keyboard's size.
+
     act(() => {
       listeners.get('keyboardWillChangeFrame')?.({ endCoordinates: { screenY: 800, height: 300 } });
     });

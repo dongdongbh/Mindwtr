@@ -64,7 +64,7 @@ const offersChoices = (request: NativeInboxTasksOrganizeRequest, scope: NativeRe
         && choice(request.draft.areaChoice, getBulkOrganizeAreaOptions(scope.areas).map(row => row.id));
 };
 
-/** Every Inbox visibility row and picker option; destination members also reserve container order. */
+
 export const inboxTasksOrganizeScope = (request: NativeInboxTasksOrganizeRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>): NativeReferenceTasksMoveScope => {
     const base = referenceTasksMoveScope(selectionRequest(request), data);
@@ -86,7 +86,7 @@ const requiredDates = (request: NativeInboxTasksOrganizeRequest, scope: NativeRe
 const temporalContext = (prepared: Pick<NativeInboxTasksOrganizePrepared, 'futureBoundary' | 'dates'>) =>
     ({ futureBoundary: prepared.futureBoundary, dates: new Map(prepared.dates.map(row => [row.value, row])) });
 
-/** The RN planner/preflight/effects on raw BEFORE, with frozen time and identities. */
+
 export const inboxTasksOrganizeEffect = (prepared: Pick<NativeInboxTasksOrganizePrepared,
     'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates' | 'recurrenceProjections' | 'allocatedIds'>,
     allocate = false): NativeInboxTasksOrganizePrepared['effect'] | null => {
@@ -311,7 +311,7 @@ export function createInboxTasksOrganizeMethods(deps: {
             if (confirmed.ok) {
                 try { logInfo('Native Inbox bulk Organize confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.5/ios-inbox-bulk-organize', count: confirmed.value.count, outcome: 'organized' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },

@@ -57,7 +57,7 @@ describe('native editor resume opening-base check', () => {
         for (const touchedBase of [
             { contexts: 'home' }, { timeEstimate: '' }, { assignedTo: '' }, { timeSpentMinutes: 5 },
         ]) {
-            // The user's eventual raw text may normalize to either the opening or the current value.
+
             expect(await env.host.checkTaskEditorResume({ id: 'resume', touchedBase })).toMatchObject({
                 ok: false, error: { code: 'STALE_REVISION' },
             });

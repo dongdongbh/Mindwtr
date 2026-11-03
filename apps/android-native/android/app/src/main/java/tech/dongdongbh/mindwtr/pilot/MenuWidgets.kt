@@ -92,51 +92,39 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/*
- * The pieces RN's Menu screens share: the stack header (app/(drawer)/_layout.tsx DrawerHeader), the list overflow menu
- * (list-overflow-menu.tsx), the sort and group modals (task-list/TaskListSortModal and task-list.tsx), the filter sheet
- * (task-filter-sheet.tsx) on core's filter view, the header's active filters, the section headings, the empty states, the
- * stats, the parked projects (views/deferred-projects-section.tsx), and the Someday and Archive dialogs. Every word is core's.
- */
 
 fun JSONObject.menuObjects(name: String): List<JSONObject> = optJSONArray(name)?.let { list -> List(list.length()) { list.getJSONObject(it) } }.orEmpty()
 fun JSONObject.menuText(name: String): String? = if (!has(name) || isNull(name)) null else getString(name)
 
-/**
- * RN's stack screen for a Menu destination, full screen over the tabs as RN pushes it: its header with Back, a failure
- * above the list (a read's Try again, or an owed command's exact retry), History's tabs, the list, RN's toast, and the
- * open sheet or dialog. The Weekly and Daily Review draw their own header and footer; RN's Projects screen shows the Projects
- * tab's list (an open project draws its own header, as on the tab). The capture popup opens over it (the Weekly Review's
- * Add task). The list is read again on every resume.
- */
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
     val c = LocalTheme.current.colors
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(owner) { owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { menu.refresh() } }
-    // Again when the clock changes a row (a due color, an age; #1360) or the widget list's day (its midnight).
+
     ReadAgainAt(menu.page?.let { shown -> clockReadAt(shown.items.map { it.row }, shown.view) }) { menu.refresh() }
-    // Back closes an open dialog, then leaves selection mode, then the screen.
+
     BackHandler(enabled = failedAction == null) { if (menu.dialog != null) menu.backInDialog() else if (menu.page?.bulk != null) menu.list?.let(menu::endBulk) else menu.closeScreen() }
     Box(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("menu-screen")) {
         when (screen) {
             MenuScreen.Weekly -> WeeklyReview(model)
             MenuScreen.Daily -> DailyReview(model)
-            // RN's Mind Sweep modal draws its own header.
+
             MenuScreen.MindSweep -> MindSweepScreen(model)
             else -> Column(Modifier.fillMaxSize()) {
                 val list = menu.list
-                // Settings titles RN's top bar with its open screen's title (core's words).
+
                 val title = when (screen) {
                     MenuScreen.Settings -> menu.settings.title
-                    // RN's widget list titles its stack screen with the list's title (core's), once read.
+
                     MenuScreen.WidgetList -> menu.page?.view?.menuText("title").orEmpty()
                     else -> t(screen.title)
                 }
                 if (screen != MenuScreen.Projects || openProjectId == null) MenuHeader(title, enabled = failedAction == null, onBack = menu::closeScreen,
                     area = if (showsAreaFilter(screen)) model else null,
-                    // Reference and Done put their list menu in the header (RN's overflowPlacement "navigation").
+
                     right = if (list == "reference" || list == "done") { { OverflowTrigger(plain = true) { menu.openDialog("overflow") } } } else null)
                 error?.let { message ->
                     FailureBanner(message) {
@@ -145,7 +133,7 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
                     }
                 }
                 if (screen == MenuScreen.History) HistoryTabs(model)
-                // RN's bulk bar over a selecting list (Waiting, Someday, Reference, Done).
+
                 BulkBar(model)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (list) {
@@ -174,10 +162,7 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
     }
 }
 
-/**
- * RN's quick-access tab when it holds Review, Contexts or the Calendar: that screen under the tab header, read on every resume,
- * with its dialogs (drawn over the tabs by MainActivity) and Back closing an open dialog.
- */
+
 @Composable
 fun QuickList(model: InboxViewModel, modifier: Modifier) = with(model) {
     val owner = LocalLifecycleOwner.current
@@ -193,10 +178,7 @@ fun QuickList(model: InboxViewModel, modifier: Modifier) = with(model) {
     }
 }
 
-/**
- * RN's DrawerHeader: the card background, a hairline below, Back (Ionicons chevron-back), the title at 17/700 in the room left,
- * then [area]'s area filter (#1448) and the [right] action's 44 box (kept empty without the filter, as RN's headerRightAction).
- */
+
 @Composable
 fun MenuHeader(title: String, enabled: Boolean, onBack: () -> Unit, area: InboxViewModel? = null, right: (@Composable () -> Unit)? = null) {
     val c = LocalTheme.current.colors
@@ -214,7 +196,7 @@ fun MenuHeader(title: String, enabled: Boolean, onBack: () -> Unit, area: InboxV
     }
 }
 
-/** RN's ListOverflowMenu trigger: MoreHorizontal in a 44 box, bordered on the list, plain in the header. */
+
 @Composable
 fun OverflowTrigger(plain: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -226,14 +208,11 @@ fun OverflowTrigger(plain: Boolean = false, enabled: Boolean = true, onClick: ()
     }
 }
 
-/** One overflow menu row: its icon, label, value, selected state, and either an action or a submenu page. */
+
 class OverflowAction(val label: String, val icon: ImageVector, val description: String = label, val value: String? = null,
                      val selected: Boolean = false, val page: String? = null, val onClick: () -> Unit = {})
 
-/**
- * RN's overflow menu sheet: a card from the bottom over a light scrim, its title (More options, or a submenu's), Back on a
- * submenu, Close, and the rows in one bordered section. A leaf closes the menu, then runs.
- */
+
 @Composable
 fun OverflowSheet(model: InboxViewModel, title: String, actions: List<OverflowAction>) = with(model.menu) {
     val theme = LocalTheme.current
@@ -277,10 +256,10 @@ fun OverflowSheet(model: InboxViewModel, title: String, actions: List<OverflowAc
     }
 }
 
-/** One modal choice: core's label and value, and whether it is the current one. */
+
 class Choice(val label: String, val selected: Boolean, val onClick: () -> Unit)
 
-/** RN's sort and group modals: a centered card over a dimmed screen, the title, and the options; the current one is washed. */
+
 @Composable
 fun ChoiceModal(model: InboxViewModel, title: String, choices: List<Choice>, dismiss: () -> Unit = { model.menu.keepDialog(null) }) = with(model.menu) {
     val theme = LocalTheme.current
@@ -302,10 +281,7 @@ fun ChoiceModal(model: InboxViewModel, title: String, choices: List<Choice>, dis
     }
 }
 
-/**
- * RN's list header chips under the header: each active filter with its removal (core's edit), struck through and red
- * when excluded, then Clear (core's clear edit), in a bordered strip. [clear] is core's clear action; null hides Clear.
- */
+
 @Composable
 fun ActiveChips(model: InboxViewModel, chips: List<JSONObject>, clear: (() -> Unit)?) = with(model.menu) {
     if (chips.isEmpty()) return
@@ -334,7 +310,7 @@ fun ActiveChips(model: InboxViewModel, chips: List<JSONObject>, clear: (() -> Un
     }
 }
 
-/** RN's "Filters · N" button (task list header, Archive's search row): the tint border and SlidersHorizontal; it opens the sheet. */
+
 @Composable
 fun ActiveFiltersButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -347,10 +323,7 @@ fun ActiveFiltersButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     }
 }
 
-/**
- * RN's grouping heading: a chevron when it folds, the title in capitals, and the count, in task-list.tsx's type, or
- * archived.tsx's ([archive]: a looser count, less letter spacing, more room above).
- */
+
 @Composable
 fun GroupHeading(model: InboxViewModel, item: JSONObject, archive: Boolean = false) {
     val c = LocalTheme.current.colors
@@ -371,7 +344,7 @@ fun GroupHeading(model: InboxViewModel, item: JSONObject, archive: Boolean = fal
     }
 }
 
-/** RN's icon empty state (Waiting, Someday, Archive): a 48 glyph at stroke 1.5, the title, the hint, and an optional action. */
+
 @Composable
 fun IconEmptyState(icon: ImageVector, title: String, hint: String?, action: String? = null, onAction: () -> Unit = {}) {
     val c = LocalTheme.current.colors
@@ -388,7 +361,7 @@ fun IconEmptyState(icon: ImageVector, title: String, hint: String?, action: Stri
     }
 }
 
-/** RN's stats bar (Waiting, Someday): core's values in the screen's color at 24 bold, core's labels under them, then [trailing]. */
+
 @Composable
 fun StatBar(stats: JSONArray, color: Color, trailing: @Composable RowScope.() -> Unit = {}) {
     val theme = LocalTheme.current
@@ -408,7 +381,7 @@ fun StatBar(stats: JSONArray, color: Color, trailing: @Composable RowScope.() ->
     }
 }
 
-/** A pill that loads a collection's next window (core's `common.more`). */
+
 @Composable
 fun MoreChip(enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -416,11 +389,7 @@ fun MoreChip(enabled: Boolean, onClick: () -> Unit) {
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
-/**
- * RN's parked projects card (DeferredProjectsSection): a header with its chevron and core's "Projects (N)", then each
- * project with RN's folder in its color, its area, a tap that opens it, and RN's swipe right to core's Reactivate
- * (activateProject), also a TalkBack action. The card starts open; the fold is screen state, as in RN.
- */
+
 @Composable
 fun DeferredProjects(model: InboxViewModel, page: MenuPage) = with(model.menu) {
     val deferred = page.view.optJSONObject("deferred") ?: return
@@ -444,10 +413,7 @@ fun DeferredProjects(model: InboxViewModel, page: MenuPage) = with(model.menu) {
     }
 }
 
-/**
- * One parked project row (RN's DeferredProjectRow): a tap opens it; a drag right past 72 opens RN's Reactivate action and runs it, as
- * RN's onSwipeableLeftOpen does. Someday's section groups draw it too (#1319).
- */
+
 @Composable
 internal fun ParkedProject(model: InboxViewModel, project: JSONObject, activate: String, moveLabel: String? = null) = with(model) {
     val c = LocalTheme.current.colors
@@ -471,7 +437,7 @@ internal fun ParkedProject(model: InboxViewModel, project: JSONObject, activate:
                     scope.launch { offset.animateTo(0f) }
                     if (opened) menu.activate(id, revision)
                 })
-            // RN's DeferredProjectRow: in its Someday section a long press (and TalkBack's action) offers Move to section… (#1319).
+
             .combinedClickable(enabled = failedAction == null && !busy, role = Role.Button,
                 onLongClick = moveLabel?.let { { if (enabled) menu.openProjectMove(id, revision) } }) { menu.openProjects(id) }
             .semantics {
@@ -489,12 +455,12 @@ internal fun ParkedProject(model: InboxViewModel, project: JSONObject, activate:
     }
 }
 
-/** The open sheet or dialog over the Menu screen (or the quick-access tab), by its kind. */
+
 @Composable
 fun MenuDialogs(model: InboxViewModel) = with(model.menu) {
     val open = dialog ?: return
     val view = page?.view
-    // The Inbox's sort and group modals come from its toolbar; each option carries core's edit.
+
     val controls = if (list == "inbox") view?.optJSONObject("toolbar") else view
     when (open.optString("kind")) {
         "overflow" -> view?.let { OverflowFor(model, it, open) }
@@ -509,7 +475,7 @@ fun MenuDialogs(model: InboxViewModel) = with(model.menu) {
                 Choice(option.getString("label"), option.getBoolean("selected")) { group(option.optJSONObject("edit")?.getString("groupBy") ?: option.getString("value")) }
             })
         }
-        // A saved search's Sort (#1453): "Use global setting (...)" first; each option carries core's edit.
+
         "savedSearchSort" -> view?.optJSONObject("sort")?.let { modal ->
             ChoiceModal(model, modal.getString("title"), modal.menuObjects("options").map { option ->
                 Choice(option.getString("label"), option.getBoolean("selected")) { savedSearchSort(option.getJSONObject("edit")) }
@@ -533,7 +499,7 @@ fun MenuDialogs(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** Each list's overflow menu, with core's labels and values (Reference and Done in the header, Someday and Archive on the list). */
+
 @Composable
 private fun OverflowFor(model: InboxViewModel, view: JSONObject, open: JSONObject) = with(model.menu) {
     val list = list ?: return
@@ -579,7 +545,7 @@ private fun OverflowFor(model: InboxViewModel, view: JSONObject, open: JSONObjec
             }
         }
         else -> {
-            // Reference and Done (TaskListHeader in its navigation slot): Filters, then Sort and Group, which open their modals.
+
             val sortMenu = view.getJSONObject("sort")
             val groupMenu = view.getJSONObject("group")
             val filters = view.getJSONObject("filters")
@@ -592,22 +558,12 @@ private fun OverflowFor(model: InboxViewModel, view: JSONObject, open: JSONObjec
     }
 }
 
-/**
- * RN's filter sheet (task-filter-sheet.tsx) on core's filter view: the title (Filters, or a picker's) with Back and Clear,
- * then the active filters, Search, the list's own switch (Reference's archived projects), and core's sections: contexts
- * and tags and projects (each a picker page), time estimate, energy level, and more filters (priority and location), each
- * disclosure folded as RN starts it. Every chip and row sends the exact edit core put on it; typed text sends core's
- * setSearch or setLocation once typing pauses. Done closes it.
- */
-/**
- * What RN's filter sheet reads and sends, for whichever list it filters: a Menu list (MenuModel) or an open project
- * (ProjectDetailsModel). Every name is the Menu's own; the sheet draws core's filter view the same way for both.
- */
+
 interface FilterSheetHost {
     val idle: Boolean
-    /** The revision of the view the sheet shows: picker results for another revision are not shown. */
+
     val filterRevision: String?
-    /** The picker search's results (`{ name, query, revision, total, items }`), or null. */
+
     val pickerFound: JSONObject?
     fun collection(name: String): List<JSONObject>
     fun collectionTotal(name: String): Int
@@ -618,10 +574,10 @@ interface FilterSheetHost {
     fun dialogPage(page: String?)
     fun closeFilters()
     fun pickerQuery(name: String, text: String)
-    /** [depth]: how many results to read; core windows them by 100 (NATIVE_HOST_MAX_WINDOW). */
+
     fun searchPicker(name: String, query: String, depth: Int = 100)
     fun loadCollection(name: String)
-    /** Reference's archived-projects switch; a list without one never shows it. */
+
     fun archivedProjects(on: Boolean) {}
 }
 
@@ -657,8 +613,8 @@ internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObje
             }
             if (picker != null) {
                 val name = if (picker == "tokens") "tokens" else "projects"
-                // RN's picker search: core's matching options (the query from offset zero), read again whenever the list changes,
-                // since a tap changes the options' states.
+
+
                 val query = open.optString("query")
                 val found = pickerFound?.takeIf { it.getString("name") == name && it.getString("query") == query && it.getString("revision") == revision }
                 LaunchedEffect(revision, name) { if (query.isNotBlank()) searchPicker(name, query, pickerFound?.optJSONArray("items")?.length() ?: 0) }
@@ -684,7 +640,7 @@ internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObje
                     }
                     if (query.isBlank() && options.size < collectionTotal(name)) Box(Modifier.padding(vertical = 8.dp)) { MoreChip(idle) { loadCollection(name) } }
                     if (found != null && options.size < found.getInt("total")) Box(Modifier.padding(vertical = 8.dp)) { MoreChip(idle) { searchPicker(name, query, options.size + 100) } }
-                    // RN's footer: Any or All for two or more chosen contexts (or tags), core's edits.
+
                     if (name == "tokens") Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         for (mode in filters.menuObjects("matchModes")) MatchModeRow(mode.getString("label"), mode.menuObjects("options"), idle) { filterEdit(it) }
                     }
@@ -777,7 +733,7 @@ internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObje
 }
 
 private fun JSONArray?.strings(): List<String> = this?.let { list -> List(list.length()) { list.getString(it) } }.orEmpty()
-/** The labels of the options core marks selected, in core's order. */
+
 private fun List<JSONObject>.chosenLabels(excludedLabel: String? = null): List<String> = mapNotNull { option ->
     val label = option.optString("title").ifEmpty { option.optString("label") }
     when {
@@ -790,7 +746,7 @@ private fun List<JSONObject>.chosenLabels(excludedLabel: String? = null): List<S
 @Composable
 internal fun SheetLabel(text: String) = Text(text.uppercase(), style = rnText(12, 600, letterSpacing = 0.4f), color = LocalTheme.current.colors.secondaryText)
 
-/** RN's overview row: the section's label, its summary (the tint once anything is chosen), and a chevron (or the fold's). */
+
 @Composable
 internal fun OverviewRow(label: String, summary: String, all: String, expanded: Boolean?, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -807,7 +763,7 @@ internal fun OverviewRow(label: String, summary: String, all: String, expanded: 
     }
 }
 
-/** A folding overview row whose chips (core's options with their edits, sent to [onEdit]) show while it is open; [summary] is core's when it sends one. */
+
 @Composable
 internal fun Disclosure(label: String, options: List<JSONObject>, all: String, open: Boolean, enabled: Boolean, onToggle: () -> Unit,
                         summary: String? = null, onEdit: (JSONObject) -> Unit) {
@@ -815,7 +771,7 @@ internal fun Disclosure(label: String, options: List<JSONObject>, all: String, o
     if (open) Box(Modifier.padding(start = 4.dp, end = 4.dp, top = 10.dp)) { ChipFlow(options, enabled, onEdit) }
 }
 
-/** Core's options as RN's filter chips; a tap sends the option's own edit to [onEdit]. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ChipFlow(options: List<JSONObject>, enabled: Boolean, onEdit: (JSONObject) -> Unit) {
@@ -826,10 +782,7 @@ internal fun ChipFlow(options: List<JSONObject>, enabled: Boolean, onEdit: (JSON
     }
 }
 
-/**
- * RN's match mode control (the token picker's footer): core's label, then Any and All in a pill, the chosen one in the tint.
- * A tap sends that option's edit to [onEdit]. One node per option holds its label, role and state.
- */
+
 @Composable
 internal fun MatchModeRow(label: String, options: List<JSONObject>, enabled: Boolean, onEdit: (JSONObject) -> Unit) {
     val c = LocalTheme.current.colors
@@ -854,10 +807,7 @@ internal fun MatchModeRow(label: String, options: List<JSONObject>, enabled: Boo
     }
 }
 
-/**
- * RN's FilterChip in the sheet: a 44-high pill, the tint when selected, struck and red when excluded. A removable chip
- * (an active filter) is not pressable itself: its X, labelled [remove], runs [onClick], as in RN.
- */
+
 @Composable
 internal fun SheetChip(label: String, selected: Boolean, excluded: Boolean, remove: String? = null, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -878,10 +828,7 @@ internal fun SheetChip(label: String, selected: Boolean, excluded: Boolean, remo
     }
 }
 
-/**
- * RN's sheet input: 44 high, bordered, the list background. [value] is the text as typed (the menu model keeps it with the
- * sheet until core has read it), else core's.
- */
+
 @Composable
 internal fun SheetField(value: String, placeholder: String, description: String, onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -897,17 +844,14 @@ internal fun SheetField(value: String, placeholder: String, description: String,
         })
 }
 
-/**
- * RN's Move to section dialog (someday-view.tsx): a centered card, core's title, core's choices ("No section" first, the
- * current one filled), "+ New section…", and Cancel. A choice runs core's moveSomedayTasksToSection.
- */
+
 @Composable
 private fun MoveDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
     val c = theme.colors
     val taskIds = open.optJSONArray("taskIds")?.strings().orEmpty()
     val taskRevisions = open.optJSONObject("taskRevisions") ?: JSONObject()
-    // A parked project's move (openProjectMove), at its row's revision.
+
     val project = open.optString("projectId").ifEmpty { null }?.let { it to open.getString("projectRevision") }
     val reply = moveChoices
     DialogCard(model, dismissible = true) {
@@ -938,11 +882,7 @@ private fun MoveDialog(model: InboxViewModel, open: JSONObject) = with(model.men
     }
 }
 
-/**
- * RN's name prompts: New section… (someday-section-picker.tsx) and a heading's Add task (someday-view.tsx), each a card with
- * its title, the field, core's failure line, Cancel and Save. Save sends the dialog's exact request (a capture UUID for a
- * task), written to disk first; while its retry is owed, the field is locked and Save re-sends it (RN's Retry).
- */
+
 @Composable
 private fun CreateDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
@@ -987,10 +927,7 @@ private fun CreateDialog(model: InboxViewModel, open: JSONObject) = with(model.m
     }
 }
 
-/**
- * RN's picker card: a dimmed screen (0.45) and a centered card, 88% wide, radius 14, over the keyboard. Only the move
- * dialog's backdrop closes it ([dismissible]); RN's name prompts sit on a plain overlay.
- */
+
 @Composable
 internal fun DialogCard(model: InboxViewModel, dismissible: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val theme = LocalTheme.current
@@ -1004,7 +941,7 @@ internal fun DialogCard(model: InboxViewModel, dismissible: Boolean, content: @C
     }
 }
 
-/** A list's More at its end: core's next window (core's `common.more`), as on the other lists. */
+
 @Composable
 fun MoreRow(model: InboxViewModel) {
     Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {

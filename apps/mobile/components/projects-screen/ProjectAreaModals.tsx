@@ -97,7 +97,7 @@ export function ProjectAreaModals({
         const area = sortedAreas.find((area) => area.id === managerAreaId);
         setEditingAreaId(area?.id ?? null);
         setAreaName(area?.name ?? '');
-        // Initialize once when opening; a live update must not replace a typed name.
+
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showAreaManager, managerAreaId]);
     const dismissProjectPickers = React.useCallback(() => {
@@ -374,10 +374,8 @@ export function ProjectAreaModals({
                                                             styles.colorOption,
                                                             styles.colorOptionNone,
                                                             { borderColor: tc.border },
-                                                            // Not styles.colorOptionSelected (#000 border) — invisible
-                                                            // against this button's transparent fill in dark theme.
-                                                            // The color swatches below stay visible on #000 because
-                                                            // they have a solid fill; this one needs a theme token.
+
+
                                                             !area.color && { borderColor: tc.tint },
                                                         ]}
                                                         onPress={() => {
@@ -419,7 +417,7 @@ export function ProjectAreaModals({
                                 onCloseAreaManager();
                                 onSetNewAreaName('');
                                 onSetNewAreaColor(colors[0] || '#3b82f6');
-                                // Switch this existing manager back to its full list/create view.
+
                                 onSetShowAreaManager(true);
                             }}>
                                 <Text style={[styles.linkModalButtonText, { color: tc.tint }]}>{t('areas.new')}</Text>

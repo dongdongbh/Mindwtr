@@ -2,8 +2,7 @@ import Foundation
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Actual private bundle, JSC, native inline journal and real SQLite faults.
-/// Running timer rows below are SQL fixtures; this slice activates no timer UI.
+
 final class NativePomodoroHostTests: XCTestCase {
     private var root: URL!, bundle: URL!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -62,7 +61,7 @@ final class NativePomodoroHostTests: XCTestCase {
         _ = try await initial.writePomodoroTransition(requestJSON: request("initialize")); await initial.close()
         var settings = try object(XCTUnwrap(rows("SELECT data FROM settings WHERE id=1").first?["data"] as? String))
         settings["deviceId"] = device
-        // The fixed `at` date ages past the default 7-day auto-archive, which then archives a done fixture on boot; 0 turns it off.
+
         var gtd = settings["gtd"] as? [String: Any] ?? [:]; gtd["autoArchiveDays"] = 0; settings["gtd"] = gtd
         try rows("UPDATE settings SET data=? WHERE id=1", [json(settings)])
         try rows("INSERT INTO tasks(id,title,status,contexts,tags,createdAt,updatedAt,rev,revBy,timeSpentMinutes,isFocusedToday,pushCount,showFutureRecurrence,suppressMindwtrReminders) VALUES ('task','PRIVATE',?,'[]','[]',?,?,1,?,?,0,0,0,0)", [status, at, at, device, minutes])
@@ -380,7 +379,7 @@ final class NativePomodoroHostTests: XCTestCase {
             }
             let core = host(); _ = try await core.start()
             if !isBreak {
-                // Boot may initialize identity; a later Pomodoro write must not replace missing identity.
+
                 var settings = try object(XCTUnwrap(rows("SELECT data FROM settings WHERE id=1").first?["data"] as? String))
                 settings.removeValue(forKey: "deviceId"); try rows("UPDATE settings SET data=? WHERE id=1", [json(settings)])
             }
@@ -425,8 +424,8 @@ final class NativePomodoroHostTests: XCTestCase {
 
     func testExactPreparedReceiptTransportBoundaryReservesFutureTerminalBeforeJournal() async throws {
         let fixedID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", original = try request(id: fixedID)
-        // Measure the literal actual bridge plan; only the raw description cell
-        // changes in the following fixtures. Receipt JSON has the same fixed wrapper.
+
+
         try await seed(); try rows("UPDATE tasks SET description='' WHERE id='task'")
         let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
         faults.beforeSQL = { if $0.hasPrefix("UPDATE tasks") { throw HostFailure("intent retained") } }

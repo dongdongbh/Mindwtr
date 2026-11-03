@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import { useTaskStore } from '@mindwtr/core';
 import { createCalendarFeeds, createNativeCalendar } from './host-calendar';
 
-// The native app's external calendars (C3): core's device on the host's ports, and each screen's feed as RN's screens hold it.
 
 type Load = { input: { slot: string; start: string; end: string; timeoutMs?: number; refresh?: boolean }; settle: (value: unknown) => void };
 
@@ -15,7 +14,7 @@ const harness = () => {
     });
     const ready = (events: unknown[]) => ({ ok: true, value: { status: 'ready', calendars: [{ id: 'c' }], events } });
     const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-    /** core's getCalendarView: its range from the state, and the feed it was given. */
+
     const reads: unknown[] = [];
     const view = (range: { start: string; end: string }) => (input: never) => {
         reads.push((input as { calendar?: unknown }).calendar);
@@ -34,7 +33,7 @@ describe('the Calendar feed', () => {
         const first = feeds.calendarView({ state: null }, view(OCTOBER));
         expect(first.ok && first.value.calendar).toEqual({ status: 'loading' });
         expect(loads.map((load) => load.input)).toEqual([{ slot: 'calendar', ...OCTOBER }]);
-        // A later window finds the same feed: no second load.
+
         feeds.calendarView({ state: null, offset: 100 }, view(OCTOBER));
         expect(loads).toHaveLength(1);
         loads[0].settle(ready([event]));
@@ -57,11 +56,11 @@ describe('the Calendar feed', () => {
         const during = feeds.calendarView({}, view(OCTOBER));
         expect(during.ok && during.value.calendar).toEqual({ status: 'loading', calendars: [{ id: 'c' }], events: [event] });
         expect(feeds.event(event.id)).toEqual({ event, canOpen: true });
-        // Actions work on the events shown, as RN's composer does while it reloads (core refuses a loading feed).
+
         expect(feeds.calendar({ taskId: 't' })).toEqual({ taskId: 't', calendar: { status: 'ready', calendars: [{ id: 'c' }], events: [event] } });
         const moved = feeds.calendarView({}, view(NOVEMBER));
         expect(moved.ok && moved.value.calendar).toEqual({ status: 'loading', calendars: [{ id: 'c' }] });
-        // The October reload ends after the move: it shows nothing.
+
         loads[1].settle(ready([]));
         await flush();
         expect(changed).toEqual(['calendar']);
@@ -109,7 +108,7 @@ describe('the reviews\' feeds', () => {
         await flush();
         expect(feeds.review('weeklyReview', {})).toEqual({ calendar: { status: 'ready', events: [event] } });
         expect(feeds.review('dailyReview', {})).toEqual({ calendar: { status: 'error', message: 'External calendar request timed out' } });
-        // A review's reload shows loading again, as RN's modal does on each open.
+
         feeds.refresh('weeklyReview');
         expect(feeds.review('weeklyReview', {})).toEqual({ calendar: { status: 'loading' } });
     });

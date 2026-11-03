@@ -264,7 +264,7 @@ const createChecklistState = (checklist = [{ id: 'check-1', title: 'Item 1', isC
 
 describe('TaskEditContentField', () => {
   it('lets the user remove a missing file the sync location could not find', () => {
-    // A remote "not found" keeps the row; Remove is how a truly lost file goes.
+
     const removeAttachment = vi.fn();
     const missing = { id: 'gone', kind: 'file' as const, title: 'scan.pdf', uri: '', cloudKey: 'attachments/gone.pdf',
       localStatus: 'missing' as const, createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z' };
@@ -301,7 +301,7 @@ describe('TaskEditContentField', () => {
 
   afterEach(() => {
     try {
-      // Flush delayed caret restoration before Vitest closes the worker console RPC.
+
       act(() => {
         vi.runOnlyPendingTimers();
         for (const tree of renderedTrees.splice(0)) tree.unmount();
@@ -332,7 +332,7 @@ describe('TaskEditContentField', () => {
       accessibilityRole: 'checkbox',
     });
     const checkboxVisual = checkbox.findByType(View);
-    // A vector check, not a "✓" text glyph: text glyphs depend on the device font.
+
     const checkmark = checkbox.findByType('Icon' as never);
 
     expect(checkbox.props.accessibilityState).toEqual({ checked: true });
@@ -1352,7 +1352,7 @@ describe('TaskEditContentField', () => {
     });
     expect(baseProps.setShowDescriptionPreview).toHaveBeenCalledTimes(1);
 
-    // In preview mode the same control reads as Edit and shows a pencil.
+
     let previewTree!: ReturnType<typeof create>;
     act(() => {
       previewTree = create(

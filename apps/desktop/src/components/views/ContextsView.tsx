@@ -85,9 +85,7 @@ type BulkTokenPickerState = {
 
 const hasContext = (task: Task) => (task.contexts?.length || 0) > 0 || (task.tags?.length || 0) > 0;
 
-// Its own key, not a field on the contexts view state: persistContextsViewSelection
-// rewrites that key from a fixed three-field shape, so any fold stored there would be
-// dropped the next time another view navigated to a token.
+
 const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
 const CLEAR_SELECTION_OPTION = '__clear__';
 
@@ -162,7 +160,7 @@ export function ContextsView() {
             return { ...current, selectedContexts: next, matchMode: next.length === 0 ? 'all' : current.matchMode };
         });
     }, [setPersistedViewState]);
-    // A plain click switches to the token; Ctrl/Cmd-click (or Ctrl/Cmd+Enter) adds it (#1427).
+
     const pressContextToken = useCallback((value: string, additive: boolean) => {
         if (additive) {
             toggleSelectedContext(value);
@@ -195,8 +193,8 @@ export function ContextsView() {
         setSelectedContext(nextSelectedContext);
         setSearchQuery('');
     }), [setSelectedContext]);
-    // Deleted, parked-project and out-of-area tasks are all gone from
-    // `activeTasks` — one core predicate, shared with every other list.
+
+
     const { projectById: projectMap, visibleTasks: activeTasks } = useVisibleTaskContext();
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [saveFilterOpen, setSaveFilterOpen] = useState(false);
@@ -244,9 +242,7 @@ export function ContextsView() {
         return () => window.clearTimeout(timer);
     }, [perf.enabled]);
 
-    // One memoized chain from here to sortedTasks: every step feeds a downstream
-    // useMemo, the virtualizer's count and getItemKey, and the array handed to
-    // useTaskSelection, so a fresh array anywhere invalidates all of them (#856).
+
     const scopedTasks = useMemo(() => {
         return selectContextsFilterTasks(activeTasks, contextCriteria, projects);
     }, [activeTasks, contextCriteria, projects]);
@@ -289,9 +285,8 @@ export function ContextsView() {
         getSectionDomId,
         toggleGroup,
         virtualRows: groupedVirtualRows,
-        // Grouping reorders the rows, so the keyboard walk and "Select all" walk
-        // the grouped order. A collapsed group renders no rows, so it contributes
-        // no tasks either.
+
+
         visibleTasks,
     } = useTaskGroupCollapse({
         axis: groupBy,
@@ -329,8 +324,8 @@ export function ContextsView() {
         tasksById,
         undoNotificationsEnabled,
     });
-    // One engine for both shapes, as in ListView and ArchiveView: grouped rows
-    // carry headers, flat rows are the sorted tasks.
+
+
     const virtualRowCount = groupedVirtualRows?.length ?? sortedTasks.length;
     const shouldVirtualize = virtualRowCount > LIST_VIRTUALIZATION_THRESHOLD;
     const rowVirtualizer = useVirtualizer({
@@ -471,7 +466,7 @@ export function ContextsView() {
     const acceptsContextDrop = (event: DragEvent<HTMLButtonElement>, context: string) => {
         if (!Array.from(event.dataTransfer.types).includes(CALENDAR_TASK_DRAG_MIME)) return false;
         const id = getCalendarTaskDragTaskId(event.dataTransfer);
-        // Native dragover protects the payload until drop; the MIME still identifies our task drag.
+
         if (!id) return true;
         const task = useTaskStore.getState()._tasksById.get(id);
         return !!task && !task.deletedAt && !pendingContextDrops.current.has(id)
@@ -487,7 +482,7 @@ export function ContextsView() {
         if (!task || task.deletedAt) return;
         pendingContextDrops.current.add(id);
         try {
-            // Add and remove the context on the latest row, so a context a sync save added meanwhile is kept.
+
             const hasContext = (contexts: string[]) => contexts.some((token) => normalizeBulkTaskTokenInput(token, 'contexts') === context);
             const result = await updateTaskFromLatest(id, (latest) => (
                 hasContext(latest.contexts) ? null : { contexts: [...latest.contexts, context] }
@@ -630,7 +625,7 @@ export function ContextsView() {
                 onConfirm={saveContextFilter} onCancel={() => setSaveFilterOpen(false)} />
             <div className="h-full px-4 pt-3">
                 <div className="mx-auto flex h-full w-full max-w-[84rem] min-w-0 gap-0 lg:gap-5 xl:gap-6 2xl:max-w-[88rem]">
-                    {/* Sidebar List of Contexts */}
+                    {                              }
                     <div className="hidden min-w-[13.5rem] w-[clamp(13.5rem,16vw,15.5rem)] flex-shrink-0 flex-col gap-4 border-r border-border pr-5 lg:flex xl:pr-6">
                         <div className="flex items-center justify-between">
                             <h2 className="text-xl font-bold tracking-tight">{t('contexts.title')}</h2>
@@ -698,7 +693,7 @@ export function ContextsView() {
                         </div>
                     </div>
 
-                    {/* Context Tasks */}
+                    {                   }
                     <div className="min-w-0 flex-1 flex flex-col h-full overflow-hidden">
                         <header className="mb-6 flex flex-wrap items-center gap-3">
                             <div className="p-2 bg-primary/10 rounded-lg">

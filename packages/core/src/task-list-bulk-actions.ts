@@ -1,18 +1,6 @@
-/**
- * Selection mode on the task lists, as React Native's TaskList and TaskListView
- * show it: which actions a list's bulk bar offers and how they read, the add-tag
- * dialog and remove-tag picker, Bulk Organize (its choices, labels and the update
- * it applies), its date fields, and the store write each action makes with the
- * toast that follows (Undo for a delete).
- *
- * Mobile's bar, dialogs and date field render from these; the native host contract
- * (native-host-contract-bulk-actions.ts) serves the same models, so both show the
- * same bar and write the same rows. React state (which rows are selected, which
- * dialog is open, the draft being edited) stays with the caller.
- *
- * QuickJS has no Intl: nothing here formats dates except through the formatter the
- * caller passes, and date values stay local `yyyy-MM-dd` days.
- */
+
+
+
 import { buildBulkOrganizeTaskUpdates, parseBulkOrganizeTokenInput, type BulkOrganizeStatus, type BulkOrganizeTaskUpdateInput } from './bulk-organize';
 import { buildBulkTaskTokenUpdates, type BulkTaskTokenMode } from './bulk-task-tokens';
 import { getQuickDate, isQuickDatePresetSelected, safeFormatDate, safeParseDate, type DateFormatter } from './date';
@@ -27,12 +15,10 @@ import type { Area, Project, Task, TaskStatus } from './types';
 
 type Translate = (key: string) => string;
 
-// ---------------------------------------------------------------------------
-// Which actions a list offers
 
 export const BULK_MOVE_STATUS_ORDER: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done', 'reference'];
 
-/** The bar's "Move to" statuses: every status but the list's own; Done adds Archived. */
+
 export function getBulkMoveStatusOptions(currentStatus?: TaskStatus | 'all'): TaskStatus[] {
     if (!currentStatus || currentStatus === 'all') return BULK_MOVE_STATUS_ORDER;
     if (currentStatus === 'done') {
@@ -43,12 +29,7 @@ export function getBulkMoveStatusOptions(currentStatus?: TaskStatus | 'all'): Ta
 
 export type TaskListBulkScreen = 'inbox' | 'waiting' | 'someday' | 'reference' | 'done' | 'project';
 
-/**
- * What each mobile list passes its bar: the Inbox and an editable project turn on
- * Bulk Organize (enableInboxBulkOrganize, getProjectDetailTaskListOptions' allowAdd);
- * TaskList offers Remove tag, TaskListView (Waiting, Someday) does not; Someday adds
- * Move to section. A read-only project offers no selection at all.
- */
+
 export const TASK_LIST_BULK_SCREENS: Record<TaskListBulkScreen, {
     status: TaskStatus | 'all';
     organize: boolean;
@@ -65,34 +46,34 @@ export const TASK_LIST_BULK_SCREENS: Record<TaskListBulkScreen, {
 
 type BarAction = { label: string; enabled: boolean };
 export type TaskListBulkBarModel = {
-    /** "2 selected". */
+
     countLabel: string;
-    /** Beside the spinner while an action runs. */
+
     busyLabel: string;
     exit: { accessibilityLabel: string; enabled: boolean };
     statuses: (BarAction & { status: TaskStatus; accessibilityLabel: string })[];
     moveToSection: BarAction | null;
     organize: BarAction | null;
-    /** Range: the next tap selects every row between it and the last one tapped. */
+
     range: BarAction & { active: boolean };
     addTag: BarAction;
-    /** Enabled only while the selection carries a tag. */
+
     removeTag: BarAction | null;
     delete: BarAction;
 };
 
-/** The bulk bar in screen order: exit, the statuses, then the actions a list turns on. */
+
 export function buildTaskListBulkBarModel(input: {
     selectedCount: number;
     hasSelection: boolean;
     busy: boolean;
-    /** The running action's label; the bar says Loading without one. */
+
     busyLabel?: string;
     rangeSelectMode: boolean;
     statuses: readonly TaskStatus[];
     moveToSection: boolean;
     organize: boolean;
-    /** Null when the list offers no Remove tag. */
+
     removeTag: { canRemove: boolean } | null;
     t: Translate;
 }): TaskListBulkBarModel {
@@ -120,7 +101,7 @@ export function buildTaskListBulkBarModel(input: {
     };
 }
 
-/** The add-tag dialog; Save stays off until the input has text. */
+
 export function getTaskListAddTagDialogText(t: Translate) {
     return {
         title: t('bulk.addTag'),
@@ -131,13 +112,13 @@ export function getTaskListAddTagDialogText(t: Translate) {
 }
 export const canSaveTaskListTag = (input: string): boolean => input.trim().length > 0;
 
-/** The remove-tag picker; it offers only the tags the selection carries (collectBulkTaskTokens). */
+
 export function getTaskListRemoveTagPickerText(t: Translate) {
     const title = tFallback(t, 'bulk.removeTag', 'Remove tag');
     return { title, description: title, placeholder: t('bulk.tagPlaceholder') };
 }
 
-/** Each action's label while it runs; a failure reads "<label> failed." unless the store says why. */
+
 export function getTaskListBulkBusyLabels(t: Translate) {
     return {
         move: t('bulk.moveTo'),
@@ -149,34 +130,32 @@ export function getTaskListBulkBusyLabels(t: Translate) {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Bulk Organize
 
 export const BULK_ORGANIZE_STATUS_OPTIONS: BulkOrganizeStatus[] = ['next', 'waiting', 'someday', 'done', 'reference'];
-/** A choice that leaves each task's own value. */
+
 export const BULK_ORGANIZE_KEEP = '__KEEP__';
-/** A choice that clears the project or area. */
+
 export const BULK_ORGANIZE_NONE = '__NONE__';
 
 export type BulkOrganizeTextField = 'contexts' | 'tags' | 'startDate' | 'dueDate' | 'reviewDate' | 'delegateWho';
 export type BulkOrganizeDateField = Extract<BulkOrganizeTextField, 'startDate' | 'dueDate' | 'reviewDate'>;
 export const BULK_ORGANIZE_DATE_FIELDS: BulkOrganizeDateField[] = ['startDate', 'dueDate', 'reviewDate'];
 
-/** What the dialog has chosen so far; every field starts at Keep or empty. */
+
 export type BulkOrganizeDraft = {
     status: BulkOrganizeStatus | typeof BULK_ORGANIZE_KEEP;
-    /** BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, or a project id. */
+
     projectChoice: string;
-    /** BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, or an area id. Ignored while a project is chosen. */
+
     areaChoice: string;
-    /** Typed tokens, split on spaces and commas; each gains its @ or # and is added. */
+
     contexts: string;
     tags: string;
-    /** Local days (yyyy-MM-dd); empty keeps each task's own. */
+
     startDate: string;
     dueDate: string;
     reviewDate: string;
-    /** Required with Waiting. */
+
     delegateWho: string;
 };
 
@@ -194,7 +173,7 @@ export const EMPTY_BULK_ORGANIZE_DRAFT: BulkOrganizeDraft = {
 
 export type BulkOrganizeDraftEdit =
     | { type: 'setStatus'; value: BulkOrganizeStatus | typeof BULK_ORGANIZE_KEEP }
-    /** Any project choice, Keep included, resets the area to Keep. */
+
     | { type: 'setProject'; value: string }
     | { type: 'setArea'; value: string }
     | { type: 'setText'; field: BulkOrganizeTextField; value: string };
@@ -216,47 +195,47 @@ const chosenId = (choice: string): string | undefined => (
     choice !== BULK_ORGANIZE_KEEP && choice !== BULK_ORGANIZE_NONE ? choice : undefined
 );
 
-/** The projects a task can be filed in, by title. */
+
 export function getBulkOrganizeProjectOptions(projects: readonly Project[]): Project[] {
     return projects
         .filter(isSelectableProjectForTaskAssignment)
         .sort((a, b) => a.title.localeCompare(b.title));
 }
 
-/** The areas that are not deleted, in their custom order. */
+
 export function getBulkOrganizeAreaOptions(areas: readonly Area[]): Area[] {
     return areas.filter((area) => !area.deletedAt).sort(compareAreasByOrder);
 }
 
 export type BulkOrganizeDialogModel = {
     title: string;
-    /** "2 selected - Titles and descriptions stay unchanged." */
+
     subtitle: string;
     closeLabel: string;
     cancelLabel: string;
     applyLabel: string;
     statusLabel: string;
-    /** Keep status first, then each status. */
+
     statuses: { value: BulkOrganizeStatus | typeof BULK_ORGANIZE_KEEP; label: string; selected: boolean }[];
     project: { label: string; value: string; accessibilityLabel: string; keepLabel: string; selectedId: string | undefined };
-    /** Disabled while a project is chosen: the project decides the area. */
+
     area: { label: string; value: string; accessibilityLabel: string; keepLabel: string; selectedId: string | undefined; disabled: boolean };
-    /** Shown only with Waiting. */
+
     waitingFor: { label: string; placeholder: string } | null;
-    /** Start, Due, then Review (Follow-up with Waiting). */
+
     dates: { field: BulkOrganizeDateField; label: string }[];
     contexts: { label: string; placeholder: string };
     tags: { label: string; placeholder: string };
-    /** Apply refuses without a selection, and with Waiting until a person is named. */
+
     canApply: boolean;
     validationMessage: string;
-    /** Shown when creating a project or area from the pickers fails. */
+
     createFailed: { project: string; area: string };
 };
 
 export function buildBulkOrganizeDialogModel(input: {
     draft: BulkOrganizeDraft;
-    /** getBulkOrganizeProjectOptions and getBulkOrganizeAreaOptions. */
+
     projects: readonly Project[];
     areas: readonly Area[];
     selectedCount: number;
@@ -330,7 +309,7 @@ export function buildBulkOrganizeDialogModel(input: {
     };
 }
 
-/** The update Apply sends: only the fields the dialog changed. */
+
 export function buildBulkOrganizeInput(draft: BulkOrganizeDraft): BulkOrganizeTaskUpdateInput {
     const input: BulkOrganizeTaskUpdateInput = {
         contexts: parseBulkOrganizeTokenInput(draft.contexts, '@'),
@@ -350,7 +329,7 @@ export function buildBulkOrganizeInput(draft: BulkOrganizeDraft): BulkOrganizeTa
     return input;
 }
 
-/** A picked day as a bulk date stores it: the local day only, never a time or a UTC shift. */
+
 export const toBulkOrganizeDateValue = (date: Date | null, formatDate: DateFormatter = safeFormatDate): string => (
     date ? formatDate(date, 'yyyy-MM-dd') : ''
 );
@@ -358,16 +337,16 @@ export const toBulkOrganizeDateValue = (date: Date | null, formatDate: DateForma
 export type BulkOrganizeDateFieldModel = {
     label: string;
     value: string;
-    /** The value in the user's short date format, shown while the field is not being typed in. */
+
     displayValue: string;
     placeholder: string;
     calendarAccessibilityLabel: string;
-    /** The calendar's Done button (iOS spinner): its text and accessibility label. */
+
     doneText: string;
     doneLabel: string;
-    /** Where the calendar opens: the value, or today. */
+
     pickerStart: string;
-    /** Today and Tomorrow; tapping the selected chip clears the date. */
+
     quickDates: { preset: 'today' | 'tomorrow'; label: string; accessibilityLabel: string; selected: boolean; value: string }[];
 };
 
@@ -405,10 +384,7 @@ export function buildBulkOrganizeDateFieldModel(input: {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Writes
 
-/** One bulk action's store write. */
 export type TaskListBulkWrite =
     | { kind: 'move'; taskIds: string[]; status: TaskStatus }
     | { kind: 'update'; updates: { id: string; updates: Partial<Task> }[] }
@@ -417,7 +393,7 @@ export type TaskListBulkWrite =
 
 type TaskLookup = Map<string, Task> | Record<string, Task | undefined>;
 
-/** Add or remove tags on the selected rows; null when no row would change. */
+
 export function planBulkTagEdit(
     taskIds: string[],
     tasksById: TaskLookup,
@@ -428,7 +404,7 @@ export function planBulkTagEdit(
     return updates.length > 0 ? { kind: 'update', updates } : null;
 }
 
-/** Bulk Organize's update on the selected rows; null when it would change nothing. */
+
 export function planBulkOrganize(
     taskIds: readonly string[],
     tasksById: ReadonlyMap<string, Task> | Record<string, Task | undefined>,
@@ -438,10 +414,7 @@ export function planBulkOrganize(
     return updates.length > 0 ? { kind: 'update', updates } : null;
 }
 
-/**
- * Makes the write: a move and a delete are one batch each (a delete is the store's
- * soft delete, which keeps a tombstone for sync); Undo restores each task on its own.
- */
+
 export function runTaskListBulkWrite(
     store: Pick<TaskStore, 'batchMoveTasks' | 'batchUpdateTasks' | 'batchDeleteTasks' | 'restoreTask'>,
     write: TaskListBulkWrite,
@@ -454,7 +427,7 @@ export function runTaskListBulkWrite(
     }
 }
 
-/** The success toast: "Done · 2 tasks"; a delete offers Undo, which restores those tasks. Undo itself shows none. */
+
 export function getTaskListBulkToast(write: TaskListBulkWrite, t: Translate): {
     tone: 'success';
     title: string;

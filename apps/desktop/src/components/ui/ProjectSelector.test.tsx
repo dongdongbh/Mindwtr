@@ -13,12 +13,7 @@ const projects: Project[] = [
 const originalInnerHeight = window.innerHeight;
 let restoreGeometryMock: (() => void) | undefined;
 
-/**
- * Simulate typing into a controlled React input under bun + JSDOM.
- * React 19 intercepts the value property descriptor to track changes;
- * we must call the *native* setter so React sees a new value, then
- * dispatch an `input` event inside `act()` so the state update flushes.
- */
+
 function setInputValue(input: HTMLInputElement, value: string) {
     const proto = Object.getPrototypeOf(Object.getPrototypeOf(input));
     const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
@@ -289,7 +284,7 @@ describe('ProjectSelector', () => {
         expect(heading.compareDocumentPosition(getByRole('option', { name: 'Garden active' })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
         expect(heading.compareDocumentPosition(getByRole('option', { name: 'Garden someday' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-        // While searching the matches are grouped the same way, and Enter takes the first row shown.
+
         const input = getByLabelText('Search projects') as HTMLInputElement;
         setInputValue(input, 'garden');
         expect(items().map((option) => option.textContent)).toEqual(['Garden active', 'Garden someday', 'Garden waiting']);
@@ -405,7 +400,7 @@ describe('ProjectSelector', () => {
     });
 
     describe('while searching (#1461)', () => {
-        // Stored order, not A-Z: the picker follows the Projects view (#1467).
+
         const fooBarBaz: Project[] = [
             { ...projects[0], id: 'p-foo', title: 'foo', order: 0 },
             { ...projects[0], id: 'p-bar', title: 'bar', order: 1 },
@@ -500,7 +495,7 @@ describe('ProjectSelector', () => {
             expect(getByRole('option', { name: 'Create project "ba"' })).toHaveFocus();
             fireEvent.keyDown(getByRole('option', { name: 'Create project "ba"' }), { key: 'ArrowDown' });
             expect(getByRole('option', { name: 'No project' })).toHaveFocus();
-            // The highlight follows focus: it leaves the Enter target once focus leaves the search box.
+
             expect(getByRole('option', { name: 'bar' }).className).not.toContain('bg-primary/10');
         });
     });

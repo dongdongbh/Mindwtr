@@ -81,8 +81,8 @@ export const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    // 31 day chips laid out exactly 7 across; the cell (not the chip) is the
-    // touch target so it stays 44pt tall.
+
+
     monthDayGrid: { flexDirection: 'row', flexWrap: 'wrap' },
     monthDayCell: { width: '14.28%', padding: 2 },
     monthDayButton: {
@@ -555,7 +555,7 @@ export const styles = StyleSheet.create({
     viewChecklistAddInput: {
         fontSize: 14,
         paddingVertical: 6,
-        // Aligns with the checklist text, which sits after an 18pt icon plus the 8pt row gap.
+
         paddingLeft: 26,
     },
     viewAttachmentGrid: {

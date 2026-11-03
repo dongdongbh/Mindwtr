@@ -16,7 +16,7 @@ import { useDropdownPosition } from './use-dropdown-position';
 type DestinationSelectorProps = {
     projects: Project[];
     areas: Area[];
-    /** Null presents an action picker without implying a current assignment. */
+
     value: TaskMoveDestination | null;
     onChange: (value: TaskMoveDestination) => void;
     onCreateProject?: (title: string) => Promise<string | null>;
@@ -24,7 +24,7 @@ type DestinationSelectorProps = {
     destinationLabel: string;
     projectsLabel: string;
     areasLabel: string;
-    /** Heading of the Someday / Waiting projects, listed after the active ones (#1467). */
+
     deferredLabel?: string;
     noneLabel: string;
     searchPlaceholder: string;
@@ -93,7 +93,7 @@ export function DestinationSelector({
                 : selectableProjects, areas),
         [areas, normalizedQuery, selectableProjects, showProjects],
     );
-    // Visual order: Enter takes the first row and the arrow keys walk the DOM, so both follow it.
+
     const filteredProjects = useMemo(() => [...projectGroups.active, ...projectGroups.deferred], [projectGroups]);
     const filteredAreas = useMemo(
         () => !showAreas
@@ -188,8 +188,8 @@ export function DestinationSelector({
             const id = await create(name);
             if (mountedRef.current && attemptRef.current === attempt && id) choose({ kind, id });
         } catch {
-            // Creation owns its user-facing error reporting. Keep this selector
-            // open and prevent a rejected callback from becoming unhandled.
+
+
         } finally {
             if (mountedRef.current && attemptRef.current === attempt) setCreating(null);
         }
@@ -203,12 +203,10 @@ export function DestinationSelector({
     const canCreateArea = showAreas
         && Boolean(onCreateArea)
         && Boolean(normalizedQuery)
-        // Against the live areas only: a deleted area's name is free again.
+
         && !sortedAreas.some((area) => area.name.trim().toLocaleLowerCase() === normalizedQuery);
 
-    // Enter matches ui/ProjectSelector: an empty search picks nothing (it used
-    // to file the draft under the alphabetically first project), and with no
-    // match it runs the create action only when exactly one is on offer.
+
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
         if (event.key !== 'Enter' || !normalizedQuery) return;
         const firstProject = filteredProjects[0];
@@ -224,8 +222,7 @@ export function DestinationSelector({
         void handleCreate(canCreateProject ? 'project' : 'area');
     };
 
-    // While searching, the list runs matches (projects, then areas), the create
-    // rows, then None, and the row Enter picks is highlighted (#1461).
+
     const searching = Boolean(normalizedQuery);
     const enterTargetKey = !searching
         ? undefined

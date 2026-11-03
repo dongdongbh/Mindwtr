@@ -86,7 +86,7 @@ class WatchProfileCertificateTests(unittest.TestCase):
                 'ExpirationDate': datetime.datetime(2099, 1, 1),
                 'UUID': 'fixture-profile', 'Name': 'Fixture Watch',
             }))
-            # Exercise the actual installer validation before it copies the profile.
+
             script = pathlib.Path(__file__).with_name('install-watch-profiles.sh').read_text()
             python = script.split("<<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
             result = subprocess.run(

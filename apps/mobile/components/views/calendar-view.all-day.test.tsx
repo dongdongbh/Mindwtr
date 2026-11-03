@@ -37,7 +37,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
 });
 
 vi.mock('react-native-gesture-handler', () => {
-  // Every builder method returns the chain, whichever ones the view uses.
+
   const gesture = () => new Proxy({}, { get: () => () => gesture() });
   return {
     Gesture: { Pan: gesture, Tap: gesture, Race: (...items: unknown[]) => items, Simultaneous: (...items: unknown[]) => items },

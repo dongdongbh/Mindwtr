@@ -15,15 +15,11 @@ import {
   type TaskStore,
 } from '@mindwtr/core';
 
-// Not re-exported from the core barrel; the relative path resolves to the same
-// module instance store.ts instruments, so the profile is the real one
-// (matches the mobile focused-count guard).
+
 import { beginNotifyProfile, endNotifyProfile } from '../../../../packages/core/src/store-notify-profiler';
 import { selectTaskItemStoreState } from '../components/Task/useTaskItemStoreState';
 
-// Ported from apps/mobile/tests/focused-count-selector.test.ts,
-// trimmed to what this guard needs. Transcribed rather than imported:
-// importing a .test.tsx module re-runs its whole suite inside this one.
+
 const TASK_COUNT = 7_000;
 const PROJECT_COUNT = 40;
 const BASE_ISO = '2026-05-01T09:00:00.000Z';
@@ -133,8 +129,8 @@ describe('focused-count row selector does not force a derived-state rebuild', ()
 
   it('costs zero derived-state rebuilds on a write (real desktop hot-path selector)', async () => {
     seedStore();
-    // Exercise the same selector the hook uses, with a project prop and closed
-    // editor/menu, as StoreTaskItem does for each visible row.
+
+
     const unsubscribes = Array.from({ length: ROWS_ON_SCREEN }, (_, index) =>
       useTaskStore.subscribe(nameNotifyListener(
         `row-selector-fixed-${index}`,
@@ -162,7 +158,7 @@ describe('focused-count row selector does not force a derived-state rebuild', ()
 
   it('rebuilds with the old selector shape (state.getDerivedState().focusedCount)', async () => {
     seedStore();
-    // Keep the old read verbatim to prove the profiler detects the regression.
+
     const unsubscribes = Array.from({ length: ROWS_ON_SCREEN }, (_, index) =>
       useTaskStore.subscribe(
         nameNotifyListener(`row-selector-old-${index}`, (state: TaskStore) => state.getDerivedState().focusedCount),
@@ -213,8 +209,8 @@ describe('focused-count row selector does not force a derived-state rebuild', ()
     seedStore();
     const state = useTaskStore.getState();
     const getDerivedState = vi.fn(state.getDerivedState);
-    // Give the selector distinct map inputs so substituting the full mutation
-    // map for derived.projectMap cannot silently pass this guard.
+
+
     const mutationProject = { ...projects[0], title: 'Mutation snapshot' };
     const hiddenProject = { ...projects[0], id: 'hidden-project' };
     const selectorState = {

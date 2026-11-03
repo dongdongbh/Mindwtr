@@ -51,8 +51,8 @@ if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ]; then
     done
   }
   if [ "$phase" = before-archive ]; then
-    # Only the current compiler's completed simulator build and previous device
-    # intermediates can be reclaimed after smoke. Keep checkout and evidence intact.
+
+
     validate_cache_parents
     if ! xcode_id="$(xcodebuild -version | shasum -a 256 | cut -c 1-16)"; then
       fail_cache 'Cannot identify the current compiler cache.'
@@ -73,13 +73,13 @@ if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ]; then
       done
     }
     validate_archive_paths
-    # Conservative archive budget; live peak usage remains a separate CI check.
+
     minimum_available_kib=$((20 * 1024 * 1024))
     before_kib="$(available_kib)"
     after_kib="$before_kib"
     trimmed_entries=0
     if [ "$before_kib" -lt "$minimum_available_kib" ]; then
-      # Validate every candidate before deleting either one.
+
       validate_archive_paths
       for child in simulator archive; do
         if [ -d "$current_cache/$child" ]; then
@@ -99,8 +99,8 @@ if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ]; then
   trimmed_entries=0
   after_kib="$before_kib"
   if [ "$before_kib" -lt "$minimum_available_kib" ]; then
-    # Validate the entire bounded set before removing anything. Unknown version
-    # names and unknown children are never cleanup candidates.
+
+
     validate_cache_paths
     for version in "$cache_root"/*; do
       [[ "${version##*/}" =~ ^[0-9a-f]{16}$ ]] || continue
@@ -117,8 +117,8 @@ if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ]; then
   fi
   echo "Apple CI disk headroom: before_kib=$before_kib after_kib=$after_kib trimmed_entries=$trimmed_entries"
   [ "$after_kib" -ge "$minimum_available_kib" ] || fail_cache 'At least 12 GiB available on the HOME volume is required. Owned generated cache cleanup was insufficient; free runner disk space before retrying.'
-  # Preserve installed dependencies and their mtimes, but remove all other
-  # untracked/ignored files so deleted sources and local config cannot leak in.
+
+
   git clean -ffdx -e node_modules/
   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
   echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
@@ -129,7 +129,7 @@ if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ]; then
   echo "$gem_home/bin" >> "$GITHUB_PATH"
 fi
 
-# Keep Swift/Xcode intermediates outside checkout cleanup, separated by compiler.
+
 xcode_id="$(xcodebuild -version | shasum -a 256 | cut -c 1-16)"
 cache_root="$cache_root/$xcode_id"
 mkdir -p "$cache_root/swift" "$cache_root/simulator" "$cache_root/archive"

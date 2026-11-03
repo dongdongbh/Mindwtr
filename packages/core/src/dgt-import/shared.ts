@@ -20,8 +20,7 @@ import type {
   TaskStatus,
 } from '../types';
 
-// Re-exported so parse.ts's existing `from './shared'` import list needs no changes — these are
-// now single shared implementations from import-source-reader.ts, not DGT's own copies.
+
 export {
   appendWarning,
   basename,
@@ -158,8 +157,7 @@ export type DgtImportPreview = {
 
 export type DgtImportParseResult = ImportParseResult<ParsedDgtImportData, DgtImportPreview>;
 
-// DGT doesn't surface importedStandaloneTaskCount even though applyImport() (called by
-// applyDgtImport) always computes it — same trade-off as TickTick.
+
 export type DgtImportExecutionResult = Omit<ImportExecutionResult, 'importedStandaloneTaskCount'>;
 
 export const createWarningCounters = (): DgtWarningCounters => ({

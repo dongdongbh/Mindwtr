@@ -39,9 +39,7 @@ describe('mobile WebDAV capability proof', () => {
     allowInsecureHttp: false,
   };
 
-  // Serialization itself (what fields it covers, secret exclusion, normalization) is core's
-  // `serializeWebdavCapabilityProof` unit test; this only proves the wrapper actually
-  // persists that value under this platform's key.
+
   it('stores the serialized proof under the platform storage key', async () => {
     await rememberWebdavCapabilityProof(config);
 
@@ -103,12 +101,11 @@ describe('mobile WebDAV capability proof', () => {
   it('never reuses a legacy answer when plaintext is not allowed, and a strong answer clears it', async () => {
     const probe = vi.fn().mockResolvedValue('legacy-plaintext');
     await ensureWebdavCapabilityProof(config, probe, { allowLegacyPlaintext: true });
-    // Encryption turned on: the cached legacy answer must not short-circuit the probe.
+
     await ensureWebdavCapabilityProof(config, probe);
     expect(probe).toHaveBeenCalledTimes(2);
 
-    // The cached legacy answer is still fresh, so only a call that must probe (plaintext
-    // not allowed) sees the server's upgrade; the strong proof then replaces the legacy one.
+
     probe.mockResolvedValue('strong-etag');
     await expect(ensureWebdavCapabilityProof(config, probe)).resolves.toBe('strong-etag');
     expect(await AsyncStorage.getItem(WEBDAV_LEGACY_PROOF_STORAGE_KEY)).toBeNull();

@@ -93,12 +93,10 @@ export function ListHeader({
 
     return (
         <header className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-            {/* No min-w-0: this column shares a flex row with the toolbar, and a
-                zero floor let the toolbar squeeze the title below its own longest
-                word — first clipping it, then (once it wrapped) breaking it
-                mid-word as "Aguardand / o". Its automatic min-content floor keeps
-                any single translated word intact and makes the toolbar yield
-                instead, which it can do because it wraps (#923). */}
+            {
+
+
+                                                                    }
             <div className="space-y-1">
                 <h2 className="break-words text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
                     {title}

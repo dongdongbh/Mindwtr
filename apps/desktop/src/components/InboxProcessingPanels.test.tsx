@@ -86,12 +86,7 @@ const scheduleFields = {
     review: scheduleField(),
 };
 
-/**
- * Both panels take the task fields as one draft, so a render fixture is the
- * draft plus the surface's own state — not a 90-key object of value/setter
- * pairs. setField writes through the core reducer, exactly as the controller
- * does, so a field cascade lands in the test the same way it lands in the app.
- */
+
 const useLiveDraft = (initial: Partial<TaskDraft> = {}) => {
     const [draft, setDraft] = useState<TaskDraft>(() => ({ ...createTaskDraft(processingTask), ...initial }));
     return {
@@ -303,8 +298,7 @@ describe('InboxProcessingQuickPanel draft editing', () => {
         expect(queryByLabelText('projects.title')).toBeNull();
     });
 
-    // The draft stores the raw token text; the selected chips are derived from
-    // it, so typing and clicking a suggestion cannot disagree.
+
     it('derives the selected contexts from the typed token text', () => {
         const { getByLabelText, getByRole } = render(<QuickPanelHarness />);
 
@@ -337,8 +331,7 @@ describe('InboxProcessingQuickPanel draft editing', () => {
         expect(getByText('+ New section…')).toBeInTheDocument();
     });
 
-    // #1155: filing a note as Reference has to offer the same containers the
-    // Someday path does, so it lands in its project in one step.
+
     it('offers Area and Project controls before filing a Reference item', () => {
         const { getByText } = render(
             <QuickPanelHarness actionabilityChoice="reference" />,
@@ -511,8 +504,7 @@ describe('Incubate requires a review date (#1338)', () => {
     });
 });
 
-// #1461: once the chosen project has sections, processing offers the task
-// editor's Section picker under Project.
+
 describe('Inbox processing project section picker', () => {
     afterEach(() => {
         cleanup();

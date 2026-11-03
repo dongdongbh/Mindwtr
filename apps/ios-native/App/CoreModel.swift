@@ -6,7 +6,7 @@ import UIKit
 import Combine
 import AVFoundation
 
-// MARK: Board drag capture (Foundation-only seam)
+
 struct BoardOrderDragCapture: Equatable {
     let nonce: String
     let generation: Int
@@ -21,7 +21,7 @@ struct BoardOrderDragCapture: Equatable {
     let ids: [String]
     let headID: String?
 }
-// MARK: End Board drag capture
+
 
 #if DEBUG && targetEnvironment(simulator)
 private struct SimulatedSomedayDeleteRefusal: LocalizedError {
@@ -82,7 +82,7 @@ struct TaskAudioPlaybackState {
     let canToggle: Bool
 }
 
-/// One foreground presentation owns the player and its temporary audio session.
+
 @MainActor
 private final class TaskAttachmentAudioPlayer: NSObject, AVAudioPlayerDelegate {
     enum Event { case tick, finished(Bool), failed, interruptionBegan, interruptionEnded, routeLost }
@@ -304,7 +304,7 @@ final class CoreModel: ObservableObject {
         didSet { inboxSelectedIDBytes = Set(inboxSelectedIDs.map { Data($0.utf8) }) }
     }
     private var inboxSelectedIDBytes: Set<Data> = []
-    /// Byte-exact, as the former linear `utf8.elementsEqual` scan.
+
     func inboxTaskSelected(_ id: String) -> Bool { inboxSelectedIDBytes.contains(Data(id.utf8)) }
     @Published private(set) var inboxBulk: CoreObject = [:]
     private var inboxSelectedRevisions: CoreObject = [:]
@@ -343,7 +343,7 @@ final class CoreModel: ObservableObject {
     private var inboxBulkRemoveParams: CoreObject = [:]
     private var inboxBulkRemoveRevision = ""
     private var inboxTasksAddTagOwner: (host: CoreHost, request: String)?
-    // Task743: core-owned Organize draft; separate immutable Apply/create debts.
+
     @Published private(set) var inboxBulkOrganizePresented = false
     @Published private(set) var inboxBulkOrganizeView: CoreObject = [:]
     @Published private(set) var inboxBulkOrganizeInputs: [String: String] = [:]
@@ -1507,7 +1507,7 @@ final class CoreModel: ObservableObject {
                 calendarPushReadmitAfterBusy = false
                 if calendarPushSceneActive && !calendarPushSettingSuspended {
                     calendarPushRestartRequested = true
-                    // Stop retires the shared watcher, so task changes during ordinary work may have no due callback.
+
                     calendarPushFullPending = true; calendarPushIDsPending.removeAll()
                     calendarPushWakeTicket &+= 1
                     admitCalendarPushLifecycle()
@@ -1860,7 +1860,7 @@ final class CoreModel: ObservableObject {
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
                 settingsAIProofTask?.cancel(); settingsAIProofState = ""; settingsAIProofReadAttempts = 0
                 #endif
-                // Warm list ownership never crosses a Host replacement; durable recovery routes by source.
+
                 clearProcessInboxUndoOffer()
                 retireTaskListSortHost()
                 clearInboxTaskSelection()
@@ -2068,7 +2068,7 @@ final class CoreModel: ObservableObject {
     private var calendarComposerSaveRequest: String?
     private var calendarComposerRecoveredResult: CoreObject?
     private var calendarComposerNavigation: (state: CoreObject, minute: Double)?
-    // Native scroll position only; core state remains the source of dates/modes.
+
     var calendarScrollAnchor = ""
     var calendarViewportAnchors: [String: Double] = [:]
     private(set) var calendarViewportGeneration = 0
@@ -2251,7 +2251,7 @@ final class CoreModel: ObservableObject {
     private var focusEditSequence = 0
     @Published private var focusRefusedLocationID: Int?
     #if DEBUG && targetEnvironment(simulator)
-    // Response faults are enabled only for an explicitly isolated UI-test library.
+
     private var notificationContextTestReadFailures = 0
     private var taskRecoveryResolverTestFailure = false
     private var startupInventoryReadTestFailureOnce = false
@@ -2319,8 +2319,8 @@ final class CoreModel: ObservableObject {
     private var manageAreaEditOptionsTestReadFailures = 0
     private var manageAreaEditTestReadFailures = 0
     private var manageAreaEditTestRefusals = 0
-    // Exercise the empty-snapshot error and Retry through the real UI. Both
-    // initial attempts fail; the explicit retry then uses the real core read.
+
+
     private var focusInitialReadFailures = ProcessInfo.processInfo.arguments.contains("--native-focus-initial-read-failure") ? 2 : 0
     private var taskOwnedCheckpointTestFailure = false
     #endif
@@ -2574,7 +2574,7 @@ final class CoreModel: ObservableObject {
     private var trashCaller: Surface = .inbox
     private var trashLoadedDepth = 50
     private let pageSize = 50
-    /// Rebuild windows after page zero use the host maximum (`NATIVE_HOST_MAX_WINDOW`).
+
     private let followUpWindow = 100
     private var preference = "nativeFoundation.capture.addAnother"
     private var storedLanguage = ""
@@ -3789,8 +3789,7 @@ final class CoreModel: ObservableObject {
             && taskFileImporterID == claim.id && !Task.isCancelled
     }
 
-    /// Informational inventory. Only the host decides whether this evidence
-    /// permits a new editor, exact recovery, Save or Discard.
+
     @discardableResult
     private func readTaskAttachmentInventory(_ currentHost: CoreHost, adoptEditor: Bool = false,
                                              ownedGuard: (() -> Bool)? = nil) async throws -> EditorDraftSnapshot? {
@@ -3880,8 +3879,7 @@ final class CoreModel: ObservableObject {
         taskAttachmentDownloadTask = Task { await performTaskAttachmentDownload(owner) }
     }
 
-    // Existing background/conceal/close paths call cancelTaskFileImport. They
-    // revoke this delivery too, while the awaited native owner keeps busy.
+
     private func cancelTaskAttachmentDownload() {
         guard taskAttachmentDownloadOwner != nil else { return }
         taskAttachmentDownloadAdmission = UUID()
@@ -4017,8 +4015,8 @@ final class CoreModel: ObservableObject {
         } catch {
             guard host === owner.host else { return }
             if taskAttachmentDownloadOwner?.dispatched == true {
-                // A valid native ACK followed by a failed inventory read is still
-                // an unknown App adoption. Keep the request; never replay a new one.
+
+
                 requireSettingsSyncRestart(owner.host)
                 if taskRecoverySession == owner.session, viewedTaskID == owner.taskID { taskAttachmentState = .interrupted }
             } else if scope() { taskAttachmentError = error.localizedDescription }
@@ -4066,8 +4064,8 @@ final class CoreModel: ObservableObject {
 
     private func prepareTaskAttachmentImport(kind: TaskAttachmentPickerKind) async -> UUID? {
         guard canAddTaskFile, let currentHost = host else { return nil }
-        // Closing, concealment or backgrounding can cancel before a picker ID
-        // exists. Fence every preparation await for both Files and Photos.
+
+
         let admission = taskFileImportAdmission
         let session = taskRecoverySession, taskID = viewedTaskID
         busy = true
@@ -4109,8 +4107,8 @@ final class CoreModel: ObservableObject {
         taskFileImporterPresented = false
         taskFileImportClaim = nil
         taskFileImportTask?.cancel()
-        // A submitted Add may already own durable work. Cancel delivery only;
-        // the next exact recovery inspects its retained native evidence.
+
+
     }
 
     func completeTaskFileImport(_ result: Result<[URL], Error>, pickerID: UUID) async {
@@ -4184,7 +4182,7 @@ final class CoreModel: ObservableObject {
                 Task { [currentHost = claim.host] in await currentHost.recordEditorAttachmentAcknowledgment(operation: "add") }
             } catch {
                 if host === claim.host {
-                    // Do not recopy or mint another UUID after an uncertain Add.
+
                     taskAttachmentState = .interrupted
                     taskAttachmentError = error.localizedDescription
                     taskRecoveryGateVisible = !taskPresented
@@ -4246,8 +4244,8 @@ final class CoreModel: ObservableObject {
                 if let acknowledgment { result = try decode(acknowledgment) }
                 else if taskAttachmentSavedHost === currentHost, let known = taskAttachmentSavedResult { result = known }
                 else { throw CocoaError(.coderReadCorrupt) }
-                // A nil retry is never an acknowledgment. A previously matched
-                // ACK can retry the subsequent strict release inventory read.
+
+
                 try await acceptTaskAttachmentSave(result, request: request, currentHost: currentHost)
             } else {
                 try await readTaskAttachmentInventory(currentHost, adoptEditor: !taskPresented)
@@ -4304,8 +4302,8 @@ final class CoreModel: ObservableObject {
             try await readTaskAttachmentInventory(currentHost, adoptEditor: true)
             guard host === currentHost, taskAttachmentState == .discardedCleanup,
                   taskRecoverySnapshot == nil else { throw CocoaError(.coderReadCorrupt) }
-            // A new ordinary editor is admitted by the host's detached-owner
-            // policy. The old cleanup owner remains visible and separate.
+
+
             taskRecoveryGateVisible = false
             taskAttachmentError = nil
             if taskPresented { dismissTask() }
@@ -4459,8 +4457,8 @@ final class CoreModel: ObservableObject {
               !appLock.concealed, !busy, !retryNeeded,
               taskAttachmentState == .none || taskAttachmentState == .discardedCleanup,
               host === selection.host, taskRecoverySnapshot == nil else { return }
-        // Reopen the saved task to obtain its current revision. A retained
-        // detached owner is still checked by the host at checkpoint/submit.
+
+
         do { try await prepareReleasedTaskMenuPresentation() }
         catch { taskAttachmentError = error.localizedDescription; return }
         guard taskPresented, viewedTaskID == selection.taskID, !taskEditor.isEmpty,
@@ -4499,7 +4497,7 @@ final class CoreModel: ObservableObject {
                     }
                 }
                 await previous?.value
-                // A newer queued checkpoint writes the latest snapshot; skip this superseded durable write.
+
                 guard taskRecoveryCheckpointTaskID == checkpointID else { return }
                 if owned, taskAttachmentCheckpointFailed != nil { return }
                 do {
@@ -4620,9 +4618,8 @@ final class CoreModel: ObservableObject {
         do {
             await flushTaskDraftCheckpoint()
             try requireDesired()
-            // Finish an owed advance if it exists, then re-ACK the same exact
-            // failed checkpoint. A pre-intent refusal has no after-state to
-            // recover; replacing RAM with the older checkpoint would lose it.
+
+
             _ = try await currentHost.recoverAttachmentDraftV3(expectedSession: desired.sessionID)
             try requireDesired()
             try await currentHost.checkpointEditorDraft(failed)
@@ -4679,7 +4676,7 @@ final class CoreModel: ObservableObject {
                   result.count == 1, ["ltr", "rtl"].contains(result.text("direction")) else { return }
             taskEditorDraftDirection = result.text("direction")
         } catch {
-            // Presentation reads must not interrupt editing or change write/retry state.
+
         }
     }
     func setTaskLocationDraft(_ text: String) {
@@ -4750,7 +4747,7 @@ final class CoreModel: ObservableObject {
             guard sourceCurrent(), target.count == 2, ["task", "project", "context", "tag"].contains(target.text("kind")),
                   !target.text("id").isEmpty else { throw CocoaError(.coderReadCorrupt) }
             if target.text("kind") == "task" && target.text("id") == id { return }
-            // Reuse Close's exact clean-draft cleanup before replacing the editor.
+
             busy = false
             await discardCleanTaskSnapshotAndClose(refreshCaller: false)
             guard !taskPresented, taskRecoverySession == session, selectedSurface == caller,
@@ -4963,7 +4960,7 @@ final class CoreModel: ObservableObject {
 
     private func invalidateTaskAttachmentOpen() {
         cancelTaskAttachmentDownload()
-        // Stop the original owner synchronously before publishing its removal.
+
         taskAudioPlayer?.retire()
         taskAudioPlayer = nil
         taskAudioPlayback = nil
@@ -4976,8 +4973,8 @@ final class CoreModel: ObservableObject {
     func dismissTaskAttachmentOpenError() { taskAttachmentOpenError = nil }
 
     func stopTaskAudioForBackground() {
-        // An awaiting file plan has not revealed its kind yet. Fence its claim,
-        // but leave already-adopted image and document presentations intact.
+
+
         if taskAudioPlayer != nil || taskFileOpenPresentation?.kind == .audio
             || (taskAttachmentOpening && taskAttachmentOpeningFile && taskFileOpenPresentation == nil) {
             invalidateTaskAttachmentOpen()
@@ -5013,8 +5010,8 @@ final class CoreModel: ObservableObject {
             guard taskAudioOwnerIsCurrent(audio) else { invalidateTaskAttachmentOpen(); return }
             try audio.play()
             taskAudioPlayback = audio.state
-            // The original admitted host records actual autoplay, best-effort.
-            // No new await splits claimed playback from its UI publication.
+
+
             Task { await host.recordTaskAudioPlaybackStarted() }
         } catch {
             guard taskAttachmentOpenClaim == presentationID, taskFileOpenPresentation?.id == presentationID else { return }
@@ -5203,7 +5200,7 @@ final class CoreModel: ObservableObject {
 
     func start() async {
         #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-        // Keep the deliberately retired fixture owner available until its held callback drains.
+
         guard !pomodoroAlarmTestEnabled || !pomodoroAlarmTestRetired else { return }
         #endif
         guard !busy else { return }
@@ -5419,11 +5416,11 @@ final class CoreModel: ObservableObject {
                     let metadataOnlyDownloadFixture = arguments.contains("--native-project-download-stop-after-metadata-intent-once")
                     if arguments.contains("--native-project-download-stop-after-filled-once") || metadataOnlyDownloadFixture {
                         try await host!.configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: metadataOnlyDownloadFixture)
-                        selectedSurface = .projects // Isolated recovery fixture must not prefetch through Inbox startup Sync.
+                        selectedSurface = .projects
                     }
                     settingsSyncAvailable = true
                 } else if case let .rehearsal(container, database, identifier) = selection {
-                    // An explicitly staged copy only. Never select the live RN container.
+
                     try FileManager.default.createDirectory(at: container.deletingLastPathComponent(), withIntermediateDirectories: true)
                     guard try container.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true,
                           try database.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey]).isSymbolicLink != true,
@@ -5535,7 +5532,7 @@ final class CoreModel: ObservableObject {
             if let groupBy = initialReferenceGroupBy, validReferenceGroup(groupBy) {
                 referenceParams["groupBy"] = groupBy
             }
-            // An omitted groupBy lets core choose its default, currently Area.
+
             referenceParams["collapsedGroupIds"] = referenceCollapsedGroups[referenceParams.text("groupBy").isEmpty
                 ? "area" : referenceParams.text("groupBy")] ?? []
             for name in ["done", "archive"] {
@@ -5562,11 +5559,11 @@ final class CoreModel: ObservableObject {
             guard host === currentHost else { throw CancellationError() }
             let eventRecovery = startup.object("recovery")
             if eventRecovery.text("method") == "calendarEventTaskCommit" {
-                // Native startup has already consumed the journal. Retain its acknowledgment
-                // before any later App inventory/read can fail, then present only after ready.
+
+
                 calendarEventTaskRecoveredResult = (currentHost, eventRecovery.object("result"))
             }
-            // Preserve the acknowledged domain result before any later App read.
+
             stageTaskStartupSaveReceipt(startup)
             _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
                 "Native iOS launch selection admitted",
@@ -5600,7 +5597,7 @@ final class CoreModel: ObservableObject {
             }
             let recovery = startup.object("recovery")
             if recovery.text("method") == "iosAIRequestTimeoutCommit" {
-                // CoreHost start validates the durable receipt and retires its journal.
+
                 let result = recovery.object("result")
                 guard Set(result.keys) == Set(["value", "changed"]),
                       let value = result["value"] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
@@ -5611,7 +5608,7 @@ final class CoreModel: ObservableObject {
                 selectedSurface = .settings; settingsAdvancedPresented = true
             }
             if recovery.text("method") == "iosAIReasoningEffortCommit" {
-                // Startup reports only a validated durable receipt after journal retirement.
+
                 let result = recovery.object("result")
                 guard Set(result.keys) == Set(["value", "changed"]),
                       let value = result["value"] as? String, NativeAIReasoningEffortValue(rawValue: value) != nil,
@@ -5621,7 +5618,7 @@ final class CoreModel: ObservableObject {
                 selectedSurface = .settings; settingsAdvancedPresented = true
             }
             if recovery.text("method") == "iosAIGeminiThinkingBudgetCommit" {
-                // CoreHost start validates the durable receipt and retires its journal.
+
                 let result = recovery.object("result")
                 guard Set(result.keys) == Set(["value", "changed"]),
                       let value = result["value"] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
@@ -5702,7 +5699,7 @@ final class CoreModel: ObservableObject {
                 taskPromotionRecoveredResult = recovery.object("result")
             }
             if recovery.text("method") == "boardCommit" {
-                // Keep the durable acknowledgement if a later startup read fails.
+
                 boardRecoveredResult = recovery.object("result")
             } else if ["calendarComposerCommit", "calendarComposerCreateCommit"].contains(recovery.text("method")) {
                 calendarComposerRecoveredResult = recovery.object("result")
@@ -5710,8 +5707,8 @@ final class CoreModel: ObservableObject {
                 mindSweepRecoveredResult = recovery.object("result")
             } else if ["projectCreateCommit", "projectFocusCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "areaCreateCommit", "areaColorCommit", "areaOrderCommit", "areaRenameCommit",
                        "areaDeleteCommit"].contains(recovery.text("method")) {
-                // The host already verified the durable row. Reopen the list;
-                // there is no project-detail navigation for quick add.
+
+
                 selectedSurface = .projects
             } else if ["calendarUnscheduleCommit", "calendarDeleteCommit"].contains(recovery.text("method")) {
                 selectedSurface = .calendar
@@ -5762,7 +5759,7 @@ final class CoreModel: ObservableObject {
                 calendarSettingsApplicationActive = UIApplication.shared.applicationState == .active
                 if kind == .subscriptionAdd, calendarSettingKind == .subscriptionAdd,
                    calendarSettingHost === currentHost, let request = calendarSettingRequest {
-                    // Probe the original intent before clearing a live draft after runtime recovery.
+
                     calendarSubscriptionRuntimeRecovery = (currentHost, request, kind)
                 } else {
                     calendarSettingRequest = nil
@@ -5784,7 +5781,7 @@ final class CoreModel: ObservableObject {
                        "somedaySectionMoveUndoCommit"].contains(recovery.text("method")) {
                 selectedSurface = .someday
             } else if recovery.text("method") == "inboxPreparedCommit" {
-                // The durable data recovered, but the in-memory queue did not.
+
                 selectedSurface = .inbox
             }
             try await readLanguage()
@@ -5850,8 +5847,8 @@ final class CoreModel: ObservableObject {
             }
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
             if startupSyncCompletedHost !== currentHost {
-                // ready precedes recovery adoption; only this terminal tail can
-                // arm the one initial-Inbox opportunity for the captured host.
+
+
                 startupSyncCompletedHost = currentHost
                 let token = UUID()
                 completedStartupToken = token
@@ -5885,15 +5882,14 @@ final class CoreModel: ObservableObject {
                     try await readAppLock()
                     guard host === currentHost else { throw CancellationError() }
                 } catch {
-                    // Keep a successfully read owner if the later lock read fails.
+
                     if host === currentHost { projectFileAddError = "The pending attachment operation could not be loaded. Try again." }
                 }
             }
             self.error = "An attachment operation needs attention."
         } catch let pending as CoreHostAttachmentCleanupPending {
-            // The host is unavailable after a failed cold cleanup. Keep the
-            // proven Save result and retry start on this same host; do not read
-            // editor files or manufacture another cancellation request here.
+
+
             taskAttachmentSavedResult = try? decode(pending.resultJSON)
             taskAttachmentSavedHost = host
             taskAttachmentState = .savedCleanup
@@ -5911,10 +5907,10 @@ final class CoreModel: ObservableObject {
             if let currentHost = host {
                 if startingHost === currentHost {
                     do { try await readProjectFileAvailabilityInventory(currentHost) }
-                    catch { /* Preserve any matching retained Download on a failed read. */ }
+                    catch {                                                                 }
                 }
                 do { try await readProjectFileAddInventory(currentHost) }
-                catch { /* Preserve the previous bounded summary on a failed read. */ }
+                catch {                                                               }
             }
         }
         #else
@@ -6118,7 +6114,7 @@ final class CoreModel: ObservableObject {
     }
 
     func externalContextBecameClean() {
-        // Withdrawing an untouched URL preview is not a new external wake.
+
         if let delivery = entityLinkCleanupDelivery, entityLinkPending?.token == delivery { return }
         requestNotificationResponses()
         requestEntityLinks()
@@ -6257,7 +6253,7 @@ final class CoreModel: ObservableObject {
                 self.entityLinkPending = nil
                 await self.recordEntityLink(owner, kind: "none", outcome: "refused")
             } catch {
-                // A read failure retains the latest link until a fresh external wake.
+
             }
         }
     }
@@ -6449,7 +6445,7 @@ final class CoreModel: ObservableObject {
             contextsLoadedDepth = pageSize
             await openContexts()
         case "review", "daily-review", "weekly-review":
-            // RN's generic Review destination intentionally ignores notification entity parameters.
+
             await openReview()
             guard notificationResponseCurrent(owner), notificationResponseForeground,
                   selectedSurface == .review, !busy, !retryNeeded, !reviewGuidePresented else { return false }
@@ -6476,7 +6472,7 @@ final class CoreModel: ObservableObject {
         if let task = notificationResponseTask { await task.value }
     }
 
-    // Independent from the Inbox-only Sync opportunity. App Lock may be enabled and authenticated.
+
     func requestReminderLifecycle(token: UUID?, active: Bool) {
         guard !Task.isCancelled, let token, token == completedStartupToken else { return }
         guard active, UIApplication.shared.applicationState == .active, !appLock.concealed else {
@@ -6528,7 +6524,7 @@ final class CoreModel: ObservableObject {
         if let previous, observed === previous, let registration {
             Task { await previous.removeReminderObserver(registration.id) }
         }
-        // The captured invocation remains installed until accepted callbacks drain.
+
     }
 
     func reminderClockChanged() {
@@ -6676,7 +6672,7 @@ final class CoreModel: ObservableObject {
                     }
                 }
             } catch {
-                // Retain dirty work, but only a new source/activation/foreign settlement may retry.
+
             }
             guard self.reminderLifecycleCurrent(owner), !self.busy, self.pomodoroWork == nil,
                   self.pomodoroWorkHost == nil, self.pomodoroCommand == nil,
@@ -6694,7 +6690,7 @@ final class CoreModel: ObservableObject {
                 self.pomodoroAlarmTestOutcome = result.text("outcome")
                 #endif
             } catch {
-                // SDK uncertainty stays dirty until a new relevant wake; callbacks never spin retries.
+
             }
         }
     }
@@ -6913,7 +6909,7 @@ final class CoreModel: ObservableObject {
                 ]))
             } catch {
                 guard self.host === owner.host, self.completedStartupToken == owner.token else { return }
-                // Keep the failed frozen work without generating another admission ticket.
+
                 if hasBatch { self.mergeCalendarPushBatch(full ? nil : ids) }
                 if !Task.isCancelled, self.calendarPushLifecycleCurrent(owner) {
                     self.calendarPushLifecycleError = self.label("settings.feedback.actionFailed")
@@ -6923,7 +6919,7 @@ final class CoreModel: ObservableObject {
     }
 
     #if DEBUG && targetEnvironment(simulator)
-    // Isolated App orchestration fixture only. It never changes the native EventKit provider.
+
     private func publishCalendarPushFixtureState() {
         guard calendarPushFixtureEnabled else { return }
         calendarPushFixtureState = (try? json(["fixture": true, "starts": calendarPushFixtureStarts,
@@ -6974,7 +6970,7 @@ final class CoreModel: ObservableObject {
             case "push": calendarPushFixtureEnabledValue = edit.flag("enabled")
             case "pushTarget": calendarPushFixtureTarget = edit["calendarId"] as? String
             case "pushColor": calendarPushFixtureColor = edit.text("color")
-            case "deleteMindwtrCalendar": calendarPushFixtureEnabledValue = false // Unrelated fixture B stays selected.
+            case "deleteMindwtrCalendar": calendarPushFixtureEnabledValue = false
             default: throw CocoaError(.coderReadCorrupt)
             }
             publishCalendarPushFixtureState()
@@ -7336,8 +7332,7 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    // Observe the actual scene episode before concealment clears presentation.
-    // Inactive/authentication alone cannot manufacture a resume opportunity.
+
     func observeForegroundSyncScene(_ phase: ScenePhase, token: UUID?) {
         if phase != .active { clearProcessInboxUndoOffer() }
         if phase == .active {
@@ -7346,8 +7341,8 @@ final class CoreModel: ObservableObject {
         }
         guard phase == .background, !foregroundSyncBackgroundObserved else { return }
         foregroundSyncBackgroundObserved = true
-        // Returning from this episode replaces any unadmitted cold intent. An
-        // admitted owner must settle; this episode never queues behind it.
+
+
         foregroundSyncIntent = nil
         guard foregroundSyncOwner == nil, let token, token == completedStartupToken,
               let currentHost = host, startupSyncCompletedHost === currentHost,
@@ -7357,8 +7352,7 @@ final class CoreModel: ObservableObject {
             startupToken: token, reason: .resume)
     }
 
-    // SwiftUI requests the captured intent. This model retains the Task, so
-    // changes to busy or the view tree cannot abandon an admitted invocation.
+
     func requestForegroundSync(token: UUID?, active: Bool) {
         guard !Task.isCancelled, let token, token == completedStartupToken else { return }
         let wasActive = foregroundSyncSceneActive
@@ -7390,8 +7384,8 @@ final class CoreModel: ObservableObject {
         foregroundSyncIntent?.foregroundRequested = false
         foregroundSyncGeneration += 1
         foregroundSyncTask?.cancel()
-        // Cancellation consumes no new intent and releases no operation. The
-        // captured host must settle before its owner may release busy.
+
+
     }
 
     private func admitForegroundSync() {
@@ -7443,7 +7437,7 @@ final class CoreModel: ObservableObject {
             guard self.foregroundSyncCurrent(owner) else { return }
             do { try await self.readInbox(foregroundSyncOwner: owner.id) }
             catch {
-                // A known Sync settlement is not made unknown by a later read.
+
                 guard self.foregroundSyncCurrent(owner) else { return }
                 self.error = self.label("settings.feedback.actionFailed")
             }
@@ -7481,8 +7475,8 @@ final class CoreModel: ObservableObject {
         guard !ready, taskRecoveryStartupCorrupt, !busy, let host else { return }
         busy = true
         do {
-            // The host independently checks that no nonterminal editor journal
-            // still needs this snapshot before removing a corrupt file.
+
+
             try await host.discardCorruptEditorDraft()
         } catch {
             busy = false
@@ -7498,9 +7492,8 @@ final class CoreModel: ObservableObject {
 
     func refresh() async {
         if selectedSurface == .calendar { calendarFeedRefreshRequested = true }
-        // The alert owns its frozen Trash projection until Confirm or Cancel.
-        // Ordinary reads resume on the next refresh; lifecycle/context changes
-        // retire the alert separately before requesting their own reads.
+
+
         guard selectedSurface != .trash || trashPurgeConfirmation == nil else { return }
         guard !appLock.concealed, !savedSearchWritePresented, !settingsSyncRestartRequired,
               calendarSettingsCloseTask == nil else { return }
@@ -7707,7 +7700,7 @@ final class CoreModel: ObservableObject {
         settingsAIEffortTestHeld = false; settingsAIEffortFixtureState = ""
         settingsAIGeminiTestHeld = false; settingsAIGeminiFixtureState = ""
         #endif
-        // Keep the task until its private read drains before admitting another page read.
+
     }
 
     private func aiSettingsSummaryCurrent(_ capturedHost: CoreHost, session: UUID) -> Bool {
@@ -7839,7 +7832,7 @@ final class CoreModel: ObservableObject {
                 guard self.settingsAITimeoutOperationID == operation,
                       self.settingsAITimeoutRequest == request, self.settingsAITimeoutHost === currentHost,
                       result.value == request.value else { throw CocoaError(.coderReadCorrupt) }
-                // A durable acknowledgment may win cancellation. Never publish into a retired page.
+
                 self.settingsAITimeoutRequest = nil; self.settingsAITimeoutHost = nil
                 self.retryNeeded = false; self.error = nil
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
@@ -7851,8 +7844,8 @@ final class CoreModel: ObservableObject {
             } catch {
                 guard self.settingsAITimeoutOperationID == operation,
                       self.settingsAITimeoutRequest == request, self.settingsAITimeoutHost === currentHost else { return }
-                // Existing rejection status can precede terminal retirement on a retry.
-                // Preserve an already-uncertain exact owner even for a typed rejection.
+
+
                 if self.isDefiniteRejection(error) && !wasUncertain {
                     self.settingsAITimeoutRequest = nil; self.settingsAITimeoutHost = nil
                     self.retryNeeded = false; self.error = nil
@@ -7924,7 +7917,7 @@ final class CoreModel: ObservableObject {
               host === capturedHost, ready, !appLock.concealed, UIApplication.shared.applicationState == .active,
               !settingsSyncPresented, !settingsCalendarPresented, !settingsDataPresented,
               !taskRecoveryGateVisible, !settingsSyncRestartRequired else { return }
-        // Explicit Retry restores only the retained owner's page. No read or fresh request.
+
         if !settingsAIPresented {
             selectedSurface = .settings; settingsAdvancedPresented = true
             settingsAISession = UUID(); settingsAIPresented = true; settingsAIAdvanced = true
@@ -8010,7 +8003,7 @@ final class CoreModel: ObservableObject {
                 guard self.settingsAIEffortOperationID == operation,
                       self.settingsAIEffortRequest == request, self.settingsAIEffortHost === currentHost,
                       result.value == request.value else { throw CocoaError(.coderReadCorrupt) }
-                // A durable acknowledgment may win cancellation. Never publish into a retired page.
+
                 self.settingsAIEffortRequest = nil; self.settingsAIEffortHost = nil
                 self.retryNeeded = false; self.error = nil
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
@@ -8022,8 +8015,8 @@ final class CoreModel: ObservableObject {
             } catch {
                 guard self.settingsAIEffortOperationID == operation,
                       self.settingsAIEffortRequest == request, self.settingsAIEffortHost === currentHost else { return }
-                // Existing rejection status can precede terminal retirement on a retry.
-                // Preserve an already-uncertain exact owner even for a typed rejection.
+
+
                 if self.isDefiniteRejection(error) && !wasUncertain {
                     self.settingsAIEffortRequest = nil; self.settingsAIEffortHost = nil
                     self.retryNeeded = false; self.error = nil
@@ -8096,7 +8089,7 @@ final class CoreModel: ObservableObject {
               host === capturedHost, ready, !appLock.concealed, UIApplication.shared.applicationState == .active,
               !settingsSyncPresented, !settingsCalendarPresented, !settingsDataPresented,
               !taskRecoveryGateVisible, !settingsSyncRestartRequired else { return }
-        // Explicit Retry restores only the retained owner's page. No read or fresh request.
+
         if !settingsAIPresented {
             selectedSurface = .settings; settingsAdvancedPresented = true
             settingsAISession = UUID(); settingsAIPresented = true
@@ -8183,7 +8176,7 @@ final class CoreModel: ObservableObject {
                 guard self.settingsAIGeminiOperationID == operation,
                       self.settingsAIGeminiRequest == request, self.settingsAIGeminiHost === currentHost,
                       result.value == request.value else { throw CocoaError(.coderReadCorrupt) }
-                // A durable acknowledgment may win cancellation. Never publish into a retired page.
+
                 self.settingsAIGeminiRequest = nil; self.settingsAIGeminiHost = nil
                 self.retryNeeded = false; self.error = nil
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
@@ -8195,8 +8188,8 @@ final class CoreModel: ObservableObject {
             } catch {
                 guard self.settingsAIGeminiOperationID == operation,
                       self.settingsAIGeminiRequest == request, self.settingsAIGeminiHost === currentHost else { return }
-                // Existing rejection status can precede terminal retirement on a retry.
-                // Preserve an already-uncertain exact owner even for a typed rejection.
+
+
                 if self.isDefiniteRejection(error) && !wasUncertain {
                     self.settingsAIGeminiRequest = nil; self.settingsAIGeminiHost = nil
                     self.retryNeeded = false; self.error = nil
@@ -8285,7 +8278,7 @@ final class CoreModel: ObservableObject {
               host === capturedHost, ready, !appLock.concealed, UIApplication.shared.applicationState == .active,
               !settingsSyncPresented, !settingsCalendarPresented, !settingsDataPresented,
               !taskRecoveryGateVisible, !settingsSyncRestartRequired else { return }
-        // Explicit Retry restores only the retained owner's page. No read or fresh request.
+
         if !settingsAIPresented {
             selectedSurface = .settings; settingsAdvancedPresented = true
             settingsAISession = UUID(); settingsAIPresented = true
@@ -8354,7 +8347,7 @@ final class CoreModel: ObservableObject {
                               self.settingsAIProofID == id, self.settingsAIProofWake == wake, !Task.isCancelled else { return }
                         self.settingsAIProofState = phase == .baseline ? "baseline-ready" : "final-ready"
                         return
-                    } catch { /* Observe natural settlement; never force persistence or clear evidence. */ }
+                    } catch {                                                                              }
                 }
                 do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return }
             }
@@ -8483,7 +8476,7 @@ final class CoreModel: ObservableObject {
             && selectedSurface == .settings && !appLock.concealed && !settingsSyncRestartRequired
     }
 
-    // A thrown bridge call may have committed. Only a new process can release this gate.
+
     private func requireSettingsSyncRestart(_ capturedHost: CoreHost) {
         guard host === capturedHost else { return }
         settingsSyncRestartRequired = true
@@ -8573,7 +8566,7 @@ final class CoreModel: ObservableObject {
         return true
     }
 
-    // These messages are the shared transport's redacted user-facing toasts.
+
     private func adoptSettingsSyncToasts(_ value: CoreObject) -> Bool {
         let toasts = value.objects("toasts")
         let failed = toasts.filter { $0.text("tone") == "error" }
@@ -8622,7 +8615,7 @@ final class CoreModel: ObservableObject {
                 guard ["noop", "completed", "interrupted"].contains(value.text("kind")) else { throw CocoaError(.coderReadCorrupt) }
                 let count = value.object("result")["importedCount"] as? Int ?? 0
                 guard count >= 0 && count <= 10_000 else { throw CocoaError(.coderReadCorrupt) }
-                // Read admission also proves that no accepted item still owns the journal.
+
                 _ = try await currentHost.readAppleRemindersSettings()
                 guard self.host === currentHost else { return }
                 self.appleRemindersImportRetry = false
@@ -8638,7 +8631,7 @@ final class CoreModel: ObservableObject {
                 }
             } catch {
                 guard self.host === currentHost else { return }
-                // Cancellation can arrive after an accepted item. A read-only uncancelled probe distinguishes recovery from a harmless stopped read.
+
                 let healthy = await Task { (try? await currentHost.readAppleRemindersSettings()) != nil }.value
                 guard self.host === currentHost else { return }
                 self.appleRemindersImportRetry = !healthy
@@ -8842,7 +8835,7 @@ final class CoreModel: ObservableObject {
         guard settingsSyncPresented, settingsSyncCanClose, !appLock.concealed else { return }
         let capturedHost = host
         let available = settingsSyncAvailable
-        // Retire plaintext before the closing command can suspend.
+
         clearSettingsSyncForPrivacy()
         settingsSyncPresented = false
         let closedSession = settingsSyncSession
@@ -8875,8 +8868,8 @@ final class CoreModel: ObservableObject {
     }
 
     func clearSettingsSyncForPrivacy() {
-        // Revoke delivery and local text synchronously; the captured owner keeps
-        // busy until its accepted bridge call and any required host close settle.
+
+
         settingsSyncEncryptionTask?.cancel()
         settingsSyncPassphrases = [:]
         settingsSyncReadTask?.cancel()
@@ -8914,7 +8907,7 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    // Admit selected saved-WebDAV and local setup flows, never returned plaintext or reveal controls.
+
     private func validSettingsSyncEncryption(_ value: Any?) -> Bool {
         if value is NSNull { return true }
         guard let card = value as? CoreObject, Set(card.keys) == Set(["title", "guide", "rows"]),
@@ -9044,8 +9037,8 @@ final class CoreModel: ObservableObject {
             guard settingsSyncEncryptionCurrent(owner), settingsSyncOpeningRevision == owner.revision, !settingsSyncDraftDirty else { throw CancellationError() }
             let fields = action.text("type") == "submit" ? settingsSyncEncryptionFields(action.text("flow")) : []
             for field in fields {
-                // Typed may mutate before an acknowledgement is lost. From this
-                // point only confirmed Submit retirement or closing this host is safe.
+
+
                 staged = true
                 let typed = try settingsSyncEncryptionReply(try await owner.host.foregroundSync(command: "runSyncEncryptionAction",
                     requestJSON: try json(["revision": owner.revision, "action": ["type": "typed", "field": field, "value": passphrases[field] ?? ""]])), action: true)
@@ -9095,8 +9088,8 @@ final class CoreModel: ObservableObject {
         }
         if staged {
             requireSettingsSyncRestart(owner.host)
-            // The last accepted native call above has returned/drained. Close
-            // even an old captured host, while never gating its replacement.
+
+
             await owner.host.close()
         }
         finishSettingsSyncEncryption(owner)
@@ -9147,7 +9140,7 @@ final class CoreModel: ObservableObject {
             do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
             guard !Task.isCancelled, settingsSyncPresented, !settingsSyncNeedsReload,
                   !settingsSyncRestartRequired, !busy else { return }
-            // Only cancel the delay, never an already-dispatched foreground command.
+
             settingsSyncReadTask = nil
             await readSettingsSyncModel()
         }
@@ -9169,7 +9162,7 @@ final class CoreModel: ObservableObject {
         guard let result = await callSettingsSync("syncSettings", input: ["draft": draft], host: capturedHost),
               settingsSyncCurrent(capturedHost, session), generation == settingsSyncGeneration,
               let view = settingsSyncValue(result) else { return }
-        // Validation for one credential shape cannot admit another panel's fields.
+
         guard resetDraft || SettingsSyncFormKind(rawValue: view.object("panel").text("kind")) == form else {
             settingsSyncNeedsReload = true
             return
@@ -9225,7 +9218,7 @@ final class CoreModel: ObservableObject {
         guard let result = await callSettingsSync(command, input: input, host: capturedHost),
               settingsSyncCurrent(capturedHost, session), let value = settingsSyncValue(result) else { return }
         let succeeded = adoptSettingsSyncToasts(value)
-        // A known failure preserves both the fields and their opening revision.
+
         await readSettingsSyncModel(resetDraft: succeeded && action != "test")
     }
 
@@ -9394,14 +9387,14 @@ final class CoreModel: ObservableObject {
                 let editor = fieldOptions.object("taskEditor")
                 let resetKey = editor.text("expandedResetKey")
                 if gtdTaskEditorExpandedResetKey != resetKey {
-                    // Initial cold recovery retains its field sheet; later default changes follow RN's reset.
+
                     if gtdTaskEditorExpandedResetKey != nil { gtdTaskEditorFieldId = nil }
                     let defaults = editor.object("initiallyExpanded")
                     gtdTaskEditorExpanded = defaults.mapValues { $0 as? Bool ?? false }
                     gtdTaskEditorExpandedResetKey = resetKey
                 }
             } catch {
-                // Unsupported legacy layout prevents layout changes, but section defaults remain usable.
+
                 guard isDefiniteRejection(error), error.localizedDescription.hasPrefix("INVALID_INPUT:") else { throw error }
                 gtdTaskEditorPresetError = error.localizedDescription
             }
@@ -9690,7 +9683,7 @@ final class CoreModel: ObservableObject {
         guard diagnosticsOwner == owner else { return }
         invalidateDiagnostics()
         if owner == settingsDiagnosticsOwner { settingsDataPresented = false }
-        // The original domain error, request and retry context are untouched.
+
     }
 
     func diagnosticsCurrent(owner: UUID, session: UUID) -> Bool {
@@ -9792,8 +9785,8 @@ final class CoreModel: ObservableObject {
 
     func setBackupImportPickerPresented(_ presented: Bool) {
         if !presented { backupImportPickerPresented = false }
-        // Cancel may dismiss without a completion. Only presentation gates
-        // actions; retain identity to recognize a late selection completion.
+
+
     }
 
     func receiveBackupImportSelection(_ result: Result<[URL], Error>, pickerID: UUID?, action: NativeBackupImportAction) async {
@@ -9805,8 +9798,8 @@ final class CoreModel: ObservableObject {
         backupImportPickerPresented = false
         guard let session, let currentHost, backupSessionIsCurrent(currentHost, session: session),
               backupImportEnabled, !Task.isCancelled else { return }
-        // The picker can dismiss before its callback. Recheck all action gates
-        // so a late callback cannot overlap a new export, share, or write.
+
+
         let url: URL
         switch result {
         case .success(let urls):
@@ -9866,8 +9859,8 @@ final class CoreModel: ObservableObject {
               let action = backupImportAction,
               backupSessionIsCurrent(currentHost, session: session), backupImportPreview.flag("valid"),
               !busy, !retryNeeded, !backupImportBusy, !backupDocumentPending else { return }
-        // From dispatch onward the host owns acceptance and any owed journal.
-        // Session dismissal must not delete or re-prepare that accepted operation.
+
+
         backupImportID = nil
         backupImportHost = nil
         backupImportSession = nil
@@ -9980,7 +9973,7 @@ final class CoreModel: ObservableObject {
         default:
             return backupTransferFailure(mode: mode)
         }
-        // Only fixed, owned capacity reasons cross the presentation boundary.
+
         return backupTransferFailure(mode: mode) + "\n" + reason
     }
 
@@ -10027,9 +10020,8 @@ final class CoreModel: ObservableObject {
             default:
                 counts = ["importedAreaCount", "importedChecklistItemCount", "importedProjectCount", "importedSectionCount", "importedStandaloneTaskCount", "importedTaskCount"]
             }
-            // Core bounds the canonical reply before journaling. Foundation can
-            // expand its transport representation by escaping slashes, so do
-            // not reapply that byte bound after native reserialization.
+
+
             guard Set(reply.keys) == Set(["version", "operation", "snapshotName", "result"]),
                   Set(result.keys) == Set(counts + ["warnings"]),
                   counts.allSatisfy({ validBackupInteger(result[$0]) }), result["warnings"] is [String] else {
@@ -10056,8 +10048,8 @@ final class CoreModel: ObservableObject {
         backupImportError = nil
         retryNeeded = false
         error = nil
-        // The host already proved the document and canonical reload. A failure
-        // of presentation reads retains this reply and retries only those reads.
+
+
         guard settingsDataPresented, !appLock.concealed else { return }
         do {
             try await readLanguage()
@@ -10203,8 +10195,8 @@ final class CoreModel: ObservableObject {
                 diagnosticsShareTestHoldOnce = false
                 diagnosticsShareTestState = "held"
                 let until = ProcessInfo.processInfo.systemUptime + 900
-                // Keep the actual settled reply across close/reopen. The normal
-                // host/library/concealment/session fence below still decides delivery.
+
+
                 while (diagnosticsSession == nil || diagnosticsSession == session), host === currentHost,
                       !appLock.concealed, ProcessInfo.processInfo.systemUptime < until, !Task.isCancelled {
                     try await Task.sleep(nanoseconds: 20_000_000)
@@ -10303,7 +10295,7 @@ final class CoreModel: ObservableObject {
         guard settingsAboutPresented else { return }
         invalidateAboutLinkOpening(retireFeedback: true)
         settingsAboutPresented = false
-        // A canceled owner must drain before menu reads can observe stored state.
+
         if settingsAboutTask != nil || busy { refreshRequested = true }
         else { setSettingsSearch(settingsSearch) }
     }
@@ -10311,7 +10303,7 @@ final class CoreModel: ObservableObject {
     func invalidateAboutLinkOpening(retireFeedback: Bool = false) {
         settingsAboutSession = UUID()
         settingsAboutTask?.cancel()
-        // Keep the task until it drains so reopening cannot overlap an old lookup.
+
         settingsAboutChecking = false
         settingsAboutOpening = false
         settingsAboutError = nil
@@ -10343,7 +10335,7 @@ final class CoreModel: ObservableObject {
         label(["bug": "settings.feedbackMessagePlaceholderBug", "feature": "settings.feedbackMessagePlaceholderFeature", "other": "settings.feedbackMessagePlaceholderOther"][settingsFeedbackCategory] ?? "settings.feedbackMessagePlaceholder")
     }
 
-    // Match JavaScript trim/\s rather than Foundation's broader whitespace set.
+
     private static let ecmaScriptWhitespace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
     private var feedbackSubmittedMessage: String {
         let message = settingsFeedbackMessage.trimmingCharacters(in: Self.ecmaScriptWhitespace)
@@ -10399,7 +10391,7 @@ final class CoreModel: ObservableObject {
 
     func closeFeedbackSettings() {
         guard settingsFeedbackPresented else { return }
-        // Canceling an in-flight POST cannot undo a request already received.
+
         settingsFeedbackPresented = false
         invalidateAboutLinkOpening()
         settingsFeedbackConfigured = nil
@@ -10579,7 +10571,7 @@ final class CoreModel: ObservableObject {
                     let timestamp = try Self.aboutCheckTimestamp()
                     do { try await currentHost.recordAboutUpdateCheck(timestamp: timestamp) }
                     catch {
-                        // Even a lost reply may follow manifest publication.
+
                         requireSettingsSyncRestart(currentHost)
                         return
                     }
@@ -10610,7 +10602,7 @@ final class CoreModel: ObservableObject {
                         try await currentHost.storeAboutUpdateResult(available: available.boolValue,
                             latestVersion: version, checkedAt: checkedAt)
                     } catch {
-                        // Page invalidation cannot hide an uncertain local write.
+
                         requireSettingsSyncRestart(currentHost)
                         return
                     }
@@ -10628,8 +10620,7 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    // Validate the original authority before Foundation can normalize userinfo,
-    // escapes or ports. Only a validated Apple listing can mint a store deep link.
+
     private static func aboutAppleListing(_ value: String) -> (url: URL, id: String)? {
         guard !value.isEmpty, value.utf8.count <= 2_048, !value.contains("\\"),
               !value.unicodeScalars.contains(where: { $0.value <= 32 || $0.value == 127 }),
@@ -10944,7 +10935,7 @@ final class CoreModel: ObservableObject {
     func saveDeviceCalendarSetting(_ edit: CoreObject) {
         guard calendarSettingEnabled, edit.text("type") == "deviceCalendars", let currentHost = host else { return }
         do {
-            // Keep nested NSDictionary maps intact; Swift String keys merge Unicode-equivalent IDs.
+
             calendarSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit])
             calendarSettingHost = currentHost
             calendarSettingKind = .device
@@ -11044,7 +11035,7 @@ final class CoreModel: ObservableObject {
         calendarSettingError = nil
         #if DEBUG && targetEnvironment(simulator)
         if let source = calendarFileImportTestSource {
-            // An isolated simulator fixture exercises the same callback and native capture, not Files UI.
+
             let cancelled = calendarFileImportTestCancelOnce
             calendarFileImportTestCancelOnce = false
             Task { await self.completeCalendarFileImport(cancelled ? .failure(CocoaError(.userCancelled))
@@ -11065,7 +11056,7 @@ final class CoreModel: ObservableObject {
         calendarFileImportClaim = nil
         calendarFileImporterID = nil
         calendarFileImporterPresented = false
-        // The shared Calendar operation stays owned until native capture has physically drained.
+
         calendarSettingTask?.cancel()
     }
 
@@ -11176,7 +11167,7 @@ final class CoreModel: ObservableObject {
                     }
                 }
                 if let localFile {
-                    // A picker may stay open across an external edit. Refresh the actual saved witness now.
+
                     try await self.readCalendarSettings()
                     guard self.calendarFileImportCurrent(localFile.claim), self.calendarSettingOwner == owner,
                           self.calendarSubscriptionReadError == nil, !self.calendarSubscriptionExpected.isEmpty else {
@@ -11248,7 +11239,7 @@ final class CoreModel: ObservableObject {
                         self.calendarSettingAwaitingRefresh = true
                         await self.refreshCalendarSettings()
                     }
-                    // The native effect fence retains uncertain push work. Ordinary tasks remain available.
+
                     return
                 }
                 if let request, self.calendarSettingRequest == request, self.calendarSettingHost === currentHost, self.host === currentHost {
@@ -11283,8 +11274,8 @@ final class CoreModel: ObservableObject {
         retryNeeded = true
         let reminder = reminderLifecycleTask, search = searchLifecycleTask, sync = foregroundSyncTask
         let notifications = notificationResponseTask, links = entityLinkTask
-        // The native runtime already removed its observers. Do not enqueue a
-        // late unregister that could remove the fresh startup's registrations.
+
+
         retireReminderLifecycleHost(nil)
         retireSearchHost(nil)
         notificationResponseTask?.cancel()
@@ -11477,7 +11468,7 @@ final class CoreModel: ObservableObject {
             notificationSettingWaiter = nil
             waiter.continuation.resume(returning: false)
         }
-        // The accepted native callback owns busy until it drains, even after page retirement.
+
     }
 
     private func notificationSettingsCurrent(owner: UUID) -> Bool {
@@ -11691,7 +11682,7 @@ final class CoreModel: ObservableObject {
     private func readAppLock(justEnabled: Bool = false) async throws {
         let currentHost = host
         searchAppLockReadPending = true
-        // A guarded search route may own this read; validate its saved result before cancelling navigation.
+
         searchPolicyChanged(suspendNavigation: false)
         defer { searchAppLockReadPending = false; searchPolicyChanged() }
         do {
@@ -11780,7 +11771,7 @@ final class CoreModel: ObservableObject {
         appLockAwaitingRefresh = true
         retryNeeded = false
         error = nil
-        // Acknowledgment is durable. Retry only this read if it fails, never authentication or the write.
+
         try await readAppLock(justEnabled: value.boolValue)
     }
 
@@ -11810,7 +11801,7 @@ final class CoreModel: ObservableObject {
             guard Set(write.keys) == Set(["key", "value"]), write["key"] as? String == "mindwtr-language",
                   write["value"] as? String == uiLanguage else { throw CocoaError(.coderReadCorrupt) }
         }
-        // UI translation and the actual regional locale remain separate shared inputs.
+
         _ = try await query("language", [uiLanguage, Locale.current.identifier])
         try await readStrings()
         currentLanguage = uiLanguage
@@ -11902,7 +11893,7 @@ final class CoreModel: ObservableObject {
         guard let translated = result["strings"] as? CoreObject, translated.values.allSatisfy({ $0 is String }) else {
             throw CocoaError(.coderReadCorrupt)
         }
-        // Equal values must not republish: every view reads strings.
+
         if !(translated as NSDictionary).isEqual(to: strings) { strings = translated }
     }
 
@@ -11924,7 +11915,7 @@ final class CoreModel: ObservableObject {
         guard mirrors.isEmpty || Set(mirrors.keys) == Set(["@mindwtr_theme", "@mindwtr_theme_style"]) else {
             throw CocoaError(.coderReadCorrupt)
         }
-        // These core-approved mirrors follow the saved field; cold startup reconciles an interrupted pair.
+
         for (name, value) in mirrors {
             let key = devicePreferencePrefix + name
             if preferenceDefaults.object(forKey: key) as? String != value { preferenceDefaults.set(value, forKey: key) }
@@ -12063,7 +12054,7 @@ final class CoreModel: ObservableObject {
                 inventoryRows[key] = try await readManagedListPages(next, key: key, depth: depths[key] ?? 100).rows
             }
         }
-        // Publish and persist together only after all required reads succeed.
+
         manageSettings = next
         managedSomedaySections = pages.rows
         managedSomedayTotal = pages.total
@@ -12644,7 +12635,7 @@ final class CoreModel: ObservableObject {
             if retryNeeded { error = failure.localizedDescription }
         }
         if !somedaySectionDeletePending && !somedaySectionDeleteAwaitingRefresh {
-            // Retry must obtain new Options and a new explicit confirmation.
+
             somedaySectionDeleteOptions = [:]
         }
         somedaySectionDeleteError = failure.localizedDescription
@@ -12822,8 +12813,8 @@ final class CoreModel: ObservableObject {
         catch { await handleProjectCreateWriteError(error); return }
         do { try await readSelectedSurface() }
         catch {
-            // The write was acknowledged and its UUID must never be submitted
-            // again merely because the subsequent list/options read failed.
+
+
             projectCreateReadError = error.localizedDescription
             self.error = error.localizedDescription
         }
@@ -13798,7 +13789,7 @@ final class CoreModel: ObservableObject {
             projectStatusExpectedStatus = "active"
         } catch let failure {
             do { try await refreshProjectStatusAfterWrite() }
-            catch { /* Preserve the original read or stale-target failure in the global banner. */ }
+            catch {                                                                                }
             self.error = failure.localizedDescription
             return
         }
@@ -14002,8 +13993,8 @@ final class CoreModel: ObservableObject {
         defer { finishOperation() }
         do {
             try await readProjectSectionRenameOptions(projectID: id, sectionID: sectionID)
-            // This is the opening read, before the editor becomes enabled. A
-            // later explicit Retry never replaces the user's draft.
+
+
             if projectSectionEditID == sectionID {
                 projectSectionTitle = projectSectionRenameOptions.object("section").text("title")
             }
@@ -14301,7 +14292,7 @@ final class CoreModel: ObservableObject {
             retryNeeded = false
             projectSectionError = failure.localizedDescription
             error = nil
-            // A later attempt must read a new token and ask for confirmation again.
+
             do { try await refreshProjectSectionsAfterWrite() }
             catch { projectSectionReadError = error.localizedDescription }
         } else {
@@ -14398,7 +14389,7 @@ final class CoreModel: ObservableObject {
         projectSectionError = nil
         defer { finishOperation() }
         do {
-            // Notes autosave can advance the Project token while this sheet is open.
+
             try await readProjectSectionOptions(projectID: id)
             guard projectSectionOptionsCurrent, projectSectionOptions.flag("canCreate"),
                   projectSectionOptions.text("revision") == projectDetail.text("mutationRevision") else {
@@ -14496,8 +14487,8 @@ final class CoreModel: ObservableObject {
             retryNeeded = false
             projectSectionError = failure.localizedDescription
             error = nil
-            // Refresh visible rows, but require an explicit read Retry before
-            // binding the retained draft to a new Section token.
+
+
             do { try await refreshProjectSectionsAfterWrite() }
             catch { projectSectionReadError = error.localizedDescription }
         } else {
@@ -14688,8 +14679,8 @@ final class CoreModel: ObservableObject {
         projectDateError = nil
         defer { finishOperation() }
         do {
-            // Notes autosave may have advanced this Project's row token while the
-            // date wheel was open. Always bind the write to a fresh read.
+
+
             try await readProjectDateOptions(field, projectID: id)
             let project = projectDateOptions.object("project")
             guard projectDateOptionsCurrent, projectDateOptionsField == field,
@@ -14942,13 +14933,12 @@ final class CoreModel: ObservableObject {
         await performProjectAreaWrite(areaID, name: name, projectID: id, colorOverride: color as Any? ?? NSNull())
     }
 
-    // The Area-create path calls this only after its own durable acknowledgment.
-    // The caller owns busy, so a second command cannot bypass the UI guards.
+
     private func performProjectAreaWrite(_ selectedID: String?, name selectedName: String?,
                                          projectID id: String, colorOverride: Any? = nil) async {
         do {
-            // Notes autosave may change the Project revision. Re-read its token,
-            // but never silently switch the association or tapped Area witness.
+
+
             try await readProjectAreaOptions(projectID: id)
             let project = projectAreaOptions.object("project")
             guard projectAreaOptionsCurrent, projectAreaOptions.flag("canEdit"),
@@ -15091,8 +15081,8 @@ final class CoreModel: ObservableObject {
         defer { finishOperation() }
         do {
             try await refreshProjectAreaAfterWrite()
-            // After a create-only outcome, an explicit retry may adopt the
-            // current association. The automatic assignment never rebases it.
+
+
             if projectAreaCreatedID != nil { projectAreaOpeningAssociation = nil }
             try await readProjectAreaOptions(projectID: id)
             projectAreaReadError = nil
@@ -15507,7 +15497,7 @@ final class CoreModel: ObservableObject {
         busy = true
         defer { finishOperation() }
         do { try await readAreaManagerOptions() }
-        catch { /* The failing options read publishes its own reachable retry. */ }
+        catch {                                                                   }
     }
 
     func openProjectAreaManager() async {
@@ -15521,7 +15511,7 @@ final class CoreModel: ObservableObject {
         busy = true
         defer { finishOperation() }
         do { try await readAreaManagerOptions() }
-        catch { /* The failing options read publishes its own reachable retry. */ }
+        catch {                                                                   }
     }
 
     func closeAreaManager() {
@@ -17094,7 +17084,7 @@ final class CoreModel: ObservableObject {
               target.text("revision") == revision,
               !text.text("title").isEmpty, !text.text("message").isEmpty,
               !text.text("cancelLabel").isEmpty, !text.text("confirmLabel").isEmpty else {
-            // The displayed row changed before confirmation. Refresh it before another explicit attempt.
+
             try await readManageSettings()
             throw CocoaError(.coderReadCorrupt)
         }
@@ -17308,7 +17298,7 @@ final class CoreModel: ObservableObject {
 
     func boardSwipeAction(_ side: String) -> String? {
         let actions = boardView.object("cardActions").object("swipes").object(side)["actions"] as? [String]
-        // Only the two supplied, single-action RN sequences are enabled in this slice.
+
         if side == "left", actions == ["duplicate"] { return "duplicateTask" }
         if side == "right", actions == ["trash"] { return "trashTask" }
         return nil
@@ -17419,7 +17409,7 @@ final class CoreModel: ObservableObject {
                       let after = intent["afterId"], after is NSNull || (after as? String).map({
                           !$0.isEmpty && $0.utf16.count <= 500 && !$0.utf8.elementsEqual(row.text("id").utf8)
                       }) == true else { return [] }
-                // The anchor may be beyond the loaded page. Only core supplies it.
+
                 actions.append(["direction": direction, "label": label, "enabled": true, "afterId": after])
             }
         }
@@ -17543,7 +17533,7 @@ final class CoreModel: ObservableObject {
         return true
     }
 
-    /// Consume the gesture and retain its exact Move before any asynchronous work.
+
     @discardableResult
     func moveBoardCard(_ capture: BoardOrderDragCapture, status: String, consume: () -> Bool) -> Bool {
         guard boardMoveDragIsCurrent(capture, status: status),
@@ -17555,7 +17545,7 @@ final class CoreModel: ObservableObject {
         let submittedHost = host
         let fromDone = capture.status == "done"
         Task {
-            // Submission is separate from the existing durable Move acknowledgement.
+
             _ = try? await submittedHost?.call("logLine", argumentsJSON: json([
                 fromDone ? "Native iOS Board Done cross-drop submitted" : "Native iOS Board cross-column drag submitted",
                 fromDone ? #"{"releaseCheck":"v1.3.7/ios-board-done-cross-drop"}"# : #"{"releaseCheck":"v1.3.7/ios-board-cross-column-drag"}"#]))
@@ -17564,7 +17554,7 @@ final class CoreModel: ObservableObject {
         return true
     }
 
-    /// Diagnostic-only: never enters the operation owner or changes published UI state.
+
     func logBoardDragStage(_ stage: String, reason: String) {
         let diagnosticHost = host
         Task {
@@ -17574,7 +17564,7 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    /// Final claim consumption and command retention must remain synchronous.
+
     @discardableResult
     func orderBoardCard(_ capture: BoardOrderDragCapture, afterID: String?, consume: () -> Bool) -> Bool {
         guard boardOrderDragIsCurrent(capture),
@@ -17594,7 +17584,7 @@ final class CoreModel: ObservableObject {
         retainBoardAction(request)
         let submittedHost = host
         Task {
-            // This marker proves submission only, including a later core refusal/no-op.
+
             _ = try? await submittedHost?.call("logLine", argumentsJSON: json([
                 "Native iOS Board drag submitted", #"{"releaseCheck":"v1.3.5/ios-board-drag"}"#]))
             await runBoardAction(request)
@@ -17643,8 +17633,8 @@ final class CoreModel: ObservableObject {
             })
         } catch {
             guard boardActionHost === actionHost, boardActionRequest?.utf8.elementsEqual(request.utf8) == true else { return }
-            // Only the host's typed, cleaned-up rejection proves no write is owed.
-            // Every other failure retains this exact request and its private journal.
+
+
             if !dispatched || isDefiniteRejection(error) { boardActionRequest = nil }
             guard host === actionHost else { return }
             retryNeeded = boardActionPending
@@ -17659,7 +17649,7 @@ final class CoreModel: ObservableObject {
     private func acknowledgeBoardAction(_ result: CoreObject, foreground: Int? = nil) async -> Bool {
         let actionHost = host
         let presentation = foreground ?? boardActionForeground
-        // Only an acknowledged Move from this exact displayed Done row invalidates its completion notice.
+
         if selectedSurface == .board, result.flag("changed"), taskActionUndoRequest == nil,
            let request = boardActionRequest, let action = try? decode(request).object("action"),
            action.text("type") == "moveCard", !action.text("taskId").isEmpty,
@@ -17680,8 +17670,8 @@ final class CoreModel: ObservableObject {
         boardActionRequest = nil
         retryNeeded = false
         error = nil
-        // Navigation is blocked while the command is pending. Still never route
-        // an acknowledgement onto a different surface if that state has changed.
+
+
         func warm() -> Bool {
             host === actionHost && selectedSurface == .board && foregroundSyncGeneration == presentation
                 && !appLock.concealed && !Task.isCancelled && UIApplication.shared.applicationState == .active
@@ -17702,8 +17692,8 @@ final class CoreModel: ObservableObject {
             taskRecoveryGateVisible = true
             return false
         }
-        // The trusted result may be outside the current filter or loaded page.
-        // It is the frozen copy ID, never a source/current-selection lookup.
+
+
         prepareTaskPresentation(open.text("taskId"), initialTab: "task")
         return true
     }
@@ -17734,8 +17724,8 @@ final class CoreModel: ObservableObject {
             window = boardView.object("sheet").object(list)
         }
         guard window.objects("items").count < window.number("total") else { return }
-        // Picker page zero is currently 100; card page zero is 50. Always use
-        // the loaded count, including for chips, and rebuild at a fresh revision.
+
+
         boardDepth[list == "cards" ? list + ":" + status : list] = window.objects("items").count + pageSize
         requestBoardRead(delay: 0)
     }
@@ -17784,9 +17774,8 @@ final class CoreModel: ObservableObject {
         boardError = nil
         defer {
             if generation == boardGeneration {
-                // Area or a temporary global operation can invalidate an awaited
-                // response without settling this read. Keep its pure edit/depth
-                // and wake it now, or when the existing gate closes.
+
+
                 if !Task.isCancelled, selectedSurface == .board, !boardCurrent, boardError == nil {
                     boardNeedsRead = true
                     scheduleBoardRead(delay: 0)
@@ -17802,8 +17791,8 @@ final class CoreModel: ObservableObject {
                 if let edit { input["filterEdit"] = edit }
                 var next = try await query("menuRead", ["board", try json(input)])
                 guard boardReadAllowed(generation, ownsOperation: ownsOperation) else { return }
-                // A search typed while a pure Clear was resolving wins over the
-                // earlier Clear's query. All other filter normalization stays core.
+
+
                 if next.object("filters").text("searchQuery") != search {
                     filters = next.object("filters")
                     filters["searchQuery"] = search
@@ -17818,8 +17807,8 @@ final class CoreModel: ObservableObject {
                 let resolved = next.object("filters")
                 var columns = next.objects("columns")
                 var sheet = next.object("sheet")
-                // Stage every list against the same effective filters/revision;
-                // publish only after all previously loaded windows are rebuilt.
+
+
                 for key in columns.map({ "cards:" + $0.text("status") }) + ["tokens", "projects", "chips"] {
                     let status = key.hasPrefix("cards:") ? String(key.dropFirst(6)) : ""
                     let list = status.isEmpty ? key : "cards"
@@ -17873,19 +17862,19 @@ final class CoreModel: ObservableObject {
                 return
             } catch {
                 guard !Task.isCancelled, generation == boardGeneration, selectedSurface == .board else { return }
-                // A refused pure input is settled even if Area/More opened while
-                // it was awaiting. Do not reapply that edit after the gate closes.
+
+
                 if error.localizedDescription.hasPrefix("INVALID_INPUT:") {
                     boardPendingEdit = nil
                     boardError = error.localizedDescription
                     return
                 }
                 guard boardReadAllowed(generation, ownsOperation: ownsOperation) else { return }
-                // Retrying starts from the unchanged pre-edit state, so a pure
-                // toggle is never applied twice after a stale nested page.
+
+
                 if attempt == 1 {
-                    // The edit is pure and the published filters are unchanged.
-                    // Keep it for Retry if a later picker/page read fails.
+
+
                     if edit != nil {
                         NSLog("Native iOS Board filter retry releaseCheck=v1.3.4/ios-board-filter-retry outcome=retained")
                     }
@@ -17954,7 +17943,7 @@ final class CoreModel: ObservableObject {
             if isDefiniteRejection(error) {
                 calendarPreferencePending = false
                 calendarPreferenceTarget = nil
-                // A refused before-value never becomes an automatic overwrite of newer intent.
+
                 await readCalendar()
                 calendarError = error.localizedDescription
             } else {
@@ -18206,7 +18195,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func queueCalendarComposerEdit(_ edit: CoreObject) {
-        // Coalesce only adjacent unsent keystrokes. Other control edits retain order.
+
         if calendarComposerError != nil && calendarComposerEdits.first?.text("type") == edit.text("type") {
             calendarComposerEdits.removeFirst()
         }
@@ -18256,7 +18245,7 @@ final class CoreModel: ObservableObject {
                     return
                 }
                 if calendarComposerEdits.first?.text("type") == edit.text("type") {
-                    // A newer raw value superseded the refused in-flight value.
+
                     continue
                 }
                 calendarComposerEdits.insert(edit, at: 0)
@@ -18306,7 +18295,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func acknowledgeCalendarComposerSave(_ result: CoreObject) async {
-        // The host has crossed its durable barrier. Never submit this request again.
+
         calendarComposerSaveRequest = nil
         retryNeeded = false
         error = nil
@@ -18471,7 +18460,7 @@ final class CoreModel: ObservableObject {
                 let result = try self.decode(await currentHost.calendarRead(requestJSON: self.json(input)))
                 guard current() else { return }
                 guard ["ready", "error"].contains(result.text("status")) else { throw CocoaError(.coderReadCorrupt) }
-                // Shared projection validates every source/event and the full request byte bound.
+
                 self.calendarFeed = result
             } catch {
                 guard current() else { return }
@@ -18486,8 +18475,8 @@ final class CoreModel: ObservableObject {
 
     private func drainCalendarFeedForCoreCall() async {
         guard let read = calendarFeedTask else { return }
-        // invoke owns the serial engine queue while HTTP is pending. Signal its cancellation
-        // before queueing another call; preserve same-range events for the deliberate restart.
+
+
         let drainID = calendarFeedDrainID ?? UUID()
         calendarFeedDrainID = drainID
         calendarFeedOwner = nil
@@ -18546,12 +18535,12 @@ final class CoreModel: ObservableObject {
                 var state = calendarState
                 if let target = calendarPreferenceTarget, !calendarPreferencePending {
                     state = target
-                    // Honor the acknowledged stored mode if replay followed newer same-field intent.
+
                     state["viewMode"] = values["viewMode"]
                 }
                 var input: CoreObject = ["scheduleQuery": text, "offset": 0, "limit": pageSize]
                 if !state.isEmpty { input["state"] = state }
-                // Only core computes/normalizes the range; this task-only projection is never published.
+
                 let baseline = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
                 guard current() else { return }
                 let range = try CalendarFeedRange(baseline.object("range"))
@@ -18577,7 +18566,7 @@ final class CoreModel: ObservableObject {
                     next = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
                 } catch {
                     guard current() else { return }
-                    // A rejected feed must remain visible as failure; keep core-rendered tasks and block planning.
+
                     calendarError = error.localizedDescription
                     frozenFeed = ["status": "error", "message": label("settings.calendarMobile.failedToLoadEvents")]
                     calendarFeed = frozenFeed
@@ -18664,7 +18653,7 @@ final class CoreModel: ObservableObject {
     private func captureCalendarEventOpenRequest(_ event: CoreObject, sourceID: String, allDay: Bool) -> NativeCalendarEventOpenRequest? {
         let prefix = "system:"
         guard sourceID.utf8.starts(with: prefix.utf8), let itemID = event["nativeEventId"] as? String else { return nil }
-        // Only remove the shared system-source prefix; never parse the display event ID.
+
         let calendarID = String(decoding: sourceID.utf8.dropFirst(prefix.utf8.count), as: UTF8.self)
         let parser = ISO8601DateFormatter()
         parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -18696,7 +18685,7 @@ final class CoreModel: ObservableObject {
         let sources = calendarViewFeed.objects("calendars").filter {
             $0.text("id").utf8.elementsEqual(reference.text("sourceId").utf8)
         }
-        // A multiday event can render in several Week columns; its feed tuple is still unique.
+
         guard !rows.isEmpty, events.count == 1, sources.count == 1,
               let calendarName = sources[0]["name"] as? String,
               let allDay = events[0]["allDay"] as? NSNumber, CFGetTypeID(allDay) == CFBooleanGetTypeID(),
@@ -18712,7 +18701,7 @@ final class CoreModel: ObservableObject {
         }
         let state = calendarView.object("state")
         guard calendarEventStateValid(state) else { throw CocoaError(.coderReadCorrupt) }
-        // Serialize the narrow snapshot so no mutable nested provider collection escapes.
+
         let captured = try decode(json(["reference": reference, "event": event, "state": state]))
         return CalendarEventIntent(id: UUID(), host: currentHost, pageSession: calendarPageSession,
             feedGeneration: calendarViewFeedGeneration, revision: calendarView.text("revision"),
@@ -18780,12 +18769,12 @@ final class CoreModel: ObservableObject {
             }
         }
         if refreshCurrent {
-            // Shared state remains unchanged; only a passive current-page feed refresh is queued.
+
             calendarFeedRefreshRequested = true
             calendarNeedsRead = true
         }
-        // A retired editor may have blocked a newer foreground/page request.
-        // Re-admit only the latest existing queue, without restoring its old state or host.
+
+
         if calendarNeedsRead { scheduleCalendarRead() }
     }
 
@@ -18814,7 +18803,7 @@ final class CoreModel: ObservableObject {
             let presentation = NativeCalendarEventEditorPresentation(id: id, owner: owner)
             calendarEventOpenSession = CalendarEventOpenSession(id: id, intent: intent)
             calendarEventOpenPresentation = presentation
-            // The native dialog has a separate owner before its custom sheet is retired.
+
             retireCalendarEventIntent()
             calendarEventOpenPresented = true
         } catch {
@@ -18837,10 +18826,10 @@ final class CoreModel: ObservableObject {
         calendarItemTaskID = ""
         calendarItemError = nil
         #if DEBUG && targetEnvironment(simulator)
-        // Resume only after the real owner is retired, so the final dispatch fence must refuse.
+
         releaseCalendarEventTaskDispatchTestHold(intent.id)
         #endif
-        // An accepted command is owned by its host, independently of this retired sheet.
+
     }
 
     #if DEBUG && targetEnvironment(simulator)
@@ -18906,7 +18895,7 @@ final class CoreModel: ObservableObject {
         let pending: CalendarEventTaskPending
         do {
             var request = try decode(templateJSON)
-            // Rebind before constructing the only public event write; fallback text stays frozen.
+
             _ = try bindCalendarEventSheet(calendarItemSheet, to: intent)
             let requestId = UUID().uuidString.lowercased()
             request["requestId"] = requestId
@@ -19317,8 +19306,7 @@ final class CoreModel: ObservableObject {
         await retryReview()
     }
 
-    // Only opaque checkpoints and returned Finish metadata use this local namespace.
-    // MainActor + busy serializes navigation; failed persistence keeps the old page.
+
     private func writeReviewPreference(_ value: String?, key: String) throws {
         guard key.hasPrefix(reviewPreferencePrefix) else { throw CocoaError(.coderInvalidValue) }
         let defaults = preferenceDefaults
@@ -19333,7 +19321,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func readReview() async {
-        // A foreground refresh must not clear a failed Finish or its reachable retry.
+
         guard !reviewFinishPending else { return }
         reviewCurrent = false
         reviewError = nil
@@ -19455,7 +19443,7 @@ final class CoreModel: ObservableObject {
     func openContexts() async {
         guard ready, !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !busy, !retryNeeded, !capturePresented, !areaPickerPresented, !taskPresented else { return }
         if selectedSurface == .project && projectCaller == .contexts {
-            // Reuse the existing Contexts route instead of creating a Back loop.
+
             NSLog("Native iOS Contexts caller reused releaseCheck=v1.3.4/ios-task-preview-links destination=contexts source=project-return")
         } else if selectedSurface != .contexts {
             contextsCaller = selectedSurface
@@ -19476,7 +19464,7 @@ final class CoreModel: ObservableObject {
     func setContextsSearch(_ text: String) {
         guard selectedSurface == .contexts, !retryNeeded, !taskPresented, text != contextsSearchText else { return }
         contextsSearchText = text
-        // RN searches the token strip only. Retain the loaded task depth.
+
         requestContextsRead()
     }
 
@@ -19529,7 +19517,7 @@ final class CoreModel: ObservableObject {
         return selection
     }
 
-    /// A chip tap, or with `additive` a token chip's long-press (#1427).
+
     func selectContextsChip(_ id: String, additive: Bool = false) {
         guard contextsControlsEnabled, contexts.objects("chips").contains(where: { $0.text("id") == id }) else { return }
         contextsIntents.append(["kind": "chip", "value": id, "additive": additive])
@@ -19550,8 +19538,8 @@ final class CoreModel: ObservableObject {
                 ["context", "tag"].contains($0.text("kind")) && $0.text("text") == token
             })
         }) else { return }
-        // Same explicit navigation as RN's onContextPress/onTagPress. The metadata
-        // text is the token; overflow is a separate field, never parsed here.
+
+
         contextsIntents.append(["kind": "focus", "value": token])
         contextsLoadedDepth = pageSize
         requestContextsRead(delay: 0)
@@ -19618,9 +19606,8 @@ final class CoreModel: ObservableObject {
         for attempt in 0..<2 {
             do {
                 var selection = contextsSelection
-                // Resolve every accepted tap against the preceding core selection.
-                // Reusing a rendered chip.next for two rapid taps would lose the first.
-                // Empty search keeps a queued chip reachable if typing hid it meanwhile.
+
+
                 for intent in intents {
                     if intent.text("kind") == "focus" {
                         selection["tokens"] = [intent.text("value")]
@@ -19663,8 +19650,8 @@ final class CoreModel: ObservableObject {
                       next.objects("rows").count == min(pageSize, next.number("total")) else {
                     throw CocoaError(.coderReadCorrupt)
                 }
-                // Contexts revision covers data/time, not selection or chip search.
-                // Every staged page must use the same effective inputs as page zero.
+
+
                 selection = contextsSelectionAfter(next, previous: selection)
                 var rows = next.objects("rows")
                 let target = min(depth, next.number("total"))
@@ -19693,7 +19680,7 @@ final class CoreModel: ObservableObject {
                         merged["items"] = contextsFilterPicker.objects("items") + picker.objects("items")
                     }
                     contextsFilterPicker = merged
-                    // Refreshes re-read the visible depth so deleted options cannot linger.
+
                     contextsFilterPickerRequest["offset"] = 0
                     contextsFilterPickerRequest["limit"] = max(1, min(100, merged.objects("items").count))
                     contextsFilterPickerRequest.removeValue(forKey: "revision")
@@ -19703,7 +19690,7 @@ final class CoreModel: ObservableObject {
                 return
             } catch {
                 guard contextsReadAllowed(generation, ownsOperation: ownsOperation) else { return }
-                // Restart at zero once on an expired revision; never publish mixed pages.
+
                 if attempt == 0 && contextsFilterPickerRequest["revision"] != nil {
                     contextsFilterPickerRequest.removeValue(forKey: "revision")
                     contextsFilterPickerRequest["offset"] = 0
@@ -20444,8 +20431,8 @@ final class CoreModel: ObservableObject {
             busy = true
             defer { finishOperation() }
             somedayTextNeedsRead = false
-            // Text remains editable during reads. Drain the latest value of each
-            // text field in order, always starting from core's effective state.
+
+
             if somedayPendingEdit != nil || somedayError != nil {
                 guard await readSomeday() else {
                     somedayTextNeedsRead = false
@@ -20563,8 +20550,8 @@ final class CoreModel: ObservableObject {
         else { somedayLoadedDepth = count + min(pageSize, total - count) }
         busy = true
         defer { finishOperation() }
-        // Stage all windows offscreen before publishing so headings and tasks,
-        // including the deferred collection, always share one revision.
+
+
         await readSomeday()
     }
 
@@ -20683,7 +20670,7 @@ final class CoreModel: ObservableObject {
         await refresh()
     }
 
-    // MARK: Task736 shared list-sort presentation owner
+
     var inboxSortPresented: Bool { taskListSortCaller == .inbox }
     var inboxSortEnabled: Bool { taskListSortCaller == nil && canOpenTaskListSort(.inbox) }
     var taskListSortActionsEnabled: Bool {
@@ -20862,9 +20849,8 @@ final class CoreModel: ObservableObject {
         if referenceSortRequest != nil { await retry() }
         else { await readTaskListSortOptions() }
     }
-    // MARK: End Task736 shared list-sort presentation owner
 
-    // MARK: Task737 Inbox grouping owner
+
     private var inboxFoldPreference: String { devicePreferencePrefix + "mindwtr:view:group-collapse:inbox:v1" }
     var inboxGroupEnabled: Bool { canOpenTaskListSort(.inbox) }
     var inboxActionsEnabled: Bool {
@@ -20882,7 +20868,7 @@ final class CoreModel: ObservableObject {
     func inboxItemIdentity(_ item: CoreObject) -> [String] {
         [inbox.text("groupBy"), item.text("type"), item.text("id"), item.text("groupId"), item.object("row").text("id")]
     }
-    /// First index of an identity, as `items.firstIndex`, built once per `inbox` value.
+
     private func inboxItemIndex(_ identity: [String]) -> Int? {
         if inboxItemIndexCache == nil {
             inboxItemIndexCache = Dictionary(items.enumerated().map { (inboxItemIdentity($1), $0) }, uniquingKeysWith: { first, _ in first })
@@ -20907,7 +20893,7 @@ final class CoreModel: ObservableObject {
             inboxFoldPreferenceWritable = true
         } else {
             inboxCollapsedGroups = [:]
-            // A malformed root cannot be merged without destroying the retained bytes.
+
             inboxFoldPreferenceWritable = stored == nil && raw == nil
         }
         inboxParams["collapsedGroupIds"] = inboxFoldIDs(inboxCollapsedGroups[inboxParams.text("groupBy")]) ?? []
@@ -20971,11 +20957,10 @@ final class CoreModel: ObservableObject {
         busy = true
         error = nil
         defer { if host === owner { finishOperation() } }
-        do { try await readInbox() } catch { /* The read owner retains its params and error. */ }
+        do { try await readInbox() } catch {                                                    }
     }
-    // MARK: End Task737 Inbox grouping owner
 
-    // MARK: Task738 Inbox session filters
+
     private var inboxFilterWorkPending: Bool {
         inboxPendingFilterEdit != nil || !inboxFilterTextEdits.isEmpty || inboxFilterNeedsRead
     }
@@ -21003,7 +20988,7 @@ final class CoreModel: ObservableObject {
         inboxFiltersPresented = false
         inboxFilterPresentation = UUID()
         closeInboxFilterPicker()
-        // Closing dismisses presentation; already admitted list intent still drains.
+
         if inboxFilterNeedsRead { scheduleInboxFilterRead(delay: 0) }
     }
 
@@ -21245,9 +21230,8 @@ final class CoreModel: ObservableObject {
               items.count == min(limit, max(0, total - offset)) else { throw CocoaError(.coderReadCorrupt) }
         return page
     }
-    // MARK: End Task738 Inbox session filters
 
-    // MARK: Task739 Inbox selection, using the list's complete core-owned scope
+
     private var inboxBulkMutationPending: Bool {
         inboxBulkDeleteOwner != nil || inboxBulkUndoOwner != nil || inboxTasksMoveOwner != nil || inboxTasksAddTagOwner != nil || inboxTasksRemoveTagOwner != nil || inboxTasksOrganizeOwner != nil || inboxOrganizeDestinationCreateOwner != nil
     }
@@ -21481,7 +21465,7 @@ final class CoreModel: ObservableObject {
         return first.utf8.elementsEqual(second.utf8)
     }
 
-    // Task740: one original Host/request debt; no reprepare or status Undo.
+
     private func inboxTasksMoveOwned(on owner: CoreHost, request: String) -> Bool {
         inboxTasksMoveOwner?.host === owner && inboxTasksMoveOwner?.request.utf8.elementsEqual(request.utf8) == true
     }
@@ -21534,7 +21518,7 @@ final class CoreModel: ObservableObject {
         } catch {
             guard inboxTasksMoveOwned(on: owner, request: request) else { return }
             if !dispatched {
-                // query refused before Host.call; only this undispatched debt can retire.
+
                 inboxTasksMoveOwner = nil
                 return
             }
@@ -21605,7 +21589,7 @@ final class CoreModel: ObservableObject {
         await publishInboxTasksMove(result, on: owner, foreground: foreground)
     }
 
-    // Task741: preserve one frozen tag request on its original Host through ambiguous retry.
+
     private func inboxBulkTagContextCurrent(_ context: InboxBulkConfirmation) -> Bool {
         inboxBulkConfirmationCurrent(context)
             && inboxTasksMoveWarm(on: context.host, generation: context.selectionGeneration, foreground: context.foregroundGeneration)
@@ -21734,7 +21718,7 @@ final class CoreModel: ObservableObject {
               changed.boolValue ? (count.doubleValue > 0 && count.doubleValue <= Double(ids.count)) : (allowNoop && count.doubleValue == 0) else {
             throw CocoaError(.coderReadCorrupt)
         }
-        inboxTasksAddTagOwner = nil // Durable ACK retires debt before any refresh/notice read.
+        inboxTasksAddTagOwner = nil
         guard warm else { return }
         retryNeeded = false; inboxReadError = nil; error = nil; inboxBulkTagWriteError = false
         closeInboxBulkTag()
@@ -21792,7 +21776,7 @@ final class CoreModel: ObservableObject {
         await publishInboxTasksAddTag(result, on: owner, foreground: foreground)
     }
 
-    // Task742: picker pages are read-only; dispatched removal debt stays on its original Host.
+
     var inboxBulkRemoveEnabled: Bool {
         inboxBulkSelectionEnabled && inboxBulk.object("bar").object("removeTag").flag("enabled")
     }
@@ -21932,7 +21916,7 @@ final class CoreModel: ObservableObject {
                         return
                     } catch {
                         guard start > 0, attempt == 0, error.localizedDescription.hasPrefix("STALE_REVISION:") else { throw error }
-                        // Replace stale pages under one fresh list revision; hidden picks remain exact.
+
                         start = 0
                     }
                 }
@@ -21998,7 +21982,7 @@ final class CoreModel: ObservableObject {
               changed.boolValue ? (count.doubleValue > 0 && count.doubleValue <= Double(ids.count)) : (allowNoop && count.doubleValue == 0) else {
             throw CocoaError(.coderReadCorrupt)
         }
-        inboxTasksRemoveTagOwner = nil // Durable ACK retires debt before any refresh/notice read.
+        inboxTasksRemoveTagOwner = nil
         guard warm else { return }
         retryNeeded = false; inboxReadError = nil; error = nil
         closeInboxBulkRemove()
@@ -22056,7 +22040,6 @@ final class CoreModel: ObservableObject {
     }
 
 
-    // MARK: Task743 Inbox Organize (core draft edits, exact original write owners)
     var inboxBulkOrganizeEnabled: Bool {
         inboxBulkSelectionEnabled && inboxBulk.object("bar").object("organize").flag("enabled")
     }
@@ -22088,7 +22071,7 @@ final class CoreModel: ObservableObject {
         } catch { inboxReadError = label("task.updateFailed"); return }
         inboxBulkOrganizeIDs = inboxSelectedIDs; inboxBulkOrganizeRevisions = inboxSelectedRevisions
         inboxBulkOrganizeParams = inboxParams; inboxBulkOrganizePresented = true
-        // Empty organize asks core for EMPTY_BULK_ORGANIZE_DRAFT; Swift never authors that schema.
+
         inboxBulkOrganizePendingEdits = [[:]]
         drainInboxBulkOrganizeEdits()
     }
@@ -22103,7 +22086,7 @@ final class CoreModel: ObservableObject {
         inboxBulkOrganizeView = [:]; inboxBulkOrganizeInputs = [:]; inboxBulkOrganizeRevision = ""
         inboxBulkOrganizeContext = nil; inboxBulkOrganizeIDs = []; inboxBulkOrganizeRevisions = [:]; inboxBulkOrganizeParams = [:]
         retireInboxOrganizePicker()
-        // Never clear either dispatched original Host/request debt on lifecycle retirement.
+
     }
     private func retireInboxOrganizePicker() {
         inboxBulkOrganizePickerGeneration += 1; inboxBulkOrganizePickerTask?.cancel(); inboxBulkOrganizePickerTask = nil
@@ -22169,7 +22152,7 @@ final class CoreModel: ObservableObject {
             defer {
                 if generation == inboxBulkOrganizeGeneration {
                     inboxBulkOrganizeReading = false; inboxBulkOrganizeTask = nil
-                    // Edits left behind a busy or stale interval keep the dialog not current; show Retry.
+
                     if !inboxBulkOrganizeCurrent, inboxBulkOrganizeReadError == nil {
                         inboxBulkOrganizeReadError = label("settings.feedback.actionFailed")
                     }
@@ -22179,20 +22162,20 @@ final class CoreModel: ObservableObject {
                 let edit = inboxBulkOrganizePendingEdits.removeFirst()
                 do {
                     let bulk = try await inboxOrganizeRead(edit: edit, current: current)
-                    // The read is a pure projection, so a not-installed edit is safe to replay.
+
                     guard !Task.isCancelled, current() else {
-                        // Only the dialog generation that queued the edit may keep it.
+
                         if generation == inboxBulkOrganizeGeneration { inboxBulkOrganizePendingEdits.insert(edit, at: 0) }
                         return
                     }
                     installInboxOrganizeView(bulk)
                 } catch {
                     guard !Task.isCancelled, current() else {
-                        // Only the dialog generation that queued the edit may keep it.
+
                         if generation == inboxBulkOrganizeGeneration { inboxBulkOrganizePendingEdits.insert(edit, at: 0) }
                         return
                     }
-                    // A rejected partial text edit must not strand a newer correction behind it.
+
                     if edit.text("type") == "setText", inboxBulkOrganizePendingEdits.contains(where: {
                         $0.text("type") == "setText" && $0.text("field") == edit.text("field")
                     }) { continue }
@@ -22353,7 +22336,7 @@ final class CoreModel: ObservableObject {
                   changed.boolValue ? (count.doubleValue > 0 && count.doubleValue <= Double(ids.count)) : (allowNoop && count.doubleValue == 0) else { throw CocoaError(.coderReadCorrupt) }
             inboxTasksOrganizeOwner = nil
         }
-        // Durably acknowledged debt is retired before any option/list/notice read can fail.
+
         if warm { retryNeeded = false; inboxReadError = nil; inboxBulkOrganizeReadError = nil; error = nil }
     }
     private func publishInboxOrganize(_ result: CoreObject, request: String, creation: Bool,
@@ -22371,7 +22354,7 @@ final class CoreModel: ObservableObject {
                 installInboxOrganizeView(bulk); retireInboxOrganizePicker()
             } catch {
                 guard current() else { return }
-                // Missing current offered ID never restores/recreates or selects an unproven destination.
+
                 inboxBulkOrganizeCurrent = false; inboxBulkOrganizePickerCurrent = false
                 inboxBulkOrganizeReadError = error.localizedDescription
             }
@@ -22397,8 +22380,8 @@ final class CoreModel: ObservableObject {
         guard warm else { return }
         retryNeeded = inboxOrganizeOwned(owner, request: request, creation: creation)
         error = retryNeeded ? failure.localizedDescription : nil
-        // An open dialog shows a definite rejection itself (clearing an earlier retry-owed one, as a
-        // successful retry does); an Inbox error would outlive the dialog's Cancel.
+
+
         inboxReadError = retryNeeded || !inboxBulkOrganizePresented ? failure.localizedDescription : nil
         inboxBulkOrganizeCurrent = false; inboxBulkOrganizePickerCurrent = false
         inboxBulkOrganizeReadError = failure.localizedDescription
@@ -22469,8 +22452,8 @@ final class CoreModel: ObservableObject {
         if host === owner {
             outcome = try await query(method, [request], beforeDispatch: { self.host === owner && currentDebt() })
         } else {
-            // A replacement Host never receives these bytes. The captured Host
-            // can only prove its own receipt; no write or warm UI crosses over.
+
+
             outcome = try decode(await owner.call(method, argumentsJSON: json([request])))
         }
         guard currentDebt() else { throw CancellationError() }
@@ -22503,7 +22486,7 @@ final class CoreModel: ObservableObject {
             do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
         }
     }
-    // MARK: End Task739 Inbox selection
+
 
     private func validReferenceGroup(_ value: String) -> Bool {
         ["none", "context", "area", "project", "tag"].contains(value)
@@ -22607,8 +22590,8 @@ final class CoreModel: ObservableObject {
             busy = true
             defer { finishOperation() }
             referenceTextNeedsRead = false
-            // Text remains editable during reads. Drain the latest value of each
-            // text field in order, always starting from core's effective state.
+
+
             if referencePendingEdit != nil || referenceError != nil {
                 guard await readReference() else {
                     referenceTextNeedsRead = false
@@ -22637,7 +22620,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func effectiveReferenceParams(_ snapshot: CoreObject) -> CoreObject {
-        // Reference always reads the saved sort. Sending sortBy is rejected by core.
+
         ["groupBy": snapshot.text("groupBy"), "includeArchivedProjects": snapshot.flag("includeArchivedProjects"),
          "collapsedGroupIds": snapshot["collapsedGroupIds"] as? [String] ?? [],
          "filters": snapshot.object("filters").object("state")]
@@ -23133,8 +23116,8 @@ final class CoreModel: ObservableObject {
         trashPresentationGeneration += 1
         trashReadGeneration += 1
         trashCurrent = false
-        // Retirement invalidates reads and presentation only. An accepted native
-        // request retains its exact payload and original host until settlement.
+
+
         if clearSelection, trashBulkRequest == nil { clearTrashSelection() }
         #if DEBUG && targetEnvironment(simulator)
         publishTrashBulkTestState()
@@ -23203,8 +23186,8 @@ final class CoreModel: ObservableObject {
             guard host === operationHost, presentation == trashPresentationGeneration, selectedSurface == .trash,
                   trashError?.hasPrefix("STALE_REVISION:") == true else { return }
             let warning = trashError
-            // Refresh the old selection, never adopt a newly toggled row using
-            // a different revision than the row the user actually pressed.
+
+
             _ = await readTrash()
             if host === operationHost, presentation == trashPresentationGeneration { trashError = warning }
         }
@@ -23229,8 +23212,8 @@ final class CoreModel: ObservableObject {
               revisions.count == ids.count,
               Set(revisions.keys.map { Data($0.utf8) }) == Set(ids.map { Data($0.utf8) }),
               revisions.values.allSatisfy({ ($0 as? String).map({ !$0.isEmpty && $0.utf16.count <= 200 }) == true }) else {
-            // Swift dictionaries cannot bind canonically equivalent keys to two
-            // distinct UTF-8 IDs. Refuse ambiguity instead of retargeting a row.
+
+
             throw CocoaError(.coderReadCorrupt)
         }
         return revisions
@@ -23370,8 +23353,8 @@ final class CoreModel: ObservableObject {
               UIApplication.shared.applicationState == .active, !Task.isCancelled else {
             cancelTrashPurge(id); return
         }
-        // Consume this alert before awaiting. Its later dismissal can only cancel
-        // this ID and cannot erase the retained write or a replacement alert.
+
+
         cancelTrashPurge(id)
         let request = TrashBulkRequest(operation: .purge, selectionMode: confirmation.selectionMode,
             id: confirmation.id, host: confirmation.host, json: confirmation.json,
@@ -23676,8 +23659,8 @@ final class CoreModel: ObservableObject {
                 } else if mode == "navigate-retire" {
                     await self.closeTrash()
                 } else if mode == "arrival" {
-                    // A staged live Reference task becomes a real saved Trash
-                    // arrival after the alert froze its IDs. No projection fake.
+
+
                     let editor = try self.decode(try await confirmation.host.call("editorModel",
                         argumentsJSON: try self.json(["task508-arrival"])))
                     let request = try self.json(["requestId": UUID().uuidString.lowercased(),
@@ -23754,13 +23737,13 @@ final class CoreModel: ObservableObject {
         guard selectedSurface == .history, !busy, !retryNeeded, !taskPresented,
               archiveBulkDeleteConfirmation.isEmpty,
               id != historyTabs.text("tab"), historyTabs.objects("tabs").contains(where: { $0.text("id") == id }) else { return }
-        // Finish text edits before switching their owner to the other tab.
+
         guard historyTextEdits.isEmpty, historyPendingEdit == nil else { return }
         busy = true
         defer { finishOperation() }
         do {
             let tabs = try await query("menuRead", ["history", try json(["tab": id])])
-            // Input can arrive while core resolves the tab. Drain it in its original tab.
+
             guard historyTextEdits.isEmpty, historyPendingEdit == nil else { return }
             historyPanel = ""
             closeHistoryPicker()
@@ -23780,7 +23763,7 @@ final class CoreModel: ObservableObject {
         historyPanel = panel
         if panel != "filters" { closeHistoryPicker() }
         if historyArchived && wasFilter != (panel == "filters") {
-            // Archive exposes all token options only while its filter sheet is open.
+
             historyCurrent = false
             historyNeedsRead = true
             scheduleHistoryRead(delay: 0)
@@ -24100,7 +24083,7 @@ final class CoreModel: ObservableObject {
                         return
                     } catch {
                         guard start > 0, attempt == 0, error.localizedDescription.hasPrefix("STALE_REVISION:") else { throw error }
-                        // Replace stale pages under one fresh list revision; hidden picks remain exact.
+
                         start = 0
                     }
                 }
@@ -24139,8 +24122,8 @@ final class CoreModel: ObservableObject {
               let ids = bulk["selectedIds"] as? [String], bulk.number("selectedCount") == ids.count,
               try json(bulk).utf8.count <= 2_000_000 else { throw CocoaError(.coderReadCorrupt) }
         let revisions = try archiveTaskSelectionRevisions(bulk, ids: ids)
-        // Swift dictionaries cannot retain both canonically equivalent String keys.
-        // Exact key bytes must bind every selected ID; ambiguity refuses the read.
+
+
         guard Set(revisions.keys.map { Data($0.utf8) }) == Set(ids.map { Data($0.utf8) }) else {
             throw CocoaError(.coderReadCorrupt)
         }
@@ -24503,7 +24486,7 @@ final class CoreModel: ObservableObject {
                         return
                     } catch {
                         guard start > 0, attempt == 0, error.localizedDescription.hasPrefix("STALE_REVISION:") else { throw error }
-                        // Replace stale pages under one fresh list revision; hidden picks remain exact.
+
                         start = 0
                     }
                 }
@@ -24586,8 +24569,8 @@ final class CoreModel: ObservableObject {
         referenceError = nil
         defer { finishOperation() }
         do {
-            // The same DTO choices, full scope and exact revision map shown at
-            // submission are frozen before yielding to the host.
+
+
             guard generation == referenceTasksMoveGeneration,
                   try json(ids).utf8.elementsEqual(json(referenceSelectedIDs).utf8),
                   try json(revisions).utf8.elementsEqual(json(referenceSelectedRevisions).utf8),
@@ -24713,8 +24696,8 @@ final class CoreModel: ObservableObject {
                         historyError = label("task.updateFailed")
                         return
                     }
-                    // The display revision includes the minute. Refresh once and
-                    // retry the frozen selection intent only if its row still matches.
+
+
                     guard await readHistory() else { return }
                     continue
                 }
@@ -24795,7 +24778,7 @@ final class CoreModel: ObservableObject {
                     guard Set(selection.keys) == Set(["taskIds", "taskRevisions"]), let ids = selection["taskIds"] as? [String],
                           try json(selection).utf8.count <= 2_000_000 else { throw CocoaError(.coderReadCorrupt) }
                     _ = try archiveTaskSelectionRevisions(selection, ids: ids)
-                    // Typing can queue a filter read while this read-only query is pending.
+
                     guard selectedSurface == .history, historyArchived, history.text("segment") == "tasks",
                           historyArchiveSelectionMode, historyCurrent, !taskStatusMenuPresented,
                           historyTextEdits.isEmpty, historyPendingEdit == nil,
@@ -24809,8 +24792,8 @@ final class CoreModel: ObservableObject {
                           historyArchiveSelectionMode, historyCurrent, !taskStatusMenuPresented,
                           historyTextEdits.isEmpty, historyPendingEdit == nil,
                           try json(historyParamsByTab["archive"] ?? [:]) == json(params) else { return }
-                    // Display revisions include the minute. Refresh once before
-                    // retrying this explicit read-only Select All intent.
+
+
                     guard await readHistory() else { return }
                 }
             }
@@ -24933,7 +24916,7 @@ final class CoreModel: ObservableObject {
                inboxBulkDeleteOwner?.host === inboxContext.host,
                inboxBulkDeleteOwner?.request.utf8.elementsEqual(request.utf8) == true,
                archivedTasksDeleteRequest?.utf8.elementsEqual(request.utf8) == true {
-                // This attempt never reached host.call; retain no unprovable debt.
+
                 let warm = inboxBulkConfirmationCurrent(inboxContext)
                 archivedTasksDeleteRequest = nil; inboxBulkDeleteOwner = nil
                 if warm { retryNeeded = false }
@@ -25131,8 +25114,7 @@ final class CoreModel: ObservableObject {
         historyError = failure.localizedDescription
     }
 
-    // RN permits Archive completion metadata under an archived parent. Core
-    // still checks the live source, cancellation and the exact displayed token.
+
     func archiveTaskCompletedAtOptions(_ displayed: CoreObject) async -> CoreObject? {
         guard historyArchiveRowActionsEnabled, historyArchived else { return nil }
         busy = true
@@ -25276,8 +25258,7 @@ final class CoreModel: ObservableObject {
         historyError = failure.localizedDescription
     }
 
-    // Busy is checked by each opening/write caller; context remains stable during a read.
-    // Every accepted context still binds the exact displayed row and pending view edits.
+
     func referenceTaskStatusContext(_ displayed: CoreObject) -> String? {
         referenceTaskRowContext(displayed, retainingBackdate: false)
     }
@@ -25915,8 +25896,8 @@ final class CoreModel: ObservableObject {
             if let sortBy = input["sortBy"] as? String { params["sortBy"] = sortBy }
             return params
         }
-        // Archive revisions identify data/time, not choices. Keep the raw sort
-        // override (or its absence); core can resolve a different displayed sort.
+
+
         var params = input
         params.removeValue(forKey: "filterEdit")
         params["segment"] = snapshot.text("segment")
@@ -26225,8 +26206,8 @@ final class CoreModel: ObservableObject {
                     throw CocoaError(.coderReadCorrupt)
                 }
                 var rows = next.objects("rows")
-                // A removed person falls back to core's All selection. Rebuild
-                // every requested window using that effective person and revision.
+
+
                 let personChanged = next.text("person") != waitingPerson
                 let target = min(personChanged ? pageSize : waitingLoadedDepth, next.number("total"))
                 while rows.count < target {
@@ -26399,8 +26380,8 @@ final class CoreModel: ObservableObject {
         projectTaskOrderError = nil
         projectTaskOrderCurrent = false
         if caller == .contexts && contextsCaller == .project {
-            // Reuse the existing Project route, as RN navigate does. Otherwise
-            // Project Back and Contexts Back would point at each other.
+
+
             NSLog("Native iOS Project caller reused releaseCheck=v1.3.4/ios-task-preview-links destination=project source=contexts-return")
         } else {
             projectCaller = caller
@@ -26602,7 +26583,7 @@ final class CoreModel: ObservableObject {
             projectDeleteRequest = request
             let result = try await query("projectDeleteWrite", [request])
             try acknowledgeProjectDelete(result)
-            // The saved Project is now in Trash; the detail cannot remain selected.
+
             selectedSurface = projectCaller
             projectCurrent = false
             projectFilterSession += 1
@@ -27062,7 +27043,7 @@ final class CoreModel: ObservableObject {
             projectCurrent = true
             projectError = nil
         } catch {
-            // Restart at zero after a stale or failed window; never append mixed revisions.
+
             guard session == projectFilterSession, selectedSurface == .project,
                   snapshot.text("projectId") == projectHeader.text("id") else { return }
             await readProjectDetail()
@@ -27092,7 +27073,7 @@ final class CoreModel: ObservableObject {
         for attempt in 0..<2 {
             do {
                 guard ownedGuard?() != false else { return false }
-                // Reference labels may be aliases; resolve the destination header through core.
+
                 if projectHeader["title"] == nil {
                     try await readProjectRenameOptions(ownedGuard: ownedGuard)
                     guard ownedGuard?() != false else { return false }
@@ -27102,12 +27083,12 @@ final class CoreModel: ObservableObject {
                     sheetOpen: sheetOpen, edit: edit)
                 guard ownedGuard?() != false, session == projectFilterSession, selectedSurface == .project,
                       id == projectHeader.text("id"), sheetOpen == projectFiltersPresented else { return false }
-                // RN resets the completed pile when its grouping mode changes (including type/status edits).
+
                 if !collapsed, !projectDetail.isEmpty,
                    next.object("controls").flag("groupCompletedTasksLast")
                     != projectDetail.object("controls").flag("groupCompletedTasksLast") {
                     collapsed = true
-                    // Apply the one pending edit to its original state again; never cycle a token twice.
+
                     next = try await projectDetailWindow(projectID: id, offset: 0, limit: pageSize,
                         showCompleted: showCompleted, collapsed: collapsed, filters: filters,
                         sheetOpen: sheetOpen, edit: edit)
@@ -27254,7 +27235,7 @@ final class CoreModel: ObservableObject {
                   result.count == 1, ["ltr", "rtl"].contains(result.text("direction")) else { return }
             projectNotesDraftDirection = result.text("direction")
         } catch {
-            // Presentation reads must not interrupt editing or change write/retry state.
+
         }
     }
 
@@ -27635,7 +27616,7 @@ final class CoreModel: ObservableObject {
         projectAttachmentDownloadTask = Task { await performProjectAttachmentDownload(owner, selectedRaw: selectedRaw) }
     }
 
-    // Cancellation revokes delivery, never the busy owner of an awaited bridge call.
+
     func cancelProjectAttachmentDownload() {
         guard projectAttachmentDownloadOwner != nil else { return }
         projectAttachmentDownloadGeneration += 1
@@ -27701,7 +27682,7 @@ final class CoreModel: ObservableObject {
                 }
             }
         }
-        // Join an already admitted blur before freezing its ordinary Notes admission.
+
         if let flush = projectNotesFlushTask {
             guard await flush.value else { return }
         }
@@ -27762,7 +27743,7 @@ final class CoreModel: ObservableObject {
                 if try await readProjectFileAvailabilityInventory(owner.host, initialOwner: owner, requestJSON: request) {
                     return
                 }
-            } catch { /* Inventory failure never clears a previously adopted Download. */ }
+            } catch {                                                                     }
             guard host === owner.host, projectAttachmentDownloadOwner?.id == owner.id else { return }
             if projectFileAvailabilityPending { return }
             requireSettingsSyncRestart(owner.host)
@@ -27805,9 +27786,8 @@ final class CoreModel: ObservableObject {
         guard let currentHost = host else { return nil }
         let projectID = projectHeader.text("id"), session = projectFilterSession
         let admission = projectFileImportAdmission
-        // A blur may already have queued its ordinary Notes flush. Let that
-        // admitted task finish even if it owns busy; this awaits existing work
-        // and admits no new write before the full check below.
+
+
         if let flush = projectNotesFlushTask {
             guard await flush.value else { return nil }
         }
@@ -27837,15 +27817,15 @@ final class CoreModel: ObservableObject {
     }
 
     func cancelProjectFileImport() {
-        // Invalidate a Prepare still awaiting an already admitted Notes flush.
+
         projectFileImportAdmission = UUID()
         projectFileImportClaim = nil
         projectFileImporterID = nil
         projectFileImporterPresented = false
         projectFileAddOpening = false
         projectFileImportTask?.cancel()
-        // Cancellation ends delivery, not a native intent already submitted.
-        // Its original operation/summary remains available for Retry or Stop.
+
+
     }
 
     func completeProjectFileImport(_ result: Result<[URL], Error>, pickerID: UUID) async {
@@ -27893,8 +27873,8 @@ final class CoreModel: ObservableObject {
                   projectFileImportCurrent(claim), !projectNotesDirty, !projectNotesWritePending else {
                 throw CancellationError()
             }
-            // Selection may have remained open across another client's edit.
-            // Read the current Project and token now, never the pre-picker array.
+
+
             try await readSelectedSurface()
             guard projectFileImportCurrent(claim), !busy, !retryNeeded,
                   !projectNotesDirty, !projectNotesWritePending else { throw CancellationError() }
@@ -27970,7 +27950,7 @@ final class CoreModel: ObservableObject {
                   projectAttachmentDownloadOwner?.session == initialOwner.session else { throw CancellationError() }
         }
         guard let summary = try parseProjectFileAvailabilitySummary(raw) else {
-            // Disappearance is not a terminal acknowledgment for an adopted UUID.
+
             guard previous == nil else { throw CocoaError(.coderReadCorrupt) }
             return false
         }
@@ -28010,7 +27990,7 @@ final class CoreModel: ObservableObject {
             projectFileAvailabilityAcknowledged = ProjectFileAvailabilityOperation(id: UUID(), host: owner.host,
                 requestID: summary.text("requestId"), projectID: owner.projectID, attachmentID: owner.attachmentID,
                 session: owner.session, requestJSON: requestJSON)
-        } catch { /* A failed optional inventory cannot revoke the exact terminal foreground ACK. */ }
+        } catch {                                                                                    }
     }
 
     private func acknowledgeProjectFileAvailability(_ raw: String, operation: ProjectFileAvailabilityOperation,
@@ -28029,7 +28009,7 @@ final class CoreModel: ObservableObject {
             terminal = status == "available" || status == "unrecoverable"
         }
         guard abandoned || terminal else { throw CocoaError(.coderReadCorrupt) }
-        // Clear only this exact request after settlement, before ordinary refresh.
+
         projectFileAvailabilityAcknowledged = operation
         projectFileAvailabilityOperation = nil
         projectFileAvailabilitySummary = [:]
@@ -28052,7 +28032,7 @@ final class CoreModel: ObservableObject {
     func stopProjectFileAvailability() async { await resolveProjectFileAvailability(stop: true) }
 
     func cancelProjectFileAvailabilityRecovery() {
-        // Keep the durable request and busy owner until the native invocation drains.
+
         projectFileAvailabilityRecoveryTask?.cancel()
     }
 
@@ -28101,7 +28081,7 @@ final class CoreModel: ObservableObject {
             } else if !Task.isCancelled, !appLock.concealed, let session = operation.session,
                       selectedSurface == .project, projectFilterSession == session,
                       projectHeader.text("id") == operation.projectID {
-                // Download recovery also refreshes archived Projects; Add's edit-only guard does not apply.
+
                 try await readSelectedSurface()
                 guard host === operation.host, !Task.isCancelled, !appLock.concealed,
                       selectedSurface == .project, projectFilterSession == session,
@@ -28197,8 +28177,8 @@ final class CoreModel: ObservableObject {
             && result["attachmentIds"] as? [String] == [operation.requestID]) else {
             throw CocoaError(.coderReadCorrupt)
         }
-        // The exact native ACK settles ownership even if presentation was lost.
-        // A subsequent inventory/read failure must not replay a completed Add.
+
+
         try clearProjectFileAdd(operation)
     }
 
@@ -28215,7 +28195,7 @@ final class CoreModel: ObservableObject {
             }
         }
         catch {
-            // An unrelated failed read cannot erase a matching retained owner.
+
             if projectFileAddOperationCurrent(operation) { retryNeeded = true }
         }
     }
@@ -28591,8 +28571,8 @@ final class CoreModel: ObservableObject {
 
     private func flushProjectNotesEdit(attachmentOpenClaim: UUID?, fileAddClaim: UUID? = nil) async -> Bool {
         if let task = projectNotesFlushTask { return await task.value }
-        // A delayed blur cannot install a fresh flush under Open's freeze and
-        // make the captured Open await a task which refuses its own admission.
+
+
         guard (attachmentOpenClaim != nil || !projectAttachmentOpening),
               fileAddClaim != nil || (!projectFileAddOpening && projectFileImporterID == nil) else { return false }
         if !projectNotesExpanded || !projectNotesEditMode || !projectNotesEditLoaded {
@@ -28614,8 +28594,8 @@ final class CoreModel: ObservableObject {
     }
 
     private func performProjectNotesFlush(attachmentOpenClaim: UUID?, fileAddClaim: UUID?) async -> Bool {
-        // This captured Open may flush its already-present notes before reading
-        // files, while the opening flag continues to refuse fresh Project work.
+
+
         let ownedOpen = attachmentOpenClaim.map {
             projectAttachmentOpenClaim == $0 && projectAttachmentOpening && projectFileOpenPresentation == nil
         } == true
@@ -28985,8 +28965,8 @@ final class CoreModel: ObservableObject {
                 "query": text, "filters": filters.isEmpty ? NSNull() : filters as Any, "limit": 100])])
             guard generation == searchGeneration, selectedSurface == .search, !retryNeeded, !taskPresented,
                   ownsOperation || !busy else { return }
-            // Empty input gets its entire default filter object from core. Never
-            // synthesize defaults or copy an older response over newer input.
+
+
             if searchFilters.isEmpty { searchFilters = value.object("defaultFilters") }
             searchView = value
             publishedSearchGeneration = generation
@@ -29032,8 +29012,8 @@ final class CoreModel: ObservableObject {
         error = nil
         defer { finishOperation() }
         do {
-            // This is core's final selection, never a native toggle/cycle.
-            // The host journals it unchanged for exact recovery.
+
+
             _ = try await query("setAreaFilter", [try json(next)])
         } catch {
             retryNeeded = !isDefiniteRejection(error)
@@ -29053,7 +29033,7 @@ final class CoreModel: ObservableObject {
             guard let index = inboxItemIndex(automaticRow),
                   index >= max(0, offset - 5),
                   inboxAutomaticPageAttempt?.generation != generation || inboxAutomaticPageAttempt?.offset != offset else { return }
-            // Busy callbacks rearm a missed appearance, but a failed admitted window waits for More.
+
             inboxAutomaticPageAttempt = (generation, offset)
         }
         let target = offset + min(pageSize, snapshot.number("total") - offset)
@@ -29076,8 +29056,8 @@ final class CoreModel: ObservableObject {
         } catch {
             guard current() else { return }
             do {
-                // Rebuild the requested depth once against a fresh minute/data revision.
-                // Keep both windows local until they agree; a second failure leaves the saved projection intact.
+
+
                 var staged = try await query("inboxView", [try json(params.merging(["offset": 0, "limit": pageSize]) { _, next in next })], beforeDispatch: current)
                 guard current() else { return }
                 let total = staged.number("total"), revision = staged.text("revision")
@@ -29390,8 +29370,8 @@ final class CoreModel: ObservableObject {
             if close && taskPresented { dismissTask() }
             Task { [currentHost] in await currentHost.recordEditorAttachmentAcknowledgment(operation: "discard") }
         } catch {
-            // An exact decision may have detached the editor before cleanup
-            // refused. Reread the host's actual phase; never infer release.
+
+
             try? await readTaskAttachmentInventory(currentHost, adoptEditor: true)
             taskAttachmentError = error.localizedDescription
             taskRecoveryGateVisible = true
@@ -29688,8 +29668,8 @@ final class CoreModel: ObservableObject {
             if !owned { await readRecoveredTaskPreview() }
             if owned {
                 try requireOwnedRestore()
-                // The gate owns the SwiftUI restore task. Dismiss only after
-                // its final await so removing that view cannot cancel hydration.
+
+
                 taskRecoveryGateVisible = false
             }
         } catch {
@@ -29723,8 +29703,8 @@ final class CoreModel: ObservableObject {
 
     private func dismissTask(refreshCaller: Bool = true) {
         cancelTaskFileImport()
-        // Resetting the checklist publishes a value. Close must never turn
-        // that reset into a new checkpoint or replace a Keep-for-later draft.
+
+
         taskRecoveryHydrating = true
         taskPresented = false
         taskEditor = [:]
@@ -29750,8 +29730,8 @@ final class CoreModel: ObservableObject {
             taskRecoveryChecklistTouched = false
             taskRecoveryAttachmentsOwned = false
         }
-        // Reset can commit while the editor stays open; Close and Discard must
-        // also refresh the caller, including its status membership and counts.
+
+
         if refreshCaller { Task { await refresh() } }
     }
 
@@ -29800,8 +29780,8 @@ final class CoreModel: ObservableObject {
     }
 
     private func flushTaskChecklistInputs(id: String, session: Int, append: Bool = true) async throws {
-        // Reverse order keeps global indexes stable when a pasted multiline title
-        // inserts rows after its source item.
+
+
         for _ in 0..<8 {
             for index in taskChecklistInputs.keys.sorted(by: >) {
                 guard let text = taskChecklistInputs[index] else { continue }
@@ -30145,8 +30125,8 @@ final class CoreModel: ObservableObject {
             referenceProjectNextActionRequest = nil
             retryNeeded = false
             referenceProjectNextActionError = failure.localizedDescription
-            // A refusal may invalidate the accepted candidates. Only this readonly
-            // read can replace that snapshot; the entered draft remains intact.
+
+
             await readReferenceProjectNextAction()
             if referenceProjectNextActionPresented { referenceProjectNextActionError = failure.localizedDescription }
         } else {
@@ -30404,7 +30384,7 @@ final class CoreModel: ObservableObject {
               !taskPersonCreateOwed, !taskPersonCreateNeedsReview,
               taskChecklistWriteKind == nil, !taskChecklistReadPending, let host else { return }
         if requestTaskOwnedMenuAction(.delete) { return }
-        // Like RN, Delete acts on the saved Task. Keep unsaved edits until its ACK.
+
         taskRecoveryOwn(["title"])
         busy = true
         taskError = nil
@@ -30456,8 +30436,8 @@ final class CoreModel: ObservableObject {
               !taskPersonCreateOwed, !taskPersonCreateNeedsReview,
               taskChecklistWriteKind == nil, !taskChecklistReadPending, let host else { return }
         if requestTaskOwnedMenuAction(.duplicate) { return }
-        // RN duplicates the saved source, not the unsaved editor. Freeze even a
-        // clean editor so success and cold replay settle the same owned snapshot.
+
+
         taskRecoveryOwn(["title"])
         busy = true
         taskError = nil
@@ -30510,7 +30490,7 @@ final class CoreModel: ObservableObject {
               !taskScheduleUpdating, !taskAttachmentOpening, !taskLinkSheetActive,
               !taskPersonCreateOwed, !taskPersonCreateNeedsReview,
               taskChecklistWriteKind == nil, !taskChecklistReadPending, let host else { return }
-        // RN uses the draft title for the project name, but moves the saved task.
+
         let title = (taskTitleDraft.isEmpty ? taskOriginalDraft.text("title") : taskTitleDraft)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if requestTaskOwnedMenuAction(.promote, promoteTitle: title) { return }
@@ -30624,8 +30604,8 @@ final class CoreModel: ObservableObject {
             }
             let associationFields = ["projectId", "areaId", "sectionId"]
             if associationFields.contains(where: { current.text($0) != taskOriginalDraft.text($0) }) {
-                // A move can clear companion associations. Compare the complete
-                // original tuple so a concurrent section/area edit is not erased.
+
+
                 for field in associationFields {
                     base[field] = taskOriginalDraft.text(field)
                     patch[field] = current.text(field)
@@ -30774,8 +30754,8 @@ final class CoreModel: ObservableObject {
         taskError = nil
         defer { finishOperation() }
         do {
-            // Switching an estimate preset replaces its text buffer; other
-            // controls first resolve it through core into the complete draft.
+
+
             try await resolveTaskEditorInputs(estimate: field != "timeEstimate")
             guard !taskEditor.flag("readOnly") else { return }
             let editor = try await query("editDraft", [try json(taskEditRequest(
@@ -30995,9 +30975,8 @@ final class CoreModel: ObservableObject {
     private func synchronizeTaskRelativeInput() {
         guard !taskScheduleEdits.contains(where: { $0.control == "relativeStart" }) else { return }
         let relative = taskEditor.object("fields").object("relativeStart")
-        // A completed blank edit normalizes to zero in core. Feeding that reply
-        // into a focused UITextField can replace the next digit being entered.
-        // Keep raw text until an explicit blur/action AND the relative queue drain.
+
+
         if !taskRelativeInputOwned || taskRelativeInputCommitRequested {
             let resolvedInput = taskRelativeInputOwned && taskRelativeInputCommitRequested
             taskRelativeAmountInput = relative.isEmpty ? "" : String(relative.number("amount"))
@@ -31024,8 +31003,8 @@ final class CoreModel: ObservableObject {
 
     func setTaskRelativeAmount(_ text: String) {
         guard taskDateFieldAvailable("startTime"), taskRelativeAmountInput != text else { return }
-        // Claim ownership in the binding setter itself; FocusState onChange may
-        // arrive after this callback. No core reply may win that opening gap.
+
+
         beginTaskRelativeInput()
         taskRelativeAmountInput = text
         enqueueTaskScheduleEdit("relativeStart", edit: ["type": "relativeStart", "amount": text, "unit": taskRelativeUnitInput])
@@ -31149,15 +31128,15 @@ final class CoreModel: ObservableObject {
     private func enqueueTaskScheduleEdit(_ control: String, edit: CoreObject, coalesces: Bool = true) {
         taskScheduleSequence += 1
         let next = TaskScheduleEdit(id: taskScheduleSequence, control: control, edit: edit, coalesces: coalesces)
-        // Correcting a refused control removes that refused edit without moving
-        // the correction ahead of any intervening, dependent control's edit.
+
+
         if coalesces, let failed = taskScheduleFailedID,
            taskScheduleEdits.contains(where: { $0.id == failed && $0.control == control && $0.coalesces }) {
             taskScheduleEdits.removeAll { $0.id == failed }
             taskScheduleFailure = nil
             taskScheduleFailedID = nil
         }
-        // Only consecutive edits from the same control can replace each other.
+
         if coalesces, taskScheduleEdits.last?.coalesces == true, taskScheduleEdits.last?.control == control {
             taskScheduleEdits[taskScheduleEdits.count - 1] = next
         }
@@ -31203,8 +31182,8 @@ final class CoreModel: ObservableObject {
                     checkpointTaskDraft()
                 } catch {
                     guard taskPresented, taskScheduleSession == session, taskRecoverySession == recoverySession, viewedTaskID == id else { return }
-                    // A newer edit of this control explicitly supersedes a
-                    // refused value. Other controls and Save cannot erase it.
+
+
                     if operation.coalesces, taskScheduleEdits.contains(where: { $0.id > operation.id && $0.control == operation.control && $0.coalesces }) {
                         taskScheduleEdits.removeAll { $0.id == operation.id }
                         continue
@@ -31241,11 +31220,11 @@ final class CoreModel: ObservableObject {
             if estimate { try await resolveTaskEstimateInput() }
             try await resolveTaskTimeSpentInput()
             try await resolveTaskTokenInputs()
-            // A final native wheel/input callback can arrive during either
-            // awaited normalization. Drain it before capturing a save payload.
+
+
         } while !taskScheduleEdits.isEmpty || taskScheduleTask != nil || taskTimeSpentPending
-        // Explicit action callers already resigned input. Include any final
-        // binding callback delivered during normalization before reconciling text.
+
+
         commitTaskRelativeInput()
         commitTaskRecurrenceInputs()
     }
@@ -31257,8 +31236,7 @@ final class CoreModel: ObservableObject {
         if await prepareTaskDatePicker() { await readTaskView() }
     }
 
-    /// Used by picker Open/Done; waits for the final wheel change without adding
-    /// a synthetic change for the initial date shown by a native wheel.
+
     func prepareTaskDatePicker() async -> Bool {
         guard taskPresented, !taskEditor.isEmpty, !taskEditor.flag("readOnly"), !busy, !retryNeeded else { return false }
         busy = true
@@ -31272,8 +31250,8 @@ final class CoreModel: ObservableObject {
 
     func editTaskDate(_ field: String, action: String, preset: String = "") {
         guard taskDateFieldAvailable(field), !busy, ["clear", "dateOnly", "quick"].contains(action) else { return }
-        // Resolve DTO values in queue order. A quick chip can toggle its selected
-        // date, so two taps must never coalesce into one.
+
+
         enqueueTaskScheduleEdit(field + ":" + action,
             edit: ["type": "dateAction", "field": field, "action": action, "preset": preset], coalesces: false)
     }
@@ -31283,8 +31261,8 @@ final class CoreModel: ObservableObject {
             return ["type": "fields", "patch": ["showFutureRecurrence": !taskDraft.flag("showFutureRecurrence")]]
         }
         if input.text("type") == "monthlyCustom" {
-            // Normalize the dialog's raw interval through core within this queue.
-            // Publish only the final custom edit, so a refused Apply keeps its buffer.
+
+
             let normalized = try await query("editDraft", [try json(taskEditRequest(
                 ["type": "recurrence", "edit": ["kind": "interval", "text": input.text("intervalText")]]))])
             var custom = input.object("custom")
@@ -31463,8 +31441,8 @@ final class CoreModel: ObservableObject {
 
     func preserveTaskTokenInputForTransientModal() {
         guard taskPresented, !taskEditor.flag("readOnly") else { return }
-        // Resigning the first responder can deliver FocusState's blur later than
-        // the modal's Cancel callback. Suppress that one blur, not future edits.
+
+
         taskTokenSuppressNextBlur.formUnion(taskTokenFocused)
     }
 
@@ -31493,7 +31471,7 @@ final class CoreModel: ObservableObject {
         guard taskTokenChoicesCurrent(field), ["matches", "quick"].contains(kind),
               let choice = taskTokenSuggestions[field]?.objects(kind).first(where: { $0.text("value") == value }),
               let text = choice["text"] as? String else { return }
-        // Pure text replacement keeps RN's focused input and never disables it.
+
         setTaskTokenInput(field, text: text)
     }
 
@@ -31563,8 +31541,8 @@ final class CoreModel: ObservableObject {
     }
 
     private func readTaskTokenSuggestions(_ field: String, raw: String, id: String) async throws -> CoreObject {
-        // Suggestions have a bounded query; a free-text assignment may be longer.
-        // Keep that scalar intact for shared edit/save validation without querying it.
+
+
         if field == "assignedTo", raw.utf16.count > 2000 {
             return ["draftValue": raw, "matches": [CoreObject](), "quick": [CoreObject]()]
         }
@@ -31573,8 +31551,8 @@ final class CoreModel: ObservableObject {
 
     private func acceptTaskTokenRead(_ result: CoreObject, field: String, raw: String) throws {
         guard let canonical = result["draftValue"] as? String else { throw CocoaError(.coderReadCorrupt) }
-        // Opening a task must not rewrite untouched legacy token spelling.
-        // RN normalizes a field only after editing or committing that input.
+
+
         if taskTokenEdited.contains(field) { taskTokenCanonical[field] = canonical }
         taskTokenResolvedInputs[field] = raw
         taskTokenSuggestions[field] = result
@@ -31597,8 +31575,8 @@ final class CoreModel: ObservableObject {
         guard !taskEditor.flag("readOnly") else { return }
         let id = viewedTaskID
         let session = taskScheduleSession
-        // Background reads only publish one canonical field. Whole editor edits
-        // are serialized here, against the latest draft, at an action boundary.
+
+
         while true {
             for field in taskTokenFields { invalidateTaskTokenRead(field) }
             let inputs = taskTokenInputs
@@ -31645,7 +31623,7 @@ final class CoreModel: ObservableObject {
         taskDestinationQuery = ""
         invalidateTaskDestinationRead()
         taskDestinationError = nil
-        // The UI has synchronously resigned its input before this operation.
+
         busy = true
         defer { finishOperation() }
         do {
@@ -31660,7 +31638,7 @@ final class CoreModel: ObservableObject {
         taskDestinationQuery = ""
         invalidateTaskDestinationRead()
         taskDestinationError = nil
-        // The value labels do not depend on query. Next opening fetches fresh choices.
+
     }
 
     func setTaskDestinationQuery(_ text: String) {
@@ -31732,7 +31710,7 @@ final class CoreModel: ObservableObject {
         guard taskPresented, viewedTaskID == id else { return }
         taskEditor = editor
         resetTaskEstimateInput()
-        // Association labels belong to the old draft until the fresh read succeeds.
+
         invalidateTaskDestinationRead()
         taskDestination = [:]
     }
@@ -31854,7 +31832,7 @@ final class CoreModel: ObservableObject {
                         intent["readOnly"] = editor.flag("readOnly")
                         let opening = try await query("taskOpenTab", [try json(intent)])
                         guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
-                        // Resolve before publishing the editor. A manual/recovered tab is already user intent.
+
                         if taskOpeningIntent != nil {
                             taskInitialTab = opening.text("tab")
                             taskOpeningIntent = nil
@@ -31890,8 +31868,8 @@ final class CoreModel: ObservableObject {
                     }
                 }
                 var draft = taskDraft
-                // Archived-project previews use the saved core projection. Do
-                // not enter edit-only normalization or send an editor overlay.
+
+
                 var firstInput: CoreObject = ["id": id, "offset": 0, "limit": pageSize]
                 if !readOnly {
                     firstInput["draft"] = draft
@@ -31900,8 +31878,8 @@ final class CoreModel: ObservableObject {
                 }
                 var next = try await query("taskView", [try json(firstInput)])
                 guard ownedGuard?() != false else { return }
-                // Reactivation requires a fresh opening; this retained session
-                // must not acquire editable rows through its saved-view read.
+
+
                 guard !readOnly || (next.text("id") == id && next["readOnly"] as? Bool == true) else {
                     throw CocoaError(.coderReadCorrupt)
                 }
@@ -31965,8 +31943,8 @@ final class CoreModel: ObservableObject {
                 if !readOnly && (taskSchedulePending || draftChanged || !taskDraftValuesEqual(checklist, taskChecklist)
                     || !taskChecklistInputs.isEmpty || !taskChecklistAppendInput.isEmpty
                     || !taskDraftValuesEqual(attachments, taskAttachments)) {
-                    // A final native input callback may arrive during the view
-                    // or checklist reads. Regenerate before publishing Preview.
+
+
                     try await resolveTaskEditorInputs()
                     guard ownedGuard?() != false else { return }
                     try await flushTaskChecklistInputs(id: id, session: session)
@@ -32097,8 +32075,8 @@ final class CoreModel: ObservableObject {
             edit = ["type": "setExtraAction", "index": index, "value": value]
         } else { return }
         processInboxInputs[field] = value
-        // Adjacent text callbacks for one field supersede each other before the
-        // next pure step read. An in-flight edit has already left this queue.
+
+
         if processInboxPendingEdits.last?.text("type") == edit.text("type")
             && processInboxPendingEdits.last?.text("field") == edit.text("field")
             && (edit.text("type") != "setExtraAction"
@@ -32141,8 +32119,8 @@ final class CoreModel: ObservableObject {
                 processInboxView = next
                 processInboxReadError = nil
             } catch {
-                // A read may have applied its edit before its reply failed. Retry
-                // first reads the current view, then reapplies only desired text.
+
+
                 processInboxReadError = error.localizedDescription
                 return
             }
@@ -32293,7 +32271,7 @@ final class CoreModel: ObservableObject {
     private func acceptProcessInboxResponse(_ wrapper: CoreObject) async throws {
         switch wrapper.text("kind") {
         case "flow":
-            // No library write occurred; this flow response may move steps.
+
             processInboxRequest = nil
             processInboxRequestMethod = nil
             processInboxRequestID = nil
@@ -32306,8 +32284,8 @@ final class CoreModel: ObservableObject {
                   wrapper.object("result").text("taskId") == processInboxRequestTaskID else {
                 throw CocoaError(.coderReadCorrupt)
             }
-            // The host has crossed the durable barrier. A failed next-view read
-            // must never make this decision's UUID eligible for submission again.
+
+
             processInboxRequest = nil
             processInboxRequestMethod = nil
             processInboxRequestID = nil
@@ -32407,7 +32385,7 @@ final class CoreModel: ObservableObject {
         guard processInboxPresented, processInboxSessionID == owner.session,
               !processInboxView.isEmpty, !appLock.concealed else { return }
         do {
-            // Refresh the current step; Undo does not rewind the queue or discard its draft.
+
             let next = try await query("inboxStep", [try processInboxStepInput()])
             guard host === owner.host, processInboxSessionID == owner.session,
                   next.text("sessionId") == owner.session,
@@ -32644,8 +32622,8 @@ final class CoreModel: ObservableObject {
               result.text("taskId") == id, !result.text("title").isEmpty else {
             throw CocoaError(.coderReadCorrupt)
         }
-        // The host has crossed the durable barrier. A later caller read cannot
-        // make this UUID eligible for submission again.
+
+
         mindSweepRequest = nil
         mindSweepRequestID = nil
         mindSweepRequestGroup = nil
@@ -32720,13 +32698,13 @@ final class CoreModel: ObservableObject {
         let originalQuery = contextQuery
         let picker = contextPickerPresented ? ["kind": "context", "query": clearContextQuery ? "" : contextQuery] : nil
         do {
-            // Apply pending note text through core before changing another option.
-            // Never copy a returned note over the local editor: typing may continue across an await.
+
+
             var options = capture.object("options")
             var resolvedEdit = edit
             if options.text("note") != note || edit == nil {
-                // Done can arrive before the debounced preview. Resolve its frozen
-                // query through core now, rather than dropping it or using a stale edit.
+
+
                 let currentPicker = edit == nil ? ["kind": "context", "query": originalQuery] : picker
                 let current = try await readCapture(text: text, note: note, options: options, picker: currentPicker)
                 options = current.object("options")
@@ -32858,7 +32836,7 @@ final class CoreModel: ObservableObject {
             try await readSelectedSurface()
         } catch {
             guard host === currentHost, captureBusyOwner == submission.id else { return }
-            // The host owns the durable request. Freeze this exact draft until its outcome is known.
+
             if !dispatched || isDefiniteRejection(error) { capturePending = false; captureSubmission = nil }
             retryNeeded = capturePending
             self.error = error.localizedDescription
@@ -33341,7 +33319,7 @@ final class CoreModel: ObservableObject {
                             if boardCompletionWarm(owner, foreground: boardRetryForeground) { self.error = label("task.completionOutcomeUnknown") }
                             return
                         }
-                        // No matching durable receipt: preserve the UUID and block a new write.
+
                         let unknown = label("task.completionOutcomeUnknown")
                         try? await readSelectedSurface()
                         if referenceCompletion { referenceError = unknown }
@@ -33468,7 +33446,7 @@ final class CoreModel: ObservableObject {
                 if let acknowledgment {
                     try await acknowledgeTaskDuplicate(try decode(acknowledgment))
                 } else {
-                    // No journal means the invocation never reached its write.
+
                     taskRecoverySnapshot = try await host!.readEditorDraft()
                     guard taskRecoverySnapshot != nil else { throw CocoaError(.coderReadCorrupt) }
                     taskDuplicateRequest = nil
@@ -34843,7 +34821,7 @@ final class CoreModel: ObservableObject {
                 throw CocoaError(.coderReadCorrupt)
             }
         }
-        // Receipt settlement belongs to the submitted host; presentation belongs to this sheet episode.
+
         capturePending = false
         captureSubmission = nil
         retryNeeded = false
@@ -34930,7 +34908,7 @@ final class CoreModel: ObservableObject {
             }
         case "refused": notice = result.object("notice").text("message")
         case "confirmLines":
-            break // The owning submission installs the in-sheet question and its frozen input.
+            break
         default: notice = capture.object("failureNotices").object("save").text("message")
         }
     }
@@ -35111,7 +35089,7 @@ final class CoreModel: ObservableObject {
                 inboxCollapsedGroups = acceptedFold.map
                 inboxPendingFold = nil
             }
-            // Validate against the captured base before core normalization changes the accepted params.
+
             inboxParams = acceptedParams
             if let intent {
                 inboxPendingFilterEdit = nil
@@ -35158,7 +35136,7 @@ final class CoreModel: ObservableObject {
                 inboxFilterNeedsRead = false
                 inboxFilterPickerNeedsRead = false
                 if let intent, error.localizedDescription.hasPrefix("INVALID_INPUT:") {
-                    // A refused pure edit cannot succeed on Retry; retain only newer desired text.
+
                     inboxPendingFilterEdit = nil
                     if let type = intent.textType, inboxFilterTextEdits[type]?.sequence == intent.textSequence {
                         inboxFilterTextEdits.removeValue(forKey: type)
@@ -35239,7 +35217,7 @@ final class CoreModel: ObservableObject {
                 throw CocoaError(.coderReadCorrupt)
             }
             focusSavedFilterOptions = options
-            // A refreshed conflict needs a confirmation showing the current target label.
+
             let operation = focusSavedFilterOperation
             let offered = operation.text("type") == "delete"
                 ? focus.object("controls").object("savedFilters").object("chips").objects("items")
@@ -35482,8 +35460,8 @@ final class CoreModel: ObservableObject {
     }
 
     func performPomodoroAction(_ requestedAction: String?, values: CoreObject = [:]) async {
-        // A tapped action waits for the in-flight read instead of being dropped by the owner guard.
-        // While it waits, automatic reads are not re-admitted, so the action takes the owner next.
+
+
         if requestedAction != nil {
             pomodoroActionsWaiting += 1
             var awaited: Task<Void, Never>?
@@ -35497,8 +35475,8 @@ final class CoreModel: ObservableObject {
             if requestedAction != nil { admitPomodoroRuntime() }
             return
         }
-        // A panel read never holds `busy`, so a tap right after another operation is not dropped.
-        // pomodoroWorkHost still serializes Pomodoro work; only a write holds `busy`.
+
+
         var holdsBusy = requestedAction != nil
         if holdsBusy { busy = true }
         pomodoroWorkHost = owner; pomodoroNeedsRead = false; pomodoroError = nil
@@ -35520,7 +35498,7 @@ final class CoreModel: ObservableObject {
             else { action = before.flag("needsReconcile") ? "reconcile" : nil }
             if let action {
                 if !holdsBusy {
-                    // Another operation may have started during the read; write after it finishes.
+
                     guard host === owner, writable() else { pomodoroNeedsRead = true; return }
                     busy = true; holdsBusy = true
                 }
@@ -35574,7 +35552,7 @@ final class CoreModel: ObservableObject {
                 pomodoroFeedback = ["sessionID": result.text("sessionID"), "generation": generation, "value": event]
             }
         }
-        // SQL proof can precede canonical projection; keep the exact request until this read is admitted.
+
         let saved = try await readPomodoroPanel(command.host)
         guard saved.text("kind") == "ready" else { throw CocoaError(.coderReadCorrupt) }
         if !result.isEmpty {
@@ -35628,7 +35606,7 @@ final class CoreModel: ObservableObject {
               pomodoroTasks.isEmpty || pomodoroTasks.count < pomodoroTaskCount else { return }
         busy = true
         defer { finishOperation() }
-        // One fresh Focus snapshot may replace stale pages; never mix revisions.
+
         for attempt in 0..<2 {
             let revision = pomodoroPickerRevision, offset = pomodoroTasks.count
             do {
@@ -35684,7 +35662,7 @@ final class CoreModel: ObservableObject {
         focusGroupError = nil
         defer { finishOperation() }
         do {
-            // Drain accepted filter/sort edits before freezing the checked request.
+
             focusReadTask?.cancel()
             focusGeneration += 1
             await readFocus(ownsOperation: true)
@@ -35788,8 +35766,8 @@ final class CoreModel: ObservableObject {
     func selectFocusSavedFilter(_ id: String) {
         guard focusControlsEnabled, focus.object("controls").object("savedFilters").object("chips").objects("items")
             .contains(where: { $0.text("id") == id }) else { return }
-        // A saved chip's edit changes from apply to clear when selected. Resolve
-        // each queued tap against current core controls, including rapid repeats.
+
+
         enqueueFocusEdit(["savedID": id])
         focusLoadedDepth = [:]
         requestFocusRead(delay: 0)
@@ -35814,8 +35792,8 @@ final class CoreModel: ObservableObject {
         var next = entry
         next["sequence"] = focusEditSequence
         let kind = focusFilterEditType(next)
-        // Only a core-refused location may be discarded. Put the explicit
-        // correction/Clear after intervening edits, preserving accepted order.
+
+
         if kind == "setLocation" || kind == "clear", let refused = focusRefusedLocationID {
             focusEdits.removeAll { $0.number("sequence") == refused }
             focusRefusedLocationID = nil
@@ -35841,7 +35819,7 @@ final class CoreModel: ObservableObject {
         focusPickerName = ""
         focusPickerQuery = ""
         focusPickerCurrent = false
-        // A response belonging to the closed picker must not replace a later one.
+
         if focusLoading { requestFocusRead(delay: 0) }
     }
 
@@ -35958,8 +35936,8 @@ final class CoreModel: ObservableObject {
                         next = try await focusPage(state: next.object("controls").object("state"), edit: edit)
                     } catch {
                         guard focusReadAllowed(generation, ownsOperation: ownsOperation) else { return }
-                        // This is a pure read: INVALID_INPUT is a definite
-                        // refusal, not an uncertain write or transport failure.
+
+
                         if focusFilterEditType(entry) == "setLocation", error.localizedDescription.hasPrefix("INVALID_INPUT:") {
                             let sequence = entry.number("sequence")
                             if edits.contains(where: {
@@ -35996,7 +35974,7 @@ final class CoreModel: ObservableObject {
                         guard window.text("revision") == revision, window.text("key") == key,
                               window.number("total") == sections[index].number("total"), window.number("rowTotal") == total,
                               window.objects("rows").count == limit else { throw CocoaError(.coderReadCorrupt) }
-                        // Group starts are absolute section indices; never add the window offset.
+
                         groups += window.objects("groups")
                         rows += window.objects("rows")
                     }
@@ -36456,8 +36434,8 @@ final class CoreModel: ObservableObject {
             let holdRefresh = method == "areaFilter" && trashBulkTestMode == "ordinary-refresh"
                 && trashPurgeTestMutationStarted && trashPurgeConfirmation != nil
             if (holdSelection || holdAck || holdRefresh), !trashBulkTestHeldOnce {
-                // The real Host has already returned this response. This delays
-                // App delivery only and never substitutes a storage failure.
+
+
                 trashBulkTestHeldOnce = true
                 await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                     trashBulkTestWaiter = continuation; publishTrashBulkTestState()
@@ -36502,9 +36480,8 @@ final class CoreModel: ObservableObject {
                   !captured.text("revision").isEmpty else { throw CocoaError(.coderReadCorrupt) }
             if ["Task196 CASE", "Task196 imported"].contains(read.query),
                referenceBulkRemoveTestHeldQueries.insert(read.query).inserted {
-                // Hold an actual host DTO. Cancellation deliberately releases it
-                // to the normal caller's generation/session guards, rather than
-                // replacing the stale-response test with a cancelled debounce.
+
+
                 recordReferenceBulkRemoveTestRead("held", read: read)
                 try? await Task.sleep(nanoseconds: 900_000_000_000)
                 recordReferenceBulkRemoveTestRead("delivered", read: read, cancelled: Task.isCancelled)
@@ -36519,7 +36496,7 @@ final class CoreModel: ObservableObject {
             let restore: CoreObject = ["requestId": UUID().uuidString.lowercased(),
                 "expectedPersonId": request.text("personId"), "name": request.object("expected").text("name"),
                 "note": "", "referenceLink": ""]
-            // Simulate a later client restoration through the real shared write policy.
+
             _ = try await host.call("managePersonCreate", argumentsJSON: json([try json(restore)]))
         }
         #endif
@@ -36559,8 +36536,8 @@ final class CoreModel: ObservableObject {
     }
     private func finishOperation() {
         if pomodoroWorkHost == nil {
-            // A hidden ready panel (Pomodoro off) re-reads on source, clock and scene changes;
-            // an ordinary operation does not need another read.
+
+
             if pomodoroPanel.text("kind") != "ready" || pomodoroPanel.flag("visible") { pomodoroNeedsRead = true }
             pomodoroAlarmWakeTicket &+= 1
         }
@@ -36587,8 +36564,8 @@ final class CoreModel: ObservableObject {
         presentQueuedReferenceProjectNextAction()
         if let id = referenceProjectNextActionEditID, ready, !retryNeeded, !taskPresented, !appLock.concealed {
             referenceProjectNextActionEditID = nil
-            // This ID is from an exact acknowledged Add. It need not be visible
-            // in Reference, and must never be reconstructed by parsing the input.
+
+
             prepareTaskPresentation(id, initialTab: "task")
             Task { await readTaskView() }
         }

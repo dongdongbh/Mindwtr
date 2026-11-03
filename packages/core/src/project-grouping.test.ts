@@ -43,7 +43,7 @@ describe('buildProjectGroups', () => {
                 project('missing-area', 'active', { areaId: 'missing' }),
                 project('deleted', 'active', { areaId: work.id, deletedAt: now }),
             ],
-            // The module respects caller order instead of re-sorting Areas.
+
             orderedAreas: [work, home],
             areaFilter: { included: [], excluded: [] },
             tagFilter: { kind: 'all' },
@@ -142,12 +142,12 @@ describe('buildProjectGroups', () => {
         const input = { projects, orderedAreas: [home, work], areaFilter: { included: [], excluded: [] }, tagFilter: { kind: 'all' as const } };
         const ids = (groups: ReturnType<typeof buildProjectGroups>) => groups.active.map((group) => group.projects.map((item) => item.id));
 
-        // A drag list keeps the stored order.
+
         expect(ids(buildProjectGroups(input))).toEqual([
             ['home-first', 'home-starred'],
             ['work-plain', 'work-starred-early', 'work-starred-late'],
         ]);
-        // Starred first, each half still in the stored order, and never across areas.
+
         expect(ids(buildProjectGroups({ ...input, pinFocused: true }))).toEqual([
             ['home-starred', 'home-first'],
             ['work-starred-early', 'work-starred-late', 'work-plain'],
@@ -196,7 +196,7 @@ describe('planProjectMove', () => {
 
     it('swaps a project with its shown neighbour in the area stored order', () => {
         expect(shown.projects.map((item) => item.id)).toEqual(['starred', 'a', 'b']);
-        // 'parked' sits between them in stored order but is not shown here; it keeps its place.
+
         expect(planProjectMove(shown, projects, 'b', 'up')).toEqual({
             areaId: 'home',
             orderedIds: ['b', 'parked', 'a', 'starred'],
@@ -210,7 +210,7 @@ describe('planProjectMove', () => {
     });
 });
 
-// Android offers RN's long-press moves from core's own rule (#1263 review NOTE 3, 4): the same check planProjectMove makes.
+
 describe('getProjectMoveOptions', () => {
     it('offers a move only past a shown neighbour with the same star and the same stored area', () => {
         const home = area('home', 0);
@@ -218,7 +218,7 @@ describe('getProjectMoveOptions', () => {
             project('a', 'active', { areaId: home.id })];
         expect(getProjectMoveOptions({ areaId: home.id, projects: rows })).toEqual([
             { up: false, down: true }, { up: true, down: false }, { up: false, down: false }]);
-        // The No area group also holds a project whose area is gone: planProjectMove never swaps it with an area-less one.
+
         const orphan = [project('none', 'active'), project('orphan', 'active', { areaId: 'deleted-area' }), project('none2', 'active')];
         expect(getProjectMoveOptions({ projects: orphan })).toEqual([{ up: false, down: false }, { up: false, down: false }, { up: false, down: false }]);
         expect(planProjectMove({ projects: orphan }, orphan, 'none2', 'up')).toBeNull();

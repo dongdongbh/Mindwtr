@@ -169,8 +169,7 @@ export type OmniFocusImportPreview = {
 
 export type OmniFocusImportParseResult = ImportParseResult<ParsedOmniFocusImportData, OmniFocusImportPreview>;
 
-// Identical to import-apply.ts's ImportExecutionResult (OmniFocus is the one format that
-// surfaces every field applyImport() computes, including importedStandaloneTaskCount).
+
 export type OmniFocusImportExecutionResult = ImportExecutionResult;
 
 const createWarningCounters = (): OmniFocusWarningCounters => ({
@@ -246,8 +245,7 @@ const decodeUtf16Be = (bytes: Uint8Array): string => {
     return new TextDecoder('utf-16le', { fatal: false }).decode(swapped);
 };
 
-// OmniFocus can export UTF-16 (BOM-prefixed); every other importer only ever sees UTF-8, so this
-// BOM sniff stays OmniFocus-specific and only the plain-UTF-8 tail is shared.
+
 const decodeOmniFocusBytes = (bytes: Uint8Array): string => {
     if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
         return new TextDecoder('utf-16le', { fatal: false }).decode(bytes);
@@ -916,9 +914,7 @@ const parseJsonImport = (
         || documents.find((document) => document !== preferredTasksDocument && (readProjectsArray(document).length > 0 || readTagsArray(document).length > 0))
         || (readProjectsArray(preferredTasksDocument).length > 0 || readTagsArray(preferredTasksDocument).length > 0 ? preferredTasksDocument : null);
 
-    // Charged as soon as the raw counts are known, before the hierarchy/checklist
-    // maps below do O(n) work over them — an oversized export is rejected instead
-    // of first paying for the maps it's guaranteed to make us discard (SEC-14).
+
     const rawTaskEntries = readTasksArray(preferredTasksDocument);
     const rawProjectEntries = readProjectsArray(preferredMetadataDocument);
     archiveBudget.consumeEntities(rawTaskEntries.length + rawProjectEntries.length);
@@ -1215,8 +1211,7 @@ export const parseOmniFocusImportSource = (input: OmniFocusFileInput): OmniFocus
     }
 };
 
-// OmniFocus has no stable per-item source id to key off, so it always mints a fresh id (the
-// default in applyImport) — re-importing the same export creates duplicates, exactly as before.
+
 export const applyOmniFocusImport = (
     currentData: AppData,
     parsedData: ParsedOmniFocusImportData,
@@ -1226,10 +1221,8 @@ export const applyOmniFocusImport = (
     {
         areas: [...parsedData.areas].sort((left, right) => left.order - right.order || left.name.localeCompare(right.name)),
         projects: [...parsedData.projects].sort((left, right) => left.order - right.order || left.name.localeCompare(right.name)),
-        // Escape hatch (R-07): OmniFocus exports carry no stable per-item id, so there is no
-        // real key to supply. This positional one is never read today — applyOmniFocusImport
-        // passes no idFor, so ids come from the uuid default — but it keeps the tasks distinct
-        // if an idFor is ever added here, instead of collapsing every one of them onto ''.
+
+
         tasks: [...parsedData.tasks]
             .sort((left, right) => left.order - right.order || left.title.localeCompare(right.title))
             .map((task, index) => ({ ...task, sourceKey: `omnifocus-task-${index}` })),

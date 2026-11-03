@@ -1,12 +1,6 @@
 package tech.dongdongbh.mindwtr.androidwidget
 
-/**
- * One entry per home-screen widget kind. Adding a kind = one enum row here,
- * one `MindwtrWidgetProvider` subclass, one layout, and one row in the kinds
- * table of `plugins/android-widget.js` (which registers the receiver and
- * writes its appwidget-provider XML). See README.md for the planned `Focus`
- * kind (#1173).
- */
+
 enum class WidgetKind(val layoutRes: Int, val providerClass: Class<out MindwtrWidgetProvider>) {
   TASKS(R.layout.mindwtr_widget, TasksWidgetProvider::class.java),
   COMPACT(R.layout.mindwtr_compact_widget, CompactWidgetProvider::class.java),
@@ -30,7 +24,7 @@ data class PlacedWidgetProvider(
   val ids: IntArray,
 )
 
-/** Provider identities shared by refresh and per-widget list selection. */
+
 object WidgetProviderRegistry {
   fun identities(applicationPackage: String): List<WidgetProviderIdentity> = WidgetKind.entries.flatMap { kind ->
     val current = WidgetProviderIdentity(kind, kind.providerClass.name, isLegacy = false)
@@ -53,7 +47,7 @@ object WidgetProviderRegistry {
   }
 }
 
-/** Every kind's receiver: the platform needs one class per kind; rendering is shared. */
+
 abstract class MindwtrWidgetProvider(private val kind: WidgetKind) : android.appwidget.AppWidgetProvider() {
   override fun onUpdate(
     context: android.content.Context,
@@ -69,7 +63,7 @@ open class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS) {
     WidgetListStore.remove(context, appWidgetIds)
   }
 
-  // The check-off fallback alarm lands here when the Handler died with the process.
+
   override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
     if (intent.action in setOf(ACTION_MIDNIGHT, android.content.Intent.ACTION_DATE_CHANGED, android.content.Intent.ACTION_TIME_CHANGED, android.content.Intent.ACTION_TIMEZONE_CHANGED)) {
       val manager = android.appwidget.AppWidgetManager.getInstance(context)
@@ -89,11 +83,7 @@ open class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS) {
     private const val REQUEST_MIDNIGHT = 4615
     private const val MIDNIGHT_WINDOW_MS = 10L * 60 * 1000
 
-    /**
-     * Android skips DATE_CHANGED for manifest receivers, so an inexact alarm
-     * redraws Upcoming's Today/Tomorrow at the next local midnight (#1455).
-     * One pending intent: every render replaces the last alarm.
-     */
+
     fun scheduleMidnightRefresh(context: android.content.Context, now: Long = System.currentTimeMillis()) {
       val app = context.applicationContext
       val alarm = app.getSystemService(android.content.Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
@@ -101,7 +91,7 @@ open class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS) {
       val pendingIntent = android.app.PendingIntent.getBroadcast(
         app, REQUEST_MIDNIGHT, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
       )
-      // A plain inexact alarm may land an hour late; a window needs no exact-alarm permission.
+
       alarm.setWindow(android.app.AlarmManager.RTC, nextLocalMidnight(now), MIDNIGHT_WINDOW_MS, pendingIntent)
     }
 

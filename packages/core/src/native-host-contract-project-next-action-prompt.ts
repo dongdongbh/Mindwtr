@@ -1,11 +1,6 @@
-/**
- * RN's project next-action prompt (apps/mobile/components/project-next-action-prompt.tsx and
- * swipeable-task-item/ProjectNextActionPromptModal.tsx) for a host that completes tasks through completeTask (native Android).
- * After a row's Done, the host reads the prompt for the completed task; null means the project still has a next action. Its
- * three actions are RN's store writes, journaled under a request UUID: Choose makes a candidate Next (updateTask), Add parses
- * the text with the capture sheet's quick-add grammar into the project, or its section (#859, f34284f8c), and Complete project
- * archives it (updateProject). iOS uses its own prepared coordinator (native-host-contract-project-next-action.ts).
- */
+
+
+
 import { formatI18nTemplate } from './i18n';
 import { logInfo } from './logger';
 import type { NativeHostResult } from './native-host-contract';
@@ -19,16 +14,16 @@ import type { TaskStatus } from './types';
 type Translate = (key: string) => string;
 
 export type NativeProjectNextActionPrompt = {
-    /** The project, and the completed task's section, an Add lands in (RN's prompt.projectId and prompt.sectionId). */
+
     taskId: string; projectId: string; sectionId: string | null; projectRevision: string; scope: 'project' | 'section';
     title: string; description: string;
-    /** RN's "Choose an existing task" list: every candidate, as RN's ScrollView shows them. */
+
     choose: { label: string; items: { id: string; title: string; status: TaskStatus; statusLabel: string; taskRevision: string }[] };
     add: { label: string; placeholder: string; saveAndEdit: string; button: string };
-    /** Only for a project-wide prompt, as RN's (a section's prompt never offers it). */
+
     completeProject: { label: string } | null;
     skip: string;
-    /** RN's failure toast: its title, and its message when core gives none. */
+
     failure: { title: string; message: string };
 };
 
@@ -75,14 +70,12 @@ export function createProjectNextActionPromptMethods(deps: {
         try {
             logInfo('Native project next action saved', { scope: 'project-next-action', context: {
                 releaseCheck: 'v1.3.8/native-project-next-action', outcome: action } });
-        } catch { /* a diagnostic line never changes the write */ }
+        } catch {                                                 }
     };
 
     return {
-        /**
-         * The prompt after `taskId` was completed (RN's buildProjectNextActionPromptState): null unless the task is done in an
-         * active project that has no next action left (or, in a sequential section, none left in its section).
-         */
+
+
         getProjectNextActionPrompt(input: { taskId: string }): NativeHostResult<{ prompt: NativeProjectNextActionPrompt | null }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -112,7 +105,7 @@ export function createProjectNextActionPromptMethods(deps: {
             } } };
         },
 
-        /** One of the prompt's actions, journaled under `requestId`: a replay answers the first reply and writes nothing twice. */
+
         async runProjectNextAction(input: NativeProjectNextActionRequest): Promise<NativeHostResult<NativeProjectNextActionResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -132,16 +125,16 @@ export function createProjectNextActionPromptMethods(deps: {
                     const project = state._projectsById.get(request.projectId);
                     if (!project || project.deletedAt) return fail('INVALID_INPUT', 'The project no longer exists');
                     if (revisionOf(project) !== request.projectRevision) return fail('STALE_REVISION', 'The project changed since the prompt showed it');
-                    // RN's Complete project: archiving completes the remaining tasks in core, reversible with Reactivate.
+
                     const written = await runStoreWrite(() => useTaskStore.getState().updateProject(project.id, { status: 'archived' }));
                     return settleWrite(written, { action: 'completeProject' as const, id: project.id });
                 }
-                // The prompt's project and section, as RN's: a sync that moved the completed task since never moves the new one.
+
                 const project = state._projectsById.get(request.projectId);
                 if (!project || project.deletedAt || project.status === 'archived') {
                     return fail('INVALID_INPUT', 'The project no longer takes a next action');
                 }
-                // The capture sheet's quick-add grammar, so "/waiting" and friends work here too (#859, f34284f8c).
+
                 const { title, props } = parseProjectNextActionInput(request.text.trim(), {
                     projectId: project.id,
                     sectionId: request.sectionId ?? undefined,

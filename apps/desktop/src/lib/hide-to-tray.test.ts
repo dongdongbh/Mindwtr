@@ -14,7 +14,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 import { hideMainWindowToTray } from './hide-to-tray';
 import { setNativeInvokeTransport } from './tauri-invoke';
 
-/** Commands and window calls in the order they actually happened. */
+
 const steps: string[] = [];
 let transportResult: () => Promise<unknown> = async () => undefined;
 

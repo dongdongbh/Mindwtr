@@ -258,8 +258,7 @@ describe('InboxProcessor', () => {
 
         fireEvent.click(getByRole('button', { name: /process\.btn/i }));
 
-        // The dropdown must reflect what apply will save; resetting it to empty
-        // silently dropped an area assigned while the task sat in the inbox.
+
         expect(getByRole('button', { name: 'Work' })).toBeTruthy();
     });
 
@@ -524,8 +523,8 @@ describe('InboxProcessor', () => {
 
         fireEvent.click(getByRole('button', { name: /process\.btn/i }));
         fireEvent.click(getByText('process.refineNext'));
-        // Deferring a decided action is an actionable outcome, so it is offered
-        // beside the question rather than under "No, not actionable" (#1089).
+
+
         fireEvent.click(getByText('Start later'));
         fireEvent.change(getByLabelText('taskEdit.startDateLabel'), {
             target: { value: '2026-03-23' },
@@ -592,9 +591,7 @@ describe('InboxProcessor', () => {
         });
     });
 
-    // #1089: incubating parks the item without deciding what it is, and brings
-    // it back to this pass on a date. Someday + a review date, which Daily and
-    // Weekly Review already read as "due to reconsider".
+
     it('incubates a capture as Someday with the return date', async () => {
         const { getByRole, getByText, getByLabelText, updateTask } = renderInboxProcessor();
 

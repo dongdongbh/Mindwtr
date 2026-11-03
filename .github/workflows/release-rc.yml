@@ -78,7 +78,7 @@ jobs:
       existing_release: ${{ steps.existing_release.outputs.exists }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 0
 
@@ -200,7 +200,7 @@ jobs:
     uses: ./.github/workflows/release-windows.yml
     permissions:
       contents: read
-      # SignPath signing reads the unsigned-binaries artifact (#965).
+
       actions: read
     with:
       tag: ${{ needs.validate.outputs.tag }}
@@ -215,7 +215,7 @@ jobs:
     name: Android VersionCode Preflight
     timeout-minutes: 10
     concurrency:
-      # A lookup opens an app-wide Play edit; serialize with rollout controls.
+
       group: google-play-production
       cancel-in-progress: false
     permissions:
@@ -226,14 +226,14 @@ jobs:
       remote_max_version_code: ${{ steps.version_code.outputs.remote_max_code }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ needs.validate.outputs.tag }}
 
       - name: Authenticate Google Play API
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_play_testing }}
         id: play_auth
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
           credentials_json: ${{ secrets.ANDROID_SERVICE_ACCOUNT_JSON }}
           token_format: access_token
@@ -356,8 +356,8 @@ jobs:
   prerelease:
     if: ${{ always() && needs.validate.outputs.existing_release != 'true' && needs.validate.result == 'success' && needs.linux.result == 'success' && needs.macos.result == 'success' && needs.windows.result == 'success' && needs.android.result == 'success' && needs.android-foss.result == 'success' && (needs.ios-appstore.result == 'success' || needs.ios-appstore.result == 'skipped') && (needs.macos-appstore.result == 'success' || needs.macos-appstore.result == 'skipped') }}
     needs: [validate, linux, macos, windows, android, android-foss, ios-appstore, macos-appstore]
-    # Pinned on purpose: this job builds or packages with tools from the runner image,
-    # and `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19. Bump CI first, then this.
+
+
     runs-on: ubuntu-24.04
     name: Create GitHub Prerelease
     timeout-minutes: 60
@@ -366,12 +366,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 0
 
       - name: Import Mindwtr release signing key
-        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}

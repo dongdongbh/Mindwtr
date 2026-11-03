@@ -53,7 +53,7 @@ const readRequest = (value: unknown): NativeProjectTaskSortRequest | null => {
         && iso(expected.updatedAt) ? input as NativeProjectTaskSortRequest : null;
 };
 
-/** Pure cold-journal validation before SQLite opens. */
+
 const readPrepared = (value: unknown): NativePreparedProjectTaskSort | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

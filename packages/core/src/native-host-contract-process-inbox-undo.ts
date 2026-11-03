@@ -81,7 +81,7 @@ const minimalSettings = (settings: AppSettings): AppSettings => JSON.parse(JSON.
     gtd: { autoArchiveDays: settings.gtd?.autoArchiveDays, focusTaskLimit: settings.gtd?.focusTaskLimit } }));
 const futureBoundary = (at: string): string => { const date = new Date(at); date.setHours(23, 59, 59, 999); return date.toISOString(); };
 
-/** Full RN restoration policy, computed without a store write or a new entity identity. */
+
 const plan = (decision: NativeInboxDecisionEnvelope, witness: Witness): PreparedChecklistEffect => {
     const offer = nativeInboxUndoOffer(decision.prepared);
     const original = decision.prepared.witness.source;
@@ -200,7 +200,7 @@ const validClock = (witness: Witness): boolean => {
     catch { return false; }
 };
 
-/** Pure pre-storage journal validation, including the original decision and complete Undo effect. */
+
 export function readNativePreparedInboxUndo(input: unknown): NativeInboxUndoEnvelope | null {
     const value = detach(input);
     if (!record(value) || !exact(value, ['request', 'prepared']) || !record(value.prepared)) return null;
@@ -226,7 +226,7 @@ export function readNativePreparedInboxUndo(input: unknown): NativeInboxUndoEnve
     catch { return null; }
 }
 
-/** Preparation reads current state once; validation can replay its bounded frozen witness without IO. */
+
 export function prepareNativeInboxUndo(request: NativeInboxUndoRequest, decision: NativeInboxDecisionEnvelope, state: TaskStore): NativePreparedInboxUndo {
     const checked = readNativePreparedInboxWrite(decision), offer = checked && nativeInboxUndoOffer(checked);
     if (!readRequest(request) || !checked || !offer || request.taskId !== offer.taskId || request.decisionRequestId !== offer.decisionRequestId)

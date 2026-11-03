@@ -1,7 +1,7 @@
-// Opt-in init script, never included by a store/release build.
-// ./gradlew -I ../benchmark/include.gradle :macrobenchmark:assembleRelease
+
+
 gradle.settingsEvaluated { settings ->
-    // Init scripts also run for React Native's included plugin builds.
+
     if (gradle.parent != null) return
     def appBuild = new File(settings.settingsDir, 'app/build.gradle')
     if (!appBuild.exists() || !appBuild.text.contains("applicationId 'tech.dongdongbh.mindwtr.benchmark'")) {
@@ -11,8 +11,7 @@ gradle.settingsEvaluated { settings ->
     settings.project(':macrobenchmark').projectDir = new File(settings.settingsDir, '../benchmark')
 }
 
-// Environment changes alone are not inputs of RN's bundle task. A cached
-// release bundle must not survive a switch between profiling and timing APKs.
+
 gradle.projectsEvaluated {
     if (gradle.parent != null) return
     gradle.rootProject.project(':app').tasks.named('createBundleReleaseJsAndAssets') {

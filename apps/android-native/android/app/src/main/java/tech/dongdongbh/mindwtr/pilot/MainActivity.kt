@@ -122,26 +122,21 @@ import tech.dongdongbh.mindwtr.pilot.core.MicrophonePermissionPrompt
 import tech.dongdongbh.mindwtr.pilot.core.VoiceCapture
 import tech.dongdongbh.mindwtr.pilot.core.GmailConsentPrompt
 
-/**
- * Isolated development UI, drawn as the React Native app draws it: its header, its bottom
- * tab bar with the center capture button, its theme tokens, and its task row. Task rules
- * and writes stay in the shared core; every label comes from core's getStrings. A
- * FragmentActivity, because AndroidX BiometricPrompt (the app lock's) needs one.
- */
+
 class MainActivity : FragmentActivity() {
     private val model: InboxViewModel by viewModels()
-    /** RN's app lock's credential fallback before Android 11: the device's credential screen answers here, on this Activity or the one after a rotation. */
+
     internal val credential = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         model.lock.answered(if (it.resultCode == RESULT_OK) null else "cancelled")
     }
-    /** RN's notification permission prompt at start; the answer reaches core's reminder plan at the resume that follows it. */
+
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
-    /** expo-calendar's prompt for the calendar pair (HostCalendars); its answer is read again as a status by the call that asked. */
+
     private val calendarPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { CalendarPermissionPrompt.answered() }
     private val askCalendar: (Array<String>) -> Unit = { calendarPermission.launch(it) }
     private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { MicrophonePermissionPrompt.answered(it) }
     private val askMicrophone: () -> Unit = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) }
-    /** RN's Gmail module's account picker and Google's consent screen (GmailAuthorization): answered on this Activity or the next. */
+
     private val gmailPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         GmailConsentPrompt.answered("picker", it.resultCode, it.data)
     }
@@ -153,10 +148,8 @@ class MainActivity : FragmentActivity() {
 
     @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
-        // RN's start screen (expo-splash-screen). The system hands its view over at the first frame; it stays over the screen,
-        // which draws beneath it meanwhile (a held first frame would draw everything only once the rows came), until the first
-        // screen is ready (InboxViewModel.holdSplash), then goes with no fade, as RN's (SplashScreen.setOptions({ fade: false })).
-        // Android 12+'s view is removed directly, as expo-splash-screen does, so the theme's system bar appearance never replaces the screen's.
+
+
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
         splash.setOnExitAnimationListener { provider ->
@@ -169,8 +162,8 @@ class MainActivity : FragmentActivity() {
         MicrophonePermissionPrompt.launcher = askMicrophone
         GmailConsentPrompt.picker = pickGmail
         GmailConsentPrompt.consent = consentGmail
-        // A recreated screen registers its own launcher (the prompt's answer reaches it); a finished one answers any prompt left
-        // open. It touches only the prompt, never the core host.
+
+
         lifecycle.addObserver(LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_DESTROY && CalendarPermissionPrompt.launcher === askCalendar) {
                 CalendarPermissionPrompt.launcher = null
@@ -180,7 +173,7 @@ class MainActivity : FragmentActivity() {
                 MicrophonePermissionPrompt.launcher = null
                 if (isFinishing) MicrophonePermissionPrompt.answered(false)
             }
-            // Leaving the app ends a recording without saving (no foreground service, as RN); a rotation keeps it.
+
             if (event == Lifecycle.Event.ON_STOP && !isChangingConfigurations) { VoiceCapture.recorder?.leave(); model.voice.left() }
             if (event == Lifecycle.Event.ON_DESTROY && GmailConsentPrompt.picker === pickGmail) {
                 GmailConsentPrompt.picker = null
@@ -188,26 +181,26 @@ class MainActivity : FragmentActivity() {
             }
         })
         model.attach()
-        // First content drawn (the root's ReportDrawnWhen, whatever the first screen; InboxList's too): the boot's leftover work,
-        // the bytecode cache, may run now.
+
+
         fullyDrawnReporter.addOnReportDrawnListener(model::contentShown)
-        // A link, share or assistant note that launched the app (a recreated screen already has it: EntryRouter keeps it).
+
         if (savedInstanceState == null) model.entries.receive(intent)
         setContent {
-            // RN's one failure banner over every screen (FailureBannerHost below).
+
             val banners = remember { FailureBannerSlot<FailureBannerContent>() }
-            // Time to first content (scripts/measure-startup-device.mjs): the first screen's data is drawn, whatever that screen is
-            // (Focus on a fresh start, as RN's; a restored last screen).
+
+
             ReportDrawnWhen { model.firstContentReady() }
-            // Core resolves RN's theme during the boot; until it ends, RN's default follows the system.
-            // RN's app lock gate (AppLock.kt) replaces the screens while locked.
+
+
             MindwtrTheme(if (model.loading) null else ThemeChoice.current) { AppLockGate(model) { CompositionLocalProvider(LocalFailureBanners provides banners) { with(model) {
                 val theme = LocalTheme.current
                 val c = theme.colors
                 LaunchedEffect(c.bg, theme.isDark) { window.applySystemBars(c.bg.toArgb(), theme.isDark) }
-                // A waiting entry opens once the app is free (EntryRouter.pump); a system capture that ended puts the app behind the previous one.
+
                 LaunchedEffect(entries.head, entries.blocked) { entries.pump() }
-                // RN asks for the notification permission at start while a reminder feature is on (core's answer, once per process).
+
                 LaunchedEffect(loading) {
                     if (!loading && askNotifications()) notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                 }
@@ -217,36 +210,36 @@ class MainActivity : FragmentActivity() {
                 val flow = processing?.takeUnless { it.hidden }
                 val searching = search
                 val listed = menu.screen
-                // Full-screen flows over the tabs, as RN presents them: RN's capture screen (its modal route, over any screen), the
-                // editor, then Process Inbox, then search, then a Menu destination (RN pushes it over the tabs).
+
+
                 if (modal != null && writable) CaptureModalScreen(model, modal)
                 else if (open != null && writable) Box(Modifier.fillMaxSize()) {
                     TaskEditorScreen(model, open)
-                    // RN's toasts show over its editor too (the "..." menu's copy rows, say).
+
                     ToastCard(model, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 16.dp))
                 }
                 else if (flow != null && writable) ProcessInboxScreen(model, flow)
                 else if (searching != null && writable) SearchScreen(model, searching)
                 else if (listed != null && writable) MenuScreenHost(model, listed)
                 else Column(
-                    // The tab bar reaches the screen's bottom edge as RN's does (it pads the navigation inset itself, TabBar).
+
                     Modifier.fillMaxSize().background(c.cardBg).windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                         .semantics { testTagsAsResourceId = true },
                 ) {
                     if (loading) {
-                        // The start screen covers the boot; only a start past its cap shows RN's spinner here.
+
                         if (slowStart) CircularProgressIndicator(Modifier.padding(24.dp))
                     } else if (!writable) {
-                        // The boot failed: no command can run, and core's labels may never have loaded.
+
                         Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("boot-failure").padding(24.dp))
                     } else {
-                        // An open project draws its own header, as RN's project screen does. In landscape the
-                        // selected tab already names the screen, so the title bar gives its height to the rows.
+
+
                         val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-                        // RN's quick-access tab titles its header with the view it holds (Review, Contexts, or Projects).
+
                         val quick = screen == Screen.Projects && menu.quickView != "projects"
                         if ((screen != Screen.Projects || openProjectId == null || quick) && !landscape) TopBar(model, t(if (screen == Screen.Projects) menu.quickLabel else screen.label))
-                        // A failure floats over the screen (FailureBannerHost). A failed read offers Try again; a failed command only its exact retry.
+
                         error?.let { message ->
                             FailureBanner(message) {
                                 if (failedAction == null) RetryButton({ refresh() }, !busy, "read-retry")
@@ -255,25 +248,25 @@ class MainActivity : FragmentActivity() {
                         }
                         Box(Modifier.weight(1f)) {
                             Column(Modifier.fillMaxSize()) {
-                                // Three lists in one Activity: tabs, no navigation library. The editor opens over the selected list.
+
                                 Box(Modifier.weight(1f).fillMaxWidth().background(c.bg).clipToBounds()) {
                                     when (screen) {
                                         Screen.Inbox -> InboxList(model, Modifier.fillMaxSize())
                                         Screen.Focus -> FocusList(model, Modifier.fillMaxSize())
                                         Screen.Projects -> if (quick) QuickList(model, Modifier.fillMaxSize()) else ProjectsTab(model, Modifier.fillMaxSize())
                                     }
-                                    // RN's More sheet sits over the list, above the tab bar, which stays usable.
+
                                     if (menu.sheet) MoreSheet(model)
                                 }
                                 TabBar(model)
                             }
-                            // The overlays keep their place above the navigation bar, where the column's padding put them.
+
                             Box(Modifier.fillMaxSize().navigationBarsPadding()) {
-                                // The capture popup shows its own toasts above its keyboard, as RN's sheet does.
+
                                 if (capture == null) ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 78.dp))
                                 capture?.let { CapturePopup(model, it) }
                                 if (areaSheet) AreaSheet(model)
-                                // The Inbox's and the quick-access tab's sheets and dialogs (MenuModel), and Focus's (FocusModel), over the tabs.
+
                                 if (quick || screen == Screen.Inbox) MenuDialogs(model)
                                 if (screen == Screen.Focus) FocusDialogs(model)
                                 StatusMenu(model)
@@ -281,39 +274,39 @@ class MainActivity : FragmentActivity() {
                         }
                     }
                 }
-                // RN's failure banner floats over the screen, under the overlays that stand for RN's modals.
+
                 FailureBannerHost(banners)
-                // The Pomodoro card's task picker over the whole screen, as RN's Modal (its scrim dims the bars too).
+
                 if (writable && screen == Screen.Focus && modal == null && open == null && flow == null && searching == null && listed == null) PomodoroPicker(model)
-                // The attachments' alert, link sheet, image preview and audio player (the editor's and the project card's), over the screen.
+
                 if (writable) AttachmentOverlays(model)
-                // The open project's pickers, section manager and help, over the whole screen as RN's modals.
+
                 if (writable && openProjectId != null && projectDetails.projectId == openProjectId) ProjectDetailsDialogs(model)
-                // RN's project next-action prompt after a row's Done (its Modal over the app).
+
                 if (writable) NextActionPrompt(model)
-                // The Projects screen's Manage areas sheet (#1263), over the whole screen as RN's modal.
+
                 if (writable) areaManager?.let { AreaOrderSheet(model, it) }
-                // RN's completion-time picker (its date and time dialogs, and its Time Spent card).
+
                 if (writable) CompletedAtFlow(model)
-                // RN's startup prompts (the welcome sheet, the announcement window), over everything, as RN's root modals.
+
                 if (writable) StartupPromptOverlays(model)
             } } } }
         }
     }
 
-    /** RN's AppState: "active" while resumed; core's sync triggers run on resume and on leaving. */
+
     override fun onResume() {
         super.onResume()
         model.appState("active")
     }
 
-    /** RN's AppState "background" on pause; a rotation is no leave (RN's activity handles it without pausing). */
+
     override fun onPause() {
         super.onPause()
         if (!isChangingConfigurations) model.appState("background")
     }
 
-    /** RN's MainActivity is singleTask: a link, share or note sent while the app runs arrives here. */
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -321,23 +314,19 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-/** A 1 px rule, as RN's StyleSheet.hairlineWidth, along the top or bottom edge. */
+
 fun Modifier.hairline(color: Color, top: Boolean) = drawBehind {
-    // A whole pixel row, RN's StyleSheet.hairlineWidth: a 1-pixel stroke centered on the edge drew half of it, at half color.
+
     drawRect(color, Offset(0f, if (top) 0f else size.height - 1f), Size(size.width, 1f))
 }
 
-/** RN's borderBottomWidth: 1, a 1 dp line inside the bottom edge. */
+
 fun Modifier.bottomBorder(color: Color) = drawBehind {
     val width = 1.dp.toPx()
     drawRect(color, Offset(0f, size.height - width), Size(size.width, width))
 }
 
-/**
- * RN's tab header: card background, a hairline below, the title centered at 17/700, RN's
- * area switcher at the left, and RN's search button (22, in a 44 box) at the right. 64 dp tall, as React Navigation's
- * Android header (getDefaultHeaderHeight).
- */
+
 @Composable
 private fun TopBar(model: InboxViewModel, title: String) {
     val c = LocalTheme.current.colors
@@ -354,22 +343,18 @@ private fun TopBar(model: InboxViewModel, title: String) {
     }
 }
 
-/**
- * RN's one PersistenceFailureBanner, floated over the screen (its root, absolute at the top, zIndex 100). Each screen's
- * [FailureBanner] puts its message and action here while it shows; the root's [FailureBannerHost] draws the newest, and a screen
- * that leaves gives the one under it back. Main thread (snapshot state).
- */
+
 class FailureBannerSlot<T> {
     private val entries = mutableStateListOf<T>()
     val shown: T? get() = entries.lastOrNull()
-    /** Shows [entry]; the answer takes it away again (once; a second call does nothing). */
+
     fun put(entry: T): () -> Unit {
         entries.add(entry)
         return { entries.removeAll { it === entry } }
     }
 }
 
-/** A screen's failure as the root's banner shows it: kept current while the screen recomposes. */
+
 class FailureBannerContent(message: String, action: @Composable RowScope.() -> Unit) {
     var message by mutableStateOf(message)
     var action by mutableStateOf(action)
@@ -377,10 +362,7 @@ class FailureBannerContent(message: String, action: @Composable RowScope.() -> U
 
 val LocalFailureBanners = staticCompositionLocalOf<FailureBannerSlot<FailureBannerContent>?> { null }
 
-/**
- * A screen's failure (a failed read with Try again, or an owed command's exact retry). It floats over the screen as RN's banner
- * does, drawn by the root ([FailureBannerHost]); with no root slot (a preview) it draws in place.
- */
+
 @Composable
 fun FailureBanner(message: String, action: @Composable RowScope.() -> Unit) {
     val slot = LocalFailureBanners.current ?: return FailureBannerCard(message, action)
@@ -389,11 +371,7 @@ fun FailureBanner(message: String, action: @Composable RowScope.() -> Unit) {
     DisposableEffect(slot, content) { val remove = slot.put(content); onDispose(remove) }
 }
 
-/**
- * RN's banner position: across the top, under the status bar (its SafeAreaView's top edge), over the screen's header and rows
- * (zIndex 100), touching nothing outside the card. TalkBack hears it at once (live region) and reaches it first (traversal
- * index, as RN's banner comes first in its root); its tags stay readable by the device checks.
- */
+
 @Composable
 fun FailureBannerHost(slot: FailureBannerSlot<FailureBannerContent>) {
     val shown = slot.shown ?: return
@@ -406,7 +384,7 @@ fun FailureBannerHost(slot: FailureBannerSlot<FailureBannerContent>) {
 @Composable
 private fun FailureBannerCard(message: String, action: @Composable RowScope.() -> Unit) {
     val c = LocalTheme.current.colors
-    // RN's persistence-failure-banner card: 12 from the sides and 8 below the bar, radius 12, a 1 dp danger border, its shadow.
+
     val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp)
@@ -421,7 +399,7 @@ private fun FailureBannerCard(message: String, action: @Composable RowScope.() -
     }
 }
 
-/** RN's banner Retry: a filled tint button, radius 8, at least 40 tall, 12 inside, white 14/600 (0.82 opacity pressed). */
+
 @Composable
 fun RetryButton(onClick: () -> Unit, enabled: Boolean, tag: String? = null) {
     val theme = LocalTheme.current
@@ -436,25 +414,18 @@ fun RetryButton(onClick: () -> Unit, enabled: Boolean, tag: String? = null) {
     }
 }
 
-/**
- * Try again for an owed command's exact request (InboxViewModel.retryOwed), in every screen's failure banner:
- * a command started where its control is gone (the status menu on Focus, a closed sheet) stays retryable.
- */
+
 @Composable
 fun OwedRetry(model: InboxViewModel) {
     if (model.failedAction != null) RetryButton(model::retryOwed, !model.busy, "owed-retry")
 }
 
-/**
- * RN's bottom tab bar: Focus, Inbox, the capture button, the quick-access view
- * (core's quickAccessView: Review, Contexts, the Calendar, or Projects), then Menu, which opens RN's More sheet. Every control keeps the
- * place an RN user's thumb expects; a tab or the capture button closes the sheet, as in RN.
- */
+
 @Composable
 private fun TabBar(model: InboxViewModel) {
     val c = LocalTheme.current.colors
     val quick = model.menu.quickView
-    // RN's tabBarBottomInset on Android: a navigation inset of 20 dp or more (three buttons), less 12; a gesture bar's is drawn over.
+
     val navigation = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val inset = if (navigation >= 20.dp) navigation - 12.dp else 0.dp
     Row(Modifier.fillMaxWidth().height(66.dp + inset).background(c.cardBg).hairline(c.border, top = true).padding(bottom = inset),
@@ -467,7 +438,7 @@ private fun TabBar(model: InboxViewModel) {
     }
 }
 
-/** RN's tab: icon 26 when active (24, drawn at 64%, when not), label 10 below, tint when active. */
+
 @Composable
 private fun RowScope.TabItem(model: InboxViewModel, tab: Screen, icon: ImageVector, label: String = tab.label) = with(model) {
     val c = LocalTheme.current.colors
@@ -483,9 +454,7 @@ private fun RowScope.TabItem(model: InboxViewModel, tab: Screen, icon: ImageVect
     }
 }
 
-/**
- * RN's tab item press (TouchableOpacity): 0.2 opacity while held, no ripple; lifted 2 dp, RN's tabItemTopOffset on Android.
- */
+
 @Composable
 internal fun Modifier.rnTabPress(selected: Boolean, onClick: () -> Unit): Modifier {
     val press = remember { MutableInteractionSource() }
@@ -493,19 +462,19 @@ internal fun Modifier.rnTabPress(selected: Boolean, onClick: () -> Unit): Modifi
     return offset(y = (-2).dp).fade(if (pressed) 0.2f else 1f).selectable(selected, press, null, role = Role.Tab, onClick = onClick)
 }
 
-/** An idle tab icon: RN gives it opacity 0.8 and the glyph draws it at 0.8 again, so it shows at 64% (S23, both themes). */
+
 internal const val RN_TAB_ICON_IDLE = 0.64f
 
-/** RN's center capture button: a 48x38 tint tile, lifted above the tab labels. It opens the quick capture sheet. */
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun RowScope.CaptureButton(model: InboxViewModel) {
     val theme = LocalTheme.current
     val shape = RoundedCornerShape(theme.captureRadius)
-    // RN's tab button says quickAdd.audioCaptureLabel while Audio is the default capture method (voice V5 review N4).
+
     val label = t(if (model.voice.defaultAudio) "quickAdd.audioCaptureLabel" else "nav.addTask")
     Box(
-        // RN's tab button: a tap records at once when Audio is the default capture method, a long press the other way.
+
         Modifier.weight(1f).fillMaxHeight().combinedClickable(role = Role.Button,
             onLongClick = { model.menu.closeSheet(); model.openCapture(AutoRecord.OPPOSITE) }) { model.menu.closeSheet(); model.openCapture(AutoRecord.DEFAULT) }
             .semantics { contentDescription = label },
@@ -518,10 +487,7 @@ private fun RowScope.CaptureButton(model: InboxViewModel) {
     }
 }
 
-/**
- * RN's pill button: filled with the tint (RN's Save) or outlined (RN's empty-state
- * action, and this app's More). [description] replaces the spoken label when set.
- */
+
 @Composable
 fun PillButton(label: String, filled: Boolean = false, onClick: () -> Unit, enabled: Boolean, description: String? = null) {
     val c = LocalTheme.current.colors
@@ -537,7 +503,7 @@ fun PillButton(label: String, filled: Boolean = false, onClick: () -> Unit, enab
     }
 }
 
-/** RN's ListEmptyState: a bordered card with the message, the hint, and one action. */
+
 @Composable
 fun EmptyState(message: String, hint: String?, action: String? = null, onAction: () -> Unit = {}) {
     val c = LocalTheme.current.colors
@@ -554,10 +520,7 @@ fun EmptyState(message: String, hint: String?, action: String? = null, onAction:
     }
 }
 
-/**
- * A section title as RN draws it: 12/700 capitals in the secondary text color, then
- * the count. TalkBack and the device checks read core's own title and count.
- */
+
 @Composable
 fun SectionTitle(title: String, count: Int?, modifier: Modifier = Modifier, note: String? = null, trailing: @Composable () -> Unit = {}) {
     val c = LocalTheme.current.colors
@@ -565,7 +528,7 @@ fun SectionTitle(title: String, count: Int?, modifier: Modifier = Modifier, note
     Row(modifier.clearAndSetSemantics { text = AnnotatedString(spoken); heading() }, verticalAlignment = Alignment.CenterVertically) {
         Text(title.uppercase(), style = rnText(12, 700, letterSpacing = 1f), color = c.secondaryText, maxLines = 2,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        // RN's flow label beside a Per section project's section title (task-list.tsx, #1429), in its sectionCount style.
+
         note?.let { Text(it, style = rnText(11, 600), color = c.secondaryText, modifier = Modifier.padding(start = 8.dp)) }
         count?.let { Text("($it)", style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(start = 10.dp)) }
         Spacer(Modifier.weight(1f))

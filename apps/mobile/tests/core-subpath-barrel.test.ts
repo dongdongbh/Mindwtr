@@ -2,9 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// Metro resolves every '@mindwtr/core/<subpath>' to the core barrel (metro.config.js), except share-card.
-// A named import the barrel lacks, or holds under another meaning, is undefined or wrong in the app while
-// vitest (which honors the subpath) passes.
+
 const mobileRoot = path.resolve(__dirname, '..');
 const coreSrc = path.resolve(mobileRoot, '../../packages/core/src');
 const METRO_OWN_SUBPATHS = new Set(['share-card']);
@@ -34,5 +32,5 @@ describe('@mindwtr/core subpath imports', () => {
             }
         }
         expect(problems).toEqual([]);
-    }, 120_000); // It loads the whole core barrel and every subpath: slow on a loaded machine.
+    }, 120_000);
 });

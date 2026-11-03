@@ -64,9 +64,8 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 vi.mock('@mindwtr/core', async () => {
-  // The real pacing controller and cooldown maths, not stubs: this suite exists
-  // to prove the hook's wiring over the shared machine, and leaving the cooldown
-  // off the mock meant every failed-sync path threw here.
+
+
   const { createAutoSyncController, resolveSyncFailureCooldownMs } = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   return {
     createAutoSyncController,
@@ -251,9 +250,7 @@ describe('useRootLayoutSyncEffects', () => {
       return vi.fn();
     });
 
-    // Sync status stamps (lastSyncAt/lastSyncStatus/...) are never part of a sync
-    // payload, so the core change fingerprint returns the same value across them;
-    // core's own test covers which fields it ignores.
+
     getInMemorySyncChangeFingerprint.mockReturnValue('sync-change:stable');
 
     let tree: ReturnType<typeof create>;
@@ -298,8 +295,7 @@ describe('useRootLayoutSyncEffects', () => {
     const storeListener = storeListeners.find((callback) => callback.length >= 2);
     expect(storeListener).toBeTypeOf('function');
 
-    // The fingerprint is a full-dataset serialize; running it synchronously in
-    // the store listener put ~0.4s inside every done/save tap on large libraries.
+
     await act(async () => {
       storeListener?.({ lastDataChangeAt: 2 }, { lastDataChangeAt: 1 });
       storeListener?.({ lastDataChangeAt: 3 }, { lastDataChangeAt: 2 });
@@ -381,9 +377,7 @@ describe('useRootLayoutSyncEffects', () => {
     vi.useRealTimers();
   });
 
-  // A throttled device used to fire again on the very next foreground/background
-  // switch, because those call requestSync(0) and explicit-0 skipped the failure
-  // cooldown. That is what kept re-tripping CloudKit's limit (#948).
+
   it('holds off app-state sync triggers while a failure cooldown is active', async () => {
     vi.useFakeTimers();
     performMobileSync.mockResolvedValue({
@@ -406,8 +400,7 @@ describe('useRootLayoutSyncEffects', () => {
     const attemptsAfterFailure = performMobileSync.mock.calls.length;
     expect(attemptsAfterFailure).toBeGreaterThan(0);
 
-    // A rapid round trip through active is deduped. It must not cancel the
-    // failure-owned retry timer while clearing ordinary lifecycle pacing.
+
     await act(async () => {
       listener('active');
       await flushMicrotasks();
@@ -469,7 +462,7 @@ describe('useRootLayoutSyncEffects', () => {
     });
     expect(performMobileSync).toHaveBeenCalledTimes(2);
 
-    // The repeated failure doubles CloudKit's requested 1s delay.
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_999);
       await flushMicrotasks();
@@ -524,8 +517,7 @@ describe('useRootLayoutSyncEffects', () => {
     });
     expect(performMobileSync).toHaveBeenCalledTimes(1);
 
-    // A manual sync runs outside this hook. Its status update is the recovery
-    // signal that cancels the retry owned here.
+
     await act(async () => {
       storeListener?.(
         {
@@ -595,8 +587,8 @@ describe('useRootLayoutSyncEffects', () => {
     });
     let fingerprintVersion = 0;
     getInMemorySyncChangeFingerprint.mockImplementation(() => `sync-change:${fingerprintVersion}`);
-    // Each sync cycle takes 20s, so the adaptive interval becomes 180s (9x) from
-    // cycle end -- well under the 5-minute cap.
+
+
     performMobileSync.mockImplementation(
       () => new Promise((resolve) => setTimeout(() => resolve({ success: true }), 20_000)),
     );
@@ -613,7 +605,7 @@ describe('useRootLayoutSyncEffects', () => {
     await act(async () => {
       fingerprintVersion += 1;
       storeListener?.({ lastDataChangeAt: 2 }, { lastDataChangeAt: 1 });
-      // Debounce (2s) + throttle to the 5s remote min interval + 20s cycle duration.
+
       await vi.advanceTimersByTimeAsync(26_000);
       await flushMicrotasks();
     });
@@ -622,15 +614,15 @@ describe('useRootLayoutSyncEffects', () => {
     await act(async () => {
       fingerprintVersion += 1;
       storeListener?.({ lastDataChangeAt: 3 }, { lastDataChangeAt: 2 });
-      // Well past the 5s base interval, but comfortably within the 180s adaptive
-      // interval measured from the end of the prior cycle.
+
+
       await vi.advanceTimersByTimeAsync(170_000);
       await flushMicrotasks();
     });
     expect(performMobileSync).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      // Crosses the 9x adaptive interval (180s) from the prior cycle's end.
+
       await vi.advanceTimersByTimeAsync(40_000);
       await flushMicrotasks();
     });
@@ -642,9 +634,7 @@ describe('useRootLayoutSyncEffects', () => {
     vi.useRealTimers();
   });
 
-  // A cycle that STARTS in the foreground and is still running when the app
-  // backgrounds must keep the request that arrived during it, so returning to the
-  // foreground syncs immediately instead of waiting out the 30s foreground gate.
+
   it('syncs on resume for a request that arrived during an active-started cycle', async () => {
     vi.useFakeTimers();
     let resolveSync: ((result: { success: boolean }) => void) | null = null;
@@ -662,14 +652,14 @@ describe('useRootLayoutSyncEffects', () => {
     expect(listener).toBeTypeOf('function');
     expect(cloudKitListener).toBeTypeOf('function');
 
-    // The background transition starts a cycle while the app is still active.
+
     await act(async () => {
       listener('background');
       await flushMicrotasks();
     });
     expect(performMobileSync).toHaveBeenCalledTimes(1);
 
-    // A CloudKit notification lands while that cycle is running and the app is background.
+
     await act(async () => {
       cloudKitListener?.();
       await flushMicrotasks();

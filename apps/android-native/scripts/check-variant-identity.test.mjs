@@ -1,6 +1,6 @@
-// node --test apps/android-native/scripts/check-variant-identity.test.mjs (no Gradle needed)
-// Each build type's identity as Gradle merges it, built here from the app manifest and RN's widget and shortcut builders, passes
-// the identity check; each broken identity is caught.
+
+
+
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { buildLinkSchemeXml, buildShortcuts, buildShortcutsManifest } from './build-shortcuts.mjs';
 import { buildManifest as buildWidgetManifest } from './build-widgets.mjs';
-import { identityProblems, launcherIconProblems } from './check-variant-identity.mjs';
+import { identityProblems, launcherIconProblems, sameXmlRules } from './check-variant-identity.mjs';
 
 const require = createRequire(import.meta.url);
 const { Builder, parseStringPromise } = require('xml2js');
@@ -23,7 +23,7 @@ const TYPES = {
     benchmark: BENCH, benchmarkSeed: BENCH, benchmarkTrace: BENCH,
 };
 
-/** One build type's three files as Gradle would write them: the merged manifest, the shortcuts XML and BuildConfig.java. */
+
 async function variant(type, { pkg, scheme, label, rn } = TYPES[type], gmail = false) {
     const main = readFileSync(resolve(import.meta.dirname, '../android/app/src/main/AndroidManifest.xml'), 'utf8')
         .replaceAll('${applicationId}', pkg).replaceAll('${urlScheme}', scheme).replaceAll('${appLabel}', label)
@@ -34,8 +34,8 @@ async function variant(type, { pkg, scheme, label, rn } = TYPES[type], gmail = f
         const extra = (await parseStringPromise(overlay)).manifest.application[0];
         for (const [kind, nodes] of Object.entries(extra)) if (kind !== '$') application[kind] = [...(application[kind] ?? []), ...nodes];
     }
-    // The merger's work: the libraries' permissions (WorkManager's, biometric's, AndroidX core's), the package, the version, and
-    // names relative to the namespace made whole.
+
+
     root['uses-permission'].push(...['android.permission.FOREGROUND_SERVICE', 'android.permission.WAKE_LOCK',
         'android.permission.USE_FINGERPRINT', `${pkg}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`].map((name) => ({ $: { 'android:name': name } })));
     Object.assign(root.$, { package: pkg, 'android:versionCode': type === 'release' ? String(app.android.versionCode) : '1',
@@ -53,13 +53,38 @@ async function variant(type, { pkg, scheme, label, rn } = TYPES[type], gmail = f
             + `  public static final String ANALYTICS_HEARTBEAT_URL = "${type === 'release' ? HEARTBEAT : ''}";\n`,
     };
 }
-// The checker reads the heartbeat environment (RN's rule); these files carry RN's default endpoint, so the tests run without
-// either variable and put the caller's back afterwards.
+
+
 const HEARTBEAT_ENV = ['ANALYTICS_HEARTBEAT_DISABLED', 'ANALYTICS_HEARTBEAT_URL', 'MINDWTR_GMAIL_DEV_ENABLED', 'MINDWTR_GMAIL_PRODUCTION_VERIFIED'];
 const savedEnv = Object.fromEntries(HEARTBEAT_ENV.map((name) => [name, process.env[name]]));
 before(() => { for (const name of HEARTBEAT_ENV) delete process.env[name]; });
 after(() => { for (const [name, value] of Object.entries(savedEnv)) if (value === undefined) delete process.env[name]; else process.env[name] = value; });
 const problems = (type, files) => identityProblems(type, files.manifest, files.shortcuts, files.buildConfig, files.linkScheme);
+
+test('backup rules ignore formatting and comments while preserving every rule', async () => {
+    const rnManifest = require('../../mobile/plugins/android-manifest-fixes.js').__testables;
+    for (const [name, expected] of [['mindwtr_backup_rules', rnManifest.BACKUP_RULES_XML],
+        ['mindwtr_data_extraction_rules', rnManifest.DATA_EXTRACTION_RULES_XML]]) {
+        const actual = readFileSync(resolve(import.meta.dirname, `../android/app/src/main/res/xml/${name}.xml`), 'utf8');
+        assert.equal(await sameXmlRules(actual, expected), true, name);
+        assert.equal(await sameXmlRules(actual.replaceAll('><', '>\n  <').replace('<include ', '<!-- formatting -->\n  <include '), expected), true, name);
+        for (const changed of [actual.replace('domain="sharedpref"', 'domain="file"'),
+            actual.replace('path="mindwtr_backup_none"', 'path="."'),
+            actual.replace(/\s*<include[^>]*\/>/, ''),
+            actual.replace('<include ', '<exclude '),
+            actual.replace('<include ', '<include requireFlags="clientSideEncryption" ')]) {
+            assert.notEqual(changed, actual);
+            assert.equal(await sameXmlRules(changed, expected), false, `${name}: ${changed}`);
+        }
+        if (name === 'mindwtr_data_extraction_rules') {
+            for (const section of ['cloud-backup', 'device-transfer']) {
+                const changed = actual.replace(new RegExp(`<${section}>[\\s\\S]*?</${section}>`), '');
+                assert.notEqual(changed, actual);
+                assert.equal(await sameXmlRules(changed, expected), false, `${name}: missing ${section}`);
+            }
+        }
+    }
+});
 
 test('every build type\'s identity passes', async () => {
     for (const type of Object.keys(TYPES)) assert.deepEqual([type, await problems(type, await variant(type))], [type, []]);
@@ -116,8 +141,7 @@ test('a permission RN declares and the build drops is caught', async () => {
     assert.notDeepEqual(await problems('release', { ...files, manifest: dropped }), []);
 });
 
-// RN's df75a3584 and a13d1184e: a FOSS build (BuildConfig.FOSS) declares no Google Play services component or metadata and no
-// install referrer permission; the Play build keeps the referrer (PlayServices.kt reads it).
+
 test('a FOSS build with the install referrer permission or a Google Play services entry is caught', async () => {
     const play = await variant('release');
     const foss = { ...play, buildConfig: `${play.buildConfig}  public static final boolean FOSS = true;\n` };
@@ -135,8 +159,7 @@ test('a FOSS build with the install referrer permission or a Google Play service
     }
 });
 
-// RN's 55049a2e0: Android 13's themed icons draw the adaptive icon's monochrome layer. Every variant launches from
-// @mipmap/ic_launcher and ic_launcher_round, and each adaptive icon keeps a monochrome layer whose drawable exists.
+
 test('a launcher icon without its monochrome layer, or a variant that points elsewhere, is caught', async () => {
     const res = resolve(import.meta.dirname, '../android/app/src');
     assert.deepEqual(launcherIconProblems(res), []);
@@ -153,7 +176,7 @@ test('a launcher icon without its monochrome layer, or a variant that points els
         const round = resolve(copy, 'main/res/mipmap-anydpi-v26/ic_launcher_round.xml');
         writeFileSync(round, readFileSync(round, 'utf8').replace(/\s*<monochrome [^>]*\/>/, ''));
         assert.notDeepEqual(launcherIconProblems(copy), []);
-        // A flavor or build type's own icon must keep the layer too.
+
         mkdirSync(resolve(copy, 'foss/res/mipmap-anydpi-v26'), { recursive: true });
         writeFileSync(resolve(copy, 'foss/res/mipmap-anydpi-v26/ic_launcher.xml'), '<adaptive-icon><foreground android:drawable="@mipmap/x"/></adaptive-icon>');
         assert.ok(launcherIconProblems(copy).some((problem) => problem.includes('foss')));
@@ -186,8 +209,7 @@ test('missing or changed shortcuts are caught', async () => {
     assert.notDeepEqual(await problems('release', { ...files, shortcuts: files.shortcuts.replace('android:shortcutId="focus"', 'android:shortcutId="today"') }), []);
 });
 
-// RN's Gmail build gate (app.config.ts gmailEnabled, plugins/android-gmail-authorization.js): MindwtrGmailEnabled is true only in a
-// Play debug build with MINDWTR_GMAIL_DEV_ENABLED=1 or a Play release with MINDWTR_GMAIL_PRODUCTION_VERIFIED=1; off everywhere else.
+
 test('Gmail turned on where RN\'s build gate keeps it off, or off where the gate turns it on, is caught', async () => {
     for (const type of Object.keys(TYPES)) {
         assert.notDeepEqual(await problems(type, await variant(type, TYPES[type], true)), [], `${type} on by default`);

@@ -41,9 +41,7 @@ type ProjectDetailsHeaderProps = {
 
 const MENU_ITEM_CLASS = 'flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm transition-colors hover:bg-muted focus:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60';
 
-// The title owns the primary line; only the essential project summary stays below it.
-// Project management and the full settings grid remain available from the "..." menu
-// without competing with long titles (#1160).
+
 export function ProjectDetailsHeader({
     primaryAction,
     project,
@@ -84,8 +82,8 @@ export function ProjectDetailsHeader({
           : t('projects.noActiveTasks');
     const detailsLabel = tFallback(t, 'taskEdit.details', 'Details');
     const moreOptionsLabel = tFallback(t, 'taskEdit.moreOptions', 'More options');
-    // Task rows carry the bare "More options" label; name the project so assistive tech
-    // (and tests) can tell this menu apart from the rows below it.
+
+
     const menuLabel = `${moreOptionsLabel}: ${editTitle.trim() || project.title}`;
     const dueDateValue = dueDate ? safeParseDate(dueDate) : null;
     const dueLabelPrefix = tFallback(t, 'taskEdit.dueDateLabel', 'Due');
@@ -126,11 +124,7 @@ export function ProjectDetailsHeader({
         return () => observer?.disconnect();
     }, [editTitle]);
 
-    // The menu renders through a portal with fixed coordinates. Inside the header it
-    // sat in the header's own stacking context (container-type makes one), and on
-    // macOS WebKit the sticky task toolbar below still painted over it whenever the
-    // header's actions wrapped under the chips, even with the header lifted to z-30
-    // (reported twice from 1.2.8 builds, the second time on an archived project).
+
     const [menuStyle, setMenuStyle] = useState<CSSProperties>({ position: 'fixed', top: 0, right: 0 });
     useLayoutEffect(() => {
         if (!menuOpen) return;
@@ -179,11 +173,7 @@ export function ProjectDetailsHeader({
         action();
     };
 
-    // .project-details-header is a size container (index.css), which makes it a stacking
-    // context: the menu's z-40 only competes inside the header, and the sticky task toolbar
-    // rendered after it (z-20) paints over the open menu. Lift the whole header above the
-    // toolbar only while a popover is open, so the header still scrolls under the toolbar
-    // the rest of the time.
+
     const popoverOpen = menuOpen;
 
     return (

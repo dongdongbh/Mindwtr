@@ -8,11 +8,7 @@ const {
   patchMainActivity,
 } = plugin.__testables;
 
-// ContextAutomationReceiver.kt and ContextAutomationHeadlessService.kt used to be
-// generated here as template strings (see git history); they are now real .kt
-// files in the local context-automation Expo module. These tests read that
-// module's source directly to keep the 9-fallback deep-link payload parser and
-// the headless task wiring covered now that this plugin no longer builds them.
+
 const contextAutomationModuleDir = path.join(
   __dirname,
   '..',
@@ -44,8 +40,7 @@ describe('android-startup-trace', () => {
     expect(receiver).toContain('ContextAutomationHeadlessService::class.java');
     expect(receiver).toContain('HeadlessJsTaskService.acquireWakeLockNow(context)');
 
-    // The 9-fallback deep-link payload parser (#819-adjacent): every branch,
-    // in order. A dropped fallback here breaks a real intent shape silently.
+
     const fallbackOrder = [
       'clean(intent.getStringExtra("context"))',
       'clean(intent.getStringExtra("name"))',
@@ -161,12 +156,11 @@ class MainActivity : ReactActivity() {
 
     const output = patchMainActivity(input);
 
-    // Both entry points run through cacheNotificationOpenPayload, so guarding it
-    // once covers the cold start and the onNewIntent replay.
+
     expect(output).toContain('private fun isSelfLaunchedIntent(intent: Intent?): Boolean');
     expect(output).toContain('if (!isSelfLaunchedIntent(intent)) return null');
     expect(output).toContain('referrer?.host == packageName');
-    // getReferrer() prefers the caller-supplied extras, so those disqualify the intent.
+
     expect(output).toContain('Intent.EXTRA_REFERRER');
     expect(output).toContain('Intent.EXTRA_REFERRER_NAME');
   });

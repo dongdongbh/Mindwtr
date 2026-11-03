@@ -37,15 +37,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 
-/** One of RN's Alert buttons: its text and style ("cancel", "destructive", or "default"). */
+
 data class AlertButton(val label: String, val style: String, val onPress: () -> Unit)
 
-/**
- * RN's Alert.alert as the RN app draws it (components/themed-alert.tsx ThemedAlertModal): a window over the whole screen with its
- * 58% black backdrop (a tap there or Back dismisses), a card with the title, the scrolling message, and the buttons side by side
- * (stacked when more than two): a destructive one in red, the last plain one filled with the tint, the others in the filter
- * background.
- */
+
 @Composable
 fun ThemedAlert(title: String, message: String?, buttons: List<AlertButton>, onDismiss: () -> Unit) {
     val theme = LocalTheme.current

@@ -1,28 +1,6 @@
-/**
- * The native host contract for a saved search's screen (the More sheet's saved
- * searches, route `/saved-search/<id>`), from core's saved-search-view-model.ts.
- * Kept in its own file and spread into createNativeHostContract.
- *
- * - getSavedSearchView reads the screen for a saved search's ID: its header, its
- *   rows (windowed by NATIVE_HOST_MAX_WINDOW; a later window sends the first one's
- *   `revision`), and its empty state. A row's swipes, taps and editor are the task
- *   lists' own commands.
- * - Delete asks first with `delete.confirm`, then deleteSavedSearch. Afterwards,
- *   and for the empty state's Back, mobile goes back, or to the Inbox when there is
- *   nothing to go back to; the empty state's Inbox replaces the screen with the Inbox.
- *
- * - Sort (RN's TaskListSortButton, #1453) opens `sort`: "Use global setting (...)"
- *   first, then the sort options; a choice sends its `edit` to setSavedSearchSort,
- *   which keeps the saved search's own sort (null: the global sort again).
- *
- * deleteSavedSearch and setSavedSearchSort take a request UUID and retry exactly
- * (native-request-receipts.ts). It deletes by ID against the settings as they are
- * when it runs (deleteSavedSearchById), and it is target-state: a saved search
- * already gone writes nothing.
- *
- * Only functions read this module's imports from native-host-contract.ts, so the
- * import cycle between the two files is safe.
- */
+
+
+
 import { resolveAreaFilterSelection } from './area-filter';
 import {
     NATIVE_HOST_CONTRACT_VERSION,
@@ -51,28 +29,26 @@ import type { Task, TaskSortBy } from './types';
 
 export type NativeSavedSearchView = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
-    /** Covers the tasks, projects, areas, settings (the saved searches, the area filter, the sort), the language and the minute. */
+
     revision: string;
     id: string;
-    /** False when no saved search has this ID: it was deleted, or never saved. */
+
     found: boolean;
     title: string;
-    /** The query under the title; null when there is none to show. */
+
     query: string | null;
     delete: SavedSearchScreenText['deleteAction'];
-    /**
-     * RN's Sort button and modal (#1453); null when the saved search is gone. The first option is "Use global setting (...)";
-     * while it is selected no other option is. Send an option's `edit` with setSavedSearchSort.
-     */
+
+
     sort: {
         title: string;
         accessibilityLabel: string;
         options: { label: string; selected: boolean; edit: { sortBy: TaskSortBy | null } }[];
     } | null;
-    /** Every row the query finds; `rows` is the requested window. */
+
     total: number;
     rows: NativeTaskRow[];
-    /** Only when nothing is found: the line to show, and Inbox and Back when the saved search is gone. */
+
     empty: SavedSearchScreenText['empty'] | null;
 };
 
@@ -80,9 +56,9 @@ type SavedSearchDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
     t: () => (key: string) => string;
-    /** Data plus display revision: tasks, projects, settings, language and the minute. */
+
     revision: (now: Date) => string;
-    /** Rows with core meta, as the other contract lists build them. */
+
     rows: (tasks: readonly Task[], now: Date) => NativeTaskRow[];
 };
 
@@ -101,7 +77,7 @@ export function createSavedSearchMethods(deps: SavedSearchDeps) {
     });
 
     return {
-        /** A saved search's screen, as mobile shows it for `/saved-search/<id>`. */
+
         getSavedSearchView(input: { id: string; offset?: number; limit?: number; revision?: string }): NativeHostResult<NativeSavedSearchView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -119,7 +95,7 @@ export function createSavedSearchMethods(deps: SavedSearchDeps) {
             const state = useTaskStore.getState();
             const { savedSearches } = state.settings;
             const savedSearch = findSavedSearch(savedSearches, input.id);
-            // Mobile's area filter (useMobileAreaFilter): the areas in display order.
+
             const areas = sortAreasForDisplay(state.areas);
             const tasks = selectSavedSearchTasks({
                 query: savedSearch?.query || '',
@@ -162,7 +138,7 @@ export function createSavedSearchMethods(deps: SavedSearchDeps) {
             };
         },
 
-        /** Delete a saved search, as the screen's confirmed Delete does. Reuse `requestId` to retry. */
+
         async deleteSavedSearch(input: { requestId: string; id: string }): Promise<NativeHostResult<{ changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -171,19 +147,16 @@ export function createSavedSearchMethods(deps: SavedSearchDeps) {
             }
             const { id } = input;
             return receipts.run<{ changed: boolean }>(input.requestId, JSON.stringify(['deleteSavedSearch', id]), async () => {
-                // By ID, against the settings as they are when the write runs.
+
                 const deleted = { found: false };
                 const written = await runStoreWrite(async () => { deleted.found = await deleteSavedSearchById(id); });
-                // Target state: a saved search already gone is deleted.
+
                 if (!deleted.found) return written.ok ? { ok: true, value: { changed: false } } : written;
                 return settleWrite(written, { changed: true });
             });
         },
 
-        /**
-         * The Sort modal's choice: the saved search's own sort, or null for the global one (setSavedSearchSortById, by ID against
-         * the saved searches as they are when it runs). Target-state: a search gone, or already on that sort, writes nothing.
-         */
+
         async setSavedSearchSort(input: { requestId: string; id: string; sortBy: TaskSortBy | null }): Promise<NativeHostResult<{ changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

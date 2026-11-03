@@ -214,7 +214,7 @@ describe('useTaskEditAttachments download settlement', () => {
     expect(deleteManagedAttachmentFile).toHaveBeenCalledWith(local, { keep: expect.any(Function) });
     const { keep } = vi.mocked(deleteManagedAttachmentFile).mock.calls[0]![1] as { keep: () => boolean };
     expect(keep()).toBe(false);
-    // Restored (or synced back) before the delete runs: the bytes stay.
+
     useTaskStore.setState({ _allTasks: [makeTask(local)] });
     expect(keep()).toBe(true);
     act(() => tree.unmount());
@@ -270,8 +270,8 @@ describe('useTaskEditAttachments download settlement', () => {
   });
 
   it('explains a desktop file link instead of handing another device\'s path to the OS', async () => {
-    // "Link to file…" on the desktop stores that computer's path; Android used
-    // to call Linking.openURL('D:\\Documents\\x.docx') and fail silently (#1001).
+
+
     const Linking = await import('expo-linking');
     const attachment = { ...makeAttachment(1), kind: 'link' as const, uri: 'D:\\Documents\\Document.docx', mimeType: undefined };
     useTaskStore.setState({ _allTasks: [makeTask(attachment)] });
@@ -382,7 +382,7 @@ describe('useTaskEditAttachments download settlement', () => {
       deletedAt: terminalAt,
       updatedAt: terminalAt,
     });
-    // Task edit owns a draft until Save; terminal state must not mutate the persisted task eagerly.
+
     expect(useTaskStore.getState()._allTasks[0]?.attachments?.[0]).toEqual(attachment);
     expect(Alert.alert).toHaveBeenCalledWith('attachments.title', 'attachments.unrecoverable');
     act(() => tree.unmount());

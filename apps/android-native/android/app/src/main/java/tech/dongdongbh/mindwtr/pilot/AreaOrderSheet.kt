@@ -45,19 +45,14 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.min
 import org.json.JSONObject
 
-/**
- * RN's Manage areas sheet (ProjectAreaModals.tsx, #1263): the title with Sort A–Z and Sort by color; each area in core's order with its
- * dot, ↑ (off on the first), its swatch (which opens RN's None and swatch row) and Delete (off while a project uses it); then the new
- * area's name (with Settings' taken-name line), its swatches, Cancel and Save. The order and color writes are core's runAreaOrder and
- * runAreaColor; Delete and Save are Settings' own area writes. The sheet reads core again after each command.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AreaOrderSheet(model: InboxViewModel, sheet: JSONObject) = with(model) {
     val c = LocalTheme.current.colors
     LaunchedEffect(projects, busy) { if (!busy) readAreaManager() }
     BackHandler(onBack = ::closeAreaManager)
-    // Until core's read lands the sheet shows its frame only, every control off (review NOTE 5).
+
     val loaded = sheet.has("areas")
     val enabled = loaded && writable && !busy && failedAction == null
     val draft = areaManagerDraft

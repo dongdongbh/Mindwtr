@@ -48,7 +48,7 @@ export function useManualPullSync() {
     setIndicatorState('syncing');
 
     try {
-      // Core's rules for one manual pull (manual-pull-sync.ts), shared with the native Android host.
+
       const outcome = await runManualPullSync({
         getConfigurationStatus: getMobileSyncConfigurationStatus,
         getActivityState: getMobileSyncActivityState,

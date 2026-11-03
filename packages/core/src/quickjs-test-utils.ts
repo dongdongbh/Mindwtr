@@ -1,6 +1,6 @@
-// QuickJS (the native Android app's engine) refuses a call with more than 65535 arguments, so `list.push(...rows)` or
-// `Math.max(...values)` throws a RangeError there for a large library while V8, JSC and the host tests pass it. Runs [work]
-// with push and Math.max held to that limit.
+
+
+
 export const QUICKJS_MAX_CALL_ARGUMENTS = 65_535;
 
 const refuse = (count: number): void => {

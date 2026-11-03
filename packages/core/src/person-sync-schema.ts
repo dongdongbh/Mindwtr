@@ -33,15 +33,13 @@ export const PERSON_SYNC_SCHEMA_VERSION = schema.schemaVersion;
 export const PERSON_SYNC_FIELD_SCHEMA: readonly PersonSyncFieldSpec[] = schema.fields;
 export const PERSON_SYNC_SCHEMA_FIXTURE: Person = schema.fixture;
 
-// Generated SQLite column list + ensurePeopleTable migration list — see the equivalent
-// comment in project-sync-schema.ts for why this lives here rather than sqlite-adapter.ts.
+
 const PERSON_SQLITE_COLUMN_ENTRIES = deriveSqliteColumnEntries(PERSON_SYNC_FIELD_SCHEMA, 'person-sync-schema');
 
 export const PERSON_SQLITE_COLUMNS: readonly string[] = sqliteColumnsFromEntries(PERSON_SQLITE_COLUMN_ENTRIES);
 export const PERSON_SQLITE_MIGRATION_COLUMNS = sqliteMigrationColumnsFromEntries(PERSON_SQLITE_COLUMN_ENTRIES, 'people');
 
-// Row codec pair — see the equivalent comments in project-sync-schema.ts and
-// area-sync-schema.ts (people share area's createdAt/updatedAt-coalesce-to-nowIso asymmetry).
+
 const personColumnValues = (person: Person, nowIso: string): Record<string, unknown> => {
     const createdAt = person.createdAt ?? person.updatedAt ?? nowIso;
     const updatedAt = person.updatedAt ?? person.createdAt ?? nowIso;

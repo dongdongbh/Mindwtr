@@ -279,7 +279,7 @@ function AgendaTaskList({
 }) {
     const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
     const [scrollMargin, setScrollMargin] = useState(0);
-    // Desktop views scroll inside the shared main content pane, not the window.
+
     const scrollElement = getAgendaScrollElement(containerElement);
     const shouldVirtualize = Boolean(scrollElement) && !highlightTaskId && tasks.length > AGENDA_VIRTUALIZATION_THRESHOLD;
     const rowVirtualizer = useVirtualizer({
@@ -430,9 +430,8 @@ export function AgendaView() {
     } = resolveFeatureFlags(settings);
     const focusTaskLimit = normalizeFocusTaskLimit(settings?.gtd?.focusTaskLimit);
     const { areaById, resolvedAreaFilter } = useAreaVisibility();
-    // The derived `projectMap` on purpose, not the hook's: Focus reads the
-    // tombstone-aware map so a task under a just-deleted project resolves the
-    // same way here as it does in the store's own derived state.
+
+
     const visibility = useMemo(
         () => ({ areaById, projectById: projectMap, resolvedAreaFilter }),
         [areaById, projectMap, resolvedAreaFilter],
@@ -450,7 +449,7 @@ export function AgendaView() {
         AGENDA_ACTIVE_STATUSES.flatMap((status) => activeTasksByStatus.get(status) ?? [])
     ), [activeTasksByStatus, taskChangeToken]);
 
-    // Filter active tasks
+
     const baseActiveTasks = useMemo(() => (
         derivedActiveTasks.filter((t) => isTaskVisibleInArea(t, visibility))
     ), [derivedActiveTasks, visibility]);
@@ -532,10 +531,8 @@ export function AgendaView() {
         tokens: selectedTokens,
         unbindSaved: unbindSavedFilter,
     } = filterSelections;
-    // A saved or stored 'priority' sort/group stops taking effect while
-    // Priorities is off (the preference survives for re-enable) — otherwise
-    // Focus would keep ordering and bucketing by a field hidden everywhere
-    // else in the UI.
+
+
     const {
         effectiveSortBy: effectiveFocusSortBy,
         effectiveGroupBy: effectiveNextGroupBy,
@@ -560,8 +557,8 @@ export function AgendaView() {
         return translateWithFallback(t, key, fallback);
     }, [t]);
     const removeAdvancedSavedFilterCriterion = useCallback((chipId: string) => {
-        // Saved-filter writes edit the list as stored when they are admitted: only the edited filter
-        // changes, so a filter another device added, changed or deleted since stays as synced.
+
+
         const nowIso = new Date().toISOString();
         void updateSettingsFromLatest((latest) => planFocusFilterCriterionRemoval({
             activeSavedFilter,
@@ -579,9 +576,8 @@ export function AgendaView() {
     }), [areaById, projectMap, resolveText, t]);
     const removeSelectionChip = useCallback((chipId: string) => {
         if (chipId.startsWith('token:')) {
-            // Picker tokens are tri-state; summary chips are direct removal
-            // controls. Advancing twice clears included → excluded → neutral
-            // without changing the picker cycle itself.
+
+
             const token = chipId.slice('token:'.length);
             toggleTokenFilter(token);
             toggleTokenFilter(token);
@@ -607,8 +603,8 @@ export function AgendaView() {
                 onRemove: () => setSearchQuery(''),
             });
         }
-        // The pickers are tri-state here, so a chip's Remove maps back to the
-        // hook action that clears that one value rather than to a criteria edit.
+
+
         buildSelectionChips(currentFilterCriteria, chipDeps).forEach((chip) => {
             if (chip.id.startsWith('priority:') && filterSelections.chips.some((item) => item.id === 'preserved:priority')) return;
             if (chip.id.startsWith('time:') && filterSelections.chips.some((item) => item.id === 'preserved:timeEstimates')) return;
@@ -626,8 +622,8 @@ export function AgendaView() {
             });
         }
         if (activeSavedFilter) {
-            // Advanced criteria come from the saved filter, not from the pickers,
-            // so they are built from its own criteria and removed through it.
+
+
             chips.push(...buildAdvancedChips({ ...effectiveFilterCriteria, anyDateRange: undefined }, chipDeps).map((chip) => ({
                 ...chip,
                 onRemove: () => removeAdvancedSavedFilterCriterion(chip.id.slice('advanced:'.length)),
@@ -653,9 +649,8 @@ export function AgendaView() {
 
     const { focusPools, upcomingAppearsAtById, scheduleAppearsAtById } = useMemo(() => {
         void localDayKey;
-        // Next Actions and Review due hide a later-today start until its time
-        // arrives, so their pools have to leave a row the moment that time hits
-        // rather than waiting for midnight.
+
+
         void futureStartTick;
         const now = new Date();
         const pools = buildFocusPools({
@@ -669,14 +664,13 @@ export function AgendaView() {
         });
         return {
             focusPools: pools,
-            // Showing the date is the whole point of the section, so it rides the
-            // row rather than the metadata that "show list details" hides.
+
+
             upcomingAppearsAtById: new Map(pools.upcoming.map((entry) => (
                 [entry.task.id, safeFormatDate(entry.appearsAt, 'P')]
             ))),
-            // A Today row whose timed start hasn't arrived yet gets the same
-            // appears-at treatment as Upcoming, formatted as a time (it's today)
-            // so it drops the moment the start passes.
+
+
             scheduleAppearsAtById: new Map(
                 pools.schedule
                     .filter((task) => !shouldShowTaskForStart(task, { now, granularity: 'time' }))
@@ -800,17 +794,11 @@ export function AgendaView() {
         const timer = window.setTimeout(() => setHighlightTask(null), 4000);
         return () => window.clearTimeout(timer);
     }, [highlightTaskId, setHighlightTask]);
-    // Manual drag order (focusOrder) is a full-list concept, so dragging is only
-    // enabled when all three hold: the sort is the default (an explicit or saved
-    // sort takes over and disables dragging), no search query is active, and no
-    // filter criteria are active. Reordering a filtered/searched subset would
-    // write focusOrder indices 0..n over only the visible rows, leaving hidden
-    // focused tasks with stale positions that surprise-interleave once the filter
-    // clears. Clearing the filter is the correction path.
+
+
     const focusDragEnabled = effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY && !hasTaskFilters;
 
-    // Today's Focus, Today, Review Due, Next actions and Upcoming, from the one
-    // derivation the mobile screen and every widget payload also use.
+
     const sections = useMemo(() => {
         void localDayKey;
         return deriveFocusTaskLists(focusPools, {
@@ -876,8 +864,7 @@ export function AgendaView() {
     const collapseOtherSections = visibleOtherSectionKeys
         .some((sectionKey) => expandedSections[sectionKey]);
 
-    // The keyboard scope walks exactly what is on screen, in render order:
-    // collapsed sections and collapsed groups contribute no rows.
+
     const visibleTasks = useMemo(() => {
         const visible = expandedSections.focus ? [...focusedTasks] : [];
         if (expandedSections.schedule) visible.push(...orderedTodayTasks);
@@ -903,8 +890,8 @@ export function AgendaView() {
     const handleToggleFocus = useCallback((taskId: string) => {
         const task = tasksById.get(taskId);
         if (!task) return;
-        // Core focus-star module decides eligibility, cap, and the patch;
-        // status promotion happens in the store's star↔status rules.
+
+
         const action = useTaskStore.getState().getFocusStarAction(task);
         if (!action.canToggle) {
             const blockedText = getFocusStarBlockedText(t, action, focusTaskLimit);
@@ -919,9 +906,8 @@ export function AgendaView() {
     const buildFocusToggle = useCallback((task: Task) => {
         const isFocused = Boolean(task.isFocusedToday);
         const queued = isTaskFutureFocusCandidate(task);
-        // Cheap cap-only gate at render time (rows are many); full eligibility
-        // is enforced on click via the core focus-star module, which toasts
-        // the blocked reason.
+
+
         const canToggle = isFocused || queued || focusedCount < focusTaskLimit;
         const title = isFocused
             ? t('agenda.removeFromFocus')
@@ -1014,7 +1000,7 @@ export function AgendaView() {
         const oldIndex = ids.indexOf(String(active.id));
         const newIndex = ids.indexOf(String(over.id));
         if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
-        // Core diffs against stored focusOrder and writes only the rows that moved.
+
         void Promise.resolve(reorderFocusedTasks(arrayMove(ids, oldIndex, newIndex))).catch(() => undefined);
     }, [focusedTasks, reorderFocusedTasks]);
     const focusDragAriaLabel = resolveText('projects.reorderTasks', 'Order');
@@ -1224,7 +1210,7 @@ export function AgendaView() {
 
             {todaysFocusSection}
 
-            {/* Other Sections */}
+            {                    }
             <div className="space-y-6">
                 {sections.schedule.length > 0 && (
                     <AgendaCollapsibleSection

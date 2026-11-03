@@ -64,16 +64,10 @@ import org.json.JSONObject
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardCapitalization
 
-/*
- * RN's capture confirmation screen (app/capture-modal.tsx), drawn from core's capture screen view: the Add Task card
- * centered on the background, the hide-keyboard and ? buttons, the title field with core's preview chips, the description
- * field when the entry brought one, a file share's files, the syntax help, the failure line, and Cancel, Save & edit and Save; over it, RN's
- * several-lines question. Every word and every control's edit is core's (CaptureModalModel.kt).
- */
 
 private fun JSONObject.text(name: String): String? = if (!has(name) || isNull(name)) null else getString(name)
 
-/** One accessibility node per control: its label, role, state and test tag together, then the tap. */
+
 private fun Modifier.control(label: String, tag: String, enabled: Boolean, action: () -> Unit) =
     clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = tag; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action)
@@ -86,33 +80,33 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
     val view = modal.view
     val owed = model.failedAction != null
     val locked = model.busy || owed
-    // While a Save's retry is owed, only that Save (or Create tasks) runs, with the same capture IDs.
+
     val canSave = model.writable && !model.busy && (!owed || model.failedAction == modal.pending)
     val keyboard = LocalSoftwareKeyboardController.current
     val titleFocus = remember { FocusRequester() }
-    // RN focuses the field 120 ms after the screen opens; the keyboard leaves with the screen.
+
     LaunchedEffect(modal.session) { delay(120); runCatching { titleFocus.requestFocus() } }
     DisposableEffect(Unit) { onDispose { keyboard?.hide() } }
-    // Edits wait while an action runs; they go on once none does.
+
     LaunchedEffect(model.busy, owed) { if (!model.busy && !owed) pump() }
-    // Core's copilot question for the title as it reads now: requestAICopilot once typing pauses (RN's 800 ms), its answer back as an edit.
+
     val copilotRequest = view.getJSONObject("copilot").optJSONObject("request")
     LaunchedEffect(modal.session, copilotRequest?.toString()) { model.ai.captureCopilot(modal.session, copilotRequest) }
     BackHandler {
         if (model.busy) return@BackHandler
         if (modal.confirm != null) cancelLines() else cancel(leave = false)
     }
-    // Edge to edge, as RN's screen: the card is centered in the whole window, and while the keyboard is up in the space above
-    // it, so Cancel and Save stay reachable (RN's KeyboardAvoidingView, 'height' on Android).
+
+
     Box(Modifier.fillMaxSize().background(c.bg).imePadding().semantics { testTagsAsResourceId = true }.testTag("capture-modal")) {
         Column(Modifier.fillMaxSize()) {
-            // An owed failure (this screen's save, or any other command) shows the app's failure banner with its exact retry.
+
             if (model.failedAction != null) FailureBanner(model.error.orEmpty()) { OwedRetry(model) }
-            // RN's ScrollView: the card centered while it fits, scrolled once it does not (the keyboard up, a long description).
+
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                 Column(Modifier.verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(16.dp), verticalArrangement = Arrangement.Center) {
                     val card = RoundedCornerShape(12.dp)
-                    // RN's border sits outside its padding; a Compose border is drawn over the padding, so each bordered box here pads 1 dp more.
+
                     Column(Modifier.fillMaxWidth().clip(card).background(c.cardBg).rnBorder(1.dp, c.border, card).padding(17.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -138,7 +132,7 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
                             Modifier.focusRequester(titleFocus)) { type(it) }
                         val preview = view.items("preview")
                         if (preview.isNotEmpty()) PreviewStrip(preview, Modifier)
-                        // A file share's files (RN's Attachments group): the label, then each file's paperclip and name.
+
                         view.optJSONObject("attachments")?.let { files ->
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(files.getString("label"), style = rnText(12, 600, 16), color = c.secondaryText)
@@ -150,7 +144,7 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
                                 }
                             }
                         }
-                        // Shown while the entry brought a description or the field holds one.
+
                         view.optJSONObject("description")?.let { description ->
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(description.getString("label"), style = rnText(12, 600, 16), color = c.secondaryText)
@@ -158,14 +152,14 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
                                     Modifier) { describe(it) }
                             }
                         }
-                        // The copilot's chips and the applied line (RN's copilotPill), while AI is on.
+
                         CaptureCopilot(model, view.getJSONObject("copilot"), !locked)
                         view.getJSONObject("help").text("text")?.let { Text(it, style = rnText(12, 400), color = c.secondaryText) }
-                        // RN's failure line, until the next save starts; TalkBack hears it at once.
+
                         if (modal.failed) Text(t("task.addFailed"), style = rnText(13, 400, 18), color = c.danger,
                             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
                         val actions = view.getJSONObject("actions")
-                        // RN's row stretches its buttons to the bordered Save & edit's height; RN's Android text line (font padding) is 19.
+
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                             val button = RoundedCornerShape(8.dp)
                             Box(Modifier.clip(button).background(c.inputBg).control(actions.getString("cancel"), "capture-modal-cancel", !model.busy) { cancel() }
@@ -188,7 +182,7 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
             }
         }
         ToastCard(model, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp))
-        // RN's several-lines question on the screen itself (#941): Cancel, the backdrop and Back close it.
+
         modal.confirm?.let { confirm ->
             PickerCard(confirm.getString("title"), { if (!locked) cancelLines() }) {
                 Text(confirm.getString("message"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(bottom = 12.dp))
@@ -201,10 +195,7 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
     }
 }
 
-/**
- * RN's TextInput on the card: the input background, an 8 radius, multiline (Return adds a line, as RN's Android field does), the
- * text centered in the field's height as an Android multiline field centers it.
- */
+
 @Composable
 private fun ModalField(value: String, placeholder: String, tag: String, enabled: Boolean, size: Int, minHeight: Dp, modifier: Modifier, onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -213,7 +204,7 @@ private fun ModalField(value: String, placeholder: String, tag: String, enabled:
     val shape = RoundedCornerShape(8.dp)
     BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled,
         textStyle = rnText(size, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
-        // RN's TextInput default autoCapitalize "sentences": the keyboard opens with Shift on.
+
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
         modifier = modifier.fillMaxWidth().heightIn(min = minHeight).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).testTag(tag)
             .semantics { contentDescription = placeholder },

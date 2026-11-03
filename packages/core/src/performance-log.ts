@@ -35,12 +35,11 @@ export type PerformanceLogInput = {
     listItemCount?: number;
     visibleItemCount?: number;
     filterCount?: number;
-    // Task rows that actually re-rendered during this commit. A count near the
-    // list length means row memoization is not holding and the whole window
-    // re-renders per store change (#766).
+
+
     rowRenderCount?: number;
-    // Entry-scroll retries before the reorder list settled on the target row;
-    // pairs with elapsedMs to size the blank window on slow devices (#784).
+
+
     scrollRetryCount?: number;
     platform?: PerformancePlatform;
     appVersion?: string;

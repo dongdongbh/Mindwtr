@@ -9,8 +9,8 @@ export default function MindSweepModalScreen() {
   return (
     <>
       <MindSweepModalContent onClose={() => router.back()} />
-      {/* This route is presented modally, so a root-level alert never reaches
-          the screen on iOS (#940). */}
+      {
+                                      }
       <ThemedAlertHost />
     </>
   );

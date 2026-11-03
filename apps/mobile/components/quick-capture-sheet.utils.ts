@@ -50,7 +50,7 @@ export const selectExistingCaptureFile = <T extends CaptureFileLike>(
                 return { file, info };
             }
         } catch {
-            // Try the next candidate. The caller decides how to report total failure.
+
         }
     }
     return null;
@@ -70,5 +70,5 @@ export const getCaptureFileExtension = (uri: string) => {
     return match ? match[0] : '.m4a';
 };
 
-// Core's one audio mime table (RN voice bug 3: this one said audio/mp4 for .webm), read when called, not when this loads.
+
 export const getCaptureMimeType = (extension: string) => getAudioMimeType(extension);

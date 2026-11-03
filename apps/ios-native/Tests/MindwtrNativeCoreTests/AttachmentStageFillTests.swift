@@ -14,7 +14,7 @@ final class AttachmentStageFillTests: XCTestCase {
     private enum Cancelled: Error { case stopped }
 
     override func setUpWithError() throws {
-        // Keep large streaming fixtures on the checkout's disk, not Darwin /tmp.
+
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let fixture = checkout.appendingPathComponent(".build/task221-fixtures/\(UUID().uuidString)", isDirectory: true)
@@ -228,7 +228,7 @@ final class AttachmentStageFillTests: XCTestCase {
             let nestedReplacement = replaceCache ? original.appendingPathComponent(nested.lastPathComponent) : original
             if replaceCache { try FileManager.default.createDirectory(at: nestedReplacement, withIntermediateDirectories: false) }
             let movedSource = retained.appendingPathComponent(replaceCache ? nested.lastPathComponent + "/source" : "source")
-            // Keep the source inode identical: the stored ancestor proof alone must reject.
+
             try FileManager.default.moveItem(at: movedSource, to: url)
             XCTAssertEqual(try token(url), sourceProof.identity)
             let cold = try NativeAttachmentFiles(libraryRoot: root)
@@ -365,8 +365,8 @@ final class AttachmentStageFillTests: XCTestCase {
         refused {
             _ = try self.files.fillReservedAttachmentStage(sourceProof: sourceProof, stageProof: proof, checkCancellation: {
                 callbacks += 1
-                // Initial admission, first source read, then the second read:
-                // the first chunk is already written and must not be trusted.
+
+
                 if callbacks == 3 {
                     let handle = try FileHandle(forWritingTo: stage.stagedUrl)
                     defer { try? handle.close() }
@@ -398,8 +398,8 @@ final class AttachmentStageFillTests: XCTestCase {
         refused {
             _ = try self.files.fillReservedAttachmentStage(sourceProof: sourceProof, stageProof: proof, checkCancellation: {
                 callbacks += 1
-                // Admission + three reads/EOF + final check + first stage read;
-                // now change bytes that the retained verification FD already read.
+
+
                 if callbacks == 8 {
                     let handle = try FileHandle(forWritingTo: stage.stagedUrl)
                     defer { try? handle.close() }

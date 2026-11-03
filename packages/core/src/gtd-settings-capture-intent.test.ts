@@ -4,10 +4,7 @@ import { getTranslator } from './i18n';
 import { openScreenHost, value } from './screen-parity.replay';
 import { flushPendingSave, resetForTests } from './store';
 
-// React Native's AndroidCaptureIntentSection, as core's GTD model gives it to the
-// native app. The live parity with the React Native card is
-// apps/mobile/components/settings/android-capture-intent-section.parity.test.tsx;
-// the words below are en.ts's `settings.automationCapture*` texts.
+
 const WORDS = {
     label: 'Automation capture',
     description: 'Allow trusted automation apps with your token to queue text to Inbox. Captures appear the next time Mindwtr opens.',

@@ -41,7 +41,7 @@ static void showFallback(WKWebView *webView) {
     }
     objc_setAssociatedObject(webView, &alertOpenKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     __weak WKWebView *weakWebView = webView;
-    // Leave WebKit's delegate callback before presenting a sheet.
+
     dispatch_async(dispatch_get_main_queue(), ^{
         WKWebView *view = weakWebView;
         NSWindow *window = view.window;
@@ -84,7 +84,7 @@ static void showFallback(WKWebView *webView) {
 }
 
 static void rendererTerminated(id self, SEL command, WKWebView *webView) {
-    // Wry owns navigation, downloads, and page-load callbacks. Keep its handler.
+
     originalTermination(self, command, webView);
 
     objc_setAssociatedObject(webView, &reloadNavigationKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -125,7 +125,7 @@ static void rendererDidFail(id self, SEL command, WKWebView *webView,
     }
     if (navigation != nil && navigation == objc_getAssociatedObject(webView, &reloadNavigationKey)) {
         objc_setAssociatedObject(webView, &reloadNavigationKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        // Never log NSError: its description can contain the current URL.
+
         emit(webView, MindwtrRendererReloadFailed);
         showFallback(webView);
     }

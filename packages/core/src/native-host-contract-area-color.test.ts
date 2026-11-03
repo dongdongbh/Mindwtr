@@ -250,7 +250,7 @@ describe('prepared native Area color', () => {
         forged.effect.area.after.updatedAt = now;
         expect(methods.validatePreparedAreaColor({ request: input, prepared: forged }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // A different stamp makes the receipt observable; mutable guards still run before first apply.
+
         useTaskStore.setState({ _allProjects: [project('newly-linked', { color: '#ef4444' })] });
         expect(await methods.commitPreparedAreaColor({ request: input, prepared: next.value.prepared }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -277,8 +277,7 @@ describe('prepared native Area color', () => {
     });
 });
 
-// Android's Manage areas sheet (#1263, RN ProjectAreaModals.tsx): a swatch, or None, is the area's color as a target state, run
-// over the prepared color above. Settings' editor cannot clear a color (its color is a preset or the one it opened with).
+
 describe('runAreaColor (#1263)', () => {
     const run = (methods: Awaited<ReturnType<typeof open>>['methods'], color: string | null, areaId = 'area-work') =>
         methods.runAreaColor({ requestId: id, areaId, color });
@@ -303,7 +302,7 @@ describe('runAreaColor (#1263)', () => {
     });
 });
 
-// Review 5c: runAreaColor's prepare and commit are two steps; a sync landing between them prepares again on the area as it is now.
+
 describe('runAreaColor retry (#1263 review 5c)', () => {
     it('prepares again when a sync changes the area between prepare and commit, keeping the synced name', async () => {
         const { methods, data } = await open({ areas: [area()], projects: [project('p1')] });

@@ -37,12 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/**
- * RN's saved search screen (app/(drawer)/saved-search/[id].tsx) on core's getSavedSearchView, under RN's stack header: the saved
- * search's name and query with RN's Sort (core's modal, #1453) and Delete (RN's red trash; core's question first, then core's deleteSavedSearch, and RN goes back), then
- * core's rows as the lists draw them (RN's task row with its status badge; their swipes, status menu and editor are the lists' own
- * commands), read in windows of 50 with More, and core's empty line, with core's Inbox and Back when the saved search is gone.
- */
+
 @Composable
 fun SavedSearchList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
@@ -54,7 +49,7 @@ fun SavedSearchList(model: InboxViewModel) = with(model.menu) {
                 Text(view.getString("title"), style = rnText(20, 700), color = c.text, modifier = Modifier.semantics { heading() })
                 view.menuText("query")?.let { Text(it, style = rnText(12, 400), color = c.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-            // RN's TaskListSortButton: core's "Sort: <current>" label opens core's modal.
+
             view.optJSONObject("sort")?.let { sort ->
                 DirectControl(Lucide.ArrowUpDown, sort.getString("accessibilityLabel"), null, null, idle) { openDialog("savedSearchSort") }
             }
@@ -68,7 +63,7 @@ fun SavedSearchList(model: InboxViewModel) = with(model.menu) {
                 }
             }
         }
-        // RN's pull here reads the list again (a RefreshControl over fetchData), no sync.
+
         PullToRead(Modifier.weight(1f).fillMaxWidth(), { done -> refresh(done) }) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
                 view.optJSONObject("empty")?.takeIf { shown.items.isEmpty() }?.let { empty ->
@@ -81,7 +76,7 @@ fun SavedSearchList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's empty line (16, the secondary text), and, for a saved search that is gone, core's Inbox (the Inbox instead) and Back. */
+
 @Composable
 private fun EmptyLine(model: InboxViewModel, empty: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors

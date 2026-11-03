@@ -4,10 +4,7 @@ const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins'
 const { buildWidgetPreviewXml } = require('./android-widget-preview');
 const { compactWidgetLocales, compactWidgetValuesDirectory } = require('./android-widget-locales');
 
-// Registers the native home-screen widget and the quick-capture dialog that
-// live in modules/android-widget (Kotlin). The module's own manifest carries no
-// components on purpose: the launcher label, the appwidget-provider XML and
-// the preview image depend on app config (the Dev variant relabels them).
+
 const MODULE_PACKAGE = 'tech.dongdongbh.mindwtr.androidwidget';
 const SERVICE_NAME = `${MODULE_PACKAGE}.TasksWidgetService`;
 const ACTIVITY_NAME = `${MODULE_PACKAGE}.QuickCaptureActivity`;
@@ -40,9 +37,7 @@ const DEFAULT_PROPS = {
 
 const resolveProps = (props) => ({ ...DEFAULT_PROPS, ...(props ?? {}) });
 
-// One row per widget kind (mirrors WidgetKind.kt). Adding a kind: one row here,
-// one enum row + provider subclass + layout in the module. `label` is the
-// launcher-picker name under the app; `description` the picker subtitle.
+
 const buildWidgetKinds = (props) => [
   {
     kind: 'Tasks',
@@ -60,10 +55,10 @@ const buildWidgetKinds = (props) => [
     targetCellHeight: props.targetCellHeight,
     resizeMode: props.resizeMode,
     previewImage: props.previewImage,
-    // Picks the list on placement; `reconfigurable` adds the launcher's edit action (#1173).
+
     configure: CONFIGURE_ACTIVITY_NAME,
     widgetFeatures: 'reconfigurable|configuration_optional',
-    // Upcoming dates go stale, so the list refreshes every 30 min and on clock changes.
+
     clockRefresh: true,
   },
   {
@@ -83,7 +78,7 @@ const buildWidgetKinds = (props) => [
     targetCellHeight: 2,
     resizeMode: 'horizontal|vertical',
     previewImage: './assets/images/widget-compact-preview.png',
-    // Its settings hold only the background choice.
+
     configure: CONFIGURE_ACTIVITY_NAME,
     widgetFeatures: 'reconfigurable|configuration_optional',
   },
@@ -111,8 +106,8 @@ const buildLegacyTasksWidgetKind = (props, androidPackage) => ({
   kind: 'LegacyTasks',
   receiver: `${androidPackage}${LEGACY_TASKS_RECEIVER_CLASS_SUFFIX}`,
   infoResource: LEGACY_TASKS_INFO_RESOURCE,
-  // API 28+ launchers can hide the compatibility component from the picker;
-  // older hosts ignore the hint but keep already-placed widgets alive.
+
+
   widgetFeatures: 'reconfigurable|configuration_optional|hide_from_picker',
 });
 
@@ -158,8 +153,7 @@ const buildCompactWidgetStringsXml = (label, locale = 'en') => {
 `;
 };
 
-// The dialog inherits AppCompat's DayNight dialog so it follows the system
-// theme; every label inside it comes from the stored widget payload.
+
 const buildWidgetStylesXml = () => `<?xml version="1.0" encoding="utf-8"?>
 <resources>
   <style name="${QUICK_CAPTURE_THEME}" parent="Theme.AppCompat.DayNight.Dialog">
@@ -189,7 +183,7 @@ const ensureWidgetReceiver = (application, kind) => {
     receiver = { $: {} };
     receivers.push(receiver);
   }
-  // Launchers update widgets; protected clock broadcasts re-evaluate cached Upcoming dates.
+
   receiver.$ = {
     'android:name': kind.receiver,
     'android:label': kind.labelResource ? `@string/${kind.labelResource}` : kind.label,
@@ -221,9 +215,8 @@ const ensureCaptureIntentReceiver = (application) => {
     receiver = { $: {} };
     receivers.push(receiver);
   }
-  // Intentionally exported for explicit cross-app automation. The receiver
-  // validates the exact action, string extras, device-local token and text
-  // bounds before it queues anything.
+
+
   receiver.$ = {
     'android:name': CAPTURE_RECEIVER_NAME,
     'android:exported': 'true',
@@ -238,8 +231,8 @@ const ensureQuickCaptureActivity = (application) => {
     activity = { $: {} };
     activities.push(activity);
   }
-  // Own task with no affinity so it floats over whatever is on screen and never
-  // pulls MainActivity's task forward; gone from Recents and history on finish.
+
+
   activity.$ = {
     'android:name': ACTIVITY_NAME,
     'android:exported': 'false',
@@ -259,12 +252,8 @@ const ensureConfigureActivity = (application) => {
     activity = { $: {} };
     activities.push(activity);
   }
-  // The launcher starts it through the system's configure flow; the
-  // APPWIDGET_CONFIGURE filter is the one entry it needs. No task affinity so
-  // the widget header's own chooser (started with FLAG_ACTIVITY_NEW_TASK) gets
-  // a task of its own and closing it returns to the launcher instead of
-  // surfacing whatever screen the app was left on; the launcher's own
-  // startActivityForResult ignores affinity and still gets its result.
+
+
   activity.$ = {
     'android:name': CONFIGURE_ACTIVITY_NAME,
     'android:exported': 'true',
@@ -275,8 +264,7 @@ const ensureConfigureActivity = (application) => {
   activity['intent-filter'] = [{ action: [{ $: { 'android:name': 'android.appwidget.action.APPWIDGET_CONFIGURE' } }] }];
 };
 
-// Invisible trampoline behind the widget rows' PendingIntent template: opens
-// the tapped task or toggles a check-off, then finishes. Never exported.
+
 const ensureTapActivity = (application) => {
   const activities = ensureArray(application, 'activity');
   let activity = findByName(activities, TAP_ACTIVITY_NAME);
@@ -294,8 +282,7 @@ const ensureTapActivity = (application) => {
   };
 };
 
-// The task sheet a widget row opens: floats over the launcher in its own task,
-// like the capture dialog, and never surfaces MainActivity.
+
 const ensurePeekActivity = (application) => {
   const activities = ensureArray(application, 'activity');
   let activity = findByName(activities, PEEK_ACTIVITY_NAME);

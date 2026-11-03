@@ -1,21 +1,6 @@
-/**
- * The one home for the "Today" list the widget payload builders render:
- * `widget-payload.ts` (Android widget, iOS widget, and the
- * Shortcuts snapshot's "focus" list, #980) and
- * `apps/desktop/src/lib/macos-widget-data.ts` (the macOS WidgetKit widget,
- * #1054). Both used to carry their own copy of this selection, and the copies
- * picked a sequential project's one slot with the order-only
- * `getSequentialFirstTaskIds` while the Focus screens picked it with the
- * schedule-ranked `getFocusSequentialFirstTaskIds` -- so a project whose
- * step 3 was due today showed step 3 in Focus and step 1 on the widget.
- *
- * Focus order is ONE contract across surfaces (#1090): this module applies the
- * Focus screens' rule, and the builders keep only their payload shaping (the
- * mobile and macOS payloads have different shapes, hence no shared builder).
- *
- * `now` is a parameter, never `Date.now()`, so the selection is deterministic
- * in tests and one payload build sees one instant.
- */
+
+
+
 import { deriveFocusTaskLists, type FocusPools } from './focus-sections';
 import { TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
 import { isTaskFocusedNow, shouldShowTaskForStart, sortTasksBy } from './task-utils';
@@ -23,13 +8,8 @@ import type { Project, Section, Task, TaskSortBy } from './types';
 
 
 export interface TodayFocusSelectionInput {
-    /**
-     * The caller's already-narrowed pool: undeleted, actionable, in an active
-     * project. This is the widget's equivalent of the Focus screens'
-     * `baseActiveTasks` -- deliberately NOT start-time filtered, because
-     * `getFocusSequentialFirstTaskIds` must see a step that is deferred to a
-     * future date to know it still holds its project's slot.
-     */
+
+
     activeTasks: Task[];
     projects: Project[];
     sections: Section[];
@@ -39,31 +19,13 @@ export interface TodayFocusSelectionInput {
 }
 
 export interface TodayFocusSelection {
-    /** Starred tasks, sorted; they lead the widget list. */
+
     starredTasks: Task[];
-    /** Everything else that belongs in today's list, sorted; starred excluded. */
+
     focusTasks: Task[];
 }
 
-/**
- * Starred tasks first, then next actions due or starting today, then the rest
- * of today's actionable next actions -- with a sequential project contributing
- * at most the one step the Focus screen would show for it.
- *
- * The buckets come from the shared Focus derivation (`focus-sections.ts`); this
- * function only shapes the widget's pools and flattens the result into the two
- * lists the payload builders render. Three widget-only rules survive here
- * because the widget shows ONE list where the screens show five sections:
- *
- * 1. The Today pool is not narrowed to today's starts. The widget has no
- *    Upcoming section, so a task that is due today but deferred to a later day
- *    would simply vanish; on the screens it moves to Upcoming instead.
- * 2. A queued star stays out until its start day, even if the task is due sooner.
- * 3. Review Due rejoins the one list, next actions only and minus the steps the
- *    sequential gate holds back. The screens split a next action that is also
- *    due for review into its own section; here that would drop it from the
- *    widget altogether. Waiting and someday tasks stay out, as they always have.
- */
+
 export function computeTodayFocusTasks({
     activeTasks,
     projects,
@@ -83,24 +45,19 @@ export function computeTodayFocusTasks({
         now,
         projects,
         sections,
-        // The widget applies its own flat sort below, so the sections' internal
-        // order never reaches the payload; only their membership does.
+
+
         sortBy: 'default',
         prioritiesEnabled: false,
         focusIncludeStartDates,
     });
 
-    // Membership comes from the shared buckets; the ORDER is the payload's own
-    // flat sort over the caller's pool order. Reading the buckets' own order
-    // would leak the screens' section sort into every tie the widget's sort
-    // leaves open.
+
     const scheduled = new Set(lists.schedule.map((task) => task.id));
     const listed = new Set(
         [...lists.reviewDue, ...lists.nextActions]
-            // Today and Next actions are already gated; Review Due is not, so
-            // folding it in would show a sequential step that is waiting its
-            // turn. The screens keep that step visible under their own Review
-            // Due heading, where the order is obvious; one flat list cannot.
+
+
             .filter((task) => task.status === 'next' && !lists.sequentialBlockedIds.has(task.id))
             .map((task) => task.id),
     );
@@ -113,12 +70,7 @@ export function computeTodayFocusTasks({
     };
 }
 
-/**
- * The widget payload builders' sort resolver: a stored widget sort that is not
- * on the task-list roster falls back to the default. One home so a new sort key
- * cannot reach one widget and miss the other. The caller still applies
- * `resolveTaskSortByForFeatures` — widgets follow the feature toggles (#1107).
- */
+
 export function resolveWidgetTaskSort(stored: unknown): TaskSortBy {
     return TASK_LIST_SORT_OPTIONS.includes(stored as TaskSortBy) ? stored as TaskSortBy : 'default';
 }

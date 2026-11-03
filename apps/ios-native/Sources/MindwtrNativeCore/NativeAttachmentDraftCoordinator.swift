@@ -29,8 +29,7 @@ final class AttachmentDraftHostHooks: @unchecked Sendable {
 }
 #endif
 
-/// Serialized by CoreHost's existing library owner. Descriptor proofs remain
-/// native; editor projection and task authority remain in shared core.
+
 final class NativeAttachmentDraftCoordinator {
     typealias Store = NativeAttachmentDraftStore
     private let store: Store
@@ -123,8 +122,8 @@ final class NativeAttachmentDraftCoordinator {
                 || record.checkpointAdvance.map({ Self.equal(value.snapshot, $0.after) }) == true else { throw Self.failure }
         }
     }
-    /// Metadata validation only. Owned Save separately requires its exact full
-    /// editor attempt; the existing editable lineage gate is never relaxed.
+
+
     private func history(_ record: Store.Record) throws {
         for op in record.operations {
             _ = try prepared(op)
@@ -247,11 +246,10 @@ final class NativeAttachmentDraftCoordinator {
         return try Self.json(["version": version, "status": "begun", "sessionID": session, "generation": generation])
     }
 
-    /// Ordinary raw editor retention only. Shared lineage proves attachment
-    /// continuity; this does not admit Save or recheck upload/task edit policy.
+
     func advance(_ snapshot: EditorDraftSnapshot) throws {
-        // Finish all existing file work before invoking the pure JS validator.
-        // No JSC invocation occurs between the durable intent and final marker.
+
+
         jobs.drain()
         guard let record = try store.read(), record.version == 2, record.session.state == .active,
               record.discard == nil, record.operations.allSatisfy({ $0.phase == .checkpointed }),
@@ -267,8 +265,8 @@ final class NativeAttachmentDraftCoordinator {
         }
         try current(record.session.checkpoint)
         if Self.equal(snapshot, record.session.checkpoint) {
-            // An earlier marker may have been promoted before its parent-sync
-            // acknowledgment failed. A read alone cannot confirm that write.
+
+
             try requireRecord(record)
             try store.write(record)
             acknowledge("checkpoint", "replayed")
@@ -301,8 +299,8 @@ final class NativeAttachmentDraftCoordinator {
     }
     private func requireRecord(_ expected: Store.Record) throws {
         guard let actual = try store.read() else { throw Self.failure }
-        // Codable's synthesized String equality is Unicode-normalizing. Compare
-        // a stable complete model encoding to retain every opaque byte instead.
+
+
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         guard try encoder.encode(actual) == encoder.encode(expected) else { throw Self.failure }
     }
@@ -313,12 +311,12 @@ final class NativeAttachmentDraftCoordinator {
         for candidate in [record, settled] {
             guard try JSONEncoder().encode(candidate).count <= Store.maximumBytes else { throw Self.failure }
         }
-        // Before intent, only the pending record can pass retained-write checks;
-        // the settled record requires that intent already present on disk.
+
+
         try store.preflight(record)
     }
-    /// Reserve future Discard only before a new intent is admitted. Recovery
-    /// must finish an older recorded pair under its original capacity checks.
+
+
     private func preflightAdvanceAdmission(_ record: Store.Record) throws {
         try preflightAdvance(record)
         guard let advance = record.checkpointAdvance else { throw Self.failure }
@@ -410,7 +408,7 @@ final class NativeAttachmentDraftCoordinator {
         try requireOwner(); try cancellation.check()
         if let binding { try requireMixed(binding, cancellation) }
         else { guard case nil = try store.readVersioned() else { throw Self.failure } }
-        // An uncertain write acknowledgment aborts before any binding refresh.
+
         try store.writeMixed(record)
         guard let next = try store.readVersioned(), case .mixed(let actual) = next.record else { throw Self.failure }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
@@ -471,7 +469,7 @@ final class NativeAttachmentDraftCoordinator {
     }
     private func preflightMixedShapes(_ records: [Store.MixedRecord]) throws {
         for record in records {
-            _ = try Store.mixedFingerprint(record) // Structural validation only.
+            _ = try Store.mixedFingerprint(record)
             guard try JSONEncoder().encode(record).count <= Store.maximumBytes else { throw Self.failure }
         }
     }
@@ -720,7 +718,7 @@ final class NativeAttachmentDraftCoordinator {
         return settled
     }
 
-    // Explicit mixed last-Add owner. The old Add-only controller stays sealed.
+
     private func mixedAddEditor(_ record: Store.MixedRecord) throws -> EditorDraftStore.OwnedCheckpoint {
         guard record.session.state == .active, record.discard == nil, record.checkpointAdvance == nil,
               let binding = try editor.readOwnedCheckpoint(), binding.attempt == nil else { throw Self.failure }
@@ -773,8 +771,8 @@ final class NativeAttachmentDraftCoordinator {
         guard let last = record.operations.last, case .add(let op) = last else { throw Self.failure }
         if op.phase == .checkpointed { try store.preflightMixed(record); return }
         try editor.preflightCheckpoint(op.after)
-        // Unknown identities are maximum-width size placeholders only. Actual
-        // jobs supply every persisted proof; no placeholder grants authority.
+
+
         let token = "18446744073709551615:18446744073709551615"
         let stageProof = op.stage ?? Store.Stage(uri: managedURI + ".mindwtr-install-"
             + op.requestId.replacingOccurrences(of: "-", with: "") + ".candidate/stage",
@@ -795,7 +793,7 @@ final class NativeAttachmentDraftCoordinator {
         for phase in [Store.Phase.intent, .stagePrepared, .stageFilled, .published, .resultDurable, .checkpointed]
             where phase.rank >= op.phase.rank {
             shapes.append(try shape(phase))
-            // Longest admitted reason dominates every other reason's encoding.
+
             if phase != .checkpointed { shapes.append(try shape(phase, reason: .interruptedReservation)) }
         }
         if admission {
@@ -880,8 +878,8 @@ final class NativeAttachmentDraftCoordinator {
         try mixedHistory(record, binding: binding, cancellation: cancellation)
         try requireMixedAdd(binding, editorBinding, cancellation)
         try preflightMixedAdd(record, admission: false)
-        // Re-acknowledge actual retained phase before another primitive, including
-        // visible writes whose earlier directory-sync acknowledgment was lost.
+
+
         binding = try writeMixedAdd(record, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
         if op.phase == .checkpointed {
             acknowledge("add-mixed", "replayed")
@@ -906,8 +904,8 @@ final class NativeAttachmentDraftCoordinator {
                     binding = try writeMixedAdd(next, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
                     record = next; if case .add(let actual) = next.operations.last! { op = actual }
                 } catch {
-                    // Only the still-exact acknowledged intent can receive this
-                    // reason; an uncertain phase write is never reparsed/adopted.
+
+
                     if op.phase == .intent, (try? requireMixedAdd(binding, editorBinding, cancellation)) != nil {
                         let retained = replacingMixedAdd(record, advancing(op, phase: .intent, reason: .interruptedReservation))
                         _ = try? writeMixedAdd(retained, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
@@ -985,8 +983,8 @@ final class NativeAttachmentDraftCoordinator {
             try requireMixedAdd(binding, editorBinding, cancellation)
             return record
         } catch {
-            // Preserve the last acknowledged phase only. Failed writes, foreign
-            // evidence and revocation cannot refresh or overwrite authority.
+
+
             if (try? requireMixedAdd(binding, editorBinding, cancellation)) != nil,
                let last = record.operations.last, case .add(let actual) = last, actual.phase != .checkpointed {
                 let retained = replacingMixedAdd(record, advancing(actual, phase: actual.phase, reason: actual.reason ?? .io))
@@ -996,8 +994,7 @@ final class NativeAttachmentDraftCoordinator {
         }
     }
 
-    // Selected availability consumers. Structural records alone grant neither
-    // shared patch authority nor ownership of a matching existing generation.
+
     struct AvailabilitySavePreparation {
         let binding: Store.AvailabilitySnapshot
         let snapshot: EditorDraftSnapshot
@@ -1030,7 +1027,7 @@ final class NativeAttachmentDraftCoordinator {
               let identity = value["identity"] as? String, !identity.isEmpty else { throw failure }
         return .init(id: id, session: session, generation: Int(generation), attachmentID: attachment, identity: identity, json: try json(value))
     }
-    /// A retained UUID is handled before any configuration, HTTP or source work.
+
     func replayAvailabilityV5(_ request: AvailabilityDownloadRequest, cancellation: NativeAttachmentCancellation) throws -> String? {
         try requireOwner(); try cancellation.check()
         guard let snapshot = try store.readVersioned() else { return nil }
@@ -1081,8 +1078,8 @@ final class NativeAttachmentDraftCoordinator {
         let binding = try store.writeAvailabilityAcknowledged(record)
         try requireAvailabilityEditor(binding, editorBinding, cancellation)
     }
-    /// Capacity is checked with the longest native proof tokens before GET or
-    /// cache creation, and with the actual frozen proof again before intent.
+
+
     func preflightDownloadV5(_ request: AvailabilityDownloadRequest, selectedJSON: String, targetURI: String,
                              cancellation: NativeAttachmentCancellation) throws {
         try requireOwner(); try cancellation.check()
@@ -1140,12 +1137,12 @@ final class NativeAttachmentDraftCoordinator {
                 state: .cleanupPending, checkpoint: checkpoint), operations: completed.operations,
                 discard: .init(requestId: discardID, requestJSON: discardRequest, expected: checkpoint, phase: phase,
                     replyJSON: phase == .detached ? Self.json(["version": 1, "status": "cleanupPending", "requestId": discardID, "sessionID": checkpoint.sessionID]) : nil))
-            // Future capacity shapes need structural validation, not a direct
-            // transition from the current disk checkpoint to a later Discard.
+
+
             _ = try Store.availabilityFingerprint(shape)
             guard try JSONEncoder().encode(shape).count <= Store.maximumBytes else { throw Self.failure }
         }
-        // Existing full Save retains both the native record and shared lineage.
+
         let lineage = try Self.availabilityLineageJSON(completed, payload: checkpoint.payloadJSON, managedDirectoryURI: managedURI)
         guard try JSONEncoder().encode(completed).count + lineage.utf8.count + checkpoint.payloadJSON.utf8.count <= Store.maximumBytes else { throw Self.failure }
     }
@@ -1307,7 +1304,7 @@ final class NativeAttachmentDraftCoordinator {
     }
     static func availabilityOwnedOperation(_ op: Store.AvailabilityOperation) throws -> Store.Operation {
         guard case .owned(let source, let stage, let filled, let published) = op.resource, let target = op.targetURI else { throw failure }
-        // Physical helper adapter only. It is never admitted as an Add proof.
+
         return .init(requestId: op.requestId, requestJSON: op.requestJSON, phase: op.phase, reason: op.reason,
             before: op.before, after: op.after, preparedJSON: op.preparedJSON, targetURI: target,
             source: source, stage: stage, filled: filled, published: published, replyJSON: op.replyJSON)
@@ -1857,8 +1854,8 @@ final class NativeAttachmentDraftCoordinator {
     static func mixedSaveAdds(_ record: Store.MixedRecord) -> [Store.Operation] {
         record.operations.compactMap { if case .add(let op) = $0 { return op }; return nil }
     }
-    /// The shared validator supplies the complete ordered plan; Swift binds
-    /// each tuple to existing private Add evidence or an opening baseline.
+
+
     static func mixedSaveCandidates(plan: [[String: Any]], envelopeJSON: String,
                                     authorities: [MixedSaveAuthority], record: Store.MixedRecord?) throws -> [MixedSaveCandidate] {
         let envelope = try object(envelopeJSON)
@@ -1890,8 +1887,8 @@ final class NativeAttachmentDraftCoordinator {
             return .init(index: index, attachmentID: id, targetURI: uri, reason: reason, authority: authorities[index])
         }
     }
-    /// Historical opening validation only. Missing or changed published bytes
-    /// remain removable from the draft; a later Save proves publication again.
+
+
     func checkResumeV3(_ snapshot: EditorDraftSnapshot, cancellation: NativeAttachmentCancellation) throws -> String {
         jobs.drain()
         let loaded = try mixedRead(cancellation), record = loaded.record
@@ -1901,8 +1898,8 @@ final class NativeAttachmentDraftCoordinator {
         let checkpoint = try Self.object(String(decoding: JSONEncoder().encode(snapshot), as: UTF8.self))
         let request: [String: Any] = ["version": record.version == 4 ? 2 : 1, "kind": "owned-editor-resume", "checkpoint": checkpoint,
                                      "ownedDraft": try Self.object(lineage)]
-        // Account for Foundation's actual nested escaping before the first
-        // shared invocation, including historical lineage validation.
+
+
         guard try Self.json(request).utf8.count <= 8 * 1024 * 1024 else { throw Self.failure }
         try requireMixed(loaded.binding, cancellation)
         try mixedHistory(record, binding: loaded.binding, cancellation: cancellation)
@@ -1916,8 +1913,8 @@ final class NativeAttachmentDraftCoordinator {
         guard result.utf8.count <= 8 * 1024 * 1024 else { throw Self.failure }
         try current(snapshot); try requireMixed(loaded.binding, cancellation)
         acknowledge("owned-resume", "validated")
-        // Diagnostics can enter shared code. Recheck the original editor and
-        // sidecar generation rather than adopting an identical-byte inode.
+
+
         try current(snapshot); try requireMixed(loaded.binding, cancellation)
         return result
     }
@@ -1995,15 +1992,15 @@ final class NativeAttachmentDraftCoordinator {
                   after["attachments"] is [[String: Any]] else { throw Self.failure }
             afterTasks = [after]
         }
-        // A generated recurring child can retain a file even if the source no
-        // longer does. Prove every owned Add referenced by the complete effect.
+
+
         let attachments = try afterTasks.flatMap { task -> [[String: Any]] in
             guard task["attachments"] == nil || task["attachments"] is [[String: Any]] else { throw Self.failure }
             return task["attachments"] as? [[String: Any]] ?? []
         }
         for op in Self.mixedSaveAdds(record) where attachments.contains(where: {
-            // Recurrence clones attachment IDs while sharing the exact file
-            // URI. Complete effects must prove those child references too.
+
+
             (selection.isComplete || ($0["id"] as? String).map { Self.equal($0, op.requestId) } == true)
                 && ($0["uri"] as? String).map { Self.equal($0, op.targetURI) } == true && $0["kind"] as? String == "file"
                 && ($0["deletedAt"] == nil || $0["deletedAt"] is NSNull)
@@ -2017,7 +2014,7 @@ final class NativeAttachmentDraftCoordinator {
             try requireOwner(); try cancellation.check()
         }
     }
-    /// Typed synchronous jobs only, under the caller's journal-bound closure.
+
     func retireMixedSaveTarget(_ candidate: MixedSaveCandidate, record: Store.MixedRecord,
                                currentURI: String? = nil,
                                cancellation: NativeAttachmentCancellation) throws -> String {
@@ -2072,8 +2069,7 @@ final class NativeAttachmentDraftCoordinator {
         return outcome
     }
 
-    /// Native structural correspondence for pre-runtime journal admission.
-    /// Shared full lineage/effect validation and descriptor proofs remain separate.
+
     static func ownedSaveLineageJSON(_ record: NativeAttachmentDraftStore.Record) throws -> String {
         _ = try NativeAttachmentDraftStore.ownedSaveFingerprint(record)
         let additions = try record.operations.map { try object($0.preparedJSON, limit: 2 * 1024 * 1024) }
@@ -2111,8 +2107,7 @@ final class NativeAttachmentDraftCoordinator {
                      envelopeJSON: envelope, resultJSON: try Self.json(result))
     }
 
-    /// Call before first invocation and every nonterminal replay. This uses the
-    /// recorded published inode/root/content; it never recopies a cache source.
+
     func verifyOwnedSavePublished(_ record: NativeAttachmentDraftStore.Record) throws {
         jobs.drain()
         _ = try Store.ownedSaveFingerprint(record)
@@ -2128,8 +2123,7 @@ final class NativeAttachmentDraftCoordinator {
         }
     }
 
-    /// The caller already owns a validated durable success terminal and checks
-    /// the exact sidecar/editor before each job. No JSC runs during retirement.
+
     func retireOwnedSaveStage(_ op: NativeAttachmentDraftStore.Operation) throws {
         guard let reserved = op.stage else { throw Self.failure }
         let value = try file(.retirePrivateStage(stage: stage(reserved), targetURI: op.targetURI,
@@ -2140,10 +2134,7 @@ final class NativeAttachmentDraftCoordinator {
     }
     func drainOwnedSaveJobs() { jobs.drain() }
 
-    /// Version 1 remains the fully published contract. Version 2 grants only
-    /// recorded private-stage retirement for one last unpublished operation.
-    /// Version 3 gives up an unproven intent without touching its namespace.
-    /// Version 4 binds an explicitly observed filled-stage retirement decision.
+
     static func ownedDiscardVersion(_ record: NativeAttachmentDraftStore.Record) throws -> Int {
         if record.operations.allSatisfy({ [.published, .resultDurable, .checkpointed].contains($0.phase)
             && $0.stage != nil && $0.published != nil }) { return 1 }
@@ -2157,8 +2148,7 @@ final class NativeAttachmentDraftCoordinator {
         throw Self.failure
     }
 
-    /// Only fresh unjournaled admission observes. A persisted v4 decision must
-    /// remain retryable after its owned stage has already been unlinked.
+
     func observeOwnedDiscardFilledStage(_ op: NativeAttachmentDraftStore.Operation,
                                        cancellation: NativeAttachmentCancellation) throws {
         guard let reserved = op.stage, let expected = op.filled else { throw Self.failure }
@@ -2184,8 +2174,7 @@ final class NativeAttachmentDraftCoordinator {
         return .init(sha256: digest, size: expected.size, identity: identity, directoryIdentity: directory)
     }
 
-    /// The Engine guards the unjournaled exact record immediately before this
-    /// acknowledged write and rebinds its new hash/inode immediately afterward.
+
     func promoteOwnedDiscardPublication(_ record: NativeAttachmentDraftStore.Record,
                                        proof: NativeAttachmentDraftStore.Published) throws -> NativeAttachmentDraftStore.Record {
         guard let op = record.operations.last, op.phase == .stageFilled else { throw Self.failure }
@@ -2196,8 +2185,7 @@ final class NativeAttachmentDraftCoordinator {
         return promoted
     }
 
-    /// Pure domain candidacy only. The Engine separately binds the detached
-    /// decision, exact journal/editor and native publication proofs for each IO.
+
     func prepareOwnedDiscardCandidates(_ record: NativeAttachmentDraftStore.Record) throws -> [NativeAttachmentDraftStore.Operation] {
         jobs.drain()
         _ = try Store.ownedDiscardFingerprint(record)
@@ -2223,8 +2211,7 @@ final class NativeAttachmentDraftCoordinator {
         return record.operations
     }
 
-    /// Synchronous typed completion only; this method never enters JSC. Called
-    /// inside the trusted live-reference handoff's native retirement callback.
+
     func retireOwnedDiscardTarget(_ op: NativeAttachmentDraftStore.Operation,
                                   cancellation: NativeAttachmentCancellation) throws -> String {
         guard let proof = op.published else { throw Self.failure }
@@ -2298,8 +2285,7 @@ final class NativeAttachmentDraftCoordinator {
         return adds
     }
 
-    /// Historical projection only. Resource proofs and the current-reference
-    /// callback remain separately bound by the Engine's exact native turn.
+
     func prepareMixedDiscardCandidates(_ record: Store.MixedRecord, binding: Store.VersionedSnapshot,
                                        cancellation: NativeAttachmentCancellation) throws -> [Store.Operation] {
         jobs.drain(); try requireMixed(binding, cancellation)
@@ -2481,7 +2467,7 @@ final class NativeAttachmentDraftCoordinator {
                 #endif
             }
             if op.phase == .stageFilled {
-                // Re-prove an earlier rename before trying publication again.
+
                 var proof = try? file(.verifyPublication(targetURI: op.targetURI, stage: stage(op.stage!), sha256: op.source.sha256, size: op.source.size), cancellation: cancellation, ignoringCancellation: true)
                 if proof == nil {
                     try cancellation.check()
@@ -2543,8 +2529,8 @@ final class NativeAttachmentDraftCoordinator {
             }
             return record
         } catch {
-            // Read the actual durable phase rather than a speculative local
-            // value when a boundary write or acknowledgment failed.
+
+
             if let actual = try? store.read(), let retained = actual.operations.last, retained.phase != .checkpointed {
                 try? store.write(replacing(actual, advancing(retained, phase: retained.phase, reason: retained.reason ?? .io)))
             }
@@ -2553,8 +2539,8 @@ final class NativeAttachmentDraftCoordinator {
     }
     private func preflight(_ record: Store.Record) throws {
         guard let op = record.operations.last else { throw Self.failure }
-        // All unknown descriptor tokens have a fixed maximum decimal width.
-        // Escaped snapshot/preparation strings are included by the real encoder.
+
+
         let token = "18446744073709551615:18446744073709551615"
         let proof = Store.Stage(uri: managedURI + ".mindwtr-install-" + op.requestId.replacingOccurrences(of: "-", with: "") + ".candidate/stage",
                                 identity: token, directoryIdentity: token, privateDirectoryIdentity: token)
@@ -2570,16 +2556,16 @@ final class NativeAttachmentDraftCoordinator {
             state: .cleanupPending, checkpoint: op.after), operations: checkpointed.operations,
             discard: .init(requestId: discardID, requestJSON: request, expected: op.after, phase: .detached, replyJSON: reply), checkpointAdvance: record.checkpointAdvance)
         let pendingRequest = try Self.json(["version": 1, "requestId": discardID, "sessionID": op.before.sessionID, "generation": op.before.generation])
-        // Before may contain more opaque whitespace than canonical after. A
-        // failed Add must still leave room to retain that exact before-half.
+
+
         let retainedPending = Store.Record(version: record.version, session: .init(sessionID: failed.session.sessionID, taskID: failed.session.taskID,
             state: .cleanupPending, checkpoint: op.before), operations: failed.operations,
             discard: .init(requestId: discardID, requestJSON: pendingRequest, expected: op.before, phase: .detached, replyJSON: reply), checkpointAdvance: record.checkpointAdvance)
         var candidates = [checkpointed, failed, retained, retainedPending]
         if record.version == 2 {
             guard op.after.generation < 9_007_199_254_740_991 else { throw Self.failure }
-            // Budget only incorporation of the acknowledged Add list, using
-            // captured after bytes. Arbitrary later edits require their own budget.
+
+
             let next = EditorDraftSnapshot(sessionID: op.after.sessionID, taskID: op.after.taskID,
                 generation: op.after.generation + 1, payloadJSON: op.after.payloadJSON)
             candidates.append(checkpointRecord(checkpointed, checkpoint: op.after,
@@ -2590,7 +2576,7 @@ final class NativeAttachmentDraftCoordinator {
             guard try JSONEncoder().encode(candidate).count <= Store.maximumBytes else { throw Self.failure }
         }
     }
-    /// Read-only opening observation; no editor, sidecar or durable ownership.
+
     func snapshotFileOpen(attachmentID: String, targetURI: String,
                           cancellation: NativeAttachmentCancellation) throws -> NativeAttachmentFiles.BaselineAttachmentProof? {
         try requireOwner(); try cancellation.check()
@@ -2604,7 +2590,7 @@ final class NativeAttachmentDraftCoordinator {
         default: throw Self.failure
         }
     }
-    /// Polls one typed ID without entering JSC or taking a raw mailbox frame.
+
     private func file(_ request: NativeAttachmentDraftFileRequest, cancellation: NativeAttachmentCancellation,
                       ignoringCancellation: Bool = false) throws -> [String: Any] {
         if !ignoringCancellation { try cancellation.check() }
@@ -2634,9 +2620,8 @@ final class NativeAttachmentDraftCoordinator {
             return reply
         }
         guard record.session.state == .active, record.session.checkpoint.generation == request.generation else { throw Self.failure }
-        // A retained interrupted Add is discardable without resuming IO.
-        // Only its exact recorded checkpoint may detach; a physically advanced
-        // after-checkpoint still requires exact Add reconciliation first.
+
+
         jobs.drain()
         try lineage(record); try current(record.session.checkpoint)
         #if DEBUG

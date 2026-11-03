@@ -3,8 +3,7 @@ import { createNativeHostContract } from './native-host-contract';
 import { resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Project, Task } from './types';
 
-// The native first screen's Focus read: the store's derived project summaries (a pass over every task, 50 ms of the first read's
-// 101 ms at 5,000 tasks on the S23's QuickJS) only serve the review projects' rows, so a Focus with none never builds them.
+
 const stamp = '2026-09-01T12:00:00.000Z';
 const task = (id: string, extra: Partial<Task> = {}): Task => ({ id, title: id, status: 'next', tags: [], contexts: [],
     createdAt: stamp, updatedAt: stamp, ...extra });

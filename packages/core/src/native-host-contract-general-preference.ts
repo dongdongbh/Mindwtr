@@ -77,7 +77,7 @@ const readRequest = (input: unknown): NativeGeneralPreferenceRequest | null => {
 const plannedStamp = (preparedAt: string, witness: GeneralPreferenceWitness) =>
     timestampAtLeastAfter(preparedAt, witness.stamp ?? undefined);
 
-/** Pure validation of the exact frozen choice and clock before SQLite opens. */
+
 const readPrepared = (input: unknown): NativePreparedGeneralPreference | null => {
     if (!isNativeJsonWithinBytes(input, 8192)) return null;
     const envelope = detach<Record<string, unknown>>(input);
@@ -144,7 +144,7 @@ export function createGeneralPreferenceMethods(deps: { readiness: () => NativeHo
                 if (!picker || !picker.options.some((option) => same(option.edit, request.edit)))
                     return fail('INVALID_INPUT', 'Calendar system choice is unavailable');
             }
-            // The shared RN helper distinguishes an absent raw key from an explicit default.
+
             if (isGeneralSettingStored(settings, request.edit))
                 return { ok: true, value: { kind: 'noop', result: resultFor(request.edit, false) } };
             const update = buildGeneralSettingsUpdate(settings, request.edit);

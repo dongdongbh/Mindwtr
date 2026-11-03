@@ -16,9 +16,8 @@
     <string>MindwtrWidgets</string>
     <key>CFBundlePackageType</key>
     <string>XPC!</string>
-    <!-- scripts/build-macos-widget.sh overwrites these two with the host
-         app's own version/build before signing, so the extension and its
-         host always ship the same version string. -->
+
+
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
     <key>CFBundleVersion</key>
@@ -30,10 +29,8 @@
         <key>NSExtensionPointIdentifier</key>
         <string>com.apple.widgetkit-extension</string>
     </dict>
-    <!-- Custom key (not an Apple-defined one) so MindwtrMacTasksWidget.swift
-         can read the App Group identifier at runtime without hardcoding it
-         into Swift source; scripts/build-macos-widget.sh substitutes the real
-         value from APPLE_TEAM_ID at package time (#1054 decision 4). -->
+
+
     <key>MindwtrAppGroupIdentifier</key>
     <string>__MINDWTR_MACOS_APP_GROUP__</string>
 </dict>

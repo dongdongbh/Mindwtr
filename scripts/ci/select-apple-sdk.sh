@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Select an installed Xcode for the requested SDK; never validate a different
-# SDK silently. Used by native CI and by the Apple evaluation runbook.
+
+
 set -euo pipefail
 
 requested="${1:-26}"

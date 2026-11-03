@@ -1,14 +1,6 @@
-/**
- * The native host contract for work that arrives while the app is closed: the
- * pending-captures queue (pending-captures.ts) and context automation
- * (context-automation.ts). Kept in its own file and spread into
- * createNativeHostContract. The native runner boots the host, activates it
- * after the validated load, replays its journal, then calls these; Kotlin only
- * lists, reads and deletes files and posts the notification.
- *
- * Only functions read this module's imports from native-host-contract.ts, so the
- * import cycle between the two files is safe.
- */
+
+
+
 import {
     buildContextAutomationNotification,
     createContextAutomationThrottle,
@@ -36,7 +28,7 @@ type CaptureIngestDeps = {
     requestIdPattern: RegExp;
 };
 
-// React Native's app log shape onto core's logger.
+
 const log: PendingCaptureLog = {
     info: (message, context) => logInfo(message, { scope: context.scope, context: context.extra }),
     warn: (message, context) => logWarn(message, { scope: context.scope, context: context.extra }),
@@ -68,14 +60,12 @@ const isAudioPort = (value: unknown): value is PendingCaptureAudioPort => (
 const isOptionalText = (value: unknown) => value === undefined || value === null || isText(value, 2000);
 
 export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
-    // React Native's drainPendingCapturesFromStore: one drain at a time, since each
-    // reads a file, writes the store, then deletes the file.
+
+
     let drainChain: Promise<unknown> = Promise.resolve();
     const throttle = createContextAutomationThrottle();
 
-    // React Native's flushPendingTaskActionSave: resolves only once the store's
-    // writes are durable. Exhausted save retries leave a persistence failure,
-    // so a replay recovers it before its queue file may go.
+
     const flushDurably = async (): Promise<void> => {
         let saved = await deps.save();
         if (!saved.ok && saved.error.code === 'SAVE_FAILED') {
@@ -86,28 +76,8 @@ export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
     };
 
     return {
-        /**
-         * Drains the pending-captures queue into the store. `queue` lists, reads and
-         * deletes the files under the app's `files/pending-captures/`. `lastApplied`
-         * reads and writes the device's record of the last queued command applied to
-         * each task, React Native's RKStorage value under
-         * PENDING_CAPTURE_LAST_APPLIED_STORAGE_KEY; a write resolves once durable. Captures,
-         * check-offs and defers are stored; `audio` and `pomodoro` items stay in the
-         * queue untouched. A file is deleted only after its write is durable.
-         * `ingested` counts the items stored and removed. A capture, check-off or
-         * defer a failure keeps queued fails the call, so the caller drains again:
-         * SAVE_FAILED once its store write landed but its save, its lastApplied
-         * write or its delete did not finish (owed: a later edit of that task must
-         * wait for the retry), whatever later items do; ACTION_FAILED when nothing
-         * of it landed. A record that did not reach the disk still removes the file.
-         *
-         * Every call drains again, so a replay after a restart is safe: a capture is
-         * created under its own UUID and a replay finds that task; a check-off or
-         * defer is found in the lastApplied record, and one older than the last
-         * command applied to its task writes nothing. The request ID
-         * names the journal entry. In sandbox mode, or during a workspace switch,
-         * nothing is read.
-         */
+
+
         async ingestPendingCaptures(input: {
             requestId: string;
             queue: PendingCaptureQueuePort;
@@ -150,23 +120,15 @@ export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
             } catch (error) {
                 thrown = error;
             }
-            // Every item's state is settled before the answer, and a later item's throw never hides an earlier one: an item
-            // stored but not saved, recorded or removed is owed (SAVE_FAILED: the journal keeps this request and newer edits wait
-            // for its replay); a throw or an item a failure left queued needs a later drain.
+
+
             if (unfinished.owed > 0) return fail('SAVE_FAILED', `${unfinished.owed} queued item(s) stored but not yet saved, recorded or removed`);
             if (thrown !== undefined) return fail('ACTION_FAILED', thrown instanceof Error ? thrown.message : String(thrown));
             if (unfinished.queued > 0) return fail('ACTION_FAILED', `${unfinished.queued} queued item(s) left for a later drain`);
             return { ok: true, value: { ingested } };
         },
 
-        /**
-         * The queued voice captures (an Android widget recording), as React Native's foreground drain turns them into tasks:
-         * each `audio` item's recording goes through [audio]'s transcription, and a transcript becomes one task under the
-         * capture's UUID, so a replay never makes a second one; its file and recording then go. No transcript (no speech
-         * provider set up, or one this host cannot reach yet) leaves the item and its recording for a later run, as in RN.
-         * Every other item is left for [ingestPendingCaptures]. Not journaled: a transcription waits on the network, and the
-         * capture UUID makes a repeat exact. Runs in the same chain as the journaled drain, never beside it.
-         */
+
         async ingestPendingAudio(input: {
             queue: PendingCaptureQueuePort;
             lastApplied: PendingCaptureRecordPort;
@@ -197,15 +159,7 @@ export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
             }
         },
 
-        /**
-         * An automation trigger, as the ACTIVATE_CONTEXT or DEACTIVATE_CONTEXT
-         * broadcast carries it: its `url`, or its `action` and `context` extras.
-         * Answers the notification to post, or null: data it cannot read,
-         * deactivation, a repeat within 10 s or a start past the window's budget,
-         * and a context with no next action post nothing. Nothing is written, so
-         * a replay after a restart builds the same notification again; the
-         * throttle is per process, as in React Native.
-         */
+
         runContextAutomation(input: { url?: string | null; action?: string | null; context?: string | null }): NativeHostResult<{
             notification: ContextAutomationNotification | null;
         }> {

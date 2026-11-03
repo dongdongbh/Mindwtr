@@ -29,8 +29,7 @@ import {
   type WhisperModelLocation,
 } from './whisper-model-store';
 
-// The provider resolution, the FOSS rule and the provider dispatch are core's (quick-capture-audio.ts); this module binds them to
-// Expo's build flags and files and keeps whisper.rn.
+
 export type { ResolvedSpeechToTextRuntimeSettings, SpeechProvider, SpeechToTextConfig };
 export { REMOTE_SPEECH_TO_TEXT_FOSS_ERROR };
 
@@ -67,9 +66,8 @@ const LOCAL_WHISPER_BITS_PER_SAMPLE = 16;
 const LOCAL_WHISPER_MIN_DURATION_MS = 150;
 const LOCAL_WHISPER_UNSUPPORTED_AUDIO_ERROR =
   'Local Whisper can only transcribe 16 kHz mono PCM WAV audio.';
-// Core's (ai-settings-model.ts), so the settings screen offers the same defaults this
-// runtime resolves — the two hardcoding their own copies is how the screen kept
-// offering retired gemini-2.5 ids after the catalog refresh.
+
+
 export { DEFAULT_GEMINI_STT_MODEL, DEFAULT_OPENAI_STT_MODEL };
 
 type ExpoConstantsExtra = {
@@ -139,7 +137,7 @@ type RNFSModule = typeof import('react-native-fs');
 const getWhisperModule = () => {
   if (whisperModuleCache) return whisperModuleCache;
   try {
-    // Use static fallback paths so Metro can bundle this file.
+
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const mod = require('whisper.rn/src/index') as WhisperModule;
@@ -167,7 +165,7 @@ const getWhisperModule = () => {
 const getExpoConstants = (): ExpoConstantsLike | null => {
   if (expoConstantsCache !== undefined) return expoConstantsCache;
   try {
-    // Delay loading expo-constants so non-Expo test environments can import this module.
+
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require('expo-constants') as {
       default?: ExpoConstantsLike | { default?: ExpoConstantsLike };
@@ -204,8 +202,8 @@ export const resolveSpeechToTextRuntimeSettings = (
 const getWhisperRealtimeModule = () => {
   if (whisperRealtimeModuleCache !== undefined) return whisperRealtimeModuleCache;
   try {
-    // Delay loading Whisper realtime modules so generic task-edit tests can import this file
-    // without a native audio stream implementation in the environment.
+
+
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const adapterModule = require(
       'whisper.rn/realtime-transcription/adapters/AudioPcmStreamAdapter.js'
@@ -251,7 +249,7 @@ const getExtension = (uri: string) => {
   return match ? match[0] : '.m4a';
 };
 
-// Core's one audio mime table, shared with the capture attachment (RN voice bug 3).
+
 const getMimeType = (uri: string) => getAudioMimeType(getExtension(uri));
 
 type OpenAIUploadStrategy = 'blob' | 'uri';
@@ -337,8 +335,8 @@ const withOpenAIUpload = async <T>(
           ...meta,
         },
       });
-      // React Native FormData accepts its URI descriptor at runtime even though
-      // the DOM type used by core only exposes Blob.
+
+
       const result = await send({ part: part as Blob, fileName });
       void logInfo('OpenAI transcription completed', {
         scope: 'speech',
@@ -389,12 +387,8 @@ const withOpenAIUpload = async <T>(
 const MIN_WHISPER_MODEL_BYTES = 5 * 1024 * 1024;
 const WHISPER_REALTIME_SLICE_SEC = 30;
 const WHISPER_REALTIME_BUFFER_SIZE = 2048;
-// Model directory naming, the candidate ladder, the RNFS<->expo-file-system
-// fallback, and URI normalization all live in whisper-model-store.ts now — it's
-// the one place both this read side and the settings write side resolve "where
-// is the model, and is it there." These are thin wrappers kept for the existing
-// call sites in this file and in components that import them directly
-// (use-quick-capture-audio.ts, use-task-edit-attachments.ts).
+
+
 export const resolveWhisperModelPathForConfigAsync = (
   modelId: string | undefined,
   modelPath?: string
@@ -408,7 +402,7 @@ export const ensureWhisperModelPathForConfigAsync = (
 const enableWhisperNativeLogging = async (): Promise<void> => {
   if (whisperNativeLogEnabled) return;
   if (!__DEV__) {
-    // Avoid enabling JNI log callbacks in release builds.
+
     whisperNativeLogEnabled = true;
     return;
   }
@@ -745,8 +739,8 @@ export const startWhisperRealtimeCapture = async (
   };
 
   const audioStream = new whisperRealtime.AudioPcmStreamAdapter();
-  // Android's file transcription path decodes WAV only. Use the realtime helper
-  // there as a PCM/WAV recorder, then transcribe the generated WAV after stop.
+
+
   const enableRealtimeTranscript = Platform.OS !== 'android';
   const transcriptBySlice = new Map<number, string>();
   let completed = false;
@@ -833,7 +827,7 @@ export const startWhisperRealtimeCapture = async (
     try {
       await realtime.release();
     } catch {
-      // Ignore cleanup failures after a failed start.
+
     }
     throw error;
   }
@@ -851,7 +845,7 @@ export const startWhisperRealtimeCapture = async (
       try {
         await realtime.release();
       } catch {
-        // Ignore release failures.
+
       }
       finalize();
     }
@@ -941,7 +935,7 @@ export const transcribeLocalWhisper = async (input: LocalWhisperAudio, config: S
       const retry = await context.transcribe(audioUri, options).promise;
       text = extractWhisperText(retry).trim();
     } catch {
-      // Ignore retry errors after a successful primary transcription.
+
     }
   }
   if (!text) {

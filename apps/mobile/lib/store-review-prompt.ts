@@ -44,7 +44,7 @@ async function hasNativeReviewAction(): Promise<boolean> {
 }
 
 export async function maybeRequestStoreReviewAfterPositiveMoment(nowMs = Date.now()): Promise<boolean> {
-  // Core's gate and attempt record (user-prompts.ts), shared with the native hosts.
+
   if (!await attemptStoreReviewAfterPositiveMoment({
     buildEligible: isStoreReviewPromptBuildEligible(),
     platform: getPromptPlatform(),

@@ -1,5 +1,3 @@
-// The fully-populated round-trip test fixtures exceed serde_json::json!'s
-// default macro recursion depth.
 #![recursion_limit = "256"]
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -173,7 +171,6 @@ use ui::{
     show_macos_widget_quick_add_window, show_main, show_quick_add_window, MainWindowReveal,
 };
 
-// Desktop privacy lock (#1472).
 mod app_lock;
 
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
@@ -190,14 +187,11 @@ pub(crate) use sync::expand_tauri_fs_scope;
 #[cfg(target_os = "macos")]
 use sync::resolve_sync_path_bookmark;
 
-/// App name used for config directories and files
 const APP_NAME: &str = "mindwtr";
 const CONFIG_FILE_NAME: &str = "config.toml";
 const SECRETS_FILE_NAME: &str = "secrets.toml";
 const SYNC_BACKEND_STATE_FILE_NAME: &str = "sync-backend-state.json";
-// The pre-1.2.2 name. The file is the durable authority for the sync backend
-// switch whatever backend is selected, so it is no longer named after Dropbox;
-// `sync_backend_state_path_in` migrates old profiles on first resolution.
+
 const LEGACY_SYNC_BACKEND_STATE_FILE_NAME: &str = "dropbox-credential-state.json";
 const DROPBOX_CREDENTIAL_STATE_VERSION: u8 = 1;
 const DATA_FILE_NAME: &str = "data.json";
@@ -221,9 +215,7 @@ const DROPBOX_TOKEN_REFRESH_SKEW_MS: i64 = 60_000;
 const DROPBOX_DEFAULT_TOKEN_LIFETIME_SECS: i64 = 4 * 60 * 60;
 const QUICK_ADD_CLI_FLAG: &str = "--quick-add";
 const WIDGET_QUICK_ADD_CLI_FLAG: &str = "--widget-quick-add";
-// Written into the autostart entry's own command line (see the autostart
-// plugin builder in `run()`) so a launch caused by that entry can be told
-// apart from a manual double-click (#928).
+
 const STARTUP_LAUNCH_CLI_FLAG: &str = "--startup";
 #[cfg(target_os = "linux")]
 const FLATPAK_INSTANCE_REQUEST_SHOW: &str = "show\n";
@@ -257,11 +249,7 @@ const WEBVIEW2_PHONE_HOME_ARGS: [&str; 3] = [
 ];
 #[cfg(any(target_os = "windows", test))]
 const WEBVIEW2_DISABLE_FEATURES_PREFIX: &str = "--disable-features=";
-// wry supplies these itself, but only while the app passes no browser arguments
-// of its own (wry 0.53 webview2/mod.rs). This environment value can replace that
-// block wholesale, so carry the defaults here or Windows silently loses the
-// WebView2 mini-menu suppression, SmartScreen (phone-home traffic #909 removed)
-// and gesture-free audio playback for the Pomodoro alarm (#913).
+
 #[cfg(any(target_os = "windows", test))]
 const WEBVIEW2_WRY_DEFAULT_DISABLED_FEATURES: [&str; 3] =
     ["msWebOOUI", "msPdfOOUI", "msSmartScreenProtection"];
@@ -288,8 +276,6 @@ fn flatpak_notification_id() -> String {
     format!("mindwtr-{millis}-{random}")
 }
 
-/// The portal replaces a notification it holds under the same id, so a tagged reminder (one tag per
-/// task) replaces the task's notification instead of adding another one.
 #[cfg(target_os = "linux")]
 fn flatpak_notification_id_for(tag: Option<&str>) -> String {
     tag.map(str::trim)
@@ -359,8 +345,6 @@ async fn send_linux_notification(
     linux_notification::send_notification(state.inner(), title, body, tag).await
 }
 
-/// Windows replaces a toast that shares a group and a tag. A tag holds at most 64 characters, so a
-/// longer one (an unusually long task id) is shortened to a stable hash of itself.
 #[cfg(any(target_os = "windows", test))]
 const WINDOWS_TOAST_GROUP: &str = "mindwtr";
 
@@ -370,7 +354,7 @@ fn windows_toast_tag(tag: &str) -> String {
     if tag.encode_utf16().count() <= MAX_TAG_CHARS {
         return tag.to_string();
     }
-    // FNV-1a: stable across builds and runs, unlike std's DefaultHasher.
+
     let hash = tag.bytes().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
     });
@@ -404,7 +388,6 @@ fn show_windows_toast(
         )
     }
 
-    // Two-line template: title in the first text node, body in the second.
     let xml: XmlDocument =
         ToastNotificationManager::GetTemplateContent(ToastTemplateType::ToastText02)
             .map_err(|error| win_err("Failed to load the toast template", error))?;
@@ -429,7 +412,6 @@ fn show_windows_toast(
     let toast = ToastNotification::CreateToastNotification(&xml)
         .map_err(|error| win_err("Failed to create the toast", error))?;
     if let Some(tag) = tag.map(str::trim).filter(|tag| !tag.is_empty()) {
-        // Same group and tag: this toast replaces the task's previous one and pops up again.
         toast
             .SetTag(&HSTRING::from(windows_toast_tag(tag)))
             .map_err(|error| win_err("Failed to tag the toast", error))?;
@@ -447,14 +429,6 @@ fn show_windows_toast(
     Ok(())
 }
 
-/// Sends a Windows toast through the process's own package identity.
-///
-/// `tauri-plugin-notification` always calls `CreateToastNotifierWithId(<tauri identifier>)`.
-/// In an MSIX (Microsoft Store) install that identifier is not the package's AUMID, Windows
-/// rejects the notifier, and the plugin discards the error, so a tray-resident app shows no
-/// reminder toast at all (#1146). A packaged process must use `CreateToastNotifier()` with no
-/// id. Unpackaged installs (NSIS, portable) keep the plugin path: their shortcut registers the
-/// AUMID the plugin passes. A `tag` (one per task) makes the toast replace the task's last one.
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn send_windows_packaged_notification(
@@ -485,10 +459,6 @@ async fn send_windows_packaged_notification(
     Err("Windows packaged notifications are only available on Windows".to_string())
 }
 
-/// A reminder that replaces its task's notification where `tauri-plugin-notification` can only add
-/// one: an unpackaged Windows install (the plugin's own notifier and AUMID, plus a toast tag) and
-/// macOS (a UserNotifications request identifier). Any error sends the caller back to the plugin, so a
-/// reminder still shows, as one more notification.
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn send_replacing_notification(
@@ -500,7 +470,6 @@ async fn send_replacing_notification(
     use windows::core::HSTRING;
     use windows::UI::Notifications::ToastNotificationManager;
 
-    // The plugin passes its AUMID only to an installed app; a dev build has no shortcut registering it.
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let exe_dir = exe
         .parent()
@@ -589,10 +558,6 @@ struct LegacyAppConfigJson {
     sync_path: Option<String>,
 }
 
-// Field order here is the on-disk key order (matches every config.toml/
-// secrets.toml written by shipped versions): `toml::to_string` emits struct
-// fields in declaration order, so reordering this struct changes file layout.
-// Add new fields at the end.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 struct AppConfigToml {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -649,12 +614,10 @@ struct AppConfigToml {
     dropbox_promotion_journal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sync_cloud_provider: Option<String>,
-    // Device-local JSON map of attachment id -> security-scoped bookmark for
-    // folders picked with "Link folder…" on the sandboxed App Store build.
+
     #[serde(skip_serializing_if = "Option::is_none")]
     link_folder_bookmarks: Option<String>,
-    // Managed MCP is an opt-in, device-local capability. Its credential is
-    // routed into secrets.toml by config::SECRET_FIELDS.
+
     #[serde(skip_serializing_if = "Option::is_none")]
     mcp_enabled: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -667,8 +630,7 @@ struct AppConfigToml {
     mcp_port: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     mcp_token: Option<String>,
-    // Desktop privacy lock (#1472). Device-level on purpose: never in a
-    // library's database. Read and written only by app_lock.rs.
+
     #[serde(skip_serializing_if = "Option::is_none")]
     app_lock_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -932,8 +894,6 @@ struct QuickAddPending(Mutex<Option<String>>);
 struct CloseRequestHandled(AtomicBool);
 struct GlobalQuickAddShortcutState(Mutex<Option<String>>);
 
-/// Windows only: macOS restores nothing because the quick-add panel never takes
-/// activation away in the first place (#794).
 #[derive(Clone, Copy, Debug, Default)]
 struct QuickAddFocusSnapshot {
     windows_hwnd: Option<isize>,
@@ -1009,9 +969,6 @@ fn with_windows_webview2_arguments(
     let mut passthrough: Vec<&str> = Vec::new();
     let mut disabled_features: Vec<&str> = Vec::new();
     for argument in existing.split_whitespace() {
-        // Chromium keeps only the LAST --disable-features it is given, so a
-        // caller's list and ours would silently cancel each other out. Merge
-        // both into one flag instead (#913).
         if let Some(values) = argument.strip_prefix(WEBVIEW2_DISABLE_FEATURES_PREFIX) {
             for value in values.split(',').map(str::trim).filter(|v| !v.is_empty()) {
                 if !disabled_features.contains(&value) {
@@ -1028,9 +985,6 @@ fn with_windows_webview2_arguments(
         }
     }
 
-    // Merged feature flag first, then the caller's other arguments, then ours:
-    // a stable order keeps this idempotent when an already-built value is fed
-    // back in (a user re-exporting the variable).
     let mut arguments: Vec<String> = vec![format!(
         "{WEBVIEW2_DISABLE_FEATURES_PREFIX}{}",
         disabled_features.join(",")
@@ -1065,16 +1019,10 @@ fn hardware_acceleration_disabled(config: &AppConfigToml) -> bool {
     bool_setting_enabled(config.disable_hardware_acceleration.as_deref())
 }
 
-/// The main window starts hidden only when the process was launched by the
-/// autostart entry AND a tray icon exists to bring the window back with.
-/// A manual launch, or a launch with no tray to recover through, always
-/// shows the window (#928).
 fn should_start_hidden(launched_via_startup: bool, tray_icon_available: bool) -> bool {
     launched_via_startup && tray_icon_available
 }
 
-// Shared by the pre-window-build availability check and the real tray
-// construction below, so both agree on whether a tray icon exists (#928).
 fn resolve_tray_icon(handle: &tauri::AppHandle) -> Option<Image<'_>> {
     Image::from_bytes(include_bytes!("../icons/tray.png"))
         .ok()
@@ -1089,10 +1037,6 @@ fn read_startup_disable_hardware_acceleration() -> bool {
 
 #[cfg(target_os = "windows")]
 fn configure_windows_webview2_browser_arguments(disable_hardware_acceleration: bool) {
-    // Keep these out of tauri.conf's `additionalBrowserArgs`: that config path
-    // was the only Windows runtime change shared by rc.3/rc.4 in #913. WebView2
-    // appends this environment value to Tauri's defaults, and the reporter
-    // verified this path with the same switches without the IPC/close hang.
     let existing = env::var(WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS_ENV).ok();
     let arguments =
         with_windows_webview2_arguments(existing.as_deref(), disable_hardware_acceleration);
@@ -1158,7 +1102,6 @@ fn configure_linux_webkit_renderer(disable_hardware_acceleration: bool) {
         disable_hardware_acceleration,
         linux_nvidia_gpu_detected(),
     ) {
-        // WebKitGTK's DMABUF renderer can fail before a window appears on NVIDIA GBM setups.
         env::set_var(
             WEBKIT_DISABLE_DMABUF_RENDERER_ENV,
             WEBKIT_DISABLE_DMABUF_RENDERER_VALUE,
@@ -1189,10 +1132,6 @@ fn get_desktop_rendering_config(app: tauri::AppHandle) -> DesktopRenderingConfig
     desktop_rendering_config_from(&read_config(&app))
 }
 
-// Held across the whole read+mutate+write (B2): read_config/write_config_files
-// each only lock/unlock config.toml briefly on their own, so without this a
-// concurrent config writer (e.g. write_local_api_config, clear_sync_path)
-// could land between this read and write and lose its own change.
 #[tauri::command(async)]
 fn set_desktop_rendering_config(
     app: tauri::AppHandle,
@@ -1475,29 +1414,21 @@ fn enable_desktop_spellcheck(window: &tauri::WebviewWindow) {
 #[cfg(not(target_os = "linux"))]
 fn enable_desktop_spellcheck(_window: &tauri::WebviewWindow) {}
 
-/// WebKitGTK never populates the DOM paste event with clipboard images (verified
-/// empty on 2.52 under Wayland), so Quick Add's image paste falls back to
-/// `navigator.clipboard.read()` — which WebKit gates behind a
-/// ClipboardPermissionRequest the embedder must answer, and the default answer
-/// is deny (#690). The webview only ever runs Mindwtr's own bundled UI, so
-/// granting it clipboard read is the same trust boundary as the app itself.
-/// Every other permission kind keeps the default deny.
 #[cfg(target_os = "linux")]
 pub(crate) fn allow_webview_clipboard_read(window: &tauri::WebviewWindow) {
     if let Err(error) = window.with_webview(|webview| {
         use webkit2gtk::glib::prelude::ObjectExt;
         use webkit2gtk::{PermissionRequestExt, WebViewExt};
 
-        webview.inner().connect_permission_request(|_view, request| {
-            // The webkit2gtk crate predates WebKitGTK 2.42's
-            // ClipboardPermissionRequest binding, so match the runtime GType
-            // name instead of downcasting; older WebKitGTK never emits it.
-            if request.type_().name() == "WebKitClipboardPermissionRequest" {
-                request.allow();
-                return true;
-            }
-            false
-        });
+        webview
+            .inner()
+            .connect_permission_request(|_view, request| {
+                if request.type_().name() == "WebKitClipboardPermissionRequest" {
+                    request.allow();
+                    return true;
+                }
+                false
+            });
     }) {
         log::warn!("Failed to install WebKit clipboard permission handler: {error}");
     }
@@ -1707,10 +1638,8 @@ pub fn run() {
                     window.app_handle(),
                     "Close trace: native main-window close request received",
                 );
-                // Captured here as well as on exit: this is the last moment the
-                // window is certainly on screen with the geometry the user left
-                // it at, and a close-to-tray followed by a kill never reaches
-                // RunEvent::Exit (#936).
+
+
                 crate::window_state::save(window.app_handle());
                 window
                     .app_handle()
@@ -1744,21 +1673,14 @@ pub fn run() {
                             &handle,
                             "Close trace: native close fallback timed out waiting for acknowledgement",
                         );
-                        // #913: the app cannot close right now, which is exactly when
-                        // the user must be able to see it and act on it. Hiding here
-                        // used to turn a stuck save into a silent zombie process that
-                        // still held the only copy of unsaved edits.
-                        // Hopped onto the main thread (as
-                        // reveal_main_window_after_timeout already does) so
-                        // show_main's activation-policy switch is applied
-                        // inline, before the window it reveals appears.
+
+
                         let reveal = handle.clone();
                         let _ = handle.run_on_main_thread(move || {
                             if let Some(w) = reveal.get_webview_window("main") {
                                 if !w.is_visible().unwrap_or(true) {
-                                    // Through show_main so this forced reveal
-                                    // also brings back the Dock icon and menu
-                                    // bar a tray-hidden window gave up.
+
+
                                     show_main(&reveal);
                                 }
                                 let _ = w.set_focus();
@@ -1769,8 +1691,8 @@ pub fn run() {
             }
         })
         .setup(move |app| {
-            // A package that ships its own mindwtr:// desktop entry (Nix, distro packages) sets this in
-            // its launcher so Mindwtr does not write a second handler pointing at a versioned path (#1377).
+
+
             #[cfg(target_os = "linux")]
             let package_registers_links = std::env::var_os("MINDWTR_SKIP_LINK_REGISTRATION")
                 .is_some_and(|value| !value.is_empty() && value != "0");
@@ -1805,8 +1727,8 @@ pub fn run() {
                         "Linux task link handler checked extra.releaseCheck=v1.3.7/linux-task-link-launcher outcome={outcome}"
                     );
                     log::info!("{diagnostic}");
-                    // Registration precedes the optional log plugin; persist the
-                    // receipt directly for Settings > Diagnostics exports.
+
+
                     append_native_log_line(app.handle(), &diagnostic);
                 }
             }
@@ -1816,8 +1738,7 @@ pub fn run() {
             let _ = RENDERER_RECOVERY_APP.set(app.handle().clone());
             ensure_data_file(&app.handle()).ok();
 
-            // #913: read back rather than re-derive — this is the exact value
-            // WebView2 saw when the windows were created above/below.
+
             #[cfg(target_os = "windows")]
             if let Ok(arguments) = env::var(WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS_ENV) {
                 append_native_log_line(
@@ -1840,10 +1761,8 @@ pub fn run() {
                     );
                 }
                 Err(error) => {
-                    // The log plugin that carries log::error! is only registered at
-                    // the END of setup, and a Windows GUI process shows no stderr —
-                    // without this line the app dies with no window and no trace,
-                    // which is exactly how a fail-closed exit must not look (#1064).
+
+
                     log::error!("Dropbox credential recovery could not be contained: {error}");
                     append_native_log_line(
                         &app.handle(),
@@ -1856,13 +1775,11 @@ pub fn run() {
             }
 
             let config = read_config(&app.handle());
-            // One-time fixup for autostart entries that predate the --startup
-            // flag, so should_start_hidden below can actually trigger for
-            // installs that already had Launch at startup on (#928).
+
+
             autostart::migrate_autostart_entry_if_pending(&app.handle());
-            // Resolved before the window is built: whether a tray icon can
-            // even be created decides whether it's safe to build the window
-            // hidden (#928) — see should_start_hidden below.
+
+
             let tray_icon_available = resolve_tray_icon(&app.handle()).is_some();
             let start_hidden =
                 should_start_hidden(initial_launch_requests_startup, tray_icon_available);
@@ -1870,28 +1787,17 @@ pub fn run() {
                 start_hidden,
                 initial_launch_requests_quick_add,
             ) {
-                // Nothing to reveal: the autostart entry launched us with "start
-                // in tray" on and a tray icon to recover through (#928), or the
-                // global hotkey wants only the quick-add window. If tray
-                // construction fails further down despite the icon being
-                // available, that branch forces the window back.
+
+
                 app.state::<MainWindowReveal>().suppress();
             }
             if start_hidden {
-                // Launched straight into the tray, so there is no window to
-                // own a Dock icon or the menu bar yet. show_main restores
-                // Regular on whichever path brings the window up. A quick-add
-                // launch is deliberately not included: that one does put a
-                // window on screen.
+
+
                 let _ = crate::platform::apply_macos_activation_policy(&app.handle(), true);
             }
 
-            // Register the initial default before creating either webview.
-            // WebView2 creation pumps Windows messages: while the second
-            // webview is being created, the main one can already hydrate its
-            // settings and apply the saved shortcut over IPC. Applying the
-            // default later would overwrite that preference (disabled on
-            // Windows) until the setting changes again.
+
             let handle = app.handle();
             let shortcut_state = app.state::<GlobalQuickAddShortcutState>();
             let default_shortcut = if cfg!(target_os = "linux") && is_flatpak() {
@@ -1905,8 +1811,7 @@ pub fn run() {
                 log::warn!("Failed to register global quick add shortcut: {error}");
             }
 
-            // The main window is declared create:false so portable mode can pin
-            // the webview's browsing profile inside the portable dir (#855).
+
             {
                 let main_window_config = app
                     .config()
@@ -1916,9 +1821,8 @@ pub fn run() {
                     .find(|window| window.label == "main")
                     .cloned()
                     .ok_or("main window config missing")?;
-                // WebKitGTK refuses navigator.clipboard.writeText once the click's user
-                // activation is gone, which a menu path can lose (#1327). Clipboard access
-                // drops that gesture check; the webview only runs Mindwtr's own UI.
+
+
                 let mut main_window_builder =
                     tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window_config)?
                         .enable_clipboard_access();
@@ -1926,14 +1830,8 @@ pub fn run() {
                     let _ = std::fs::create_dir_all(&webview_dir);
                     main_window_builder = main_window_builder.data_directory(webview_dir);
                 }
-                // Always built hidden, and revealed only once the webview has
-                // painted (notify_ui_ready, with reveal_main_window_after_timeout
-                // as the backstop). The window-state plugin restores geometry
-                // from its own on_window_ready, which Tauri dispatches through
-                // run_on_main_thread — so it only lands once the event loop is
-                // pumping, and a window built visible sits on screen at the
-                // config's 1200x800, blank, until then and then jumps (#936).
-                // Restoring here keeps all of that off screen.
+
+
                 main_window_builder = main_window_builder.visible(false);
                 if let Some(title) = workspaces::window_title() {
                     main_window_builder = main_window_builder.title(title);
@@ -1944,12 +1842,10 @@ pub fn run() {
                 reveal_main_window_after_timeout(&app.handle());
             }
 
-            // Portable mode stores webview-managed files (attachments, logs,
-            // captures) under the profile dir, which lies outside the fs
-            // plugin's static $DATA scope.
+
             if crate::storage::is_portable_mode() {
-                // The device root covers logs, speech models and every
-                // workspace's folder below it (#1473).
+
+
                 expand_tauri_fs_scope(
                     &app.handle(),
                     &crate::storage::get_device_data_dir(&app.handle()),
@@ -1971,8 +1867,7 @@ pub fn run() {
                     }
                 }
 
-                // Also expand scope for the Obsidian vault path, which may be
-                // inside iCloud Drive or another location not covered at runtime.
+
                 if let Some(ref raw_obsidian) = config.obsidian_config {
                     #[derive(serde::Deserialize, Default)]
                     struct VaultPathOnly {
@@ -1994,11 +1889,8 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 enable_desktop_spellcheck(&window);
                 allow_webview_clipboard_read(&window);
-                // 128x128, not icon.png: GTK3 on X11 silently drops window
-                // icons whose _NET_WM_ICON property would be too large, so
-                // the 512px master never reached the taskbar and AppImages —
-                // with no installed .desktop file to fall back on — showed a
-                // blank entry (#1018).
+
+
                 #[cfg(target_os = "linux")]
                 if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/128x128.png")) {
                     let _ = window.set_icon(icon);
@@ -2039,15 +1931,8 @@ pub fn run() {
                         .icon(tray_icon)
                         .menu(&tray_menu)
                         .show_menu_on_left_click(false);
-                    // The tray protocol hands the panel a PATH to the icon,
-                    // so the file must stay readable for the whole session.
-                    // The default temp dir breaks that in two ways: Flatpak's
-                    // /tmp is invisible to the host panel (the original reason
-                    // for this redirect), and on regular installs /tmp is
-                    // subject to cleaners and sandboxed launchers that mount a
-                    // private /tmp — a panel that re-resolves the icon later
-                    // then draws a blank slot (#1018, Cinnamon AppImage). The
-                    // app cache dir is user-owned, host-visible, and stable.
+
+
                     #[cfg(target_os = "linux")]
                     {
                         match handle.path().app_cache_dir() {
@@ -2109,12 +1994,8 @@ pub fn run() {
             if let Err(error) = tray_init_result {
                 log::warn!("Failed to initialize tray support: {error}");
                 if start_hidden {
-                    // The icon decoded fine but tray construction itself
-                    // errored (menu items, tray builder) — never leave a
-                    // hidden window with no tray to recover it through (#928,
-                    // the failure mode #913 was about). Bypasses the reveal
-                    // gate deliberately: it was suppressed for a tray start
-                    // that no longer has a tray.
+
+
                     show_main(&handle);
                 }
             }
@@ -2149,12 +2030,12 @@ pub fn run() {
             log::info!(
                 "macOS native startup reached after runtime loading extra.releaseCheck=v1.3.0/macos-swift-runtime"
             );
-            // Reported here because the migration itself runs before any
-            // logger exists — the first config read is the top of `run()`.
+
+
             crate::storage_layout::log_layout_migration();
             crate::workspaces::log_workspace_opened(&handle);
-            // Optional helper readiness can take up to ten seconds. Startup
-            // stays responsive and failure only affects this capability.
+
+
             let mcp_app = handle.clone();
             tauri::async_runtime::spawn_blocking(move || {
                 let state = mcp_app.state::<McpServerState>();
@@ -2362,18 +2243,16 @@ pub fn run() {
                 log::info!("macOS Dock reopen handled extra.releaseCheck=v1.3.5/macos-dock-reopen");
             }
             if matches!(event, tauri::RunEvent::Exit) {
-                // A workspace switch restarts the app as soon as this returns;
-                // the new process must not find this one's socket and hand its
-                // launch back to a process that is exiting (#1473).
+
+
                 #[cfg(target_os = "linux")]
                 if let Some(socket) = app.try_state::<FlatpakInstanceSocketCleanup>() {
                     let _ = fs::remove_file(&socket.0);
                 }
                 stop_mcp_server(&app.state::<McpServerState>());
                 crate::window_state::save(app);
-                // Other plugins can still create the OS config dir a portable
-                // install is meant to stay out of; clearing it here runs after
-                // they have handled the same event (#936).
+
+
                 crate::storage::cleanup_portable_os_config_dir(app);
                 crate::workspaces::relaunch_if_switching(app);
             }
@@ -2493,7 +2372,7 @@ mod tests {
         assert!(launch_requests_startup(["mindwtr", "--STARTUP"]));
         assert!(!launch_requests_startup(["mindwtr"]));
         assert!(!launch_requests_startup(["mindwtr", "--quick-add"]));
-        // Mixed with other flags, order doesn't matter.
+
         assert!(launch_requests_startup(["mindwtr", "--foo", "--startup"]));
     }
 
@@ -2568,8 +2447,6 @@ arch=x86_64
 --autoplay-policy=no-user-gesture-required --disable-component-update \
 --disable-domain-reliability --no-pings";
 
-        // wry only passes its own defaults while the app supplies no arguments;
-        // this environment value can replace them, so it must carry them (#913).
         assert_eq!(with_windows_webview2_arguments(None, false), DEFAULTS);
         assert_eq!(
             with_windows_webview2_arguments(Some("--foo=bar"), false),
@@ -2577,22 +2454,21 @@ arch=x86_64
 --autoplay-policy=no-user-gesture-required --disable-component-update \
 --disable-domain-reliability --no-pings",
         );
-        // Switches the caller already set are never duplicated.
+
         assert_eq!(
             with_windows_webview2_arguments(Some("--disable-component-update"), true),
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
 --disable-component-update --autoplay-policy=no-user-gesture-required \
 --disable-domain-reliability --no-pings --disable-gpu",
         );
-        // A caller's own --disable-features must survive: Chromium keeps only
-        // the last one, so the two lists are merged instead of overwriting.
+
         assert_eq!(
             with_windows_webview2_arguments(Some("--disable-features=Translate"), false),
             "--disable-features=Translate,msWebOOUI,msPdfOOUI,msSmartScreenProtection \
 --autoplay-policy=no-user-gesture-required --disable-component-update \
 --disable-domain-reliability --no-pings",
         );
-        // Idempotent: re-exporting a value we already built changes nothing.
+
         assert_eq!(
             with_windows_webview2_arguments(Some(DEFAULTS), false),
             DEFAULTS

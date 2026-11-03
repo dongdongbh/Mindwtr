@@ -8,7 +8,7 @@ import { deriveSyncKeyMaterial } from './sync-crypto';
 
 const FAST_KDF = { mKib: 8, t: 1, p: 1 };
 
-/** Strict UTF-8 as the native hosts decode it (HostIo.read), or null. */
+
 const strictUtf8 = (bytes: Uint8Array): string | null => {
     try {
         return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -17,10 +17,7 @@ const strictUtf8 = (bytes: Uint8Array): string | null => {
     }
 };
 
-/**
- * Minimal in-memory fake WebDAV server: GET/PUT keyed by URL, byte-accurate. With [decodedText], a GET answers as the native
- * hosts' fetch does: a strict UTF-8 body comes decoded, with its size in bytes (`mindwtrDecodedTextBytes`).
- */
+
 function createFakeWebdavServer({ decodedText = false } = {}) {
     const files = new Map<string, Uint8Array>();
     const versions = new Map<string, number>();
@@ -153,7 +150,7 @@ describe('webdav sync-document encryption', () => {
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(2), FAST_KDF);
         await webdavPutSyncDocument(URL_, { tasks: [] }, { fetcher, material, expectedEtag: null });
 
-        const result = await webdavGetSyncDocument(URL_, { fetcher }); // no material — this device is 'off'
+        const result = await webdavGetSyncDocument(URL_, { fetcher });
         expect(result.state).toBe('encrypted-no-key');
         if (result.state === 'encrypted-no-key') {
             expect(result.salt.length).toBe(16);
@@ -168,11 +165,7 @@ describe('webdav sync-document encryption', () => {
         await expect(webdavGetSyncDocument(URL_, { fetcher, material: wrongMaterial })).rejects.toThrow();
     });
 
-    // A passphrase set before the first sync while a peer encrypted the remote, or a peer's
-    // rotation: the key is for a DIFFERENT salt than the remote's artifacts. That is a
-    // provable generation mismatch, reported as encrypted-no-key (which the caller persists
-    // and the unlock prompt heals by re-deriving from the remote's salt) — never a dead-end
-    // Auth failure, and never "no data" (which would fork the remote's generation).
+
     it('a key under a foreign salt reports encrypted-no-key with the remote header salt', async () => {
         const { fetcher } = createFakeWebdavServer();
         const remoteMaterial = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(6), FAST_KDF);
@@ -192,14 +185,11 @@ describe('webdav sync-document encryption', () => {
         expect(result).toEqual({ state: 'data', data: null, exists: false, strongEtag: null });
     });
 
-    // Mirror of the off-state discovery above, in the other direction: a peer DISABLED
-    // encryption at the sync location, so the `.enc` artifact is gone and a plaintext
-    // document is back. Reporting "empty" here would merge this device's whole store into a
-    // fresh remote generation and fork the two silently.
+
     it('an enabled device treats a peer-disabled (plaintext-restored) remote as terminal, not as empty', async () => {
         const { fetcher } = createFakeWebdavServer();
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(4), FAST_KDF);
-        await webdavPutSyncDocument(URL_, { tasks: [] }, { fetcher, expectedEtag: null }); // the peer's plaintext write
+        await webdavPutSyncDocument(URL_, { tasks: [] }, { fetcher, expectedEtag: null });
 
         const result = await webdavGetSyncDocument(URL_, { fetcher, material });
         expect(result.state).toBe('remote-plaintext');
@@ -426,9 +416,8 @@ describe('webdav sync-document encryption', () => {
 });
 
 describe('sync-document download cap', () => {
-    /** Wraps a fake server so GETs report `declaredLength` in content-length. The cap
-     *  rejects on that header before reading, so a huge library is simulated by the
-     *  header alone -- no need to allocate 150 MB in a test. */
+
+
     const withDeclaredLength = (fetcher: typeof fetch, declaredLength: number): typeof fetch => (
         async (url, init) => {
             const res = await fetcher(url, init);

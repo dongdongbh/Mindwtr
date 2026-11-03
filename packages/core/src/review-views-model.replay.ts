@@ -1,12 +1,6 @@
-/**
- * Test support only (imported by the review views tests; not exported).
- * Replays the frozen React Native Review, Weekly Review and Daily Review
- * scenarios (review-views-parity.fixtures.json, captured by the mobile parity
- * harnesses) through the native host contract. The replay plays the native
- * screen: it keeps the screen's own state (what is expanded, selected or open,
- * the stored checkpoint), reads views, sends actions, and lays the view's text
- * out in the order the React Native screen draws it.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import type { ReviewSuggestion } from './ai/types';
 import type {
@@ -60,11 +54,11 @@ export const loadReviewViewsFixture = (): ReviewViewsFixture => JSON.parse(
     readFileSync(new URL('./review-views-parity.fixtures.json', import.meta.url), 'utf8'),
 );
 
-// The mobile harnesses' theme colors.
+
 const THEME = { tint: '#3b82f6', text: '#0f172a', secondaryText: '#64748b', success: '#10b981', warning: '#f59e0b', danger: '#ef4444' };
 const CALENDAR_ERROR = 'Calendar feed unreachable';
 
-/** The store writes a scenario asks for, as the mobile harnesses record them. */
+
 export function createReviewRecorder() {
     const log: unknown[][] = [];
     const createdIds = new Map<string, string>();
@@ -79,7 +73,7 @@ const RECORDED = ['updateTask', 'deleteTask', 'restoreTask', 'addTask', 'batchUp
 type Recorded = (typeof RECORDED)[number];
 let realActions: Pick<ReturnType<typeof useTaskStore.getState>, Recorded> | null = null;
 
-/** Loads a scenario's data through the store and records the writes, as the harnesses do. */
+
 export async function seedReviewStore(
     part: ReviewFixturePart,
     scenario: ReviewScenario,
@@ -130,7 +124,7 @@ const ok = <T,>(result: NativeHostResult<T>): T => {
     return result.value;
 };
 
-/** The revision a drawn row showed for a task, as a screen sends it back. */
+
 const rowRevision = (rows: readonly { row: { id: string; taskRevision: string } }[], id: string): string => (
     rows.find((entry) => entry.row.id === id)?.row.taskRevision ?? ''
 );
@@ -144,7 +138,7 @@ const requestId = () => {
     return `00000000-0000-4000-8000-${requestCount.toString(16).padStart(12, '0')}`;
 };
 
-/** Every page of a windowed view, under one revision. */
+
 function readAll<T extends { revision: string; total: number }, Item>(
     read: (window: { offset: number; limit: number; revision?: string }) => NativeHostResult<T>,
     items: (view: T) => Item[],
@@ -155,11 +149,7 @@ function readAll<T extends { revision: string; total: number }, Item>(
     return { view: first, items: all };
 }
 
-/**
- * What the comparison reads. Device storage is compared as what it holds after
- * each step: mobile writes a restored session before correcting its step; the
- * native host stores only the corrected checkpoint.
- */
+
 export function projectObservation(observation: Observation): Observation {
     if (!Array.isArray(observation.storage)) return observation;
     const state: Record<string, string | null> = {};
@@ -170,8 +160,6 @@ export function projectObservation(observation: Observation): Observation {
     return { ...observation, storage: state };
 }
 
-// ---------------------------------------------------------------------------
-// Review.
 
 async function replayReview(contract: Contract, scenario: ReviewScenario, recorder: ReviewRecorder): Promise<Observation[]> {
     let expandedAreaIds: string[] = [];
@@ -189,7 +177,7 @@ async function replayReview(contract: Contract, scenario: ReviewScenario, record
 
     const read = (edit?: NativeReviewExpansionEdit) => {
         if (edit) {
-            // The edit resolves the expansion; the screen keeps what comes back.
+
             const edited = ok(contract.getReviewOverview({ scope: 'all', expandedAreaIds, expandedProjectIds, expandedLaterProjectIds: useTaskStore.getState().projects.map((project) => `project:${project.id}`), selectedIds: selected, expansionEdit: edit, offset: 0, limit: 1 }));
             expandedAreaIds = edited.expandedAreaIds;
             expandedProjectIds = edited.expandedProjectIds;
@@ -224,7 +212,7 @@ async function replayReview(contract: Contract, scenario: ReviewScenario, record
                 rows.push([item.row.id, selection, item.selected]);
                 return;
             }
-            // Historical parity exercises the disclosed plan; #1495's default fold has separate contract tests.
+
             if (item.type === 'later') return;
             texts.push(item.title, item.summary);
             headers.push(item.type === 'area'
@@ -290,7 +278,7 @@ async function replayReview(contract: Contract, scenario: ReviewScenario, record
                 const [verb, status] = rest as [string, string?];
                 const taskRevision = rowRevision(taskRowsOf(items), String(target));
                 if (verb === 'edit') editor = String(target);
-                // The row's own toasts belong to the row, which the harness stands in for.
+
                 else if (verb === 'status') await run({ type: 'setTaskStatus', taskId: String(target), status: status as never, taskRevision });
                 else await run({ type: 'trashTask', taskId: String(target), taskRevision });
                 return;
@@ -384,8 +372,6 @@ async function replayReview(contract: Contract, scenario: ReviewScenario, record
     return observations;
 }
 
-// ---------------------------------------------------------------------------
-// The review wizards' device storage, as the host keeps it.
 
 function createDeviceStorage(initial: Record<string, string> | undefined) {
     const values = new Map(Object.entries(initial ?? {}));
@@ -413,8 +399,6 @@ const calendarInput = (part: ReviewFixturePart, scenario: ReviewScenario) => (
         : { status: 'ready' as const, events: scenario.calendar === 'none' ? [] : part.calendarEvents }
 );
 
-// ---------------------------------------------------------------------------
-// Weekly Review.
 
 async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenario: ReviewScenario, recorder: ReviewRecorder): Promise<Observation[]> {
     const storage = createDeviceStorage(scenario.storage);
@@ -438,7 +422,7 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
         (window) => contract.getWeeklyReview({ checkpoint, calendar, expandedProjectId, ...window }),
         (view: NativeWeeklyReview) => view.items,
     );
-    /** A nested list whole: its first window, then the rest under the view's revision. */
+
     const whole = <T,>(view: NativeWeeklyReview, window: NativeReviewWindow<T>, list: NativeWeeklyReviewList, key?: string): T[] => {
         const all = [...window.items];
         while (all.length < window.total) {
@@ -448,7 +432,7 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
         }
         return all;
     };
-    /** Every read stores the checkpoint the review now stands on, as mobile saves its session. */
+
     const settle = () => {
         const result = read();
         if (result.view.checkpoint !== checkpoint) {
@@ -457,8 +441,8 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
         }
         return result;
     };
-    // Mobile opens while the calendar loads, then shows it: a step with no work
-    // until then is passed over for good.
+
+
     const open = () => {
         const loaded = calendar;
         calendar = { status: 'loading' };
@@ -489,7 +473,7 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
         const projects: unknown[] = [];
         const suggestionChecks: boolean[] = [];
         const tasks = items.filter((item): item is Extract<NativeWeeklyReviewItem, { type: 'task' }> => item.type === 'task');
-        /** RN's renderProjectEntry (Projects and Stale): the card, then its rows and Open project while expanded (rows keep their own list). */
+
         const projectCards = () => items.forEach((item) => {
             if (item.type === 'project') {
                 texts.push(item.title, labels.addTask, item.badge.label, item.countLabel, item.expanded ? '▾' : '▸');
@@ -700,7 +684,7 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
                     ai.selected = new Set(ai.suggestions.filter(isActionableReviewSuggestion).map((suggestion) => suggestion.id));
                 } else if (content.step === 'stale' && label === `${labels.aiApply} (${ai.selected.size})`) {
                     const chosen = ai.suggestions.filter((suggestion) => ai.selected.has(suggestion.id));
-                    // Each actionable suggestion's task, at the revision the step's row shows.
+
                     const taskRevisions = Object.fromEntries(chosen.filter(isActionableReviewSuggestion).map((suggestion) => (
                         [suggestion.id, rowRevision(taskRowsOf(items), suggestion.id)]
                     )));
@@ -725,8 +709,6 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
     return observations;
 }
 
-// ---------------------------------------------------------------------------
-// Daily Review.
 
 async function replayDaily(contract: Contract, part: ReviewFixturePart, scenario: ReviewScenario, recorder: ReviewRecorder): Promise<Observation[]> {
     const storage = createDeviceStorage(scenario.storage);
@@ -858,7 +840,7 @@ async function replayDaily(contract: Contract, part: ReviewFixturePart, scenario
                 return;
             }
             case 'editorSave': {
-                // The editor is its own contract; its save closes it.
+
                 const updates = target as { title: string };
                 const task = useTaskStore.getState()._tasksById.get(editor!)!;
                 ok(await contract.updateTask({ id: task.id, base: { title: task.title }, patch: { title: updates.title }, requestId: requestId() }));
@@ -880,7 +862,7 @@ async function replayDaily(contract: Contract, part: ReviewFixturePart, scenario
     return observations;
 }
 
-/** Replays one scenario of one part through the native host contract. */
+
 export function replayReviewScenario(options: {
     part: ReviewPart;
     fixture: ReviewFixturePart;

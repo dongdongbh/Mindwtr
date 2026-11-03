@@ -1,4 +1,4 @@
-// Install shared URL/URLSearchParams shim up front so all modules see a consistent API
+
 require('./shims/timers-bootstrap');
 const { URL: ShimURL, URLSearchParams: ShimURLSearchParams, setupURLPolyfill } = require('./shims/url-polyfill');
 const { logError } = require('./lib/app-log');
@@ -18,7 +18,7 @@ maybeCopyGlobals(typeof globalThis !== 'undefined' ? globalThis : undefined);
 maybeCopyGlobals(typeof self !== 'undefined' ? self : undefined);
 
 try {
-    // Apply React Native specific polyfills
+
     if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
         if (typeof SharedArrayBuffer === 'undefined') {
             global.SharedArrayBuffer = ArrayBuffer;
@@ -28,7 +28,7 @@ try {
             global.Buffer = require('buffer').Buffer;
         }
 
-        // Set on all potential global objects
+
         if (typeof window !== 'undefined') window.SharedArrayBuffer = global.SharedArrayBuffer;
         if (typeof self !== 'undefined') self.SharedArrayBuffer = global.SharedArrayBuffer;
     }

@@ -4,7 +4,7 @@ import { taskRevisionOf } from './native-request-receipts';
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
 import type { AppData, Area, Project, Section, Task } from './types';
 
-// Each forced failed save waits the store's real retry backoff (250+500+1000+2000 ms), so one such test takes ~3.8 s alone.
+
 vi.setConfig({ testTimeout: 30_000 });
 
 const NOW = '2026-10-02T13:00:00.000Z';
@@ -254,8 +254,8 @@ describe('Reference Task Delete and Undo use saved RN task policy', () => {
             return client.run(sql, params);
         } }));
         try {
-            // First-install migrations can save load defaults; model an existing
-            // legacy row only after those migrations, then really load it again.
+
+
             await sqlite.client().run('UPDATE tasks SET pushCount = NULL WHERE id = ?', [TASK_ID]);
             await sqlite.restart();
             const original = request();

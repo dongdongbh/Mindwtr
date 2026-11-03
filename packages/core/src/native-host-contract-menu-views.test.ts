@@ -43,7 +43,7 @@ describe('native host contract: More sheet and list views', () => {
         vi.restoreAllMocks();
     });
 
-    // Revisions read the clock.
+
     const freezeClock = () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(fixture.now));
@@ -63,10 +63,10 @@ describe('native host contract: More sheet and list views', () => {
         return result.value;
     };
     type Host = ReturnType<typeof createNativeHostContract>;
-    /** A parked project's revision, as Waiting shows it. */
+
     const parkedRevision = (host: Host, id: string) => value(host.getWaitingView({ offset: 0, limit: 1 })).deferred!.rows.items
         .find((row) => row.id === id)!.projectRevision;
-    /** Someday rows' revisions, as the view shows them. */
+
     const somedayRevisions = (host: Host, ids: string[]) => {
         const rows = value(host.getSomedayView({ offset: 0, limit: 100 })).items.flatMap((item) => (item.type === 'task' ? [item.row] : []));
         return Object.fromEntries(ids.map((id) => [id, rows.find((row) => row.id === id)!.taskRevision]));
@@ -89,8 +89,8 @@ describe('native host contract: More sheet and list views', () => {
         const { host } = await openHost(scenario('someday', 'sections'));
         const read = () => value(host.getSomedayView({ groupBy: 'viewSection', offset: 0, limit: 100 }));
         const ids = (view: ReturnType<typeof read>) => view.items.map((item) => (item.type === 'heading' ? item.id : item.row.id));
-        // Every Someday task in a section, and the parked projects in a deleted one: core's
-        // model then has a No section group that holds only projects.
+
+
         const place = <T extends { status: string; viewSectionIds?: unknown }>(rows: T[], status: string, id: string) => rows.map((row) => (
             row.status === status ? { ...row, viewSectionIds: { someday: id } } : row));
         useTaskStore.setState((state) => ({
@@ -111,7 +111,7 @@ describe('native host contract: More sheet and list views', () => {
         const parked = useTaskStore.getState()._allProjects.filter((project) => project.status === 'someday');
         expect(parked.length).toBeGreaterThan(1);
         const [first, ...rest] = parked;
-        // One parked project in a section, the others in a section that no longer exists (they fall back to No section).
+
         useTaskStore.setState((state) => {
             const place = (rows: typeof state._allProjects) => rows.map((row) => (row.status !== 'someday' ? row
                 : { ...row, viewSectionIds: { someday: row.id === first.id ? 's-later' : 'deleted-section' } }));
@@ -129,14 +129,14 @@ describe('native host contract: More sheet and list views', () => {
         const item = view.items.find((entry) => entry.type === 'project' && entry.id === first.id);
         expect(item).toMatchObject({ groupId: 'view-section:someday:s-later', activateLabel: expect.any(String),
             project: { id: first.id, title: first.title, projectRevision: expect.any(String) } });
-        // The same read without the flag keeps the block above the list (native iOS).
+
         expect(read().deferred?.rows.items.map((row) => row.id)).toEqual(parked.map((project) => project.id));
         expect(read().items.some((entry) => entry.type === 'project')).toBe(false);
         expect(view.revision).not.toBe(read().revision);
-        // Any grouping other than sections keeps the block.
+
         expect(value(host.getSomedayView({ groupBy: 'project', projectsInSections: true, offset: 0, limit: 100 })).deferred).not.toBeNull();
     });
-    // RN 8fd2cab96 (#1319): a parked project in its section moves to another section from its row (long press), through updateProject.
+
     it('moves a parked Someday project to a section, as React Native does (#1319)', async () => {
         freezeClock();
         const saveData = vi.fn().mockResolvedValue(undefined);
@@ -144,7 +144,7 @@ describe('native host contract: More sheet and list views', () => {
         const project = useTaskStore.getState()._allProjects.find((row) => row.status === 'someday')!;
         const section = () => useTaskStore.getState()._projectsById.get(project.id)!.viewSectionIds?.someday;
         expect(section()).toBeUndefined();
-        // The dialog for the project: core's choices, No section first and selected.
+
         const dialog = value(host.getSomedayMoveDialog({ projectId: project.id }));
         expect(dialog.title).toBe('Move to section…');
         expect(dialog.choices.items[0]).toEqual({ sectionId: null, title: 'No section', selected: true });
@@ -153,32 +153,32 @@ describe('native host contract: More sheet and list views', () => {
         expect(value(await host.moveSomedayProjectToSection(input))).toEqual({ moved: 1 });
         expect(section()).toBe('s-later');
         expect(recorder.log).toHaveLength(1);
-        // A repeat answers from its receipt: no second write.
+
         expect(value(await host.moveSomedayProjectToSection(input))).toEqual({ moved: 1 });
         expect(recorder.log).toHaveLength(1);
         expect(value(host.getSomedayMoveDialog({ projectId: project.id })).choices.items.find((choice) => choice.selected)?.sectionId).toBe('s-later');
 
-        // The revision the row showed before the move is stale now: nothing is written.
+
         expect(await host.moveSomedayProjectToSection({ ...input, sectionId: null, requestId: generateUUID() }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
-        // A section that is gone is refused in RN's words; No section clears the project's.
+
         const fresh = () => ({ projectRevision: projectRevision(project.id), requestId: generateUUID() });
         expect(value(await host.moveSomedayProjectToSection({ ...input, ...fresh(), sectionId: 'gone' })))
             .toEqual({ refused: { title: 'Error', message: 'Could not update Someday sections.' } });
         expect(value(await host.moveSomedayProjectToSection({ ...input, ...fresh(), sectionId: null }))).toEqual({ moved: 1 });
         expect(section()).toBeUndefined();
-        // Already there: target state, no write.
+
         const writes = recorder.log.length;
         expect(value(await host.moveSomedayProjectToSection({ ...input, ...fresh(), sectionId: null }))).toEqual({ moved: 0 });
         expect(recorder.log).toHaveLength(writes);
-        // Only a parked Someday project moves; the input is checked.
+
         const active = useTaskStore.getState()._allProjects.find((row) => row.status === 'active')!;
         expect(await host.moveSomedayProjectToSection({ projectId: active.id, sectionId: null, projectRevision: projectRevision(active.id), requestId: generateUUID() }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await host.moveSomedayProjectToSection({ ...input, requestId: 'nope' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(host.getSomedayMoveDialog({ projectId: active.id })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
-    // RN 43479990e: the status menu's Move to project or area… (TaskEditDestinationPicker, then updateTask with buildTaskMovePatch).
+
     it('moves a task to a project or an area from its status menu, as React Native does', async () => {
         freezeClock();
         const { host, recorder } = await openHost(scenario('someday', 'sections'));
@@ -194,7 +194,7 @@ describe('native host contract: More sheet and list views', () => {
         expect(picker.projectGroups[0].rows).toContainEqual({ title: project.title, accessibilityLabel: `Projects: ${project.title}`, selected: false,
             destination: { kind: 'project', id: project.id } });
         expect(picker.areas.rows.map((row) => row.destination)).toContainEqual({ kind: 'area', id: area.id });
-        // The search narrows projects and areas by name; a search nothing matches says so.
+
         const query = project.title.slice(0, 3).toLowerCase();
         const searched = value(host.getTaskDestinationPicker({ id: task.id, query }));
         expect(searched.projectGroups.flatMap((group) => group.rows).every((row) => row.title.toLowerCase().includes(query))).toBe(true);
@@ -205,15 +205,15 @@ describe('native host contract: More sheet and list views', () => {
         expect(value(await host.moveTaskToDestination(input))).toEqual({ id: task.id, changed: true });
         expect(useTaskStore.getState()._tasksById.get(task.id)!.projectId).toBe(project.id);
         expect(recorder.log).toHaveLength(1);
-        // A repeat answers from its receipt; the picker now selects the project.
+
         expect(value(await host.moveTaskToDestination(input))).toEqual({ id: task.id, changed: true });
         expect(recorder.log).toHaveLength(1);
         expect(value(host.getTaskDestinationPicker({ id: task.id })).projectGroups[0].rows.find((row) => row.selected)?.destination).toEqual(input.destination);
-        // The row's revision from before the move is stale: nothing is written.
+
         expect(await host.moveTaskToDestination({ ...input, destination: { kind: 'area', id: area.id }, requestId: generateUUID() }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         const fresh = () => ({ taskRevision: revisionOf(useTaskStore.getState()._tasksById.get(task.id)!), requestId: generateUUID() });
-        // An area clears the project (buildTaskMovePatch); None clears both; already there writes nothing.
+
         expect(value(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'area', id: area.id } }))).toEqual({ id: task.id, changed: true });
         expect(useTaskStore.getState()._tasksById.get(task.id)).toMatchObject({ projectId: undefined, areaId: area.id });
         expect(value(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'none' } }))).toEqual({ id: task.id, changed: true });
@@ -221,7 +221,7 @@ describe('native host contract: More sheet and list views', () => {
         const writes = recorder.log.length;
         expect(value(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'none' } }))).toEqual({ id: task.id, changed: false });
         expect(recorder.log).toHaveLength(writes);
-        // Refused: a project that cannot take tasks, an unknown area, a malformed destination or request.
+
         const archived = useTaskStore.getState()._allProjects.find((row) => row.status === 'archived');
         if (archived) expect(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'project', id: archived.id } }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -231,7 +231,7 @@ describe('native host contract: More sheet and list views', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await host.moveTaskToDestination({ ...input, requestId: 'nope' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(host.getTaskDestinationPicker({ id: 'no-such-task' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // RN's TaskEditDestinationPicker says No matches only when neither a project nor an area matches: an area-only match shows none.
+
         const lonely = (await useTaskStore.getState().addArea('Zebra garden'))!;
         const areaOnly = value(host.getTaskDestinationPicker({ id: task.id, query: 'zebra' }));
         expect(areaOnly.projectGroups.flatMap((group) => group.rows)).toEqual([]);
@@ -246,7 +246,7 @@ describe('native host contract: More sheet and list views', () => {
         const waiting = buildWaitingViewModel({ tasks: visibleTasks, projects: state.projects, resolvedAreaFilter, areaById, person: 'alice', t });
         const waitingView = value(host.getWaitingView({ person: 'alice', offset: 0, limit: 100 }));
         expect(waitingView.rows.map((row) => row.id)).toEqual(waiting.tasks.map((task) => task.id));
-        // Parked project rows carry the revision activateProject compares.
+
         const parked = waiting.deferred!.rows.map((row) => ({ ...row, projectRevision: projectRevision(row.id) }));
         expect(waitingView.deferred).toEqual({ ...waiting.deferred, rows: { total: parked.length, items: parked } });
 
@@ -262,7 +262,7 @@ describe('native host contract: More sheet and list views', () => {
         expect(somedayView.items.map((item) => (item.type === 'heading' ? item.id : item.row.id)))
             .toEqual(someday.groups!.flatMap((group) => [group.id, ...group.tasks.map((task) => task.id)]));
         expect(somedayView.filters.state).toEqual(resolved.state);
-        // Rows carry core meta.
+
         const row = somedayView.items.find((item) => item.type === 'task');
         expect(row?.type === 'task' && row.row.meta).toBeTruthy();
 
@@ -279,7 +279,7 @@ describe('native host contract: More sheet and list views', () => {
         expect(referenceView.items.map((item) => (item.type === 'section' ? item.id : item.row.id)))
             .toEqual(reference.items.map((item) => (item.type === 'section' ? item.id : item.task.id)));
         expect(referenceView.filters.tokens.items.map((token) => token.value)).toEqual(referenceOptions.tokens);
-        // A reference filed in an archived project opens read-only, as on mobile.
+
         const archived = referenceView.items.find((item) => item.type === 'task' && item.row.id === 'r-c');
         expect(archived?.type === 'task' && archived.row.readOnly).toBe(true);
     });
@@ -308,7 +308,7 @@ describe('native host contract: More sheet and list views', () => {
         expect(first.total).toBe(5);
         const second = value(host.getWaitingView({ offset: 2, limit: 2, revision: first.revision }));
         expect([...first.rows, ...second.rows].map((row) => row.id)).toEqual(['w-alice2', 'w-alice', 'w-desc', 'w-plain']);
-        // A later page needs the revision; another person's list is another revision.
+
         expect(host.getWaitingView({ offset: 2, limit: 2 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(value(host.getWaitingView({ person: 'bob', offset: 0, limit: 2 })).revision).not.toBe(first.revision);
 
@@ -325,7 +325,7 @@ describe('native host contract: More sheet and list views', () => {
     it('refuses invalid input', async () => {
         freezeClock();
         const { host } = await openHost(scenario('someday', 'sections'));
-        // As the journaling Android host: each write must carry its replay tokens.
+
         setNativeReplayTokens('required');
         expect(host.getWaitingView({ offset: 0, limit: 101 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(host.getSomedayView({ groupBy: 'tag' as never, offset: 0, limit: 10 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -341,7 +341,7 @@ describe('native host contract: More sheet and list views', () => {
         expect(await host.createSomedaySection({ title: 'Hobbies' } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         const revisions = somedayRevisions(host, ['s-a']);
         expect(await host.moveSomedayTasksToSection({ taskIds: ['s-a'], sectionId: null, requestId: 'nope', taskRevisions: revisions })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // A move carries the revision the view showed for each task it sends, and nothing else.
+
         expect(await host.moveSomedayTasksToSection({ taskIds: ['s-a'], sectionId: null, requestId: generateUUID() } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await host.moveSomedayTasksToSection({ taskIds: ['s-a', 's-b'], sectionId: null, requestId: generateUUID(), taskRevisions: revisions }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -472,7 +472,7 @@ describe('native host contract: More sheet and list views', () => {
         expect(recorder.log).toHaveLength(1);
         const saved = saveData.mock.lastCall?.[0] as { tasks: { id: string; viewSectionIds?: { someday?: string } }[] };
         expect(saved.tasks.filter(({ id }) => id === 's-a' || id === 's-b').map((task) => task.viewSectionIds?.someday)).toEqual(['s-empty', 's-empty']);
-        // A lost reply repeats the request: no write, no save.
+
         const saves = saveData.mock.calls.length;
         expect(value(await host.moveSomedayTasksToSection(input))).toEqual(retried);
         expect(saveData).toHaveBeenCalledTimes(saves);
@@ -487,7 +487,7 @@ describe('native host contract: More sheet and list views', () => {
         freezeClock();
         const saveData = vi.fn().mockResolvedValue(undefined);
         const { host, recorder } = await openHost(scenario('someday', 'sections'), saveData);
-        // A store write that saves at once, as the store's reactivation path does: it lands, then reports the failed save.
+
         const inner = useTaskStore.getState().batchUpdateTasks;
         useTaskStore.setState({
             batchUpdateTasks: async (updates) => {
@@ -534,7 +534,7 @@ describe('native host contract: More sheet and list views', () => {
         saveData.mockRejectedValue(new Error('disk unavailable'));
         expect(await host.createSomedaySection(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
         saveData.mockResolvedValue(undefined);
-        // The retry answers from its receipt: the section the request made, named by its UUID.
+
         const retried = value(await host.createSomedaySection(input));
         expect(retried).toEqual({ id: input.requestId.toLowerCase(), existing: false });
         expect(recorder.log).toHaveLength(1);
@@ -632,7 +632,7 @@ describe('native host contract: More sheet and list views', () => {
         expect(value(await host.undoSomedaySectionMove({ moveRequestId: move.requestId, requestId: generateUUID() }))).toEqual({ reverted: 1 });
         expect(useTaskStore.getState()._tasksById.get('s-a')?.viewSectionIds).toEqual({ someday: 's-later' });
         expect(useTaskStore.getState()._tasksById.get('s-b')?.viewSectionIds).toEqual({ someday: 's-empty' });
-        // A move retried after its receipt is gone is target state: it writes nothing again.
+
         const again = { taskIds: ['s-a'], sectionId: 's-ideas', requestId: generateUUID(), taskRevisions: somedayRevisions(host, ['s-a']) };
         expect(value(await host.moveSomedayTasksToSection(again))).toMatchObject({ moved: 1 });
         expect(value(await host.moveSomedayTasksToSection({ ...again, requestId: generateUUID() })))
@@ -719,7 +719,7 @@ describe('native host contract: More sheet and list views', () => {
     describe('a replay after a restart (a new host, no receipts) never undoes a later change', () => {
         const stale = { ok: false, error: { code: 'STALE_REVISION' } };
         const sections = () => useTaskStore.getState().settings.gtd?.viewSections?.someday ?? [];
-        /** Another writer's edit of the Someday sections. */
+
         const writeSections = (next: ViewSectionDefinition[]) => useTaskStore.getState().updateSettings({
             gtd: { ...useTaskStore.getState().settings.gtd, viewSections: { someday: next } },
         });
@@ -729,7 +729,7 @@ describe('native host contract: More sheet and list views', () => {
             const { host } = await openHost(scenario('waiting', 'base'));
             const input = { projectId: 'p-vendor', projectRevision: parkedRevision(host, 'p-vendor') };
             expect(value(await host.activateProject(input))).toEqual({ id: 'p-vendor', changed: true });
-            // The user parks it again.
+
             await useTaskStore.getState().updateProject('p-vendor', { status: 'waiting' });
             const { result, wrote } = await replayAfterRestart((restarted) => restarted.activateProject(input));
             expect(result).toMatchObject(stale);
@@ -742,7 +742,7 @@ describe('native host contract: More sheet and list views', () => {
             const { host } = await openHost(scenario('someday', 'sections'));
             const input = { taskIds: ['s-a', 's-b'], sectionId: 's-empty', requestId: generateUUID(), taskRevisions: somedayRevisions(host, ['s-a', 's-b']) };
             expect(value(await host.moveSomedayTasksToSection(input))).toMatchObject({ moved: 2 });
-            // The user files s-a elsewhere.
+
             await useTaskStore.getState().updateTask('s-a', { viewSectionIds: { someday: 's-ideas' } });
             const { result, wrote } = await replayAfterRestart((restarted) => restarted.moveSomedayTasksToSection(input));
             expect(result).toMatchObject(stale);
@@ -798,7 +798,7 @@ describe('native host contract: More sheet and list views', () => {
             value(await host.renameSomedaySection(rename));
             value(await host.deleteSomedaySection(remove));
             value(await host.reorderSomedaySections(reorder));
-            // Another field of the same settings: Ideas is renamed.
+
             await writeSections(sections().map((section) => (section.id === 's-ideas' ? { ...section, title: 'Big ideas' } : section)));
             const expected = structuredClone(sections());
             for (const replay of [
@@ -817,7 +817,7 @@ describe('native host contract: More sheet and list views', () => {
             freezeClock();
             const { host } = await openHost(scenario('reference', 'base'));
             value(await host.setTaskListSort({ sortBy: 'title' }));
-            // Another field of the same settings.
+
             await useTaskStore.getState().updateSettings({ gtd: { ...useTaskStore.getState().settings.gtd, autoArchiveDays: 3 } });
             const { result, wrote } = await replayAfterRestart((restarted) => restarted.setTaskListSort({ sortBy: 'title' }));
             expect(result).toEqual({ ok: true, value: { sortBy: 'title', changed: false } });

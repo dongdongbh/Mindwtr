@@ -25,7 +25,7 @@ export type SettingsAdvancedPageProps = SettingsKeyboardWindowProps & {
     onNetworkProxyUrlChange: (value: string) => void;
     onSaveNetworkProxy: () => Promise<void> | void;
     onDesktopRenderingToggle: (disableHardwareAcceleration: boolean) => void;
-    /** Privacy lock support on this device; hidden when `supported` is false. */
+
     appLockAvailability?: AppLockAvailability;
 };
 

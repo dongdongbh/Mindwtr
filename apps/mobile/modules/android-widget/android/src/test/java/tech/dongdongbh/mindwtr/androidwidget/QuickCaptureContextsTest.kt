@@ -22,8 +22,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-// The widget capture dialog's Contexts button (#1418 follow-up). Each inserted form is pinned to
-// parse back through core parseQuickAdd in widget-capture-token.test.ts.
+
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class QuickCaptureContextsTest {
@@ -102,7 +101,7 @@ class QuickCaptureContextsTest {
     assertEquals(activity.input().text.length, activity.input().selectionStart)
   }
 
-  // Same cases as core task-token-usage.test.ts getTaskContextMatches; keep the two in step.
+
   @Test fun rankingMirrorsCoreGetTaskContextMatches() {
     fun matches(names: List<String>, query: String) =
       QuickCaptureActivity.contextChoices(names.map { WidgetPayload.SavedFilterOption("context:$it", it) }, "", query).map { it.first }
@@ -111,20 +110,20 @@ class QuickCaptureContextsTest {
     assertEquals(listOf("@off", "@office", "@coffee"), matches(listOf("@coffee", "@office", "@off"), "@off"))
     assertEquals(emptyList<String>(), matches(core, "offer"))
     assertEquals(listOf("@Seasonal Planning"), matches(listOf("@Seasonal Planning", "@office"), "seas"))
-    // Prefix beats substring, as in the app (#1418): "gar" puts @garage before @agarwal.
+
     assertEquals(listOf("@garage", "@agarwal"), matches(listOf("@agarwal", "@garage"), "gar"))
-    // Unlike core (which hides history on an empty query), the button lists every context in core's order.
+
     assertEquals(core, matches(core, ""))
     assertEquals(8, matches((1..12).map { "@c$it" }, "c").size)
   }
 
   @Test fun choicesKeepCoreOrderAndSpacingRules() {
     val options = listOf("@zeta", "@alpha", "@x ", "@Büro").map { WidgetPayload.SavedFilterOption("context:$it", it) }
-    // Core's order stands: Kotlin only filters, it never re-ranks.
+
     assertEquals(listOf("@zeta" to "@zeta", "@alpha" to "@alpha", "@Büro" to "@Büro"), QuickCaptureActivity.contextChoices(options, "", ""))
     assertEquals(listOf("@Büro"), QuickCaptureActivity.contextChoices(options, "", "bü").map { it.first })
     assertEquals(listOf("@alpha", "@Büro"), QuickCaptureActivity.contextChoices(options, "see @zeta", "").map { it.first })
-    // `@zetas` is a different context, so `@zeta` is still offered.
+
     assertEquals(3, QuickCaptureActivity.contextChoices(options, "@zetas", "").size)
     assertEquals("@a " to 3, QuickCaptureActivity.insertToken("", 0, 0, "@a"))
     assertEquals("x @a " to 5, QuickCaptureActivity.insertToken("x", 1, 1, "@a"))

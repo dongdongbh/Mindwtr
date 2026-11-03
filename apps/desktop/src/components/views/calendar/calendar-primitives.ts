@@ -1,11 +1,6 @@
-/**
- * The hook-free part of the desktop calendar: grid geometry, the date shapes the
- * inputs speak in, and the item types every panel renders.
- *
- * It is deliberately a leaf — the calendar sub-hooks and their panels all import
- * from here, so none of them has to import (and cycle back through) the
- * controller that composes them.
- */
+
+
+
 import { format } from 'date-fns';
 import type { ExternalCalendarEvent, Task } from '@mindwtr/core';
 import type { CalendarDayItem } from '@mindwtr/core/calendar-day-items';
@@ -17,15 +12,7 @@ export const DESKTOP_GRID_SNAP_MINUTES = 15;
 
 export const CALENDAR_DAYS_IN_WEEK = 7;
 
-/**
- * How many days the week timeline shows at once (#951).
- *
- * The range and the clamp mirror mobile's `coerceCalendarWeekVisibleDays`
- * (`apps/mobile/components/views/calendar/calendar-view-mode.ts`) on purpose, so
- * the two platforms agree on what a day count means. Only the default differs:
- * mobile opens on 5 (a school or work week in compact columns), a desktop
- * window is wide enough to start on the whole week.
- */
+
 export const CALENDAR_TIMELINE_DAY_COUNT_MIN = 2;
 export const CALENDAR_TIMELINE_DAY_COUNT_MAX = CALENDAR_DAYS_IN_WEEK;
 export const CALENDAR_TIMELINE_DAY_COUNT_DEFAULT = CALENDAR_DAYS_IN_WEEK;

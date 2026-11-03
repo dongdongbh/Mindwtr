@@ -14,8 +14,7 @@ import type { GmailReceiptDatabase, GmailReceiptStore } from './gmail-capture-st
 const mobile = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const expoSources = resolve(mobile, '../../node_modules/expo-file-system/src');
 
-// The opener deliberately uses lazy require; evaluate its real source with native bindings,
-// leaving Expo's constructors/path utilities and the maintained RN URL shim intact.
+
 function evaluate<T>(file: string, dependencies: Record<string, unknown>, runtimeURL?: typeof URL): T {
     const module = { exports: {} as T };
     const source = transpileModule(readFileSync(file, 'utf8'), {
@@ -166,10 +165,7 @@ describe('Gmail receipt storage opening under the RN URL shim', () => {
         expect(harness.open).not.toHaveBeenCalled();
     });
 
-    // A crash between creating the file and writing its schema left a 0-byte file, and a damaged file failed the schema check:
-    // either stopped capture for good, with no button left to recover (13a Gmail design review P3-11). The file is moved aside,
-    // never deleted, and a fresh one starts with capture off until the user starts it again. Every receipt that can still be
-    // read from it is carried into the fresh file, so starting capture again never captures that mail a second time.
+
     it.each([
         ['an empty file', (path: string) => writeFileSync(path, ''), 'file', '0'],
         ['a file whose schema fails the check', (path: string) => {
@@ -187,7 +183,7 @@ describe('Gmail receipt storage opening under the RN URL shim', () => {
         expect(module.gmailReceiptsWereReset()).toBe(false);
         const store = module.getGmailReceiptStore();
         expect(store.config()).toEqual({ account: null, label: null, enabled: false, blocked: true });
-        // Settings explains the reset, even after a restart, until capture starts again.
+
         expect(harness.reload().gmailReceiptsWereReset()).toBe(true);
         module.clearGmailReceiptsReset();
         expect(module.gmailReceiptsWereReset()).toBe(false);

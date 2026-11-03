@@ -4,7 +4,7 @@ import UserNotifications
 import XCTest
 @testable import MindwtrNativeCore
 
-/// These tests create request values only; they never obtain a notification center.
+
 final class NativePomodoroRequestTests: XCTestCase {
     private let namespace = "tech.dongdongbh.mindwtr.native-ui.585_01"
     private let libraryID = "/Users/dd/Library/Application Support/Mindwtr/library::585"

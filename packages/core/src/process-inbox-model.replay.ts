@@ -1,12 +1,6 @@
-/**
- * Test support only (imported by the Process Inbox tests; not exported).
- * Replays the frozen React Native Process Inbox scenarios
- * (process-inbox-model-parity.fixtures.json, captured by
- * apps/mobile/components/inbox-processing/process-inbox-parity.test.tsx) through
- * core: either core's functions directly, or the native host contract. Every
- * action goes through the step view's own choices and edits, so the view is
- * tested as the thing a native client taps.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import { formatTimeEstimateLabel, resolveTimeEstimateOptions } from './calendar-scheduling';
 import { tFallback } from './i18n';
@@ -86,12 +80,12 @@ export const loadProcessInboxFixture = (): ProcessInboxFixture => JSON.parse(
     readFileSync(new URL('./process-inbox-model-parity.fixtures.json', import.meta.url), 'utf8'),
 );
 
-/** The context tasks every scenario keeps, as the mobile capture seeded them. */
+
 const CONTEXT_TASK_IDS = ['next-e', 'done-f'];
 
 type Translate = (key: string) => string;
 
-/** The store writes a scenario asks for, with created IDs named after their titles. */
+
 export function createWriteRecorder() {
     const log: unknown[] = [];
     const createdIds = new Map<string, string>();
@@ -111,14 +105,14 @@ export type WriteRecorder = ReturnType<typeof createWriteRecorder>;
 
 let realActions: Pick<ReturnType<typeof useTaskStore.getState>, 'updateTask' | 'deleteTask' | 'addTask' | 'addProject'> | null = null;
 
-/** Load the scenario's data through the store and record the four writes Process Inbox uses. */
+
 export async function seedProcessInboxStore(
     fixture: ProcessInboxFixture,
     scenario: ProcessInboxScenario,
     recorder: WriteRecorder,
     adapter: { saveData?: (data: unknown) => Promise<void> } = {},
 ): Promise<void> {
-    // The previous scenario's last save belongs to its own adapter.
+
     await flushPendingSave();
     resetForTests();
     const initial = useTaskStore.getState();
@@ -133,7 +127,7 @@ export async function seedProcessInboxStore(
         tasks, projects: fixture.projects, sections: [], areas: fixture.areas, people: fixture.people,
         settings: fixture.settings[scenario.settings],
     }));
-    // A reload (the host's activation) reads back what was last saved.
+
     setStorageAdapter({
         getData: async () => data,
         saveData: async (next) => {
@@ -147,7 +141,7 @@ export async function seedProcessInboxStore(
         settings: {}, error: null, persistenceFailure: null, isLoading: false, editLockCount: 0, lastDataChangeAt: 0,
     });
     await useTaskStore.getState().fetchData({ throwOnError: true });
-    // Load migrations queue a save; let it land before anything else writes.
+
     await flushPendingSave();
     const { log, createdIds, encodeArgs } = recorder;
     useTaskStore.setState({
@@ -160,8 +154,8 @@ export async function seedProcessInboxStore(
             return result;
         },
         addProject: async (title, color, initialProps) => {
-            // The contract names the new project from its request (an `id` prop); React Native lets the
-            // store draw one, so the log leaves that id out, as the harness records the call.
+
+
             const { id: _id, ...rest } = initialProps ?? {};
             const shown = initialProps && 'id' in initialProps ? (Object.keys(rest).length > 0 ? rest : undefined) : initialProps;
             log.push(['addProject', ...encodeArgs([title, color, shown])]);
@@ -181,7 +175,7 @@ export type ReplayBackend = {
     skip(): Promise<void>;
     submitProjectSearch(): Promise<void>;
     toggleMode(): Promise<void>;
-    /** What only core can report: RN's raw counts and suggestion lists. */
+
     extras?(): Record<string, unknown>;
 };
 
@@ -192,7 +186,7 @@ const storeActions = () => ({
     addProject: (title: string, color: string, props?: Partial<Project>) => useTaskStore.getState().addProject(title, color, props),
 });
 
-/** The mobile controller, run on core's functions. */
+
 export function createCoreBackend(options: { t: Translate; toasts: unknown[] }): ReplayBackend {
     const { t, toasts } = options;
     let mode: ProcessInboxMode = 'guided';
@@ -362,7 +356,7 @@ const pick = (options: readonly ProcessInboxViewOption[] | undefined, match: (op
     return option.edit;
 };
 
-/** One fixture action, done through the view's choices and edits. */
+
 export async function performProcessInboxAction(backend: ReplayBackend, action: ProcessInboxAction, t: Translate): Promise<void> {
     const view = backend.view();
     if (!view) throw new Error(`No step for ${JSON.stringify(action)}`);
@@ -449,7 +443,7 @@ export async function performProcessInboxAction(backend: ReplayBackend, action: 
             if (action[1] === 'add') return backend.edit(conversion.addAction.edit);
             if (action[1] === 'remove') return backend.edit(conversion.rows[action[2]].remove);
             if (action[1] === 'type') return backend.edit({ type: 'setExtraAction', index: action[2], value: action[3] });
-            // Enter does nothing unless the field opens a new row.
+
             const submit = action[2] === 'next' ? conversion.nextActionSubmit : conversion.rows[action[2]].submit;
             return submit ? backend.edit(submit) : undefined;
         }
@@ -461,7 +455,7 @@ export async function performProcessInboxAction(backend: ReplayBackend, action: 
     }
 }
 
-/** What the RN capture recorded after each action, from a replay backend. */
+
 export function observeProcessInbox(
     backend: ReplayBackend,
     recorder: WriteRecorder,
@@ -488,7 +482,7 @@ export function observeProcessInbox(
     }) as ProcessInboxObservation;
 }
 
-/** The fixture's observation in the replay's shape: `closed` as a flag, and only the given fields. */
+
 export function frozenObservation(observation: ProcessInboxObservation, keep?: readonly string[]): ProcessInboxObservation {
     const closed = typeof observation.closed === 'number' ? observation.closed > 0 : Boolean(observation.closed);
     const entries = Object.entries({ ...observation, closed })

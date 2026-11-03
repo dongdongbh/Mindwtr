@@ -98,32 +98,16 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 
-/*
- * RN's capture popup (components/quick-capture-sheet.tsx and quick-capture-sheet/), drawn from core's
- * capture view (getQuickCaptureView): every label, chip, preview entry and picker row is core's, and
- * every control carries the exact edit core takes back. Kotlin keeps what RN's popup keeps: the typed
- * text, core's options as core last returned them, which picker is open with its search text, and
- * whether More is open.
- */
 
-/** RN's ADD_ANOTHER_STORAGE_KEY: "Add another" stays on for the next open, per device. */
 const val ADD_ANOTHER_KEY = "mindwtr:quickCapture:addAnother"
 
-/** The three answer commands: a capture, several lines, and a project or area picker's create. */
+
 val CAPTURE_KINDS = setOf("capture", "captureLines", "capturePicker")
 
-/** A read of the view with the current text, options and picker (no edit). */
+
 private val READ = JSONObject().put("read", true)
 
-/**
- * The open popup. [view] is core's last view; [options] core's options, sent back with every call. [pending] is
- * an answer whose outcome is unknown (its exact request); [confirm] core's several-lines question with one capture
- * ID per line ([lineIds]); [snapshot] is the recovery snapshot the batch sends, the name as written ([snapshotTaken]:
- * taken, null in sandbox mode). [requests] are reads and edits with core or waiting, sent one at a time; the edits are
- * part of the durable draft and are sent again after process death. [queuedSave] is a Save tapped while they waited
- * ("save" or "edit" for Save and edit). [linesText] is an imported file's text while its several-lines question is open
- * (Create tasks sends it in place of the field's).
- */
+
 data class CaptureDraft(
     val session: String,
     val text: String,
@@ -142,7 +126,7 @@ data class CaptureDraft(
     val snapshotTaken: Boolean = false,
     val linesText: String? = null,
 ) {
-    /** A read queued behind whatever is queued, unless one is already last. */
+
     fun reading(): CaptureDraft = if (requests.lastOrNull() === READ) this else copy(requests = requests + READ)
 
     fun state(): JSONObject = JSONObject().put("session", session).put("text", text).put("options", options).put("view", view)
@@ -165,7 +149,7 @@ data class CaptureDraft(
                     patch = patch.keys().asSequence().associateWith<String, String?> { patch.getString(it) })
             },
             saved.optJSONObject("confirm"), saved.getString("lineIds").split(",").mapNotNull { it.ifEmpty { null } },
-            // Edits core had not answered go again, in order.
+
             requests = saved.optJSONArray("edits")?.let { edits -> List(edits.length()) { JSONObject().put("edit", edits.getJSONObject(it)) } }.orEmpty(),
             snapshot = if (saved.isNull("snapshot")) null else saved.optString("snapshot"), snapshotTaken = saved.optBoolean("snapshotTaken"),
             linesText = if (saved.isNull("linesText")) null else saved.optString("linesText").ifEmpty { null },
@@ -173,7 +157,7 @@ data class CaptureDraft(
     }
 }
 
-/** The popup in the app's no-backup folder: each write synced and renamed into place; the Bundle holds only whether it is open. */
+
 class CaptureStore(private val dir: File) {
     private val file = File(dir, "capture")
     fun read(): CaptureDraft? = runCatching { CaptureDraft.restore(JSONObject(file.readText())) }.getOrNull()
@@ -190,7 +174,7 @@ private fun JSONObject.text(name: String): String? = if (!has(name) || isNull(na
 private fun JSONObject.child(name: String): JSONObject? = if (!has(name) || isNull(name)) null else getJSONObject(name)
 private fun JSONObject.items(name: String): List<JSONObject> = optJSONArray(name)?.let { list -> List(list.length()) { list.getJSONObject(it) } }.orEmpty()
 
-/** RN's Switch at a call site with RN's [props] (MindwtrTheme's *Switch); its touch area is the switch, as RN's. */
+
 @Composable
 internal fun RnSwitch(on: Boolean, enabled: Boolean, label: String, props: RnSwitchProps, toggle: () -> Unit) {
     Box(Modifier.toggleable(on, enabled = enabled, role = Role.Switch) { toggle() }.semantics { contentDescription = label }) {
@@ -198,11 +182,7 @@ internal fun RnSwitch(on: Boolean, enabled: Boolean, label: String, props: RnSwi
     }
 }
 
-/**
- * RN's Switch on Android (SwitchCompat) as drawn, measured on the test phone: a 46.67x27dp view, a 24x14dp track in RN's track
- * color, solid, and a raised 20dp thumb 10dp either side of the center, in RN's thumb color or AppCompat's where RN sets none.
- * A disabled switch changes only AppCompat's thumb, as in RN.
- */
+
 @Composable
 internal fun RnSwitchGraphic(on: Boolean, enabled: Boolean, props: RnSwitchProps) {
     val theme = LocalTheme.current
@@ -213,15 +193,10 @@ internal fun RnSwitchGraphic(on: Boolean, enabled: Boolean, props: RnSwitchProps
     }
 }
 
-/** RN's QuickAddPreview: at most 6 chips, then "+N". */
+
 private const val PREVIEW_CHIPS = 6
 
-/**
- * RN's capture popup, from the bottom over a dimmed screen: Add Task and Close, the field, core's preview, the
- * project or contexts chip with Focus and More, More's panel (the note, the option chips, the syntax help, the due
- * dates), and "Add another" with Save and edit and Save. While a capture's retry is owed the draft is locked,
- * only its Save runs, and Back is left to the system.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
@@ -230,7 +205,7 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
     val view = draft.view
     val copy = view.getJSONObject("text")
     val failed = failedAction != null
-    // Voice V5 review B1: RN's sheet takes saving || recordingBusy, so the microphone starting, stopping or saving locks it too.
+
     val voiceBusy = voice.state.busy
     val locked = busy || failed || voiceBusy
     val canSave = view.getBoolean("canSave") && writable && !busy && !voiceBusy && (failedAction == null || failedAction == draft.pending && draft.pending?.kind == "capture")
@@ -240,31 +215,30 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
     var pickDay by rememberSaveable { mutableStateOf(false) }
     var pickTime by rememberSaveable { mutableStateOf(false) }
     var helpOpen by rememberSaveable(draft.session) { mutableStateOf(false) }
-    // RN's Android expand: More waits until the keyboard is gone, so the tall panel never pushes the field off screen.
+
     var expandPending by remember { mutableStateOf(false) }
     val imeVisible = WindowInsets.isImeVisible
     LaunchedEffect(expandPending, imeVisible) {
         if (!expandPending) return@LaunchedEffect
-        if (imeVisible) delay(500) // RN's ANDROID_OPTIONS_EXPAND_FALLBACK_MS
+        if (imeVisible) delay(500)
         expandPending = false
         setCaptureExpanded(true)
     }
-    // As RN's modal does, the keyboard leaves with the popup.
+
     DisposableEffect(Unit) { onDispose { keyboard?.hide() } }
-    // RN focuses the field 120 ms after it opens, and keeps it (and the keyboard) for the next capture after an
-    // Add another save. A save locks the field, which drops its focus; the field takes it back once the save is done.
-    // Without this the keyboard went down after each Add another save and the sheet slid under the next tap (run 33).
+
+
     LaunchedEffect(draft.session, locked) { if (!draft.expanded && !locked) { delay(120); runCatching { titleFocus.requestFocus() } } }
-    // Debug builds only: the capture check puts its several lines on the clipboard (`debug.mindwtr.native.clipboard`,
-    // "\n" for a new line) so it pastes them through the field's real Paste, the only way RN's popup gets several lines.
+
+
     val clipboard = LocalClipboardManager.current
     LaunchedEffect(draft.session) {
         withContext(Dispatchers.IO) { debugProperty("clipboard") }.takeIf { it.isNotEmpty() }?.let { clipboard.setText(AnnotatedString(it.replace("\\n", "\n"))) }
     }
-    // Reads and edits wait while an action runs; they go on once none does.
+
     LaunchedEffect(busy, failed) { if (!busy && !failed) pumpCapture() }
     val closable = !busy && !failed && !voiceBusy
-    // RN's Import .txt: the system's document picker for a text file (DocumentPicker, type text/plain).
+
     val importText = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(::importCaptureText) }
     BackHandler(enabled = !failed) {
         if (busy || voiceBusy) return@BackHandler
@@ -298,7 +272,7 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                 }
             }
             val footer = @Composable {
-                // RN's footer: the Add another switch, then Save and edit and Save.
+
                 Column(Modifier.padding(top = if (draft.expanded) 10.dp else 8.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val addAnother = view.getJSONObject("addAnother")
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -310,7 +284,7 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                         val pill = RoundedCornerShape(999.dp)
                         val saveAndEdit = copy.getString("saveAndEdit")
-                        // RN fades each button whole (opacity 0.5) while the text is blank: the layer comes before the pill's border and fill.
+
                         Box(Modifier.fade(if (canSave) 1f else 0.5f).widthIn(min = 112.dp).heightIn(min = 48.dp).clip(pill).rnBorder(1.dp, c.border, pill)
                             .clickable(enabled = canSave, role = Role.Button) { focusManager.clearFocus(); saveCapture(openAfterSave = true) }
                             .padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
@@ -324,16 +298,16 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                     }
                 }
             }
-            // In landscape everything under the header scrolls, so Save stays reachable above the keyboard and a failure
-            // banner; in portrait only More's panel scrolls, and the footer stays put, as in RN.
+
+
             Column(if (landscape) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).testTag("capture-scroll")
                 else Modifier.weight(1f, fill = false)) {
-                // RN's input row: the field (Return saves; Add another keeps the keyboard up for the next capture), then the mic.
+
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     TitleField(draft.text, copy.getString("inputLabel"), !locked, Modifier.weight(1f).focusRequester(titleFocus)) { typed -> typeCapture(typed) }
                     MicButton(voice.state) { voice.toggle(draft.text, draft.options) }
                 }
-                // RN's Add notes field under the title, shown with More closed too (#1406): the task's description.
+
                 NoteField(draft, copy.getString("notePlaceholder"), copy.getString("noteLabel"), !locked) { note ->
                     editCapture(JSONObject().put("type", "setNote").put("value", note))
                 }
@@ -401,17 +375,17 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
             }
             if (!landscape) footer()
         }
-        // RN's toasts inside the popup, above the keyboard.
+
         ToastCard(model, Modifier.align(Alignment.BottomCenter).imePadding().padding(bottom = 16.dp))
         draft.picker?.let { picker -> view.child("picker")?.takeIf { it.getString("kind") == picker.getString("kind") }?.let { CapturePicker(model, draft, it, locked) } }
         draft.confirm?.let { LinesConfirm(model, it, locked) }
     }
-    // RN's Alert.alert from the microphone: permission denied, a recording that failed.
+
     voiceAlert?.let { (title, message) ->
         AlertDialog(onDismissRequest = ::dismissVoiceAlert, title = { Text(title) }, text = { Text(message) },
             confirmButton = { TextButton(onClick = ::dismissVoiceAlert, modifier = Modifier.testTag("voice-alert-ok")) { Text(t("common.ok")) } })
     }
-    // The pickers open where core says, as RN's value={dueDate ?? new Date()}: the day, and the due date's clock time.
+
     val due = view.getJSONObject("due")
     if (pickDay) DayPickerDialog(due.getJSONObject("custom").getString("startDay"), { pickDay = false }) { day ->
         editCapture(JSONObject().put("type", "setDueDay").put("day", day))
@@ -422,10 +396,7 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
     }
 }
 
-/**
- * RN's record button (QuickCaptureSheetBody recordButton): 40 square, radius 12, a border; filterBg with the Mic, or danger with
- * the Square while recording; faded to 0.6 and disabled while busy. Its label is RN's audioRecord or audioStop.
- */
+
 @Composable
 private fun MicButton(state: VoiceUi, toggle: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -438,7 +409,7 @@ private fun MicButton(state: VoiceUi, toggle: () -> Unit) {
     }
 }
 
-/** RN's recording row (a red dot and "Recording...") and its processing row while the recording starts or saves. */
+
 @Composable
 private fun RecordingRows(state: VoiceUi) {
     val c = LocalTheme.current.colors
@@ -452,7 +423,7 @@ private fun RecordingRows(state: VoiceUi) {
     }
 }
 
-/** RN's field: the input background, a 12 radius, 15 text, up to about four lines. Text the app puts in leaves the cursor at its end. */
+
 @Composable
 private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boolean, modifier: Modifier, onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -461,11 +432,11 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
     val shape = RoundedCornerShape(12.dp)
     BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled,
         textStyle = rnText(15, 400).copy(color = if (enabled) c.text else c.secondaryText), cursorBrush = SolidColor(c.tint),
-        // RN's TextInput default autoCapitalize "sentences": the keyboard opens with Shift on.
+
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { saveCapture(openAfterSave = false) }),
-        // A hardware Enter saves too, with no line added, as RN's multi-line field with submitBehavior blurAndSubmit does
-        // (an adb Enter in RN's popup saved it, 10-25); a pasted text keeps its lines (core's several-captures question).
+
+
         modifier = modifier.onPreviewKeyEvent { event ->
             val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
             if (enter && event.type == KeyEventType.KeyDown) saveCapture(openAfterSave = false)
@@ -480,7 +451,7 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
         })
 }
 
-/** RN's Add notes field (noteInput): typed text stays as typed; core's note replaces it only when no edit is still with core. */
+
 @Composable
 private fun NoteField(draft: CaptureDraft, placeholder: String, label: String, enabled: Boolean, send: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -502,7 +473,7 @@ private fun NoteField(draft: CaptureDraft, placeholder: String, label: String, e
         })
 }
 
-/** RN's Import .txt pill in More's panel: the file glyph and the label, on the filter background with a border. */
+
 @Composable
 private fun ImportTextButton(enabled: Boolean, pick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -517,7 +488,7 @@ private fun ImportTextButton(enabled: Boolean, pick: () -> Unit) {
     }
 }
 
-/** RN's QuickAddPreview (the popup's and the capture screen's): core's entries as passive chips (a warning in the danger color), at most six, then "+N". */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun PreviewStrip(entries: List<JSONObject>, modifier: Modifier) {
@@ -528,7 +499,7 @@ internal fun PreviewStrip(entries: List<JSONObject>, modifier: Modifier) {
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (entry in entries.take(PREVIEW_CHIPS)) {
             val warning = entry.getString("tone") == "warning"
-            // RN's chip: its padding (8, 2) inside a 1 dp border, and RN's Android text line (font padding) of 13.
+
             Row(Modifier.clip(pill).background(if (warning) theme.dangerWash else c.filterBg).rnBorder(1.dp, if (warning) c.danger else c.border, pill)
                 .padding(horizontal = 9.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 entry.text("label")?.let { Text(it, style = rnText(11, 400, 13), color = if (warning) c.danger else c.secondaryText, maxLines = 1) }
@@ -541,10 +512,7 @@ internal fun PreviewStrip(entries: List<JSONObject>, modifier: Modifier) {
     }
 }
 
-/**
- * RN's option chip: a pill with a glyph and core's label; a tap opens its picker, a long press sends core's reset.
- * [collapsed] is the chip row above More (RN's collapsedProjectChip / collapsedContextChip), else More's grid.
- */
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RowScope.OptionChip(icon: ImageVector, label: String?, description: String, enabled: Boolean, collapsed: Boolean = false,
@@ -562,7 +530,7 @@ private fun RowScope.OptionChip(icon: ImageVector, label: String?, description: 
     }
 }
 
-/** RN's focus chip: the star and core's Focus label; on, the star's amber wash and border. At the limit core refuses with a toast. */
+
 @Composable
 private fun RowScope.FocusChip(model: InboxViewModel, view: JSONObject, collapsed: Boolean, locked: Boolean) = with(model) {
     val theme = LocalTheme.current
@@ -581,7 +549,7 @@ private fun RowScope.FocusChip(model: InboxViewModel, view: JSONObject, collapse
     }
 }
 
-/** RN's QuickDateChips (Today, Tomorrow, Next week; the chosen one clears) and the Custom chip (the system date picker; a long press clears). */
+
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun DueDates(due: JSONObject, enabled: Boolean, send: (JSONObject) -> Unit, pick: () -> Unit) {
@@ -608,7 +576,7 @@ private fun DueDates(due: JSONObject, enabled: Boolean, send: (JSONObject) -> Un
     }
 }
 
-/** RN's picker card over the popup (and the capture screen's several-lines question): its title, then its content. */
+
 @Composable
 internal fun PickerCard(title: String, dismiss: () -> Unit, content: @Composable () -> Unit) {
     val theme = LocalTheme.current
@@ -637,7 +605,7 @@ private fun PickerRow(label: String, description: String, selected: Boolean = fa
     }
 }
 
-/** RN's pickers: project and area (search, create, list), contexts (search, add, chosen chips, clear, list), and priority. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun InboxViewModel.CapturePicker(model: InboxViewModel, draft: CaptureDraft, picker: JSONObject, locked: Boolean) {
@@ -717,14 +685,14 @@ private fun InboxViewModel.CapturePicker(model: InboxViewModel, draft: CaptureDr
     }
 }
 
-/** RN's several-lines question inside the popup: core's title and lines, Cancel and Create tasks. */
+
 @Composable
 private fun InboxViewModel.LinesConfirm(model: InboxViewModel, confirm: JSONObject, locked: Boolean) {
     val c = LocalTheme.current.colors
     PickerCard(confirm.getString("title"), this::cancelCaptureLines) {
         Text(confirm.getString("message"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(bottom = 12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-            // While the batch's retry is owed, only Create tasks runs, with the same capture IDs.
+
             val canCreate = writable && !busy && (failedAction == null || failedAction == capture?.pending)
             DialogAction(confirm.getString("cancelLabel"), c.secondaryText, !locked, this@LinesConfirm::cancelCaptureLines)
             DialogAction(confirm.getString("confirmLabel"), c.tint, canCreate, this@LinesConfirm::createCaptureLines)

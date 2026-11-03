@@ -201,14 +201,13 @@ describe('Done Move durable proof and closed admission', () => {
         else if (scenario === 'deleted-section') data.sections![0].deletedAt = NOW;
         else if (scenario === 'missing-parent') { data.tasks![0].projectId = undefined; data.sections![0].projectId = 'missing'; }
         else { data.projects!.push({ ...data.projects![0], id: 'other' }); data.tasks![0].projectId = 'other'; }
-        // Missing parent cannot be stored with FK constraints; exercise the
-        // same raw in-memory contract admission with the corrupt identity.
+
+
         if (scenario === 'missing-parent') data.sections![0].projectId = 'parent';
         const sqlite = await open(data);
         try {
-            // Normal hydration sanitizes invalid container links. Restore only
-            // those source references in memory to exercise admission itself;
-            // the database is still the real persisted invalid-policy fixture.
+
+
             if (['deleted-parent', 'deleted-section', 'conflict'].includes(scenario)) {
                 useTaskStore.setState({ _allTasks: useTaskStore.getState()._allTasks.map(row => row.id === ID
                     ? { ...row, projectId: data.tasks![0].projectId, sectionId: 'section' } : row),

@@ -54,18 +54,11 @@ pub(crate) fn append_native_log_line(app: &tauri::AppHandle, message: &str) {
     }
 }
 
-// Synchronous log file I/O (open/append/flush, occasional rotation) off the
-// UI thread; O_APPEND writes to this file are already safe under concurrent
-// writers, and a rotation race costs at worst a diagnostic log hiccup, not
-// app data (B1).
 #[tauri::command(async)]
 pub(crate) fn append_log_line(app: tauri::AppHandle, line: String) -> Result<String, String> {
     write_log_line(&app, &line)
 }
 
-// Diagnostics display only: under an MS Store (MSIX) install the OS silently
-// redirects our Roaming AppData writes into the package's LocalCache, so the
-// path the webview computes points at a file that does not exist there (#1135).
 #[tauri::command(async)]
 pub(crate) fn get_log_file_path(app: tauri::AppHandle) -> String {
     let log_path = crate::storage::get_device_data_dir(&app)
@@ -82,9 +75,6 @@ pub(crate) fn clear_log_file(app: tauri::AppHandle) -> Result<String, String> {
     clear_log_files(&crate::storage::get_device_data_dir(&app).join("logs"))
 }
 
-// Both files, not just the live one: write_log_line rotates at 5 MB, so
-// clearing only mindwtr.log left the whole rotated history on disk — the user
-// asked for the log to be gone.
 fn clear_log_files(log_dir: &Path) -> Result<String, String> {
     let log_path = log_dir.join("mindwtr.log");
     for path in [&log_path, &log_dir.join("mindwtr.log.1")] {

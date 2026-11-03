@@ -1,4 +1,4 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const faOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "پیش از شروع",
     "taskEdit.advanceReminderLabel": "یادآوری پیشاپیش",

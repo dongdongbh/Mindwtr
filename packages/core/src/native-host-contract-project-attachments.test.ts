@@ -75,7 +75,7 @@ describe('prepared native Project URL attachment edits', () => {
             const plan = env.host.prepareProjectAttachmentWrite(request);
             if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(plan.ok ? plan.value.kind : `${plan.error.code}: ${plan.error.message}`);
             const original = { request, prepared: plan.value.prepared };
-            // Foundation sorts structured object keys; opaque SQL strings are untouched.
+
             const frozen = JSON.parse(JSON.stringify(original, (_name, item: unknown) => item && typeof item === 'object'
                 && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item)) as typeof original;
             expect(Object.keys(frozen.prepared.effect.project.before.attachments![0]))
@@ -87,8 +87,8 @@ describe('prepared native Project URL attachment edits', () => {
             const saved = await env.sql<{ rev: number; attachments: string }>('SELECT rev, attachments FROM projects WHERE id = ?', ['target']);
             expect(saved[0].rev).toBe(plan.value.prepared.effect.project.after.rev);
             expect(JSON.parse(saved[0].attachments)).toEqual(plan.value.prepared.effect.project.after.attachments);
-            // Historical URL v1 performs a full save, which may canonicalize
-            // JSON encoding. Every unrelated value must still survive exactly.
+
+
             const firstSave = await unrelated();
             expect(firstSave[0].map(row => ({ ...row, attachments: JSON.parse(row.attachments) })))
                 .toEqual(untouched[0].map(row => ({ ...row, attachments: JSON.parse(row.attachments) })));

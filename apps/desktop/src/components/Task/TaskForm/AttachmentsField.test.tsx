@@ -6,7 +6,7 @@ import { globalProgressTracker } from '@mindwtr/core';
 import { AttachmentsField } from './AttachmentsField';
 import { LanguageProvider } from '../../../contexts/language-context';
 
-// The progress indicator reads its labels through the language context.
+
 const render = (ui: ReactElement, options?: RenderOptions) => rtlRender(ui, { wrapper: LanguageProvider, ...options });
 
 const renderField = (attachments: Parameters<typeof AttachmentsField>[0]['visibleEditAttachments']) => render(
@@ -36,7 +36,7 @@ describe('AttachmentsField', () => {
     });
 
     it('lets the user remove a missing file the sync location could not find', () => {
-        // A remote "not found" keeps the row; Remove is how a truly lost file goes.
+
         const removeAttachment = vi.fn();
         const { getByText, getByRole } = render(
             <AttachmentsField

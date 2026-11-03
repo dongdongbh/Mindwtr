@@ -16,6 +16,8 @@ Maintainer clarification, 2026-09-26: preserve the RN interface and interaction 
 
 RN regression provenance (2026-10-02): before accepting each native workflow, trace the actual RN caller/controller, shared-core policy, existing tests and relevant fix history. Reuse shared policy and carry previously fixed edge cases into runnable native checks; matching the visible screen alone is insufficient. Record the source/fix references and separate core, simulator and physical-device evidence in the parity ledger. Older migrated workflows remain subject to this audit; do not infer complete regression coverage from a build or a focused happy-path pass.
 
+RN capture presentation invariants: keep the quick-capture title outside the metadata scroll area; UIKit can otherwise scroll a focused title above the keyboard while `KeyboardAvoidingView` also adjusts it. A screen underneath the native capture route waits for dismissal before presenting another sheet: `capture-route-presence.ts` retains the 700 ms settlement measured on an iPhone 12 and a 1,500 ms fallback if capture remains mounted. Android transparent modal windows do not resize with the activity keyboard event; `use-android-keyboard-inset.ts` remeasures the modal inset at 0, 80, 240 and 480 ms, rejecting stale or out-of-order results. Preserve these behaviors in native parity checks; these timings are existing RN calibration, not new device acceptance.
+
 ### Current evidence and limits
 
 - ADR 0029 records an Android pilot with Inbox, editor, and Focus on local branch `experiment/gate2-native-android`, reviewed at `6c74a67e9`. It is not a complete client or a production release. Its injected taps, simplified collation, and partial workflow coverage do not establish hands-on or language readiness.

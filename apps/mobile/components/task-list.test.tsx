@@ -123,7 +123,7 @@ vi.mock('react-native', () => ({
     );
   }),
   Modal: ({ children, visible, ...props }: any) => (visible ? React.createElement('Modal', props, children) : null),
-  // The save/add paths open a performance diagnostic, which reads Platform.OS.
+
   Platform: { OS: 'android', select: (options: any) => options.android ?? options.default },
   Pressable: ({ children, onPress, ...props }: any) => React.createElement('Pressable', { ...props, onPress }, children),
   RefreshControl: () => null,
@@ -131,7 +131,7 @@ vi.mock('react-native', () => ({
   StyleSheet: { create: (styles: unknown) => styles },
   Switch: (props: any) => React.createElement('Switch', props),
   Text: ({ children, ...props }: any) => React.createElement('Text', props, children),
-  // TokenPickerModal's search field.
+
   TextInput: () => React.createElement('TextInput'),
   TouchableOpacity: ({ children, onPress, ...props }: any) => React.createElement('TouchableOpacity', { ...props, onPress }, children),
   View: ({ children, ...props }: any) => React.createElement('View', props, children),
@@ -159,9 +159,7 @@ vi.mock('react-native-draggable-flatlist', () => ({
   ScaleDecorator: ({ children, ...props }: any) => React.createElement('ScaleDecorator', props, children),
 }));
 
-// Spread the real module and replace only the store hook (see
-// test-support/mock-core.ts). The old hand-listed mock returned nothing else, so
-// every core export the component tree grew afterwards arrived as undefined.
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const { mockCore } = await import('../test-support/mock-core');
   return mockCore(importOriginal as () => Promise<Record<string, unknown>>, () => storeState, {
@@ -196,9 +194,8 @@ vi.mock('./list-empty-state', () => ({
 }));
 
 vi.mock('./swipeable-task-item', () => ({
-  // The spy stands in for the real module's render counter (#766): it fires
-  // exactly where `SwipeableTaskItem` increments `taskRowRenderCount`, so a row
-  // that memoises away never reaches it.
+
+
   SwipeableTaskItem: (props: any) => {
     rowRenderSpy(props.task?.id);
     return React.createElement('SwipeableTaskItem', props);
@@ -226,8 +223,8 @@ vi.mock('../contexts/language-context', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: resolveThemeTokens caches its result, so a
-  // fresh literal per call would fake instability the app never sees (#766).
+
+
   const themeColors = {
     bg: '#ffffff',
     border: '#d1d5db',
@@ -355,7 +352,7 @@ vi.mock('./task-list/TaskListTagModal', () => ({
   TaskListTagModal: () => null,
 }));
 
-// Mocks above must be registered before the component module is evaluated.
+
 // eslint-disable-next-line import/first
 import { TaskList } from './task-list';
 
@@ -382,7 +379,7 @@ describe('TaskList', () => {
       appearance: {},
       features: {},
     };
-    // Entering project reorder mode schedules its entry scroll on a frame.
+
     vi.stubGlobal('requestAnimationFrame', (callback: (time: number) => void) => {
       callback(0);
       return 1;
@@ -567,7 +564,7 @@ describe('TaskList', () => {
       expect(data[sectionIndex].count).toBe(2);
       const referenceIds = data.filter((item) => item.type === 'task' && item.task?.status === 'reference').map((item) => item.task!.id);
       expect(referenceIds).toEqual(expectedIds);
-      // The main list stays reference-free: the active row sits above the pile.
+
       expect(data.findIndex((item) => item.type === 'task' && item.task?.id === 'task-1')).toBeLessThan(sectionIndex);
 
       act(() => {
@@ -995,7 +992,7 @@ describe('TaskList', () => {
 
     expect(listData().find((item) => item.type === 'section' && item.id === 'tag:events'))
       .toMatchObject({ count: 1, collapsed: true });
-    // The row leaves the data, which is what orderedTaskIds and range select read.
+
     expect(listData().some((item) => item.type === 'task' && item.task.id === 'task-tagged')).toBe(false);
     expect(listData().some((item) => item.type === 'task' && item.task.id === 'task-untagged')).toBe(true);
 
@@ -1132,7 +1129,6 @@ describe('TaskList', () => {
   });
 
 
-
   it('omits the current page status from bulk move options and orders Done before Reference', async () => {
     taskListSelectionState.current = {
       ...taskListSelectionState.current,
@@ -1176,8 +1172,7 @@ describe('TaskList', () => {
       );
     });
 
-    // The quick-capture sheet sets highlightTaskId as it closes; the list scrolls
-    // once the flagged row is present in the rendered data (no composer involved).
+
     storeState.highlightTaskId = 'capture-task';
     await act(async () => {
       tree.update(
@@ -1193,8 +1188,7 @@ describe('TaskList', () => {
 
     expect(flatListScrollToIndexMock).toHaveBeenCalledWith(expect.objectContaining({ index: 0 }));
 
-    // Variable row heights mean an unmeasured target throws; the fallback jumps
-    // to an estimated offset (index * averageItemLength) before retrying.
+
     const flatListProps = flatListPropsSpy.mock.calls.at(-1)?.[0];
     act(() => {
       flatListProps.onScrollToIndexFailed({ index: 4, averageItemLength: 90 });
@@ -1222,8 +1216,7 @@ describe('TaskList', () => {
       );
     });
 
-    // Reorder mode swaps in the draggable list, so the highlight-scroll effect
-    // has no FlatList to drive and must leave the drag list alone.
+
     expect(flatListScrollToIndexMock).not.toHaveBeenCalled();
     expect(tree.root.findAll((node) => String(node.type) === 'DraggableFlatList').length).toBeGreaterThan(0);
 
@@ -1232,9 +1225,7 @@ describe('TaskList', () => {
     });
   });
 
-  // The editor closes the moment a save is handed off, so a swallowed
-  // `{ success: false }` reads to the user as a task that saved. useTaskEditActions
-  // only sees the result if the handler returns the store promise.
+
   it('hands the store result back to the editor so a failed save can surface', async () => {
     const visibleTask = makeTask('task-save', 'Review launch notes');
     updateTaskMock.mockResolvedValue({ success: false, error: 'Task is deleted' });
@@ -1320,9 +1311,8 @@ describe('TaskList', () => {
 
   it('reads focusedCount from the memoized store selector, not a fresh scan of the rendered task list (#766)', async () => {
     const visibleTask = makeTask('task-row-context-derived', 'Review launch notes');
-    // state.tasks intentionally disagrees with _allTasks here: if focusedCount
-    // were computed by scanning state.tasks (the pre-fix regression) it would
-    // report 5; the memoized getFocusedCount() correctly counts _allTasks.
+
+
     storeState.tasks = Array.from(
       { length: 5 },
       (_, index) => makeTask(`misleading-focused-${index}`, `Misleading ${index}`, { isFocusedToday: true }),
@@ -1350,10 +1340,7 @@ describe('TaskList', () => {
     });
   });
 
-  // The memo boundary itself now lives in the row module and is pinned there,
-  // against the real component, in swipeable-task-item.test.tsx. What this list
-  // owes it is prop identity: after a single edit, every untouched row must get
-  // back the props it already had, or the boundary cannot hold.
+
   it('leaves untouched rows their existing props after one task changes (#766)', async () => {
     const listProps = (taskSource: Task[]) => ({
       showHeader: false,
@@ -1377,8 +1364,7 @@ describe('TaskList', () => {
     );
     const before = rowPropsById();
 
-    // What a single task edit looks like from the list's side: a fresh tasks
-    // array in which exactly one task object was replaced.
+
     const editedTasks = tasks.map((task, index) => (
       index === 7 ? { ...task, title: 'Task 7 (edited)' } : task
     ));
@@ -1454,9 +1440,7 @@ describe('TaskList', () => {
     });
   });
 
-  // #784: exiting Task order lands the normal list on the region the reorder
-  // view was showing — not the pre-reorder offset, which yanked the viewport
-  // away from where the dragged task had just been dropped.
+
   it('returns the normal list to the reorder viewport region on exit', async () => {
     const longTaskList = Array.from({ length: 30 }, (_, index) => makeTask(
       `task-${index}`,
@@ -1491,7 +1475,7 @@ describe('TaskList', () => {
     const call = flatListScrollToIndexMock.mock.calls.at(-1)?.[0];
     expect(call).toBeTruthy();
     expect(call.viewPosition).toBe(0);
-    // 800px over 80px reorder rows = the task at reorder index 10.
+
     const data = flatListPropsSpy.mock.calls.at(-1)?.[0].data;
     expect(data[call.index]).toEqual(expect.objectContaining({ type: 'task' }));
     expect(data[call.index].task.id).toBe('task-10');
@@ -1541,7 +1525,7 @@ describe('TaskList', () => {
     const call = flatListScrollToIndexMock.mock.calls.at(-1)?.[0];
     expect(call).toBeTruthy();
     const normalData = flatListPropsSpy.mock.calls.at(-1)?.[0].data;
-    // Moving task-0 below the viewport shifts task-11 into reorder index 10.
+
     expect(normalData[call.index].task.id).toBe('task-11');
 
     act(() => {
@@ -1569,7 +1553,7 @@ describe('TaskList', () => {
       );
     });
 
-    // The self-scrolling list owns scroll, so the nested (non-virtualizing) variant must be gone.
+
     expect(tree.root.findAllByType('NestableDraggableFlatList' as unknown as React.ElementType)).toHaveLength(0);
 
     const draggableList = tree.root.findByType('DraggableFlatList' as unknown as React.ElementType);

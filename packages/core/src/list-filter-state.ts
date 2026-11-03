@@ -13,12 +13,7 @@ import type {
     TimeEstimate,
 } from './types';
 
-/**
- * The list filter picker's state as plain data, for hosts that cannot run
- * `useTaskFilterSelections` (task-filter-selections.ts). The edits, the pruning
- * and the chips mirror that hook without a saved filter applied, which is how
- * Someday, Reference and Done use it.
- */
+
 export type ListFilterState = {
     searchQuery: string;
     tokens: string[];
@@ -48,7 +43,7 @@ export const EMPTY_LIST_FILTER_STATE: ListFilterState = {
     tagMatchMode: 'all',
 };
 
-/** One picker control's change, exactly as the hook's setter of the same name makes it. */
+
 export type ListFilterEdit =
     | { type: 'toggleToken'; value: string }
     | { type: 'removeToken'; value: string }
@@ -78,7 +73,7 @@ export function applyListFilterEdit(state: ListFilterState, edit: ListFilterEdit
                 excludedTokens: state.excludedTokens.filter((item) => item !== edit.value),
             };
         case 'toggleToken': {
-            // Tri-state cycle: neutral → included → excluded → neutral.
+
             const token = edit.value;
             if (state.tokens.includes(token)) {
                 return {
@@ -132,21 +127,21 @@ export const getListSearchChipLabel = (search: string, t: (key: string) => strin
 export type ListFilterChip = {
     id: string;
     label: string;
-    /** Excluded chips subtract; they render struck through. */
+
     excluded: boolean;
-    /** What pressing the chip sends: the hook's own chip action. */
+
     edit: ListFilterEdit;
 };
 
 export type ResolvedListFilter = {
-    /** The state with selections the view no longer offers dropped, as the hook's effects drop them. */
+
     state: ListFilterState;
     criteria: FilterCriteria;
     searchQuery: string;
     activeCount: number;
     hasActive: boolean;
     chips: ListFilterChip[];
-    /** The match mode control shows once two tokens of a kind are selected. */
+
     showContextMatchMode: boolean;
     showTagMatchMode: boolean;
 };
@@ -155,7 +150,7 @@ export function resolveListFilterState(
     input: ListFilterState,
     options: {
         visibility: TaskMetadataFilterVisibility;
-        /** Offered tokens from older callers; explicit selections remain clearable when absent. */
+
         retainTokens?: readonly string[];
         retainProjects?: readonly string[];
         getProjectLabel?: (projectId: string) => string | undefined;

@@ -4,7 +4,7 @@ import Darwin
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Actual production bundle/JSC/SQLite. These are authored Apple checks, not Linux or device acceptance.
+
 final class NativeAISettingsProjectionTests: XCTestCase {
     private var root: URL!, bundle: URL!, service: String!
     private var database: URL { root.appendingPathComponent("core.sqlite") }

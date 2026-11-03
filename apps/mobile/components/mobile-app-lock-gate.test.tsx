@@ -82,7 +82,7 @@ describe('MobileAppLockGate', () => {
     };
     const wait = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
     const changeTo = async (state: AppStateStatus) => { await act(async () => { onAppStateChange?.(state); }); };
-    /** Mounts as a cold start and unlocks with the first prompt. */
+
     const coldStart = async () => {
       let tree!: ReactTestRenderer;
       await act(async () => {
@@ -137,7 +137,7 @@ describe('MobileAppLockGate', () => {
       expect(shows(tree)).toBe(false);
     });
 
-    // The root layout holds widget and share links while this is true (#1475).
+
     it('reports the lock from the first render, the unlock, and the next lock', async () => {
       setDelay(0);
       const onLockedChange = vi.fn();

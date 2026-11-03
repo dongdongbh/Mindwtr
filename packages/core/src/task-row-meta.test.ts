@@ -61,8 +61,7 @@ const fixture = JSON.parse(
     };
 };
 
-// How the mobile row drew each part at snapshot time: its text nodes, the first text's
-// color (theme tokens by name, stylesheet colors as literals), the dot and the icon.
+
 const TONE_COLOR = { overdue: 'danger', dueSoon: 'warning', normal: 'secondaryText' } as const;
 const PART_STYLE: Record<TaskRowMetaPart['kind'], { color: string; icon?: string }> = {
     project: { color: 'secondaryText' },
@@ -113,7 +112,7 @@ describe('buildTaskRowMeta parity with the mobile row', () => {
         const english = await loadTranslations('en');
         for (const config of Object.values(fixture.configs)) {
             const map = await loadTranslations(config.language);
-            // The mobile language context's `t`.
+
             translators.set(config.language, (key) => map[key] || english[key] || key);
         }
     });
@@ -122,8 +121,8 @@ describe('buildTaskRowMeta parity with the mobile row', () => {
         else process.env.TZ = originalTz;
         configureDateFormatting();
     });
-    // The function must format with the configuration it is given, so the global
-    // one is set to something no fixture configuration uses.
+
+
     beforeEach(() => configureDateFormatting({ language: 'fa', dateFormat: 'mdy', timeFormat: '12h', calendarSystem: 'jalali', systemLocale: 'fa-IR' }));
 
     it('matches the captured React Native swipe action for every task status', () => {
@@ -174,7 +173,7 @@ describe('buildTaskRowMeta parity with the mobile row', () => {
                 ),
                 features: resolveTaskRowFeatures(config.settings),
                 language: config.language,
-                // What the mobile root layout passed to configureDateFormatting.
+
                 dateFormatting: {
                     language: config.settings.language || config.language,
                     dateFormat: config.settings.dateFormat,
@@ -252,7 +251,7 @@ describe('buildTaskRowMeta', () => {
         expect(hidden.status).toBe(false);
         const meta = buildTaskRowMeta({ ...base, features: hidden, task: task({}) });
         expect(meta.statusHidden).toBe(true);
-        // The label stays: iOS's row Done lives in its status menu and needs it (review of 859f9202f).
+
         expect(meta.statusLabel).toBe('status.next');
         const shown = buildTaskRowMeta({ ...base, features: resolveTaskRowFeatures({ gtd: { taskEditor: { hidden: [] } } }), task: task({}) });
         expect(shown.statusHidden).toBe(false);
@@ -268,8 +267,7 @@ describe('resolveTaskRowFeatures', () => {
     });
 });
 
-// #1360 (8b4c4e447): RN redraws a row's due color and age as the clock passes them. Native reads a list again only at the next
-// instant one of its rows can differ: getTaskRowMetaValidUntil names that instant.
+
 describe('getTaskRowMetaValidUntil', () => {
     const t = (key: string) => key;
     const features = resolveTaskRowFeatures({ appearance: { showTaskAge: true } });

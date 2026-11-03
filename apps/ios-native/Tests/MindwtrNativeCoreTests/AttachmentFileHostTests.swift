@@ -87,7 +87,7 @@ final class AttachmentFileHostTests: XCTestCase {
         let file = try XCTUnwrap(URL(string: XCTUnwrap(rows.first?["uri"] as? String)))
         XCTAssertEqual(file.deletingLastPathComponent().path, managed.path)
         XCTAssertEqual(try Data(contentsOf: file), bytes)
-        XCTAssertEqual(try storedAttachments(), before) // draft, not durable task mutation
+        XCTAssertEqual(try storedAttachments(), before)
         let opened = try await request(host, "openAttachment", ["owner": owner(rows), "attachmentId": id])
         XCTAssertEqual(opened["status"] as? String, "available")
         let removed = try await request(host, "draftRemove", ["owner": owner(rows), "attachmentId": id, "requestId": UUID().uuidString.lowercased()])
@@ -103,7 +103,7 @@ final class AttachmentFileHostTests: XCTestCase {
         XCTAssertEqual(try storedAttachments(), before)
         let log = try String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"))
         XCTAssertFalse(log.contains(source.absoluteString)); XCTAssertFalse(log.contains("private + 文.txt"))
-        // No AsyncStorage/Sync/AI is fabricated by the local binding.
+
         do { _ = try await cold.call("syncSettings"); XCTFail("Sync must remain unavailable") } catch { }
         await cold.close()
     }
@@ -165,7 +165,7 @@ final class AttachmentFileHostTests: XCTestCase {
         let deleted = try await request(host, "settleTaskDraftAttachments", ["taskId": taskID, "taskRevision": revision,
                                                                           "baseline": [], "draft": rows, "committed": []])
         XCTAssertEqual(deleted["deleted"] as? Int, 1); XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
-        // Seed a canonical live reference and recreate the owner so keep() sees it.
+
         await host.close(); try Data([2, 3]).write(to: file)
         let sql = try SQLiteBridge(url: database)
         _ = try sql.execute("UPDATE tasks SET attachments=? WHERE id=?", parametersJSON: json([json(rows), taskID])); sql.close()
@@ -268,7 +268,7 @@ final class AttachmentFileHostTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: journal), Data("corrupt journal".utf8))
         XCTAssertEqual(try Data(contentsOf: source), Data("retained".utf8)); await host.close()
         try FileManager.default.removeItem(at: journal)
-        // A malformed optional namespace disables the capability, not SQLite.
+
         let isolated = root.appendingPathComponent("isolated", isDirectory: true)
         try FileManager.default.createDirectory(at: isolated, withIntermediateDirectories: true)
         try Data([1]).write(to: isolated.appendingPathComponent("attachment-files"))
@@ -281,8 +281,7 @@ final class AttachmentFileHostTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: isolated.appendingPathComponent("attachment-files")), Data([1]))
     }
 
-    // Test-only bundle extension uses the real production polyfill/bridge. It
-    // exposes no production evaluator or extra CoreHost command.
+
     private func probeBundle(_ expression: String) throws -> URL {
         let suffix = """
         ;(() => {
@@ -338,8 +337,8 @@ final class AttachmentFileHostTests: XCTestCase {
         XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
         XCTAssertEqual(captured.get()?.counters.jobs, 1)
         release.signal(); XCTAssertEqual(completed.wait(timeout: .now() + 5), .success)
-        // No subsequent CoreHost call pumps JS here. The idle pump must consume
-        // the metadata and release admission after the top-level result returned.
+
+
         let deadline = Date().addingTimeInterval(5)
         while captured.get()?.counters.jobs != 0 && Date() < deadline { Thread.sleep(forTimeInterval: 0.001) }
         XCTAssertEqual(captured.get()?.counters.jobs, 0)
@@ -373,8 +372,8 @@ final class AttachmentFileHostTests: XCTestCase {
         release.signal()
         do { _ = try await task.value; XCTFail("Pending caller was cancelled") } catch is CancellationError { } catch { XCTFail("Expected cancellation") }
         await closeTask.value
-        // A completed install cannot be undone by caller cancellation. No
-        // arbitrary pathname cleanup or false rollback acknowledgment occurs.
+
+
         XCTAssertEqual(try Data(contentsOf: target), Data([4, 5, 6]))
         _ = try await replacement.start(); await replacement.close()
         XCTAssertEqual(try Data(contentsOf: target), Data([4, 5, 6]))
@@ -412,9 +411,8 @@ final class AttachmentFileHostTests: XCTestCase {
                              "attachments": ["base": [] as [[String: Any]], "value": [row]],
                              "requestId": UUID().uuidString.lowercased()])
         let saveString = try json([save])
-        // Test-only transport instrumentation forwards every request unchanged.
-        // A timer invokes a valid existing production shared save method; no
-        // direct store mutation or new production domain hook is introduced.
+
+
         let prefix = """
         (() => {
           const original = globalThis.__mindwtrNative.fileCall;
@@ -450,7 +448,7 @@ final class AttachmentFileHostTests: XCTestCase {
         XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
         let deadline = Date().addingTimeInterval(5)
         while !(try storedAttachments()).contains(id) && Date() < deadline { Thread.sleep(forTimeInterval: 0.001) }
-        XCTAssertTrue(try storedAttachments().contains(id)) // actual shared durable save occurred while barrier waited
+        XCTAssertTrue(try storedAttachments().contains(id))
         XCTAssertEqual(try Data(contentsOf: file), bytes)
         release.signal()
         let result = try object(await settlement.value)

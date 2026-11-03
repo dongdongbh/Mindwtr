@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Resolve release tag + semantic version from workflow inputs/ref.
-# Usage:
-#   scripts/ci/resolve-release-version.sh [optional-tag]
-# Output:
-#   tag=<tag>
-#   version=<version-without-v-prefix>
 
 tag_input="${1:-${INPUT_TAG:-}}"
 

@@ -48,8 +48,8 @@ describe('serializeMindwtrCsv', () => {
         const header = serializeMindwtrCsv(appData()).split('\n')[0];
 
         expect(header).toBe(MINDWTR_CSV_COLUMNS.join(','));
-        // The column table is shared, so an export can never emit a header the
-        // importer would count as unknown.
+
+
         for (const column of MINDWTR_CSV_COLUMNS) {
             expect(MINDWTR_CSV_KNOWN_COLUMNS.has(column.toUpperCase())).toBe(true);
         }
@@ -108,7 +108,7 @@ describe('serializeMindwtrCsv', () => {
             { title: 'Draft copy', isCompleted: true },
             { title: 'Get approval', isCompleted: false },
         ]);
-        // Date-only stays date-only; a datetime keeps its instant (#797).
+
         expect(parsed.tasks[0].startTime).toBe('2026-09-01');
         expect(new Date(parsed.tasks[0].dueDate!).toISOString()).toBe('2026-09-05T14:30:00.000Z');
     });
@@ -137,9 +137,7 @@ describe('serializeMindwtrCsv', () => {
         expect(imported.data.tasks[0].completedAt).toBeUndefined();
     });
 
-    // D1: the previous version of this test only checked the PARSE output, so it proved the
-    // parser was deterministic and never that importing an export leaves the task count alone.
-    // Round-trip through applyMindwtrCsvImport or it proves nothing.
+
     it('re-imports an export onto the same tasks instead of duplicating them', () => {
         const data = appData({ tasks: [task({ id: 'stable-id' }), task({ id: 'other-id', title: 'Second' })] });
 
@@ -149,13 +147,7 @@ describe('serializeMindwtrCsv', () => {
         expect(result.data.tasks.map((item) => item.id).sort()).toEqual(['other-id', 'stable-id']);
     });
 
-    // The importer is add-only: an already-present id is skipped, not updated
-    // (import-apply.ts's existingTaskIds check). So an edited export does NOT push the edit
-    // back in — it is reported as skipped. Pinned here so the round-trip contract is explicit
-    // rather than assumed; changing it to update-in-place is a product decision, not a bug fix.
-    // V1: containers round-trip by name, so an unmodified re-import used to add an empty
-    // duplicate project and a renamed "<name> (Mindwtr CSV)" area even though every task was
-    // skipped. Zero new entities of ANY kind is the contract.
+
     it('adds nothing at all when an unmodified export is re-imported', () => {
         const data = appData({
             areas: [{ id: 'area-1', name: 'Work', createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z' }] as AppData['areas'],
@@ -174,8 +166,7 @@ describe('serializeMindwtrCsv', () => {
         expect(result.data.projects.map((item) => item.title)).toEqual(['Marketing']);
     });
 
-    // V1 correction: the container carry read a live task's project without checking either
-    // was alive, so a re-import could orphan a NEW row into a project the user had deleted.
+
     it('never carries a container from a tombstoned task or into a deleted project', () => {
         const data = appData({
             projects: [project({ deletedAt: '2026-08-02T00:00:00.000Z' })],
@@ -197,8 +188,7 @@ describe('serializeMindwtrCsv', () => {
         expect(landedIn?.deletedAt).toBeUndefined();
     });
 
-    // V1 correction: the carry was first-wins, so when one task had moved to another project
-    // the destination of new rows depended on CSV row order. Disagreement drops the carry.
+
     it('does not let row order decide where a moved task redirects new rows', () => {
         const exported = appData({
             projects: [project({ id: 'proj-alpha', title: 'Alpha' }), project({ id: 'proj-beta', title: 'Beta' })],
@@ -210,7 +200,7 @@ describe('serializeMindwtrCsv', () => {
         });
         const live = appData({
             projects: exported.projects,
-            // t1 has since moved to Beta; t3 does not exist yet.
+
             tasks: [task({ id: 't1', title: 'One', projectId: 'proj-beta' }), task({ id: 't2', title: 'Two', projectId: 'proj-alpha' })],
         });
 
@@ -229,21 +219,18 @@ describe('serializeMindwtrCsv', () => {
         expect(landed(forward)).not.toBe('Beta');
     });
 
-    // Section carry: once a CSV import has created the containers, their ids ARE the derived
-    // ids, so a later re-import resolves the project by derivation while the section carry
-    // still points at wherever a matched task has since moved — pairing this row's project
-    // with another project's section, a state the app cannot otherwise produce.
+
     it('never pairs a resolved project with another project\'s section', () => {
         const csv = serializeMindwtrCsv(appData({ tasks: [task({ id: 't1', title: 'One' })] }))
             .replace('One,,next,,,', 'One,,next,Alpha,Sprint,');
 
-        // Seed: the first import mints Alpha and Sprint under derived ids.
+
         const seeded = applyMindwtrCsvImport(appData({}), reimport(csv));
         const alpha = seeded.data.projects[0];
         const sprint = seeded.data.sections[0];
         expect(sprint?.projectId).toBe(alpha?.id);
 
-        // The user then moves that task to a different project and section.
+
         const live = appData({
             projects: [alpha, project({ id: 'proj-beta', title: 'Beta' })],
             sections: [sprint, { id: 'sec-s2', projectId: 'proj-beta', title: 'Backlog', order: 0, createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z' }] as unknown as Section[],
@@ -302,7 +289,7 @@ describe('serializeMindwtrCsv', () => {
 
         const parsed = reimport(serializeMindwtrCsv(data));
 
-        // Otherwise re-importing an export would resurrect deleted tasks.
+
         expect(parsed.tasks.map((item) => item.sourceId)).toEqual(['live']);
     });
 
@@ -320,10 +307,7 @@ describe('serializeMindwtrCsv', () => {
         expect(parsed.tasks[0].projectSourceKey).toBeUndefined();
     });
 
-    // Every family the recurrence editors can produce, pinned as an exact cell AND as the
-    // recurrence the importer reads back out of it. Anything the RRULE subset cannot carry
-    // (seriesId, occurrence counters, clamped anchor days) is dropped on purpose: an
-    // imported task starts a fresh series.
+
     const RECURRENCE_MATRIX: Array<{ name: string; recurrence: Recurrence; cell: string; imported: Recurrence }> = [
         {
             name: 'daily',
@@ -393,8 +377,7 @@ describe('serializeMindwtrCsv', () => {
         },
     ];
 
-    // Tab-delimited so the cell is never quote-wrapped and can be compared literally;
-    // BYDAY/BYMONTHDAY lists would otherwise be quoted for their commas.
+
     const recurrenceCell = (recurrence?: Task['recurrence']): string => {
         const rows = serializeMindwtrCsv(appData({ tasks: [task({ recurrence })] }), { delimiter: '\t' }).split('\n');
         return rows[1].split('\t')[rows[0].split('\t').indexOf('Recurrence')];
@@ -418,8 +401,7 @@ describe('serializeMindwtrCsv', () => {
     });
 });
 
-// #1096: a view exports what it currently shows. The subset narrows the ROWS
-// only — every lookup table still comes from the full AppData.
+
 describe('serializeMindwtrCsv with a task subset', () => {
     const titles = (csv: string) => csv.split('\n').slice(1).map((row) => row.split(',')[0]);
 

@@ -6,9 +6,7 @@ export const FOCUS_ESTIMATED_PROJECT_HEIGHT = 88;
 
 export const FOCUS_LIST_HEADER_LAYOUT_KEY = 'focus-list-header';
 
-// Separates a key's stable identity (row) from its revision (content version).
-// Matches task-list-layout's convention; unlike a bare '@' it cannot collide
-// with group ids, which hold user text such as '@home'.
+
 const FOCUS_LAYOUT_REVISION_SEPARATOR = '@layout:';
 
 const focusLayoutKeyIdentity = (key: string): string => key.split(FOCUS_LAYOUT_REVISION_SEPARATOR)[0];
@@ -62,11 +60,7 @@ type BuildFocusListLayoutFramesOptions = {
   firstVisibleSectionType: string | null;
 };
 
-// SectionList flattens every section as [header, ...items, footer], so each
-// section contributes data.length + 2 flat indices; the footer slot renders
-// null here (no renderSectionFooter) and is always zero-height. Offsets start
-// after the measured ListHeaderComponent because VirtualizedList cell frames
-// are content-relative and include the header.
+
 export function buildFocusListLayoutFrames(
   sections: readonly FocusLayoutSection[],
   { measuredHeights, firstVisibleSectionType }: BuildFocusListLayoutFramesOptions,
@@ -79,7 +73,7 @@ export function buildFocusListLayoutFrames(
   };
   for (const section of sections) {
     if (section.totalCount === 0) {
-      // renderSectionHeader returns null for empty sections.
+
       push(0);
     } else {
       const headerKey = focusSectionHeaderLayoutKey(section, section.type === firstVisibleSectionType);
@@ -107,11 +101,7 @@ export function collectFocusListLayoutKeys(
   return keys;
 }
 
-// Drops measurements for rows that left the list and carries a measurement to
-// a row's successor key when a revision bump re-keys it. SectionList cells do
-// not remount on a re-key, so onLayout only re-fires if the pixel height
-// actually changed — without the carry-over the frame falls back to the
-// estimate and the scroll math jumps.
+
 export function reconcileFocusListMeasuredHeights(
   sections: readonly FocusLayoutSection[],
   firstVisibleSectionType: string | null,

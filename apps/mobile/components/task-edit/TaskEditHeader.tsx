@@ -56,8 +56,8 @@ export function TaskEditHeader({
   const skipOccurrenceLabel = tFallback(t, 'task.skipOccurrence', 'Skip this occurrence');
   const moreLabel = t('common.more');
   const closeLabel = t('common.close');
-  // "Save", not "Done": the button commits the draft, and "Done" reads as the
-  // task status one line below it.
+
+
   const doneLabel = readOnly ? closeLabel : t('common.save');
 
   return (

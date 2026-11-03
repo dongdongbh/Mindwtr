@@ -23,18 +23,13 @@ import type {
   TimeEstimate,
 } from './types';
 
-/**
- * Filter selections shared by desktop and mobile picker surfaces. Criteria
- * live in filter-criteria; this hook owns the picker state around them — the
- * tri-state token cycle, metadata visibility, chips, and saved-filter binding.
- */
 
 export type TaskFilterView = 'focus' | 'list';
 
 export type TaskFilterChip = {
   id: string;
   label: string;
-  /** Excluded chips subtract; they render struck through so mono themes keep the state. */
+
   excluded?: boolean;
   onPress: () => void;
 };
@@ -44,22 +39,20 @@ type TranslateFn = (key: string) => string;
 export type TaskFilterSelectionsOptions = {
   view: TaskFilterView;
   t: TranslateFn;
-  /** Which metadata sections the visible tasks justify showing. */
+
   visibility: TaskMetadataFilterVisibility;
-  /** Saved filters for this view, already filtered to non-deleted ones. */
+
   savedFilters?: SavedFilter[];
-  /** Original stored criteria, retained unchanged when only the date filter is edited. */
+
   rawSavedFilters?: SavedFilter[];
-  /** Offered tokens from older callers; explicit selections remain clearable when absent. */
+
   retainTokens?: string[];
-  /** Project ids currently offered; selections outside the list are dropped. */
+
   retainProjects?: string[];
-  /** Resolves a project chip label; a project that resolves to nothing gets no chip. */
+
   getProjectLabel?: (projectId: string) => string | undefined;
-  /**
-   * Extra reset for view state that reads as a filter but is not a criterion
-   * (Focus's sort order). Memoize it: `clear` inherits its identity.
-   */
+
+
   onClear?: () => void;
 };
 
@@ -82,11 +75,7 @@ const toggleValue = <T,>(current: T[], value: T): T[] => (
 
 const normalize = (value: string | undefined): string => value?.trim().toLowerCase() ?? '';
 
-/**
- * Search-box matching for a filter surface: fielded terms (`id:`, `due:` …)
- * run through the core search parser, everything else is a plain title and
- * description substring.
- */
+
 export function taskMatchesFilterSearchQuery(task: Task, searchQueryValue: string): boolean {
   const searchQuery = normalize(searchQueryValue);
   if (!searchQuery) return true;
@@ -106,7 +95,7 @@ export function taskMatchesFilterSearchQuery(task: Task, searchQueryValue: strin
   return searchable.includes(searchQuery);
 }
 
-/** Search box + criteria in one predicate, for surfaces that filter locally. */
+
 export function taskMatchesFilterSelections(
   task: Task,
   selections: { criteria: FilterCriteria; searchQuery: string },
@@ -129,8 +118,8 @@ export function useTaskFilterSelections({
   const [anyDateRange, updateAnyDateRange] = useState<DateRange>();
   const [preservedCriteria, setPreservedCriteria] = useState<FilterCriteria>({});
   const [searchQuery, setSearchQuery] = useState('');
-  // Both sides of the token cycle in one value: the transition reads them
-  // together, so splitting them would make a toggle depend on a stale render.
+
+
   const [tokenSelection, setTokenSelection] = useState<TokenSelection>(NO_TOKENS);
   const [projectSelection, setProjectSelection] = useState<TokenSelection>(NO_TOKENS);
   const { included: projects, excluded: excludedProjects } = projectSelection;
@@ -154,10 +143,7 @@ export function useTaskFilterSelections({
     }
   }, [activeSavedFilter, activeSavedFilterId]);
 
-  // Selections whose section is no longer offered stop filtering silently:
-  // drop them so a later re-appearance does not resurrect a hidden filter.
-  // The selections are dependencies too: an applied saved filter can select
-  // what the view already hides or does not offer.
+
   useEffect(() => {
     if (!visibility.priority) setPriorities((current) => (current.length > 0 ? [] : current));
   }, [priorities, visibility.priority]);
@@ -191,8 +177,8 @@ export function useTaskFilterSelections({
   const toggleToken = useCallback((token: string) => {
     forgetPreservedFields('contexts', 'tags', 'excludedContexts', 'excludedTags');
     setActiveSavedFilterId(null);
-    // Tri-state cycle: neutral → included → excluded → neutral. A token lives
-    // on only one side, so each transition clears the other.
+
+
     setTokenSelection((current) => {
       if (current.included.includes(token)) {
         return {
@@ -278,7 +264,7 @@ export function useTaskFilterSelections({
 
   const setAnyDateRange = useCallback((value: DateRange | undefined) => {
     if (activeSavedFilter) {
-      // Date edits keep criteria the pickers cannot represent when detaching.
+
       const preserved = { ...(rawSavedFilters?.find((filter) => filter.id === activeSavedFilter.id)?.criteria ?? activeSavedFilter.criteria) };
       delete preserved.anyDateRange;
       setPreservedCriteria(preserved);
@@ -304,11 +290,7 @@ export function useTaskFilterSelections({
     onClear?.();
   }, [onClear]);
 
-  /**
-   * Detach from the applied saved filter, keeping the selections. For view
-   * state the filter also carries (sort, grouping): changing it means you are
-   * no longer looking at that saved filter.
-   */
+
   const unbindSaved = useCallback(() => setActiveSavedFilterId(null), []);
 
   const applySaved = useCallback((filter: SavedFilter) => {
@@ -364,9 +346,7 @@ export function useTaskFilterSelections({
     visibility.timeEstimate,
   ]);
 
-  // An applied saved filter can carry criteria no picker can express (areas,
-  // date ranges), so it filters from its own criteria rather than the
-  // round-tripped selections — still gated by what this view can show.
+
   const criteria = useMemo<FilterCriteria>(() => ({
     ...(activeSavedFilter?.criteria ?? currentCriteria),
     ...(visibility.priority ? {} : { priority: undefined }),
@@ -469,8 +449,8 @@ export function useTaskFilterSelections({
       });
     }
     const normalizedLocation = locationQuery.trim();
-    // A saved filter owns its location criterion; removing it belongs to the
-    // saved filter, not to this picker, so no removable chip is offered.
+
+
     if (visibility.location && normalizedLocation && !activeSavedFilter && !preservedCriteria.locations) {
       result.push({
         id: 'location',
@@ -539,7 +519,7 @@ export function useTaskFilterSelections({
 
   return {
     view,
-    // selections
+
     anyDateRange,
     searchQuery,
     tokens,
@@ -553,7 +533,7 @@ export function useTaskFilterSelections({
     locationQuery,
     contextMatchMode,
     tagMatchMode,
-    // derived
+
     criteria,
     currentCriteria,
     activeCount,
@@ -563,10 +543,10 @@ export function useTaskFilterSelections({
     chips,
     activeSavedFilterId,
     activeSavedFilter,
-    // The match mode only means something once several tokens of a kind compete.
+
     showContextMatchMode: selectedContextCount > 1,
     showTagMatchMode: selectedTagCount > 1,
-    // actions
+
     setAnyDateRange,
     setSearchQuery,
     setLocation,

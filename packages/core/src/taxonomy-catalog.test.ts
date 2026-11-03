@@ -132,13 +132,13 @@ describe('saved contexts and tags', () => {
         const settings: AppSettings = { deviceId: 'device' };
         const before = task({ contexts: ['@Kept', '@Dropped'], tags: ['#Legacy'] });
         const later = { updatedAt: '2026-10-21T12:00:00.000Z', rev: 2 };
-        // Status, focus, title and order writes leave every token in use: settings stay the same object.
+
         for (const change of [{ status: 'waiting' as const }, { status: 'reference' as const }, { isFocusedToday: true },
             { title: 'renamed' }, { order: 3 }]) expect(retainTaskTaxonomy(settings, before, { ...before, ...later, ...change })).toBe(settings);
         const removed = retainTaskTaxonomy(settings, before, { ...before, ...later, contexts: ['@Kept'] });
         expect(getSavedTaxonomyTokens(removed, 'context')).toEqual(['@Dropped']);
         expect(getSavedTaxonomyTokens(removed, 'tag')).toEqual([]);
-        // Delete leaves every list; Done leaves the Contexts pickers; Archived leaves the visible task list.
+
         for (const change of [{ deletedAt: later.updatedAt }, { status: 'done' as const }, { status: 'archived' as const }]) {
             const left = retainTaskTaxonomy(settings, before, { ...before, ...later, ...change });
             expect(getSavedTaxonomyTokens(left, 'context')).toEqual(['@Dropped', '@Kept']);
@@ -146,7 +146,7 @@ describe('saved contexts and tags', () => {
         }
         expect(getSavedTaxonomyTokens(retainTaskTaxonomy(settings, before, { ...before, ...later, tags: ['#Legacy', '#New'] }), 'tag'))
             .toEqual(['#New']);
-        // A row already Done or Archived left those lists earlier: editing it again writes nothing.
+
         for (const status of ['done', 'archived'] as const) {
             const finished = { ...before, status };
             expect(retainTaskTaxonomy(settings, finished, { ...finished, ...later, title: 'renamed' })).toBe(settings);
@@ -203,7 +203,7 @@ describe('saved contexts and tags', () => {
         const loaded = await open(document({ deviceId: 'device', gtd: { autoArchiveDays: 7 } }, [stale]));
         expect(loaded.saved().tasks[0].status).toBe('archived');
         expect(getSavedTaxonomyTokens(loaded.saved().settings, 'tag')).toEqual(['#Legacy']);
-        // A library with no device ID gets one from an earlier load step, so it keeps the token too.
+
         const anonymous = await open(document({ gtd: { autoArchiveDays: 7 } }, [stale]));
         expect(anonymous.saved().tasks[0].status).toBe('archived');
         expect(getSavedTaxonomyTokens(anonymous.saved().settings, 'tag')).toEqual(['#Legacy']);

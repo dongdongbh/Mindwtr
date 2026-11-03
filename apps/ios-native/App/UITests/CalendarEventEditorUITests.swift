@@ -1,4 +1,4 @@
-// Compiled with the production presenter; no EventKit store or permission is used.
+
 import XCTest
 import UIKit
 
@@ -41,7 +41,7 @@ final class NativeCalendarEventEditorOwnedUIChecks: XCTestCase {
         XCTAssertNil(root.presentedViewController)
         XCTAssertNil(editor.presentingViewController)
         XCTAssertNil(nested.presentingViewController)
-        // Privacy remains through the actual UIKit completion, before release.
+
         XCTAssertTrue(cover.superview === window)
         let coveredCountAfterDismissal = window.subviews.count
         ownedUI.release()

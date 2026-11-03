@@ -139,8 +139,7 @@ describe('device-only calendar Area mapping', () => {
     });
 });
 
-// Mirrors the day bucketing in components/views/calendar/useCalendarViewController.ts
-// (`externalEventsByDate`): local days, end exclusive when it lands on local midnight.
+
 function countProjectedDays(event: { start: string; end: string } | undefined): number {
     if (!event) return 0;
     const start = new Date(event.start);
@@ -356,9 +355,8 @@ describe('fetchExternalCalendarEvents', () => {
     });
 
     it('projects an all-day device event over exactly its own days, like the .ics import (#1133)', async () => {
-        // The reporter is east of UTC; Android hands all-day bounds back as UTC midnight, which
-        // reads as 02:00 local and used to paint a fourth day. Pinned so the assertion means the
-        // same thing on a UTC CI runner.
+
+
         const originalTz = process.env.TZ;
         process.env.TZ = 'Europe/Berlin';
         try {
@@ -375,7 +373,7 @@ describe('fetchExternalCalendarEvents', () => {
                 }
                 return null;
             });
-            // Same three-day all-day event, once through each path.
+
             mockReadSafString.mockResolvedValue(
                 [
                     'BEGIN:VCALENDAR',
@@ -417,8 +415,8 @@ describe('fetchExternalCalendarEvents', () => {
     });
 
     it('keeps device-calendar events that span the queried window (#1134)', async () => {
-        // Android's provider query only returns events fully contained in the window, so the fetch
-        // has to over-query and clip; a multi-day event crossing the month edge must survive both.
+
+
         const rangeStart = new Date('2026-04-01T00:00:00.000Z');
         const rangeEnd = new Date('2026-05-01T00:00:00.000Z');
         mockGetCalendarsAsync.mockResolvedValue([

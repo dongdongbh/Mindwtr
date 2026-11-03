@@ -26,7 +26,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 
-// No target override: tests must never type into the normal app or change its data.
+
 private const val TARGET = "tech.dongdongbh.mindwtr.benchmark"
 private const val TIMEOUT = 15_000L
 
@@ -43,9 +43,8 @@ class MindwtrBenchmark {
 
     private fun metrics(startup: Boolean = false): List<Metric> = when (metricMode) {
         "timing" -> if (startup) listOf(StartupTimingMetric()) else listOf(FrameTimingMetric())
-        // AndroidX 1.4.1 drops ALL scalar results for an iteration when any
-        // scalar counter is absent. ART heap samples require GC; GPU samples
-        // are also intermittent. Keep memory separate and collect only RSS.
+
+
         "memory" -> listOf(MemoryUsageMetric(MemoryUsageMetric.Mode.Last,
             listOf(MemoryUsageMetric.SubMetric.RssAnon, MemoryUsageMetric.SubMetric.RssFile)))
         else -> error("metricMode must be timing or memory")
@@ -62,8 +61,8 @@ class MindwtrBenchmark {
         ?: error("Expected benchmark UI element was not found: $selector")
     private fun tap(label: String) { find(By.desc(label)).click() }
     private inline fun stage(name: String, block: () -> Unit) {
-        // Runner-process sections identify automation phases in Perfetto. They
-        // include UiAutomator waits; do not report them as app input latency.
+
+
         Trace.beginSection("benchmark.capture.$name")
         try { block() } finally { Trace.endSection() }
     }
@@ -75,8 +74,8 @@ class MindwtrBenchmark {
         find(By.desc("Sort: $label"))
     }
     private fun scroll(down: Boolean) {
-        // React Native may replace an accessibility node after a scroll. Never
-        // keep UiObject2 references across gestures; derive bounds afresh.
+
+
         val bounds = find(By.scrollable(true)).visibleBounds
         lastGestureBounds = bounds.toString()
         assertTrue("Expected a visible list, got $bounds", bounds.height() > device.displayHeight / 4 && bounds.width() > device.displayWidth / 2)
@@ -111,10 +110,10 @@ class MindwtrBenchmark {
             startActivityAndWait(); ready(); tap("Inbox")
             settleStartupNotice()
             selectSort("Default")
-            // Captures can fill the entire first screen in Newest order.
-            // Normalize ordering before asserting a fixture row is visible.
+
+
             find(By.descStartsWith("Synthetic task "))
-            // Warm-ups and previous iterations must not leave us at the end.
+
             var remaining = 40
             while (!device.hasObject(By.descStartsWith("Synthetic task 0.").pkg(TARGET)) && remaining-- > 0) {
                 scroll(false)
@@ -147,9 +146,7 @@ class MindwtrBenchmark {
         find(By.desc("Inbox"))
     }
 
-    // Non-mutating capture baseline: identical data across A/A and A/B runs.
-    // Exercise the normal autofocus/keyboard path, then use the header close
-    // control (not the full-screen backdrop, which also has a Close label).
+
     @Test fun captureOpenClose() = benchmark.measureRepeated(
         packageName = TARGET, metrics = metrics(), iterations = iterations,
         compilationMode = compilation,
@@ -171,8 +168,7 @@ class MindwtrBenchmark {
             inboxBefore == find(By.descStartsWith("Process Inbox (")).contentDescription)
     }
 
-    // Run last or alone: successful captures intentionally remain in this
-    // synthetic-only app. A fresh fixture is required for comparable reruns.
+
     @Test fun captureSave() = benchmark.measureRepeated(
         packageName = TARGET, metrics = metrics(), iterations = iterations,
         compilationMode = compilation,

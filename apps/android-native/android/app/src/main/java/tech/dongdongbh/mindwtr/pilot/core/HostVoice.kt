@@ -8,11 +8,7 @@ import java.io.File
 import java.io.IOException
 import org.json.JSONObject
 
-/**
- * The bundle's microphone calls (host-voice.ts through `__mindwtrVoiceCall`, HostIo.voice): RN's permission request
- * (expo-audio requestRecordingPermissionsAsync), then VoiceRecorder's start, stop and cancel. Each replies once, like a fetch.
- * A recording answers its expo-style `file://` URI and size; a failure answers a fixed code, never a path or a message.
- */
+
 class HostVoice(
     private val granted: () -> Boolean,
     private val recorder: () -> VoiceRecorder,
@@ -38,7 +34,7 @@ class HostVoice(
     }
 
     companion object {
-        /** RN's m4a fallback reads E_VOICE_START_FAILED (host-voice.ts); the rest end the start or stop. */
+
         fun code(error: Throwable): String = when (error) {
             is VoiceRecorder.StartFailed -> "E_VOICE_START_FAILED"
             is VoiceRecorder.Refused -> "E_VOICE_BUSY"
@@ -52,7 +48,7 @@ class HostVoice(
             else -> throw IllegalArgumentException("Unknown recording format")
         }
 
-        /** expo-file-system's form, as HostFiles answers the documents folder: `file:///data/user/0/…`. */
+
         fun uriOf(file: File): String = "file://${file.absolutePath}"
 
         fun forApp(context: Context): HostVoice {

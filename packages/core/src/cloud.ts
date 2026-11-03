@@ -21,28 +21,24 @@ import { logWarn } from './logger';
 import type { ClockSkewWarning, MergeStats } from './sync-types';
 import { buildHttpRemoteFileFingerprint, type RemoteFileMetadata, type RemoteJsonWriteResult } from './webdav';
 
-/** The self-hosted server's published iCalendar feed (#952). */
+
 export type CloudCalendarFeed = {
     createdAt: string;
     path: string;
     token: string;
 };
 
-/** Authenticated endpoint that reads, rotates and revokes the feed token. */
+
 export const getCloudCalendarFeedEndpoint = (cloudUrl: string): string => (
     `${getCloudBaseUrl(cloudUrl)}/calendar/feed`
 );
 
-/** The subscription URL itself. Derived from the configured sync URL rather than
- *  the server's root so a server behind a path-prefixed reverse proxy still works. */
+
 export const buildCloudCalendarFeedUrl = (cloudUrl: string, token: string): string => (
     `${getCloudBaseUrl(cloudUrl)}/calendar/${token}.ics`
 );
 
-// Single source of truth for the cloud sync bearer-token shape, shared by the
-// cloud server (apps/cloud/src/server-config.ts re-exports it as
-// BEARER_TOKEN_PATTERN) and the desktop/mobile self-hosted settings forms so
-// client and server can never validate a token differently.
+
 export const CLOUD_SYNC_TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{20,512}$/;
 
 export function isValidCloudSyncToken(token: string): boolean {
@@ -50,8 +46,8 @@ export function isValidCloudSyncToken(token: string): boolean {
 }
 
 export interface CloudOptions {
-    /** Download ceiling for this call. Defaults to the per-attachment cap; the sync
-     *  document is not an attachment and passes MAX_SYNC_DOCUMENT_BYTES instead. */
+
+
     maxBytes?: number;
     token?: string;
     headers?: Record<string, string>;
@@ -87,12 +83,8 @@ const CLOUD_TIMEOUT_ERROR = 'Cloud request timed out';
 export class CloudHttpError extends Error {
     status: number;
     statusCode: number;
-    /**
-     * A refused upload's raw response body, set only for a `400` on an attachment PUT.
-     * Remote text, so it never reaches a log or an error message:
-     * `isBlockedAttachmentContentRefusal` is its only reader, and the callers build their
-     * own fixed reason strings.
-     */
+
+
     refusalText?: string;
 
     constructor(message: string, status: number) {
@@ -103,27 +95,15 @@ export class CloudHttpError extends Error {
     }
 }
 
-/** The prefix the cloud server uses when it refuses the BYTES of an upload:
- *  `Blocked attachment content type: …` and `Blocked executable attachment signature: …`
- *  (apps/cloud/src/server-attachments.ts). */
+
 const BLOCKED_ATTACHMENT_CONTENT_PREFIX = 'Blocked ';
 
-/**
- * True only when the server said it will never accept THESE BYTES, which is the one kind
- * of `400` an upload may treat as final.
- *
- * Every other `400` is about the request or the server, not the file: `Invalid attachment
- * path` answers a storage folder that became a symbolic link or moved after start, and it
- * hits every upload at once. Giving up on those would soft-delete every attachment still
- * waiting to upload, and the tombstones would take them off the other devices too. So an
- * unrecognised body, a non-JSON body (a proxy or firewall page) and a missing body all
- * return false and stay retryable.
- */
+
 export const isBlockedAttachmentContentRefusal = (error: unknown): boolean => {
     const raw = (error as { refusalText?: unknown } | null | undefined)?.refusalText;
     if (typeof raw !== 'string') return false;
     const trimmed = raw.trim();
-    // The cloud server always answers `{"error":"…"}`; anything else is not it talking.
+
     if (!trimmed.startsWith('{')) return false;
     try {
         const parsed = JSON.parse(trimmed) as { error?: unknown };
@@ -139,8 +119,7 @@ const cloudHttpError = (label: string, res: Response): CloudHttpError => {
     return new CloudHttpError(`${label} failed (${res.status}): ${res.statusText}${hint}`, res.status);
 };
 
-/** A 413 on the sync document write: name both sizes and the server setting to raise.
- *  The cloud server sends `limitBytes`; a proxy's 413 does not, so the hint also names it. */
+
 const cloudDataTooLargeError = async (res: Response, bodyBytes: number, signal?: AbortSignal): Promise<CloudHttpError> => {
     const text = await readResponseText(res, MAX_ERROR_BODY_BYTES, signal).catch(() => '');
     let limitBytes: number | undefined;
@@ -148,7 +127,7 @@ const cloudDataTooLargeError = async (res: Response, bodyBytes: number, signal?:
         const parsed = JSON.parse(text) as { limitBytes?: unknown };
         if (Number.isSafeInteger(parsed.limitBytes)) limitBytes = parsed.limitBytes as number;
     } catch {
-        // Not the cloud server talking.
+
     }
     logWarn('Cloud sync data refused as too large', {
         scope: 'cloud',
@@ -300,8 +279,8 @@ export async function cloudRequestJson<T>(
         fetcher,
         CLOUD_TIMEOUT_ERROR,
         async (res, signal) => {
-            // Success bodies are real entities and may be large; only an error body is
-            // truncated down to message size.
+
+
             const text = res.ok
                 ? await readResponseText(res, MAX_SYNC_DOCUMENT_BYTES, signal)
                 : await readResponseText(res, MAX_ERROR_BODY_BYTES, signal).catch(() => '');
@@ -311,7 +290,7 @@ export async function cloudRequestJson<T>(
                     const parsed = JSON.parse(text) as Record<string, unknown>;
                     if (typeof parsed.error === 'string') serverMessage = parsed.error;
                 } catch {
-                    // Non-JSON error body; fall back to the status line.
+
                 }
                 throw new CloudHttpError(
                     serverMessage || `Cloud ${method} failed (${res.status}): ${res.statusText}`,
@@ -445,9 +424,8 @@ export async function cloudPutFile(
         async (res, signal) => {
             if (!res.ok) {
                 const error = cloudHttpError('Cloud File PUT', res);
-                // Only a 400 needs its words read, and only so the caller can tell a refusal
-                // of these bytes from one about the server's storage folder. The body never
-                // joins the message, so it cannot reach a log.
+
+
                 if (res.status === 400) {
                     error.refusalText = await readResponseText(res, MAX_ERROR_BODY_BYTES, signal)
                         .catch(() => '');
@@ -483,32 +461,15 @@ export async function cloudGetFile(
 }
 
 export type CloudAttachmentPresenceOptions = CloudOptions & {
-    /**
-     * Can this caller's transport stop reading a response body once it has seen the
-     * headers? Desktop's streaming fetch can; React Native's XHR transport
-     * (apps/mobile/lib/background-safe-fetch.ts) cannot — it buffers the whole reply
-     * before the promise resolves. Only a caller that answers `true` may use the
-     * GET fallback below, because for everyone else that "cheap probe" is a full
-     * download of every attachment.
-     */
+
+
     partialBodyReads?: boolean;
-    /** Called when the server has no HEAD route and this caller cannot fall back, so the
-     *  caller can say so once instead of silently proving nothing. */
+
+
     onHeadUnsupported?: () => void;
 };
 
-/**
- * #1119 follow-up: does the self-hosted server still hold this attachment blob?
- * `true` yes, `false` definitively no, `null` could not tell — and only `false` may ever
- * be acted on (see `attachment-presence-repair.ts`).
- *
- * HEAD is the real probe. Servers older than the release that added
- * `HEAD /v1/attachments/:path` answer 405 Method Not Allowed, which is not an answer, so a
- * caller whose transport can abandon a body early retries as a GET with a one-byte ceiling:
- * `readResponseBody` rejects on the declared content-length and cancels before a single
- * chunk is read. A caller that cannot do that gets `null` — one wasted request rather than
- * a full download of the whole library.
- */
+
 export async function cloudAttachmentExists(
     url: string,
     options: CloudAttachmentPresenceOptions = {},

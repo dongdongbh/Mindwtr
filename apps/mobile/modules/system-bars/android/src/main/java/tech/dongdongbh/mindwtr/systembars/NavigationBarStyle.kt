@@ -9,8 +9,8 @@ import android.view.WindowInsetsController
 internal object NavigationBarStyle {
   @Suppress("DEPRECATION")
   fun apply(window: Window, color: String, darkButtons: Boolean): String {
-    // API 35+ draws the app's safe-area background behind transparent system bars.
-    // Keep the legacy color only for Android versions that still support it.
+
+
     if (Build.VERSION.SDK_INT < 35) {
       window.navigationBarColor = Color.parseColor(color)
     }

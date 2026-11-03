@@ -26,7 +26,7 @@ const task = (extra = {}) => ({ id: 'task', row: taskToSqliteRow({ id: 'task', t
 const reconcile = (extra = {}, target = task()) => prepareNativePomodoroTransition({ request: { action: 'reconcile', requestId: NEXT,
     observedAtMs: AT, localDayKey: day, autoStart: { autoStartFocus: false, autoStartBreaks: false } },
     session: running(), target, deviceId: 'existing-device', ...extra });
-// The task row stored by accepted schema4 Pomodoro receipts, before reminderPolicy was appended in schema5.
+
 const SCHEMA4_TASK_COLUMNS = ['id', 'title', 'status', 'priority', 'energyLevel', 'assignedTo', 'taskMode', 'startTime',
     'relativeStartOffset', 'dueDate', 'recurrence', 'showFutureRecurrence', 'pushCount', 'repeatReminderMinutes', 'tags',
     'contexts', 'checklist', 'description', 'textDirection', 'attachments', 'location', 'projectId', 'sectionId', 'areaId',
@@ -243,7 +243,7 @@ describe('native Pomodoro explicit actions', () => {
             session: { raw: plan.sessionAfter, state: after }, target: null, deviceId: null })).toBeNull();
     });
     it('keeps original initialize/reconcile receipt bytes and accepts their unchanged plans', () => {
-        // Frozen independently from the accepted17e3d2411 model before action implementation.
+
         expect(TASK_SQLITE_COLUMNS).toEqual([...SCHEMA4_TASK_COLUMNS, 'reminderPolicy', 'dueReminderLeadMinutes', 'startReminderLeadMinutes']);
         for (const [plan, digest] of [[initialize(), '9001a8d3126988bfdab00114e606ff7c2d8f88c8ae6585a790262db10a0a22f1'],
             [legacyReconcile(), '765d1dc0af0b8743c48884a4563c2975928b6849008e01140e7c4618fa2760b6']] as const) {

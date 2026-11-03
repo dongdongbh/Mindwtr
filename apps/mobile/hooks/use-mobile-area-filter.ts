@@ -43,8 +43,8 @@ export function useMobileAreaFilter() {
     () => resolveAreaFilterSelection(filterSettings, sortedAreas),
     [filterSettings, sortedAreas],
   );
-  // True once the stored filter names an area that no longer exists, so the
-  // resolved selection is narrower than what was saved.
+
+
   const didResetDeletedAreaFilter = useMemo(() => {
     const hasLists = Boolean(filterSettings?.areaIds || filterSettings?.excludedAreaIds);
     const stored = hasLists

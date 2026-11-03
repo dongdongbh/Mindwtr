@@ -42,7 +42,7 @@ export const buildMultipartAudioPart = ({
         fileName: name,
       };
     } catch {
-      // Fall through to the React Native uri object below.
+
     }
   }
 

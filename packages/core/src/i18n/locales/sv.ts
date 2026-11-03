@@ -1,4 +1,4 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const svOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "Före start",
     "taskEdit.advanceReminderLabel": "Förhandspåminnelse",

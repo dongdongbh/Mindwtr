@@ -6,16 +6,12 @@ import { normalizeCalendarSystemSetting, normalizeDateFormatSetting, normalizeTi
 let runtimeMode: boolean | undefined;
 let workspaceTransitionOwner: symbol | null = null;
 
-/** Stop new foreground sync admission while the owner drains existing work and reloads. */
+
 export function isWorkspaceTransitionActive(): boolean {
     return workspaceTransitionOwner !== null;
 }
 
-/**
- * Exclusive, runtime-only handoff. Keep the lease through a successful reload;
- * release it when entry fails so normal personal work can resume. Existing
- * writes and admitted sync cycles must still be drained by the platform.
- */
+
 export function acquireWorkspaceTransitionLock(): (() => void) | null {
     if (workspaceTransitionOwner !== null) return null;
     const owner = Symbol('workspace-transition');
@@ -25,7 +21,7 @@ export function acquireWorkspaceTransitionLock(): (() => void) | null {
     };
 }
 
-/** Select the workspace before hydration. A workspace change requires a fresh JS runtime. */
+
 export function initializeSandboxRuntime(enabled: boolean): void {
     if (runtimeMode !== undefined && runtimeMode !== enabled) {
         throw new Error('Changing workspace requires restarting the app session.');
@@ -33,7 +29,7 @@ export function initializeSandboxRuntime(enabled: boolean): void {
     runtimeMode = enabled;
 }
 
-/** Headless/native capture runtimes that do not initialize a sandbox remain personal. */
+
 export function isSandboxMode(): boolean {
     return runtimeMode === true;
 }
@@ -43,11 +39,11 @@ const themes: readonly AppTheme[] = [
     'material3-dark', 'oled', 'catppuccin-macchiato', 'dracula', 'gruvbox-light', 'gruvbox-dark',
 ];
 
-/** Do not spread personal settings: they include credentials, custom labels and external paths. */
+
 export function pickSandboxDisplaySettings(settings: AppSettings): AppSettings {
     const source = settings && typeof settings === 'object' ? settings : {};
     const result: AppSettings = {};
-    // Keep the existing explicit logging opt-in so sandbox-only crashes remain diagnosable.
+
     if (typeof source.diagnostics?.loggingEnabled === 'boolean') {
         result.diagnostics = { loggingEnabled: source.diagnostics.loggingEnabled };
     }
@@ -74,12 +70,12 @@ export function pickSandboxDisplaySettings(settings: AppSettings): AppSettings {
 
 const BOOT_REQUEST_MAX_AGE_MS = 60_000;
 
-/** One-shot handoff with allowlisted display preferences and the existing logging opt-in. */
+
 export function createSandboxBootRequest(settings: AppSettings, now = Date.now()): string {
     return JSON.stringify({ version: 1, requestedAt: now, settings: pickSandboxDisplaySettings(settings) });
 }
 
-/** Callers must remove the stored request before parsing/booting. Stale requests cannot reopen a sandbox. */
+
 export function parseSandboxBootRequest(raw: string | null | undefined, now = Date.now()): AppSettings | null {
     if (!raw || raw.length > 4096) return null;
     try {
@@ -94,11 +90,10 @@ export function parseSandboxBootRequest(raw: string | null | undefined, now = Da
     }
 }
 
-// AppData is JSON-shaped. Returning independent objects prevents live-store edits from
-// modifying persisted snapshots, and keeps reset fixtures independent from every session.
+
 const cloneData = (data: AppData): AppData => JSON.parse(JSON.stringify(data)) as AppData;
 
-/** A disposable workspace with no filesystem, native bridge, network, or fallback storage. */
+
 export function createSandboxStorage(seed: AppData): StorageAdapter {
     let saved = cloneData(seed);
     return {

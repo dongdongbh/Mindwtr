@@ -96,7 +96,7 @@ final class ReminderReceiptRetentionHostTests: XCTestCase {
         XCTAssertEqual(try taskSnapshot(), before)
         _ = try await core.start(retainingReminderResponseIDs: [completeID])
         XCTAssertEqual(try receiptIDs(), [completeID])
-        // This later snapshot is deliberately empty: construction did not freeze the earlier one.
+
         _ = try await core.start(retainingReminderResponseIDs: [])
         XCTAssertEqual(try receiptIDs(), [])
         XCTAssertEqual(try taskSnapshot(), before)

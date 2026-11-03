@@ -139,9 +139,7 @@ export function useRootLayoutSyncEffects({
         });
     }, []);
 
-    // The trigger rules live in core (mobile-sync-triggers.ts) with the shared pacing machine;
-    // one instance for the life of the hook. Everything they do not own — AppState and store
-    // wiring, widget and notification recomputes, the toast copy — stays here.
+
     const getTriggers = useCallback((): MobileSyncTriggers => {
         triggersRef.current ??= createMobileSyncTriggers({
             initialAppState: appStateAtMount.current,
@@ -159,7 +157,7 @@ export function useRootLayoutSyncEffects({
             logInfo: (message, context) => logInfo(message, context),
             onLocalChangePendingChange: setMobileLocalChangePending,
             showSyncIssue,
-            // iOS only: null elsewhere, so Android keeps its behavior.
+
             holdBackgroundExecution: (onExpire) => beginIosBackgroundTask('Mindwtr sync', onExpire),
             waitForSyncIdle: () => waitForMobileSyncIdle(),
         });
@@ -202,7 +200,7 @@ export function useRootLayoutSyncEffects({
                     .then((permission) => {
                         if (!triggers.isRuntimeActive()) return;
                         if (!permission.granted) {
-                            // The same cleanup as a denied start: the Pomodoro alarm goes too.
+
                             stopMobileNotifications({ permissionDenied: true }).catch(logAppError);
                             if (!notificationPermissionWarningShown.current) {
                                 notificationPermissionWarningShown.current = true;
@@ -270,7 +268,7 @@ export function useRootLayoutSyncEffects({
         return () => unsubscribe();
     }, [disabled]);
 
-    // Start calendar push sync on mount if enabled; stop on unmount.
+
     useEffect(() => {
         if (disabled) return undefined;
         let stopSync: (() => void) | null = null;

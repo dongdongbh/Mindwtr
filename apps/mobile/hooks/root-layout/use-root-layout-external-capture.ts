@@ -45,17 +45,14 @@ type RouterLike = {
 
 type UseRootLayoutExternalCaptureParams = {
     canonicalDataReady: boolean;
-    /** The startup snapshot has painted; entity links may open from it (#1310). */
+
     dataReady: boolean;
     disabled?: boolean;
     hasShareIntent: boolean;
     incomingUrl: string | null;
     incomingUrlKey: number;
-    /**
-     * The app lock covers the app. Links and shares wait for the unlock: iOS unmounts the navigator under the
-     * lock, so a replace then swaps Expo Router's own root route, remounting this layout and replaying the link
-     * in a loop; Android would open the task editor above the lock screen (#1475).
-     */
+
+
     locked?: boolean;
     providerReady: boolean;
     resolveText: ResolveText;
@@ -94,8 +91,7 @@ const inferSharePayloadType = ({
     return 'unknown';
 };
 
-// The capture a file share opens is core's (buildShareIntentFileCaptureParams), shared with the native Android app; the
-// hook hands it this app's attachment IO and log.
+
 const shareFileCaptureHost: ShareIntentFileCaptureHost = {
     newId: generateUUID,
     persistAttachmentLocallyDetailed,
@@ -104,7 +100,7 @@ const shareFileCaptureHost: ShareIntentFileCaptureHost = {
     logError,
 };
 
-// The capture a text or link share opens is core's (buildShareCaptureDraft), shared with the native Android app.
+
 function buildShareIntentCaptureParams(share: {
     shareSubject?: string | null;
     shareText?: string | null;
@@ -123,8 +119,7 @@ function buildShareIntentCaptureParams(share: {
     return params;
 }
 
-// Deep links are untrusted input (#1017): core's resolveEntityOpenTarget opens an entity only while its id still
-// exists in the store, and falls back to the default view otherwise.
+
 function resolveEntityOpenPath(kind: EntityOpenKind, id: string): { pathname: string; params?: Record<string, string> } | null {
     const state = useTaskStore.getState();
     const target = resolveEntityOpenTarget(kind, id, state);
@@ -155,13 +150,12 @@ export function useRootLayoutExternalCapture({
     shareWebUrl,
     showToast,
 }: UseRootLayoutExternalCaptureParams) {
-    // Keyed per delivery, not per URL string: an Action Button shortcut sends
-    // the same capture link every time, and each press must open the sheet.
+
+
     const lastHandledKey = useRef<number>(0);
     const lastHeldKey = useRef<number>(0);
-    // The async file-copy branch outlives a render; a dep-identity change
-    // mid-copy (language load swaps resolveText, for instance) must not start
-    // a second copy of the same share.
+
+
     const shareHandlingRef = useRef(false);
     const lastProviderReadyRef = useRef<boolean | null>(null);
     const lastObservedShareUrlKeyRef = useRef<number | null>(null);
@@ -231,12 +225,7 @@ export function useRootLayoutExternalCapture({
         }
     }, [canonicalDataReady, disabled, hasShareIntent, providerReady, shareFiles, shareText, shareWebUrl]);
 
-    // Arms the AppSearch index (#1017) once per app start if the device-local
-    // preference is on. This hook already owns every other OS-level entry
-    // point (share intents, deep links) and runs unconditionally on mount, so
-    // it is the natural place to also arm the search-index subscription —
-    // there is no dedicated root-layout-startup file in this task's scope.
-    // No-op (and no AsyncStorage read) when unsupported or off.
+
     useEffect(() => {
         if (disabled) return;
         void syncAppSearchIndexingWithPreference();
@@ -271,10 +260,7 @@ export function useRootLayoutExternalCapture({
         }
     }, [router]);
 
-    // The native module reports failures (unreadable URI, resolver errors) on a
-    // separate error channel that used to vanish silently: the app just opened
-    // with no sheet and no clue (#1117). Surface it so a broken share is at
-    // least visible and diagnosable from the log.
+
     const lastShareErrorRef = useRef<string | null>(null);
     const lastShareDiagnosticErrorRef = useRef<{ error: string; shareUrlKey: number | null } | null>(null);
     useEffect(() => {
@@ -312,11 +298,8 @@ export function useRootLayoutExternalCapture({
     useEffect(() => {
         if (disabled || locked) return;
         if (!hasShareIntent) return;
-        // Cold start: navigating before the root navigator and store are up
-        // swallows the replace and the share dies silently (#1117). The provider
-        // holds the intent, so waiting for canonical data just re-runs this effect —
-        // the same gate the deep-link effect below uses. The startup snapshot is
-        // not enough: the capture sheet and entity links read its tasks and projects.
+
+
         if (!canonicalDataReady) return;
         if (shareHandlingRef.current) return;
         shareHandlingRef.current = true;
@@ -351,8 +334,8 @@ export function useRootLayoutExternalCapture({
         };
         const hasSharedFiles = (shareFiles ?? []).some((file) => typeof file?.path === 'string' && file.path.trim().length > 0);
         if (!hasSharedFiles) {
-            // Text/URL shares stay synchronous; only file shares need the
-            // async copy into the managed attachments dir.
+
+
             finish(buildShareIntentCaptureParams({ shareSubject, shareText, shareWebUrl }));
             logIosShareDiagnostic({ stage: 'reset-requested' });
             resetShareIntent();
@@ -388,8 +371,8 @@ export function useRootLayoutExternalCapture({
                     });
                     logIosShareDiagnostic({ stage: 'navigation-returned', type: payloadType });
                 } else if (skippedCount === 0) {
-                    // Nothing readable at all; when files were skipped the
-                    // toast above already explains why nothing arrived.
+
+
                     finish(null);
                 }
             })
@@ -406,7 +389,7 @@ export function useRootLayoutExternalCapture({
         if (!incomingUrl) return;
         if (lastHandledKey.current === incomingUrlKey) return;
         if (locked) {
-            // The link stays in its slot (lastHandledKey is not advanced), so the unlock re-runs this effect.
+
             if (lastHeldKey.current !== incomingUrlKey) {
                 lastHeldKey.current = incomingUrlKey;
                 void logInfo('Incoming link held until unlock', {
@@ -418,10 +401,7 @@ export function useRootLayoutExternalCapture({
             return;
         }
 
-        // An entity link only navigates, so it opens from the startup snapshot when
-        // the entity is already there, as a tap on a snapshot row does; waiting for
-        // canonical data made a cold widget tap sit on the Inbox (#1310). A link to
-        // an entity the snapshot lacks waits for canonical data before falling back.
+
         const entityPayload = parseEntityOpenUrl(incomingUrl);
         if (entityPayload) {
             const target = resolveEntityOpenPath(entityPayload.kind, entityPayload.id);
@@ -493,7 +473,7 @@ export function useRootLayoutExternalCapture({
             });
         } catch {
             lastHandledKey.current = 0;
-            // Router errors can echo the private capture parameters too.
+
             void logWarn('Shortcut capture confirmation failed', {
                 scope: 'shortcuts',
                 extra: { releaseCheck: 'v1.3.1/shortcut-failure-privacy', stage: 'navigation' },

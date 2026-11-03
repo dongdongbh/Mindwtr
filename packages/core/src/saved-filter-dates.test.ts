@@ -219,7 +219,7 @@ describe('task date saved filters', () => {
             task('inactive', { projectId: 'inactive', dueDate: '2026-10-17' }),
         ]);
         source.projects = [{ id: 'inactive', title: 'Inactive', status: 'someday', color: '#000000', order: 0, tagIds: [], createdAt: '2026-01-01', updatedAt: '2026-01-01' }];
-        // Android builds a saved filter's list for a placed widget that chose it; iOS carries every saved filter.
+
         const android = buildAndroidWidgetPublication(source, 'en', { listSelections: ['filter:dates'] });
         const ios = createWidgetPayloadProjection(source, 'en', iosWidgetProjectionOptions({})).build(50);
         for (const payload of [android, ios]) {

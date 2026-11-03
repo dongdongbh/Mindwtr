@@ -1,4 +1,3 @@
-"""Synthetic preflight regression; creates no app/device state."""
 import hashlib
 from pathlib import Path
 import runpy
@@ -22,13 +21,13 @@ with tempfile.TemporaryDirectory(prefix="download-fixture-", dir=Path.home()) as
     refused("cached")
     file.parent.mkdir(parents=True)
     file.write_bytes(b"synthetic")
-    refused()  # Settings Save prefetch must invalidate an absent-file test.
+    refused()
     assert check(root, "cached", targets, [request], 1)["managedFiles"] == 1
     file.write_bytes(b"wrong")
     refused("cached")
     file.unlink()
     file.mkdir()
-    refused()  # An unsafe directory is not proven file absence.
+    refused()
     file.rmdir()
     journal = root / "mindwtr.sqlite.pending.json"
     journal.write_text("{}")

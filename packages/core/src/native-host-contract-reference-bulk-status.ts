@@ -72,8 +72,7 @@ const unique = (rows: { id: string }[]) => new Set(rows.map((row) => row.id)).si
 const canonicalPayload = (value: unknown): string => JSON.stringify(value, (_name, item) => record(item)
     ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
 
-// The existing bounded JSON rules, with a narrow exception for the public
-// revision dictionary: it can contain one entry per selected ID, not only128.
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number, path: string): boolean => {
         if (depth > 24) return false;
@@ -117,7 +116,7 @@ const validArea = (row: unknown): row is Area => record(row) && text(row.id, 500
     && typeof row.name === 'string' && [row.createdAt, row.updatedAt].every((value) =>
         iso(value) || (typeof value === 'string' && !value.trim()))
     && (row.deletedAt === undefined || iso(row.deletedAt));
-// Match the existing Reference raw codec allowance without changing the guarded BEFORE.
+
 const validContextProject = (row: unknown): row is Project => record(row) && text(row.id, 500)
     && (row.deletedAt === undefined || iso(row.deletedAt)) && (row.purgedAt === undefined || iso(row.purgedAt))
     && validProject({ ...row, tagIds: row.tagIds ?? [], deletedAt: undefined, purgedAt: undefined,
@@ -132,10 +131,8 @@ const frozenInstant = (value: unknown): boolean => record(value) && exact(value,
     && Number.isInteger(value.offsetMinutes) && Math.abs(value.offsetMinutes as number) <= 840
     && typeof value.local === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}$/.test(value.local)
     && Date.parse(`${value.local}Z`) + (value.offsetMinutes as number) * 60_000 === value.epochMs;
-// This is a frozen native journal witness, as in task-checklist. The shared builder
-// validates source anchors, field presence, UNTIL and RRULE; replay never derives
-// the next occurrence using a later local clock or timezone. A completely coherently
-// rewritten precommit journal is outside this unauthenticated witness boundary.
+
+
 const validRecurrenceProjection = (value: unknown): boolean => {
     if (value === null) return true;
     if (!record(value) || !hasOnly(value, ['version', 'sourceAnchorDays', 'candidate', 'until'], ['rruleUntilSourceToken', 'rruleText'])
@@ -175,13 +172,13 @@ const moveSettings = (settings: AppData['settings'], source: MoveSource): AppDat
     return JSON.parse(JSON.stringify({ ...value, features: { ...value.features, priorities: settings.features?.priorities } })) as AppData['settings'];
 };
 
-/** Bounded container membership, plus every normalized projectless recurrence peer. */
+
 export const referenceTasksMoveScope = (request: MoveRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>): NativeReferenceTasksMoveScope => {
     const selected = new Set(request.taskIds);
     const bySection = buildEntityMap(data.sections);
     const normalizedProject = (row: Task) => typeof row.projectId === 'string' && row.projectId.trim() ? row.projectId : undefined;
-    // Inbox filter-option visibility and grouping depend on its other rows too.
+
     const sources = data.tasks.filter((row) => selected.has(row.id) || (sourceOf(request) === 'inbox' && row.status === 'inbox'));
     const parentIds = new Set([...sources.flatMap((row) => {
         const parent = normalizedProject(row);
@@ -249,7 +246,7 @@ const selectedSourcesMatch = (request: MoveRequest, scope: NativeReferenceTasksM
 const referenceSourcesMatch = (request: NativeReferenceTasksMoveRequest, scope: NativeReferenceTasksMoveScope, at: string): boolean =>
     sourceOf(request) === 'reference' && selectedSourcesMatch(request, scope, at);
 
-/** Actual RN loaded-before batch planner. UUID allocation never happens during replay. */
+
 export const referenceTasksMoveEffect = (prepared: Pick<MovePrepared,
     'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates' | 'recurrenceProjections' | 'allocatedIds'>,
     allocate = false): NativeReferenceTasksMovePrepared['effect'] | null => {
@@ -330,7 +327,7 @@ export const readTasksMoveEnvelope = (input: unknown, source: MoveSource): MoveE
 export const readReferenceTasksMoveEnvelope = (input: unknown): NativeReferenceTasksMoveEnvelope | null =>
     readTasksMoveEnvelope(input, 'reference') as NativeReferenceTasksMoveEnvelope | null;
 
-/** Exact raw scope plus a frozen replan; the adapter epoch fence proves it again inside BEGIN. */
+
 export const referenceTasksMoveAuthorityMatches = (prepared: MovePrepared, data: AppData): boolean => {
     const current = rawScope(referenceTasksMoveScope(prepared.request, data));
     return Boolean(current && same(current, prepared.scope) && selectedSourcesMatch(prepared.request, current, prepared.updateAt)
@@ -469,7 +466,7 @@ export function createTasksMoveMethods(deps: {
                 try { logInfo(`Native ${label} bulk status confirmed`, { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-status' : 'v1.3.4/ios-reference-bulk-status', count: confirmed.value.count,
                         status: confirmed.value.status, outcome: 'moved' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },
@@ -486,7 +483,7 @@ export function createReferenceTasksMoveMethods(deps: Parameters<typeof createTa
     };
 }
 
-/** Additive reuse for Reference batch families; Move V1 bodies/bytes stay unchanged. */
+
 export { detach as detachReferenceBatchJson, jsonSafe as detachReferenceBatchValue,
     validRecurrenceProjection as validReferenceBatchRecurrenceProjection,
     readRequest as readReferenceBatchSelectionRequest, readMoveRequest as readStatusBatchSelectionRequest,
@@ -496,7 +493,7 @@ export { detach as detachReferenceBatchJson, jsonSafe as detachReferenceBatchVal
     validTask as validReferenceBatchTask, validContextProject as validReferenceBatchProject,
     validArea as validReferenceBatchArea, relevantSettings as relevantReferenceBatchSettings };
 
-// The store's Reference move action reads these here: it cannot import this module (store-reference-batch-modules.ts).
+
 referenceBatchModules.shared = { historyRowLoadProjection, NativeReceiptSqliteAdapter };
 referenceBatchModules.move = (input) => {
     const prepared = input as NativeReferenceTasksMovePrepared;

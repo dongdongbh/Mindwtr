@@ -1,7 +1,7 @@
 import { logInfo } from './app-log';
 
 const enabled = import.meta.env.VITE_STARTUP_PROFILING === '1';
-// navigationStart precedes module evaluation; these are WebView, not process timings.
+
 const origin = typeof performance !== 'undefined' ? performance.now() : 0;
 const milestones = new Map<string, number>();
 let reported = false;

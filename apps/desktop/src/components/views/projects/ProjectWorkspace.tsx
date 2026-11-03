@@ -69,8 +69,7 @@ import {
 import { toDateTimeLocalValue } from '../../Task/task-item-helpers';
 import type { ConfirmationRequestOptions } from '../../../hooks/useConfirmDialog';
 
-// The one visible line is far shorter; the cap only keeps a pathological
-// single-line note out of the inline markdown tokenizer.
+
 const SECTION_NOTES_PREVIEW_MAX_CHARS = 300;
 
 const PROJECT_TASK_VIRTUALIZATION_THRESHOLD = 80;
@@ -154,18 +153,7 @@ type ProjectTaskVirtualRow = {
     start: number;
 };
 
-/**
- * Where to draw a row the virtualizer is not currently rendering — the task
- * being edited, or the one a new-task highlight wants scrolled into view.
- *
- * It has to be the offset the virtualizer itself holds for that index, never
- * `index * estimate`. Once rows have been measured they come out shorter than
- * the estimate, so the list is far shorter than `index * estimate` suggests;
- * placing the row there puts it past the end of the list, and scrolling it into
- * view leaves the viewport in empty space with nothing rendered (#916).
- * The estimate is only a fallback for the first render, before any measuring,
- * where the two agree anyway.
- */
+
 export function resolvePinnedRowStart(
     measuredStart: number | undefined,
     index: number,
@@ -217,7 +205,7 @@ function ProjectTaskRows({ tasks, renderTask, scrollRef, pinnedTaskId }: Project
     });
 
     const rowVirtualizer = useVirtualizer({
-        // Inactive section virtualizers must not reset the shared scroller on mount (#1262).
+
         enabled: shouldVirtualize,
         count: shouldVirtualize ? tasks.length : 0,
         getScrollElement: () => scrollRef.current,
@@ -302,9 +290,7 @@ function ProjectTaskRows({ tasks, renderTask, scrollRef, pinnedTaskId }: Project
     );
 }
 
-// Renders one section as a board column. The column body is its own vertical
-// scroller, so the shared ProjectTaskRows virtualizer measures against the
-// column instead of the page — columns need no task-count ceiling of their own.
+
 function ProjectSectionColumn({
     id,
     dashed,
@@ -348,42 +334,39 @@ type BulkTokenPickerState = {
     action: 'add' | 'remove';
 } | null;
 
-// The workspace reads its store data and actions itself (useProjectWorkspaceStore
-// + useUiStore); only genuinely wrapper-owned state stays a prop. Store slices
-// re-threaded through ProjectsView were removed (arch review 2026-07-20 #8).
+
 type ProjectWorkspaceProps = {
-    // Cross-view navigation highlight — set from other views, cleared here.
+
     highlightTaskId: string | null;
-    // Area-creation-in-progress flag; drives the shared workspace loading banner.
+
     isAreaCreating: boolean;
-    // Project-creation-in-progress flag; drives the shared loading banner.
+
     isCreatingProject: boolean;
-    // App language (React context); threaded so tests keep translation control.
+
     language: string;
-    // Duplicate-then-select action; also wired to the sidebar in ProjectsView.
+
     onDuplicateProject: (projectId: string) => Promise<void> | void;
     onConvertProjectToSection?: (projectId: string) => Promise<void> | void;
-    // Opens the AreaManagerModal, whose open/close state lives in ProjectsView.
+
     onManageAreas: () => void;
-    // Opens the quick-area prompt, whose state lives in ProjectsView.
+
     onRequestQuickArea: (projectId: string) => void;
-    // Setter for the persisted showCompletedTasks view state (localStorage).
+
     onToggleShowCompletedTasks: () => void;
-    // The confirm-dialog host is rendered by ProjectsView.
+
     requestConfirmation: (options: ConfirmationRequestOptions) => Promise<boolean>;
-    // Selection identity — owned by ProjectsView (UI store + reset effects).
+
     selectedProjectId: string | null;
-    // Persisted view state (localStorage) owned by ProjectsView.
+
     showCompletedTasks: boolean;
-    // Translator (React context); threaded so tests keep translation control.
+
     t: (key: string) => string;
-    // Wrapper layout state.
+
     projectsSidebarCollapsed?: boolean;
-    // Toggles wrapper layout state.
+
     onToggleProjectsSidebar?: () => void;
-    // ADR 0023: the Projects view owns the shared DndContext; the workspace
-    // registers its in-list drag-end handling here so the view can delegate
-    // non-sidebar drops.
+
+
     taskDragEndRef: RefObject<((event: DragEndEvent) => void) | null>;
 };
 
@@ -469,13 +452,12 @@ export function ProjectWorkspace({
     const [sectionNotesOpen, setSectionNotesOpen] = useState<Record<string, boolean>>({});
     const [archivedSectionCollapsed, setArchivedSectionCollapsed] = useState<Record<string, boolean>>({});
     const [tagDraft, setTagDraft] = useState('');
-    // The project the tag draft was last filled from: its save merges against it.
+
     const tagDraftBaseRef = useRef<Project | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [editProjectTitle, setEditProjectTitle] = useState('');
-    // Effective sort is read straight from the selected project so it persists
-    // across restarts and view switches; the change handler writes it back via
-    // updateProject. Core normalizes 'default' to an absent field.
+
+
     const projectTaskSortBy: TaskSortBy = resolveTaskSortByForFeatures(
         selectedProject?.taskSortBy ?? 'default',
         settings,
@@ -680,8 +662,7 @@ export function ProjectWorkspace({
         [allSections, sections, selectedProject],
     );
 
-    // Progressive disclosure: the layout toggle exists only where sections do,
-    // and a project that loses its last section falls back to the list.
+
     const hasProjectSections = projectSections.length > 0;
     const columnsLayout = hasProjectSections && storedProjectLayout === 'columns';
     const columnsScrollRef = useRef<HTMLDivElement | null>(null);
@@ -743,9 +724,7 @@ export function ProjectWorkspace({
         };
     }, [orderedProjectTasks, projectSections, selectedProjectId, sortProjectTasks]);
 
-    // "No Section" is a bucket, not a section: it renders after the named
-    // sections and only while it has tasks. During a live drag it must exist
-    // even when empty — it's the drop target that clears a task's section.
+
     const [taskDragActive, setTaskDragActive] = useState(false);
     useDndMonitor(useMemo(() => ({
         onDragStart: (event) => setTaskDragActive(event.active.data.current?.type === 'task'),
@@ -781,8 +760,8 @@ export function ProjectWorkspace({
                 : [...orderedProjectTasks, ...completedProjectTasks];
         }
         const combined: Task[] = [];
-        // Keyboard order follows reading order: named sections, then the
-        // unsectioned tasks, in both layouts — "No Section" renders last.
+
+
         sectionTaskGroups.sections.forEach((group) => {
             if (!group.section.isCollapsed) {
                 combined.push(...group.tasks);
@@ -798,8 +777,8 @@ export function ProjectWorkspace({
         () => visibleProjectTaskList.map((task) => task.id),
         [visibleProjectTaskList],
     );
-    // Deliberately over allTasks (visible tasks), not the store's _tasksById
-    // (all tasks incl. hidden) — PERF-03 leaves this site alone on purpose.
+
+
     const tasksById = useMemo(() => new Map(allTasks.map((task) => [task.id, task])), [allTasks]);
     const {
         activeAction,
@@ -930,7 +909,7 @@ export function ProjectWorkspace({
         if (!hasProjectSections) return [];
         const tasksBySection = new Map<string, Task[]>(projectSections.map((section) => [section.id, []]));
         const unsectioned: Task[] = [];
-        // References are already sorted; retain that order within each bucket.
+
         for (const task of projectReferenceTasks) {
             const sectionTasks = task.projectId === selectedProjectId && task.sectionId
                 ? tasksBySection.get(task.sectionId)
@@ -947,8 +926,7 @@ export function ProjectWorkspace({
         ].filter((group) => group.tasks.length > 0);
     }, [hasProjectSections, projectReferenceTasks, projectSections, selectedProjectId, t]);
 
-    // Reference tasks render as their own section below the task list, so the
-    // keyboard walks them last rather than skipping them.
+
     const keyboardVisibleTasks = useMemo(
         () => [
             ...visibleProjectTaskList,
@@ -957,7 +935,7 @@ export function ProjectWorkspace({
         [hasProjectSections, projectReferenceTasks, referenceTaskGroups, visibleProjectTaskList],
     );
     const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
-    // Last highlight id whose row was handed DOM focus (#1014).
+
     const focusedHighlightIdRef = useRef<string | null>(null);
     useTaskListScope({
         getTasks: () => keyboardVisibleTasks,
@@ -975,9 +953,8 @@ export function ProjectWorkspace({
         }
         const exists = [...orderedProjectTaskList, ...projectReferenceTasks].some((task) => task.id === highlightTaskId);
         if (!exists) return;
-        // Focus once per highlight: the effect re-runs on list changes during
-        // the flash window, and refocusing then could steal focus from a modal
-        // the user already opened on the revealed task (#1014).
+
+
         if (focusedHighlightIdRef.current !== highlightTaskId) {
             focusedHighlightIdRef.current = highlightTaskId;
             focusTaskRowWhenMounted(highlightTaskId);
@@ -1037,8 +1014,8 @@ export function ProjectWorkspace({
             handleReorderSection(data.sectionId, overData.sectionId);
             return;
         }
-        // In non-default sort modes the list is not a drop target; tasks can only
-        // be dragged out to the sidebar (handled by the Projects view).
+
+
         if (!canReorderProjectTasks) return;
 
         const failTaskMove = (error: unknown) => {
@@ -1237,8 +1214,7 @@ export function ProjectWorkspace({
         );
     };
 
-    // One header for both layouts; only the reorder arrows change axis, because
-    // in columns the same section order reads left-to-right.
+
     const renderSectionHeader = (
         group: { section: Section; tasks: Task[] },
         index: number,
@@ -1258,13 +1234,13 @@ export function ProjectWorkspace({
         const moveForwardLabel = isHorizontal
             ? resolveText('projects.moveSectionRight', 'Move section right')
             : resolveText('projects.moveSectionDown', 'Move section down');
-        // Hidden while the editor is open: the textarea below already shows the
-        // notes, and it saves on blur, so a preview would sit there stale.
+
+
         const notesPreview = hasNotes && !notesOpen
             ? getInlineMarkdownPreview(group.section.description ?? '').slice(0, SECTION_NOTES_PREVIEW_MAX_CHARS)
             : '';
-        // The tooltip is plain text, so it gets the markers stripped rather than
-        // rendered, and an ellipsis where the preview cut the notes short.
+
+
         const notesTooltip = notesPreview
             ? (() => {
                 const stripped = stripMarkdown(getInlineMarkdownPreview(group.section.description ?? ''));
@@ -1274,7 +1250,7 @@ export function ProjectWorkspace({
             })()
             : '';
         const moreOptionsLabel = resolveText('taskEdit.moreOptions', 'More options');
-        // Per section Flow mode (#1429): the label and menu choice appear only then.
+
         const sectionFlowLabel = isPerSectionProject
             ? (group.section.isSequential === true ? t('projects.sequential') : t('projects.parallel'))
             : null;
@@ -1371,8 +1347,7 @@ export function ProjectWorkspace({
         );
     };
 
-    // Every section body in both layouts shows this: an empty *section* is not
-    // an empty project, so it must not borrow the project-level empty copy.
+
     const sectionEmptyState = (
         <div className="py-2 text-xs text-muted-foreground">
             {t('projects.sectionEmpty')}
@@ -1404,10 +1379,7 @@ export function ProjectWorkspace({
         );
     };
 
-    // Sections as side-by-side columns (#1019). The drop containers, the
-    // sortable contexts and the drag-end resolver are the list layout's — only
-    // the box the sections sit in changes, so cross-column drops are the same
-    // cross-section drops the stacked layout already performed.
+
     const renderProjectSectionColumns = (renderTasks: RenderProjectTasks) => (
         <div className="space-y-3">
             <div
@@ -1590,9 +1562,7 @@ export function ProjectWorkspace({
         setEditProjectTitle(selectedProject.title);
     };
 
-    // Archive without a confirmation: the action is fully reversible from the
-    // same header slot (the button becomes Reactivate and task statuses are
-    // restored), matching the mobile editor. Delete keeps its confirmation.
+
     const handleArchiveProject = async () => {
         const current = getMutableSelectedProject();
         if (!current) return;
@@ -1645,8 +1615,8 @@ export function ProjectWorkspace({
             if (confirmed && getMutableSelectedProject()?.id === projectId) {
                 setIsProjectDeleting(true);
                 try {
-                    // Deleting detaches the project's tasks, and only Undo can know
-                    // which they were -- the links must be read before the delete.
+
+
                     const detachedTasks = collectProjectTaskLinks(projectId);
                     await Promise.resolve(deleteProject(projectId));
                     setSelectedProjectId(null);
@@ -1883,8 +1853,8 @@ export function ProjectWorkspace({
                                         tagSuggestions={addTagOptions}
                                         onTagDraftChange={setTagDraft}
                                         onCommitTags={() => {
-                                            // Merged by token onto the latest row against the project the draft was
-                                            // filled from: a tag another device added since stays.
+
+
                                             const current = getMutableSelectedProject();
                                             if (!current) return;
                                             const base = tagDraftBaseRef.current?.id === current.id ? tagDraftBaseRef.current : current;

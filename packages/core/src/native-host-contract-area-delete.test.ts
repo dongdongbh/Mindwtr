@@ -24,7 +24,7 @@ const project = (id: string, overrides: Partial<Project> = {}): Project => ({
     areaTitle: 'Work', rev: 4, revBy: 'old-device', createdAt: now, updatedAt: now, ...overrides,
 });
 
-// These mutations model a saved sync/other-writer change, rather than a UI-only projection.
+
 let updateSavedData: (() => void) | undefined;
 const setSavedState: typeof useTaskStore.setState = (...args) => {
     useTaskStore.setState(...args); updateSavedData?.();
@@ -82,7 +82,7 @@ describe('prepared native Area delete', () => {
         const prepared = structuredClone(plan.value.prepared);
         prepared.version = version;
         if (version === 1) {
-            // Historical v1 detached the relationship but retained the compatibility color.
+
             for (const pair of prepared.effect.projects!) pair.after.color = pair.before.color;
         }
         const frozen = JSON.parse(JSON.stringify({ request: input, prepared }));

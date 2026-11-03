@@ -268,7 +268,7 @@ describe('guarded Archive bulk Restore', () => {
             const host = methods(); const command = await prepare(host);
             expect(value(await host.commitPreparedArchivedTasksRestore(command))).toEqual({ count: 2, status: 'inbox' });
             const actual = await raw(native);
-            expect(actual).not.toEqual(expectedRaw!); // Strict legacy all-nine raw parity is FAIL.
+            expect(actual).not.toEqual(expectedRaw!);
             const differences: Array<{ table: string; row: string; field: string; rn: unknown; native: unknown }> = [];
             for (const table of Object.keys(actual)) {
                 const left = expectedRaw![table] as Array<Record<string, unknown>>;

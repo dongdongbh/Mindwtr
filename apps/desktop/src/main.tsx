@@ -1,5 +1,5 @@
-// First import: scopes localStorage to the open workspace before any other
-// module reads it (#1473).
+
+
 import { workspaceStorageScopeFailed } from './lib/workspace-storage-scope';
 import React from 'react';
 import { markDesktopStartup } from './lib/startup-profiler';
@@ -104,7 +104,7 @@ async function initStorage() {
     if (isTauriRuntime()) {
         const { tauriStorage, getDesktopSaveStatus } = await import('./lib/storage-adapter');
         setStorageAdapter(tauriStorage);
-        // No global store or flush control: profiling builds expose counts only.
+
         if (import.meta.env.VITE_STARTUP_PROFILING === '1') {
             Object.defineProperty(window, '__mindwtrSaveStatus', {
                 value: () => ({ core: getPersistenceStatus(), desktop: getDesktopSaveStatus() }),
@@ -151,13 +151,7 @@ async function restoreWebviewZoomState() {
     }
 }
 
-// Tauri's native drag-drop handler is off (tauri.conf.json dragDropEnabled:
-// false) so HTML5 drag-and-drop works for task rows; that also means the
-// webview's plain browser default runs for OS file drops anywhere else,
-// navigating away to the dropped file. Block navigation here, but only
-// preventDefault (never stopPropagation) so the editor's own file-drop
-// handler, which runs first since React attaches below document, still
-// gets the event.
+
 function installFileDropNavigationGuard() {
     const isFileDrag = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes('Files'));
     document.addEventListener('dragover', (event) => {
@@ -168,16 +162,12 @@ function installFileDropNavigationGuard() {
     });
 }
 
-// The main window is built hidden so the restored geometry and the first paint
-// stay off screen (#936). Two animation frames after the first render is the
-// cheapest "has painted" signal the webview gives us; Rust reveals the window
-// anyway after a few seconds if this never arrives.
+
 async function signalUiReady() {
     if (!isTauriRuntime()) return;
     try {
-        // Resolve the transport during the paint wait, not on the reveal call
-        // itself — the two frames below are the signal's timing, and nothing
-        // else may be added to it.
+
+
         await preloadNativeTransport();
         await new Promise<void>((resolve) => {
             requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -196,9 +186,7 @@ async function bootstrap() {
     if (!isQuickAddWindow) installAppLockKeyboardGuard();
     installFileDropNavigationGuard();
 
-    // The quick-add webview is always personal. The main window removes its
-    // one-shot request before validation so a failed boot cannot reopen sample
-    // data on the next launch.
+
     const sandboxSettings = isQuickAddWindow ? null : consumeDesktopSandboxBootRequest();
     const sandboxMode = sandboxSettings !== null;
     initializeSandboxRuntime(sandboxMode);
@@ -217,8 +205,7 @@ async function bootstrap() {
     }
     markDesktopStartup('storage_adapter_ready');
 
-    // Apply only the allowlisted display snapshot in sandbox. Personal browser
-    // storage remains untouched and becomes authoritative again after Exit.
+
     const initialTheme = coerceDesktopThemeMode(
         sandboxMode ? sandboxSettings.theme : localStorage.getItem(THEME_STORAGE_KEY),
     );
@@ -255,7 +242,7 @@ async function bootstrap() {
 
     if (!sandboxMode && isDiagnosticsEnabled()) setupGlobalErrorLogging();
     if (workspaceStorageScopeFailed) {
-        // The open workspace is reading the default workspace's UI caches (#1473).
+
         void logWarn('Workspace storage scope unavailable', {
             scope: 'app',
             force: true,
@@ -267,8 +254,7 @@ async function bootstrap() {
         await restoreWebviewZoomState();
     }
 
-    // The Vite dev server serves ~1000 unbundled modules; routing each through
-    // the caching worker can stall a reload's module fetches for good.
+
     if (!import.meta.env.DEV && !isQuickAddWindow && !isTauriRuntime() && 'serviceWorker' in navigator) {
         registerWebServiceWorker(() => {
             void logInfo('Online-only service worker controls this page', {
@@ -279,11 +265,8 @@ async function bootstrap() {
     }
 
     if (!isTauriRuntime()) {
-        // A lazy route chunk can fail to import when the served index.html and
-        // the deployed assets are from different builds (web app redeployed
-        // while a tab was open, or a stale cached shell). One reload fetches a
-        // fresh shell with matching chunk names; the guard stops a reload loop
-        // when the failure is not staleness.
+
+
         window.addEventListener('vite:preloadError', () => {
             const RELOAD_FLAG = 'mindwtr-chunk-reload-at';
             const lastReload = Number(sessionStorage.getItem(RELOAD_FLAG) || 0);
@@ -293,12 +276,7 @@ async function bootstrap() {
         });
     }
 
-    // Import the app only after the immutable workspace mode is selected.
-    // Several desktop stores read device-local caches while their modules are
-    // evaluated, so importing them earlier could expose personal view state to
-    // a sandbox renderer before React mounts.
-    // The privacy lock state comes first so a locked launch paints the lock
-    // screen, never the task list (the window is still hidden here).
+
     if (!isQuickAddWindow) await loadAppLockState();
     const RootApp = isQuickAddWindow
         ? (await import('./QuickAddWindowApp.tsx')).QuickAddWindowApp
@@ -315,7 +293,7 @@ async function bootstrap() {
             </LanguageProvider>
         </React.StrictMode>,
     );
-    // Quick Add has no App theme effect; the main App takes over after render.
+
     appOwnsTheme = !isQuickAddWindow;
 
     if (!isQuickAddWindow) {

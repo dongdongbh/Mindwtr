@@ -13,7 +13,7 @@ export type TaxonomyEffect = { tasks: Array<{ before: Task; after: Task }>;
 const key = (kind: TaxonomyKind, value: string, catalogued = false) => catalogued
     ? normalizeTaxonomyToken(kind, value).toLowerCase() : kind === 'tag' ? normalizeTagId(value) : value.trim().toLowerCase();
 
-/** The exact RN early-return policy; `to` retains the text supplied by its caller. */
+
 export function taxonomyDestination(kind: TaxonomyKind, action: TaxonomyAction,
     name: string, to: string | null): string | null | undefined {
     const source = key(kind, name);
@@ -37,7 +37,7 @@ export function selectTaxonomyScope(kind: TaxonomyKind, name: string,
         ...(settings === undefined ? {} : { catalogue: settings.taxonomy ?? null }) };
 }
 
-/** Preserves RN's first-match rename, context first-wins and tag last-wins rules. */
+
 export function planTaxonomyEffect(kind: TaxonomyKind, action: TaxonomyAction, name: string,
     to: string | null, scope: TaxonomyScope, deviceId: string, now: string): TaxonomyEffect | null {
     const destination = taxonomyDestination(kind, action, name, to);

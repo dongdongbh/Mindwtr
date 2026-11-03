@@ -47,8 +47,7 @@ type Option =
     | { kind: 'person'; label: string; value: string }
     | { kind: 'command'; label: string; value: string; command: SlashCommand; requiresArgument: boolean; priority?: TaskPriority };
 
-// WebKit does not scroll an input to a caret set via setSelectionRange, so we
-// measure the caret's pixel offset and adjust scrollLeft ourselves (LTR only).
+
 let caretMeasureContext: CanvasRenderingContext2D | null | undefined;
 
 const ensureCaretVisible = (input: HTMLInputElement, caret: number) => {
@@ -129,8 +128,7 @@ const SLASH_COMMANDS: Array<{
     { command: '*', requiresArgument: false },
 ];
 
-// The parser only accepts these exact tokens for /energy: — suggest them so
-// a partial token like "l" never ends up in the task title.
+
 const ENERGY_LEVEL_VALUES = ['low', 'medium', 'high'];
 const PRIORITY_VALUES: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 
@@ -165,8 +163,8 @@ function getSlashCommandOptions(query: string, prioritiesEnabled: boolean, timeE
     }
 
     return SLASH_COMMANDS
-        // The parser ignores /priority: while the feature is off, so suggesting
-        // it would hand the user a token that stays in their title (#1107).
+
+
         .filter(({ command }) => command !== 'priority' || prioritiesEnabled)
         .filter(({ command }) => (command !== 'estimate' && command !== 'duration') || timeEstimatesEnabled)
         .filter(({ command }) => (
@@ -191,9 +189,8 @@ function getSlashCommandOptions(query: string, prioritiesEnabled: boolean, timeE
 function getTrigger(text: string, caret: number): TriggerState | null {
     if (caret < 0) return null;
     const before = text.slice(0, caret);
-    // A value may hold spaces ("/start:next friday"), but it ends where the next
-    // command or a +project / @context / #tag / !area / %person token starts, as in
-    // the parser; otherwise "/start:now +La" would still be the /start trigger (#1259).
+
+
     const commandMatch = /(?:^|\s)\/(\*|[a-z-]*)(?::((?:(?!\s(?:\/(?:\*|[a-z-]*)(?::|$)|[+@#!%]))[\s\S])*))?$/i.exec(before);
     if (commandMatch) {
         const rawMatch = commandMatch[0] ?? '';
@@ -534,8 +531,8 @@ export function TaskInput({
         } else if (activeTrigger.type === 'area') {
             tokenValue = `!${tokenValue}`;
         } else if (activeTrigger.type === 'person') {
-            // Quote multi-word names so the parser never swallows title words
-            // at call sites that do not pass knownPeople.
+
+
             tokenValue = /\s/.test(tokenValue) ? `%"${tokenValue}"` : `%${tokenValue}`;
         } else if (activeTrigger.type === 'tag') {
             tokenValue = tokenValue.startsWith('#') ? tokenValue : `#${tokenValue}`;
@@ -588,8 +585,8 @@ export function TaskInput({
                 setSelectedIndex((prev) => (prev - 1 + options.length) % options.length);
                 return;
             }
-            // Only plain Enter picks a suggestion; modified Enter falls through
-            // so consumer shortcuts (Ctrl+Enter save & edit) win over the popup.
+
+
             if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();

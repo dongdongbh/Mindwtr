@@ -8,10 +8,7 @@ const DROPBOX_CALLBACK_TARGETS = new Set([
     'mindwtr:///redirect/',
 ]);
 
-/**
- * Recognizes only the registered Dropbox callback route. OAuth query and
- * fragment values remain owned by AuthSession and are intentionally ignored.
- */
+
 export function isDropboxAuthCallbackUrl(value: string): boolean {
     const queryIndex = value.indexOf('?');
     const fragmentIndex = value.indexOf('#');

@@ -30,7 +30,7 @@ enum MindwtrWatchSnapshotStore {
     static func save(_ snapshot: MindwtrWatchSnapshot) -> Bool {
         do {
             let data = try JSONEncoder().encode(snapshot)
-            // A settled command may be removed only after its replacement snapshot is on disk.
+
             try data.write(to: snapshotURL, options: .atomic)
             defaults?.set(data, forKey: snapshotKey)
             return true

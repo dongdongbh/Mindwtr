@@ -294,8 +294,8 @@ export function AiSettingsSpeechCard({
                                         <TextInput
                                             value={speechBaseUrl}
                                             onChangeText={onSpeechBaseUrlChange}
-                                            // Not the chat field's Ollama URL — that serves LLMs,
-                                            // not transcription.
+
+
                                             placeholder="http://localhost:8000/v1"
                                             placeholderTextColor={tc.secondaryText}
                                             autoCapitalize="none"

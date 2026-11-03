@@ -7,7 +7,7 @@ import { logInfo, logWarn } from './app-log';
 
 const SHARE_CARD_FILE_NAME = 'mindwtr-share-card.png';
 const SHARE_CARD_CAPTURE_TIMEOUT_MS = 10_000;
-// Some native share extensions never settle after cancellation; keep the composer recoverable.
+
 const SHARE_CARD_SHARE_TIMEOUT_MS = 30_000;
 let shareCardFileSequence = 0;
 type ShareCardExportStage = 'availability' | 'capture' | 'create' | 'download' | 'share' | 'write';
@@ -174,7 +174,7 @@ export async function exportShareCardPng(
       try {
         file.delete();
       } catch {
-        // Cache cleanup is best-effort after a failed share-sheet launch.
+
       }
     }
     if (!dismissed) recordExportFailure(stage, error);

@@ -101,7 +101,7 @@ const getLegacyFileSystem = async (): Promise<ExpoLegacyFileSystemModule | null>
 const logInternalFailure = (phase: string, error?: unknown): void => {
   if (!__DEV__) return;
   const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-  // Console is the only reliable fallback when the diagnostics file itself is unavailable.
+
   console.warn(`[Mindwtr diagnostics] ${phase} failed: ${message}`);
 };
 
@@ -222,7 +222,7 @@ async function ensureLogFile(): Promise<boolean> {
     try {
       LOG_FILE.create({ intermediates: true, overwrite: true });
     } catch (error) {
-      // If a directory exists where the log file should be, remove it and retry.
+
       const fs = await getExpoFileSystem();
       if (LOG_FILE_URI && LOG_DIR_URI && LOG_FILE_URI !== fs?.Paths?.document?.uri && fs) {
         const strayDir = new fs.Directory(LOG_FILE_URI);
@@ -269,8 +269,8 @@ async function ensureLegacyLogFilePath(): Promise<string | null> {
 }
 
 export function isLoggingEnabled(): boolean {
-  // settings can be briefly undefined (store still hydrating, partial test
-  // stores); a log call must never throw over it.
+
+
   return isDiagnosticsLoggingEnabled(useTaskStore.getState().settings);
 }
 
@@ -302,7 +302,7 @@ function appendWithFileHandle(line: string): boolean {
   }
 }
 
-/** Expo's file API: appends in place, trimmed by core's size cap. */
+
 const primaryLogFile: DiagnosticsLogFile = {
   path: async () => {
     await ensureLogTargets();
@@ -348,7 +348,7 @@ const primaryLogFile: DiagnosticsLogFile = {
     const aside = new fs.File(`${LOG_FILE_URI}.unreadable`);
     if (fileExists(aside)) aside.delete();
     LOG_FILE.move(aside);
-    // Expo's move points the File at its new place: the next line starts a new file at the log's path.
+
     LOG_FILE = new fs.File(LOG_FILE_URI);
   },
 };
@@ -359,7 +359,7 @@ const legacyLogPath = async (): Promise<{ fs: ExpoLegacyFileSystemModule; path: 
   return fs && path ? { fs, path } : null;
 };
 
-/** Expo's legacy file API (Expo Go, older runtimes): every line rewrites the file. */
+
 const legacyLogFile: DiagnosticsLogFile = {
   path: async () => (await legacyLogPath())?.path ?? null,
   ensure: ensureLegacyLogFilePath,
@@ -387,11 +387,7 @@ const legacyLogFile: DiagnosticsLogFile = {
   },
 };
 
-// Core's file rules (diagnostics-log.ts): the gate, the line, the size cap, and one write at a time.
-// Several notification-path callers intentionally do not await diagnostics; the log keeps their
-// file-handle offsets and read-modify-write fallbacks ordered so adjacent receipt/outcome evidence
-// cannot overwrite an earlier line (#1028). Made on first use: tests that replace @mindwtr/core as a
-// whole still import this module.
+
 let diagnosticsLogInstance: DiagnosticsLog | null = null;
 const diagnosticsLog = (): DiagnosticsLog => {
   diagnosticsLogInstance ??= createDiagnosticsLog({ isEnabled: isLoggingEnabled, files: [primaryLogFile, legacyLogFile] });
@@ -400,8 +396,8 @@ const diagnosticsLog = (): DiagnosticsLog => {
 
 async function appendLogLine(entry: LogEntry, options?: { force?: boolean }): Promise<string | null> {
   feedbackDiagnosticsBuffer.record(entry);
-  // Dev builds mirror every entry to the Metro console, gate or not: an Expo Go
-  // tester has no way to hand over the log file, but can paste the terminal.
+
+
   logEntryToDevConsole(entry);
   const backend = customLogBackend;
   if (!backend?.appendLogLine) return diagnosticsLog().append(entry, options);
@@ -530,9 +526,8 @@ export async function readRecentLogText(maxChars = RECENT_LOG_MAX_CHARS): Promis
 
 export async function collectFeedbackDiagnostics(maxChars = RECENT_LOG_MAX_CHARS): Promise<string | null> {
   const breadcrumbs = getBreadcrumbs();
-  // Feedback attachment is an explicit, one-time opt-in. Build the snapshot in
-  // memory so checking the box does not persist a log when detailed logging is
-  // disabled, while still explaining the recent app flow.
+
+
   const snapshot = buildFeedbackDiagnosticsSnapshot({ debugLoggingEnabled: isLoggingEnabled(), breadcrumbs });
   const recentLogs = await readRecentLogText(FEEDBACK_DIAGNOSTICS_SOURCE_CHARS);
   return buildFeedbackDiagnostics(
@@ -603,7 +598,7 @@ export function setupGlobalErrorLogging(options: GlobalErrorLoggingOptions = {})
         try {
           localFatalCrashCapture?.capture(error);
         } catch {
-          // Fatal delegation must never depend on the best-effort local slot.
+
         }
       }
       void logError(error, {

@@ -1,33 +1,6 @@
-/**
- * The native host contract for Settings › About (React Native's about-settings-screen.tsx and feedback-settings-modal.tsx),
- * the daily analytics heartbeat (RN's use-root-layout-startup.ts) and the store review prompt after a Weekly Review (RN's
- * store-review-prompt.ts). Kept in its own file and spread into createNativeHostContract. The rules are core's, the code RN
- * runs: about-settings-model.ts, analytics-heartbeat.ts, user-prompts.ts and feedback.ts.
- *
- * A host binds its device through `NativeAboutHost` (createNativeHostContract's `about` option): the build's facts (its
- * version, channel and the endpoints it was built with), RN's AsyncStorage (the update dot, the heartbeat's id and day, the
- * prompt state, all under RN's keys, so an upgraded RN user keeps them), the fetch, and the recent diagnostics. Without it the
- * screen and the requests answer ACTION_FAILED.
- *
- * - getAboutInstallerSource is how the app was installed (resolveAndroidInstallerSource), from what the host read: Google
- *   Play's install referrer (null when the read failed) and the installing package. The other requests take its answer.
- * - getAboutSettings is the screen: the header, the rows, the feedback modal's words, for `installerSource`.
- * - isAboutUpdateCheckDue says whether a check would ask the channel now (the silent check: once a day); only then does the
- *   host ask Google Play. runAboutUpdateCheck is the silent check when About opens (`silent`) and Check for updates
- *   (`manual`): the host sends Play's answer as `play` on a Play install when the check was due (else null), and says
- *   whether a market link opens (`marketAvailable`). The answer is the update dot to show
- *   (null: unchanged) and RN's alert or toast; an alert button with a `url` opens it.
- * - checkAboutFeedback is the modal's state for the draft as typed (Send on or off, the error line); submitAboutFeedback
- *   sends it to the build's feedback endpoint. Neither is a store write.
- * - sendAboutHeartbeat (after the boot) and attemptAboutStoreReview (after a Weekly Review, with whether the store has a
- *   review flow) write only RN's AsyncStorage keys. The prompts' active day is the startup prompts' first ask
- *   (native-host-contract-startup-prompts.ts), its one writer.
- *
- * Nothing here is journaled: the requests write no synced data, and a replay would send feedback or a heartbeat twice. The
- * feedback text and email go only to the endpoint, never to a log, receipt or error text.
- *
- * Only functions read this module's imports from native-host-contract.ts, so the import cycle between the two files is safe.
- */
+
+
+
 import {
     buildAboutFeedbackSubmission,
     buildAboutSettingsModel,
@@ -62,7 +35,7 @@ import { fail, isObjectRecord, isText } from './native-host-contract-menu-views'
 import { useTaskStore } from './store';
 import { attemptStoreReviewAfterPositiveMoment } from './user-prompts';
 
-/** RN's AsyncStorage on the host. */
+
 type AboutStorage = {
     getItem: (key: string) => Promise<string | null>;
     setItem: (key: string, value: string) => Promise<void>;
@@ -70,18 +43,18 @@ type AboutStorage = {
 };
 
 export type NativeAboutHost = {
-    /** The build, as RN reads it from app.json and app.config.ts's extra. */
+
     app: {
         appName: string;
-        /** app.json's version. */
+
         version: string;
-        /** The release tag (release-version.json or ANALYTICS_RELEASE_VERSION): shown when it extends the version. */
+
         releaseVersion: string;
-        /** The build number (RN's nativeBuildVersion). */
+
         build: string;
         packageName: string;
         isFossBuild: boolean;
-        /** A development build (RN's __DEV__): it never sends a heartbeat. */
+
         isDev: boolean;
         platform: string;
         platformVersion: string | number;
@@ -89,15 +62,15 @@ export type NativeAboutHost = {
         feedbackEndpointUrl: string;
         analyticsHeartbeatUrl: string;
         analyticsHeartbeatChannel: string;
-        /** GitHub's latest-release API; a device check points it at a local stub. */
+
         githubReleasesApi?: string;
     };
     storage: AboutStorage;
     fetcher: (url: string, init?: RequestInit) => Promise<Response>;
-    /** The device locale (RN's Intl resolvedOptions().locale). */
+
     locale: () => string;
     generateId: () => string;
-    /** The diagnostics a bug report attaches (RN's collectFeedbackDiagnostics). */
+
     feedbackDiagnostics: () => Promise<string | null>;
     logWarn: (message: string, error: unknown) => void;
     logInfo: (message: string, context: Record<string, string>) => void;
@@ -106,14 +79,14 @@ export type NativeAboutHost = {
 export type NativeAboutSettings = AboutSettingsModel & {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
     revision: string;
-    /** The Rate row's links, in the order to try (RN's market link, else the web page), and the toast when none opens. */
+
     rate: { urls: string[]; failed: AboutToast };
     feedback: {
         text: FeedbackModalText;
-        /** No endpoint in this build: Send stays off and the modal says so. */
+
         isConfigured: boolean;
         categories: readonly string[];
-        /** A bug's places, in RN's order. */
+
         locations: readonly string[];
     };
 };
@@ -143,7 +116,7 @@ const readPlay = (value: unknown): { value: PlayStoreUpdateAnswer } | { error: s
 
 const displayVersion = (host: NativeAboutHost) => resolveMobileAnalyticsVersion(host.app.version, host.app.releaseVersion);
 
-/** The heartbeat's build config and device on [host] (the Data screen's opt-out sends with them too). */
+
 export function nativeAboutHeartbeat(host: NativeAboutHost): { config: MobileAnalyticsHeartbeatConfig; device: MobileHeartbeatDevice; available: boolean } {
     const config = {
         analyticsHeartbeatUrl: host.app.analyticsHeartbeatUrl,
@@ -174,7 +147,7 @@ export function createAboutMethods(deps: Deps) {
     const readSource = (value: unknown): AndroidInstallerSource | null => (INSTALLER_SOURCES.has(value as string) ? value as AndroidInstallerSource : null);
 
     return {
-        /** How the app was installed (see the module doc); a FOSS build is a sideload, as RN's is. */
+
         getAboutInstallerSource(input: { referrer: string | null; installerPackageName: string | null }): NativeHostResult<{ source: AndroidInstallerSource }> {
             const host = deps.host();
             if (!host) return unavailable();
@@ -184,11 +157,11 @@ export function createAboutMethods(deps: Deps) {
             }
             if (host.app.isFossBuild) return { ok: true, value: { source: 'sideload' } };
             const source = resolveAndroidInstallerSource(input.referrer, input.installerPackageName);
-            // RN's rejected referrer read is 'unknown', unless Play's installer already says Play.
+
             return { ok: true, value: { source: input.referrer === null && source !== 'play-store' ? 'unknown' : source } };
         },
 
-        /** Whether an update check in `mode` would ask the channel now: the host asks Google Play only then. */
+
         async isAboutUpdateCheckDue(input: { mode: 'silent' | 'manual' }): Promise<NativeHostResult<{ due: boolean }>> {
             const host = deps.host();
             if (!host) return unavailable();
@@ -198,12 +171,12 @@ export function createAboutMethods(deps: Deps) {
             try {
                 return { ok: true, value: { due: shouldCheckForAppUpdate(await host.storage.getItem(UPDATE_BADGE_LAST_CHECK_KEY), Date.now()) } };
             } catch {
-                // The host then asks no Play, and runAboutUpdateCheck refuses to check without it.
+
                 return fail('ACTION_FAILED', 'The last update check could not be read');
             }
         },
 
-        /** Settings › About for `installerSource` (see the module doc). */
+
         getAboutSettings(input: { installerSource: AndroidInstallerSource }): NativeHostResult<NativeAboutSettings> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -236,10 +209,7 @@ export function createAboutMethods(deps: Deps) {
             };
         },
 
-        /**
-         * RN's update check: `silent` when About opens (at most once a day; within the day it answers the stored dot), `manual`
-         * behind Check for updates. The answer's `badge` is the dot to show (null: unchanged), `notices` RN's alert or toast.
-         */
+
         async runAboutUpdateCheck(input: {
             mode: 'silent' | 'manual';
             installerSource: AndroidInstallerSource;
@@ -255,9 +225,8 @@ export function createAboutMethods(deps: Deps) {
             if (!source || play === undefined || (input.mode !== 'silent' && input.mode !== 'manual') || typeof input.marketAvailable !== 'boolean') {
                 return fail('INVALID_INPUT', 'A mode, an installer source, the Play answer (or null) and whether a market link opens are required');
             }
-            // Play was not asked on a Play (or unknown) install: the host's preflight said not due, or failed. A check that would
-            // ask the channel now must not run, or it would fall back to GitHub and store a GitHub answer as Play's dot; within the
-            // day the silent check still answers the stored dot.
+
+
             if (play === null && !host.app.isFossBuild && host.app.platform === 'android' && source !== 'sideload') {
                 const due = input.mode === 'manual' || await host.storage.getItem(UPDATE_BADGE_LAST_CHECK_KEY)
                     .then((raw) => shouldCheckForAppUpdate(raw, Date.now()), () => true);
@@ -265,7 +234,7 @@ export function createAboutMethods(deps: Deps) {
                     try {
                         host.logInfo('Native About update check', { releaseCheck: 'v1.3.5/native-about-update-check', mode: input.mode, source,
                             play: 'not-asked', badge: 'unchanged', notice: 'none' });
-                    } catch { /* a diagnostic line must never fail its caller */ }
+                    } catch {                                                    }
                     return { ok: true, value: { badge: null, notices: [] } };
                 }
             }
@@ -288,7 +257,7 @@ export function createAboutMethods(deps: Deps) {
                     return play.value;
                 },
                 canOpenURL: async (url) => url.startsWith('market://') && input.marketAvailable,
-                // Opening is the host's (an alert button's url).
+
                 openURL: async () => undefined,
                 onUpdateBadgeChange: (next) => { badge = next; },
                 showToast: (toast) => { notices.push({ kind: 'toast', ...toast }); },
@@ -309,14 +278,11 @@ export function createAboutMethods(deps: Deps) {
                     badge: badge === null ? 'unchanged' : String(badge),
                     notice: notices[0]?.kind ?? 'none',
                 });
-            } catch { /* a diagnostic line must never fail its caller */ }
+            } catch {                                                    }
             return { ok: true, value: { badge, notices } };
         },
 
-        /**
-         * The modal's state for the draft as typed: whether Send is on, the error line under the fields, and the message field's
-         * limit (less a bug's place, which leads the message).
-         */
+
         checkAboutFeedback(input: { message: string; email: string; sending: boolean; error: string | null; category: string; location: string }):
             NativeHostResult<{ canSubmit: boolean; visibleError: string | null; messageMaxLength: number }> {
             const ready = deps.readiness();
@@ -334,11 +300,7 @@ export function createAboutMethods(deps: Deps) {
             return { ok: true, value: { canSubmit, visibleError, messageMaxLength } };
         },
 
-        /**
-         * Send: RN's refusal for a blank message or an invalid email (`refused`, the modal's error line), else the feedback to the
-         * build's endpoint with the app's metadata and, for a bug that asked, the recent diagnostics. A failed send answers
-         * `failed` (RN's line; the draft stays). Never journaled, never logged.
-         */
+
         async submitAboutFeedback(input: {
             draft: { category: string; message: string; email: string; location: string; includeDiagnostics: boolean };
             installerSource: AndroidInstallerSource;
@@ -371,16 +333,16 @@ export function createAboutMethods(deps: Deps) {
                     diagnosticsLogs,
                 }), host.fetcher as typeof fetch);
             } catch (error) {
-                // Only the failure's code: an error text could carry the endpoint.
+
                 const code = error instanceof Error && /^feedback_[a-z_]+\d*$/.test(error.message) ? error.message : 'request_failed';
-                try { host.logInfo('Native About feedback', { releaseCheck: 'v1.3.5/native-about-feedback', outcome: code, diagnostics }); } catch { /* best effort */ }
+                try { host.logInfo('Native About feedback', { releaseCheck: 'v1.3.5/native-about-feedback', outcome: code, diagnostics }); } catch {                   }
                 return { ok: true, value: { sent: false, refused: null, failed: tr('settings.feedbackFailed') } };
             }
-            try { host.logInfo('Native About feedback', { releaseCheck: 'v1.3.5/native-about-feedback', outcome: 'sent', diagnostics }); } catch { /* best effort */ }
+            try { host.logInfo('Native About feedback', { releaseCheck: 'v1.3.5/native-about-feedback', outcome: 'sent', diagnostics }); } catch {                   }
             return { ok: true, value: { sent: true, refused: null, failed: null } };
         },
 
-        /** The day's heartbeat after the boot, as RN's startup sends it; whether one went. Failures stay silent, as on RN. */
+
         async sendAboutHeartbeat(): Promise<NativeHostResult<{ sent: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -392,19 +354,15 @@ export function createAboutMethods(deps: Deps) {
             try {
                 sent = await sendMobileDailyHeartbeat(config, useTaskStore.getState().settings, nativeAboutHeartbeat(host).device);
             } catch {
-                // Keep analytics heartbeat failures silent, as RN's startup does.
+
             }
             if (sent) {
-                try { host.logInfo('Native analytics heartbeat sent', { releaseCheck: 'v1.3.5/native-analytics-heartbeat', channel: config.analyticsHeartbeatChannel || 'fallback' }); } catch { /* best effort */ }
+                try { host.logInfo('Native analytics heartbeat sent', { releaseCheck: 'v1.3.5/native-analytics-heartbeat', channel: config.analyticsHeartbeatChannel || 'fallback' }); } catch {                   }
             }
             return { ok: true, value: { sent } };
         },
 
-        /**
-         * After a finished Weekly Review: whether to show the store's review flow now (core's gate; the attempt is stored first).
-         * `storeReviewAvailable` is whether the store has one (RN's StoreReview.hasAction: Google Play installed). A FOSS build
-         * never asks.
-         */
+
         async attemptAboutStoreReview(input: { storeReviewAvailable: boolean }): Promise<NativeHostResult<{ request: boolean }>> {
             const host = deps.host();
             if (!host) return unavailable();
@@ -417,7 +375,7 @@ export function createAboutMethods(deps: Deps) {
                 hasNativeReviewAction: async () => input.storeReviewAvailable,
                 nowMs: Date.now(),
             });
-            try { host.logInfo('Native store review prompt', { releaseCheck: 'v1.3.5/native-store-review', request: String(request) }); } catch { /* best effort */ }
+            try { host.logInfo('Native store review prompt', { releaseCheck: 'v1.3.5/native-store-review', request: String(request) }); } catch {                   }
             return { ok: true, value: { request } };
         },
     };

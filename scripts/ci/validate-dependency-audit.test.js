@@ -304,11 +304,7 @@ const buildToolImportNames = [
   "deepmerge", "@expo/config", "expo/config",
 ];
 
-// The deepmerge exception (GHSA-gcqx-w48m-w2h4) holds only while deepmerge stays a build-time dependency: @expo/config is its
-// only consumer, and the packages that ship in the app reach @expo/config only from their build-time entry points (expo's
-// config/ and scripts/, expo-constants' scripts/, which prebuild and the native build phases run). A new consumer, a new
-// runtime import, or a deepmerge newer than the excepted version (a likely fix) fails here; the workflow also checks npm's
-// latest release.
+
 const EXPO_CONFIG_BUILD_TOOLS = ["@expo/cli", "@expo/metro-config", "@expo/prebuild-config", "eas-cli"];
 const EXPO_CONFIG_RUNTIME_PACKAGES = ["expo", "expo-constants", "expo-manifests"];
 test("deepmerge stays a build-time dependency of @expo/config only, at the excepted version", () => {
@@ -379,7 +375,7 @@ test("runtime exposure guard catches static, side-effect, dynamic, and template-
 
 test("shipped runtime sources never import the excepted Node build-tool chains", () => {
   const files = (path) => readdirSync(path, {withFileTypes: true}).flatMap((entry) => {
-    // build/.build/Pods hold Gradle, SwiftPM, and CocoaPods output under the native module dirs, never shipped JS source.
+
     if (["node_modules", "__tests__", ".expo", "dist", "build", ".build", "Pods"].includes(entry.name)) return [];
     const child = join(path, entry.name);
     return entry.isDirectory() ? files(child) : /\.[cm]?[jt]sx?$/.test(entry.name) && !/\.(test|spec)\./.test(entry.name) ? [child] : [];
@@ -390,7 +386,7 @@ test("shipped runtime sources never import the excepted Node build-tool chains",
     "packages/core/src", "apps/cloud/src", "apps/mcp-server/src",
   ];
   const sources = [...roots.flatMap(files), "apps/mobile/index.js", "apps/mobile/polyfills.js"];
-  // Parsing all ~1,300 files takes over 20 s on a loaded machine; a file that never names a chain cannot import it.
+
   const imports = sources.flatMap((path) => {
     const source = readFileSync(path, "utf8");
     if (!buildToolImportNames.some((name) => source.includes(name))) return [];

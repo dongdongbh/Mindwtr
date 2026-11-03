@@ -4,7 +4,7 @@ import java.security.MessageDigest
 
 internal data class CaptureIntentExtras(val text: String, val token: String)
 
-/** Keeps Bundle unparcelling failures inside the exported receiver boundary. */
+
 internal object CaptureIntentExtrasReader {
   fun read(getStringExtra: (String) -> String?): CaptureIntentExtras? {
     return try {
@@ -12,13 +12,13 @@ internal object CaptureIntentExtrasReader {
       val token = getStringExtra(CaptureIntentProcessor.EXTRA_TOKEN) ?: return null
       CaptureIntentExtras(text, token)
     } catch (_: RuntimeException) {
-      // Includes BadParcelableException and type-confused Bundle values.
+
       null
     }
   }
 }
 
-/** Validates the exported receiver's complete untrusted-input boundary. */
+
 object CaptureIntentProcessor {
   const val ACTION = "tech.dongdongbh.mindwtr.action.CAPTURE"
   const val EXTRA_TEXT = "text"

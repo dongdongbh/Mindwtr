@@ -59,7 +59,7 @@ describe('createSomedaySection', () => {
     });
 
     it('keeps every stored entry as it is, in stored order, including ones this build cannot show', async () => {
-        // A newer app's entry this build cannot show.
+
         const folder = { kind: 'folder', children: ['books'] } as unknown as ViewSectionDefinition;
         const books = { id: 'books', title: 'Books to read', order: 1 };
         const films = { id: 'films', title: 'Films', order: 0 };
@@ -157,7 +157,7 @@ describe('createSomedaySection', () => {
         expect(persistedSections.current).toEqual([expect.objectContaining({ id: optimisticId, title: 'Books to read' })]);
         expect(useUiStore.getState().listOptions.somedayGroupBy).toBe('viewSection');
 
-        // A close/reload reads the committed settings instead of the optimistic store.
+
         useTaskStore.setState({ settings: { gtd: { viewSections: { someday: persistedSections.current } } } });
         expect(useTaskStore.getState().settings?.gtd?.viewSections?.someday?.[0]?.id).toBe(optimisticId);
     });

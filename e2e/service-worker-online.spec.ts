@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-// A separate origin exercises the shipped workers, independent of Vite's dev mode.
+
 const pwaWorker = readFileSync('apps/desktop/public/sw.js', 'utf8');
 const onlineWorker = readFileSync('docker/app/sw-online.js', 'utf8');
 let server: Server;
@@ -74,7 +74,7 @@ test('online-only replaces an installed worker without reloading or deleting loc
     await context.setOffline(false);
     await page.locator('#draft').fill('unsaved draft');
     onlineOnly = true;
-    // Updating a public script also works while page authentication is denied.
+
     denied = true;
     await page.evaluate(async () => {
         const changed = new Promise<void>(resolve => navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true }));
@@ -129,7 +129,7 @@ test('a restarted profile keeps local work and recovers with the replacement wor
         await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
         await context.close();
 
-        // No credentials after restart; a headless browser cannot show a login dialog.
+
         context = await browserType.launchPersistentContext(directory, { headless: true });
         page = context.pages()[0];
         expect((await page.goto(origin))?.status()).toBe(401);

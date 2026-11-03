@@ -13,7 +13,7 @@ export function normalizePrefixedToken(value: string, prefix: '@' | '#'): string
 
 export type ContextOrTagMatchMode = 'all' | 'any';
 
-/** Match selected context and tag tokens against either field, including child tokens. */
+
 export function taskMatchesContextOrTagSelection(
     task: Task,
     selectedTokens: readonly string[],

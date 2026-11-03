@@ -27,7 +27,7 @@ const task = (id: string, overrides: Partial<Task> = {}): Task => ({
     ...TASK_SYNC_SCHEMA_FIXTURE, id, title: id, createdAt: now, updatedAt: now, ...overrides,
 });
 
-// These mutations model a saved sync/other-writer change, rather than a UI-only projection.
+
 let updateSavedData: (() => void) | undefined;
 const setSavedState: typeof useTaskStore.setState = (...args) => {
     useTaskStore.setState(...args); updateSavedData?.();
@@ -184,7 +184,7 @@ describe('prepared native Area create', () => {
         const independentlyDeleted = project('other-deletion', { areaId: old.id, areaTitle: 'Work',
             deletedAt: '2026-09-26T12:00:00.000Z', rev: 7 });
         const restoredSection = section('planning', restoredProject.id, { deletedAt, rev: 3 });
-        // Not purged: the schema fixture's purgedAt (2026-07-14) would let the tombstone purge drop them on load once 90 days pass.
+
         const direct = task('direct', { areaId: old.id, projectId: undefined, sectionId: undefined, deletedAt, purgedAt: undefined, rev: 5 });
         const linked = task('project-task', { projectId: restoredProject.id, sectionId: restoredSection.id,
             deletedAt, purgedAt: undefined, rev: 6 });

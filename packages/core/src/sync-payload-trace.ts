@@ -1,7 +1,6 @@
-// Formatters for the optional `tracePayload` sync port (sync-run-ports.ts).
-// Shared by desktop and mobile so a trace read from either platform's log means
-// the same thing. Every string here is ids, field names, counts and
-// fingerprints — never task content (#854).
+
+
+
 import {
     computeStableValueFingerprint,
     sanitizeAppDataForRemote,
@@ -10,8 +9,7 @@ import {
 import type { AppData, AppSettings } from './types';
 import type { SyncPayloadTraceEvent } from './sync-run-ports';
 
-/** Payload tracing rides the diagnostics-logging switch on both platforms:
- *  it is verbose and only useful while a user is capturing a sync log. */
+
 export const isSyncPayloadTraceEnabled = (settings: AppSettings | undefined): boolean => (
     settings?.diagnostics?.loggingEnabled === true
 );
@@ -65,30 +63,10 @@ export const buildSyncPayloadSurfaceTraceExtra = (
     prefix,
 );
 
-/**
- * #766: each of `fingerprint` and the six surface signatures stringifies and
- * hashes the whole sanitized document, and at 7k tasks the tasks surface alone
- * is ~98% of it. One trace cost ~3.4s on the reporter's device and a sync cycle
- * emits seven of them — about a third of the cycle, spent only while a user is
- * capturing a log, which is exactly when the app already feels slow.
- *
- * So: sanitize once per document instead of twice, and memoize the derived
- * strings on the document's identity, since a cycle re-traces the same object
- * several times (write-remote/remote-write-completed, core-result/post-attachment).
- * Keyed on identity, which is sound because synced documents and entities are
- * replaced, never mutated in place (sync-signatures.ts carries the test teeth for
- * that invariant). Only strings are retained — never the sanitized copy, which is
- * document-sized and would put this device back under memory pressure.
- */
+
 const payloadTraceSignatureCache = new WeakMap<AppData, Record<string, string>>();
 
-/** Past this many records the whole-document `fingerprint` stops being worth its
- *  cost. It hashes ~98% of the same bytes as `tasksSig`, and the six surface
- *  signatures together identify a document more precisely than it does, so above
- *  the threshold we drop it and keep them. #766's reporter confirmed the trace
- *  was itself what made the app feel slow while they captured a log; a diagnostic
- *  must not be the thing it is measuring. Ordinary libraries are far below this
- *  and keep the full trace. */
+
 const SYNC_TRACE_FULL_FINGERPRINT_MAX_RECORDS = 2000;
 
 const countTraceRecords = (data: AppData): number => (
@@ -101,8 +79,8 @@ const getPayloadTraceSignatures = (data: AppData): Record<string, string> => {
     if (cached) return cached;
     const sanitized = sanitizeAppDataForRemote(data);
     const surfaces = nameSurfaceSignatures(buildSurfaceSignatures(sanitized), '');
-    // computeStableValueFingerprint of the sanitized document IS
-    // computeSyncPayloadFingerprint(data) — same value, one less sanitize pass.
+
+
     const signatures = countTraceRecords(data) > SYNC_TRACE_FULL_FINGERPRINT_MAX_RECORDS
         ? { fingerprintSkipped: 'large-document', ...surfaces }
         : { fingerprint: computeStableValueFingerprint(sanitized), ...surfaces };
@@ -199,9 +177,8 @@ export const buildCollectionDiffTraceSample = (left: unknown, right: unknown): s
 export const buildSyncPayloadDiffTraceExtra = (currentData: AppData, syncedData: AppData): Record<string, string> => {
     const current = sanitizeAppDataForRemote(currentData);
     const synced = sanitizeAppDataForRemote(syncedData);
-    // Same #766 economy: the signatures below already answer "did this surface
-    // change", so compare those instead of stringifying every surface a second
-    // time (both sides were already sanitized here, too).
+
+
     const currentSignatures = buildSurfaceSignatures(current);
     const syncedSignatures = buildSurfaceSignatures(synced);
     const changedSurfaces = SYNC_TRACE_SURFACES.filter(

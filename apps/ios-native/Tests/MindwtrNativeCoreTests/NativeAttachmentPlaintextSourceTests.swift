@@ -4,7 +4,7 @@ import Darwin
 import CryptoKit
 @testable import MindwtrNativeCore
 
-/// Native Files/Jobs evidence only: no selected lease, shared producer or HTTP.
+
 final class NativeAttachmentPlaintextSourceTests: XCTestCase {
     private var root: URL!
     private var files: NativeAttachmentFiles!
@@ -51,7 +51,7 @@ final class NativeAttachmentPlaintextSourceTests: XCTestCase {
         try bytes.write(to: url)
         return retained
     }
-    // Same deterministic metadata-only fixture used by the accepted provider test.
+
     private func changeOnlyCtime(_ url: URL) throws {
         let fd = Darwin.open(url.path, O_RDWR | O_NOFOLLOW_ANY | O_CLOEXEC)
         guard fd >= 0 else { throw FixtureFault.refused }
@@ -228,7 +228,7 @@ final class NativeAttachmentPlaintextSourceTests: XCTestCase {
         let selected = try NativeAttachmentFileJobs(libraryRoot: root); jobs = selected
         let bytes = Data("live cleanup".utf8), token = NativeAttachmentCancellation()
         let result = try selected.createPlaintextDownloadSource(bytes: bytes, cancellation: token)
-        token.cancel() // Successful creation knowledge must survive later cancellation.
+        token.cancel()
         let url = try XCTUnwrap(URL(string: result.source.sourceURI)), before = try identity(url)
         selected.drain()
         XCTAssertThrowsError(try selected.retireProviderSource(result.receipt, requireOwner: { throw FixtureFault.refused }))
@@ -250,7 +250,7 @@ final class NativeAttachmentPlaintextSourceTests: XCTestCase {
             let temporary = try NativeAttachmentFileJobs(libraryRoot: root)
             let result = try temporary.createPlaintextDownloadSource(bytes: bytes, cancellation: .init())
             temporary.shutdown()
-            return result.source // Creation receipt intentionally does not survive this scope.
+            return result.source
         }()
         let url = try XCTUnwrap(URL(string: descriptor.sourceURI)), before = try identity(url)
         let cold = try NativeAttachmentFileJobs(libraryRoot: root); jobs = cold

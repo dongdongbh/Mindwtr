@@ -15,8 +15,8 @@ final class SQLiteBridge {
             close()
             throw HostFailure("Cannot open native SQLite database")
         }
-        // A failed prewrite check must not checkpoint or delete the original WAL
-        // during last-connection teardown. Apply and verify before the first read.
+
+
         guard mindwtr_disable_close_checkpoint(database) == SQLITE_OK else {
             close()
             throw HostFailure("Cannot disable SQLite close checkpoint")
@@ -30,7 +30,7 @@ final class SQLiteBridge {
     }
 
     private func failure(_ operation: String) -> HostFailure {
-        // SQLite error text may contain stored data or paths; expose only its code.
+
         HostFailure("SQLite \(operation) failed (\(sqlite3_extended_errcode(database)))")
     }
 
@@ -46,9 +46,8 @@ final class SQLiteBridge {
     }
 
     private func makeCheckpointStandalone(_ connection: OpaquePointer?) throws {
-        // Backup copies the source's WAL header. Only this new destination must
-        // become a standalone file before rename; otherwise a later read-only
-        // open can fail without its WAL sidecars.
+
+
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(connection, "PRAGMA journal_mode = DELETE", -1, &statement, nil) == SQLITE_OK else {
             throw HostFailure("Cannot finalize prewrite recovery checkpoint")
@@ -59,8 +58,7 @@ final class SQLiteBridge {
               sqlite3_step(statement) == SQLITE_DONE else { throw HostFailure("Cannot finalize prewrite recovery checkpoint") }
     }
 
-    /// The backup API includes committed WAL pages in one consistent snapshot.
-    /// Nothing from core executes until the original snapshot is durably promoted.
+
     func prepareRecovery(at url: URL) throws {
         #if DEBUG
         try faults?.checkpoint?()
@@ -119,7 +117,7 @@ final class SQLiteBridge {
     }
 
     #if DEBUG
-    /// Fixture evidence only: copy committed pages; never change either connection's PRAGMAs.
+
     func captureAISummaryEvidence(at url: URL, maximumBytes: Int = 64 * 1024 * 1024) throws {
         guard let database, sqlite3_get_autocommit(database) != 0, maximumBytes > 0 else {
             throw HostFailure("AI summary evidence is unavailable")
@@ -196,7 +194,7 @@ final class SQLiteBridge {
                                             platform: platform, lastSyncedAt: stamp)
     }
 
-    /// The push owner persists its acknowledging effect before this call, then clears it after success.
+
     func compareAndSetCalendarPushMapping(taskID: String, expected: NativeCalendarPushMapping?, next: NativeCalendarPushMapping?) throws {
         guard NativeCalendarWriteValidation.id(taskID),
               expected.map({ NativeCalendarWriteValidation.equalID($0.taskId, taskID) }) ?? true,
@@ -209,7 +207,7 @@ final class SQLiteBridge {
         do {
             _ = try execute("BEGIN IMMEDIATE")
             let current = try readCalendarPushMapping(taskID: taskID)
-            // A committed mapping with a lost reply is already acknowledged; never write it again.
+
             if current != next {
                 guard current == expected else { throw HostFailure("Calendar mapping changed") }
                 if let next {
@@ -239,8 +237,8 @@ final class SQLiteBridge {
             throw HostFailure("SQLite parameters must be an array")
         }
         if readOnly {
-            // SQLite also calls some connection-changing PRAGMAs read-only, and
-            // some PRAGMAs act at prepare time. Admit only the known read shapes.
+
+
             let query = sql.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             guard query.hasPrefix("SELECT ") || query == "PRAGMA DATA_VERSION"
                     || query == "PRAGMA TABLE_INFO(NATIVE_POMODORO_SESSION)" else {
@@ -284,8 +282,8 @@ final class SQLiteBridge {
                 case SQLITE_TEXT:
                     let count = Int(sqlite3_column_bytes(statement, column))
                     let data = Data(bytes: sqlite3_column_text(statement, column)!, count: count)
-                    // Foundation's Data-to-String initializer discards a leading UTF-8 BOM.
-                    // Decode without that normalization and reject replacement decoding.
+
+
                     let text = String(decoding: data, as: UTF8.self)
                     guard text.utf8.elementsEqual(data) else { throw HostFailure("Invalid SQLite text") }
                     if !loggedLeadingBOM && data.starts(with: [0xEF, 0xBB, 0xBF]) {
