@@ -337,14 +337,12 @@ try {
 
 
     {
-        const action = await device.revealAction(await screen(), first);
-        requireAppFront();
-        const [l, t, r, b] = box(action);
-        sh(`input swipe ${Math.round((l + r) / 2)} ${Math.round((t + b) / 2)} ${Math.round((l + r) / 2)} ${Math.round((t + b) / 2)} 900`);
+        const action = await device.revealAction(await screen(), first, 'organize');
+        await tap(action);
         await waitFor('the status menu', (current) => current.some((node) => node.text === CHANGE_STATUS), 10_000);
         sh('input keyevent KEYCODE_BACK');
         await waitFor('the status menu to close', (current) => !current.some((node) => node.text === CHANGE_STATUS), 10_000);
-        expectStored(first, { status: 'next', rev: due.rev }, '(#1275) long-press on the revealed action opens the status menu and stores nothing');
+        expectStored(first, { status: 'next', rev: due.rev }, '(#1464) the tray\'s Organize opens the status menu and stores nothing');
     }
 
 

@@ -1,6 +1,22 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
+import android.os.Build
+import android.view.HapticFeedbackConstants
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
+import kotlin.math.sign
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -89,21 +105,32 @@ fun TaskRowItem(
     val c = theme.colors
     val meta = task.meta
 
-    val target = meta.swipe.target
-    val swipeLabel = meta.swipe.label
     val canComplete = writable && !busy &&
         (failedAction == null || failedAction == completeAction(task.id, task.taskRevision))
     val canEdit = writable && !busy && failedAction == null
-
-
-    val canMove = writable && !busy && (failedAction == null || failedAction == statusAction(task, target))
     val selecting = actions?.selecting == true
     val listed = actions?.status
-    val swipeOn = !selecting && if (target == "done") completable && canComplete else if (listed != null) canEdit else completable && canMove
-    val onSwipe = if (target == "done") { { complete(task.id, task.taskRevision, askNext = true) } } else listed?.let { status -> { status(target) } } ?: { changeStatus(task, target) }
-    val onDelete = actions?.delete?.takeIf { canEdit && !selecting }
-
-    val onLongDone = if (target == "done" && swipeOn && task.status != "done") { { completedAt.open(task, "complete") } } else null
+    val tray = SwipeTrays.of(task.status, task.isFocusedToday)?.takeIf { completable && !selecting }
+    val trayEnabled = { action: TrayAction ->
+        when (action.id) {
+            "done" -> canComplete
+            "restore", "next" -> if (listed != null) canEdit else writable && !busy && (failedAction == null || failedAction == statusAction(task, action.status.orEmpty()))
+            else -> canEdit
+        }
+    }
+    val runTray = { action: TrayAction ->
+        when (action.id) {
+            "done" -> complete(task.id, task.taskRevision, askNext = true)
+            "focus" -> swipeFocus(task)
+            "organize" -> showStatusMenu(task)
+            "dates" -> openDates(task)
+            "delete" -> actions?.delete?.invoke() ?: editorMenu.deleteRow(task.id, task.taskRevision)
+            else -> action.status?.let { target -> listed?.invoke(target) ?: changeStatus(task, target) }
+        }
+        Unit
+    }
+    val trayActions = tray?.let { it.swipeRight + it.swipeLeft }.orEmpty().filter(trayEnabled)
+    val onLongDone = if (task.status != "done" && canComplete) { { completedAt.open(task, "complete") } } else null
 
     val editCompleted = if (canEdit && !selecting && meta.parts.any { it.kind == "completed" }) { { completedAt.open(task, "edit") } } else null
     val onTap = { if (selecting) actions?.select?.invoke() else openEditor(task.id) }
@@ -116,7 +143,7 @@ fun TaskRowItem(
     val highlighted = (focusHighlight && showStar && task.isFocusedToday || listed == null && isHighlighted(task.id)) && !selecting
     val picked = selecting && actions?.selected == true
     Box(Modifier.padding(bottom = 6.dp)) {
-        SwipeAction(enabled = swipeOn, swipe = meta.swipe, shape = shape, onSwipe = onSwipe, onMenu = { showStatusMenu(task) }, onDelete = onDelete, onLongDone = onLongDone) {
+        SwipeTray(tray, enabled = trayActions.isNotEmpty(), shape = shape, isEnabled = trayEnabled, run = runTray, onLongDone = onLongDone) {
             Row(
                 Modifier.fillMaxWidth().clip(shape).background(c.bg).background(if (available && !selecting) theme.availableBg else c.taskItemBg)
                     .rnBorder(if (highlighted || selecting) 2.dp else 1.dp,
@@ -151,11 +178,9 @@ fun TaskRowItem(
                                     contentDescription = meta.accessibilityLabel
                                     if (selecting) selected = picked
 
-                                    val editDate = editCompleted?.let { edit -> CustomAccessibilityAction(t("task.editCompletedAt")) { edit(); true } }
-                                    if (swipeOn) customActions = listOf(CustomAccessibilityAction(swipeLabel) { onSwipe(); true },
-                                        CustomAccessibilityAction(t("taskStatus.changeStatus")) { showStatusMenu(task); true }) +
-                                        listOfNotNull(onDelete?.let { delete -> CustomAccessibilityAction(t("common.delete")) { delete(); true } }, editDate)
-                                    else if (editDate != null) customActions = listOf(editDate)
+                                    val all = trayActions.map { action -> CustomAccessibilityAction(action.label) { runTray(action); true } } +
+                                        listOfNotNull(editCompleted?.let { edit -> CustomAccessibilityAction(t("task.editCompletedAt")) { edit(); true } })
+                                    if (all.isNotEmpty()) customActions = all
                                 })
                         if (meta.parts.any { it.kind == "recurrence" }) {
                             Icon(Lucide.Repeat, null, tint = c.secondaryText,
@@ -286,6 +311,7 @@ private fun StatusControl(model: InboxViewModel, task: TaskRow, icon: Boolean, e
 @Composable
 fun StatusMenu(model: InboxViewModel) = with(model) {
     DestinationPicker(model)
+    DatesSheet(model)
     val task = statusMenu ?: return
     val theme = LocalTheme.current
     val c = theme.colors
@@ -371,6 +397,53 @@ private fun DestinationPicker(model: InboxViewModel) = with(model) {
 
 
 @Composable
+private fun DatesSheet(model: InboxViewModel) = with(model) {
+    val sheet = datesSheet ?: return
+    val theme = LocalTheme.current
+    val c = theme.colors
+    BackHandler { closeDates() }
+    Box(Modifier.fillMaxSize().background(theme.menuScrim).pointerInput(Unit) { detectTapGestures { closeDates() } }
+        .padding(20.dp), contentAlignment = Alignment.Center) {
+        Column(Modifier.widthIn(max = 340.dp).fillMaxWidth().shadow(5.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp))
+            .background(c.cardBg).pointerInput(Unit) { detectTapGestures { } }.padding(20.dp).testTag("dates-sheet")) {
+            Text(sheet.getString("title"), style = rnText(18, 600), color = c.text, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).semantics { heading() })
+            Column(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.6f).dp).verticalScroll(rememberScrollState())) {
+                for (part in sheet.menuObjects("fields")) {
+                    val field = part.getString("field")
+                    val label = part.getString("label")
+                    val value = part.getString("value")
+                    Text(label.replaceFirstChar { it.uppercase() }, style = rnText(14, 500), color = c.secondaryText, modifier = Modifier.padding(top = 12.dp))
+                    val pill = RoundedCornerShape(20.dp)
+                    Box(Modifier.padding(top = 6.dp).fillMaxWidth().heightIn(min = 48.dp).clip(pill).rnBorder(1.dp, c.border, pill)
+                        .clickable(role = Role.Button) { datesPicker = field }.semantics { contentDescription = "$label, $value" }
+                        .testTag("dates-$field").padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(value, style = rnText(14, 500), color = c.text, textAlign = TextAlign.Center)
+                    }
+                    val chips = part.menuObjects("quickDates").map { QuickDate(it.getString("label"), it.getBoolean("selected"), it.getString("value")) }
+                    QuickDateChips(label, chips, enabled = true, minHeight = 48) { datesPicker = null; editDates(field, it) }
+                    if (datesPicker == field) DayPickerDialog(part.getString("pickerStart"), { datesPicker = null }) { day -> pickDatesDay(field, day) }
+                }
+                sheet.menuText("issue")?.takeIf { it.isNotEmpty() }?.let { Text(it, style = rnText(14, 400), color = c.warning, modifier = Modifier.padding(top = 8.dp)) }
+            }
+            val canSave = writable && !busy && failedAction == null
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val pill = RoundedCornerShape(20.dp)
+                Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(pill).rnBorder(1.dp, c.border, pill).clickable(role = Role.Button) { closeDates() }
+                    .padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    Text(sheet.getString("cancel"), style = rnText(14, 500), color = c.text)
+                }
+                Box(Modifier.weight(1f).fade(if (canSave) 1f else 0.5f).heightIn(min = 48.dp).clip(pill).background(c.tint).rnBorder(1.dp, c.tint, pill)
+                    .clickable(enabled = canSave, role = Role.Button) { saveDates() }.testTag("dates-save")
+                    .padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    Text(sheet.getString("save"), style = rnText(14, 500), color = c.onTint)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun StatusMenuAction(label: String, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(20.dp)
@@ -417,46 +490,112 @@ fun ToastCard(model: InboxViewModel, modifier: Modifier) {
 }
 
 
+internal const val TRAY_FRICTION = 1.25f
+internal const val TRAY_OPEN_THRESHOLD_DP = 72f
+internal const val TRAY_DRAG_OFFSET_DP = 28f
+private const val TRAY_BUTTON_DP = 76
+private const val TRAY_GAP_DP = 6
+private const val TRAY_MARGIN_DP = 8
+internal const val TRAY_LABEL_MAX_FONT_SCALE = 1.2f
+private const val TRAY_DRAG_TOSS = 0.05f
+
+internal fun trayWidthDp(buttons: Int): Int = if (buttons == 0) 0 else buttons * TRAY_BUTTON_DP + (buttons - 1) * TRAY_GAP_DP + TRAY_MARGIN_DP
+
+internal fun settleTray(start: Float, offset: Float, velocity: Float, threshold: Float, left: Float, right: Float): Float {
+    val moved = offset - start + TRAY_DRAG_TOSS * velocity / TRAY_FRICTION
+    return when {
+        start > 0f -> if (moved > -threshold) left else 0f
+        start < 0f -> if (moved < threshold) -right else 0f
+        moved > threshold && left > 0f -> left
+        moved < -threshold && right > 0f -> -right
+        else -> 0f
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SwipeAction(enabled: Boolean, swipe: RowSwipe, shape: RoundedCornerShape, onSwipe: () -> Unit, onMenu: () -> Unit,
-                        onDelete: (() -> Unit)? = null, onLongDone: (() -> Unit)? = null, content: @Composable () -> Unit) {
-    val theme = LocalTheme.current
+private fun SwipeTray(tray: Tray?, enabled: Boolean, shape: RoundedCornerShape, isEnabled: (TrayAction) -> Boolean, run: (TrayAction) -> Unit,
+                      onLongDone: (() -> Unit)?, content: @Composable () -> Unit) {
     val density = LocalDensity.current
-    val open = with(density) { 98.dp.toPx() }
-    val left = if (onDelete != null) -open else 0f
+    val left = with(density) { trayWidthDp(tray?.swipeRight?.size ?: 0).dp.toPx() }
+    val right = with(density) { trayWidthDp(tray?.swipeLeft?.size ?: 0).dp.toPx() }
+    val threshold = with(density) { TRAY_OPEN_THRESHOLD_DP.dp.toPx() }
+    val dragOffset = with(density) { TRAY_DRAG_OFFSET_DP.dp.toPx() }
+    val labels = density.fontScale <= TRAY_LABEL_MAX_FONT_SCALE
     val offset = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
+    var start by remember { mutableFloatStateOf(0f) }
+    var fresh by remember { mutableStateOf(false) }
     val settle = { to: Float -> scope.launch { offset.animateTo(to) }; Unit }
-
+    val view = LocalView.current
+    val press = { action: TrayAction ->
+        settle(0f)
+        if (action.id in setOf("done", "restore", "next")) view.performHapticFeedback(if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY)
+        if (action.id == "delete" && Build.VERSION.SDK_INT >= 30) view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+        run(action)
+    }
     LaunchedEffect(enabled) { if (!enabled) offset.snapTo(0f) }
     Box {
-        if (offset.value < 0f && onDelete != null) {
-            val delete = t("task.aria.delete")
-            Column(Modifier.matchParentSize().padding(start = 8.dp).wrapContentWidth(Alignment.End).width(90.dp).clip(shape)
-                .background(theme.deleteAction).clickable(role = Role.Button) { settle(0f); onDelete() }.semantics { contentDescription = delete },
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Icon(Lucide.Trash2, null, tint = theme.onAction, modifier = Modifier.size(20.dp))
-                Text(t("common.delete"), style = rnText(12, 600), color = theme.onAction, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
-            }
+        if (tray != null && offset.value > 0f) TrayButtons(tray.swipeRight, Alignment.Start, shape, labels, isEnabled, press,
+            onLongDone?.let { long -> { settle(0f); view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); long() } })
+        if (tray != null && offset.value < 0f) TrayButtons(tray.swipeLeft, Alignment.End, shape, labels, isEnabled, press, null)
+        val system = LocalViewConfiguration.current
+        CompositionLocalProvider(LocalViewConfiguration provides TraySlop(system, dragOffset)) {
+            Box(Modifier.offset { IntOffset(offset.value.roundToInt(), 0) }.draggable(
+                state = rememberDraggableState { delta ->
+                    val moved = if (fresh) delta + sign(delta) * dragOffset else delta
+                    fresh = false
+                    scope.launch { offset.snapTo((offset.value + moved / TRAY_FRICTION).coerceIn(-right, left)) }
+                },
+                orientation = Orientation.Horizontal, enabled = enabled,
+                onDragStarted = { start = offset.targetValue; fresh = true },
+                onDragStopped = { velocity -> settle(settleTray(start, offset.value, velocity, threshold, left, right)) },
+            )) { CompositionLocalProvider(LocalViewConfiguration provides system) { content() } }
         }
-        if (offset.value > 0f) {
-            val spoken = t("task.aria.action").replace("{{action}}", swipe.label)
-            Column(Modifier.matchParentSize().padding(end = 8.dp).wrapContentWidth(Alignment.Start).width(90.dp).clip(shape)
-                .background(theme.status(swipe.target).text).testTag("swipe-action")
+    }
+}
 
-                .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = { settle(0f); (onLongDone ?: onMenu)() }) { settle(0f); onSwipe() }
-                .semantics { contentDescription = spoken },
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Icon(when (swipe.icon) { "restore" -> Lucide.RotateCcw; "done" -> Lucide.Circle; else -> Lucide.ArrowRight }, null,
-                    tint = theme.onAction, modifier = Modifier.size(20.dp))
-                Text(swipe.label, style = rnText(12, 600), color = theme.onAction, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
+private class TraySlop(private val system: ViewConfiguration, private val slop: Float) : ViewConfiguration by system {
+    override val touchSlop: Float get() = slop
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BoxScope.TrayButtons(actions: List<TrayAction>, side: Alignment.Horizontal, shape: RoundedCornerShape, labels: Boolean,
+                                 isEnabled: (TrayAction) -> Boolean, press: (TrayAction) -> Unit, onLongDone: (() -> Unit)?) {
+    val theme = LocalTheme.current
+    Row(Modifier.matchParentSize().wrapContentWidth(side), horizontalArrangement = Arrangement.spacedBy(TRAY_GAP_DP.dp)) {
+        for (action in actions) {
+            val enabled = isEnabled(action)
+            val long = onLongDone?.takeIf { action.id == "done" && enabled }
+            val spoken = if (action.id == "delete") t("task.aria.delete") else t("task.aria.action").replace("{{action}}", action.label)
+            val color = when (action.id) {
+                "done" -> theme.status("done").text
+                "focus" -> theme.star
+                "organize", "next" -> theme.status("next").text
+                "dates" -> theme.status("someday").text
+                "restore" -> theme.status("inbox").text
+                else -> theme.deleteAction
+            }
+            Column(Modifier.fade(if (enabled) 1f else 0.5f).width(TRAY_BUTTON_DP.dp).fillMaxHeight().heightIn(min = 48.dp).clip(shape).background(color)
+                .testTag("swipe-${action.id}")
+                .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = long,
+                    onLongClickLabel = long?.let { t("task.completeBackdateHintMobile") }) { press(action) }
+                .semantics { contentDescription = spoken }.padding(horizontal = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
+                val icon = when (action.id) {
+                    "done" -> Lucide.Circle
+                    "focus" -> if (action.focused) Lucide.StarFilled else Lucide.Star
+                    "organize" -> Lucide.FolderOpen
+                    "dates" -> Lucide.CalendarDays
+                    "restore" -> Lucide.RotateCcw
+                    "next" -> Lucide.ArrowRight
+                    else -> Lucide.Trash2
+                }
+                Icon(icon, null, tint = theme.onAction, modifier = Modifier.size(20.dp))
+                if (labels) Text(action.label, style = rnText(12, 600), color = theme.onAction, textAlign = TextAlign.Center, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis)
             }
         }
-        Box(Modifier.offset { IntOffset(offset.value.roundToInt(), 0) }.draggable(
-            state = rememberDraggableState { delta -> scope.launch { offset.snapTo((offset.value + delta).coerceIn(left, open)) } },
-            orientation = Orientation.Horizontal, enabled = enabled,
-            onDragStopped = { settle(if (offset.value > open / 2) open else if (offset.value < left / 2) left else 0f) },
-        )) { content() }
     }
 }

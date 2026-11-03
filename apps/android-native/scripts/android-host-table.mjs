@@ -99,6 +99,7 @@ export const ANDROID_HOST_METHODS = [
     'sessionRestoreWrite',
     'setAreaFilter',
     'strings',
+    'swipeTrays',
     'syncAppState',
     'syncNetwork',
     'syncStart',

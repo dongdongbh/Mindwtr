@@ -170,6 +170,8 @@ class EditorMenuModel(private val shell: InboxViewModel) {
 
     private fun save(editor: TaskEditor) = editorActionSave(editor)
 
+    fun deleteRow(taskId: String, taskRevision: String) = send(taskId, taskRevision, JSONObject().put("kind", "delete"))
+
     private fun send(taskId: String, taskRevision: String, kind: JSONObject) {
         val requestId = UUID.randomUUID().toString()
         val input = JSONObject(kind.toString()).put("requestId", requestId).put("taskId", taskId).put("taskRevision", taskRevision)
@@ -220,7 +222,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
                 shell.showToast(t("common.success"), t("task.convertToSectionCreated"), "success")
             }
             "delete" -> {
-                shell.closeEditor()
+                if (shell.editor?.id == taskId) shell.closeEditor()
                 shell.showToast(t("common.notice"), t("list.taskDeleted"), "info", t("common.undo"), 5200) {
                     send(taskId, revision, JSONObject().put("kind", "deleteUndo").put("deleteRequestId", input.getString("requestId")))
                 }

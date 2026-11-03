@@ -470,7 +470,7 @@ internal object ProcessCoreHost {
 
     private fun setLanguage(runtime: CoreHost, stored: String?): Unit = traced("boot:language") {
         runtime.language(stored ?: "", Locale.getDefault().toLanguageTag())
-        Labels.load(runtime.strings(LABEL_KEYS))
+        loadLabels(runtime)
     }
 
 

@@ -892,7 +892,7 @@ const shoot13a = async (prefix, rn) => {
     requireAppFront();
     sh(`input swipe ${Math.max(x1 + 10, EDGE_SAFE_X)} ${y} ${Math.max(x1 + 10, EDGE_SAFE_X) + 440} ${y} 400`);
     const doneAction = en['task.aria.action'].replace('{{action}}', en['status.done']);
-    const action = (current) => current.find((node) => (node['content-desc'] === doneAction || (node['resource-id'] ?? '').endsWith('swipe-action'))
+    const action = (current) => current.find((node) => (node['content-desc'] === doneAction || (node['resource-id'] ?? '').endsWith('swipe-done'))
         && box(node)[1] <= y && box(node)[3] >= y);
     await tap(action(await waitFor('the Done action', (current) => Boolean(action(current)), 8_000)));
     const marked = `${T.milk} marked Done`;

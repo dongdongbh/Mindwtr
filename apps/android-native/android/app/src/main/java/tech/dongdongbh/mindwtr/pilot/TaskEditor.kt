@@ -882,12 +882,12 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun QuickDateChips(fieldLabel: String, chips: List<QuickDate>, enabled: Boolean, choose: (String) -> Unit) {
+internal fun QuickDateChips(fieldLabel: String, chips: List<QuickDate>, enabled: Boolean, minHeight: Int = 34, choose: (String) -> Unit) {
     val c = LocalTheme.current.colors
     FlowRow(Modifier.padding(top = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (chip in chips) {
             val shape = RoundedCornerShape(999.dp)
-            Box(Modifier.weight(1f).widthIn(min = 92.dp).heightIn(min = 34.dp).clip(shape).background(if (chip.selected) c.tint else c.filterBg)
+            Box(Modifier.weight(1f).widthIn(min = 92.dp).heightIn(min = minHeight.dp).clip(shape).background(if (chip.selected) c.tint else c.filterBg)
                 .rnBorder(1.dp, if (chip.selected) c.tint else c.border, shape)
                 .semantics { contentDescription = "$fieldLabel: ${chip.label}" }
                 .selectable(selected = chip.selected, enabled = enabled, role = Role.Tab) { choose(chip.value) }

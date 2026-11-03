@@ -17,11 +17,20 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 ## Inbox
 
 - Reach: Tab bar › Inbox. The list header has Sort, Group, Filters, the Mind Sweep pill, and the "All areas" line.
-- Shortcuts: Swipe a row right to show its status button (Done, Next, or Restore). Long-press that button for the status menu. Pull down to sync. Link `mindwtr-native-dev:///inbox`.
-- Selectors: `task-row`, `swipe-action`, `read-retry`
+- Shortcuts: Swipe a row right for Done or Focus. Swipe left for Organize, Dates…, Delete. Pull down to sync. Link `mindwtr-native-dev:///inbox`.
+- Selectors: `task-row`, `swipe-done`, `read-retry`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/TaskRowView.kt`
 - Checks: `apps/android-native/scripts/check-toolbars-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/RowStatusControlTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ListViewStateTest.kt`
-- Notes: Every list shows 50 rows first, and **More** loads the next 50. A row has no Done button, as in RN: completion is the swipe action or the status menu.
+- Notes: Every list shows 50 rows first, and **More** loads the next 50. A row has no Done button, as in RN: completion is the swipe tray's Done or the status menu.
+
+## Task row swipe actions
+
+- Reach: Any task list row.
+- Shortcuts: Swipe right on an open task: Done, Focus (or Remove from focus). Long press Done in that tray to pick a past completion time. Swipe left: Organize, Dates…, Delete. A done task swipes right to Restore to Inbox. A reference task swipes right to Next. Tap the open row to shut the tray.
+- Selectors: `swipe-done`, `swipe-focus`, `dates-sheet`, `dates-startTime`, `dates-dueDate`, `dates-save`
+- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/TaskRowView.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt`, `packages/core/src/native-host-contract-task-swipe.ts`, `packages/core/src/task-row-swipe-actions.ts`
+- Checks: `apps/android-native/scripts/check-swipe-tray-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/SwipeTrayTest.kt`, `packages/core/src/native-host-contract-task-swipe.test.ts`
+- Notes: Core builds each tray, the same table RN reads. Each tray button's test tag is `swipe-<action id>` (done, focus, organize, dates, delete, restore, next). Organize opens the status and Move menu. Dates… opens the Task dates sheet; Save writes once. Swipes are off during bulk selection.
 
 ## Selection mode and Bulk organize
 
@@ -190,7 +199,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 ## Contexts
 
 - Reach: Menu › Contexts (or the quick-access tab when set to Contexts). Chips: All, No context, each context and tag, and an All/Any switch.
-- Shortcuts: Swipe a row right for its status action and left for Delete.
+- Shortcuts: Swipe a row right for Done or Focus, and left for Organize, Dates…, Delete.
 - Selectors: `contexts-list`, `list-search`, `token-picker-list`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ContextsScreen.kt`
 - Checks: `apps/android-native/scripts/check-review-device.mjs`, `apps/android-native/scripts/check-review-organize-device.mjs`
@@ -300,7 +309,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 - Reach: A widget's list link opens the list full screen. Back leaves it.
 - Shortcuts: Link `mindwtr-native-dev:///widget-list`.
-- Selectors: `swipe-action`
+- Selectors: `swipe-done`, `swipe-focus`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/WidgetListScreen.kt`
 - Checks: `apps/android-native/scripts/check-widget-list-device.mjs`
 - Notes: A saved filter that is gone shows "No results" with no rows.

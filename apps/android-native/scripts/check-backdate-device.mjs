@@ -115,7 +115,7 @@ const capture = async (text = title, shown = text) => {
 const completeOnFifteenth = async (name) => {
     const before = stored(name);
     const nodes = await device.reveal(name);
-    longPress(await device.revealAction(nodes, name));
+    await tap(await device.revealAction(nodes, name, 'organize'));
     const doneItem = (current) => hasText(current, en['taskStatus.changeStatus'])
         ? current.find((node) => node.text === en['status.done'] && node.class !== 'android.widget.EditText') : undefined;
     longPress(doneItem(await waitFor('the status menu', (current) => Boolean(doneItem(current)), 10_000)));

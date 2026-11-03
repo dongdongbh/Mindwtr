@@ -22,13 +22,13 @@ private const val PAGE = 50
 private const val WINDOW = 100
 
 
-val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "taskDestinationMove", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
+val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "taskDestinationMove", "taskDatesSave", "taskSwipeFocus", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
     "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "taskCompletedAt", "areaOrder", "areaColor", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 
 
 internal fun staleMoveLine(kind: String, message: String?): String? =
-    message?.takeIf { kind in setOf("taskDestinationMove", "somedayProjectMove") && it.startsWith("STALE_REVISION") }
+    message?.takeIf { kind in setOf("taskDestinationMove", "somedayProjectMove", "taskDatesSave", "taskSwipeFocus") && it.startsWith("STALE_REVISION") }
         ?.substringAfter(": ", "")?.ifEmpty { null }
 
 
@@ -1289,6 +1289,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
         "taskDestinationMove" -> JSONObject(action.title).put("requestId", action.id)
 
+        "taskDatesSave", "taskSwipeFocus" -> JSONObject(action.title).put("requestId", action.id)
         "generalSetting", "gtdSetting", "manageEditor", "manageDelete", "dataSetting", "syncPreference", "setAISetting", "calendarSetting" -> JSONObject(action.title).put("requestId", action.id)
 
         "notificationsSetting" -> JSONObject(action.title).put("requestId", action.id)
@@ -1380,6 +1381,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     private fun finish(action: FailedAction, reply: JSONObject) {
         when (action.kind) {
+            "taskSwipeFocus" -> reply.optString("blocked").takeIf { it.isNotEmpty() }?.let { shell.showToast(reply.getString("blockedTitle"), it) }
             "projectNextAction" -> shell.nextAction.done(reply)
             "somedayMove" -> {
                 val refused = reply.optJSONObject("refused")

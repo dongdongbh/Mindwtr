@@ -217,6 +217,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var destinationQuery by mutableStateOf(""); private set
     var destinationPicker by mutableStateOf<JSONObject?>(null); private set
 
+    var datesSheet by mutableStateOf<JSONObject?>(null); private set
+    var datesPicker by mutableStateOf<String?>(null)
+    private var datesFor: String? = null
     var toast by mutableStateOf<Toast?>(null); private set
 
     var projectDraft by mutableStateOf(saved.get<String>("projectDraft") ?: ""); private set
@@ -1266,6 +1269,47 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         }
     }
 
+
+    fun openDates(task: TaskRow) {
+        datesFor = task.id
+        datesSheet = null
+        datesPicker = null
+        readDates(JSONObject().put("taskId", task.id))
+    }
+
+    fun editDates(field: String, value: String) = datesSheet?.let { sheet ->
+        readDates(datesInput(sheet).put("draft", JSONObject(sheet.getJSONObject("draft").toString()).put(field, value)))
+    }
+
+    fun pickDatesDay(field: String, day: String) = datesSheet?.let { sheet ->
+        readDates(datesInput(sheet).put("pick", JSONObject().put("field", field).put("day", day)))
+    }
+
+    private fun datesInput(sheet: JSONObject) =
+        JSONObject().put("taskId", sheet.getString("taskId")).put("base", sheet.getJSONObject("base")).put("draft", sheet.getJSONObject("draft"))
+
+    private fun readDates(input: JSONObject) {
+        val taskId = input.getString("taskId")
+        background(listOf(Part.MenuDialog), { runtime -> runtime.menuRead("taskDates", input.toString()).getJSONObject("sheet") }) { sheet, _ ->
+            if (datesFor == taskId) datesSheet = sheet
+        }
+    }
+
+    fun closeDates() {
+        datesFor = null
+        datesSheet = null
+        datesPicker = null
+    }
+
+    fun saveDates() {
+        val sheet = datesSheet ?: return
+        closeDates()
+        if (sheet.getJSONObject("draft").toString() == sheet.getJSONObject("base").toString()) return
+        menu.command("taskDatesSave", JSONObject().put("taskId", sheet.getString("taskId")).put("base", sheet.getJSONObject("base"))
+            .put("draft", sheet.getJSONObject("draft")))
+    }
+
+    fun swipeFocus(task: TaskRow) = menu.command("taskSwipeFocus", JSONObject().put("taskId", task.id).put("taskRevision", task.taskRevision))
 
     fun moveToDestination(destination: JSONObject) {
         val task = destinationFor ?: return

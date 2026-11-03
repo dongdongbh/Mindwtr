@@ -769,6 +769,8 @@ class CoreHost(
     fun strings(keys: List<String>): JSONObject = callAsync("strings", JSONArray(keys).toString())
 
 
+    fun swipeTrays(): JSONObject = callAsync("swipeTrays")
+
     fun theme(stored: String): JSONObject = callAsync("theme", stored)
 
 

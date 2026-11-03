@@ -783,7 +783,6 @@ assert.match(model, /text\("revealLabel"\), getBoolean\("laterToday"\), optStrin
 assert.match(model, /fun completeAction\(id: String, taskRevision: String\) = FailedAction\("complete", id, patch = mapOf\("taskRevision" to taskRevision\)\)/);
 
 
-assert.match(rowUi, /val target = meta\.swipe\.target\s+val swipeLabel = meta\.swipe\.label/);
 assert.match(model, /meta\.getJSONObject\("swipe"\)\.let \{ RowSwipe\(it\.getString\("target"\), it\.getString\("label"\), it\.getString\("icon"\)\) \}/);
 
 const STATUS = '"(?:inbox|next|waiting|someday|reference|done)"';
@@ -791,14 +790,19 @@ for (const [name, text] of Object.entries({ rowUi, model, focusUi, projectsUi, a
     assert.doesNotMatch(code(text), new RegExp(`${STATUS}(?:\\s*,\\s*${STATUS})*\\s*->\\s*${STATUS}`), `${name}: no status-to-swipe map in Kotlin`);
 }
 assert.doesNotMatch(code(rowUi), /swipeTarget|archived\.restoreToInbox/);
-assert.match(rowUi, /when \(swipe\.icon\) \{ "restore" -> Lucide\.RotateCcw; "done" -> Lucide\.Circle; else -> Lucide\.ArrowRight \}/);
+assert.doesNotMatch(code(rowUi), /meta\.swipe/, 'the tray is core\'s, not the single meta.swipe action');
+assert.match(rowUi, /val tray = SwipeTrays\.of\(task\.status, task\.isFocusedToday\)\?\.takeIf \{ completable && !selecting \}/);
+assert.match(source('Labels.kt'), /fun loadLabels\(runtime: CoreHost\) \{\s+Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)\s+runCatching \{ SwipeTrays\.load\(runtime\.swipeTrays\(\)\) \}/);
+assert.match(rowUi, /"done" -> complete\(task\.id, task\.taskRevision, askNext = true\)\s+"focus" -> swipeFocus\(task\)\s+"organize" -> showStatusMenu\(task\)\s+"dates" -> openDates\(task\)\s+"delete" -> actions\?\.delete\?\.invoke\(\) \?: editorMenu\.deleteRow\(task\.id, task\.taskRevision\)\s+else -> action\.status\?\.let \{ target -> listed\?\.invoke\(target\) \?: changeStatus\(task, target\) \}/);
+assert.match(rowUi, /"done" -> canComplete\s+"restore", "next" -> if \(listed != null\) canEdit else writable && !busy && \(failedAction == null \|\| failedAction == statusAction\(task, action\.status\.orEmpty\(\)\)\)\s+else -> canEdit/);
+assert.match(rowUi, /val all = trayActions\.map \{ action -> CustomAccessibilityAction\(action\.label\) \{ runTray\(action\); true \} \}/);
+assert.match(rowUi, /\.combinedClickable\(enabled = enabled, role = Role\.Button, onLongClick = long,/);
+assert.match(rowUi, /val long = onLongDone\?\.takeIf \{ action\.id == "done" && enabled \}/);
+assert.match(rowUi, /onDragStopped = \{ velocity -> settle\(settleTray\(start, offset\.value, velocity, threshold, left, right\)\) \}/, 'a drag only opens or closes the row');
+assert.match(rowUi, /internal const val TRAY_FRICTION = 1\.25f\s+internal const val TRAY_OPEN_THRESHOLD_DP = 72f\s+internal const val TRAY_DRAG_OFFSET_DP = 28f/);
+assert.match(menuModel, /kind in setOf\("taskDestinationMove", "somedayProjectMove", "taskDatesSave", "taskSwipeFocus"\) && it\.startsWith\("STALE_REVISION"\)/);
 
 
-assert.match(rowUi, /val listed = actions\?\.status\s+val swipeOn = !selecting && if \(target == "done"\) completable && canComplete else if \(listed != null\) canEdit else completable && canMove/);
-assert.match(rowUi, /val canMove = writable && !busy && \(failedAction == null \|\| failedAction == statusAction\(task, target\)\)/);
-assert.match(rowUi, /val onSwipe = if \(target == "done"\) \{ \{ complete\(task\.id, task\.taskRevision, askNext = true\) \} \} else listed\?\.let \{ status -> \{ status\(target\) \} \} \?: \{ changeStatus\(task, target\) \}/);
-assert.match(rowUi, /SwipeAction\(enabled = swipeOn, swipe = meta\.swipe, shape = shape, onSwipe = onSwipe, onMenu = \{ showStatusMenu\(task\) \}, onDelete = onDelete, onLongDone = onLongDone\)/);
-assert.match(rowUi, /if \(swipeOn\) customActions = listOf\(CustomAccessibilityAction\(swipeLabel\) \{ onSwipe\(\); true \},\s*CustomAccessibilityAction\(t\("taskStatus\.changeStatus"\)\) \{ showStatusMenu\(task\); true \}\)/);
 
 assert.match(rowUi, /StatusMenuAction\(t\("task\.moveToProjectOrArea"\), idle\) \{ openDestination\(task\) \}/);
 
@@ -812,11 +816,7 @@ assert.match(source('MenuWidgets.kt'), /onLongClick = moveLabel\?\.let \{ \{ if 
 assert.match(source('SomedayScreen.kt'), /ParkedProject\(model, item\.json\.getJSONObject\("project"\), item\.json\.getString\("activateLabel"\), view\.getJSONObject\("text"\)\.getString\("moveToSection"\)\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');
 
-assert.match(rowUi, /\.combinedClickable\(enabled = enabled, role = Role\.Button, onLongClick = \{ settle\(0f\); \(onLongDone \?: onMenu\)\(\) \}\) \{ settle\(0f\); onSwipe\(\) \}/);
-assert.match(rowUi, /onDragStopped = \{ settle\(if \(offset\.value > open \/ 2\) open else if \(offset\.value < left \/ 2\) left else 0f\) \}/, 'a drag only opens or closes the row');
 
-assert.match(rowUi, /val left = if \(onDelete != null\) -open else 0f/);
-assert.match(rowUi, /val onDelete = actions\?\.delete\?\.takeIf \{ canEdit && !selecting \}/);
 assert.doesNotMatch(code(rowUi), /SwipeToDismissBox|combinedClickable\([^)]*\)[^\n]*openEditor/, 'no one-gesture swipe; the row\'s own long-press stays free');
 
 assert.match(model, /internal val UPDATE_REFUSALS = listOf\("STALE_REVISION", "INVALID_INPUT", "TASK_NOT_FOUND"\)/);
@@ -1376,7 +1376,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
 
         'runProjectNextAction',
 
-        'setTaskCompletedAt'];
+        'setTaskCompletedAt', 'setTaskSwipeFocus', 'saveTaskDates'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
@@ -1896,7 +1896,7 @@ assert.match(labelsKt, /operator fun get\(name: String\): String = strings\[name
 assert.match(labelsKt, /strings = LABEL_KEYS\.filter\(values::has\)\.associateWith\(values::getString\)/);
 assert.match(labelsKt, /if \(logged\.add\(name\)\) Log\.w\(/, 'a missing key is logged once');
 assert.equal(kotlinFiles.join('\n').match(/Labels\.load\(/g).length, 1);
-assert.match(owner, /runtime\.language\(stored \?: "", Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);
+assert.match(owner, /runtime\.language\(stored \?: "", Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+loadLabels\(runtime\)/);
 assert.match(owner, /runtime\.start\([^\n]*\)\s+if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
 
 
@@ -2964,7 +2964,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(model, /app\.getSharedPreferences\(DEVICE_PREFS, /);
     assert.match(coreHost, /private fun settle\(entry: WriteJournal\.Entry\?, result: JSONObject, replay: Boolean\): Boolean \{\s+result\.optJSONObject\("value"\)\?\.optJSONArray\("deviceWrites"\)\?\.let \{ devices\.store\(it, entry\?\.sequence, replay\) \}\s+return entry != null && checkNotNull\(journal\)\.settle\(entry, result\.error\(\), replay\)/);
     assert.equal(coreHost.match(/(?<!\.)\bsettle\((?:call\.)?entry, /g).length, 3, 'settle(): the first send (finish), the replay, and a backup commit\'s finish (backupFinish, pass D1a)');
-    assert.match(settingsModel, /runtime\.language\(prefs\.getString\(LANGUAGE_KEY, null\)\.orEmpty\(\), Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);
+    assert.match(settingsModel, /runtime\.language\(prefs\.getString\(LANGUAGE_KEY, null\)\.orEmpty\(\), Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+loadLabels\(runtime\)/);
     assert.match(model, /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\)\)\s+applyDeviceChoices\(runtime, prefs\)/, 'the device\'s own language and theme apply at boot, before any screen');
     for (const [kotlin, file, core] of [['LANGUAGE_KEY', 'i18n/i18n-constants.ts', 'LANGUAGE_STORAGE_KEY'], ['THEME_KEY', 'general-settings-model.ts', 'MOBILE_THEME_STORAGE_KEY'],
         ['MANAGE_SECTIONS_KEY', 'manage-settings-model.ts', 'MANAGE_OPEN_SECTIONS_STORAGE_KEY'], ['TASK_OPEN_MODE_KEY', 'gtd-settings-model.ts', 'MOBILE_TASK_OPEN_MODE_STORAGE_KEY']]) {
@@ -8743,7 +8743,7 @@ assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"
     assert.match(readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8'), /if \(contentAfter\.some\(\(reference, index\) => reference !== contentBefore\[index\]\)\) contentRevision \+= 1;/);
     assert.match(viewModelKt, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\);/);
 
-    assert.match(settingsKt, /if \(reply\.optString\("language"\) != Labels\.language\) Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);
+    assert.match(settingsKt, /if \(reply\.optString\("language"\) != Labels\.language\) loadLabels\(runtime\)/);
     assert.match(coreHost, /fun languageSaved\(stored: String, system: String\): JSONObject = callAsync\("languageSaved", stored, system\)/);
 }
 

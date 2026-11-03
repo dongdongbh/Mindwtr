@@ -66,7 +66,7 @@ private val MANAGE_LISTS = listOf("areas", "people", "contexts", "tags")
 fun applyDeviceChoices(runtime: CoreHost, prefs: SharedPreferences) {
     prefs.getString(LANGUAGE_KEY, null)?.let { stored ->
         runtime.language(stored, Locale.getDefault().toLanguageTag())
-        Labels.load(runtime.strings(LABEL_KEYS))
+        loadLabels(runtime)
     }
     prefs.getString(THEME_KEY, null)?.let { stored -> runCatching { ThemeChoice.load(runtime.theme(stored)) } }
 }
@@ -77,7 +77,7 @@ fun applySyncedChoices(runtime: CoreHost, prefs: SharedPreferences) {
         val before = prefs.getString(LANGUAGE_KEY, null)
         val reply = runtime.languageSaved(before.orEmpty(), Locale.getDefault().toLanguageTag())
         reply.optJSONArray("deviceWrites")?.takeIf { it.length() > 0 }?.let { deviceStore(prefs).store(it, null, replay = false) }
-        if (reply.optString("language") != Labels.language) Labels.load(runtime.strings(LABEL_KEYS))
+        if (reply.optString("language") != Labels.language) loadLabels(runtime)
     }.onFailure { Log.w(CoreHost.TAG, "Native Android synced language not applied ${failureForLog(it)}") }
     runCatching { ThemeChoice.load(runtime.theme(prefs.getString(THEME_KEY, null).orEmpty())) }
         .onFailure { Log.w(CoreHost.TAG, "Native Android synced theme not applied ${failureForLog(it)}") }
@@ -463,7 +463,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
         val keys = List(writes.length()) { writes.getJSONObject(it).getString("key") }
         if (LANGUAGE_KEY in keys) {
             runtime.language(prefs.getString(LANGUAGE_KEY, null).orEmpty(), Locale.getDefault().toLanguageTag())
-            Labels.load(runtime.strings(LABEL_KEYS))
+            loadLabels(runtime)
         }
         if (THEME_KEY in keys) runCatching { ThemeChoice.load(runtime.theme(prefs.getString(THEME_KEY, null).orEmpty())) }
 

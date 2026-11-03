@@ -524,16 +524,21 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_
     };
 
 
-    const revealAction = async (nodes, title) => {
+    const revealAction = async (nodes, title, id = 'done') => {
         const row = taskRow(nodes, title) ?? fail(`no row ${title} on screen`);
         requireAppFront();
-        const [x1, y1, , y2] = box(row);
+        const [x1, y1, x2, y2] = box(row);
         const y = Math.round((y1 + y2) / 2);
 
-        const from = Math.max(x1 + 10, EDGE_SAFE_X);
-        sh(`input swipe ${from} ${y} ${from + 440} ${y} 400`);
-        const beside = (current) => current.find((node) => (node['resource-id'] ?? '').endsWith('swipe-action') && box(node)[1] <= y && box(node)[3] >= y);
-        return beside(await waitFor(`the action button beside ${title}`, (current) => Boolean(beside(current)), 8_000));
+        if (['organize', 'dates', 'delete'].includes(id)) {
+            const from = Math.min(x2 - 10, x1 + x2 - EDGE_SAFE_X);
+            sh(`input swipe ${from} ${y} ${from - 440} ${y} 400`);
+        } else {
+            const from = Math.max(x1 + 10, EDGE_SAFE_X);
+            sh(`input swipe ${from} ${y} ${from + 440} ${y} 400`);
+        }
+        const beside = (current) => current.find((node) => (node['resource-id'] ?? '').endsWith(`swipe-${id}`) && box(node)[1] <= y && box(node)[3] >= y);
+        return beside(await waitFor(`the ${id} button beside ${title}`, (current) => Boolean(beside(current)), 8_000));
     };
 
     const swipeDone = async (nodes, title) => {

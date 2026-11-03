@@ -146,3 +146,30 @@ object Labels {
 
 
 fun t(name: String): String = Labels[name]
+
+data class TrayAction(val id: String, val label: String, val status: String?, val focused: Boolean)
+
+data class Tray(val swipeRight: List<TrayAction>, val swipeLeft: List<TrayAction>)
+
+object SwipeTrays {
+    private var trays by mutableStateOf<Map<String, Tray>>(emptyMap())
+
+    fun load(reply: JSONObject) { trays = parse(reply) }
+
+    internal fun parse(reply: JSONObject): Map<String, Tray> {
+        val all = reply.getJSONObject("trays")
+        fun side(tray: JSONObject, name: String) = tray.getJSONArray(name).let { list ->
+            List(list.length()) { list.getJSONObject(it) }.map { action ->
+                TrayAction(action.getString("id"), action.getString("label"), action.optString("status").ifEmpty { null }, action.optBoolean("focused"))
+            }
+        }
+        return all.keys().asSequence().associateWith { key -> all.getJSONObject(key).let { Tray(side(it, "swipeRight"), side(it, "swipeLeft")) } }
+    }
+
+    fun of(status: String, focused: Boolean): Tray? = trays[if (focused) "$status:focused" else status]
+}
+
+fun loadLabels(runtime: CoreHost) {
+    Labels.load(runtime.strings(LABEL_KEYS))
+    runCatching { SwipeTrays.load(runtime.swipeTrays()) }.onFailure { Log.w(CoreHost.TAG, "Native Android swipe trays not read ${failureForLog(it)}") }
+}

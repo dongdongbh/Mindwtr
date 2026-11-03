@@ -163,7 +163,7 @@ try {
 
         const from = Math.round((x1 + x2) / 2);
         sh(`input swipe ${from} ${y} ${Math.max(from - 440, 160)} ${y} 300`);
-        await waitFor('the action to close', (current) => !current.some((node) => (node['resource-id'] ?? '').endsWith('swipe-action')), 8_000);
+        await waitFor('the tray to close', (current) => !current.some((node) => /swipe-\w+$/.test(node['resource-id'] ?? '')), 8_000);
     }
     nodes = await tapExpecting(taskRows(await screen()).find((node) => node.text === first) ?? fail(`no row ${first}`), inEditor, `the editor for ${first}`);
     check(nodes.some((node) => node.text === first), `(a) the row's tap opens the editor on ${first}`);
