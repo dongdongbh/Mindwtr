@@ -1,86 +1,3 @@
-// Upgrade check: a real RN v1.3.2 install, replaced in place by the native
-// upgradetest build, then by a newer RN recovery build.
-//
-//   node apps/android-native/scripts/build-upgrade-harness.mjs
-//   node apps/android-native/scripts/check-upgrade-device.mjs <adb-serial> [--only=1,4,2,4b,2b,3,3b,5,5b,6,7,8,9,9b,9c,10,11] [--keep]
-//
-// Scenarios, each from a fresh RN v1.3.2 install:
-//   1   happy upgrade: the native app shows the RN data, imports the capture RN
-//       left queued once at its first boot, captures once, keeps every
-//       pre-upgrade row and every other non-database file, and leaves a
-//       .prewrite checkpoint that holds the pre-upgrade rows. In RKStorage only
-//       RN's alarm map (the reminder alarms) and RN's prompt state may change, after the byte checkpoint the boot takes;
-//       RN's About, heartbeat and prompt keys carry over (pass O1): RN's update dot shows on the native
-//       Settings menu, the prompt state keeps RN's days and adds today, the anonymous id stays;
-//   4   recovery (continues 1): the RN 154 build opens the database and keeps
-//       the native edit and the native import. While the recovery source is v1.3.2 a failure is
-//       reported as BLOCKED (RN startup snapshot bug) and does not fail the run;
-//   2   json-ahead import: RN's JSON backup holds a task SQLite never took and
-//       the json-ahead marker is set. The native app imports the task once,
-//       clears the marker after a byte checkpoint of RKStorage, changes nothing
-//       else, and imports nothing on a relaunch;
-//   4b  recovery after the import (continues 2): RN 154 shows the imported task
-//       once and, with its marker gone, imports nothing again;
-//   2b  json-ahead marker with a corrupt backup: RN would abandon it (#964), but core's
-//       stricter preflight (legacyCheck) refuses before the RN database opens: the
-//       native app shows core's refusal and changes no file, the marker included; it
-//       only adds the RKStorage byte checkpoint the passed guard takes;
-//   3   damaged database, empty WAL: the native app changes no file;
-//   3b  damaged database with WAL frames: the native app changes no file;
-//   5   database missing, no JSON backup, other RN state present: the native app creates nothing;
-//   5b  database missing with RN's JSON backup: the native app migrates it; every persisted
-//       field of every entity and the settings equal core's plan for the backup;
-//   6   an RN user's WebDAV sync: RN v1.3.2 configures WebDAV in its own Sync screen against a local
-//       folder (sync-harness.mjs, through adb reverse); the native app finds RN's keys in RKStorage and
-//       the password in RN's secret store, shows them on its Sync screen, and syncs with them. RN's background sync
-//       worker (EXPO_BACKGROUND_WORKER in WorkManager's database) is gone after the native app's first start, and the
-//       native background sync job is scheduled once (pass S4a).
-//   7   an RN user's reminder alarms (task reminders turned on in RN's database): RN v1.3.2 sets its alarm for a task due in two hours (`dumpsys alarm`: one alarm to its
-//       library's AlarmReceiver); the native app's first start cancels it, deletes RN's alarm database and map, and sets its own
-//       alarm for the same task: RN's gone, the native one present, once each. Then the RN 154 recovery build over the native
-//       app: it reads the native app's map under RN's key, holds none of its alarms, and sets its own alarm for the task, once.
-//   8   an RN user's widget check-off still in its Undo file (files/mindwtr-widget-checkoff-pending.json,
-//       RN's PendingCheckoffStore format) when the native app replaces RN: the native app's first boot
-//       completes that task once, through the queue, and a relaunch writes nothing more.
-//   9   an RN user's running Pomodoro timer, folded card and persistent capture notification (pass R2): RN v1.3.2, through its own
-//       screens (Settings › GTD › Pomodoro turns the feature on, Settings › Notifications the capture switch), starts the timer
-//       from its Focus card and folds it; its alarm is set. The native app's first start (pass R2b) adopts RN's session into its
-//       own (native_pomodoro_session: same phase, end and minutes) and shows the card folded and running; it keeps RN's session,
-//       fold and Pomodoro record byte for byte, cancels RN's alarm with RN's others (R1), arms its own Pomodoro alarm at the same
-//       phase end, once (core's record in shared_prefs/mindwtr_pomodoro_alarms.xml names it), and shows no alert, since RN's was
-//       not yet due; the persistent capture notification is shown. Then RN 154 over the native app holds no native reminder alarm.
-//   9b  RN's alert due after the update (design R2b §3b K6): RN v1.3.2 with 1-minute focus and break starts the timer; the native
-//       app is installed over it before the phase ends and opened only after RN's alarm time, so RN's receiver (gone) never
-//       showed it. The native first start shows RN's focus alert once with core's words and records it in its ledger; the adopted
-//       session settles the ended phase and arms nothing; a second start posts it no second time.
-//   9c  an RN build with the alarm re-arm fix (RN 155, 45dff1573) installed over the native app mid-phase: RN v1.3.2 runs a
-//       2-minute focus, the native app adopts it and arms its own alarm, then RN 155 arms its alarm again (the library no longer
-//       held it), and RN's focus alert arrives at the phase end, once.
-//   12  an RN user's calendar push (pass C4): RN v1.3.2 turns Push tasks to calendar on in its own Settings › Calendar and
-//       pushes three dated tasks to the Mindwtr calendar it makes on the phone's first owned account. With the app closed, one
-//       task's widget check-off waits in RN's Undo file and one event is deleted from the calendar provider. The native app's
-//       first start keeps RN's calendar (same ID, no second Mindwtr calendar), removes the done task's event, makes the
-//       deleted event again, updates the third in place, and logs v1.3.8/native-calendar-push adopted=existing. Then, in the
-//       native Settings › Calendar push card, a color change leaves one Mindwtr calendar in the new color with both live
-//       events, and Delete Mindwtr calendar removes it, its events, the saved ID and the rows. At the end the run deletes
-//       every calendar it made and every event in it, and prints the account type (never the account name).
-//   11  an RN user's File Sync folder (pass S5): RN v1.3.2 picks Download/mts5u<run> in its own Sync screen (File, Select
-//       Folder, the system folder picker) and syncs into it. The native app shows RN's folder on its Sync screen, and its Sync
-//       now writes into data.json (a capture RN left queued, which the native boot imports) with no new pick: RN's grant is
-//       still held, and files/file-sync-root-authorities/ still holds RN's one authority lock file, under the same name.
-// In 1, 2 and 5b the native app also publishes RN's home-screen widget payload (shared_prefs/mindwtr_widget.xml,
-// pass W1): that one other file may change, and only as RN's format with its one `payload` key, the value equal to
-// core's publication on a copy of the database the app left (host-side core with bun, widget-payload.mjs).
-//
-// RN writes every seed row through its own code: queued captures in
-// files/pending-captures, which RN imports at launch (tasks, a +Project task,
-// a widget check-off), and one switch in RN Settings. Faults are injected on
-// the host and printed as INJECTED. The script touches only
-// tech.dongdongbh.mindwtr.upgradetest: it refuses any other APK, uninstalls
-// only that package (before each scenario and at the end; --keep leaves it
-// installed), installs with -g so no permission dialog can appear, and sends
-// input only while that package is in front. Exit 0 = pass, 1 = fail,
-// 2 = refused, 3 = stopped.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -95,7 +12,6 @@ const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '7', '8
 const USAGE = `usage: node check-upgrade-device.mjs <adb-serial> [--only=${SCENARIOS.join(',')}] [--keep]`;
 const args = process.argv.slice(2);
 const serials = args.filter((arg) => !arg.startsWith('--'));
-// The device batch passes no arguments: MINDWTR_UPGRADE_ONLY (for example `12`) picks scenarios there.
 const onlyArg = args.find((arg) => arg.startsWith('--only=')) ?? (process.env.MINDWTR_UPGRADE_ONLY ? `--only=${process.env.MINDWTR_UPGRADE_ONLY}` : undefined);
 const only = onlyArg?.slice('--only='.length).split(',');
 if (serials.length !== 1 || args.some((arg) => arg.startsWith('--') && arg !== '--keep' && arg !== onlyArg)
@@ -1580,14 +1496,8 @@ const scenarioPomodoroRnFix = async () => {
     await killWithoutStop();
 };
 
-// ---- 12: RN's calendar push at the upgrade (pass C4) ----
-const RN_PUSH_TITLE = 'Push tasks to calendar'; // v1.3.2's settings.calendarMobile.pushTasksToCalendar
+const RN_PUSH_TITLE = 'Push tasks to calendar';
 const PUSH_KEYS = { enabled: 'mindwtr:calendar-push-sync:enabled', calendarId: 'mindwtr:calendar-push-sync:calendar-id' };
-/**
- * A calendar provider query as the shell (run-as cannot reach a provider: ACCESS_CONTENT_PROVIDERS_EXTERNALLY). Rows as
- * objects of the projected columns; a value is read up to the next `, <column>=`. A refused query throws: read as "no rows",
- * it would let the cleanup miss the calendar this run made.
- */
 const calendarCommand = (command) => {
     const text = sh(`content ${command} 2>&1`);
     if (/Error while accessing provider|Exception/.test(text)) fail(`calendar provider refused \`content ${command.split(' ')[0]}\`: ${text.split('\n')[1] ?? text}`);
@@ -1610,7 +1520,6 @@ const pushRows = (name) => new Map(rows(pullDatabase(name), "SELECT task_id, cal
 const scenarioCalendarPush = async () => {
     console.log('\n# 12 calendar push: RN\'s Mindwtr calendar and events kept by the native app');
     fresh();
-    // The phone's calendars live outside the app: a Mindwtr calendar an earlier run or app left is never touched.
     const earlier = new Set(mindwtrCalendars().map((row) => row._id));
     if (earlier.size) console.log(`note - Mindwtr calendars from before this run (left alone): ${earlier.size}`);
     let made = [];
@@ -1634,7 +1543,6 @@ const scenarioCalendarPush = async () => {
         queue(items);
         device.launch(RN_ACTIVITY);
         await drained(items, 'three dated captures');
-        // RN's own switch: the first Switch on Settings › Calendar is the push card's (calendar-settings-screen.tsx v1.3.2).
         openLink('mindwtr-upgradetest://settings?settingsScreen=calendar');
         let nodes = await waitFor('RN\'s Settings › Calendar', (current) => current.some((node) => node.text === RN_PUSH_TITLE), 60_000);
         const pushSwitch = nodes.find((node) => node.class === 'android.widget.Switch');
@@ -1657,7 +1565,6 @@ const scenarioCalendarPush = async () => {
         const event = (role) => before.get(items.find((item) => item.role === role).id).calendar_event_id;
         check(items.every((item) => before.get(item.id)?.calendar_id === calendarId) && liveEvents(calendarId).length === 3,
             '(12) RN pushed three events into it');
-        // With the app closed: one task's widget check-off waits in RN's Undo file, and one event is deleted in the provider.
         const done = items.find((item) => item.role === 'done');
         const pendingLocal = resolve(work, '12-pending.json');
         writeFileSync(pendingLocal, JSON.stringify({ version: 1, pending: [{ id: done.id, at: Date.now() - 60_000 }] }));
@@ -1688,16 +1595,12 @@ const scenarioCalendarPush = async () => {
         check(context.releaseCheck === 'v1.3.8/native-calendar-push' && context.outcome === 'pushed' && context.adopted === 'existing'
             && context.rowsBefore === '3' && context.rowsAfter === '2', `(12) the diagnostics line: ${JSON.stringify(context)}`);
 
-        // The provider hands a deleted event's _id to the next event (S23). A user's event that takes a pushed event's ID is
-        // never written or deleted: core makes the task's own event again. The user's side is a calendar this run makes
-        // (MtuUser<run>, LOCAL), so no real calendar is touched.
         const account = calendarRows(CALENDARS, ['_id', 'account_name'], `_id=${calendarId}`)[0]?.account_name ?? '';
         const asAdapter = (uri, name, type) => `'${uri}?caller_is_syncadapter=true&account_name=${encodeURIComponent(name)}&account_type=${type}'`;
         calendarCommand(`insert --uri ${asAdapter(CALENDARS, `mtu${run}`, 'LOCAL')} --bind name:s:mtu-user --bind calendar_displayName:s:MtuUser${run}`
             + ` --bind account_name:s:mtu${run} --bind account_type:s:LOCAL --bind calendar_access_level:i:700 --bind ownerAccount:s:mtu${run}`
             + ' --bind visible:i:1 --bind sync_events:i:1');
         userCalendar = calendarRows(CALENDARS, ['_id', 'calendar_displayName'], `calendar_displayName='MtuUser${run}'`)[0]?._id ?? fail('(12) no test user calendar');
-        // The task's event goes for good (as its sync adapter, so its _id is free), and the user's event comes next.
         calendarCommand(`delete --uri ${asAdapter(`${EVENTS}/${remade}`, account, 'LOCAL')}`);
         const userTitle = `12user${run}`;
         calendarCommand(`insert --uri ${EVENTS} --bind calendar_id:i:${userCalendar} --bind title:s:${userTitle} --bind dtstart:l:1793750400000`
@@ -1721,8 +1624,6 @@ const scenarioCalendarPush = async () => {
                 '(12) reuse: the task got its own event again in the Mindwtr calendar');
         }
 
-        // The native Settings push card (review N9): a color change makes a new Mindwtr calendar in that color with the live
-        // tasks' events (Android keeps a calendar's color only from its creation), then Delete Mindwtr calendar removes it.
         device.launch(NATIVE_ACTIVITY);
         nodes = await nativeScreen();
         await tap(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'));
@@ -1743,8 +1644,6 @@ const scenarioCalendarPush = async () => {
         const pink = (current) => current.find((node) => node['content-desc'] === `${en['settings.calendarMobile.mindwtrCalendarColor']} ${PINK}`);
         if (!pink(nodes)) await tap(tagged(nodes, 'calendar-push') ?? fail('no push card'));
         await tap(await scrollTo(pink, 'the pink color'));
-        // The new calendar and its events can take the deleted ones' _ids (the S23's provider hands out max(_id)+1), so the
-        // new calendar is told by its color and its marked name (RN v1.3.2 named its calendar plain "mindwtr").
         const PINK_INT = ((0xFF000000 | parseInt(PINK.slice(1), 16)) | 0).toString();
         const oldEvents = new Set(liveEvents(calendarId));
         const ownRows = () => calendarRows(CALENDARS, ['_id', 'name', 'calendar_displayName', 'calendar_color', 'account_type'])
@@ -1757,7 +1656,6 @@ const scenarioCalendarPush = async () => {
             const calendar = recolored();
             return Boolean(calendar) && liveEvents(calendar._id).length === 2;
         }, 60_000).catch((error) => {
-            // What the provider shows then (IDs, internal names and colors of this run's calendars; no titles of tasks).
             console.log(`note - calendars after the color change: ${JSON.stringify(ownRows().map((row) => ({ ...row,
                 events: liveEvents(row._id).length, old: liveEvents(row._id).filter((id) => oldEvents.has(id)).length })))} want color ${PINK_INT}`);
             throw error;
@@ -1769,7 +1667,6 @@ const scenarioCalendarPush = async () => {
         check(ownRows().length === 1, '(12) N9: a color change in the native card leaves one Mindwtr calendar, made with the marker name, in the new color, with the two live tasks\' events');
         const deleteRow = (current) => current.find((node) => node['content-desc'] === en['settings.calendarMobile.deleteMindwtrCalendar']);
         await tap(await scrollTo(deleteRow, 'Delete Mindwtr calendar'));
-        // The dialog is its own window, where Compose's test tags are not resource IDs: its button is found by its text.
         const confirm = (current) => tagged(current, 'calendar-delete-confirm') ?? current.find((node) => node.text === en['common.delete']);
         await tap(await waitFor('the Delete question', (current) => Boolean(confirm(current)), 15_000).then(confirm));
         await until('the Mindwtr calendar deleted', () => !mindwtrCalendars().some((row) => !earlier.has(row._id)), 60_000);
@@ -1778,10 +1675,6 @@ const scenarioCalendarPush = async () => {
         check(liveEvents(newId).length === 0 && !deletedKeys.has(PUSH_KEYS.calendarId) && pushRows('12-deleted').size === 0,
             '(12) N9: Delete Mindwtr calendar removes the calendar, its events, the saved ID and the pushed-event rows');
     } finally {
-        // Every calendar this run made goes, and its events with it (the provider deletes a calendar's events). The known IDs
-        // go first (review N10), each only while it still carries the name this run gave it: the phone hands a freed _id to
-        // the next calendar (correction review note 11). Then a name sweep finds any other: every MtuUser test calendar, and
-        // this run's mindwtr / mindwtr:* calendars. The run fails if a test calendar or a test event is left.
         const OURS = "(name='mindwtr' OR name LIKE 'mindwtr:%')";
         const USER = "calendar_displayName LIKE 'MtuUser%'";
         const remove = (id, named) => {

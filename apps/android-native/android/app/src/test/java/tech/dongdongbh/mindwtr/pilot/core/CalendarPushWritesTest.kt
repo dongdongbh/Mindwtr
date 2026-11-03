@@ -7,7 +7,6 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Calendar push's writes (C4) as RN's expo-calendar makes them on Android, each RN fix the binding must keep. */
 class CalendarPushWritesTest {
     private class FakeRows : CalendarPushWrites.Rows {
         val calendars = mutableMapOf<Long, Map<String, Any>>()
@@ -34,7 +33,6 @@ class CalendarPushWritesTest {
     private val rows = FakeRows()
     private val writes = CalendarPushWrites(rows) { "Europe/Berlin" }
 
-    /** Core's getAndroidManagedCalendarSeed with the marker name (calendar-push-service.ts). */
     private fun seed(source: JSONObject = JSONObject().put("name", "me@example.com").put("type", "com.google")) = JSONObject()
         .put("title", "Mindwtr").put("color", "#3B82F6").put("entityType", "event").put("name", "mindwtr:0f0e0d0c-0b0a-4908-8706-050403020100")
         .put("ownerAccount", "me@example.com").put("accessLevel", "owner").put("source", source).put("isVisible", true).put("isSynced", true)
@@ -88,7 +86,6 @@ class CalendarPushWritesTest {
         val gone = writes.createEvent(calendar, event())
         rows.events.remove(gone.toLong())
         assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(gone, null, event()) }.message)
-        // A row marked deleted, waiting for its sync adapter, is gone too (expo's findEventById selection).
         val marked = writes.createEvent(calendar, event())
         rows.deleted += marked.toLong()
         assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(marked, null, event()) }.message)
@@ -108,10 +105,6 @@ class CalendarPushWritesTest {
         assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(id, null) }.message)
     }
 
-    /**
-     * The provider hands a deleted event's _id to the next event (S23, review N9), so a pushed-event row can name the user's
-     * own event in another calendar. Core passes the row's calendar: an event elsewhere is missing, and it is never changed.
-     */
     @Test fun anEventIdTheProviderGaveToAnEventInAnotherCalendarIsMissingAndUntouched() {
         val mindwtr = writes.createCalendar(seed())
         val users = writes.createCalendar(seed().put("name", "users-own"))
@@ -119,22 +112,16 @@ class CalendarPushWritesTest {
         assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(theirs, mindwtr, event()) }.message)
         assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(theirs, mindwtr) }.message)
         assertEquals("Dentist", rows.events[theirs.toLong()]!![CalendarContract.Events.TITLE])
-        // In its own calendar (or with no calendar given, as before) the event is written.
         writes.updateEvent(theirs, users, event().put("title", "Changed"))
         assertEquals("Changed", rows.events[theirs.toLong()]!![CalendarContract.Events.TITLE])
         writes.deleteEvent(theirs, null)
         assertTrue(theirs.toLong() !in rows.events)
     }
 
-    /**
-     * Review N3 at the moment of the delete: the provider hands a deleted calendar's _id to the next calendar (S23), so a
-     * calendar is deleted only while its internal name is RN's "mindwtr" or a marked "mindwtr:<marker>", never the user's.
-     */
     @Test fun aCalendarDeleteRefusesACalendarWithoutMindwtrsInternalName() {
         val users = writes.createCalendar(seed().put("name", "me@example.com"))
         assertThrows(IllegalStateException::class.java) { writes.deleteCalendar(users) }
         assertTrue(users.toLong() in rows.calendars)
-        // Many app-made calendars have no internal name: refused too (a gone calendar is refused as well, and core lists again).
         rows.calendars[900L] = mapOf(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME to "Mindwtr")
         assertThrows(IllegalStateException::class.java) { writes.deleteCalendar("900") }
         assertTrue(900L in rows.calendars)

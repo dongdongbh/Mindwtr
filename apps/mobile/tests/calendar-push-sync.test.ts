@@ -280,9 +280,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockPlatform.OS = 'ios';
-    // Default: the stored calendar still exists
     mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr', name: 'mindwtr' }]);
-    // Mirror the storage adapter's persistent task/platform mapping contract.
     setCalendarSyncEntries([]);
     mockGetCalendarSyncEntry.mockImplementation(async (taskId, platform) => (
         calendarSyncEntries.get(calendarSyncEntryKey(taskId, platform)) ?? null
@@ -1511,11 +1509,9 @@ describe('startCalendarPushSync', () => {
 });
 
 describe('Android: expo-calendar never reports a missing event, so the binding reads it back', () => {
-    // expo-calendar 15's Android codes (CalendarModule.kt): getEventByIdAsync on a deleted row, deleteEventAsync on zero rows.
     const notFound = (id: string) => Object.assign(new Error(`Event with id ${id} could not be found`), { code: 'E_EVENT_NOT_FOUND' });
     const notDeleted = (id: string) => Object.assign(new Error(`Event with id ${id} could not be deleted`), { code: 'E_EVENT_NOT_DELETED' });
     const androidCalendars = () => mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr', name: 'mindwtr', accessLevel: 'owner', allowsModifications: true }]);
-    // A full push tries a done task's delete twice (its own pass, then the stale pass), so each refusal stays for the whole run.
     afterEach(() => {
         mockDeleteEventAsync.mockImplementation(async () => {});
         mockGetEventAsync.mockImplementation(async (id: string) => ({ id }));
@@ -1546,7 +1542,6 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
         setupEnabled();
         const task = makeTask();
         setStoreTasks([task]);
-        // The row points at the deleted calendar; its event went with it.
         setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-gone', calendarId: 'cal-deleted', platform: 'ios', lastSyncedAt: '' }]);
         mockDeleteEventAsync.mockRejectedValue(notDeleted('evt-gone'));
         mockGetEventAsync.mockRejectedValue(notFound('evt-gone'));
@@ -1561,8 +1556,6 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
         }));
     });
 
-    // Android's calendar provider hands a deleted event's _id to the next event (seen on a Galaxy S23), which can be the user's
-    // own event in another calendar. The binding reads the event's calendar first, so that event is never written or deleted.
     it('never updates the user\'s event that took a pushed event\'s ID: core makes its own event instead', async () => {
         mockPlatform.OS = 'android';
         androidCalendars();
@@ -1594,12 +1587,8 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
         expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(task.id, 'ios');
     });
 
-    // Correction review BLOCK 1: the phone gave the deleted Mindwtr calendar's ID to the user's next calendar, and a freed
-    // pushed-event ID to the user's event in it. The event's calendar matches the row's, so only forgetting the rows of a
-    // saved calendar push does not keep (core) keeps that event safe.
     it('never touches the user\'s event when both the Mindwtr calendar\'s ID and the event\'s ID were reused', async () => {
         mockPlatform.OS = 'android';
-        // The new Mindwtr calendar gets the old ID back too (the mock's createCalendarAsync answers 'cal-1').
         mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Work', name: 'work@example.com', ownerAccount: 'me@gmail.com',
             accessLevel: 'owner', allowsModifications: true, source: { name: 'me@gmail.com', type: 'com.google' } }]);
         setupEnabled();
@@ -1620,8 +1609,6 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
         expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(done.id, 'ios');
     });
 
-    // Correction review note 5: an event read that fails for another reason writes nothing by the bare ID; the row stays for
-    // the next push.
     it('writes nothing and keeps the row when the event read fails for another reason', async () => {
         mockPlatform.OS = 'android';
         androidCalendars();

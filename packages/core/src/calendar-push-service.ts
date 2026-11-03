@@ -243,15 +243,9 @@ function isStoredMindwtrManagedCalendar(calendar: DeviceCalendar, storedCalendar
 
 const managedCalendarName = (marker: string): string => `${MANAGED_CALENDAR_NAME}:${marker}`;
 
-/** Whether a calendar carries the internal name every Mindwtr calendar is made with on Android: "mindwtr" or "mindwtr:<marker>". */
 const hasManagedCalendarName = (calendar: DeviceCalendar): boolean =>
     calendar.name === MANAGED_CALENDAR_NAME || (typeof calendar.name === 'string' && calendar.name.startsWith(`${MANAGED_CALENDAR_NAME}:`));
 
-/**
- * The diagnostics line (docs/release-notes/diagnostics-ledger.md) proving the app acts only
- * on its own calendar: a marked calendar adopted, a delete finished or refused, a color
- * kept for the next calendar. Never a title or a URL.
- */
 const OWNED_ONLY_CHECK = 'v1.3.4/calendar-push-owned-only';
 
 function getAndroidManagedCalendarSeed(
@@ -473,26 +467,15 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         return made.id;
     };
 
-    /**
-     * Whether the saved ID still names this install's calendar in the list. On Android the provider can give a deleted
-     * calendar's ID to a new calendar, so the calendar must also carry Mindwtr's internal name: push never writes into the
-     * user's calendar, and a Delete or a recolor never deletes it.
-     */
     const savedIsOwned = (calendars: DeviceCalendar[], savedId: string | null): savedId is string => Boolean(savedId)
         && calendars.some((calendar) => calendar.id === savedId && (host.os() !== 'android' || hasManagedCalendarName(calendar)));
 
-    /** Forgets the pushed-event rows of a calendar that is gone (their events went with it). */
     const forgetCalendarRows = async (calendarId: string): Promise<void> => {
         for (const entry of (await syncEntries.getAll(PLATFORM)).filter((item) => item.calendarId === calendarId)) {
             await syncEntries.delete(entry.taskId, PLATFORM);
         }
     };
 
-    /**
-     * The calendar this install owns, in a list the device answered (never a failed
-     * read taken as empty): the saved one while it exists, else the one a creation cut
-     * short made (adopted now), even when a stale saved ID points elsewhere.
-     */
     const resolveOwnedCalendar = async (calendars: DeviceCalendar[], savedId: string | null): Promise<string | null> => (
         savedIsOwned(calendars, savedId) ? savedId : adoptPendingCalendar(calendars)
     );
@@ -561,27 +544,18 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
                     return recovered.id;
                 }
                 if (intent.calendarId) return null;
-                // ponytail: delayed provider visibility can duplicate this same pending title;
-                // native idempotent creation would be needed to eliminate that ambiguity.
             } else if (savedIsOwned(allCalendars, storedId)) {
-                // A death after saving the ID left the marker: the creation is done.
                 if (host.os() === 'android' && await storage.getItem(CALENDAR_PUSH_PENDING_KEY)) {
                     await storage.removeItem(CALENDAR_PUSH_PENDING_KEY);
                 }
                 return storedId;
             } else if (storedId && allCalendars.some((calendar) => calendar.id === storedId)) {
-                // The provider gave the deleted Mindwtr calendar's ID to another calendar: it is left alone.
                 void log.warn('Saved Mindwtr calendar ID now names another calendar', {
                     scope: 'calendar-push',
                     extra: { releaseCheck: 'v1.3.8/calendar-push-reused-id', outcome: 'skipped' },
                 });
             }
-            // Android: the saved calendar is gone or now another calendar's, and its events went with it. Its rows are
-            // forgotten, as Delete forgets them, before anything is pushed: the phone hands freed event IDs to new events
-            // (the user's, or the ones this push makes), so a stale row must never reach an event by its ID.
             if (host.os() === 'android' && storedId) await forgetCalendarRows(storedId);
-            // The saved calendar was deleted externally (or none was saved): a calendar a
-            // creation cut short made is adopted, else a new one is made.
             const adoptedId = host.os() === 'android' ? await resolveOwnedCalendar(allCalendars, null) : null;
             if (adoptedId) return adoptedId;
 
@@ -680,9 +654,8 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
             try {
                 const calendars = await device.getCalendars();
                 const selected = calendars.find((calendar) => calendar.id === selectedId);
-                // On Android a chosen Mindwtr calendar whose ID the phone gave another calendar is no longer the choice.
-                const lostMindwtr = host.os() === 'android' && selectedId === await getStoredCalendarId() && !savedIsOwned(calendars, selectedId);
-                if (selected && isWritableCalendar(selected) && !lostMindwtr) {
+                const selectedIsReusedMindwtrId = host.os() === 'android' && selectedId === await getStoredCalendarId() && !savedIsOwned(calendars, selectedId);
+                if (selected && isWritableCalendar(selected) && !selectedIsReusedMindwtrId) {
                     return { id: selectedId };
                 }
                 await setCalendarPushTargetCalendarId(null);

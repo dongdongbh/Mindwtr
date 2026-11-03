@@ -678,11 +678,6 @@ describe('calendar push behind the host ports', () => {
         expect(writes).toBeGreaterThan(3);
     });
 
-    // Calendar push review N3 (an RN bug too): Android's calendar provider can give a deleted calendar's _id to a new calendar.
-    // The saved ID is then the user's calendar: push never writes into it, and a Delete or a recolor never deletes it.
-    // Correction review BLOCK 1: the phone reuses both IDs. The deleted Mindwtr calendar's ID goes to the user's next calendar,
-    // and a freed pushed-event ID to the user's event in it. The saved calendar's rows name events that died with it, so they
-    // are forgotten (as Settings Delete forgets them) before anything is pushed: no stale row reaches the user's event.
     it.each(['reused', 'gone'])('on Android forgets the rows of a saved calendar it does not keep (%s), and touches no event by them', async (how) => {
         const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', accessLevel: 'owner', allowsModifications: true, source: google };
         const dated = (id: string) => task(id, { dueDate: '2026-09-10' });
@@ -717,7 +712,6 @@ describe('calendar push behind the host ports', () => {
         expect(phone.writes.filter(([name, id]) => name === 'createEvent' && id === 'saved')).toEqual([]);
         expect(phone.storage.has(CALENDAR_PUSH_TARGET_ID_KEY)).toBe(false);
         expect(phone.entries.get('t1')?.calendarId).toBe('created-1');
-        // Settings no longer marks the other calendar as Mindwtr's (review note 9).
         const listed = await createCalendarPushService(device({ calendars: [PRIMARY, reused], storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved' } }).host)
             .getCalendarPushTargetCalendars();
         expect(listed.find((entry) => entry.id === 'saved')?.isMindwtrManaged).toBe(false);
@@ -746,7 +740,6 @@ describe('calendar push behind the host ports', () => {
         expect(await createCalendarPushService(recoloring.host).updateMindwtrCalendarColor('#059669')).toBe(false);
         expect(recoloring.writes).toEqual([]);
         expect(recoloring.calendars.find((calendar) => calendar.id === 'saved')).toEqual(reused);
-        // RN's own names keep it: v1.3.2's plain "mindwtr", and the marked name a creation writes now.
         for (const name of ['mindwtr', 'mindwtr:11111111-1111-4111-8111-111111111111']) {
             const phone = device({ calendars: [PRIMARY, { ...reused, name }], storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved' } });
             expect(await createCalendarPushService(phone.host).ensureMindwtrCalendar()).toBe('saved');

@@ -8,9 +8,6 @@ import type { SqliteAdapter } from '../../../packages/core/src/sqlite-adapter';
 import type { Task } from '../../../packages/core/src/types';
 import { createNativeCalendar } from './host-calendar';
 
-// Calendar push on native Android (pass C4b): core's push over host-calendar.ts, HostCalendars as CalendarPushWrites.kt answers
-// (a missing event is "Calendar event not found"), and RN's own state as an upgrade finds it: RKStorage's keys and the
-// calendar_sync rows in the same database. One test per RN fix the binding must keep (design note, section 3).
 
 const KEY = {
     enabled: 'mindwtr:calendar-push-sync:enabled',
@@ -29,7 +26,6 @@ const calendar = (id: string, extra: Partial<Calendar> = {}): Calendar => ({ id,
     source: { name: 'me@example.com', type: 'com.google', isLocalAccount: false }, ...extra });
 const MARKER = '0f0e0d0c-0b0a-4908-8706-050403020100';
 
-/** HostCalendars as CalendarPushWrites.kt answers it, over an in-memory calendar provider. */
 function phone(calendars: Calendar[], events: Record<string, { calendarId: string; title: string }> = {}) {
     const state = { calendars: calendars.map((entry) => structuredClone(entry)), events: new Map(Object.entries(events)), next: 500,
         calls: [] as Record<string, unknown>[], refuse: new Set<string>(), unreadable: false };
@@ -65,7 +61,6 @@ function phone(calendars: Calendar[], events: Record<string, { calendarId: strin
             }
             case 'updateEvent': {
                 const event = state.events.get(request.eventId as string);
-                // CalendarPushWrites.kt: an event in another calendar than the row's is missing too.
                 if (!event || (request.calendarId && event.calendarId !== request.calendarId)) throw new Error('Calendar event not found');
                 event.title = (request.details as { title: string }).title;
                 return null;
@@ -90,7 +85,6 @@ setLogger((entry) => { lines.push({ message: entry.message, context: entry.conte
 const opened: { close(): Promise<void> }[] = [];
 afterEach(async () => { for (const host of opened.splice(0)) await host.close(); lines.length = 0; });
 
-/** RN's state as an upgrade finds it, then the native host booted over it, as ProcessCoreHost boots it. */
 async function upgrade(options: { tasks: Task[]; kv: Record<string, string>; device: ReturnType<typeof phone>;
     rows?: { taskId: string; eventId: string; calendarId: string }[] }) {
     const kv = new Map(Object.entries(options.kv));
@@ -219,8 +213,6 @@ describe('an event ID the provider reused (review N9: the S23 hands a deleted _i
     });
 });
 
-// Correction review BLOCK 1 (rcal2's repro): the S23 reuses the deleted Mindwtr calendar's ID for the user's next calendar and
-// a freed pushed-event ID for the user's event in it. The rows of a saved calendar push does not keep are forgotten first.
 describe('both the calendar ID and an event ID reused (correction review BLOCK 1)', () => {
     it('keeps the user\'s event in the calendar that took the deleted Mindwtr calendar\'s ID', async () => {
         const device = phone([calendar('1'), calendar('7', { title: 'Work', name: 'work@example.com' })], { 70: { calendarId: '7', title: 'Dentist' } });
@@ -298,7 +290,6 @@ describe('Settings › Calendar on the Android host', () => {
         const edit = (await open(app)).push!.target!.delete.edit;
         const requestId = crypto.randomUUID();
         const remove = app.kv.delete.bind(app.kv);
-        // Death after the device delete, before the saved ID is cleared.
         app.kv.delete = (name: string) => { if (name === KEY.calendarId) throw new Error('process died'); return remove(name); };
         expect((await send(app, edit, requestId)).ok).toBe(false);
         app.kv.delete = remove;
@@ -379,7 +370,6 @@ describe('the push queue', () => {
     });
 });
 
-// The tasks the push reads are the store's: a check that the store saw the seed (guards a harness that pushes nothing).
 it('the harness store holds the seeded tasks', async () => {
     await upgrade({ tasks: [task('t1')], kv: {}, device: phone([]) });
     expect(useTaskStore.getState()._allTasks.map((entry) => entry.id)).toEqual(['t1']);

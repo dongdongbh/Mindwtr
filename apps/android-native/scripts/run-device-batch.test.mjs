@@ -49,9 +49,7 @@ test('an unset adb port defaults to 5038 in the child env and the detached unit;
     assert.deepEqual(setenvArgs(set), ['--setenv=PATH=/bin', '--setenv=ANDROID_ADB_SERVER_PORT=5099']);
 
     assert.deepEqual(setenvArgs({ PATH: '/bin', PARITY_ONLY: 'small2' }), ['--setenv=PATH=/bin', '--setenv=PARITY_ONLY=small2']);
-    // The upgrade check's scenario pick reaches the detached unit (check-upgrade-device.mjs reads it).
     assert.deepEqual(setenvArgs({ MINDWTR_UPGRADE_ONLY: '12' }), ['--setenv=MINDWTR_UPGRADE_ONLY=12']);
-    // device.mjs's own default is the /opt adb, never the /home/dd/Android/Sdk one (each kills the other's server).
     assert.equal(DEFAULT_ADB, '/opt/android-sdk/platform-tools/adb');
 });
 

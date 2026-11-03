@@ -14,13 +14,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 
-/**
- * The device calendar reads core's external calendars take (external-calendar-feeds.ts DeviceCalendarReader), as RN's
- * expo-calendar gives them on Android (CalendarModule.kt): the permission (READ_CALENDAR and WRITE_CALENDAR together, with
- * expo's "asked" record, so an upgrade from RN keeps its answer), every calendar row, and the instances of the chosen calendars.
- * Calendar push's writes (pass C4) are [CalendarPushWrites] over the provider. Each call runs on HostIo's calendar thread;
- * [call] answers once through `reply`.
- */
 class HostCalendars(context: Context) {
     private val app = context.applicationContext
 
@@ -139,7 +132,6 @@ class HostCalendars(context: Context) {
     }
 }
 
-/** [CalendarPushWrites.Rows] on the calendar provider, as expo-calendar writes it on Android. */
 private class ProviderRows(context: Context) : CalendarPushWrites.Rows {
     private val resolver = context.contentResolver
 
@@ -188,11 +180,6 @@ private class ProviderRows(context: Context) : CalendarPushWrites.Rows {
     }
 }
 
-/**
- * The system prompt for the calendar pair, on the open screen (MainActivity registers [launcher] and hands each answer to
- * [answered]). A prompt asked while one shows waits for the same answer, as expo queues them; with no screen it answers at once
- * (the status then reads denied: expo marked the permissions asked).
- */
 object CalendarPermissionPrompt {
     private val main = Handler(Looper.getMainLooper())
 

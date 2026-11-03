@@ -6,9 +6,7 @@ import { sanitizeLogContext } from './log-sanitize';
 const RELEASE_CHECK_FIELD_NAMES = [
 
     'staleTaskCount', 'staleProjectCount',
-    // native-calendar-push reuses releaseCheck and outcome; adopted is existing/marker/new/target/none/unknown, the rows are counts.
     'adopted', 'rowsBefore', 'rowsAfter',
-    // Widget presentation/archive convergence reuse lists/entityType/count/outcome; Focus uses bounded UI state.
     'section', 'grouping', 'collapsed', 'refresh',
 
     'entityType',

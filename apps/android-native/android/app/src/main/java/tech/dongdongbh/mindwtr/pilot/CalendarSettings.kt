@@ -215,7 +215,6 @@ class CalendarSettingsModel(private val menu: MenuModel) {
 }
 
 
-/** RN's calendar screen from core's view: the push card (none on a host without calendar push), the device calendars card, the subscription form and the list. */
 @Composable
 internal fun CalendarSettings(model: InboxViewModel, view: JSONObject) {
     view.optJSONObject("push")?.let { PushCard(model, it) }
