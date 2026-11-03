@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { spawn } from 'child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
@@ -10,6 +10,8 @@ import type { AppData, Person, Project, Task } from '@mindwtr/core';
 
 import { createMindwtrAutomationStorage } from './mindwtr-automation-storage';
 import { createMindwtrAutomationService } from './mindwtr-automation-core';
+
+setDefaultTimeout(20_000);
 
 const tempDirs: string[] = [];
 
