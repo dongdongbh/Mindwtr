@@ -186,7 +186,14 @@ try {
     const startTomorrow = `${en['taskEdit.startDateLabel']}: ${en['quickDate.tomorrow']}`;
     const chip = (current) => current.find((node) => node['content-desc'] === startTomorrow);
     await tap(chip(nodes) ?? fail(`no "${startTomorrow}" chip`));
-    await waitFor('Tomorrow chosen', (current) => chip(current)?.selected === 'true', 10_000);
+    const chipTarget = (current) => {
+        const [l, t, r, b] = box(chip(current) ?? fail(`no "${startTomorrow}" chip`));
+        const area = (node) => { const [x1, y1, x2, y2] = box(node); return (x2 - x1) * (y2 - y1); };
+        return current.filter((node) => node.focusable === 'true')
+            .filter((node) => { const [x1, y1, x2, y2] = box(node); return x1 <= l && y1 <= t && x2 >= r && y2 >= b; })
+            .sort((a, z) => area(a) - area(z))[0];
+    };
+    await waitFor('Tomorrow chosen', (current) => chipTarget(current)?.selected === 'true', 10_000);
     check(stored(T.dates).rev === datesBefore.rev, '(e) a quick date changes only the sheet');
     await tapExpecting(tagged(await screen(), 'dates-save') ?? fail('no Save'), (current) => !datesOpen(current), 'the sheet to save and close');
     const tomorrow = new Date();
