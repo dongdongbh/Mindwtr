@@ -1,7 +1,7 @@
 import type { Project, Section, Task } from './types';
 import type { TaskStore } from './store-types';
 import { ensureDeviceId, createProjectOrderReserver, nextRevision } from './store-helpers';
-import { compareTasksByProjectOrder } from './task-utils';
+import { compareTasksByProjectOrder, getProjectFlowMode } from './task-utils';
 import { projectSectionOrderMax, buildNewSection, sameSectionDeleteJson } from './store-projects/section-actions';
 import { generateUUID } from './uuid';
 import { buildTaskMovePatch } from './task-container-rules';
@@ -30,7 +30,7 @@ export type ProjectToSectionPreview = {
 type Blocked = { ok: false; reason: ProjectToSectionBlockReason };
 type RowChange<T> = { before: T; after: T };
 
-/** Frozen confirmation authority and exact retry footprint. No synced receipt field. */
+
 export type PreparedProjectToSection = {
     sourceProjectId: string;
     destinationProjectId: string;
@@ -53,7 +53,7 @@ export type ProjectToSectionReceipt = PreparedProjectToSection;
 export type ProjectToSectionPreparation = Blocked | { ok: true;
     preview: ProjectToSectionPreview; command: PreparedProjectToSection };
 
-/** Preserve array order, including checklist order; compare object member order independently. */
+
 export const sameProjectToSectionValue = sameSectionDeleteJson;
 
 const oneProject = (projects: readonly Project[], id: string): Project | undefined => {
@@ -94,8 +94,11 @@ const destinationBlock = (source: Project, destination: Project | undefined): Bl
     if (destination.deletedAt || destination.purgedAt || destination.status !== 'active'
         || destination.archivedAt || destination.cancelledAt)
         return { ok: false, reason: 'destination-inactive' };
+
+
     if (source.isSequential) {
-        if (!destination.isSequential || destination.sequentialScope !== 'section')
+        if (getProjectFlowMode(destination) !== 'perSection'
+            && (!destination.isSequential || destination.sequentialScope !== 'section'))
             return { ok: false, reason: 'destination-section-sequence' };
     } else if (destination.isSequential) return { ok: false, reason: 'destination-sequential' };
     return null;
@@ -118,16 +121,12 @@ export const previewProjectToSection = (state: ConversionState, sourceProjectId:
         colorWillBeLost: true };
 };
 
-/**
- * Destination-list form of previewProjectToSection: checks the source and counts its tasks once,
- * so each destination costs one lookup instead of a scan of every project, section, and task.
- * Each call returns what previewProjectToSection(state, sourceProjectId, destinationProjectId) returns.
- */
+
 export const createProjectToSectionPreviewer = (state: ConversionState, sourceProjectId: string):
     ((destinationProjectId: string) => ProjectToSectionPreview | Blocked) => {
     const eligible = getProjectToSectionEligibility(state, sourceProjectId);
     if (!eligible.ok) return () => ({ ...eligible });
-    // null marks a duplicated id, which oneProject treats as missing.
+
     const projects = new Map<string, Project | null>();
     for (const project of state._allProjects) projects.set(project.id, projects.has(project.id) ? null : project);
     const source = projects.get(sourceProjectId)!;
@@ -150,7 +149,7 @@ export const createProjectToSectionPreviewer = (state: ConversionState, sourcePr
     };
 };
 
-/** Deterministic planner; generated identity and clock are supplied by prepare. */
+
 export const planProjectToSection = (state: PreparationState, sourceProjectId: string,
     destinationProjectId: string, title: string, sectionId: string, preparedAt: string,
     deviceIdBefore: string | null, deviceIdToInitialize: string | null): ProjectToSectionPreparation => {
@@ -171,7 +170,8 @@ export const planProjectToSection = (state: PreparationState, sourceProjectId: s
         .sort(compareTasksByProjectOrder);
     const reserveOrder = createProjectOrderReserver(state._allTasks);
     const section = buildNewSection({ id: sectionId, projectId: destination.id, title: sectionTitle,
-        initialProps: { description: source.supportNotes },
+        initialProps: { description: source.supportNotes,
+            ...(getProjectFlowMode(destination) === 'perSection' ? { isSequential: source.isSequential === true } : {}) },
         orderMax: projectSectionOrderMax(state._allSections, destination.id), deviceId, now: preparedAt });
     const assignment = buildTaskMovePatch({ kind: 'project', id: destination.id },
         { projectId: destination.id, sectionId: section.id });
@@ -187,7 +187,7 @@ export const planProjectToSection = (state: PreparationState, sourceProjectId: s
         destination, sourceSections, destinationSections, sourceTasks, destinationTasks,
         section, tasks, deviceIdBefore, deviceIdToInitialize, preparedAt,
     };
-    // A prepared dialog can outlive a store update; never retain mutable store row references.
+
     return { ok: true, preview, command: JSON.parse(JSON.stringify(command)) as PreparedProjectToSection };
 };
 

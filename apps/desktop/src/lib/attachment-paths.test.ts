@@ -55,8 +55,8 @@ describe('resolveAttachmentReadPath', () => {
     });
 
     it('falls back to the current managed dir when the recorded path is stale', async () => {
-        // #1038: a moved portable profile strands every absolute attachment URI
-        // even though the file travelled along inside attachments/.
+
+
         existsMock.mockImplementation(async (path) => path === '/new-profile/attachments/a1.pdf');
         expect(await resolveAttachmentReadPath('/old-profile/attachments/a1.pdf', 'a1'))
             .toBe('/new-profile/attachments/a1.pdf');
@@ -88,9 +88,7 @@ describe('resolveAttachmentReadPath', () => {
         expect(existsMock).toHaveBeenCalledTimes(1);
     });
 
-    // #1245 moved an installed Windows/macOS profile's managed folders from
-    // <root>/ down into <root>/data/. Audio captures are the case the #1038
-    // fallback cannot reach: the file name is a timestamp, never the attachment id.
+
     it('re-homes a capture recorded at the flat profile root into the data subfolder', async () => {
         managedDataDirMock.mockResolvedValue('/os-data/mindwtr/data');
         const moved = '/os-data/mindwtr/data/audio-captures/mindwtr-audio-1756-abc.wav';

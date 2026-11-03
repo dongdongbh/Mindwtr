@@ -42,11 +42,8 @@ export interface TaskListScope {
     setStatusSelected?: (status: TaskStatus) => void;
     copySelected?: (includeDescription: boolean, requireHighlight?: boolean) => boolean;
     focusAddInput?: () => boolean;
-    // Move DOM focus onto the currently selected task's title and render its
-    // highlight, so entering the list from the sidebar (ArrowRight / `l`)
-    // selects a task instead of focusing the scroll container (#890). Returns
-    // false when there is no task to select so the caller can fall back to
-    // focusing the main-content container.
+
+
     focusSelected?: () => boolean;
 }
 
@@ -61,8 +58,7 @@ export interface ProjectListScope {
     ownsFocus: () => boolean;
 }
 
-// Status chord: `s` then a letter sets the selected task's status (#860).
-// Letters mirror the g-navigation chords (gi/gn/gw/gs/gd/ga).
+
 const STATUS_CHORD_MAP: Record<string, TaskStatus> = {
     i: 'inbox',
     n: 'next',
@@ -91,23 +87,17 @@ function isEditableTarget(target: EventTarget | null): boolean {
         || target.closest('[contenteditable]:not([contenteditable="false"])') !== null;
 }
 
-// An open modal dialog (global search, quick add, prompts) owns the keyboard:
-// list shortcuts must never act on the view behind it. Without this, a stray
-// Enter or 'e' with focus outside the dialog's input completed a task in the
-// background Focus list from inside search (same class as the #848 menu fix).
+
 function hasModalDialogOpen(): boolean {
     return document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
 }
 
-// Dropdown panels are mounted only while open. Their trigger can retain focus,
-// so target.closest() alone cannot protect the copy chord.
+
 function hasOpenPopup(): boolean {
     return document.querySelector('[role="menu"], [role="listbox"]') !== null;
 }
 
-// Enter must keep activating whatever control actually has focus (buttons,
-// menu items, links); the list-level Enter binding only fires when nothing
-// interactive is focused.
+
 function hasInteractiveFocus(): boolean {
     const active = document.activeElement;
     if (!(active instanceof HTMLElement)) return false;
@@ -204,9 +194,7 @@ function triggerQuickAdd() {
     window.dispatchEvent(new Event('mindwtr:quick-add'));
 }
 
-// Click the current view's visible add-task affordance so a keyboard add
-// inherits its context — a project view's trigger presets that project —
-// instead of always landing in the Inbox (#978).
+
 function clickVisibleAddTaskTrigger(): boolean {
     const root = document.querySelector<HTMLElement>('[data-main-content]') ?? document.body;
     const target = Array.from(root.querySelectorAll<HTMLElement>('[data-add-task-trigger]'))
@@ -223,20 +211,18 @@ function clickVisibleAddTaskTrigger(): boolean {
 
 function getAppScopedShortcutKey(event: KeyboardEvent): string {
     if (event.key.length !== 1) return event.key;
-    // Caps Lock reports 'A' without Shift; decide the a/A pair by Shift alone
-    // so Caps Lock doesn't arm the area chord instead of quick add (#865).
+
+
     if (event.key.toLowerCase() === 'a') return event.shiftKey ? 'A' : 'a';
     return event.key;
 }
 
-// A modifier pressed mid-chord (re-pressing Shift before the digit) must not
-// consume and cancel the pending chord (#865).
+
 const CHORD_MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'AltGraph']);
 
 function getAreaChordKey(event: KeyboardEvent): string {
-    // Users often hold Shift from the chord prefix into the digit (Shift+1
-    // reports '!'), and some layouts put digits on shifted keys. Read the
-    // digit from the physical key so the chord still lands (#865).
+
+
     const digit = /^(?:Digit|Numpad)(\d)$/.exec(event.code)?.[1];
     return digit ?? event.key;
 }
@@ -387,20 +373,14 @@ export function KeybindingProvider({
         if (pendingRef.current.key === 'y') pendingRef.current.key = null;
     }, [currentView, style]);
 
-    // Every task list decision — which task is selected, what a key does to it —
-    // belongs to a registered TaskListScope built from the view's own ordered
-    // task array (see `views/list/task-list-scope.ts`). A view that cannot
-    // supply one (the calendar grid) registers nothing and keeps a single
-    // last-resort affordance: entering the list focuses the first task row so
-    // Tab/Enter still reach it (#890).
+
     const focusFirstTaskRow = useCallback((): boolean => {
         const root = document.querySelector<HTMLElement>('[data-main-content]') ?? document.body;
         const row = root.querySelector<HTMLElement>('[data-task-id]');
         if (!row) return false;
         row.scrollIntoView?.({ block: 'nearest' });
-        // A comma selector returns the first match in document order, which is
-        // the done button — Enter would then complete the task (#847). Prefer
-        // the title toggle so Enter opens the task instead.
+
+
         const focusTarget = row.querySelector<HTMLElement>('[data-task-view-toggle]')
             ?? row.querySelector<HTMLElement>('button, [tabindex]:not([tabindex="-1"])');
         if (!focusTarget) return false;
@@ -408,10 +388,7 @@ export function KeybindingProvider({
         return true;
     }, []);
 
-    // Entering the list from the sidebar (ArrowRight / `l`) should focus the
-    // selected task, not the scroll container — focusing the container painted
-    // its focus ring around the whole list and left no task visibly selected
-    // (#890). Fall back to the container only when there is no task to select.
+
     const focusTaskSelection = useCallback((): boolean => {
         if (scopeRef.current?.focusSelected?.()) return true;
         if (focusFirstTaskRow()) return true;
@@ -447,7 +424,7 @@ export function KeybindingProvider({
             && active instanceof HTMLElement
             && (
                 active.closest('[data-project-workspace], [data-task-id]') !== null
-                // Empty projects enter the main-content container instead of a task.
+
                 || active.matches('[data-main-content]')
             )
             && projectScope.focusSelected()
@@ -476,8 +453,7 @@ export function KeybindingProvider({
         }
     }, []);
 
-    // Timeline is opt-in (#1111), so its go-to key only exists while the view
-    // does; with the flag off the key falls through like any unbound letter.
+
     const timelineEnabled = resolveFeatureFlags(settings).timeline;
 
     const vimGoMap = useMemo<Record<string, string>>(() => ({
@@ -495,8 +471,8 @@ export function KeybindingProvider({
         ...(timelineEnabled ? { t: 'timeline' } : {}),
         d: 'done',
         a: 'archived',
-        // Capital T: lowercase t is Timeline. Trash can be hidden from the
-        // sidebar (#1115), so a go-to chord is its only keyboard route.
+
+
         T: 'trash',
     }), [timelineEnabled]);
 
@@ -640,9 +616,7 @@ export function KeybindingProvider({
             }
         };
 
-        // Gmail/Superhuman/Todoist-style task-action cluster: e done, x select,
-        // Enter open, z undo, # delete. Navigation matches the Vim preset since
-        // Gmail uses j/k and g-chords too.
+
         const handleStandard = (e: KeyboardEvent) => {
             if (e.metaKey || e.ctrlKey || e.altKey) return;
             if (e.key === 'F11') {
@@ -888,18 +862,17 @@ export function KeybindingProvider({
                 }
                 return;
             }
-            // Open menus and listboxes own the keyboard: don't fire list
-            // shortcuts (j/k, e, x, dd…) while focus sits in a popup (#848).
+
+
             if (
                 e.target instanceof HTMLElement
                 && e.target.closest('[role="menu"], [role="listbox"]')
             ) return;
-            // Same for modal dialogs: arrows and app shortcuts must not reach
-            // the list behind global search / quick add / prompts.
+
+
             if (hasModalDialogOpen()) return;
-            // Project row controls (focus toggle and dnd handle) own their
-            // keystrokes. In particular, dnd-kit uses Space/Arrow keys and
-            // must not also move or mutate a stale task selection.
+
+
             if (hasProjectNestedControlFocus(e.target)) return;
             if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'c') {
                 if (
@@ -971,10 +944,8 @@ export function KeybindingProvider({
                     }
                     return;
                 }
-                // Bare digits switch the area filter directly (1-9, 0 clears) —
-                // the no-modifier complement of the Shift+A chord (#865). Read
-                // from the physical key like the chord digits; unassigned digits
-                // fall through untouched.
+
+
                 if (!pendingRef.current.key && !e.shiftKey) {
                     const bareDigit = /^(?:Digit|Numpad)(\d)$/.exec(e.code)?.[1];
                     if (bareDigit && applyAreaFilterShortcut(bareDigit)) {
@@ -1028,8 +999,8 @@ export function KeybindingProvider({
                     }
                 }
             }
-            // Native builds give this shortcut one owner: Tauri opens the
-            // standalone window. Browser/PWA builds keep the webview fallback.
+
+
             if (
                 !isTauriRuntime()
                 && !isEditableTarget(e.target)
@@ -1094,10 +1065,7 @@ export function KeybindingProvider({
         applyAreaFilterShortcut,
     ]);
 
-    // Only apply the shortcut once the settings document has loaded (deviceId is
-    // stamped on every load). Before that, `quickAddShortcut` is the platform
-    // default, and persisting the registration fallback into the not-yet-loaded
-    // store wiped the on-disk data on machines where registration fails (#852).
+
     const isStoreHydrated = Boolean(settings.deviceId);
     useEffect(() => {
         if (sandboxMode || isTest || !isTauriRuntime() || !isStoreHydrated) return;
@@ -1163,8 +1131,7 @@ export function KeybindingProvider({
     );
 }
 
-// Views register their task list opportunistically: one rendered outside the
-// provider (unit tests, embedded previews) simply has no keyboard scope.
+
 export function useOptionalKeybindings(): KeybindingContextType | null {
     return useContext(KeybindingContext) ?? null;
 }

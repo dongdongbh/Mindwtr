@@ -1,4 +1,5 @@
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
+import { logInfo } from './logger';
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { safeParseDate } from './date';
 import { countFocusedTasksBeforeBoundary } from './task-utils';
@@ -26,6 +27,7 @@ import { projectNextRecurringTask, type RecurrenceProjection } from './recurrenc
 import { findSelectableProjectByTitleAndArea } from './project-utils';
 import { buildNewProject } from './store-projects/project-actions';
 import { buildNewTask } from './task-creation';
+import { getTaskReminderDefault } from './task-reminder-policy';
 import { createProjectOrderReserver, ensureDeviceId, getNextProjectOrder, getTaskOrder, nextRevision } from './store-helpers';
 import { planTaskUpdateEffects, prepareTaskUpdatesForStore, taskEditValuesEqual } from './store-tasks';
 import type { PreparedInboxEffect, TaskStore } from './store-types';
@@ -193,6 +195,8 @@ type PlanningContext = {
     parseTitle: (input: string) => ProcessInboxParsedTitle;
     nextId: () => string;
     allowMembershipDiscovery?: boolean;
+
+    taskReminderDefault: 'send' | 'skip';
 };
 type Planned = { effect: PreparedInboxEffect; result: NativeInboxDurableResult;
     decisionRequest?: NativeInboxWitness['decisionRequest']; preparedDecision?: PreparedProcessInboxCommit;
@@ -220,7 +224,7 @@ const dateRequest = (witness: NativeInboxWitness, kind: ProcessInboxCommitKind) 
     now: new Date(witness.preparedAt),
 });
 
-const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscovery = false }: PlanningContext): Planned | Refused => {
+const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscovery = false, taskReminderDefault }: PlanningContext): Planned | Refused => {
     const { source, draft, plan, lists } = witness;
     const kind: NativeInboxDurableResult['kind'] = witness.decisionKind === null ? 'projectCreate'
         : witness.decisionKind === 'skip' ? 'skip' : 'decision';
@@ -277,7 +281,7 @@ const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscov
                 const id = nextId();
                 const built = buildNewTask({ title: action.title, initialTaskProps: { status: 'inbox', projectId: newProject.id },
                     id, now: witness.preparedAt, deviceId: witness.deviceIdBefore ?? witness.deviceIdToInitialize!,
-                    state: { settings: witness.settings, _allProjects: projects, _allSections: sections, _allAreas: lists.areas },
+                    state: { settings: { ...witness.settings, taskReminderDefault }, _allProjects: projects, _allSections: sections, _allAreas: lists.areas },
                     tasks, focusedCount: witness.focusCount, focusTaskLimit: witness.focusLimit,
                     projectOrderReserver: reserveOrder, endOfTodayIso: witness.futureBoundary });
                 if (!built.ok) throw new Error(built.error);
@@ -320,7 +324,7 @@ const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscov
                     if (frozen !== undefined && frozen !== original && !validDate(frozen)) {
                         throw new Error('Invalid frozen Inbox date');
                     }
-                    // Explicit picker edits (including clearing) outrank title tokens in RN.
+
                     if (!draft.dirtyScheduleFields.includes(field) && parsed !== undefined && frozen !== parsed) {
                         throw new Error('Parsed Inbox date was altered');
                     }
@@ -420,7 +424,7 @@ const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscov
     return { effect, result, decisionRequest, preparedDecision };
 };
 
-/** The ordinary core contract supplies an already checked, pre-write session. */
+
 export function prepareNativeInboxWrite(input: {
     request: NativeInboxWriteRequest;
     source: Task;
@@ -471,7 +475,8 @@ export function prepareNativeInboxWrite(input: {
         focusCount: countFocusedTasksBeforeBoundary(state.tasks, boundary),
         focusLimit: normalizeFocusTaskLimit(state.settings.gtd?.focusTaskLimit),
     };
-    const planned = planWrite({ request, witness, parseTitle, nextId, allowMembershipDiscovery: true });
+    const taskReminderDefault = getTaskReminderDefault(state.settings);
+    const planned = planWrite({ request, witness, parseTitle, nextId, allowMembershipDiscovery: true, taskReminderDefault });
     if (planned.reason !== undefined) return { kind: 'notice', reason: planned.reason,
         ...('invalidDateCommands' in planned ? { invalidDateCommands: planned.invalidDateCommands } : {}) };
     if (planned.decisionRequest) witness.decisionRequest = planned.decisionRequest;
@@ -486,9 +491,8 @@ export function prepareNativeInboxWrite(input: {
             sectionIds: state._allSections.filter((section) => section.projectId === reopened.after.id).map((section) => section.id).sort() };
         planned.effect.guards.reactivation = witness.membership;
     }
-    // The first plan ran against live state. Retain only rows read by its
-    // affected set and the bounded order/dedupe/membership guards. Replanning
-    // this reduced witness must yield the same complete effect and receipt.
+
+
     const relevantTasks = new Set<string>([
         source.id,
         ...planned.effect.tasks.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
@@ -514,6 +518,8 @@ export function prepareNativeInboxWrite(input: {
     const relevantSections = new Set<string>([
         ...planned.effect.sections.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
         ...planned.effect.guards.reactivation?.sectionIds ?? [],
+
+        ...[source.sectionId, input.draft.sectionId].filter((id): id is string => Boolean(id)),
     ]);
     witness.lists = {
         tasks: state._allTasks.filter((task) => relevantTasks.has(task.id)),
@@ -526,7 +532,7 @@ export function prepareNativeInboxWrite(input: {
             || planned.effect.tasks.some((row) => row.after.areaId === area.id)),
     };
     let idIndex = 0;
-    const check = planWrite({ request, witness, parseTitle: (title) => {
+    const check = planWrite({ request, witness, taskReminderDefault, parseTitle: (title) => {
         const record = parser.find((entry) => entry.input === title);
         if (!record) throw new Error('Missing frozen Inbox parser result');
         return record.parsed;
@@ -546,7 +552,7 @@ export function prepareNativeInboxWrite(input: {
     return { kind: 'prepared', prepared };
 }
 
-/** Pure verification, including a self-consistent full-effect reconstruction. */
+
 export function readNativePreparedInboxWrite(input: unknown): NativePreparedInboxWrite | null {
     const envelope = detach(input);
     if (!isRecord(envelope) || !exactKeys(envelope, ['request', 'prepared'])
@@ -612,7 +618,10 @@ export function readNativePreparedInboxWrite(input: unknown): NativePreparedInbo
     try {
         const seen = new Set<string>();
         let idIndex = 0;
+        const createdActionIds = new Set(prepared.result.createdActionIds ?? []);
         const recomputed = planWrite({ request: envelope.request, witness,
+            taskReminderDefault: prepared.effect.tasks.some((row) => !row.before && createdActionIds.has(row.after.id)
+                && row.after.suppressMindwtrReminders === true) ? 'skip' : 'send',
             parseTitle: (title) => {
                 const records = witness.parser.filter((record) => record.input === title);
                 if (records.length !== 1) throw new Error('Invalid Inbox parser witness');
@@ -624,11 +633,31 @@ export function readNativePreparedInboxWrite(input: unknown): NativePreparedInbo
                 if (!id) throw new Error('Missing frozen Inbox ID');
                 return id;
             } });
-        if (recomputed.reason !== undefined || idIndex !== witness.ids.length
-            || seen.size !== witness.parser.length || !same(recomputed.effect, prepared.effect)
+        if (recomputed.reason !== undefined) return null;
+        const legacyReferenceFields = (['dueReminderLeadMinutes', 'startReminderLeadMinutes'] as const).filter((field) => {
+            const hasAdvance = (task: Task) => Object.prototype.hasOwnProperty.call(task, field);
+            return witness.decisionKind === 'reference' && witness.committed === 'reference'
+                && witness.source.status !== 'reference' && !hasAdvance(witness.source)
+                && witness.lists.tasks.every((task) => !hasAdvance(task))
+                && prepared.effect.tasks.every((row) => !hasAdvance(row.after) && (!row.before || !hasAdvance(row.before)))
+                && recomputed.effect.tasks.some((row) => row.after.id === witness.source.id
+                    && row.after.status === 'reference' && row.after[field] === 0);
+        });
+
+        const legacyReference = legacyReferenceFields.length > 0;
+        const effect = legacyReference ? { ...recomputed.effect, tasks: recomputed.effect.tasks.map((row) => {
+            if (row.after.id !== witness.source.id) return row;
+            const after = { ...row.after };
+            for (const field of legacyReferenceFields) delete after[field];
+            return { ...row, after };
+        }) } : recomputed.effect;
+        if (idIndex !== witness.ids.length
+            || seen.size !== witness.parser.length || !same(effect, prepared.effect)
             || !same(recomputed.result, prepared.result) || prepared.kind !== prepared.result.kind
             || !same(recomputed.decisionRequest, witness.decisionRequest)
             || !same(recomputed.preparedDecision, witness.preparedDecision)) return null;
+        if (legacyReference) logInfo('Legacy Reference decision validated', { scope: 'native-host', force: true,
+            context: { releaseCheck: 'v1.3.8/native-reference-legacy-decision', outcome: 'validated' } });
         return prepared;
     } catch {
         return null;

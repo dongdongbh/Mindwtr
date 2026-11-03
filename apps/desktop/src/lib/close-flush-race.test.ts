@@ -55,7 +55,7 @@ describe('raceCloseFlush (#913)', () => {
             'flush before close started',
             'flush before close timed out after 10000ms',
         ]);
-        // The flush itself was never cancelled — it can still resolve later.
+
         expect(flushResolved).toBe(false);
         resolveFlush();
         expect(flushResolved).toBe(true);

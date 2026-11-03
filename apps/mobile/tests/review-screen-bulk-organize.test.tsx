@@ -14,8 +14,10 @@ const mocks = vi.hoisted(() => {
   const modalPropsSpy = vi.fn();
   const showToast = vi.fn();
   const flushPendingSave = vi.fn(async () => undefined);
+  const backListeners: (() => boolean)[] = [];
 
   return {
+    backListeners,
     batchDeleteTasks,
     batchMoveTasks,
     batchUpdateTasks,
@@ -28,7 +30,7 @@ const mocks = vi.hoisted(() => {
     updateTask,
     storeState: {
       tasks: [] as Task[],
-      // Bulk organize reads the stored rows by id when its write is admitted.
+
       get _tasksById() { return new Map(this.tasks.map((task) => [task.id, task])); },
       projects: [] as Project[],
       areas: [] as Area[],
@@ -66,6 +68,7 @@ vi.mock('expo-router', () => ({
 }));
 
 vi.mock('@react-navigation/native', () => ({
+  NavigationContext: React.createContext(undefined),
   useFocusEffect: () => undefined,
 }));
 
@@ -129,7 +132,7 @@ vi.mock('../contexts/language-context', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: rows compare `tc` by identity (#766).
+
   const themeColors = {
     bg: '#ffffff',
     border: '#d1d5db',
@@ -191,7 +194,10 @@ vi.mock('react-native', async (importOriginal) => {
     ...actual,
     AppState: { addEventListener: vi.fn(() => ({ remove: vi.fn() })) },
     BackHandler: {
-      addEventListener: vi.fn(() => ({ remove: vi.fn() })),
+      addEventListener: (_event: string, listener: () => boolean) => {
+        mocks.backListeners.push(listener);
+        return { remove: () => { mocks.backListeners.splice(mocks.backListeners.indexOf(listener), 1); } };
+      },
     },
     FlatList: ({ data = [], renderItem, keyExtractor, ListEmptyComponent, ...props }: any) => {
       const children = data.length > 0
@@ -274,6 +280,37 @@ describe('ReviewScreen bulk organize', () => {
     mocks.storeState.tasks = [makeTask('task-1', 'Loose next action')];
   });
 
+  it('keeps sequence tails collapsed, editable on expansion, and visible when explicitly due', async () => {
+    const project: Project = {
+      id: 'sequence', title: 'Sequence', status: 'active', color: '#2563eb', order: 0,
+      tagIds: [], createdAt: now, updatedAt: now, isSequential: true,
+    };
+    mocks.storeState.projects = [project];
+    mocks.storeState.tasks = [
+      makeTask('head', 'Waiting head', { projectId: project.id, status: 'waiting', order: 0 }),
+      makeTask('tail', 'Later tail', { projectId: project.id, order: 1 }),
+      makeTask('due-tail', 'Review due tail', { projectId: project.id, order: 2, reviewAt: '2020-01-01' }),
+    ];
+    const original = structuredClone(mocks.storeState.tasks);
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<ReviewScreen />); });
+    pressButtonWithLabel(tree, 'Expand areas');
+    pressButtonWithLabel(tree, 'Expand projects');
+    const rows = () => tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem');
+    expect(rows().map((row) => row.props.task.id)).toEqual(['due-tail']);
+    pressButtonWithText(tree, 'All open tasks');
+    expect(rows().map((row) => row.props.task.id)).toEqual(['head']);
+    const disclosure = () => tree.root.findAllByType(Pressable).find((node) => node.props.accessibilityLabel === 'projects.laterInSequence (2)')!;
+    expect(disclosure().props.accessibilityState).toEqual({ expanded: false });
+    act(() => disclosure().props.onPress());
+    expect(rows().map((row) => row.props.task.id)).toEqual(['head', 'tail', 'due-tail']);
+    expect(mocks.updateTask).not.toHaveBeenCalled();
+    expect(mocks.storeState.tasks).toEqual(original);
+    act(() => rows().find((row) => row.props.task.id === 'tail')!.props.actions.edit(mocks.storeState.tasks[1]));
+    expect(tree.root.findByType('TaskEditModal' as React.ElementType).props.task.id).toBe('tail');
+    await act(async () => tree.unmount());
+  });
+
   it('bulk-applies an area from the review selection organize modal', async () => {
     let tree!: ReactTestRenderer;
     await act(async () => {
@@ -311,6 +348,40 @@ describe('ReviewScreen bulk organize', () => {
     ]);
   });
 
+
+  it('keeps selection on Android Back while a review dialog is open, then leaves it (#1415)', async () => {
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(<ReviewScreen />);
+    });
+    pressButtonWithText(tree, 'All open tasks');
+    pressButtonWithLabel(tree, 'Expand areas');
+    pressButtonWithLabel(tree, 'Expand projects');
+    const row = tree.root.findByType('SwipeableTaskItem' as unknown as React.ElementType);
+    act(() => {
+      row.props.onLongPressAction(row.props.task);
+    });
+    const pressBack = () => {
+      let handled = false;
+      act(() => {
+        handled = [...mocks.backListeners].reverse().some((listener) => listener());
+      });
+      return handled;
+    };
+    const selecting = () => tree.root.findAllByType(TouchableOpacity).some((node) => flattenText(node.props.children) === 'Organize');
+
+    pressButtonWithText(tree, 'Organize');
+    expect(mocks.modalPropsSpy.mock.calls.at(-1)?.[0].visible).toBe(true);
+    expect(pressBack()).toBe(false);
+    expect(selecting()).toBe(true);
+
+    act(() => {
+      mocks.modalPropsSpy.mock.calls.at(-1)?.[0].onClose();
+    });
+    expect(pressBack()).toBe(true);
+    expect(selecting()).toBe(false);
+  });
+
   it('gives every bulk bar action the button role', async () => {
     let tree!: ReactTestRenderer;
     await act(async () => {
@@ -336,8 +407,7 @@ describe('ReviewScreen bulk organize', () => {
     ]);
   });
 
-  // Rows carry the #766 memo boundary, which only holds while the screen hands
-  // untouched rows the same references back.
+
   it('hands rows stable prop references across a re-render', async () => {
     mocks.storeState.tasks = [
       makeTask('task-1', 'Loose next action'),

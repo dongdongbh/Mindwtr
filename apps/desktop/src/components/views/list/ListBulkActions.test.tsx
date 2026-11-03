@@ -143,7 +143,7 @@ describe('ListBulkActions', () => {
         fireEvent.click(getByRole('button', { name: 'Destination' }));
         expect(getByRole('option', { name: 'Plan' })).toBeInTheDocument();
         fireEvent.change(getByLabelText('Search'), { target: { value: 'New destination' } });
-        expect(queryByRole('button', { name: /New project|New area/ })).not.toBeInTheDocument();
+        expect(queryByRole('option', { name: /New project|New area/ })).not.toBeInTheDocument();
     });
 
     it('assigns selected energy level from bulk action select', () => {

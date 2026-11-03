@@ -6,15 +6,11 @@ import { openScreenHost, requestId, value } from './screen-parity.replay';
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
 import type { Attachment } from './types';
 
-/**
- * A file share on the native host (O3 review item 5): the host stages each shared file in its own folder, core runs React
- * Native's rule (share-capture-files.ts) over the host's attachment IO, and the capture screen shows and saves the managed
- * copies, as React Native's root layout and capture screen do.
- */
+
 const MANAGED = 'file:///data/files/attachments/';
 const STAGED = '/data/no_backup/shared-entries/e1/';
 
-/** The host's attachment IO: a copy puts the staged file in the managed folder (its bytes [sizes] by name, when the share had none). */
+
 const fileHost = (sizes: Record<string, number> = {}, unreadable: string[] = []) => {
     const log: unknown[][] = [];
     const host: NativeAttachmentsHost = {
@@ -52,7 +48,7 @@ describe('native host contract: prepareSharedFiles', () => {
         const params = answer.captureModal!.params;
         expect(decodeURIComponent(params.initialValue!)).toBe('Report');
         expect(props(params).attachments.map((attachment: Attachment) => attachment.id)).toEqual([requestRowId(id, 'share-file:0'), requestRowId(id, 'share-file:1')]);
-        // The same entry again (a replay after a restart) names the same copies.
+
         const again = value(await host.prepareSharedFiles({ requestId: id, files: [staged('Report.pdf'), staged('photo.png', { mimeType: 'image/png' })], text: null, subject: null }));
         const named = (entry: { captureModal: { params: Record<string, string> } | null }) => props(entry.captureModal!.params).attachments.map((attachment: Attachment) => [attachment.id, attachment.uri]);
         expect(named(again)).toEqual(named(answer));
@@ -89,7 +85,7 @@ describe('native host contract: prepareSharedFiles', () => {
     });
 
     it('counts a staged file the system cleared before the entry opened as skipped: a notice, never a silent empty capture', async () => {
-        // The cache copy is gone, so the host's copy into the attachments folder fails.
+
         const host = await open(fileHost({}, ['cleared.pdf']).host);
         const answer = value(await host.prepareSharedFiles({ requestId: requestId(), files: [staged('cleared.pdf')], text: null, subject: null }));
         expect(answer.captureModal).toBeNull();
@@ -108,7 +104,7 @@ describe('native host contract: prepareSharedFiles', () => {
 
     it('takes no files without the host\'s attachment IO, and refuses malformed input', async () => {
         const host = await open(null);
-        // Without it, the share cannot be read: RN's notice, so the entry leaves instead of holding the queue.
+
         const unbound = value(await host.prepareSharedFiles({ requestId: requestId(), files: [staged('a.pdf')], text: null, subject: null }));
         expect(unbound).toMatchObject({ captureModal: null, notice: { title: 'Share unavailable' } });
         const bound = await open(fileHost().host);

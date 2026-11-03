@@ -19,7 +19,7 @@ private struct TaskDraftDirection: ViewModifier {
     }
 }
 
-/// Core owns field layout, draft edits, preview formatting and acknowledged saves.
+
 struct TaskViewSheet: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -35,6 +35,14 @@ struct TaskViewSheet: View {
     @State private var waitingAssignment: String?
     @State private var backdatedCompletion: TaskBackdatedCompletionDraft?
     @State private var checklistReordering = false
+    @State private var checklistRowSession = ChecklistRowSession()
+    @State private var checklistDragRow: String?
+    @State private var checklistDragTarget: String?
+    @State private var checklistDragPointer: CGFloat = 0
+    @State private var checklistFrames: [String: CGRect] = [:]
+    @State private var checklistViewport = CGRect.zero
+    @State private var checklistActionRow: String?
+    @GestureState private var checklistGestureActive = false
     @FocusState private var focusedChecklistIndex: Int?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var value: CoreObject { model.taskView }
@@ -353,6 +361,19 @@ struct TaskViewSheet: View {
                     .padding(20)
                 }
                 .id(editing)
+                .scrollDisabled(checklistDragRow != nil)
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: ChecklistViewportPreference.self, value: geometry.frame(in: .global))
+                })
+                .onPreferenceChange(ChecklistViewportPreference.self) { checklistViewport = $0 }
+                .onPreferenceChange(ChecklistRowFramesPreference.self) { checklistFrames = $0 }
+                .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
+                    scrollChecklistDrag(reader)
+                }
+                .onChange(of: checklistGestureActive) { active in
+                    if !active { checklistDragRow = nil; checklistDragTarget = nil }
+                }
+                .onDisappear { checklistDragRow = nil; checklistDragTarget = nil }
                 .onChange(of: focusedChecklistIndex) { _ in scrollChecklistFocus(reader) }
                 .onChange(of: error) { message in
                     guard message != nil else { return }
@@ -440,13 +461,15 @@ struct TaskViewSheet: View {
 
     private func scrollChecklistFocus(_ reader: ScrollViewProxy) {
         guard let index = focusedChecklistIndex else { return }
-        // iOS 17 applies the keyboard inset after its notification. Scrolling
-        // in that callback clamps to the old viewport and can hide the new row.
+
+
         DispatchQueue.main.async {
             guard focusedChecklistIndex == index, model.taskChecklistFocusIndex == index,
                   editing, !readOnly, !checklistReordering,
                   model.taskChecklistField.objects("items").contains(where: { $0.number("index") == index }) else { return }
-            reader.scrollTo("task-checklist-row-\(index)", anchor: .center)
+            let rows = checklistRowSession.sync(model.taskChecklistField.objects("items"))
+            guard rows.indices.contains(index) else { return }
+            reader.scrollTo("task-checklist-row-\(rows[index].identity)", anchor: .center)
         }
     }
 
@@ -715,6 +738,7 @@ struct TaskViewSheet: View {
         let field = model.taskChecklistField
         let labels = field.object("labels")
         let items = field.objects("items")
+        let sessionRows = checklistRowSession.sync(items)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 label(field.text("label"))
@@ -732,13 +756,32 @@ struct TaskViewSheet: View {
                     .accessibilityIdentifier("task-checklist-reorder")
                 }
             }
-            ForEach(items.indices, id: \.self) { offset in
-                let item = items[offset]
-                if checklistReordering {
-                    checklistOrderRow(item)
-                } else {
-                    checklistEditRow(item, placeholder: labels.text("placeholder"), bullets: field.flag("bullets"))
+            if model.taskEditor.flag("canPreserveChecklistOnRepeat"), !items.isEmpty {
+                Toggle(model.label("taskEdit.resetChecklistOnRepeat"), isOn: Binding(
+                    get: { !model.taskEditor.object("draft").flag("preserveChecklistOnRepeat") },
+                    set: { _ in endEditingBeforeAction(); model.toggleTaskChecklistRecurrence() }))
+                    .disabled(frozen)
+                Text(model.label("taskEdit.resetChecklistOnRepeatHint")).rnFont(12).foregroundStyle(palette.secondary)
+            }
+            ForEach(sessionRows, id: \.identity) { row in
+                let item = row.item
+                HStack(spacing: 0) {
+                    checklistHandle(row.identity, index: item.number("index"), labels: labels)
+                    if checklistReordering {
+                        checklistOrderRow(item)
+                    } else {
+                        checklistEditRow(item, placeholder: labels.text("placeholder"), bullets: field.flag("bullets"))
+                    }
                 }
+                .id("task-checklist-row-\(row.identity)")
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: ChecklistRowFramesPreference.self,
+                        value: [row.identity: geometry.frame(in: .global)])
+                })
+                .overlay(alignment: .top) {
+                    if checklistDragTarget == row.identity { Rectangle().fill(palette.tint).frame(height: 2) }
+                }
+                .opacity(checklistDragRow == row.identity ? 0.6 : 1)
             }
             if !checklistReordering, field.flag("canAdd") {
                 Button {
@@ -765,7 +808,88 @@ struct TaskViewSheet: View {
                 .accessibilityIdentifier("task-checklist-reset")
             }
         }
-        .onChange(of: model.taskEditor.text("id")) { _ in checklistReordering = false }
+        .onChange(of: model.taskEditorSession) { _ in
+            checklistReordering = false; checklistRowSession = ChecklistRowSession()
+            checklistDragRow = nil; checklistDragTarget = nil; checklistActionRow = nil
+        }
+        .confirmationDialog(labels.text("actions"), isPresented: Binding(
+            get: { checklistActionRow != nil }, set: { if !$0 { checklistActionRow = nil } }), titleVisibility: .visible) {
+            if let identity = checklistActionRow,
+               let index = sessionRows.firstIndex(where: { $0.identity == identity }) {
+                Button(model.label("projects.moveUp")) { moveChecklistItem(from: index, to: index - 1) }.disabled(index == 0)
+                Button(model.label("projects.moveDown")) { moveChecklistItem(from: index, to: index + 1) }.disabled(index == items.count - 1)
+                Button(labels.text("moveTop")) { moveChecklistItem(from: index, to: 0) }.disabled(index == 0)
+                Button(labels.text("moveBottom")) { moveChecklistItem(from: index, to: items.count - 1) }.disabled(index == items.count - 1)
+                Button(labels.text("addBelow")) {
+                    endEditingBeforeAction()
+                    Task { await model.editTaskChecklist(["kind": "insertAfter", "index": index]) }
+                }.disabled((model.taskChecklistInputs[index] ?? items[index].text("title")).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Button(strings.text("common.cancel"), role: .cancel) { checklistActionRow = nil }
+        }
+    }
+
+    private func checklistHandle(_ identity: String, index: Int, labels: CoreObject) -> some View {
+        Image(systemName: "line.3.horizontal")
+            .foregroundStyle(palette.secondary).frame(width: 44, height: 44).contentShape(Rectangle())
+            .accessibilityElement().accessibilityLabel(labels.text("drag"))
+            .accessibilityHint(labels.text("actions")).accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("task-checklist-drag-\(index)")
+            .onTapGesture { if !frozen { endEditingBeforeAction(); checklistActionRow = identity } }
+            .accessibilityAction { if !frozen { endEditingBeforeAction(); checklistActionRow = identity } }
+            .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                .updating($checklistGestureActive) { _, active, _ in active = true }
+                .onChanged { value in
+                    guard !frozen, model.taskChecklistField.objects("items").count > 1 else { return }
+                    if checklistDragRow == nil {
+                        endEditingBeforeAction(); focusedChecklistIndex = nil; checklistActionRow = nil
+                        checklistDragRow = identity
+                    }
+                    checklistDragPointer = value.location.y
+                    checklistDragTarget = checklistDropTarget()
+                }
+                .onEnded { _ in
+                    guard !frozen, checklistDragRow == identity else { return }
+                    let rows = checklistRowSession.sync(model.taskChecklistField.objects("items"))
+                    let from = rows.firstIndex { $0.identity == identity }
+                    let target = checklistDropTarget()
+                    let to = rows.firstIndex { $0.identity == target }
+                    checklistDragRow = nil; checklistDragTarget = nil
+                    if let from, let to, from != to { moveChecklistItem(from: from, to: to, dragged: true) }
+                })
+            .disabled(frozen)
+    }
+
+    private func checklistDropTarget() -> String? {
+        let rows = checklistRowSession.sync(model.taskChecklistField.objects("items"))
+        return rows.compactMap { row -> (String, CGFloat)? in
+            guard let frame = checklistFrames[row.identity] else { return nil }
+            return (row.identity, abs(frame.midY - checklistDragPointer))
+        }.min(by: { $0.1 < $1.1 })?.0
+    }
+
+    private func scrollChecklistDrag(_ reader: ScrollViewProxy) {
+        guard checklistDragRow != nil, !frozen, checklistViewport.height > 0 else { return }
+        checklistDragTarget = checklistDropTarget()
+        let rows = checklistRowSession.sync(model.taskChecklistField.objects("items"))
+        guard let index = rows.firstIndex(where: { $0.identity == checklistDragTarget }) else { return }
+        let edge = min(CGFloat(72), checklistViewport.height / 4)
+        if checklistDragPointer > checklistViewport.maxY - edge, index + 1 < rows.count {
+            reader.scrollTo("task-checklist-row-\(rows[index + 1].identity)", anchor: .bottom)
+        } else if checklistDragPointer < checklistViewport.minY + edge, index > 0 {
+            reader.scrollTo("task-checklist-row-\(rows[index - 1].identity)", anchor: .top)
+        }
+    }
+
+    private func moveChecklistItem(from: Int, to: Int, dragged: Bool = false) {
+        guard !frozen, from != to, to >= 0, to < model.taskChecklistField.objects("items").count else { return }
+        endEditingBeforeAction(); focusedChecklistIndex = nil; checklistActionRow = nil
+        checklistRowSession.expectMove(from: from, to: to)
+        Task {
+            if dragged { NSLog("Checklist handle drag submitted releaseCheck=v1.3.8/checklist-handle-drag") }
+            await model.editTaskChecklist(["kind": "move", "from": from, "to": to])
+            checklistRowSession.settle(model.taskChecklistField.objects("items"), succeeded: model.taskError == nil)
+        }
     }
 
     private func checklistEditRow(_ item: CoreObject, placeholder: String, bullets: Bool) -> some View {
@@ -804,7 +928,11 @@ struct TaskViewSheet: View {
                 .disabled(frozen)
             Button {
                 endEditingBeforeAction()
-                Task { await model.editTaskChecklist(["kind": "remove", "index": index]) }
+                checklistRowSession.expectRemove(index)
+                Task {
+                    await model.editTaskChecklist(["kind": "remove", "index": index])
+                    checklistRowSession.settle(model.taskChecklistField.objects("items"), succeeded: model.taskError == nil)
+                }
             } label: {
                 AppIcon(name: "x", size: 16).frame(width: 44, height: 44).contentShape(Rectangle())
             }
@@ -812,7 +940,7 @@ struct TaskViewSheet: View {
             .accessibilityLabel(strings.text("common.remove"))
             .accessibilityIdentifier("task-checklist-remove-\(index)")
         }
-        .id("task-checklist-row-\(index)")
+
     }
 
     private func checklistOrderRow(_ item: CoreObject) -> some View {
@@ -821,7 +949,7 @@ struct TaskViewSheet: View {
             Text(item.text("orderTitle")).rnFont(14)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             Button {
-                Task { await model.editTaskChecklist(["kind": "move", "from": index, "to": index - 1]) }
+                moveChecklistItem(from: index, to: index - 1)
             } label: {
                 Image(systemName: "arrow.up").frame(width: 44, height: 44).contentShape(Rectangle())
             }
@@ -829,7 +957,7 @@ struct TaskViewSheet: View {
             .accessibilityLabel(item.text("moveUpLabel"))
             .accessibilityIdentifier("task-checklist-up-\(index)")
             Button {
-                Task { await model.editTaskChecklist(["kind": "move", "from": index, "to": index + 1]) }
+                moveChecklistItem(from: index, to: index + 1)
             } label: {
                 Image(systemName: "arrow.down").frame(width: 44, height: 44).contentShape(Rectangle())
             }
@@ -1047,11 +1175,8 @@ struct TaskViewSheet: View {
     }
 
     private func endEditingBeforeAction() {
-        // Resign synchronously in the input action, before SwiftUI removes or
-        // disables a focused UITextView. Letting `.disabled(frozen)` resign it
-        // during layout can re-enter UIKit keyboard updates on iOS 27.
-        // The checklist binding receives its final synchronous editing callback
-        // here, before the action's Task sets busy and freezes checklist input.
+
+
         _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         model.commitTaskRelativeInput()
         model.commitTaskRecurrenceInputs()
@@ -1510,8 +1635,8 @@ private struct NativePhotoPicker: UIViewControllerRepresentable {
                 completion(.failure(CocoaError(.userCancelled)), pickerID)
                 return
             }
-            // Retain the selected provider; its temporary representation is
-            // acquired and captured only by the typed native facade.
+
+
             completion(.success(results.map(\.itemProvider)), pickerID)
         }
     }
@@ -1648,7 +1773,7 @@ struct NativeMarkdownContent: View {
                                              onReference: referenceHandler(blockIndex, itemIndex: index))
                             .accessibilityValue(block.text("type") == "taskList" ? strings.text(item.flag("checked") ? "common.done" : "status.active") : "")
                     }
-                    // ponytail: indent caps at eight levels; use horizontal scrolling if deeper nesting must stay distinct.
+
                     .padding(.leading, CGFloat(min(max(0, item.number("depth")), 8)) * 14)
                 }
             }
@@ -1659,13 +1784,13 @@ struct NativeMarkdownContent: View {
     }
 }
 
-// Validation does not normalize or decode the original external link.
+
 enum NativeMarkdownLinkURL {
     static func externalURL(_ href: String) -> URL? {
         guard let url = URL(string: href),
-              ["http", "https", "mailto", "tel", "upnote"].contains(url.scheme?.lowercased() ?? "") else { return nil }
-        if url.scheme?.lowercased() == "upnote" {
-            guard href.lowercased().hasPrefix("upnote://"), url.absoluteString == href else { return nil }
+              ["http", "https", "mailto", "tel", "upnote", "obsidian"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        if let scheme = url.scheme?.lowercased(), ["upnote", "obsidian"].contains(scheme) {
+            guard href.lowercased().hasPrefix("\(scheme)://"), url.absoluteString == href else { return nil }
         }
         return url
     }
@@ -1840,8 +1965,52 @@ private struct TaskScheduleField: View {
                 Text(issue).rnFont(13).foregroundStyle(palette.warning).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(prefix + "-issue")
             }
+            if field == "dueDate" && (!part.text("value").isEmpty || model.taskEditor.object("draft").number("dueReminderLeadMinutes") > 0) { advanceReminder }
+            if field == "startTime" && !model.taskEditor.object("fields").object("reminders").object("startAdvance").isEmpty { startAdvanceReminder }
             if field == "startTime" && !relative.isEmpty { relativeControls }
             if !pickerMode.isEmpty { inlinePicker }
+        }
+    }
+
+    private var startAdvanceReminder: some View {
+        let advance = model.taskEditor.object("fields").object("reminders").object("startAdvance")
+        return VStack(alignment: .leading, spacing: 4) {
+            Picker(advance.text("label"), selection: Binding(
+                get: { model.taskEditor.object("draft").number("startReminderLeadMinutes") },
+                set: { minutes in beforeAction(); model.setTaskStartAdvanceReminder(minutes) })) {
+                ForEach(advance.objects("options").indices, id: \.self) { index in
+                    let option = advance.objects("options")[index]
+                    Text(option.text("label")).tag(option.number("value"))
+                }
+            }
+            .pickerStyle(.menu).tint(palette.tint)
+            .disabled(!advance.flag("enabled") || model.busy || model.taskScheduleUpdating)
+            .accessibilityIdentifier("task-start-advance-reminder")
+            if !advance.text("hint").isEmpty {
+                Text(advance.text("hint")).rnFont(12).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var advanceReminder: some View {
+        let reminders = model.taskEditor.object("fields").object("reminders")
+        return VStack(alignment: .leading, spacing: 4) {
+            Picker(reminders.text("advanceLabel"), selection: Binding(
+                get: { model.taskEditor.object("draft").number("dueReminderLeadMinutes") },
+                set: { minutes in beforeAction(); model.setTaskAdvanceReminder(minutes) })) {
+                ForEach(reminders.objects("advanceOptions").indices, id: \.self) { index in
+                    let option = reminders.objects("advanceOptions")[index]
+                    Text(option.text("label")).tag(option.number("value"))
+                }
+            }
+            .pickerStyle(.menu).tint(palette.tint)
+            .disabled(!reminders.flag("showAdvance") || model.busy || model.taskScheduleUpdating)
+            .accessibilityIdentifier("task-advance-reminder")
+            if !reminders.text("advanceHint").isEmpty {
+                Text(reminders.text("advanceHint")).rnFont(12).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -1892,18 +2061,16 @@ private struct TaskScheduleField: View {
 
     @ViewBuilder private var dateActions: some View {
         if !part.text("value").isEmpty {
-            if field != "reviewAt" {
-                Button { openPicker("time") } label: {
-                    Image(systemName: "clock").font(.system(size: 14)).frame(width: 44, height: 44)
-                        .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).foregroundStyle(palette.secondary)
-                .accessibilityLabel(part.flag("hasTime") && !part.text("time").isEmpty
-                    ? model.label(field == "startTime" ? "task.aria.startTime" : "task.aria.dueTime") + ": " + part.text("time")
-                    : model.label("calendar.changeTime"))
-                .accessibilityIdentifier(prefix + "-time")
+            Button { openPicker("time") } label: {
+                Image(systemName: "clock").font(.system(size: 14)).frame(width: 44, height: 44)
+                    .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
             }
+            .buttonStyle(.plain).foregroundStyle(palette.secondary)
+            .accessibilityLabel(part.flag("hasTime") && !part.text("time").isEmpty
+                ? model.label(field == "startTime" ? "task.aria.startTime" : field == "dueDate" ? "task.aria.dueTime" : "task.aria.reviewTime") + ": " + part.text("time")
+                : model.label("calendar.changeTime"))
+            .accessibilityIdentifier(prefix + "-time")
             if part.flag("hasTime") {
                 chip(model.label("taskEdit.dateOnly"), selected: false, id: prefix + "-date-only", compact: true) {
                     pickerID = ""
@@ -2025,9 +2192,7 @@ private struct TaskScheduleField: View {
     }
 }
 
-/// Converts only core's machine picker components. Stored date strings and
-/// displayed labels never pass through Foundation formatting here. The wheel
-/// itself keeps the platform locale/calendar, as RN's native spinner does.
+
 enum TaskDatePickerComponents {
     private static func formatter(_ format: String, timeZone: TimeZone = .current) -> DateFormatter {
         let formatter = DateFormatter()
@@ -2065,8 +2230,8 @@ enum TaskDatePickerComponents {
     }
 
     private static func instantFormatter() -> DateFormatter {
-        // JS ISO instants use a proleptic Gregorian calendar and astronomical
-        // years. Local date/time wheel components keep their existing calendar.
+
+
         let codec = formatter("uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", timeZone: TimeZone(secondsFromGMT: 0)!)
         codec.gregorianStartDate = Date(timeIntervalSince1970: -8_640_000_000_000)
         return codec
@@ -2315,8 +2480,8 @@ private struct TaskBackdatedCompletionDialog: View {
                 VStack(alignment: .leading, spacing: 12) {
                     ScrollView { form }
                     .scrollDismissesKeyboard(.interactively)
-                    // Keep this one form mounted as the keyboard changes the
-                    // available height; replacing it loses the focused input.
+
+
                     .frame(maxHeight: max(120, min(dynamicTypeSize.isAccessibilitySize ? .infinity : 360, geometry.size.height - 132)))
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("task-backdate-scroll")
@@ -2930,7 +3095,7 @@ private struct TaskDestinationPicker: View {
 private struct TaskDestinationChoice: Identifiable {
     let value: CoreObject
     let kind: String
-    // Lazy stacks flatten nested ForEach children; group-local indices collide.
+
     var id: String { kind + "-" + value.text("id") }
 }
 
@@ -3033,4 +3198,74 @@ struct AttachmentFileQuickLookSheet: UIViewControllerRepresentable {
             url as NSURL
         }
     }
+}
+
+private struct ChecklistSessionRow {
+    let identity: String
+    let item: CoreObject
+}
+
+private final class ChecklistRowSession {
+    private let sessionId = UUID().uuidString
+    private var serial = 0
+    private var rows: [ChecklistSessionRow] = []
+    private var expected: [ChecklistSessionRow]?
+
+    private func same(_ a: CoreObject, _ b: CoreObject) -> Bool {
+        a.text("id") == b.text("id") && a.text("title") == b.text("title") && a.flag("completed") == b.flag("completed")
+    }
+
+    func sync(_ items: [CoreObject]) -> [ChecklistSessionRow] {
+        if let expected, expected.count == items.count,
+           items.indices.allSatisfy({ same(expected[$0].item, items[$0]) }) {
+            rows = items.indices.map { ChecklistSessionRow(identity: expected[$0].identity, item: items[$0]) }
+            self.expected = nil
+            return rows
+        }
+        if rows.count == items.count, rows.indices.allSatisfy({ rows[$0].item.text("id") == items[$0].text("id") }) {
+            rows = rows.indices.map { ChecklistSessionRow(identity: rows[$0].identity, item: items[$0]) }
+            return rows
+        }
+        var remaining = rows
+        rows = items.map { item in
+            let index = remaining.firstIndex { same($0.item, item) }
+                ?? remaining.firstIndex { $0.item.text("id") == item.text("id") }
+            let identity: String
+            if let index { identity = remaining.remove(at: index).identity }
+            else { serial += 1; identity = "\(sessionId)-row-\(serial)" }
+            return ChecklistSessionRow(identity: identity, item: item)
+        }
+        return rows
+    }
+
+    func settle(_ items: [CoreObject], succeeded: Bool) {
+        guard let expected else { return }
+        if succeeded, expected.count == items.count {
+            rows = items.indices.map { ChecklistSessionRow(identity: expected[$0].identity, item: items[$0]) }
+        }
+        self.expected = nil
+    }
+
+    func expectRemove(_ index: Int) {
+        if rows.indices.contains(index) { expected = rows.enumerated().filter { $0.offset != index }.map { $0.element } }
+    }
+
+    func expectMove(from: Int, to: Int) {
+        guard rows.indices.contains(from), rows.indices.contains(to), from != to else { return }
+        var moved = rows
+        moved.insert(moved.remove(at: from), at: to)
+        expected = moved
+    }
+}
+
+private struct ChecklistRowFramesPreference: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+private struct ChecklistViewportPreference: PreferenceKey {
+    static var defaultValue = CGRect.zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }

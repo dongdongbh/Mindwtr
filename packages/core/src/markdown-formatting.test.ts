@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { getEnglishI18nValue } from './i18n';
 import {
+    MARKDOWN_TOOLBAR_ACTIONS,
     applyMarkdownKeyboardShortcut,
     applyMarkdownPairInsertion,
     applyMarkdownToolbarAction,
@@ -205,7 +207,7 @@ describe('applyMarkdownPairInsertion', () => {
     });
 
     it('does not auto-close quotes, angle brackets, or braces at the cursor', () => {
-        // Only Markdown-relevant pairs auto-close; these fight prose and pasted URLs (discussion #742).
+
         expect(applyMarkdownPairInsertion('say ', 'say "', { start: 4, end: 4 })).toBeNull();
         expect(applyMarkdownPairInsertion('say ', "say '", { start: 4, end: 4 })).toBeNull();
         expect(applyMarkdownPairInsertion('say ', 'say <', { start: 4, end: 4 })).toBeNull();
@@ -292,11 +294,11 @@ describe('applyMarkdownPairInsertion', () => {
     });
 
     it('does not resolve a typed/pasted "constructor" through Object.prototype (SEC-13)', () => {
-        // Collapsed-cursor path (shouldAutoPairInsertion / applyCollapsedPairInsertion).
+
         expect(
             applyMarkdownPairInsertion('', 'constructor', { start: 11, end: 11 }),
         ).toBeNull();
-        // Selection-replacement path (MARKDOWN_INSERTION_PAIRS lookup).
+
         expect(
             applyMarkdownPairInsertion('read docs', 'constructor', { start: 0, end: 9 }),
         ).toBeNull();
@@ -581,5 +583,11 @@ describe('markdown editor assist gate', () => {
         expect(
             continueMarkdownOnTextChange('- item', '- item\n', { start: 6, end: 6 }, { assist: false }),
         ).toBeNull();
+    });
+});
+
+describe('Markdown toolbar labels', () => {
+    it('gives every toolbar action an English text of its own, so no app falls back to core\'s built-in label', () => {
+        expect(MARKDOWN_TOOLBAR_ACTIONS.filter((action) => getEnglishI18nValue(action.labelKey) !== action.fallbackLabel).map((action) => action.labelKey)).toEqual([]);
     });
 });

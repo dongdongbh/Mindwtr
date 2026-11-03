@@ -5,8 +5,7 @@ import { globalProgressTracker } from '@mindwtr/core';
 import { AttachmentProgressIndicator } from './AttachmentProgressIndicator';
 import { LanguageProvider } from '../contexts/language-context';
 
-// The progressbar's accessible name and value text were hardcoded English even
-// though mobile already reads `attachments.transferProgress` for the same bar.
+
 describe('AttachmentProgressIndicator', () => {
     it('names the progress bar from the shared translation key', () => {
         globalProgressTracker.updateProgress('att-1', {

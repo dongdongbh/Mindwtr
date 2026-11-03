@@ -39,8 +39,8 @@ describe('prepared Review row Task write on SQLite', () => {
         exec: async (sql) => { db.exec(sql); },
     });
     const openSqlite = async (path: string, seed = false) => {
-        // A new contract and adapter after reset model a process restart, even
-        // when an earlier process left an unsaved in-memory failure behind.
+
+
         resetForTests(); resetNativeRequestReceipts();
         const db = new DatabaseSync(path); databases.push(db);
         const fault = { commits: 0 };

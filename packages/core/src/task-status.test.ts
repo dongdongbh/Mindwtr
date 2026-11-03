@@ -159,9 +159,7 @@ describe('cancellation timestamp validation', () => {
     });
 });
 
-// Consolidation law: pin the old hand-written predicates verbatim across
-// every TaskStatus value, so isTaskFinished/isTaskActionable cannot silently
-// narrow to a subset of the ~30 call sites they replace (#968).
+
 const oldIsFinished = (status: TaskStatus) => status === 'done' || status === 'archived';
 const oldIsActionable = (status: TaskStatus) => status !== 'done' && status !== 'archived' && status !== 'reference';
 

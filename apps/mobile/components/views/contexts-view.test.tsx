@@ -2,8 +2,9 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { runStoreCommand, runSyncStoreSave, type Task } from '@mindwtr/core';
-import { Pressable, ScrollView, TouchableOpacity } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
 import { ContextsView } from './contexts-view';
+import { TaskListSortModal } from '../task-list/TaskListSortModal';
 
 const now = '2026-06-11T00:00:00.000Z';
 
@@ -21,7 +22,8 @@ const storeState = vi.hoisted(() => ({
   tasks: [] as Task[],
   _tasksById: new Map<string, Task>(),
   projects: [],
-  settings: { appearance: {}, taskSortBy: 'default' },
+  settings: { appearance: {}, taskSortBy: 'default' } as Record<string, unknown>,
+  updateSettings: vi.fn(async (_next: Record<string, unknown>) => undefined),
   updateTask: vi.fn(async () => undefined),
   deleteTask: vi.fn(async () => undefined),
   restoreTask: vi.fn(async () => undefined),
@@ -42,6 +44,11 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   };
 });
 
+vi.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
+vi.mock('@/lib/use-android-keyboard-inset', () => ({ useKeyboardInset: () => 0 }));
+
 vi.mock('expo-router', () => ({
   useLocalSearchParams: () => ({}),
 }));
@@ -59,7 +66,7 @@ vi.mock('@/contexts/toast-context', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: rows compare `tc` by identity (#766).
+
   const themeColors = {
     bg: '#ffffff',
     border: '#d1d5db',
@@ -104,14 +111,22 @@ vi.mock('react-native-gesture-handler', () => ({
 }));
 
 vi.mock('lucide-react-native', () => ({
+  SlidersHorizontal: (props: any) => React.createElement('SlidersHorizontal', props),
+  ChevronDown: (props: any) => React.createElement('ChevronDown', props),
+  ChevronRight: (props: any) => React.createElement('ChevronRight', props),
+  ChevronUp: (props: any) => React.createElement('ChevronUp', props),
+  Flag: (props: any) => React.createElement('Flag', props),
+  ArrowUpDown: (props: any) => React.createElement('ArrowUpDown', props),
   CheckCircle2: (props: any) => React.createElement('CheckCircle2', props),
   Tag: (props: any) => React.createElement('Tag', props),
+  X: (props: any) => React.createElement('X', props),
 }));
 
 vi.mock('react-native', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-native')>();
   return {
     ...actual,
+    Modal: ({ visible, children, ...props }: any) => visible ? React.createElement('Modal', props, children) : null,
     FlatList: ({ data = [], renderItem, keyExtractor, ListEmptyComponent, ...props }: any) => (
       React.createElement(
         'FlatList',
@@ -127,6 +142,57 @@ vi.mock('react-native', async (importOriginal) => {
 });
 
 describe('ContextsView', () => {
+
+  it('shows the shared list sort, writes settings.taskSortBy, and orders rows by it', async () => {
+    const original = { settings: storeState.settings, updateSettings: storeState.updateSettings };
+    storeState.tasks = [
+      { ...makeTask('b', 'Bravo'), createdAt: '2026-06-10T00:00:00.000Z' },
+      { ...makeTask('a', 'Alpha'), priority: 'high' },
+    ];
+    storeState.updateSettings = vi.fn(async (next: Record<string, unknown>) => {
+      storeState.settings = { ...storeState.settings, ...next };
+    });
+    let tree!: ReactTestRenderer;
+    try {
+      await act(async () => { tree = create(<ContextsView />); });
+      const titles = () => tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')
+        .map((node) => node.props.task.title);
+      const sortModal = () => tree.root.findByType(TaskListSortModal);
+      const options = () => sortModal().findAllByType(Pressable)
+        .map((node) => node.props.testID).filter((id): id is string => Boolean(id?.startsWith('sort-option-')));
+      expect(titles()).toEqual(['Bravo', 'Alpha']);
+      expect(sortModal().props.visible).toBe(false);
+
+      const sort = tree.root.findAllByType(TouchableOpacity).find((node) => node.props.accessibilityLabel === 'sort.label: sort.default')!;
+      expect(sort.props.accessibilityRole).toBe('button');
+      await act(async () => { sort.props.onPress(); });
+      expect(sortModal().props.visible).toBe(true);
+      expect(sortModal().props.sortBy).toBe('default');
+      expect(options()).toContain('sort-option-priority');
+
+      const title = tree.root.findAllByType(Pressable).find((node) => node.props.testID === 'sort-option-title')!;
+      await act(async () => { title.props.onPress(); });
+      expect(storeState.updateSettings).toHaveBeenCalledWith({ taskSortBy: 'title' });
+      expect(sortModal().props.visible).toBe(false);
+      await act(async () => { tree.update(<ContextsView />); });
+      expect(titles()).toEqual(['Alpha', 'Bravo']);
+      expect(tree.root.findAllByType(TouchableOpacity).some((node) => node.props.accessibilityLabel === 'sort.label: sort.title')).toBe(true);
+
+
+      storeState.settings = { ...storeState.settings, taskSortBy: 'priority', features: { priorities: false } };
+      await act(async () => { tree.update(<ContextsView />); });
+      expect(titles()).toEqual(['Bravo', 'Alpha']);
+      const reopened = tree.root.findAllByType(TouchableOpacity).find((node) => node.props.accessibilityLabel === 'sort.label: sort.default')!;
+      await act(async () => { reopened.props.onPress(); });
+      expect(options()).not.toContain('sort-option-priority');
+      expect(options()).toContain('sort-option-title');
+    } finally {
+      storeState.settings = original.settings;
+      storeState.updateSettings = original.updateSettings;
+      storeState.tasks = [];
+    }
+  });
+
   it('keeps a parent chip selected when its last child task completes', async () => {
     storeState.tasks = [
       { ...makeTask('tool', 'Excavator'), contexts: ['@tools/excavator'] },
@@ -169,6 +235,62 @@ describe('ContextsView', () => {
     expect(tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')).toHaveLength(2);
   });
 
+
+  it('shows nested chips after their parent with a short label', async () => {
+    storeState.tasks = [
+      { ...makeTask('emma', 'Emma'), contexts: ['@person/emma'], tags: [] },
+      { ...makeTask('todd', 'Todd'), contexts: ['@person/todd'], tags: [] },
+      { ...makeTask('bank', 'Bank'), contexts: ['@place/bank'], tags: ['#errand/post'] },
+    ];
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<ContextsView />); });
+    const chips = () => tree.root.findAllByType(ScrollView).find((node) => node.props.horizontal)!.findAllByType(Pressable).slice(2);
+    const shown = () => chips().map((node) => [node.props.accessibilityLabel, node.findAllByType(Text)[0].props.children]);
+    expect(shown()).toEqual([
+      ['@person (2)', '@person'],
+      ['@person/emma (1)', '/emma'],
+      ['@person/todd (1)', '/todd'],
+      ['@place (1)', '@place'],
+      ['@place/bank (1)', '/bank'],
+      ['#errand (1)', '#errand'],
+      ['#errand/post (1)', '/post'],
+    ]);
+    await act(async () => { chips()[2].props.onPress(); });
+    expect(tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem').map((node) => node.props.task.title)).toEqual(['Todd']);
+
+    const search = tree.root.findAllByType(TextInput).find((node) => node.props.placeholder === 'contexts.search')!;
+    await act(async () => { search.props.onChangeText('todd'); });
+    expect(shown()).toEqual([['@person/todd (1)', '@person/todd']]);
+  });
+
+
+  it('switches context on tap and combines on long-press', async () => {
+    storeState.tasks = [
+      { ...makeTask('alice', 'Alice only'), contexts: ['@alice'], tags: [] },
+      { ...makeTask('bob', 'Bob only'), contexts: ['@bob'], tags: [] },
+      { ...makeTask('both', 'Alice and Bob'), contexts: ['@alice', '@bob'], tags: [] },
+    ];
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<ContextsView />); });
+    const chip = (label: string) => tree.root.find((item) => item.props.accessibilityLabel === label && item.type === Pressable);
+    const titles = () => tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')
+      .map((node) => node.props.task.title).sort();
+    await act(async () => { chip('@alice (2)').props.onPress(); });
+    await act(async () => { chip('@bob (2)').props.onPress(); });
+    expect(titles()).toEqual(['Alice and Bob', 'Bob only']);
+    expect(chip('@alice (2)').props.accessibilityState.selected).toBe(false);
+    await act(async () => { chip('@bob (2)').props.onPress(); });
+    expect(titles()).toEqual(['Alice and Bob', 'Alice only', 'Bob only']);
+    await act(async () => { chip('@alice (2)').props.onPress(); });
+    await act(async () => { chip('@bob (2)').props.onLongPress(); });
+    expect(titles()).toEqual(['Alice and Bob']);
+    expect(chip('@alice (2)').props.accessibilityState.selected).toBe(true);
+    expect(chip('@bob (2)').props.accessibilityActions).toEqual([{ name: 'longpress', label: 'filters.remove' }]);
+    await act(async () => { chip('@bob (2)').props.onAccessibilityAction({ nativeEvent: { actionName: 'longpress' } }); });
+    expect(titles()).toEqual(['Alice and Bob', 'Alice only']);
+    expect(chip('@bob (2)').props.accessibilityActions).toEqual([{ name: 'longpress', label: 'common.add' }]);
+  });
+
   it('shows All/Any for two combined tokens and keeps No context exclusive', async () => {
     storeState.tasks = [
       { ...makeTask('alice', 'Alice only'), contexts: ['@alice'], tags: [] },
@@ -179,15 +301,15 @@ describe('ContextsView', () => {
     ];
     let tree!: ReactTestRenderer;
     await act(async () => { tree = create(<ContextsView />); });
-    const pressToken = async (label: string) => {
+    const pressToken = async (label: string, gesture: 'onPress' | 'onLongPress' = 'onPress') => {
       const node = tree.root.find((item) => item.props.accessibilityLabel === label);
-      await act(async () => { node.props.onPress(); });
+      await act(async () => { node.props[gesture](); });
     };
     const titles = () => tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')
       .map((node) => node.props.task.title);
     await pressToken('@alice (2)');
     expect(tree.root.findAllByType(Pressable).filter((node) => node.props.accessibilityRole === 'radio')).toHaveLength(0);
-    await pressToken('#bob (2)');
+    await pressToken('#bob (2)', 'onLongPress');
     expect(titles()).toEqual(['Alice and Bob']);
     const modes = tree.root.findAllByType(Pressable).filter((node) => node.props.accessibilityRole === 'radio');
     expect(modes).toHaveLength(2);
@@ -201,13 +323,47 @@ describe('ContextsView', () => {
     expect(tree.root.findAllByType(Pressable).filter((node) => node.props.accessibilityRole === 'radio')).toHaveLength(0);
   });
 
+  it.each([
+    ['contexts', '@unused', 'bulk.addContext', 'bulk.removeContext'],
+    ['tags', '#unused', 'bulk.addTag', 'Remove tag'],
+  ] as const)('forwards saved %s to Add without leaking them into Remove', async (field, token, addLabel, removeLabel) => {
+    const previous = storeState.settings;
+    storeState.tasks = [{ ...makeTask('selected', 'Selected'), tags: ['#assigned'] }];
+    storeState._tasksById = new Map(storeState.tasks.map((task) => [task.id, task]));
+    storeState.settings = { ...previous, taxonomy: {
+      contexts: [{ token: '@unused', rev: 1, revBy: 'test', updatedAt: now }],
+      tags: [{ token: '#unused', rev: 1, revBy: 'test', updatedAt: now }],
+    } };
+    let tree!: ReactTestRenderer;
+    try {
+      await act(async () => { tree = create(<ContextsView />); });
+      const row = tree.root.find((node) => (node.type as unknown) === 'SwipeableTaskItem');
+      await act(async () => { row.props.actions.toggleSelect(row.props.task); });
+      const press = async (label: string) => {
+        const button = tree.root.findAllByType(TouchableOpacity).find((node) => node.findAllByProps({ children: label }).length > 0)!;
+        await act(async () => { button.props.onPress(); });
+      };
+      const picker = () => tree.root.find((node) => (node.type as unknown) === 'TokenPickerModal');
+      await press(addLabel);
+      expect(picker().props.tokens).toContain(token);
+      await act(async () => { picker().props.onClose(); });
+      await press(removeLabel);
+      expect(picker().props.tokens).toEqual(storeState.tasks[0][field]);
+    } finally {
+      await act(async () => { tree?.unmount(); });
+      storeState.settings = previous;
+      storeState.tasks = [];
+      storeState._tasksById = new Map();
+    }
+  });
+
   it('adds a tag to the row a sync save published while the bulk write waited behind it', async () => {
     const setTasks = (tasks: Task[]) => {
       storeState.tasks = tasks;
       storeState._tasksById = new Map(tasks.map((task) => [task.id, task]));
     };
     const original = storeState.batchUpdateTasks;
-    // batchUpdateTasks as the store runs it: a command behind the write gate (store-write-gate.ts).
+
     storeState.batchUpdateTasks = vi.fn((updates) => runStoreCommand(async () => {
       const byId = new Map(updates.map((entry) => [entry.id, entry.updates]));
       setTasks(storeState.tasks.map((task) => ({ ...task, ...byId.get(task.id) })));
@@ -224,7 +380,7 @@ describe('ContextsView', () => {
 
       let release!: () => void;
       const held = new Promise<void>((resolve) => { release = resolve; });
-      // Another device's tag: the sync save holds the gate, then publishes it.
+
       const save = runSyncStoreSave(async () => {
         await held;
         setTasks([{ ...storeState.tasks[0], rev: 3, tags: ['#old', '#remote'] }]);
@@ -240,8 +396,31 @@ describe('ContextsView', () => {
     }
   });
 
-  // Rows carry the #766 memo boundary, which only holds while the screen hands
-  // untouched rows the same references back.
+
+  it('exits selection with the X icon button labelled bulk.exitSelect', async () => {
+    storeState.tasks = [makeTask('task-1', 'First')];
+    storeState._tasksById = new Map(storeState.tasks.map((task) => [task.id, task]));
+    let tree!: ReactTestRenderer;
+    try {
+      await act(async () => { tree = create(<ContextsView />); });
+      const row = () => tree.root.find((node) => (node.type as unknown) === 'SwipeableTaskItem');
+      await act(async () => { row().props.actions.toggleSelect(row().props.task); });
+      expect(row().props.selectionMode).toBe(true);
+
+      const exit = tree.root.findAllByType(TouchableOpacity).find((node) => node.props.accessibilityLabel === 'bulk.exitSelect')!;
+      expect(exit.props.accessibilityRole).toBe('button');
+      expect(exit.findAll((node) => (node.type as unknown) === 'X')).toHaveLength(1);
+      expect(exit.findAll((node) => (node.type as unknown) === 'Text')).toHaveLength(0);
+
+      await act(async () => { exit.props.onPress(); });
+      expect(row().props.selectionMode).toBe(false);
+    } finally {
+      storeState.tasks = [];
+      storeState._tasksById = new Map();
+    }
+  });
+
+
   it('hands rows stable prop references across a re-render', async () => {
     storeState.tasks = [makeTask('task-1', 'First'), makeTask('task-2', 'Second')];
 

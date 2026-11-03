@@ -28,9 +28,15 @@ type IosSceneDiagnosticsSubscription = { remove(): void };
 
 interface MindwtrIosSceneLifecycleNativeModule extends NativeModule {
   drainDiagnostics?: () => unknown;
+  beginBackgroundTask?: (name: string) => unknown;
+  endBackgroundTask?: (id: number) => void;
   addListener(
     eventName: 'onDiagnosticsChanged',
     listener: () => void,
+  ): IosSceneDiagnosticsSubscription;
+  addListener(
+    eventName: 'onBackgroundTaskExpired',
+    listener: (event: { id?: unknown } | undefined) => void,
   ): IosSceneDiagnosticsSubscription;
 }
 
@@ -77,7 +83,7 @@ const validRecord = (value: unknown): value is IosSceneDiagnosticRecord => {
     && Number(record.count) <= 1_000_000;
 };
 
-/** Drains only fixed, privacy-safe fields from the bounded native queue. */
+
 export function drainIosSceneDiagnostics(): IosSceneDiagnosticRecord[] {
   try {
     const raw = getNativeModule()?.drainDiagnostics?.();
@@ -92,7 +98,7 @@ export function drainIosSceneDiagnostics(): IosSceneDiagnosticRecord[] {
   }
 }
 
-/** A wake-up edge; records remain in the native queue until drained. */
+
 export function subscribeIosSceneDiagnostics(
   listener: () => void,
 ): IosSceneDiagnosticsSubscription {
@@ -105,4 +111,44 @@ export function subscribeIosSceneDiagnostics(
   } catch {
     return { remove: () => undefined };
   }
+}
+
+
+export function beginIosBackgroundTask(
+  name: string,
+  onExpire: () => void,
+): (() => void) | null {
+  const nativeModule = getNativeModule();
+  if (!nativeModule?.beginBackgroundTask || !nativeModule.endBackgroundTask) return null;
+  let id: unknown;
+  try {
+    id = nativeModule.beginBackgroundTask(name);
+  } catch {
+    return null;
+  }
+  if (typeof id !== 'number' || !Number.isInteger(id) || id <= 0) return null;
+  const taskId = id;
+  let subscription: IosSceneDiagnosticsSubscription | null = null;
+  let finished = false;
+  const finish = (): boolean => {
+    if (finished) return false;
+    finished = true;
+    subscription?.remove();
+    return true;
+  };
+  try {
+    subscription = nativeModule.addListener('onBackgroundTaskExpired', (event) => {
+      if (event?.id === taskId && finish()) onExpire();
+    });
+  } catch {
+
+  }
+  return () => {
+    if (!finish()) return;
+    try {
+      nativeModule.endBackgroundTask?.(taskId);
+    } catch {
+
+    }
+  };
 }

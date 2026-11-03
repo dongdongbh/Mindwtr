@@ -16,8 +16,7 @@ private final class EventTaskNoHTTP: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Public native command over real production JSC, SQLite, device KV and journal.
-/// Only the explicitly named forged-reply test appends a fault shim to the bundle.
+
 final class NativeCalendarEventTaskHostTests: XCTestCase {
     private var root: URL!, bundle: URL!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -207,7 +206,7 @@ final class NativeCalendarEventTaskHostTests: XCTestCase {
         XCTAssertEqual(acknowledgments, 0)
         XCTAssertEqual(sql, 0); XCTAssertEqual(try taskRows(), before); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
         faults.journalWrite = nil; faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected task COMMIT") } }
-        // A failed journal write retains the prepared command in memory.
+
         await refused("SAVE_FAILED") { _ = try await core.retryPending() }
         XCTAssertEqual(acknowledgments, 0)
         XCTAssertEqual(try taskRows(), before); XCTAssertEqual(try receiptRows(), receipts)
@@ -229,7 +228,7 @@ final class NativeCalendarEventTaskHostTests: XCTestCase {
             faults.commandDiagnostic = { if $0 == "calendarEventTaskCreate" { acknowledgments += 1 } }
             var lostCommitReplies = 0
             if cut == "commitReply" {
-                // Exhaust the store's automatic save retries to leave a cold-recovery window.
+
                 faults.afterSQL = { if $0 == "COMMIT" { lostCommitReplies += 1; throw HostFailure("Injected lost COMMIT reply") } }
             }
             else if cut == "terminalWrite" { var count = 0; faults.journalWrite = { count += 1; if count == 2 { throw HostFailure("Injected terminal write") } } }
@@ -279,7 +278,7 @@ final class NativeCalendarEventTaskHostTests: XCTestCase {
             XCTAssertEqual(writes, 0, change); XCTAssertEqual(try json(task(id)), try json(changed), change); XCTAssertEqual(try receiptRows(), receipts, change)
             try assertRetained(originalJournal)
             await cold.close()
-            // This test owns the stale journal; retire it before the next isolated case.
+
             try? FileManager.default.removeItem(at: journal)
         }
     }

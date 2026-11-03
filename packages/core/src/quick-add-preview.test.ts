@@ -34,7 +34,7 @@ describe('buildQuickAddPreviewEntries', () => {
         });
         const byKind = Object.fromEntries(entries.map((entry) => [entry.kind, entry.value]));
 
-        // The resolved date, formatted — not the words the user typed.
+
         expect(byKind.due).not.toContain('tomorrow');
         expect(byKind.due).toContain('2026');
         expect(byKind.context).toBe('@errands');
@@ -46,7 +46,7 @@ describe('buildQuickAddPreviewEntries', () => {
     it('shows the priority and energy levels as their own chips', () => {
         const input = 'call mom /priority:urgent /energy:low';
         const parsed = parseQuickAdd(input, [], now);
-        // The identity `t` above falls back, so translate here to prove the keys.
+
         const translations: Record<string, string> = {
             'priority.urgent': 'Urgent',
             'energyLevel.low': 'Low energy',

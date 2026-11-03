@@ -65,7 +65,7 @@ describe('area filter selection', () => {
             { areaId: AREA_FILTER_ALL, areaIds: [workArea.id, deletedArea.id, 'gone', workArea.id], excludedAreaIds: [homeArea.id] },
             allAreas,
         )).toEqual({ included: [workArea.id], excluded: [homeArea.id] });
-        // Stored lists win over the legacy mirror, even when they are empty.
+
         expect(resolveAreaFilterSelection({ areaId: workArea.id, areaIds: [] }, allAreas)).toEqual({ included: [], excluded: [] });
         expect(resolveAreaFilterSelection({ areaIds: 'nope' }, allAreas)).toEqual({ included: [], excluded: [] });
     });
@@ -138,7 +138,7 @@ describe('isTaskVisibleInArea', () => {
         expect(isTaskVisibleInArea(baseTask, ctxFor([project]))).toBe(true);
     });
 
-    // One case per clause: drop any one of the three and exactly one of these flips.
+
     it('rejects a soft-deleted task', () => {
         expect(isTaskVisibleInArea({ ...baseTask, deletedAt: '2026-03-17T00:00:00.000Z' }, ctxFor([project]))).toBe(false);
     });

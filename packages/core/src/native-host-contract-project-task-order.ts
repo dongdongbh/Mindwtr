@@ -7,7 +7,7 @@ import { getProjectSectionsForView } from './project-utils';
 import { getProjectSyntheticSectionIds, sortProjectTasksByOrder } from './project-task-list-model';
 import { projectTaskOrderToken } from './project-task-reorder';
 import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
-import { resolveTaskSortByForFeatures } from './task-utils';
+import { getProjectFlowMode, resolveTaskSortByForFeatures } from './task-utils';
 import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
 import { projectTaskOrderEffect } from './store-projects/ordering-actions';
@@ -63,7 +63,7 @@ const readRequest = (value: unknown): NativeProjectTaskOrderRequest | null => {
         ? input as NativeProjectTaskOrderRequest : null;
 };
 
-/** The frozen flat list may be filtered, but every row must be a real ordered subset of the source. */
+
 const validItems = (scope: PreparedProjectTaskOrder['scope'], request: NativeProjectTaskOrderRequest): boolean => {
     const sectionIds = scope.sections.map((row) => row.id);
     const syntheticIds = getProjectSyntheticSectionIds(scope.sections);
@@ -94,7 +94,7 @@ const validItems = (scope: PreparedProjectTaskOrder['scope'], request: NativePro
         const task = tasks.get(item.id);
         if (!task || task.status === 'reference'
             || (!request.showCompleted && (task.status === 'done' || task.status === 'archived'))
-            || (request.showCompleted && !scope.project.isSequential && task.status === 'done')) return false;
+            || (request.showCompleted && getProjectFlowMode(scope.project) === 'parallel' && task.status === 'done')) return false;
         const bucket = task.sectionId && live.has(task.sectionId) ? task.sectionId : null;
         if (bucket !== current || sectionIds.length > 0 && !sawHeader) return false;
         seenTasks.add(task.id);
@@ -112,7 +112,7 @@ const validItems = (scope: PreparedProjectTaskOrder['scope'], request: NativePro
     return true;
 };
 
-/** Pure cold-journal validation before any mutable store or SQLite access. */
+
 const readPrepared = (value: unknown): NativePreparedProjectTaskOrder | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

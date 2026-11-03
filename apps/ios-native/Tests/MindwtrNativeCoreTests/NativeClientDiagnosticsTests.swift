@@ -46,10 +46,14 @@ final class NativeClientDiagnosticsTests: XCTestCase {
     }
     private var approved: [(String, [String: Any])] {
         var result: [(String, [String: Any])] = [
+            ("Native iOS retained editor draft protected from late close", ["releaseCheck": "v1.3.5/ios-editor-retained-close", "outcome": "ignored"]),
             ("Native iOS launch selection admitted", ["releaseCheck": "v1.3.5/ios-launch-selection", "outcome": "confirmed"]),
             ("Native iOS reminder lifecycle reconciled", ["releaseCheck": "v1.3.5/ios-reminder-lifecycle", "outcome": "confirmed"]),
             ("Native iOS foreground activation refreshed", ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"]),
         ]
+        for operation in ["capture", "restore", "purge"] {
+            result.append(("Native iOS bulk operation acknowledged", ["releaseCheck": "v1.3.5/ios-bulk-ui", "operation": operation, "outcome": "confirmed"]))
+        }
         for outcome in ["publicationQueued", "removalQueued", "failed"] {
             result.append(("Native iOS system search", ["releaseCheck": "v1.3.5/ios-search-publication", "outcome": outcome, "count": 2_750]))
         }
@@ -110,6 +114,19 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         }
         for field in ["taskId", "text", "url", "passphrase"] {
             refused.append(try json([message, json(["releaseCheck": "v1.3.5/ios-search-publication", "outcome": "publicationQueued", "count": 0, field: "Synthetic private value"])]))
+        }
+        for context in [
+            ["releaseCheck": "v1.3.5/ios-editor-retained-close", "outcome": "saved"],
+            ["releaseCheck": "v1.3.5/ios-editor-retained-close", "outcome": "ignored", "taskId": "Synthetic private value"],
+        ] {
+            refused.append(try json(["Native iOS retained editor draft protected from late close", json(context)]))
+        }
+        for context in [
+            ["releaseCheck": "v1.3.5/ios-bulk-ui", "operation": "private text", "outcome": "confirmed"],
+            ["releaseCheck": "v1.3.5/ios-bulk-ui", "operation": "capture", "outcome": "pending"],
+            ["releaseCheck": "v1.3.5/ios-bulk-ui", "operation": "restore", "outcome": "confirmed", "taskId": "private"],
+        ] {
+            refused.append(try json(["Native iOS bulk operation acknowledged", json(context)]))
         }
         for raw in refused {
             do { _ = try await core.call("logLine", argumentsJSON: raw); XCTFail("Expected closed client diagnostic refusal") } catch {}

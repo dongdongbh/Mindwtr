@@ -1,0 +1,52 @@
+import { describe, expect, it } from 'vitest';
+import type { AppData, Task } from './types';
+import { mergeAppData } from './sync';
+import { normalizeAppData } from './sync-normalization';
+import { sanitizeAppDataForRemote } from './sync-helpers';
+
+
+const STAMP = '2026-07-01T00:00:00.000Z';
+const HASH = 'a'.repeat(64);
+const doc = (cloudKey: string, extra: object = {}): AppData => normalizeAppData({
+    tasks: [{
+        id: 't1', title: 'T', status: 'inbox', createdAt: STAMP, updatedAt: STAMP,
+        attachments: [{ id: 'att', kind: 'file', title: 'scan.pdf', uri: '', cloudKey, fileHash: HASH, localStatus: 'missing', createdAt: STAMP, updatedAt: STAMP, ...extra }],
+    } as Task],
+    projects: [], sections: [], areas: [], people: [], settings: {},
+});
+const keyOf = (data: AppData) => data.tasks[0]!.attachments![0]!.cloudKey;
+
+describe('merge of an attachment kept without its file', () => {
+    it.each([
+
+        ['cloudkit:att', 'attachments/att.pdf'],
+        ['attachments/att.pdf', `attachments/att.${'f'.repeat(64)}.pdf`],
+    ])('takes the key another device uploaded here (kept %s, uploaded %s)', (keptKey, uploadedKey) => {
+        const local = doc(keptKey);
+        const incoming = sanitizeAppDataForRemote(doc(uploadedKey, { uri: '/b/scan.pdf', localStatus: 'available' })) as AppData;
+        const kept = new Set(['att']);
+
+        expect(keyOf(mergeAppData(local, incoming, { preferIncomingAttachmentCloudKeyIds: kept }))).toBe(uploadedKey);
+
+        expect(keyOf(mergeAppData(local, incoming))).toBe([keptKey, uploadedKey].sort().pop());
+    });
+
+    it('keeps the local key when the incoming row has none', () => {
+        const kept = new Set(['att']);
+        const local = doc('attachments/att.pdf');
+        const keyless = doc('attachments/x.pdf');
+        delete keyless.tasks[0]!.attachments![0]!.cloudKey;
+
+        expect(keyOf(mergeAppData(local, keyless, { preferIncomingAttachmentCloudKeyIds: kept }))).toBe('attachments/att.pdf');
+    });
+
+    it('still removes the row when another device deleted the attachment, with or without the record', () => {
+
+        const local = doc('attachments/att.pdf');
+        const deleted = doc('attachments/att.pdf', { deletedAt: '2026-07-02T00:00:00.000Z', updatedAt: '2026-07-02T00:00:00.000Z' });
+
+        for (const options of [{}, { preferIncomingAttachmentCloudKeyIds: new Set(['att']) }]) {
+            expect(mergeAppData(local, deleted, options).tasks[0]!.attachments![0]!.deletedAt).toBe('2026-07-02T00:00:00.000Z');
+        }
+    });
+});

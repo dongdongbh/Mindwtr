@@ -2,7 +2,7 @@ import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { ArrowRight, CheckCircle, ClipboardList, Trash2, User, X } from 'lucide-react';
 import { INCUBATE_ICON as IncubateIcon, START_LATER_ICON as StartLaterIcon, TASK_STATUS_ICONS } from '../lib/task-status-icons';
 
-// One status, one glyph: these come from the shared map, never picked here (#1256).
+
 const SomedayIcon = TASK_STATUS_ICONS.someday;
 const ReferenceIcon = TASK_STATUS_ICONS.reference;
 const NextIcon = TASK_STATUS_ICONS.next;
@@ -32,6 +32,7 @@ import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
+import { InboxProcessingSectionField } from './InboxProcessingSectionField';
 import { PriorityFlag } from './Task/PriorityFlag';
 import { InboxSimilarTasks } from './InboxSimilarTasks';
 
@@ -43,7 +44,7 @@ export type InboxProcessingQuickPanelProps = {
     t: (key: string) => string;
     processingTask: Task;
     remainingCount: number;
-    /** The task fields being clarified, and the one write path into them. */
+
     draft: TaskDraft;
     setField: TaskDraftSetter;
     similarTasks: readonly Task[];
@@ -53,7 +54,7 @@ export type InboxProcessingQuickPanelProps = {
     processingMode: 'guided' | 'quick';
     onModeChange: (mode: 'guided' | 'quick') => void;
     onSkip: () => void;
-    /** This item reached the pass from Someday, not the Inbox (#1089). */
+
     isReturningItem: boolean;
     onClose: () => void;
     actionabilityChoice: QuickActionabilityChoice;
@@ -71,6 +72,8 @@ export type InboxProcessingQuickPanelProps = {
     onSendDelegateRequest: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
     onCreateSomedaySection: (title: string) => Promise<string | null>;
+
+    onCreateSection: (title: string) => Promise<string | null>;
     toggleContext: (ctx: string) => void;
     toggleTag: (tag: string) => void;
     convertToProject: boolean;
@@ -143,6 +146,7 @@ export function InboxProcessingQuickPanel({
     onSendDelegateRequest,
     onCreatePerson,
     onCreateSomedaySection,
+    onCreateSection,
     toggleContext,
     toggleTag,
     convertToProject,
@@ -161,6 +165,7 @@ export function InboxProcessingQuickPanel({
         areas,
         personOptions,
         projects,
+        sections,
         suggestedContexts,
         suggestedTags,
         timeEstimateOptions,
@@ -177,8 +182,8 @@ export function InboxProcessingQuickPanel({
         showTagsField,
         showTimeEstimateField,
     } = visibility;
-    // The body keeps its own names for the draft fields: one alias block beats
-    // rewriting every reference (and re-growing the prop list to do it).
+
+
     const processingTitle = draft.title;
     const titleInputRef = useProcessingTitleFocus(processingTask?.id);
     const processingDescription = draft.description;
@@ -282,12 +287,25 @@ export function InboxProcessingQuickPanel({
                         noProjectLabel={t('process.noProject')}
                         searchPlaceholder={t('projects.search')}
                         noMatchesLabel={t('common.noMatches')}
+                        deferredLabel={t('projects.deferredSection')}
                         emptyLabel={projectFilterAreaId ? t('projects.noProjectsInArea') : undefined}
                         createProjectLabel={t('projects.create')}
                         controlClassName="rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                         menuClassName="text-sm"
                     />
                 </div>
+            ) : null}
+            {showProjectField ? (
+                <InboxProcessingSectionField
+                    t={t}
+                    project={selectedProjectId ? projects.find((project) => project.id === selectedProjectId) : null}
+                    sections={sections}
+                    value={draft.sectionId}
+                    onChange={(sectionId) => setField('sectionId', sectionId)}
+                    onCreateSection={onCreateSection}
+                    labelClassName="text-[11px] text-muted-foreground font-medium"
+                    controlClassName="rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                />
             ) : null}
         </div>
     ) : null;
@@ -380,8 +398,7 @@ export function InboxProcessingQuickPanel({
         return () => document.removeEventListener('keydown', handleDocumentKeyDown);
     }, [onSubmit]);
 
-    // After a long form is submitted the view is left scrolled to the bottom;
-    // bring the panel top (title of the next task) back into view on advance.
+
     const panelRef = useRef<HTMLDivElement | null>(null);
     useEffect(() => {
         panelRef.current?.scrollIntoView?.({ block: 'start' });
@@ -604,6 +621,7 @@ export function InboxProcessingQuickPanel({
                             t={t}
                             fields={scheduleFields}
                             visibleFieldKeys={['start']}
+                            requiredFieldKeys={['start']}
                             variant="quick"
                         />
                         {organizationContainerFields}

@@ -33,21 +33,13 @@ export const AREA_SYNC_SCHEMA_VERSION = schema.schemaVersion;
 export const AREA_SYNC_FIELD_SCHEMA: readonly AreaSyncFieldSpec[] = schema.fields;
 export const AREA_SYNC_SCHEMA_FIXTURE: Area = schema.fixture;
 
-// Generated SQLite column list + ensureAreaColumns migration list — see the equivalent
-// comment in project-sync-schema.ts for why this lives here rather than sqlite-adapter.ts.
+
 const AREA_SQLITE_COLUMN_ENTRIES = deriveSqliteColumnEntries(AREA_SYNC_FIELD_SCHEMA, 'area-sync-schema');
 
 export const AREA_SQLITE_COLUMNS: readonly string[] = sqliteColumnsFromEntries(AREA_SQLITE_COLUMN_ENTRIES);
 export const AREA_SQLITE_MIGRATION_COLUMNS = sqliteMigrationColumnsFromEntries(AREA_SQLITE_COLUMN_ENTRIES, 'areas');
 
-// Row codec pair — see the equivalent comment in project-sync-schema.ts. Replaces the
-// hand-written positional literal in saveData() and the inline mapper in getData(). Unlike
-// project/section, areas (and people) coalesce a missing createdAt/updatedAt to `nowIso` on
-// both read and write — a pre-existing asymmetry, preserved here rather than "fixed" into
-// consistency with the other three entities. `nowIso` defaults to a fresh timestamp so callers
-// (e.g. the round-trip test) don't have to supply one; sqlite-adapter.ts's getData()/saveData()
-// pass their own single per-batch nowIso explicitly so every row in one read/write shares it,
-// matching the original inline behaviour exactly.
+
 const areaColumnValues = (area: Area, nowIso: string): Record<string, unknown> => {
     const createdAt = area.createdAt ?? area.updatedAt ?? nowIso;
     const updatedAt = area.updatedAt ?? area.createdAt ?? nowIso;

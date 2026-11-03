@@ -3,12 +3,24 @@ import { loadTranslations } from './i18n/i18n-loader';
 import type { AppData, AppSettings, Task } from './types';
 import {
     buildAndroidWidgetPublication,
+    buildAndroidQuickCaptureLabels,
     buildWidgetPayload,
     createWidgetPayloadProjection,
     IOS_WIDGET_FAMILY_CACHE_ITEMS,
     iosWidgetProjectionOptions,
     resolveWidgetLanguage,
 } from './widget-payload';
+
+describe('Android quick capture destinations', () => {
+    it('publishes localized creation choices and queue feedback without an Inbox-only placeholder', async () => {
+        await loadTranslations('de');
+        const labels = buildAndroidQuickCaptureLabels('de');
+        expect(labels.statusLabels).toEqual({ inbox: 'Eingang', next: 'Nächste Aktionen', waiting: 'Warten', someday: 'Irgendwann/Vielleicht' });
+        expect(labels.statusLabel).toBe('Status');
+        expect(labels.placeholder).not.toContain('Eingang');
+        expect(buildAndroidQuickCaptureLabels('en').queued).toContain('will be added');
+    });
+});
 
 describe('resolveWidgetLanguage', () => {
     it('falls back to the device language, as the app does, when no language was chosen', () => {
@@ -44,7 +56,7 @@ describe('iOS widget task contexts', () => {
         };
         const projection = createWidgetPayloadProjection(data, 'en', iosWidgetProjectionOptions({}));
         for (const maxItems of Object.values(IOS_WIDGET_FAMILY_CACHE_ITEMS)) {
-            // Exercise the JSON boundary used by the native widget cache.
+
             const payload = JSON.parse(JSON.stringify(projection.build(maxItems)));
             const row = payload.sections.flatMap((section: { items: unknown[] }) => section.items)[0];
             expect(row).toMatchObject({
@@ -105,11 +117,11 @@ describe('widget times', () => {
     });
 
     it('reads the System setting as the app does on that device', () => {
-        // The app formats 'p' in the device locale (configureDateFormatting's systemLocale).
+
         expect(times({}, 'en-US')).toEqual({ due: '9:30 PM', start: 'Today 8:05 AM' });
         expect(times({}, 'en-GB')).toEqual({ due: '21:30', start: 'Today 08:05' });
         expect(times({ timeFormat: 'system' }, 'de-DE', 'de')).toEqual({ due: '21:30', start: 'Heute 08:05' });
-        // An explicit date format picks the locale, as it does in the app.
+
         expect(times({ dateFormat: 'dmy' }, 'en-US')).toEqual({ due: '21:30', start: 'Today 08:05' });
         expect(times({ dateFormat: 'mdy' }, 'en-GB')).toEqual({ due: '9:30 PM', start: 'Today 8:05 AM' });
     });
@@ -126,8 +138,8 @@ describe('widget times', () => {
     });
 
     it('reaches the device locale through the platform publications', () => {
-        // A host without Intl names the device locale itself; both publication
-        // paths must hand it to the builder.
+
+
         const data: AppData = {
             tasks: [
                 task('due-tonight', { dueDate: '2026-09-28T21:30:00' }),
@@ -149,5 +161,41 @@ describe('widget times', () => {
         } finally {
             spy.mockRestore();
         }
+    });
+});
+
+
+describe('Focus widget area selection', () => {
+    it('keeps only selected-area stars while the occupied count remains global before criteria', () => {
+        const stamp = '2026-10-01T12:00:00.000Z';
+        const task = (id: string, extra: Partial<Task> = {}): Task => ({ id, title: id, status: 'next',
+            tags: [], contexts: [], isFocusedToday: true, createdAt: stamp, updatedAt: stamp, ...extra });
+        const data: AppData = { tasks: [task('direct', { areaId: 'work' }), task('project', { projectId: 'p' }),
+            task('home', { areaId: 'home' })], projects: [{ id: 'p', title: 'P', areaId: 'work', status: 'active',
+                color: '#123456', order: 0, tagIds: [], createdAt: stamp, updatedAt: stamp }], sections: [],
+            areas: ['work', 'home'].map((id, order) => ({ id, name: id, order, createdAt: stamp, updatedAt: stamp })),
+            settings: { filters: { areaIds: ['work'] } } };
+        const payload = createWidgetPayloadProjection(data, 'en').build(10);
+        expect(payload.items.map((row) => row.id)).toEqual(['direct', 'project']);
+        expect(payload.focusedCount).toBe(3);
+        const filtered = createWidgetPayloadProjection(data, 'en', { focusFilter: { criteria: { hasDescription: true }, sortBy: 'default' } }).build(10);
+        expect(filtered.items).toEqual([]);
+        expect(filtered.focusedCount).toBe(3);
+    });
+});
+
+describe('Inbox widget area selection', () => {
+    it('lists every Inbox task like the app Inbox, while other lists keep the area filter (#1458)', () => {
+        const stamp = '2026-10-01T12:00:00.000Z';
+        const task = (id: string, extra: Partial<Task> = {}): Task => ({ id, title: id, status: 'inbox',
+            tags: [], contexts: [], createdAt: stamp, updatedAt: stamp, ...extra });
+        const data: AppData = { tasks: [task('loose'), task('home', { areaId: 'home' }), task('work-next', { status: 'next', areaId: 'work' }),
+            task('home-next', { status: 'next', areaId: 'home' })], projects: [], sections: [],
+            areas: ['work', 'home'].map((id, order) => ({ id, name: id, order, createdAt: stamp, updatedAt: stamp })),
+            settings: { filters: { areaIds: ['work'] } } };
+        const payload = createWidgetPayloadProjection(data, 'en', { listIds: ['inbox', 'next'] }).build(10);
+        expect(payload.lists.inbox?.items.map((row) => row.id).sort()).toEqual(['home', 'loose']);
+        expect(payload.inboxCount).toBe(2);
+        expect(payload.lists.next?.items.map((row) => row.id)).toEqual(['work-next']);
     });
 });

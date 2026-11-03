@@ -166,9 +166,7 @@ describe('gemini provider request behavior', () => {
         const fetchMock = vi.fn(async () => mockGeminiSuccess({ steps: ['Pick a date'] }));
         globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-        // A pass-through id (not in the retired-model remap) below the
-        // thinking-capable families; retired ids like gemini-1.5-flash now
-        // remap to a current thinking-capable model by design.
+
         const provider = createGeminiProvider({ provider: 'gemini', apiKey: 'k', model: 'gemma-3-27b-it' });
         await provider.breakDownTask({ title: 'Plan trip' });
 

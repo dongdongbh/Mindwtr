@@ -16,13 +16,6 @@ import { areJsTimersPaused } from '../js-timers';
 import { logSyncEncryptionEvent } from '../sync-encryption-state';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
 
-// The attachment passes' shared layer — sealing and opening bytes, download staging and
-// installation, upload snapshots, the lifecycle adapter, the bespoke content checks, the
-// pre-passes, abort-aware delays and the streamed PUT — lives in core
-// (`packages/core/src/mobile-attachment-common.ts`) so the native app runs the same rules. This
-// module binds it to expo-file-system, the native installer, the crypto module, Expo Go and the
-// paused-timer check. Every binding calls the imported function when used, so tests that
-// replace these modules still reach their mocks; the core object is made on first use.
 
 export {
   assertAttachmentSyncNotAborted,
@@ -34,11 +27,7 @@ export {
 };
 export type { BespokeAttachmentRemoteWinnerCheck } from '@mindwtr/core/mobile-attachment-common';
 
-/** #1136: the enum lives in `expo-file-system/legacy`, never in the local wrapper.
- *  Android's native `FileSystemUploadOptions.uploadType` has no default and expo's
- *  `UploadTask` spreads our options over its own default, so an undefined value
- *  reaches Kotlin as null and `uploadTaskStartAsync` dies on `Enum.ordinal()`.
- *  Never return undefined: 0 is BINARY_CONTENT on both sides. */
+
 const resolveUploadType = (): number => {
   const types = (LegacyFileSystem as any).FileSystemUploadType;
   return types?.BINARY_CONTENT ?? types?.BINARY ?? 0;
@@ -46,7 +35,7 @@ const resolveUploadType = (): number => {
 
 let common: MobileAttachmentCommon | null = null;
 
-/** The core attachment common object, made on first use. */
+
 export const mobileAttachmentCommon = (): MobileAttachmentCommon => {
   if (common) return common;
   common = createMobileAttachmentCommon({
@@ -64,8 +53,8 @@ export const mobileAttachmentCommon = (): MobileAttachmentCommon => {
     installerMayBeMissing: () => isExpoGo(),
     timersPaused: () => areJsTimersPaused(),
     uploads: {
-      // uploadAsync has no cancellation handle, so only the task API is used; without it the
-      // caller falls back to the bounded byte PUT.
+
+
       createUploadTask: (url, fileUri, options, onProgress) => {
         if (typeof LegacyFileSystem.uploadAsync !== 'function') return null;
         if (typeof LegacyFileSystem.createUploadTask !== 'function') return null;
@@ -104,7 +93,7 @@ export const installStagedAttachmentDownload: Common['installStagedAttachmentDow
 export const installAttachmentDownloadBytes: Common['installAttachmentDownloadBytes'] = (...args) => (
   mobileAttachmentCommon().installAttachmentDownloadBytes(...args)
 );
-/** CloudKit's native fetch must receive scratch, never the canonical target. */
+
 export const createAttachmentDownloadStagePath: Common['createAttachmentDownloadStagePath'] = (...args) => (
   mobileAttachmentCommon().createAttachmentDownloadStagePath(...args)
 );

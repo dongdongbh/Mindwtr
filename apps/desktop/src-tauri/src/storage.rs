@@ -37,14 +37,10 @@ const SNAPSHOT_RETENTION_RECENT_COUNT: usize = 2;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const STORAGE_RETRY_ATTEMPTS: usize = 4;
 const STORAGE_RETRY_BASE_DELAY_MS: u64 = 120;
-// Version 11 adds tasks/projects.archivedAt (#1320). Version 10 adds projects.viewSectionIds (#1319). Version 9 dropped the nine snake_case task
-// indexes that duplicated camelCase ones. Increment this
-// whenever SQLITE_SCHEMA or an ensure_* migration changes; otherwise the warm schema-state fast
-// path can incorrectly skip the migration on an existing database.
-const STORAGE_SCHEMA_VERSION: i64 = 12;
+
+const STORAGE_SCHEMA_VERSION: i64 = 16;
 const STORAGE_SCHEMA_STATE_TABLE: &str = "storage_schema_state";
-// Version 4 adds assignedTo to the desktop-native FTS schema and forces one
-// content rebuild after the corrected triggers are installed.
+
 const FTS_TRIGGER_MIGRATION_VERSION: i64 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,7 +109,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   updatedAt TEXT NOT NULL,
   deletedAt TEXT,
   purgedAt TEXT,
-  reminderPolicy TEXT
+  reminderPolicy TEXT,
+  dueReminderLeadMinutes INTEGER,
+  startReminderLeadMinutes INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -121,10 +119,12 @@ CREATE TABLE IF NOT EXISTS projects (
   title TEXT NOT NULL,
   status TEXT NOT NULL,
   color TEXT NOT NULL,
+  colorOverride TEXT,
   orderNum INTEGER,
   tagIds TEXT,
   isSequential INTEGER,
   sequentialScope TEXT,
+  perSectionFlow INTEGER,
   taskSortBy TEXT,
   isFocused INTEGER,
   supportNotes TEXT,
@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS sections (
   description TEXT,
   orderNum INTEGER,
   isCollapsed INTEGER,
+  isSequential INTEGER,
   rev INTEGER,
   revBy TEXT,
   createdAt TEXT NOT NULL,
@@ -332,8 +333,6 @@ pub(crate) fn is_portable_mode() -> bool {
     matches!(detect_storage_mode(), StorageMode::Portable { .. })
 }
 
-// Keeps the webview's own browsing profile (cache, local storage) inside the
-// portable profile instead of the OS-default per-user location.
 pub(crate) fn portable_webview_data_dir() -> Option<PathBuf> {
     if let StorageMode::Portable { profile_root } = detect_storage_mode() {
         return Some(profile_root.join(PORTABLE_WEBVIEW_DIR_NAME));
@@ -341,19 +340,10 @@ pub(crate) fn portable_webview_data_dir() -> Option<PathBuf> {
     None
 }
 
-/// Removes `path` only when it is an empty directory. Returns whether it went.
-///
-/// `remove_dir` is non-recursive and fails on a non-empty directory, so this can
-/// never take anything with it — if some other component has put a file there,
-/// the call simply fails and the directory stays.
 fn remove_dir_if_empty(path: &Path) -> bool {
     std::fs::remove_dir(path).is_ok()
 }
 
-/// Portable installs are meant to leave nothing outside their own folder, but
-/// plugins create the OS config directory whether or not they end up writing
-/// anything there (#936). Tauri has no hook to prevent that yet, so the empty
-/// leftover is cleared on the way out.
 pub(crate) fn cleanup_portable_os_config_dir(app: &tauri::AppHandle) {
     if !is_portable_mode() {
         return;
@@ -376,10 +366,6 @@ fn os_data_dir() -> PathBuf {
         .join(APP_NAME)
 }
 
-/// The two directories a standard install uses. Where the OS resolves both to
-/// the same folder (Windows, macOS) this is where the flat-to-subfolder
-/// migration happens, before anything has read a config file or a database
-/// (#1245).
 fn standard_dirs(app: Option<&tauri::AppHandle>) -> (PathBuf, PathBuf) {
     let (config_dir, data_dir) = match app {
         Some(app) => (
@@ -395,29 +381,50 @@ fn standard_dirs(app: Option<&tauri::AppHandle>) -> (PathBuf, PathBuf) {
     crate::storage_layout::standard_dirs(config_dir, data_dir)
 }
 
-pub(crate) fn get_config_dir_for_startup() -> PathBuf {
+pub(crate) fn device_dirs_for_startup() -> (PathBuf, PathBuf) {
     if let StorageMode::Portable { profile_root } = detect_storage_mode() {
-        return profile_root.join(PORTABLE_CONFIG_DIR_NAME);
+        return (
+            profile_root.join(PORTABLE_CONFIG_DIR_NAME),
+            profile_root.join(PORTABLE_DATA_DIR_NAME),
+        );
     }
-    standard_dirs(None).0
+    standard_dirs(None)
 }
 
-pub(crate) fn get_config_path_for_startup() -> PathBuf {
-    get_config_dir_for_startup().join(CONFIG_FILE_NAME)
+pub(crate) fn get_device_config_dir_for_startup() -> PathBuf {
+    device_dirs_for_startup().0
 }
 
-pub(crate) fn get_config_dir(app: &tauri::AppHandle) -> PathBuf {
+pub(crate) fn get_device_config_path_for_startup() -> PathBuf {
+    get_device_config_dir_for_startup().join(CONFIG_FILE_NAME)
+}
+
+pub(crate) fn get_device_config_dir(app: &tauri::AppHandle) -> PathBuf {
     if let StorageMode::Portable { profile_root } = detect_storage_mode() {
         return profile_root.join(PORTABLE_CONFIG_DIR_NAME);
     }
     standard_dirs(Some(app)).0
 }
 
-pub(crate) fn get_data_dir(app: &tauri::AppHandle) -> PathBuf {
+pub(crate) fn get_device_data_dir(app: &tauri::AppHandle) -> PathBuf {
     if let StorageMode::Portable { profile_root } = detect_storage_mode() {
         return profile_root.join(PORTABLE_DATA_DIR_NAME);
     }
     standard_dirs(Some(app)).1
+}
+
+pub(crate) fn get_config_dir(app: &tauri::AppHandle) -> PathBuf {
+    crate::workspaces::workspace_dir(
+        &get_device_config_dir(app),
+        crate::workspaces::active_workspace_id(),
+    )
+}
+
+pub(crate) fn get_data_dir(app: &tauri::AppHandle) -> PathBuf {
+    crate::workspaces::workspace_dir(
+        &get_device_data_dir(app),
+        crate::workspaces::active_workspace_id(),
+    )
 }
 
 pub(crate) fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
@@ -511,6 +518,8 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
         ensure_column(&transaction, "tasks", "suppressMindwtrReminders", "INTEGER")?;
         ensure_column(&transaction, "tasks", "reminderPolicy", "TEXT")?;
         ensure_column(&transaction, "tasks", "repeatReminderMinutes", "INTEGER")?;
+        ensure_column(&transaction, "tasks", "dueReminderLeadMinutes", "INTEGER")?;
+        ensure_column(&transaction, "tasks", "startReminderLeadMinutes", "INTEGER")?;
         ensure_column(&transaction, "tasks", "timeSpentMinutes", "INTEGER")?;
         ensure_column(&transaction, "tasks", "cancelledAt", "TEXT")?;
         ensure_column(&transaction, "tasks", "archivedAt", "TEXT")?;
@@ -553,6 +562,9 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
         ensure_projects_order_column(&transaction)?;
         ensure_column(&transaction, "projects", "sequentialScope", "TEXT")?;
         ensure_column(&transaction, "projects", "taskSortBy", "TEXT")?;
+        ensure_column(&transaction, "projects", "colorOverride", "TEXT")?;
+        ensure_column(&transaction, "projects", "perSectionFlow", "INTEGER")?;
+        ensure_column(&transaction, "sections", "isSequential", "INTEGER")?;
         ensure_projects_due_date_column(&transaction)?;
         ensure_column(&transaction, "projects", "startDate", "TEXT")?;
         ensure_column(&transaction, "projects", "cancelledAt", "TEXT")?;
@@ -614,9 +626,7 @@ fn sqlite_file_identity(db_path: &Path) -> Option<SqliteFileIdentity> {
 
     let file = File::open(db_path).ok()?;
     let mut metadata = BY_HANDLE_FILE_INFORMATION::default();
-    // SAFETY: `file` owns a valid handle for the duration of this call and
-    // `metadata` points to writable storage of the exact structure the API
-    // expects.
+
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut metadata) } == 0 {
         return None;
     }
@@ -696,11 +706,6 @@ pub(crate) fn open_sqlite(app: &tauri::AppHandle) -> Result<Connection, String> 
     open_sqlite_path(&get_db_path(app))
 }
 
-// Sort orders are sparse and may be fractional (midpoints written by older app
-// versions or synced from other devices). Binding them as i64 silently turned
-// fractional values into NULL, which dropped the task to the bottom of its list
-// after the next sync reload (#784). Keep integral values as JSON integers so
-// round-trips stay byte-identical for the common case.
 fn json_number_from_f64(value: f64) -> Option<Value> {
     if !value.is_finite() {
         return None;
@@ -727,10 +732,7 @@ fn normalize_project_task_sort_by(value: Option<&str>) -> Option<&str> {
 
 fn is_retryable_storage_error(message: &str) -> bool {
     let normalized = message.to_ascii_lowercase();
-    // "is locked", not "database is locked": SQLite words the same contention
-    // three ways — "database is locked" (SQLITE_BUSY with a message), "the
-    // database file is locked" (bare SQLITE_BUSY), "a table in the database is
-    // locked" (SQLITE_LOCKED) — and the narrower match retried only the first.
+
     normalized.contains("is locked")
         || normalized.contains("database is busy")
         || normalized.contains("resource busy")
@@ -746,9 +748,6 @@ fn data_json_publication_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
-// Poison-recovering: a panic anywhere inside a publication must not make every later
-// data.json refresh fail for the life of the process. The lock is a `Mutex<()>` — it
-// serializes the write, it holds no state a panic could half-mutate.
 fn lock_data_json_publication() -> std::sync::MutexGuard<'static, ()> {
     data_json_publication_lock()
         .lock()
@@ -760,10 +759,6 @@ fn snapshot_operation_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
-// ponytail: one global lock serializes snapshot create/restore against each
-// other now that both run off the main thread (blocking pool, no more
-// implicit serialization); per-profile lock if concurrent snapshot ops ever
-// become a real workload.
 fn lock_snapshot_operation() -> Result<std::sync::MutexGuard<'static, ()>, String> {
     snapshot_operation_lock()
         .lock()
@@ -846,10 +841,6 @@ fn cleanup_stale_data_json_backup(data_path: &Path) -> Result<(), String> {
 }
 
 fn write_data_json_file(data_path: &Path, data: &Value) -> Result<(), String> {
-    // Incremental saves publish after releasing SQLite's writer lock. Keep the
-    // Windows backup dance and final rename serialized within this process;
-    // every writer still uses a unique temp so no publisher can truncate or
-    // rename another publisher's in-progress file.
     let _publication_guard = lock_data_json_publication();
     if let Some(parent) = data_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -869,7 +860,7 @@ fn write_data_json_file(data_path: &Path, data: &Value) -> Result<(), String> {
         .write_all(content.as_bytes())
         .and_then(|_| temp_file.as_file().sync_all())
         .map_err(|e| e.to_string())?;
-    // Close the handle before rename so Windows can move it.
+
     let temp_path = temp_file.into_temp_path();
 
     if cfg!(windows) && data_path.exists() {
@@ -901,10 +892,7 @@ fn write_initial_data_json_file(data_path: &Path, data: &Value) -> Result<bool, 
         if read_json_with_retries(data_path, 1).is_ok() {
             return Ok(false);
         }
-        // A legacy direct write may have crashed after creating a partial
-        // final file. Quarantine it under an unlisted unique temp name for the
-        // duration of this publication so mere existence cannot suppress a
-        // valid bootstrap retry.
+
         let quarantine = tempfile::Builder::new()
             .prefix(".mindwtr-invalid-data-")
             .suffix(".tmp")
@@ -937,9 +925,6 @@ fn write_initial_data_json_file(data_path: &Path, data: &Value) -> Result<bool, 
 
 const ENTITY_TABLES: [&str; 5] = ["tasks", "projects", "sections", "areas", "people"];
 
-// Every foreign key in SQLITE_SCHEMA, keyed by the table it points at, as
-// (child table, child column). Twin of core ENTITY_FOREIGN_KEY_CHILDREN; a test
-// compares it with PRAGMA foreign_key_list and with the core list.
 const ENTITY_FOREIGN_KEY_CHILDREN: [(&str, &[(&str, &str)]); 3] = [
     ("sections", &[("tasks", "sectionId")]),
     (
@@ -983,10 +968,6 @@ fn sqlite_entity_count(conn: &Connection) -> Result<i64, String> {
     Ok(total)
 }
 
-// An unguarded save that would replace existing entities with an all-empty
-// document means the caller likely lost its in-memory state (#852). A compacted
-// snapshot may legitimately be empty when the caller opts into transactional
-// CAS semantics: only explicitly supplied observed rows can then be removed.
 fn refuse_empty_snapshot_overwrite(
     conn: &Connection,
     data: &Value,
@@ -1015,7 +996,6 @@ fn persist_data_snapshot(
     let (canonical, retained, kept_live) =
         merge_json_to_sqlite_with_retained_tasks(&mut conn, data, baseline_entities)?;
     for (table, count) in kept_live {
-        // Proof the omission guard ran: counts only, never row content or ids.
         let line = format!(
             "SQLite save kept live rows the snapshot omitted extra.releaseCheck=v1.3.3/desktop-kept-omitted-live-rows table={table} count={count}"
         );
@@ -1042,17 +1022,12 @@ fn persist_data_snapshot(
         log::info!(
             "SQLite snapshot committed with cached inserts extra.releaseCheck=v1.3.0/sqlite-snapshot-statements count={count}"
         );
-        // The optional log plugin has its own file; field testers export the
-        // app's Diagnostics log, so retain the same privacy-safe proof there.
+
         crate::logging::append_native_log_line(app, &format!(
             "SQLite snapshot committed with cached inserts extra.releaseCheck=v1.3.0/sqlite-snapshot-statements count={count}"
         ));
     }
-    // SQLite has committed and is canonical at this point. data.json is a
-    // secondary recovery copy: failing to refresh it must not report the
-    // already-committed write as failed (a caller retry could duplicate a
-    // create). Always derive the copy from SQLite, never the stale caller
-    // snapshot that may have lost a revision race above.
+
     Ok(refresh_data_json_from_sqlite(&conn, &get_data_path(app)).unwrap_or(canonical))
 }
 
@@ -1068,9 +1043,6 @@ fn persist_data_snapshot_exact(
 }
 
 fn refresh_data_json_from_sqlite(conn: &Connection, data_path: &Path) -> Option<Value> {
-    // SQLite is already committed. Read a transactionally consistent snapshot
-    // without taking a second writer lock, then use data_version repair if a
-    // later writer commits while pretty JSON serialization/fsync/rename runs.
     match stable_sqlite_snapshot_with_version(conn) {
         Ok((canonical, data_version)) => Some(publish_task_data_json(
             conn,
@@ -1335,11 +1307,6 @@ fn ensure_tasks_section_column(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-// Until schema version 9 the schema text created these nine task indexes twice:
-// once under a snake_case name and once under a camelCase name on the same
-// columns. The camelCase twin stays (core's schema uses the same names), so
-// dropping these loses no index. IF EXISTS keeps the step safe to re-run: it
-// runs again whenever another program (MCP, the CLI) changes the schema.
 const DUPLICATE_SNAKE_CASE_TASK_INDEXES: &[&str] = &[
     "idx_tasks_project_id",
     "idx_tasks_updated_at",
@@ -1502,9 +1469,7 @@ fn fts_triggers_are_current(conn: &Connection) -> Result<bool, String> {
         let Some(sql) = sql else {
             return Ok(false);
         };
-        // Trust the marker only while the actual SQL is still current. An older
-        // desktop binary can recreate these triggers without assignedTo while
-        // leaving the shared schema_migrations table untouched.
+
         if name.starts_with("tasks_") && !sql.contains("assignedTo") {
             return Ok(false);
         }
@@ -1775,11 +1740,6 @@ fn upsert_task_row_at(conn: &Connection, task: &Value, merge_now: i128) -> Resul
     replace_task_row(conn, task)
 }
 
-// Mutations derived from the canonical row while holding BEGIN IMMEDIATE are
-// already validated against the only row they can replace. They must bypass
-// stale-snapshot arbitration: at a saturated revision, a future-dated old row
-// can otherwise defeat a legitimate local patch and turn a 200 response into
-// a silent no-op.
 fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
     task.get("id")
         .and_then(Value::as_str)
@@ -1797,7 +1757,7 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
     let execute_insert =
         |sql: &str, values: &[&dyn ToSql]| conn.prepare_cached(sql)?.execute(values);
     execute_insert(
-        "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes, archivedAt, reminderPolicy) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47)",
+        "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes, archivedAt, reminderPolicy, dueReminderLeadMinutes, startReminderLeadMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49)",
         params![
             task.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
             task.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -1860,6 +1820,8 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
             task.get("timeSpentMinutes").and_then(|v| v.as_i64()),
             task.get("archivedAt").and_then(|v| v.as_str()),
             task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip")),
+            task.get("dueReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| (0..=10080).contains(minutes)),
+            task.get("startReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60)),
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -1894,7 +1856,6 @@ fn build_fts_query(input: &str) -> Option<String> {
     let tokens: Vec<String> = cleaned
         .split_whitespace()
         .filter(|t| !t.is_empty())
-        // Cleaning excludes quotes; quote tokens so @/# remain literal FTS5 text (#1264).
         .map(|t| format!("\"{}\"*", t))
         .collect();
     if tokens.is_empty() {
@@ -1955,10 +1916,7 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
     if !recurrence_val.is_null() {
         map.insert("recurrence".to_string(), recurrence_val);
     }
-    // Canonical wire form is `true` only with recurrence, otherwise ABSENT (the merge rule in
-    // packages/core/src/sync-normalization.ts). Reading a stored 0 (or NULL) back
-    // as absent keeps this reader in step with the JS codec's fromPresentBool and
-    // absorbs every legacy row without a migration.
+
     if let Ok(val) = row.get::<_, i64>("showFutureRecurrence") {
         if val != 0 && map.contains_key("recurrence") {
             map.insert("showFutureRecurrence".to_string(), Value::Bool(true));
@@ -2053,6 +2011,19 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
             map.insert("reminderPolicy".to_string(), Value::String(policy));
         }
     }
+    if let Ok(Some(minutes)) = row.get::<_, Option<i64>>("dueReminderLeadMinutes") {
+        if (0..=10080).contains(&minutes) {
+            map.insert("dueReminderLeadMinutes".to_string(), Value::Number(minutes.into()));
+        }
+    }
+    if let Ok(Some(minutes)) = row.get::<_, Option<i64>>("startReminderLeadMinutes") {
+        if matches!(minutes, 0 | 5 | 15 | 30 | 60) {
+            map.insert(
+                "startReminderLeadMinutes".to_string(),
+                Value::Number(minutes.into()),
+            );
+        }
+    }
     if let Ok(val) = row.get::<_, Option<i64>>("repeatReminderMinutes") {
         if let Some(v) = val {
             map.insert("repeatReminderMinutes".to_string(), Value::Number(v.into()));
@@ -2068,10 +2039,7 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
             map.insert("reviewAt".to_string(), Value::String(v));
         }
     }
-    // Canonical only for done/archived rows, else ABSENT — the same rule
-    // normalizeTaskForLoad applies on every load/merge (task-status.ts). A
-    // caller that patches completedAt without a status transition (MCP) leaves
-    // a stale value in the column; keep this reader in step with the JS codec.
+
     let status_keeps_completed_at = map
         .get("status")
         .and_then(Value::as_str)
@@ -2177,6 +2145,13 @@ fn row_to_project_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Erro
         if let Some(v) = val {
             map.insert("sequentialScope".to_string(), Value::String(v));
         }
+    }
+    if let Some(value) = row.get::<_, Option<String>>("colorOverride")? {
+        map.insert("colorOverride".to_string(), Value::String(value));
+    }
+
+    if let Ok(Some(val)) = row.get::<_, Option<i64>>("perSectionFlow") {
+        map.insert("perSectionFlow".to_string(), Value::Bool(val != 0));
     }
     if let Ok(val) = row.get::<_, Option<String>>("taskSortBy") {
         if let Some(v) = normalize_project_task_sort_by(val.as_deref()) {
@@ -2291,6 +2266,10 @@ fn row_to_section_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Erro
     }
     if let Ok(val) = row.get::<_, i64>("isCollapsed") {
         map.insert("isCollapsed".to_string(), Value::Bool(val != 0));
+    }
+
+    if let Ok(Some(val)) = row.get::<_, Option<i64>>("isSequential") {
+        map.insert("isSequential".to_string(), Value::Bool(val != 0));
     }
     if let Ok(val) = row.get::<_, Option<i64>>("rev") {
         if let Some(v) = val {
@@ -2435,14 +2414,6 @@ fn stamp_reference_repair(entity: &mut Value, now: &str, rev_by: &str, tombstone
     entity.insert("revBy".to_string(), Value::String(rev_by.to_string()));
 }
 
-/// Repairs project/task container references that don't resolve to a live row
-/// and tombstones orphaned sections with fresh revision metadata. A section
-/// whose parent row is physically absent is routed to the transactional
-/// sidecar table because the primary sections table has a NOT NULL project FK;
-/// canonical reads merge that tombstone back into the one sections array.
-/// Mutates `data` in place and returns each issue found in the same
-/// `(kind, id, missingId)` shape as core's own diagnostic instrumentation
-/// (`SqliteReferenceIssue` in sqlite-adapter.ts), for the caller to log.
 fn sanitize_dangling_container_references(data: &mut Value) -> Vec<(&'static str, String, String)> {
     let area_ids = collect_ids(data, "areas");
     let project_ids = collect_ids(data, "projects");
@@ -2669,9 +2640,6 @@ fn take_orphan_section_tombstones(data: &mut Value) -> Vec<Value> {
     let mut regular = Vec::with_capacity(sections.len());
     let mut orphaned = Vec::new();
     for mut section in std::mem::take(sections) {
-        // Older or externally edited JSON may contain the former private
-        // marker. It is untrusted input: scrub it and derive sidecar routing
-        // solely from the persisted entity relationship.
         if let Some(section) = section.as_object_mut() {
             section.remove("_mindwtrOrphanSectionTombstone");
         }
@@ -2860,9 +2828,7 @@ fn incoming_delete_vs_live_wins_at(
         if has_revision && !revision_order.is_eq() {
             return Some(revision_order.is_gt());
         }
-        // ADR 0007: revisioned records preserve the live side inside the
-        // ambiguity window. Legacy records without revisions retain the old
-        // tombstone preference so replicas still converge deterministically.
+
         return Some(if has_revision {
             !incoming_deleted
         } else {
@@ -2874,8 +2840,7 @@ fn incoming_delete_vs_live_wins_at(
         (Some(current), Some(incoming)) if incoming != current => Some(incoming > current),
         (None, Some(_)) => Some(true),
         (Some(_), None) => Some(false),
-        // Equal/unparseable non-ambiguous operation times finish with the
-        // core merge contract's deterministic delete preference.
+
         _ => Some(incoming_deleted),
     }
 }
@@ -2972,6 +2937,7 @@ fn normalize_entity_signature_pair(current: &Value, incoming: &Value) -> (Value,
         "isSequential",
         "isFocused",
         "isCollapsed",
+        "perSectionFlow",
     ] {
         if current.contains_key(key) || incoming.contains_key(key) {
             current.entry(key.to_string()).or_insert(Value::Bool(false));
@@ -3020,9 +2986,6 @@ fn incoming_entity_wins_at(current: &Value, incoming: &Value, merge_now: i128) -
     let incoming_timestamp = entity_timestamp_info(incoming.get("updatedAt"), merge_now);
     let raw_timestamp_order = entity_timestamp_order(current_timestamp, incoming_timestamp);
     let timestamp_order = match (current_timestamp.safe, incoming_timestamp.safe) {
-        // Core deliberately ignores small timestamp differences on legacy
-        // rows: without a revision they are plausible clock skew, not a safe
-        // causal order. Content signatures make every replica converge.
         (Some(current), Some(incoming))
             if !has_revision
                 && !current_timestamp.was_clamped
@@ -3036,9 +2999,6 @@ fn incoming_entity_wins_at(current: &Value, incoming: &Value, merge_now: i128) -
     let order = entity_revision(incoming)
         .cmp(&entity_revision(current))
         .then(timestamp_order)
-        // Match core: revBy resolves an otherwise equal revision/time only
-        // when both clients supplied it. A legacy row with no revBy falls
-        // through to the deterministic content signature instead.
         .then_with(
             || match (current_rev_by.is_empty(), incoming_rev_by.is_empty()) {
                 (false, false) => incoming_rev_by.cmp(current_rev_by),
@@ -3046,9 +3006,7 @@ fn incoming_entity_wins_at(current: &Value, incoming: &Value, merge_now: i128) -
             },
         )
         .then_with(|| entity_tie_break_order(current, incoming));
-    // Core's deterministic winner selects the incoming value on an exact
-    // comparable + full-signature tie. This also permits otherwise ignored
-    // archive-bookkeeping differences to flow through without oscillation.
+
     !order.is_lt()
 }
 
@@ -3064,7 +3022,6 @@ fn entities_by_id(entities: &[Value]) -> HashMap<&str, &Value> {
         .collect()
 }
 
-/// Returns the merged rows and how many omitted live rows it kept.
 fn merge_entity_snapshots(
     current: &[Value],
     incoming: &[Value],
@@ -3092,10 +3049,6 @@ fn merge_entity_snapshots(
             .is_some_and(|baseline| *baseline == canonical);
 
         match incoming_by_id.get(id) {
-            // A caller may replace a row exactly (including pruning nested
-            // attachment tombstones without bumping the task rev) only when
-            // the row it originally observed is still canonical. The CAS
-            // never authorizes rolling the entity revision backward.
             Some(target) if baseline_matches => {
                 if entity_revision(target) >= entity_revision(canonical) {
                     merged.push((*target).clone());
@@ -3107,13 +3060,7 @@ fn merge_entity_snapshots(
                 merged.push((*target).clone())
             }
             Some(_) => merged.push(canonical.clone()),
-            // Omission is a physical removal only when it is a CAS against
-            // the exact row the caller observed, that row is a tombstone, and
-            // no remaining row references it (removing a referenced parent
-            // would make storage repair the child without its owner's edit).
-            // Mindwtr deletes by tombstone, so an omitted LIVE row means a
-            // stale snapshot, never a delete. Unseen/concurrently changed
-            // rows remain intact.
+
             None if baseline_matches
                 && entity_is_deleted(canonical)
                 && !referenced_ids.contains(id) => {}
@@ -3130,11 +3077,7 @@ fn merge_entity_snapshots(
         let Some(id) = entity.get("id").and_then(Value::as_str) else {
             continue;
         };
-        // A row absent from the canonical snapshot may have been removed by
-        // an exact restore after this caller observed it. Sparse changed-row
-        // baselines alone cannot distinguish that stale row from a genuine
-        // local create, so the caller also sends the IDs it observed. Existing
-        // changed-baseline rows count as observed for older callers.
+
         if !current_ids.contains_key(id)
             && !observed_ids.contains(id)
             && !baseline_by_id.contains_key(id)
@@ -3165,8 +3108,6 @@ fn merge_data_snapshots_at(
     merge_data_snapshots_reporting_kept_at(current, incoming, baseline_entities, merge_now).0
 }
 
-/// Also returns, per table, how many live rows the incoming snapshot omitted
-/// and the merge kept.
 fn merge_data_snapshots_reporting_kept_at(
     current: &Value,
     incoming: &Value,
@@ -3175,8 +3116,7 @@ fn merge_data_snapshots_reporting_kept_at(
 ) -> (Value, Vec<(&'static str, usize)>) {
     let mut merged = incoming.as_object().cloned().unwrap_or_default();
     let mut kept_live = Vec::new();
-    // Children before parents, so a parent's references come from the
-    // children that survive this merge.
+
     for key in ["tasks", "sections", "projects", "areas", "people"] {
         let current_entities = current
             .get(key)
@@ -3227,11 +3167,7 @@ fn merge_data_snapshots_reporting_kept_at(
         }
         merged.insert(key.to_string(), Value::Array(entities));
     }
-    // Settings are one explicit, unsynced document rather than revisioned
-    // entities. Legacy/migration callers without a baseline retain replacement
-    // behavior. Normal saves must compare-and-swap the exact settings document
-    // they observed; an absent/stale baseline cannot overwrite a concurrent
-    // settings update.
+
     let incoming_settings_are_accepted = incoming.get("settings").is_some_and(Value::is_object)
         && match baseline_entities {
             None => true,
@@ -3257,11 +3193,6 @@ fn merge_data_snapshots_reporting_kept_at(
     (Value::Object(merged), kept_live)
 }
 
-/// Core parity (sqlite-adapter saved_filters): saved filters delete by
-/// tombstone, so a settings write that omits a live saved filter came from a
-/// stale snapshot. Append each such filter after the incoming list, verbatim
-/// and in stored order; an omitted tombstone filter is dropped. Returns how
-/// many filters it kept.
 fn keep_omitted_live_saved_filters(
     current_settings: Option<&Value>,
     settings: &mut Value,
@@ -3363,10 +3294,7 @@ fn replace_prepared_data_in_transaction(
 ) -> Result<Value, String> {
     let orphan_section_tombstones = take_orphan_section_tombstones(&mut data);
     let data = &data;
-    // Reuse each table's statement within this connection. Recompiling the
-    // task INSERT (including FK/FTS trigger programs) for every unchanged row
-    // adds work to large full-snapshot saves. SQL and transaction semantics stay
-    // identical; every execution binds all parameters again.
+
     let execute_insert =
         |sql: &str, values: &[&dyn ToSql]| conn.prepare_cached(sql)?.execute(values);
 
@@ -3385,20 +3313,6 @@ fn replace_prepared_data_in_transaction(
     conn.execute("DELETE FROM orphan_section_tombstones", [])
         .map_err(|e| e.to_string())?;
 
-    // Insert order is parent-before-child so each row's FK references
-    // (tasks/sections -> projects, tasks/projects -> areas) already exist:
-    // areas depend on nothing, projects depend on areas, sections depend on
-    // projects, tasks depend on all three. `people`/`settings` have no FK
-    // columns, so their position relative to the others is unconstrained.
-    // This also matters beyond satisfying the constraint on this from-scratch
-    // migration: `INSERT OR REPLACE` on a row whose id already exists
-    // resolves the conflict by deleting the old row first, which fires the
-    // same `ON DELETE CASCADE`/`SET NULL` actions - so on any write that
-    // isn't a full wipe-and-reinsert (an incremental per-entity upsert
-    // elsewhere), re-inserting a parent before its children are also
-    // re-inserted can silently cascade-delete or null a child's own
-    // reference. Parent-before-child order is load-bearing for data
-    // integrity generally, not only for constraint satisfaction here.
     let areas = data
         .get("areas")
         .and_then(|v| v.as_array())
@@ -3436,7 +3350,7 @@ fn replace_prepared_data_in_transaction(
         let attachments_json = json_str(project.get("attachments"));
         let view_section_ids_json = json_str(project.get("viewSectionIds"));
         execute_insert(
-            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
             params![
                 project.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 project.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3464,6 +3378,8 @@ fn replace_prepared_data_in_transaction(
                 project.get("cancelledAt").and_then(|v| v.as_str()),
                 view_section_ids_json,
                 project.get("archivedAt").and_then(|v| v.as_str()),
+                project.get("colorOverride").and_then(|v| v.as_str()),
+                project.get("perSectionFlow").and_then(|v| v.as_bool()).map(|v| v as i32),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -3476,7 +3392,7 @@ fn replace_prepared_data_in_transaction(
         .unwrap_or_default();
     for section in sections {
         execute_insert(
-            "INSERT OR REPLACE INTO sections (id, projectId, title, description, orderNum, isCollapsed, rev, revBy, createdAt, updatedAt, deletedAt, deletedAtBeforeProjectArchive, projectArchivedAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT OR REPLACE INTO sections (id, projectId, title, description, orderNum, isCollapsed, rev, revBy, createdAt, updatedAt, deletedAt, deletedAtBeforeProjectArchive, projectArchivedAt, isSequential) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 section.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 section.get("projectId").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3493,6 +3409,7 @@ fn replace_prepared_data_in_transaction(
                     .get("deletedAtBeforeProjectArchive")
                     .and_then(|v| v.as_str()),
                 section.get("projectArchivedAt").and_then(|v| v.as_str()),
+                section.get("isSequential").and_then(|v| v.as_bool()).map(|v| v as i32),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -3526,7 +3443,7 @@ fn replace_prepared_data_in_transaction(
         let attachments_json = json_str(task.get("attachments"));
         let view_section_ids_json = json_str(task.get("viewSectionIds"));
         execute_insert(
-            "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes, archivedAt, reminderPolicy) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47)",
+            "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes, archivedAt, reminderPolicy, dueReminderLeadMinutes, startReminderLeadMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49)",
             params![
                 task.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 task.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3589,6 +3506,8 @@ fn replace_prepared_data_in_transaction(
                 task.get("timeSpentMinutes").and_then(|v| v.as_i64()),
             task.get("archivedAt").and_then(|v| v.as_str()),
             task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip")),
+            task.get("dueReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| (0..=10080).contains(minutes)),
+            task.get("startReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60)),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -3635,12 +3554,7 @@ fn merge_json_to_sqlite(
     merge_json_to_sqlite_with_retained_tasks(conn, data, baseline_entities).map(|(data, _, _)| data)
 }
 
-// A deliberately narrow optimization after normal merge/revision/CAS arbitration
-// and reference repair, under the same writer lock. Exact restores never use it.
-// Strict equality is conservative: codec differences simply take the old path.
 fn appended_snapshot_tasks<'a>(current: &Value, merged: &'a Value) -> Option<&'a [Value]> {
-    // Full replacement also scrubs this legacy, untrusted sidecar marker.
-    // Do not bypass that cleanup for a database produced by an older writer.
     if merged
         .get("sections")?
         .as_array()?
@@ -3686,8 +3600,6 @@ fn write_merged_snapshot_in_transaction(
     if let Some(appended) = appended_snapshot_tasks(current, &merged) {
         let retained = current["tasks"].as_array().map_or(0, Vec::len);
         for task in appended {
-            // Proven new IDs only. This uses the same snapshot column codec;
-            // no existing row or parent can be replaced/cascade-deleted here.
             replace_task_row(conn, task)?;
         }
         return Ok((read_sqlite_data(conn)?, retained));
@@ -3695,16 +3607,11 @@ fn write_merged_snapshot_in_transaction(
     replace_prepared_data_in_transaction(conn, merged).map(|data| (data, 0))
 }
 
-/// Returns the canonical data, the retained task count of an append-only
-/// save, and per table the omitted live rows the merge kept.
 fn merge_json_to_sqlite_with_retained_tasks(
     conn: &mut Connection,
     data: &Value,
     baseline_entities: Option<&Value>,
 ) -> Result<(Value, usize, Vec<(&'static str, usize)>), String> {
-    // Acquire the cross-process writer lock before reloading. A stale whole
-    // snapshot can then merge with canonical rows without erasing an MCP,
-    // CLI, or Local API write committed after the snapshot was captured.
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| e.to_string())?;
     let result: Result<(Value, usize, Vec<(&'static str, usize)>), String> = (|| {
@@ -3743,10 +3650,6 @@ fn replace_json_in_sqlite_if_unchanged(
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| e.to_string())?;
     let result = (|| {
-        // Native/API writers bypass the renderer's write barrier. Check under
-        // the SQLite writer lock so a restore cannot erase a later commit. An
-        // exact replacement erases every row it does not carry, so a caller
-        // that did not name the data it replaces is refused.
         let Some(expected) = expected_data else {
             return Err(
                 "Refusing an exact replacement without the data it replaces; local data left untouched"
@@ -3964,8 +3867,6 @@ fn row_to_calendar_sync_entry(
     })
 }
 
-// Each call opens its own SQLite connection and runs one atomic statement
-// (WAL) — no app-level read-modify-write, so no extra lock (B1).
 #[tauri::command(async)]
 pub(crate) fn get_calendar_sync_entry(
     app: tauri::AppHandle,
@@ -4042,10 +3943,6 @@ pub(crate) fn get_all_calendar_sync_entries(
 }
 
 fn get_legacy_config_json_path(app: &tauri::AppHandle) -> PathBuf {
-    // Two places have held the pre-TOML settings file: the bundle-identifier
-    // directory Tauri picks by default, and the app's own config dir. The
-    // second one follows the standard-layout migration into `config/`, so an
-    // un-imported file is still found after the move (#1245).
     let by_identifier = app
         .path()
         .app_config_dir()
@@ -4069,13 +3966,14 @@ fn bootstrap_storage_layout(app: &tauri::AppHandle) -> Result<(), String> {
     fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
     fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
 
-    let legacy_config_path = get_legacy_config_json_path(app);
-    let legacy_config: LegacyAppConfigJson =
-        if let Ok(content) = fs::read_to_string(&legacy_config_path) {
-            serde_json::from_str(&content).unwrap_or_default()
-        } else {
-            LegacyAppConfigJson::default()
-        };
+    let import_legacy = crate::workspaces::active_workspace_id().is_none();
+    let legacy_config: LegacyAppConfigJson = match import_legacy
+        .then(|| fs::read_to_string(get_legacy_config_json_path(app)).ok())
+        .flatten()
+    {
+        Some(content) => serde_json::from_str(&content).unwrap_or_default(),
+        None => LegacyAppConfigJson::default(),
+    };
 
     let config_path = get_config_path(app);
     if !config_path.exists() {
@@ -4093,8 +3991,10 @@ fn bootstrap_storage_layout(app: &tauri::AppHandle) -> Result<(), String> {
         if let Some(custom_path) = legacy_config.data_file_path.as_ref() {
             legacy_sources.push(PathBuf::from(custom_path));
         }
-        legacy_sources.push(config_dir.join(DATA_FILE_NAME));
-        legacy_sources.push(get_legacy_data_json_path(app));
+        if import_legacy {
+            legacy_sources.push(config_dir.join(DATA_FILE_NAME));
+            legacy_sources.push(get_legacy_data_json_path(app));
+        }
         for source in legacy_sources {
             if !source.exists() {
                 continue;
@@ -4144,11 +4044,7 @@ pub(crate) fn load_data_snapshot(app: &tauri::AppHandle) -> Result<Value, String
     if !sqlite_has_any_data(&conn)? && data_path.exists() {
         if let Ok(value) = read_json_with_retries(&data_path, 2) {
             let _ = fs::copy(&data_path, &backup_path);
-            // A first-load migration failure must not brick the app: fall
-            // through to the JSON already in hand (sanitize_dangling_container_references
-            // above should prevent an FK failure here in the first place, but
-            // this is the backstop for anything else that goes wrong) instead
-            // of hard-failing the whole load.
+
             if let Err(error) = migrate_json_to_sqlite(&mut conn, &value) {
                 log::warn!(
                     "First-load JSON->SQLite migration failed, using JSON directly: {error}"
@@ -4160,10 +4056,6 @@ pub(crate) fn load_data_snapshot(app: &tauri::AppHandle) -> Result<Value, String
     }
 
     match read_sqlite_snapshot(&conn) {
-        // Once SQLite has any canonical data, even an empty settings object is
-        // authoritative: it can be an intentional reset. data.json is only a
-        // first-load/failure fallback and must not resurrect stale settings if
-        // its best-effort refresh failed after that reset committed.
         Ok(value) => Ok(value),
         Err(primary_err) => {
             if data_path.exists() {
@@ -4570,12 +4462,6 @@ fn read_task_mutation_data(
         load_scoped_area(conn, area_id, &mut areas, &mut stats)?;
     }
 
-    // Project order is allocated from the destination's canonical rows while
-    // the caller holds BEGIN IMMEDIATE. Concurrent Local API moves therefore
-    // serialize their MAX+1 reservations instead of choosing the same slot.
-    // Match core getProjectOrderIndex exactly: every non-deleted task in the
-    // project counts, including sectioned tasks; the SQLite row stores the
-    // synchronized order/orderNum aliases in orderNum.
     let requested_section_project_id = scope.section_id.as_deref().and_then(|section_id| {
         sections
             .iter()
@@ -4645,8 +4531,7 @@ fn read_task_mutation_data(
             .map(|value| value.date())
             .unwrap_or_else(|| now.to_offset(time::UtcOffset::UTC).date())
             .to_string();
-        // Match local_api_task_is_future_start: offset timestamps use local days;
-        // date-only and floating timestamps keep their written days.
+
         let count: i64 = conn
             .query_row(
                 "WITH focus_values AS (
@@ -4739,7 +4624,7 @@ fn read_task_mutation_data(
                 if project.get("isSequential").and_then(Value::as_bool) == Some(true) {
                     let section_scoped =
                         project.get("sequentialScope").and_then(Value::as_str) == Some("section");
-                    // A patch can move or clear its section before eligibility is checked.
+
                     if section_scoped && scope.task_id.is_none() {
                         if let Some(section_id) = focus_section_id {
                             append_scoped_task_rows(
@@ -4958,8 +4843,8 @@ fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String>
     let normalized_rev = normalized_revision_for_storage(project.get("rev"));
     let normalized_rev_by = normalized_rev_by(project.get("revBy"));
     conn.execute(
-        "INSERT INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+        "INSERT INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
          ON CONFLICT(id) DO UPDATE SET
            title=excluded.title, status=excluded.status, color=excluded.color, orderNum=excluded.orderNum,
            tagIds=excluded.tagIds, isSequential=excluded.isSequential, sequentialScope=excluded.sequentialScope,
@@ -4968,7 +4853,8 @@ fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String>
            areaId=excluded.areaId, areaTitle=excluded.areaTitle, rev=excluded.rev, revBy=excluded.revBy,
            createdAt=excluded.createdAt, updatedAt=excluded.updatedAt, deletedAt=excluded.deletedAt,
            purgedAt=excluded.purgedAt, startDate=excluded.startDate, cancelledAt=excluded.cancelledAt,
-           viewSectionIds=excluded.viewSectionIds, archivedAt=excluded.archivedAt",
+           viewSectionIds=excluded.viewSectionIds, archivedAt=excluded.archivedAt, colorOverride=excluded.colorOverride,
+           perSectionFlow=excluded.perSectionFlow",
         params![
             project.get("id").and_then(Value::as_str).unwrap_or_default(),
             project.get("title").and_then(Value::as_str).unwrap_or_default(),
@@ -5011,6 +4897,11 @@ fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String>
             project.get("cancelledAt").and_then(Value::as_str),
             view_section_ids_json,
             project.get("archivedAt").and_then(Value::as_str),
+            project.get("colorOverride").and_then(Value::as_str),
+            project
+                .get("perSectionFlow")
+                .and_then(Value::as_bool)
+                .map(|v| v as i32),
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -5026,14 +4917,14 @@ fn replace_project_mutation_section_row(conn: &Connection, section: &Value) -> R
     let normalized_rev = normalized_revision_for_storage(section.get("rev"));
     let normalized_rev_by = normalized_rev_by(section.get("revBy"));
     conn.execute(
-        "INSERT INTO sections (id, projectId, title, description, orderNum, isCollapsed, rev, revBy, createdAt, updatedAt, deletedAt, deletedAtBeforeProjectArchive, projectArchivedAt)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+        "INSERT INTO sections (id, projectId, title, description, orderNum, isCollapsed, rev, revBy, createdAt, updatedAt, deletedAt, deletedAtBeforeProjectArchive, projectArchivedAt, isSequential)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
            projectId=excluded.projectId, title=excluded.title, description=excluded.description,
            orderNum=excluded.orderNum, isCollapsed=excluded.isCollapsed, rev=excluded.rev,
            revBy=excluded.revBy, createdAt=excluded.createdAt, updatedAt=excluded.updatedAt,
            deletedAt=excluded.deletedAt, deletedAtBeforeProjectArchive=excluded.deletedAtBeforeProjectArchive,
-           projectArchivedAt=excluded.projectArchivedAt",
+           projectArchivedAt=excluded.projectArchivedAt, isSequential=excluded.isSequential",
         params![
             section.get("id").and_then(Value::as_str).unwrap_or_default(),
             section
@@ -5065,6 +4956,10 @@ fn replace_project_mutation_section_row(conn: &Connection, section: &Value) -> R
                 .get("deletedAtBeforeProjectArchive")
                 .and_then(Value::as_str),
             section.get("projectArchivedAt").and_then(Value::as_str),
+            section
+                .get("isSequential")
+                .and_then(Value::as_bool)
+                .map(|v| v as i32),
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -5127,7 +5022,6 @@ where
         let (mut canonical, read_stats) = read_project_mutation_data(conn, scope)?;
         let (result, changed) = mutate(&mut canonical)?;
         for area in changed.areas {
-            // UPDATE preserves child foreign keys; REPLACE would detach them.
             let changed = conn
                 .execute(
                     "UPDATE areas SET name = ?2, color = ?3, icon = ?4, orderNum = ?5,
@@ -5209,9 +5103,6 @@ pub(crate) fn mutate_task_rows_with_retries<T, F>(
 where
     F: FnMut(&mut Value) -> Result<(T, Vec<Value>), String>,
 {
-    // Bootstrap/migrate once before entering the retry loop. Steady-state
-    // mutations do not read the whole store here; each retry loads only the
-    // task and supporting rows described by `scope` under BEGIN IMMEDIATE.
     ensure_task_mutation_storage_ready(app)?;
     let data_path = get_data_path(app);
     for attempt in 0..STORAGE_RETRY_ATTEMPTS {
@@ -5223,10 +5114,6 @@ where
                         publish_task_data_json(&conn, &data_path, canonical, data_version)
                     }
                     Err(error) => {
-                        // The rows are durably committed. `fallback` is only a
-                        // scoped response snapshot, so never publish it as the
-                        // full recovery document; leave the previous data.json
-                        // intact and avoid turning success into a caller retry.
                         log::warn!(
                             "Task mutation committed but canonical recovery refresh failed: {error}"
                         );
@@ -5379,9 +5266,6 @@ where
     let (canonical, data_version) = match read_canonical() {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            // COMMIT is the durable acknowledgement boundary. A recovery-copy
-            // read after it may require a later reload, but must never turn the
-            // completed mutation into a caller-visible failure and retry.
             log::warn!(
                 "Task save committed but canonical recovery snapshot could not be read: {error}"
             );
@@ -5468,10 +5352,7 @@ where
         if before == after {
             return Ok((canonical, after));
         }
-        // The snapshot is still transactionally consistent even when another
-        // connection committed around it. Keep it as a successful post-commit
-        // return value; using the older version as the publication expectation
-        // forces data.json repair to retry rather than mistaking it for current.
+
         last_read = Some((canonical, before));
     }
     last_read.ok_or_else(|| "Could not read canonical SQLite snapshot".to_string())
@@ -5483,10 +5364,6 @@ fn publish_task_data_json(
     mut canonical: Value,
     mut expected_data_version: i64,
 ) -> Value {
-    // Serialization, fsync, and atomic replacement happen after COMMIT, so an
-    // incremental task save does one canonical read and never holds SQLite's
-    // writer lock across filesystem I/O. If another connection commits before
-    // publication finishes, reload and republish its newer canonical snapshot.
     write_data_json_best_effort(data_path, &canonical);
     for attempt in 0..STORAGE_RETRY_ATTEMPTS {
         let current_data_version = match sqlite_data_version(conn) {
@@ -5628,8 +5505,6 @@ fn prune_data_snapshots(snapshot_dir: &Path) {
         return;
     }
 
-    // Strategy: keep the latest few snapshots, then spread remaining slots across
-    // the retention window so snapshots represent different points in time.
     let recent_keep = SNAPSHOT_RETENTION_RECENT_COUNT
         .min(SNAPSHOT_RETENTION_MAX_COUNT)
         .min(fresh.len());
@@ -5663,7 +5538,6 @@ fn prune_data_snapshots(snapshot_dir: &Path) {
         }
     }
 
-    // If selection is still short (sparse history), fill from the oldest entries.
     if kept_count < SNAPSHOT_RETENTION_MAX_COUNT {
         for index in (0..fresh.len()).rev() {
             if keep[index] {
@@ -5717,9 +5591,6 @@ pub(crate) fn create_data_snapshot(app: tauri::AppHandle) -> Result<String, Stri
     create_data_snapshot_from_connection(&conn, &snapshot_dir, OffsetDateTime::now_utc())
 }
 
-// Directory listing only: new snapshot files land via atomic rename
-// (write_new_data_snapshot) and prune's own file-not-found races are already
-// silently ignored, so this doesn't need the create/restore lock.
 #[tauri::command(async)]
 pub(crate) fn list_data_snapshots(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     ensure_data_file(&app)?;
@@ -5774,8 +5645,6 @@ pub(crate) fn query_tasks(
     query_tasks_with_connection(&conn, &options)
 }
 
-// Lifted out of the #[tauri::command] closure so it's callable from a test with a plain
-// in-memory Connection - the command itself needs an AppHandle just to open the real db.
 fn query_tasks_with_connection(
     conn: &Connection,
     options: &TaskQueryOptions,
@@ -5815,8 +5684,6 @@ fn query_tasks_with_connection(
         params.push(Box::new(project_id.clone()));
     }
 
-    // COALESCE, not `= ?`: the column is nullable, and rows written before the field
-    // existed store NULL rather than 0 (mirrors buildTaskWhere in packages/core).
     if let Some(is_focused_today) = options.is_focused_today {
         where_clauses.push("COALESCE(isFocusedToday, 0) = ?".to_string());
         params.push(Box::new(if is_focused_today { 1i64 } else { 0i64 }));
@@ -5912,7 +5779,6 @@ pub(crate) fn get_db_path_cmd(app: tauri::AppHandle) -> String {
 }
 
 fn sanitize_json_text(raw: &str) -> String {
-    // Strip BOM and trailing NULs (can occur with partial writes / filesystem quirks).
     let mut text = raw.trim_start_matches('\u{FEFF}').trim_end().to_string();
     while text.ends_with('\u{0}') {
         text.pop();
@@ -5926,19 +5792,11 @@ fn parse_json_relaxed(raw: &str) -> Result<Value, serde_json::Error> {
         return serde_json::from_str::<Value>("{}");
     }
 
-    // 1) Strict parse (fast path)
     let strict_error = match serde_json::from_str::<Value>(&sanitized) {
         Ok(value) => return Ok(value),
         Err(error) => error,
     };
 
-    // 2) Lenient parse: parse the first JSON value and ignore any trailing bytes.
-    // This makes sync resilient to "mid-write" files (e.g., Syncthing replacing data.json).
-    // The document must still START where a document starts: a leading NUL/whitespace run is
-    // fine (sparse or partial writes), but real garbage before the first brace means the head
-    // of the file is gone. Scanning past it would parse an INTERIOR object (a single task) as
-    // the whole document, which normalizes into an empty remote and lets this device's
-    // snapshot overwrite peer edits. Fail closed and let the caller retry.
     let body = sanitized.trim_start_matches(|c: char| c == '\u{0}' || c.is_whitespace());
     if !body.starts_with('{') && !body.starts_with('[') {
         return Err(strict_error);
@@ -5953,10 +5811,6 @@ mod tests {
     use rusqlite::Connection;
     use std::sync::{Arc, Barrier};
 
-    /// A torn/NUL-headed `data.json` (VFS or network mount mid-write) can leave the file
-    /// starting inside the document. Scanning forward to the first `{` would parse an interior
-    /// task object as the whole document, which then reads as an empty remote and lets this
-    /// device overwrite peer edits. Refuse it instead.
     #[test]
     fn relaxed_parse_refuses_a_garbage_prefix_before_the_first_brace() {
         let torn = "\u{0}\u{0}\u{0}sks\":[{\"id\":\"t1\",\"title\":\"Nested\"}]}";
@@ -5966,8 +5820,6 @@ mod tests {
         );
     }
 
-    /// The lenient path exists for a COMPLETE document plus a stale tail (Syncthing replacing
-    /// data.json under us). That must keep working.
     #[test]
     fn relaxed_parse_still_accepts_a_complete_document_with_a_stale_tail() {
         let raw = "{\"tasks\":[{\"id\":\"t1\"}],\"projects\":[]}{\"tasks\":[]}";
@@ -6147,8 +5999,6 @@ mod tests {
             0
         );
 
-        // A failed second insert must roll back the first new row and its FTS
-        // entry, keep old rows intact, and permit a later retry.
         let mut failed = saved.clone();
         failed["tasks"].as_array_mut().unwrap().extend([
             serde_json::json!({"id":"first","title":"rollbackneedle"}),
@@ -6175,7 +6025,7 @@ mod tests {
                 .1,
             3
         );
-        // Exact restore intentionally remains authoritative, including removal.
+
         assert_eq!(
             replace_json_in_sqlite(&mut actual, &initial).unwrap(),
             initial
@@ -6202,7 +6052,6 @@ mod tests {
             let mut seed = serde_json::json!({"tasks":[{"id":"old","title":"Existing","status":"inbox","rev":8}],
                 "projects":[],"sections":[],"areas":[],"people":[],"settings":{}});
             if scenario == "prune" {
-                // Omission prunes only a tombstone; a live row it omits is kept.
                 seed["tasks"][0]["deletedAt"] = serde_json::json!("2026-01-01T00:00:00Z");
             }
             let current = replace_json_in_sqlite(&mut conn, &seed).unwrap();
@@ -6259,8 +6108,6 @@ mod tests {
         }
     }
 
-    // An exact replacement erases every row it does not carry, so it must
-    // name the data it replaces; no caller can skip the check.
     #[test]
     fn exact_replacement_without_the_data_it_replaces_is_refused() {
         let temp = tempfile::tempdir().unwrap();
@@ -6300,8 +6147,6 @@ mod tests {
         assert!(error.contains("Local data changed"));
         assert_eq!(read_sqlite_data(&other).unwrap(), current);
 
-        // A fresh preparation can proceed; this models carrying the newly read
-        // data through the core restore rules before retrying the exact write.
         let saved =
             replace_json_in_sqlite_if_unchanged(&mut conn, &current, Some(&current)).unwrap();
         assert_eq!(saved, current);
@@ -6379,7 +6224,6 @@ mod tests {
         );
     }
 
-    // Opt-in, disk-backed diagnostic; never a timing gate on variable CI hosts.
     #[test]
     #[ignore]
     fn profile_large_snapshot_save() {
@@ -6445,9 +6289,6 @@ mod tests {
         }
     }
 
-    // The three retry loops in this file gate entirely on this classifier, and
-    // it matches on message text — so pin it against the strings SQLite really
-    // produces, not against strings someone wrote from memory.
     #[test]
     fn classifies_a_real_contended_sqlite_write_as_retryable() {
         let temp = tempfile::tempdir().expect("should create temp dir");
@@ -6478,7 +6319,6 @@ mod tests {
 
     #[test]
     fn classifies_sqlite_lock_codes_as_retryable_and_real_faults_as_final() {
-        // rusqlite renders a bare result code as "Error code N: <errstr>".
         let busy = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(5), None).to_string();
         let locked = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(6), None).to_string();
         assert!(is_retryable_storage_error(&busy), "SQLITE_BUSY: {busy:?}");
@@ -6491,7 +6331,6 @@ mod tests {
             "Resource temporarily unavailable (os error 11)"
         ));
 
-        // Retrying these only delays the error the caller has to see.
         assert!(!is_retryable_storage_error("no such table: tasks"));
         assert!(!is_retryable_storage_error("unable to open database file"));
         assert!(!is_retryable_storage_error("disk I/O error"));
@@ -6502,10 +6341,73 @@ mod tests {
     }
 
     #[test]
+    fn due_advance_migrates_and_round_trips_explicit_off() {
+        use serde_json::json;
+        let mut conn = Connection::open_in_memory().unwrap();
+        let legacy_schema = SQLITE_SCHEMA.replace("  reminderPolicy TEXT,\n  dueReminderLeadMinutes INTEGER,\n  startReminderLeadMinutes INTEGER\n);", "  reminderPolicy TEXT\n);");
+        assert_ne!(legacy_schema, SQLITE_SCHEMA);
+        conn.execute_batch(&legacy_schema).unwrap();
+        let generation = sqlite_schema_generation(&conn).unwrap();
+        conn.execute("INSERT INTO storage_schema_state (id, storage_version, schema_generation) VALUES (1, 14, ?1)", [generation]).unwrap();
+        initialize_sqlite_schema(&mut conn).unwrap();
+        for minutes in [15, 1440, 0] {
+            let task = json!({"id":"advance", "title":"Advance", "status":"next", "tags":[], "contexts":[],
+                "createdAt":"2026-01-01", "updatedAt":"2026-01-01", "dueReminderLeadMinutes":minutes});
+            replace_task_row(&conn, &task).unwrap();
+            let read = conn.query_row("SELECT * FROM tasks WHERE id='advance'", [], row_to_task_value).unwrap();
+            assert_eq!(read["dueReminderLeadMinutes"], minutes);
+        }
+        conn.execute("UPDATE tasks SET dueReminderLeadMinutes=10081 WHERE id='advance'", []).unwrap();
+        let invalid = conn.query_row("SELECT * FROM tasks WHERE id='advance'", [], row_to_task_value).unwrap();
+        assert!(invalid.get("dueReminderLeadMinutes").is_none());
+    }
+
+    #[test]
+    fn start_advance_migrates_and_round_trips_explicit_off() {
+        use serde_json::json;
+        let mut conn = Connection::open_in_memory().unwrap();
+        let legacy_schema = SQLITE_SCHEMA.replace(
+            "  dueReminderLeadMinutes INTEGER,\n  startReminderLeadMinutes INTEGER\n);",
+            "  dueReminderLeadMinutes INTEGER\n);",
+        );
+        assert_ne!(legacy_schema, SQLITE_SCHEMA);
+        conn.execute_batch(&legacy_schema).unwrap();
+        let generation = sqlite_schema_generation(&conn).unwrap();
+        conn.execute("INSERT INTO storage_schema_state (id, storage_version, schema_generation) VALUES (1, 15, ?1)", [generation]).unwrap();
+        initialize_sqlite_schema(&mut conn).unwrap();
+        for minutes in [5, 15, 30, 60, 0] {
+            let task = json!({"id":"advance", "title":"Advance", "status":"next", "tags":[], "contexts":[],
+                "createdAt":"2026-01-01", "updatedAt":"2026-01-01", "startReminderLeadMinutes":minutes});
+            replace_task_row(&conn, &task).unwrap();
+            let read = conn
+                .query_row(
+                    "SELECT * FROM tasks WHERE id='advance'",
+                    [],
+                    row_to_task_value,
+                )
+                .unwrap();
+            assert_eq!(read["startReminderLeadMinutes"], minutes);
+        }
+        conn.execute(
+            "UPDATE tasks SET startReminderLeadMinutes=61 WHERE id='advance'",
+            [],
+        )
+        .unwrap();
+        let invalid = conn
+            .query_row(
+                "SELECT * FROM tasks WHERE id='advance'",
+                [],
+                row_to_task_value,
+            )
+            .unwrap();
+        assert!(invalid.get("startReminderLeadMinutes").is_none());
+    }
+
+    #[test]
     fn reminder_policy_migration_keeps_legacy_absence_and_round_trips_new_values() {
         let mut conn = Connection::open_in_memory().unwrap();
         let legacy_schema = SQLITE_SCHEMA.replace(
-            "  purgedAt TEXT,\n  reminderPolicy TEXT\n);",
+            "  purgedAt TEXT,\n  reminderPolicy TEXT,\n  dueReminderLeadMinutes INTEGER,\n  startReminderLeadMinutes INTEGER\n);",
             "  purgedAt TEXT\n);",
         );
         assert_ne!(legacy_schema, SQLITE_SCHEMA);
@@ -6622,13 +6524,6 @@ mod tests {
         );
     }
 
-    /// The canonical wire form of `showFutureRecurrence` is `true` or ABSENT,
-    /// never `false` (the merge rule in packages/core/src/sync-normalization.ts).
-    /// This reader and the JS codec's `fromPresentBool` must agree, or a desktop
-    /// build's two local readers disagree about the same row and the sync cycle
-    /// re-normalizes the whole library on every upload. The JS side of the same
-    /// rule is pinned by packages/core/src/sync-schema-row-codec.test.ts (sparse
-    /// task fixture) and packages/core/src/sync-canonical-reads.contract.test.ts.
     #[test]
     fn show_future_recurrence_round_trips_as_true_or_absent() {
         let schema: Value = serde_json::from_str(include_str!(
@@ -6674,8 +6569,7 @@ mod tests {
         write("sfr-false", Some(false), true);
         write("sfr-absent", None, true);
         write("sfr-no-recurrence", Some(true), false);
-        // Pin the persisted shape produced by an external writer: the flag is
-        // still 1 even though recurrence is SQL NULL.
+
         let stored: (i64, Option<String>) = conn
             .query_row(
                 "SELECT showFutureRecurrence, recurrence FROM tasks WHERE id = ?1",
@@ -6687,14 +6581,11 @@ mod tests {
         assert_eq!(read("sfr-no-recurrence"), None);
 
         assert_eq!(read("sfr-true"), Some(Value::Bool(true)));
-        // Stored 0, and every legacy row already on disk, read back ABSENT.
+
         assert_eq!(read("sfr-false"), None);
         assert_eq!(read("sfr-absent"), None);
     }
 
-    /// completedAt is canonical only on done/archived rows (task-status.ts
-    /// normalizeTaskForLoad); a row patched without a status transition keeps
-    /// the stale column value, and the reader must not surface it.
     #[test]
     fn completed_at_reads_absent_unless_done_or_archived() {
         let schema: Value = serde_json::from_str(include_str!(
@@ -6733,7 +6624,7 @@ mod tests {
         write("ca-done", "done");
         write("ca-archived", "archived");
         write("ca-next", "next");
-        // The column keeps the stale value; only the reader hides it.
+
         let stored: Option<String> = conn
             .query_row(
                 "SELECT completedAt FROM tasks WHERE id = ?1",
@@ -6754,11 +6645,6 @@ mod tests {
         assert_eq!(read("ca-next"), None);
     }
 
-    /// Mirrors `packages/core/src/task-query.test.ts` and `local_api.rs`'s
-    /// fixture test against the SAME (tasks, query) -> expected ids table.
-    /// Unlike local_api's HTTP-query-param filter, this Tauri command takes a
-    /// JSON body shaped exactly like core's `TaskQueryOptions`, so every case
-    /// in the fixture is expressible here - none are skipped.
     #[test]
     fn query_tasks_with_connection_matches_task_query_fixture() {
         let cases: Value = serde_json::from_str(include_str!(
@@ -6776,10 +6662,7 @@ mod tests {
             let conn = Connection::open_in_memory().expect("should open in-memory db");
             conn.execute_batch(SQLITE_SCHEMA)
                 .expect("should create schema");
-            // No upsert_project_row helper exists (this file only writes tasks) - the
-            // "projectId filters to one project" case references projects that are never
-            // inserted, so drop FK enforcement for this test the same way the exhaustive
-            // single-task fixture test above does.
+
             conn.execute_batch("PRAGMA foreign_keys = OFF;")
                 .expect("should disable fixture foreign keys");
 
@@ -6842,8 +6725,6 @@ mod tests {
 
     #[test]
     fn directory_holding_anything_is_left_alone() {
-        // The whole point of remove_dir over remove_dir_all: if another component
-        // has written into the OS config dir, the cleanup must not take it.
         let parent = tempfile::tempdir().expect("should create temp parent");
         let target = parent.path().join("mindwtr-occupied");
         fs::create_dir(&target).expect("should create target dir");
@@ -6909,14 +6790,11 @@ mod tests {
         );
     }
 
-    // #1245 only reshapes the platforms where the OS collapses the two
-    // directories into one; XDG keeps them apart, so nothing here moves and no
-    // migration ever runs.
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_keeps_the_two_xdg_directories_as_they_are() {
         assert_ne!(os_config_dir(), os_data_dir());
-        assert_eq!(get_config_dir_for_startup(), os_config_dir());
+        assert_eq!(get_device_config_dir_for_startup(), os_config_dir());
         assert_eq!(
             crate::storage_layout::standard_layout_root(&os_config_dir(), &os_data_dir()),
             None
@@ -7001,9 +6879,6 @@ mod tests {
             .collect();
         assert!(column_names.iter().any(|name| name == "startDate"));
 
-        // Idempotent: running it again against a table that already has the column is a no-op,
-        // not an error (matches how ensureProjectColumns/ensure_column are called on every
-        // startup, not just once).
         ensure_column(&conn, "projects", "startDate", "TEXT")
             .expect("should be a no-op when startDate already exists");
     }
@@ -7336,8 +7211,7 @@ mod tests {
             )
             .expect("create legacy snake_case index");
         }
-        // The MCP server and the CLI open the same file and apply core's schema, which
-        // creates camelCase indexes this file does not know about.
+
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_tasks_project_deletedAt ON tasks(projectId, deletedAt);
              CREATE INDEX IF NOT EXISTS idx_tasks_completedAt ON tasks(completedAt);",
@@ -7487,8 +7361,6 @@ mod tests {
             "empty payload over live data must be refused"
         );
 
-        // Mass deletions keep tombstoned rows, so a payload that still carries
-        // the (deleted) entity is a legitimate overwrite.
         let tombstoned = serde_json::json!({
             "tasks": [{
                 "id": "task-guard-1",
@@ -7515,7 +7387,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("should open in-memory db");
         conn.execute_batch(SQLITE_SCHEMA)
             .expect("should create schema");
-        // Fresh installs persist settings-only documents before any task exists.
+
         let empty = serde_json::json!({
             "tasks": [],
             "projects": [],
@@ -7539,9 +7411,6 @@ mod tests {
 
     #[test]
     fn sqlite_round_trip_preserves_fractional_sort_orders() {
-        // Sparse reorders and other devices can produce fractional orders; binding
-        // them as i64 used to store NULL and drop the task to the bottom after the
-        // next sync reload (#784).
         let conn = Connection::open_in_memory().expect("should open in-memory db");
         conn.execute_batch(SQLITE_SCHEMA)
             .expect("should create schema");
@@ -7730,7 +7599,7 @@ mod tests {
         );
         assert_eq!(task.get("order"), Some(&Value::Number(11.into())));
         assert_eq!(task.get("orderNum"), Some(&Value::Number(11.into())));
-        // Stored 0 reads back ABSENT: canonical is `true` or nothing.
+
         assert_eq!(task.get("showFutureRecurrence"), None);
         assert_eq!(task.get("isFocusedToday"), Some(&Value::Bool(false)));
         assert_eq!(
@@ -7920,9 +7789,7 @@ mod tests {
             "deletedAt": "2026-06-08T08:00:00.000Z",
             "purgedAt": "2026-06-09T08:00:00.000Z"
         });
-        // Both the task and the project above point at area-1/section-1: with
-        // the tasks/projects/sections FK columns now mirroring core's schema,
-        // those rows must actually exist or the FK-enforced insert fails.
+
         let source = serde_json::json!({
             "tasks": [task.clone()],
             "projects": [project.clone()],
@@ -8569,6 +8436,115 @@ mod tests {
 
         assert_eq!(project["sequentialScope"], "section");
         assert_eq!(project["taskSortBy"], "created-desc");
+    }
+
+    #[test]
+    fn sqlite_open_migrates_version_thirteen_without_flow_mode_columns() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join("version-thirteen-flow.sqlite");
+        let conn = Connection::open(&db_path).expect("open legacy database");
+        let version_thirteen_schema = SQLITE_SCHEMA
+            .replace("  perSectionFlow INTEGER,\n", "")
+            .replace(
+                "  isCollapsed INTEGER,\n  isSequential INTEGER,\n",
+                "  isCollapsed INTEGER,\n",
+            );
+        assert_ne!(version_thirteen_schema, SQLITE_SCHEMA);
+        conn.execute_batch(&version_thirteen_schema)
+            .expect("create version thirteen schema");
+        assert!(!has_column(&conn, "sections", "isSequential").expect("inspect legacy sections"));
+        conn.execute(
+            "INSERT INTO projects (id, title, status, color, createdAt, updatedAt) VALUES ('p', 'Trip', 'active', '#6B7280', '2026-10-01', '2026-10-01')",
+            [],
+        )
+        .expect("seed legacy project");
+        let schema_generation = sqlite_schema_generation(&conn).expect("read legacy generation");
+        conn.execute(
+            "INSERT INTO storage_schema_state (id, storage_version, schema_generation) VALUES (1, 13, ?1)",
+            params![schema_generation],
+        )
+        .expect("record version thirteen schema state");
+        drop(conn);
+
+        let reopened = open_sqlite_path(&db_path).expect("migrate version thirteen database");
+
+        assert!(
+            has_column(&reopened, "projects", "perSectionFlow").expect("inspect project columns")
+        );
+        assert!(has_column(&reopened, "sections", "isSequential").expect("inspect section columns"));
+        let project = &read_sqlite_data(&reopened).unwrap()["projects"][0];
+        assert_eq!(project["title"], "Trip");
+        assert!(
+            project.get("perSectionFlow").is_none(),
+            "a legacy row reads as never set"
+        );
+        let state = stored_sqlite_schema_state(&reopened)
+            .expect("read migrated state")
+            .expect("migrated state row");
+        assert_eq!(state.storage_version, STORAGE_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn sqlite_flow_mode_fields_round_trip_and_keep_never_set_absent() {
+        let mut conn = Connection::open_in_memory().expect("open db");
+        conn.execute_batch(SQLITE_SCHEMA).expect("schema");
+        let at = "2026-10-21T10:00:00.000Z";
+        let mut data = serde_json::json!({"tasks": [], "projects": [
+            {"id": "p", "title": "Camping Trip", "status": "active", "color": "#94a3b8", "order": 0,
+             "tagIds": [], "perSectionFlow": true, "rev": 1, "createdAt": at, "updatedAt": at},
+            {"id": "q", "title": "Plain", "status": "active", "color": "#94a3b8", "order": 1,
+             "tagIds": [], "rev": 1, "createdAt": at, "updatedAt": at}
+        ], "areas": [], "sections": [
+            {"id": "s1", "projectId": "p", "title": "Book campsite", "order": 0, "isSequential": true,
+             "rev": 1, "createdAt": at, "updatedAt": at},
+            {"id": "s2", "projectId": "p", "title": "Prep", "order": 1, "isSequential": false,
+             "rev": 1, "createdAt": at, "updatedAt": at},
+            {"id": "s3", "projectId": "p", "title": "Later", "order": 2,
+             "rev": 1, "createdAt": at, "updatedAt": at}
+        ], "settings": {}});
+        migrate_json_to_sqlite(&mut conn, &data).expect("full save");
+        let stored = read_sqlite_data(&conn).unwrap();
+        assert_eq!(stored["projects"][0]["perSectionFlow"], true);
+        assert!(stored["projects"][1].get("perSectionFlow").is_none());
+        assert_eq!(stored["sections"][0]["isSequential"], true);
+        assert_eq!(stored["sections"][1]["isSequential"], false);
+        assert!(stored["sections"][2].get("isSequential").is_none());
+
+        data["projects"][0]["perSectionFlow"] = Value::Bool(false);
+        data["projects"][0]["rev"] = serde_json::json!(2);
+        replace_project_row(&conn, &data["projects"][0]).expect("scoped project write");
+        assert_eq!(
+            read_sqlite_data(&conn).unwrap()["projects"][0]["perSectionFlow"],
+            false
+        );
+    }
+
+    #[test]
+    fn sqlite_project_color_override_round_trip() {
+        let mut conn = Connection::open_in_memory().expect("open db");
+        conn.execute_batch(SQLITE_SCHEMA).expect("schema");
+        let mut data = serde_json::json!({"tasks": [], "projects": [{
+            "id": "p", "title": "Project", "status": "active", "color": "#94a3b8",
+            "colorOverride": "#94a3b8", "order": 0, "tagIds": [], "rev": 1,
+            "createdAt": "2026-10-20T10:00:00.000Z", "updatedAt": "2026-10-20T10:00:00.000Z"
+        }], "areas": [], "sections": [], "settings": {}});
+        migrate_json_to_sqlite(&mut conn, &data).expect("full save");
+        assert_eq!(
+            read_sqlite_data(&conn).unwrap()["projects"][0]["colorOverride"],
+            "#94a3b8"
+        );
+        data["projects"][0]["colorOverride"] = Value::Null;
+        data["projects"][0]["rev"] = serde_json::json!(2);
+        replace_project_row(&conn, &data["projects"][0]).expect("scoped reset");
+        assert!(read_sqlite_data(&conn).unwrap()["projects"][0]["colorOverride"].is_null());
+        let cell: Option<String> = conn
+            .query_row(
+                "SELECT colorOverride FROM projects WHERE id='p'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cell, None);
     }
 
     #[test]
@@ -9328,9 +9304,6 @@ mod tests {
         assert_eq!(merged["tasks"][0]["rev"], 5);
     }
 
-    // A stale snapshot (built before the caller saw every row) omits rows it
-    // never meant to delete. Mindwtr deletes by tombstone, so omission may drop
-    // only an unchanged, unreferenced tombstone (core sqlite-adapter parity).
     #[test]
     fn omission_removes_only_unchanged_unreferenced_tombstones() {
         let gone = "2026-06-01T00:00:00Z";
@@ -9365,15 +9338,13 @@ mod tests {
             ],
             "settings": {}
         });
-        // The caller observed every row exactly (the CAS matches) except
-        // task-changed, which advanced after it was read.
+
         let mut baseline = serde_json::json!({});
         for key in ENTITY_TABLES {
             baseline[key] = current[key].clone();
         }
         baseline["tasks"][2]["rev"] = serde_json::json!(3);
-        // The target keeps only the deleted child, so its tombstone area has a
-        // remaining reference; every other row is omitted.
+
         let target = serde_json::json!({
             "tasks": [current["tasks"][3].clone()],
             "projects": [], "sections": [], "areas": [], "people": [],
@@ -9440,8 +9411,6 @@ mod tests {
         }
     }
 
-    // Core parity (sqlite-adapter saved_filters): a settings write that omits a
-    // live saved filter keeps it; an omitted tombstone filter is removed.
     #[test]
     fn settings_write_keeps_omitted_live_saved_filters() {
         let live = serde_json::json!({"id": "filter-live", "name": "Live",
@@ -9519,8 +9488,6 @@ mod tests {
         assert_eq!(saved["tasks"].as_array().unwrap().len(), 2);
     }
 
-    // Rust twin of core ENTITY_FOREIGN_KEY_CHILDREN: the omission guard must
-    // know every foreign key, or pruning a parent fires ON DELETE actions.
     #[test]
     fn entity_foreign_key_children_match_the_sqlite_schema() {
         let conn = Connection::open_in_memory().expect("should open in-memory db");
@@ -9611,8 +9578,6 @@ mod tests {
             .iter()
             .all(|task| task["id"] != "stale-json"));
 
-        // Byte formatting is not identity: a semantically equal latest
-        // snapshot must still deduplicate against canonical SQLite.
         fs::write(
             &first_path,
             serde_json::to_vec(&first_snapshot).expect("serialize compact snapshot"),
@@ -11901,11 +11866,6 @@ mod tests {
 
     #[test]
     fn migrate_json_to_sqlite_succeeds_on_a_snapshot_with_a_dangling_project_reference() {
-        // What used to brick first load once the FK columns were added
-        // (#rust-write-parity review): a task referencing a project that no
-        // longer exists must not fail the FK-enforced insert - it lands with
-        // the dangling reference nulled, same as ON DELETE SET NULL would
-        // have produced.
         let mut conn = Connection::open_in_memory().expect("should open in-memory db");
         conn.execute_batch(SQLITE_SCHEMA)
             .expect("should create schema");
@@ -11968,11 +11928,6 @@ mod tests {
         }
     }
 
-    // create_data_snapshot/read_data_snapshot need a real tauri::AppHandle,
-    // which this crate has no test harness to construct — this proves the
-    // lock those commands share (lock_snapshot_operation) actually serializes
-    // two concurrent holders, the mechanism they rely on now that both run
-    // off the main thread.
     #[test]
     fn snapshot_operation_lock_blocks_a_concurrent_holder() {
         let guard = lock_snapshot_operation().expect("first holder acquires");
@@ -12036,10 +11991,6 @@ where
     )
 }
 
-/// Same retry/eviction/backoff behavior as `read_json_with_retries_validated`, with the
-/// bytes-to-JSON-text step supplied by the caller. The sync-encryption seam passes a decoder
-/// that reads raw bytes and decrypts them (#1056); every other caller passes the plain
-/// `read_to_string` above, whose behavior is unchanged.
 pub(crate) fn read_json_with_retries_decoded<Decode, Validate>(
     path: &Path,
     attempts: usize,
@@ -12052,8 +12003,6 @@ where
 {
     let mut last_err: Option<String> = None;
     for attempt in 0..attempts {
-        // Re-check for iCloud eviction on each retry — the file may have been
-        // evicted between attempts if Optimize Storage kicked in.
         if is_icloud_evicted(path) {
             last_err = Some("File is iCloud-evicted (placeholder only)".to_string());
             if attempt + 1 < attempts {
@@ -12073,7 +12022,6 @@ where
             Err(e) => last_err = Some(e.to_string()),
         }
 
-        // Small backoff to allow other writers (Syncthing/iCloud) to finish replacing the file.
         if attempt + 1 < attempts {
             std::thread::sleep(Duration::from_millis(120 + (attempt as u64) * 80));
         }

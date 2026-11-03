@@ -28,10 +28,8 @@ const cloudData: AppData = {
       createdAt: '2026-01-02T00:00:00.000Z',
       updatedAt: '2026-01-02T00:00:00.000Z',
     },
-    // BUG-13: cloud search now runs core's filterTasksBySearch, the same operator language the
-    // local adapter and every app surface use - a free-text term matches assignedTo (among
-    // other fields) even though the title/description don't contain it, unlike the literal
-    // title/description-only substring check this used to run.
+
+
     {
       id: 'task-token-only',
       title: 'Call finance',
@@ -151,8 +149,8 @@ describe('cloud-backed MCP service', () => {
       url: 'https://mindwtr.example.com/v1/data',
       authorization: 'Bearer cloud-token',
     });
-    // 'task-token-only' matches via assignedTo ('Quote Owner'); sorted title asc,
-    // 'Call finance' < 'Call supplier'.
+
+
     expect(tasks.map((item) => item.id)).toEqual(['task-token-only', 'task-next']);
     expect(task.title).toBe('Call supplier');
     expect(projects.map((item) => item.id)).toEqual(['project-1']);

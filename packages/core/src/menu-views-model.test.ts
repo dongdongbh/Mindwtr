@@ -8,7 +8,8 @@ import {
     seedMenuViewsStore,
 } from './menu-views-model.replay';
 import { applyListFilterEdit, EMPTY_LIST_FILTER_STATE, resolveListFilterState } from './list-filter-state';
-import { buildSomedayFilterOptions, buildSomedayViewModel, buildWaitingViewModel, getSomedayGroupSectionId, selectDeferredProjects } from './menu-views-model';
+import { buildSomedayFilterOptions, buildSomedayViewModel, buildStatusListFilterOptions, buildStatusListModel, buildWaitingViewModel, getSomedayGroupSectionId, selectDeferredProjects } from './menu-views-model';
+import { tokenOptions } from './native-host-contract-menu-views';
 import { AREA_FILTER_NONE, projectMatchesAreaFilterSelection, type AreaFilterSelection } from './area-filter';
 import { buildMoreMenuModel, resolveMobileQuickAccessView } from './more-menu-model';
 import { createNativeHostContract } from './native-host-contract';
@@ -80,6 +81,39 @@ describe('list views parity with the frozen React Native fixture', () => {
 
 describe('list view models', () => {
     const t = (key: string) => key;
+
+    it.each(['inbox', 'done'] as const)('filters %s with canonical options for legacy bare tags and contexts without changing stored data', (kind) => {
+        const stamp = '2026-10-20T12:00:00.000Z';
+        const tasks: Task[] = [
+            { id: 'legacy', title: 'Legacy', status: kind, contexts: [' office/desk ', '@office/desk'], tags: [' admin/team ', '#admin/team'], createdAt: stamp, updatedAt: stamp },
+            { id: 'other', title: 'Other', status: kind, contexts: ['@home'], tags: ['#other'], createdAt: stamp, updatedAt: stamp },
+        ];
+        const settings: AppSettings = { taxonomy: {
+            contexts: [{ token: '@office/desk', rev: 1, updatedAt: stamp }],
+            tags: [{ token: '#admin/team', rev: 1, updatedAt: stamp }, { token: '#unused', rev: 1, updatedAt: stamp }],
+        } };
+        const before = JSON.stringify({ tasks, settings });
+        const options = buildStatusListFilterOptions({ kind, tasks, allProjects: [], settings, t });
+        expect(new Set(options.tokens)).toEqual(new Set(['@home', '@office', '@office/desk', '#admin', '#admin/team', '#other']));
+        expect(options.tokens).toHaveLength(6);
+        expect(buildStatusListFilterOptions({ kind, tasks, allProjects: [], settings, t, withTokens: false }).tokens).toEqual([]);
+        for (const token of ['#admin', '@office']) {
+            const picker = tokenOptions(options, EMPTY_LIST_FILTER_STATE).find((item) => item.value === token)!;
+            const included = applyListFilterEdit(EMPTY_LIST_FILTER_STATE, picker.edit);
+            const excluded = applyListFilterEdit(included, picker.edit);
+            for (const [state, expectedIds] of [[included, ['legacy']], [excluded, ['other']]] as const) {
+                const resolved = resolveListFilterState(state, { visibility: options.visibility, t });
+                expect(resolved.activeCount).toBe(1);
+                expect(tokenOptions(options, state).find((item) => item.value === token)?.state)
+                    .toBe(state === included ? 'included' : 'excluded');
+                const model = buildStatusListModel({ kind, tasks, projects: [], areas: [], settings, groupBy: 'none',
+                    criteria: resolved.criteria, searchQuery: resolved.searchQuery, collapsedGroupIds: new Set(), t, now: new Date(stamp) });
+                expect(model.orderedTasks.map((task) => task.id)).toEqual(expectedIds);
+            }
+            expect(applyListFilterEdit(excluded, picker.edit)).toEqual(EMPTY_LIST_FILTER_STATE);
+        }
+        expect(JSON.stringify({ tasks, settings })).toBe(before);
+    });
 
     it('offers a parent token in Someday when only its child is assigned', () => {
         const item = { id: 'tool', status: 'someday', contexts: ['@tools/excavator'], tags: [] } as Task;
@@ -235,7 +269,7 @@ describe('list view models', () => {
     });
 
     it('changes only the edited Someday section: every other entry stays as stored, in stored order', () => {
-        // Entries this build cannot show (a newer app's shapes) are kept, not dropped.
+
         const future = { id: 'f', title: '', order: 0.5, color: 'teal' } as unknown as ViewSectionDefinition;
         const folder = { kind: 'folder', children: ['b'] } as unknown as ViewSectionDefinition;
         const b = { id: 'b', title: 'B', order: 1, icon: 'book' } as ViewSectionDefinition;
@@ -254,7 +288,7 @@ describe('list view models', () => {
         expect(removed).toEqual([future, a, folder, c]);
         removed.forEach((entry, index) => expect(entry).toBe([future, a, folder, c][index]));
 
-        // Moving C up swaps it with B; A, and the entries it cannot show, stay as stored.
+
         const moved = moveSomedaySection(stored, 'c', -1)!;
         expect(moved).toEqual([{ ...b, order: 2 }, future, a, folder, { ...c, order: 1 }]);
         [1, 2, 3].forEach((index) => expect(moved[index]).toBe(stored[index]));
@@ -295,9 +329,7 @@ describe('selectDeferredProjects', () => {
     const homeArea = { id: 'area-home', name: 'Home', order: 0 } as Area;
     const areaById = new Map<string, Area>([[homeArea.id, homeArea]]);
 
-    // The predicate React Native's Someday and Waiting screens each carried before the
-    // extraction. Comparing against it, rather than iterating the helper, catches the
-    // helper quietly accepting a different set.
+
     const legacySelectDeferredProjects = (
         projects: Project[],
         status: 'someday' | 'waiting',

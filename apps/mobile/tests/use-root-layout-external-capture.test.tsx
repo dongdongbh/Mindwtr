@@ -65,6 +65,7 @@ function TestHarness({
   hasShareIntent = false,
   incomingUrl,
   incomingUrlKey = incomingUrl ? 1 : 0,
+  locked = false,
   providerReady = true,
   resetShareIntent = vi.fn(),
   router,
@@ -81,6 +82,7 @@ function TestHarness({
   hasShareIntent?: boolean;
   incomingUrl: string | null;
   incomingUrlKey?: number;
+  locked?: boolean;
   providerReady?: boolean;
   resetShareIntent?: () => void;
   router: RouterMock;
@@ -98,6 +100,7 @@ function TestHarness({
     hasShareIntent,
     incomingUrl,
     incomingUrlKey,
+    locked,
     providerReady,
     resolveText: (_key: string, fallback: string) => fallback,
     resetShareIntent,
@@ -169,7 +172,7 @@ describe('useRootLayoutExternalCapture', () => {
       });
       expect(logError).not.toHaveBeenCalled();
       expect(JSON.stringify(vi.mocked(logWarn).mock.calls)).not.toContain('private-');
-      // The failed delivery remains retryable once navigation is available.
+
       router.replace.mockReset();
       act(() => { tree.update(<TestHarness incomingUrl={incomingUrl} router={router} showToast={showToast} />); });
       expect(router.replace).toHaveBeenCalledTimes(1);
@@ -194,7 +197,7 @@ describe('useRootLayoutExternalCapture', () => {
         project: 'Home',
       },
     });
-    // Closing confirmation (Save with Add another off, or Cancel) goes back.
+
     stack.pop();
     act(() => {
       tree.update(<TestHarness incomingUrl={url} router={router} showToast={showToast} />);
@@ -240,7 +243,7 @@ describe('useRootLayoutExternalCapture', () => {
     let currentRoute: unknown = '/focus';
     const routeHandoff = (cold: boolean) => {
       const route = redirectSystemPath({ path: incomingUrl, initial: cold });
-      // Matches Expo Router's subscription: an empty result skips navigation.
+
       if (route) currentRoute = route;
     };
     routeHandoff(initial);
@@ -270,10 +273,10 @@ describe('useRootLayoutExternalCapture', () => {
     act(() => { tree.update(render(false, true)); });
     expect(router.replace).toHaveBeenCalledOnce();
 
-    // A delayed Router callback must not overwrite the populated modal.
+
     routeHandoff(false);
     expect(currentRoute).toEqual(captureRoute);
-    // Sharing the same URL again is a new payload, not a suppressed duplicate.
+
     act(() => { tree.update(render(true, true, 2)); });
     act(() => { tree.update(render(false, true, 2)); });
     expect(router.replace).toHaveBeenCalledTimes(2);
@@ -514,8 +517,7 @@ describe('useRootLayoutExternalCapture', () => {
     expect(showToast).toHaveBeenCalledOnce();
     expect(JSON.stringify(nativeErrors)).not.toContain('private.example');
 
-    // Commit the cleared error separately so React does not batch it away.
-    // A repeated error without another URL delivery must still be observable.
+
     act(() => {
       tree.update(
         <TestHarness
@@ -760,7 +762,7 @@ describe('useRootLayoutExternalCapture', () => {
       );
     });
 
-    // The blocklist rejects the file before any copy happens.
+
     expect(persistAttachmentLocallyDetailed).not.toHaveBeenCalled();
     expect(showToast).toHaveBeenCalledTimes(1);
     const params = router.replace.mock.calls[0][0].params;
@@ -792,14 +794,13 @@ describe('useRootLayoutExternalCapture', () => {
       );
     });
 
-    // Let validation finish so the copy is genuinely in flight.
+
     await act(async () => {
       await Promise.resolve();
     });
     expect(persistAttachmentLocallyDetailed).toHaveBeenCalledTimes(1);
 
-    // A re-render with a new showToast identity while the copy is pending
-    // re-runs the effect; the in-flight guard must not start a second copy.
+
     act(() => {
       tree.update(
         <TestHarness
@@ -849,8 +850,7 @@ describe('useRootLayoutExternalCapture', () => {
     });
   });
 
-  // The capture sheet and entity links read tasks and projects from the store,
-  // and the startup snapshot can lag SQLite. The link waits for canonical data.
+
   it('holds a capture link until canonical data is ready, then opens the sheet once', () => {
     let tree!: ReturnType<typeof create>;
     const url = 'mindwtr:///capture?title=Call%20dentist';
@@ -875,9 +875,8 @@ describe('useRootLayoutExternalCapture', () => {
   });
 
   it('opens the capture sheet again when the same shortcut link is delivered a second time', () => {
-    // An Action Button shortcut that opens a fixed mindwtr://capture link
-    // worked once per app session: the second delivery carried the same
-    // string and was treated as already handled (in-app report, iOS 26).
+
+
     let tree!: ReturnType<typeof create>;
     const url = 'mindwtr:///capture?title=Call%20dentist';
 
@@ -1003,7 +1002,57 @@ describe('useRootLayoutExternalCapture', () => {
     });
   });
 
-  // A cold widget tap used to sit on the Inbox until canonical data loaded (#1310).
+
+  it('holds a task link while the app is locked and opens it once after the unlock (#1475)', () => {
+    storeTasksById.set('task-1', { id: 'task-1', title: 'Buy milk' });
+    const url = 'mindwtr://open?task=task-1';
+    let tree!: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<TestHarness incomingUrl={url} locked router={router} showToast={showToast} />);
+    });
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} locked router={router} showToast={showToast} />);
+    });
+
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(setHighlightTask).not.toHaveBeenCalled();
+    const held = vi.mocked(logInfo).mock.calls.filter(([message]) => message === 'Incoming link held until unlock');
+    expect(held).toEqual([['Incoming link held until unlock', {
+      scope: 'routing',
+      extra: { releaseCheck: 'v1.3.8/app-lock-link-hold', kind: 'task' },
+      force: true,
+    }]]);
+
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} router={router} showToast={showToast} />);
+    });
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} router={router} showToast={showToast} />);
+    });
+
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith({
+      pathname: '/focus',
+      params: expect.objectContaining({ taskId: 'task-1', taskTab: 'view' }),
+    });
+  });
+
+  it('holds a share while the app is locked (#1475)', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TestHarness hasShareIntent incomingUrl={null} locked router={router} shareText="Shared note" showToast={showToast} />);
+    });
+    expect(router.replace).not.toHaveBeenCalled();
+
+    act(() => {
+      tree.update(<TestHarness hasShareIntent incomingUrl={null} router={router} shareText="Shared note" showToast={showToast} />);
+    });
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith(expect.objectContaining({ pathname: '/capture-modal' }));
+  });
+
+
   it('opens a task link from the startup snapshot before canonical data is ready', () => {
     storeTasksById.set('task-1', { id: 'task-1', title: 'Buy milk' });
 

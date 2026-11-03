@@ -1,12 +1,6 @@
-/**
- * React Native's Contexts screen, replayed against the frozen parity fixture that
- * core's contexts-view-model and the native host contract are tested against.
- *
- * MINDWTR_CAPTURE_LIST_VIEWS=1 rewrites the fixture's `contexts` part; its
- * `provenance` names the commit the observations were captured at. Each scenario renders the real screen
- * with the real core store, presses its chips, rows and bulk buttons, and records
- * what a user sees and what the store is asked to write.
- */
+
+
+
 import React from 'react';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -43,6 +37,11 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
     removeItem: async (key: string) => { harness.storage.delete(key); },
   },
 }));
+vi.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
+vi.mock('@/lib/use-android-keyboard-inset', () => ({ useKeyboardInset: () => 0 }));
+
 vi.mock('expo-router', () => ({ useLocalSearchParams: () => harness.route }));
 vi.mock('../../contexts/language-context', () => ({
   useLanguage: () => ({ t: (key: string) => harness.strings[key] ?? key, language: 'en' }),
@@ -60,6 +59,16 @@ vi.mock('@/hooks/use-theme-colors', () => {
 });
 vi.mock('@/lib/task-meta-navigation', () => ({ openContextsScreen: vi.fn(), openProjectScreen: vi.fn() }));
 vi.mock('@/lib/app-log', () => ({ logError: vi.fn(), logInfo: vi.fn(), logWarn: vi.fn() }));
+
+vi.mock('../task-filter-sheet', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../task-filter-sheet')>();
+  return {
+    ...actual,
+    TaskFilterSheet: (props: React.ComponentProps<typeof actual.TaskFilterSheet>) => props.visible
+      ? React.createElement(actual.TaskFilterSheet, props)
+      : null,
+  };
+});
 vi.mock('../task-edit-modal', () => ({ TaskEditModal: (props: any) => React.createElement('TaskEditModal', props) }));
 vi.mock('../token-picker-modal', () => ({ TokenPickerModal: (props: any) => React.createElement('TokenPickerModal', props) }));
 vi.mock('../swipeable-task-item', () => ({ SwipeableTaskItem: (props: any) => React.createElement('SwipeableTaskItem', props) }));
@@ -136,6 +145,7 @@ const settingsVariants: Record<string, AppSettings> = {
 type Action =
   | ['search', string]
   | ['chip', string]
+  | ['chipTap', string]
   | ['matchMode', 'all' | 'any']
   | ['row', string, 'edit' | 'remove' | 'toggleSelect']
   | ['row', string, 'changeStatus', string]
@@ -173,6 +183,24 @@ export const scenarios: Scenario[] = [
       ['chip', 'No context'],
       ['chip', '#focus'],
       ['chip', 'All Contexts'],
+    ],
+  },
+  {
+    name: 'a tap switches to one token, long-press combines',
+    settings: 'base',
+    actions: [
+      ['chipTap', '@phone'],
+      ['chipTap', '#work'],
+      ['chip', '@phone'],
+      ['matchMode', 'any'],
+      ['chipTap', '@phone'],
+      ['chipTap', '@phone'],
+      ['chipTap', 'No context'],
+      ['chipTap', '@computer/deep'],
+      ['chip', '@computer/deep'],
+      ['chipTap', 'No context'],
+      ['chip', '#home'],
+      ['chipTap', 'All Contexts'],
     ],
   },
   {
@@ -314,7 +342,7 @@ async function seedStore(settings: AppSettings, tasks: Task[]) {
   } as never);
   await useTaskStore.getState().fetchData({ throwOnError: true });
   await flushPendingSave();
-  // Only the screen's own calls: batchMoveTasks calls batchUpdateTasks inside the store.
+
   let moving = 0;
   useTaskStore.setState(Object.fromEntries(RECORDED.map((name) => [name, async (...args: unknown[]) => {
     if (!(name === 'batchUpdateTasks' && moving > 0)) writeLog.push([name, ...encodeArgs(args)]);
@@ -337,6 +365,8 @@ const textsIn = (node: ReactTestInstance): string[] => node.findAll((child) => S
   .map((child) => textOf(child).join(''));
 const hostsOf = (root: ReactTestInstance, type: string) => root.findAll((node) => String(node.type) === type);
 
+const buttonName = (node: ReactTestInstance): string | undefined => textsIn(node)[0] ?? node.props.accessibilityLabel;
+
 function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number; writes: number }) {
   const chipRow = hostsOf(root, 'ScrollView').find((node) => node.props.horizontal && node.props.style !== undefined);
   const chips = chipRow
@@ -351,9 +381,11 @@ function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number
   const flatList = hostsOf(root, 'FlatList')[0];
   const emptyIcon = flatList.findAll((node) => String(node.type).startsWith('Icon:'))[0];
   const empty = rows.length === 0 && emptyIcon ? [String(emptyIcon.type), ...textsIn(flatList)] : null;
-  const bulkButtons = hostsOf(root, 'TouchableOpacity');
+
+  const bulkButtons = hostsOf(root, 'TouchableOpacity')
+    .filter((node) => !node.findAll((child) => ['Icon:ArrowUpDown', 'Icon:SlidersHorizontal'].includes(String(child.type))).length);
   const bulk = bulkButtons.length > 0
-    ? bulkButtons.map((node) => [textsIn(node)[0], node.props.disabled === true])
+    ? bulkButtons.map((node) => [buttonName(node), node.props.disabled === true])
     : null;
   const pickerNode = hostsOf(root, 'TokenPickerModal')[0];
   const picker = pickerNode?.props.visible
@@ -394,12 +426,13 @@ async function perform(root: ReactTestInstance, action: Action) {
     await act(async () => { hostsOf(root, 'TextInput')[0].props.onChangeText(action[1]); });
     return;
   }
-  if (kind === 'chip') {
+  if (kind === 'chip' || kind === 'chipTap') {
     const chip = root.findAll((node) => String(node.type) === 'Pressable' && (
       node.props.accessibilityLabel === action[1] || String(node.props.accessibilityLabel).startsWith(`${action[1]} (`)
     ))[0];
     if (!chip) throw new Error(`No chip ${action[1]}`);
-    await act(async () => { chip.props.onPress(); });
+
+    await act(async () => { ((kind === 'chip' && chip.props.onLongPress) || chip.props.onPress)(); });
     return;
   }
   if (kind === 'matchMode') {
@@ -430,7 +463,7 @@ async function perform(root: ReactTestInstance, action: Action) {
     return;
   }
   if (kind === 'bulk') {
-    const button = hostsOf(root, 'TouchableOpacity').filter((node) => textsIn(node)[0] === action[1])[action[2] ?? 0];
+    const button = hostsOf(root, 'TouchableOpacity').filter((node) => buttonName(node) === action[1])[action[2] ?? 0];
     if (!button) throw new Error(`No bulk button ${action[1]}`);
     await act(async () => { await button.props.onPress(); });
     return;
@@ -469,7 +502,7 @@ async function runScenario(scenario: Scenario) {
   const observations = [observe(renderer.root, seen)];
   for (const action of scenario.actions) {
     await perform(renderer.root, action);
-    // Store writes settle through promises the press does not await.
+
     await act(async () => { await flushPendingSave(); });
     observations.push(observe(renderer.root, seen));
   }

@@ -19,7 +19,7 @@ import { tFallback } from './i18n';
 import { buildRRuleString, editRRuleString, getProjectedRecurringTaskCalendarDate, isMonthlyWeekdaySet, MONTHLY_WEEKDAYS, parseRRuleString, RECURRENCE_INTERVAL_MAX, type RRuleEditOverrides } from './recurrence';
 import { getLocalizedWeekdayButtons, getLocalizedWeekdayLabels, WEEKDAY_ORDER } from './recurrence-constants';
 import { resolveFeatureFlags } from './resolve-feature-flags';
-import { REPEAT_REMINDER_INTERVAL_OPTIONS } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, REPEAT_REMINDER_INTERVAL_OPTIONS } from './schedule-utils';
 import type { TaskDraft } from './task-draft';
 import { computeRelativeStartTime } from './task-relative-start';
 import { getTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
@@ -35,20 +35,12 @@ import type {
     TimeEstimate,
 } from './types';
 
-/**
- * The React Native editor's date, recurrence, reminder and estimate controls, as
- * pure functions: the labels they show and the draft values their taps write. The
- * mobile editor and native hosts both call these, so a tap writes the same draft.
- */
 
 type Translate = (key: string) => string;
 
 export type TaskEditorDateField = 'startTime' | 'dueDate' | 'reviewAt';
 
-// ---------------------------------------------------------------------------
-// Dates
 
-/** A date field's text: the date, with the time when it has one. A due date parses as end of day. */
 export function formatTaskEditorDate(
     value: string | undefined,
     formatDate: DateFormatter,
@@ -61,17 +53,13 @@ export function formatTaskEditorDate(
     return formatDate(parsed, hasTimeComponent(value) ? 'P p' : 'P', notSet) || notSet;
 }
 
-/** The value after "Date only": the local day, without the time. */
+
 export function getTaskDraftDateOnly(value: string | undefined, formatDate: DateFormatter): string {
     const parsed = safeParseDate(value);
     return parsed ? formatDate(parsed, 'yyyy-MM-dd') : '';
 }
 
-/**
- * The value after picking a day. An existing time is kept; otherwise the default
- * schedule time is added; otherwise the value stays date-only. Start and due keep
- * their time as an ISO instant and review as local wall time, as the editor writes them.
- */
+
 export function setTaskDraftDate(
     field: TaskEditorDateField,
     value: string | undefined,
@@ -90,11 +78,7 @@ export function setTaskDraftDate(
     return options.defaultScheduleTime ? `${dateOnly}T${options.defaultScheduleTime}` : dateOnly;
 }
 
-/**
- * The value after picking a time: the hour and minute set on `base`'s local day, else
- * the value's day, else today; an ISO instant. A wall time the day skips at a DST change
- * moves forward, and a repeated one takes its first occurrence, as Date#setHours does.
- */
+
 export function setTaskDraftTime(
     value: string | undefined,
     time: { hours: number; minutes: number },
@@ -106,11 +90,18 @@ export function setTaskDraftTime(
     return combined.toISOString();
 }
 
-/**
- * The draft fields a date control writes, in order. A new start ends the relative
- * start link even when it equals the computed start; a new due moves a relative
- * start through setTaskDraftField's cascade.
- */
+
+export function setTaskDraftReviewTime(
+    value: string | undefined,
+    time: { hours: number; minutes: number },
+    formatDate: DateFormatter,
+    now: Date = new Date(),
+): string {
+    const picked = new Date(setTaskDraftTime(value, time, null, now));
+    return `${formatDate(picked, 'yyyy-MM-dd')}T${formatDate(picked, 'HH:mm')}`;
+}
+
+
 export function getTaskDraftDateEdit(field: TaskEditorDateField, value: string): Partial<TaskDraft> {
     if (field === 'startTime') return { startTime: value, relativeStartOffset: undefined };
     return field === 'dueDate' ? { dueDate: value } : { reviewAt: value };
@@ -134,11 +125,11 @@ export type TaskEditorQuickDate = {
     preset: QuickDatePreset;
     label: string;
     selected: boolean;
-    /** The field's value after tapping the chip: the selected chip and No date clear it. */
+
     value: string;
 };
 
-/** A date field's quick chips. */
+
 export function getTaskEditorQuickDates(
     field: TaskEditorDateField,
     value: string | undefined,
@@ -158,16 +149,16 @@ export function getTaskEditorQuickDates(
 }
 
 export type TaskEditorDatePart = {
-    /** The draft value. */
+
     value: string;
-    /** The field's text, in the user's date and time settings. */
+
     label: string;
     hasTime: boolean;
-    /** The value after "Date only", or '' when unset. */
+
     dateOnly: string;
-    /** The time as HH:mm, or '' when the value is date-only or unset. */
+
     time: string;
-    /** Where the date and time pickers start: the value, else now. */
+
     picker: { date: string; time: string };
     quickDates: TaskEditorQuickDate[];
 };
@@ -192,28 +183,23 @@ export function getTaskEditorDatePart(
     };
 }
 
-// ---------------------------------------------------------------------------
-// Relative start
 
 const isSubDayUnit = (unit: RelativeStartOffsetUnit) => unit === 'minute' || unit === 'hour';
 
-/** Minutes and hours need a due time; before a date-only due they read as days. */
+
 export const getTaskEditorRelativeStartUnit = (
     dueDate: string | undefined,
     unit: RelativeStartOffsetUnit,
 ): RelativeStartOffsetUnit => (dueDate && !hasTimeComponent(dueDate) && isSubDayUnit(unit) ? 'day' : unit);
 
-/**
- * "Start N units before due": the draft fields to write, in order, or null when the
- * input changes nothing. A start that cannot be computed ends the link.
- */
+
 export function getTaskDraftRelativeStartEdit(
     dueDate: string,
     amount: number,
     unit: RelativeStartOffsetUnit,
 ): Partial<TaskDraft> | null {
     if (!dueDate || !Number.isFinite(amount)) return null;
-    // 0 is valid: start on the due date itself.
+
     const magnitude = Math.max(0, Math.floor(amount));
     const offset = { amount: magnitude === 0 ? 0 : -magnitude, unit: getTaskEditorRelativeStartUnit(dueDate, unit) };
     const startTime = computeRelativeStartTime(dueDate, offset);
@@ -221,15 +207,15 @@ export function getTaskDraftRelativeStartEdit(
 }
 
 export type TaskEditorRelativeStart = {
-    /** Relative mode is on. */
+
     active: boolean;
-    /** The amount shown and applied when switching to relative mode. */
+
     amount: number;
     unit: RelativeStartOffsetUnit;
     units: Array<{ unit: RelativeStartOffsetUnit; label: string }>;
 };
 
-/** The start field's absolute/relative control; null without a due date. */
+
 export function getTaskEditorRelativeStart(
     draft: Pick<TaskDraft, 'dueDate' | 'relativeStartOffset'>,
     t: Translate,
@@ -252,13 +238,25 @@ export function getTaskEditorRelativeStart(
     };
 }
 
-// ---------------------------------------------------------------------------
-// Reminders
+
+export const DUE_REMINDER_LEAD_OPTIONS = [5, 15, 30, 60, 1440, 2880, 10080] as const;
 
 export type TaskEditorReminders = {
-    /** "Skip reminders" shows when the start or due has a time. */
+    startAdvance: {
+        enabled: boolean;
+        label: string;
+        valueLabel: string;
+        hint: string | null;
+        options: Array<{ value: number; label: string; selected: boolean }>;
+    } | null;
+    showAdvance: boolean;
+    advanceLabel: string;
+    advanceValueLabel: string;
+    advanceHint: string | null;
+    advanceOptions: Array<{ value: number; label: string; selected: boolean }>;
+
     showSkip: boolean;
-    /** "Repeat reminder" shows under a timed due, unless reminders are skipped. */
+
     showRepeat: boolean;
     policyLabel: string;
     policyValueLabel: string;
@@ -266,14 +264,14 @@ export type TaskEditorReminders = {
     hint: string;
     disabledHint: string | null;
     repeatLabel: string;
-    /** The current interval, as the collapsed control shows it. */
+
     repeatValueLabel: string;
-    /** Off, then each interval; `value` is the draft value (null for Off). */
+
     repeatOptions: Array<{ value: number | null; label: string; selected: boolean }>;
 };
 
 export function getTaskEditorReminders(
-    draft: Pick<TaskDraft, 'startTime' | 'dueDate' | 'repeatReminderMinutes' | 'suppressMindwtrReminders'> & Partial<Pick<TaskDraft, 'reminderPolicy'>>,
+    draft: Pick<TaskDraft, 'startTime' | 'dueDate' | 'repeatReminderMinutes' | 'suppressMindwtrReminders'> & Partial<Pick<TaskDraft, 'reminderPolicy' | 'dueReminderLeadMinutes' | 'startReminderLeadMinutes'>>,
     t: Translate,
     settings: Pick<NotificationSettings, 'taskReminderDefault' | 'notificationsEnabled'> = {},
 ): TaskEditorReminders {
@@ -290,7 +288,35 @@ export function getTaskEditorReminders(
         { value: 'send', label: send, selected: policy === 'send' },
         { value: 'skip', label: skip, selected: policy === 'skip' },
     ];
+    const advanceCurrent = normalizeDueReminderLeadMinutes(draft.dueReminderLeadMinutes) ?? 0;
+    const advanceValues: number[] = [0, ...DUE_REMINDER_LEAD_OPTIONS];
+    if (!advanceValues.includes(advanceCurrent)) advanceValues.push(advanceCurrent);
+    const advanceLabel = (minutes: number): string => {
+        if (minutes === 0) return off;
+        if (minutes === 10080) return tFallback(t, 'taskEdit.advanceReminderWeek', '1 week before');
+        if (minutes === 1440) return tFallback(t, 'taskEdit.advanceReminderDay', '1 day before');
+        if (minutes === 2880) return tFallback(t, 'taskEdit.advanceReminderTwoDays', '2 days before');
+        if (minutes === 60) return tFallback(t, 'taskEdit.advanceReminderHour', '1 hour before');
+        return tFallback(t, 'taskEdit.advanceReminderMinutes', '{count} min before').replace('{count}', String(minutes));
+    };
+    const showAdvance = hasTimeComponent(draft.dueDate) && !!safeParseDate(draft.dueDate) && shouldSendTaskReminders(draft, settings);
+    const startCurrent = normalizeStartReminderLeadMinutes(draft.startReminderLeadMinutes) ?? 0;
     return {
+        startAdvance: hasTimeComponent(draft.startTime) && !!safeParseDate(draft.startTime) ? {
+            enabled: shouldSendTaskReminders(draft, settings),
+            label: tFallback(t, 'taskEdit.startAdvanceReminderLabel', 'Before start'),
+            valueLabel: advanceLabel(startCurrent),
+            hint: shouldSendTaskReminders(draft, settings) ? null
+                : tFallback(t, 'taskEdit.advanceReminderSkipped', 'Enable start/due reminders for this task to use an advance reminder.'),
+            options: [0, 5, 15, 30, 60].map((value) => ({ value, label: advanceLabel(value), selected: value === startCurrent })),
+        } : null,
+        showAdvance,
+        advanceLabel: tFallback(t, 'taskEdit.advanceReminderLabel', 'Advance reminder'),
+        advanceValueLabel: advanceLabel(advanceCurrent),
+        advanceHint: !hasTimeComponent(draft.dueDate) || !safeParseDate(draft.dueDate)
+            ? tFallback(t, 'taskEdit.advanceReminderNeedsDueTime', 'Add a due date and time to set an advance reminder.')
+            : !showAdvance ? tFallback(t, 'taskEdit.advanceReminderSkipped', 'Enable start/due reminders for this task to use an advance reminder.') : null,
+        advanceOptions: advanceValues.map((value) => ({ value, label: advanceLabel(value), selected: value === advanceCurrent })),
         showSkip: hasTimeComponent(draft.startTime) || hasTimeComponent(draft.dueDate),
         showRepeat: hasTimeComponent(draft.dueDate) && shouldSendTaskReminders(draft, settings),
         policyLabel: tFallback(t, 'taskEdit.reminders', 'Start/due reminders'),
@@ -309,10 +335,7 @@ export function getTaskEditorReminders(
     };
 }
 
-// ---------------------------------------------------------------------------
-// Time estimate and time spent
 
-/** The Custom… estimate for typed text ("2h30", "45"), or null when it does not parse. */
 export function parseTaskEditorTimeEstimate(text: string): TimeEstimate | null {
     const minutes = parseTimeEstimateInput(text);
     return minutes === null ? null : createCustomTimeEstimate(minutes);
@@ -321,9 +344,9 @@ export function parseTaskEditorTimeEstimate(text: string): TimeEstimate | null {
 export type TaskEditorTimeEstimate = {
     customLabel: string;
     customSelected: boolean;
-    /** The draft value after tapping Custom…: the current estimate as exact minutes. */
+
     customValue: TimeEstimate;
-    /** The custom input's text for the current value; '' when the estimate is not custom. */
+
     customText: string;
 };
 
@@ -333,28 +356,26 @@ export function getTaskEditorTimeEstimate(current: TimeEstimate | '', t: Transla
         customLabel: tFallback(t, 'recurrence.custom', 'Custom…'),
         customSelected,
         customValue: createCustomTimeEstimate(timeEstimateToMinutes(current || undefined)),
-        // The editor shows the input text without the language, as it always has.
+
         customText: customSelected && current ? formatTimeEstimateLabel(current) : '',
     };
 }
 
-/** Time spent shows when Pomodoro is on and linked to tasks. */
+
 export const isTaskEditorTimeSpentEnabled = (settings: AppSettings): boolean => (
     resolveFeatureFlags(settings).pomodoro && settings.gtd?.pomodoro?.linkTask === true
 );
 
-/** Time spent for typed text: its digits as minutes, or unset when there are none. */
+
 export const parseTaskEditorTimeSpent = (text: string): number | undefined => {
     const digits = text.replace(/[^0-9]/g, '');
     return digits ? Number(digits) : undefined;
 };
 
-// ---------------------------------------------------------------------------
-// Recurrence
 
 export type TaskDraftRecurrence = Pick<TaskDraft, 'recurrence' | 'recurrenceStrategy' | 'recurrenceRRule'>;
 
-/** RN's draft-backed Calendar hint, shown even when the preview toggle is off. */
+
 export function getTaskEditorRecurrenceCalendarPreviewHint(input: {
     draft: TaskDraft;
     task: Task | null;
@@ -408,15 +429,15 @@ export type TaskEditorMonthlyCustom = {
 
 export type TaskDraftRecurrenceEdit =
     | { kind: 'rule'; rule: RecurrenceRule | '' }
-    /** "Repeat every", already parsed (parseRecurrenceIntervalInput). */
+
     | { kind: 'interval'; interval: number }
-    /** Weekly days, the full new list. */
+
     | { kind: 'weekdays'; weekdays: RecurrenceWeekday[] }
     | { kind: 'monthlyOnDay' }
     | { kind: 'ends'; ends: 'never' | 'until' | 'count' }
-    /** The "after N occurrences" input as typed. */
+
     | { kind: 'count'; text: string }
-    /** The end date picked, yyyy-MM-dd. */
+
     | { kind: 'until'; date: string }
     | { kind: 'strategy' }
     | { kind: 'monthlyCustom'; custom: TaskEditorMonthlyCustom };
@@ -425,7 +446,7 @@ const normalizeRecurrenceInterval = (value: number): number => (
     Number.isFinite(value) && value > 0 ? Math.min(Math.round(value), RECURRENCE_INTERVAL_MAX) : 1
 );
 
-/** "Repeat every" text as a whole number of units, or null when it is not one. */
+
 export function parseRecurrenceIntervalInput(text: string): number | null {
     const trimmed = text.trim();
     if (!/^\d+$/.test(trimmed)) return null;
@@ -433,17 +454,17 @@ export function parseRecurrenceIntervalInput(text: string): number | null {
     return Number.isSafeInteger(parsed) && parsed > 0 ? normalizeRecurrenceInterval(parsed) : null;
 }
 
-/** The interval an interval input shows. */
+
 export const getRecurrenceIntervalDisplay = normalizeRecurrenceInterval;
 
-/** Weekly days on a draft rule, in rule order. */
+
 export function getTaskDraftRecurrenceWeekdays(recurrence: RecurrenceRule | '', rrule: string): RecurrenceWeekday[] {
     if (recurrence !== 'weekly') return [];
     return (parseRRuleString(rrule).byDay ?? [])
         .filter((day): day is RecurrenceWeekday => WEEKDAY_ORDER.includes(day as RecurrenceWeekday));
 }
 
-/** Where "Ends on date" starts: the rule's end, else the due or start day, else today. */
+
 export function getTaskEditorRecurrenceDefaultUntil(
     draft: Pick<TaskDraft, 'recurrenceRRule' | 'dueDate' | 'startTime'>,
     task: Pick<Task, 'dueDate' | 'startTime'> | null | undefined,
@@ -454,7 +475,7 @@ export function getTaskEditorRecurrenceDefaultUntil(
         || formatDate(safeParseDate(draft.dueDate || draft.startTime || task?.dueDate || task?.startTime) ?? now, 'yyyy-MM-dd');
 }
 
-/** The custom monthly dialog's starting state for a rule and the monthly anchor day. */
+
 export function getTaskEditorMonthlyCustom(rrule: string, anchorDate: Date): TaskEditorMonthlyCustom {
     const parsed = parseRRuleString(rrule);
     const state: TaskEditorMonthlyCustom = {
@@ -484,13 +505,13 @@ export function getTaskEditorMonthlyCustom(rrule: string, anchorDate: Date): Tas
     return state;
 }
 
-/** The monthly rule the custom dialog saves; the rule's end carries over. */
+
 export function buildTaskEditorMonthlyCustomRRule(rrule: string, custom: TaskEditorMonthlyCustom): string {
     const parsed = parseRRuleString(rrule);
     const intervalValue = Number(custom.interval);
     const interval = Number.isFinite(intervalValue) && intervalValue > 0 ? intervalValue : 1;
     const ends = { count: parsed.count, until: parsed.until };
-    // buildRRuleString clamps, dedupes and sorts the day list.
+
     return custom.mode === 'nth'
         ? buildRRuleString('monthly', custom.weekday === 'WEEKDAY'
             ? MONTHLY_WEEKDAYS
@@ -504,11 +525,7 @@ export function buildTaskEditorMonthlyCustomRRule(rrule: string, custom: TaskEdi
         });
 }
 
-/**
- * A recurrence control's edit, as the editor applies it. Rule and ends edits use
- * editRRuleString to preserve fields they do not override, including opaque
- * tokens. `weekdays` is the weekly day selection shown.
- */
+
 export function editTaskDraftRecurrence(
     current: TaskDraftRecurrence,
     edit: TaskDraftRecurrenceEdit,
@@ -583,17 +600,17 @@ export function editTaskDraftRecurrence(
 }
 
 export type TaskEditorRecurrenceDetails = {
-    /** "Repeat every" for the draft's rule. */
+
     interval: number;
     ends: 'never' | 'until' | 'count';
-    /** "After N occurrences", as the input shows it. */
+
     count: number;
-    /** The end date, or where "Ends on date" starts. */
+
     until: string;
     untilLabel: string;
 };
 
-/** Time-independent recurrence input values shared by display and Save validation. */
+
 export function getTaskEditorRecurrenceInputValues(
     draft: Pick<TaskDraft, 'recurrence' | 'recurrenceRRule'>,
     dailyInterval: number,
@@ -630,7 +647,7 @@ export function getTaskEditorRecurrenceDetails(input: {
     };
 }
 
-/** Weekly day buttons in week order: `label` is narrow, `longLabel` names the day. */
+
 export function getTaskEditorWeekdayButtons(
     language: string | undefined,
     selected: readonly RecurrenceWeekday[],

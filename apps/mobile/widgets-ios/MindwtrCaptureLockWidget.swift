@@ -5,10 +5,7 @@ import WidgetKit
 private let mindwtrCaptureLockWidgetKind = "MindwtrCaptureLockWidget"
 private let mindwtrCaptureControlKind = "MindwtrCaptureControl"
 
-// Lock screen (accessory family) widget that opens quick capture (#1066).
-// Reuses MindwtrTasksWidgetProvider like the Focus lock widget: the payload
-// carries the localized capture label and the quick-capture URI, so the
-// launcher stays a dumb button whose strings and route live in JS.
+
 struct MindwtrCaptureLockWidget: Widget {
     let kind: String = mindwtrCaptureLockWidgetKind
 
@@ -41,8 +38,7 @@ private struct MindwtrCaptureLockWidgetEntryView: View {
     }
 }
 
-// Lock screen widgets render in the system's monochrome/vibrant style, so the
-// theme palette deliberately does not apply here.
+
 @available(iOSApplicationExtension 16.0, *)
 private struct MindwtrCaptureLockView: View {
     let entry: MindwtrTasksWidgetEntry
@@ -84,9 +80,7 @@ private struct MindwtrCaptureLockView: View {
     }
 }
 
-// Control Center / Lock Screen bottom-slot control (iOS 18+): the same
-// quick-capture launch as the accessory widget, placeable where the
-// flashlight and camera controls live (#1066).
+
 @available(iOSApplicationExtension 18.0, iOS 18.0, *)
 struct MindwtrCaptureControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
@@ -100,12 +94,7 @@ struct MindwtrCaptureControl: ControlWidget {
     }
 }
 
-// The control must be able to name its action in this target, so the type lives here. It is
-// only half of the pair: the app target carries a type with the SAME name
-// (ios-app-intents/MindwtrSiriCaptureIntents.swift). With both present, iOS brings the app to
-// the front and runs the app's copy, which opens quick capture. This copy used to return an
-// `OpenURLIntent` for `mindwtr:///capture-quick`, which does nothing for a custom URL scheme,
-// and with no app-side copy the tap did nothing at all. Keep name, title and modes identical.
+
 @available(iOSApplicationExtension 18.0, iOS 18.0, *)
 struct MindwtrOpenQuickCaptureIntent: AppIntent {
     static var title: LocalizedStringResource { "Add Task" }

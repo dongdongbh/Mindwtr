@@ -13,7 +13,7 @@ export type WatchFocusItem = {
   checklist?: ChecklistItem[];
   detailsUnavailable?: boolean;
 };
-// Leave space for property-list overhead; native validation checks the actual encoding too.
+
 export const WATCH_DETAILS_BUDGET = 40 * 1024;
 const encodedSize = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
 
@@ -91,7 +91,7 @@ export function buildWatchApplicationContext({
   };
 }
 
-/** Changes once per displayed minute while running, immediately for all controls. */
+
 export function watchPomodoroPublicationKey(snapshot: MobilePomodoroControllerState): string {
   const remaining = snapshot.timerState.isRunning
     ? Math.ceil(snapshot.timerState.remainingSeconds / 60)

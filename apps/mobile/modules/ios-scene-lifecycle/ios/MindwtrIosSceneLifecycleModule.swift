@@ -8,10 +8,14 @@ public final class MindwtrIosSceneLifecycleModule: Module {
     )
     private var diagnosticsObserver: NSObjectProtocol?
 
+
+    private let backgroundTaskLock = NSLock()
+    private var backgroundTasks = Set<Int>()
+
     public func definition() -> ModuleDefinition {
         Name("MindwtrIosSceneLifecycle")
 
-        Events("onDiagnosticsChanged")
+        Events("onDiagnosticsChanged", "onBackgroundTaskExpired")
 
         OnCreate {
             self.diagnosticsObserver = NotificationCenter.default.addObserver(
@@ -28,6 +32,38 @@ public final class MindwtrIosSceneLifecycleModule: Module {
                 NotificationCenter.default.removeObserver(observer)
                 self.diagnosticsObserver = nil
             }
+            self.backgroundTaskLock.lock()
+            let open = self.backgroundTasks
+            self.backgroundTasks.removeAll()
+            self.backgroundTaskLock.unlock()
+            for id in open {
+                UIApplication.shared.endBackgroundTask(UIBackgroundTaskIdentifier(rawValue: id))
+            }
+        }
+
+
+        Function("beginBackgroundTask") { (name: String) -> Int in
+            let task = BackgroundTaskIdentifierBox()
+            let identifier = UIApplication.shared.beginBackgroundTask(withName: name) {
+
+
+                let id = task.identifier.rawValue
+                let wasOpen = self.removeBackgroundTask(id)
+                UIApplication.shared.endBackgroundTask(task.identifier)
+                if wasOpen { self.sendEvent("onBackgroundTaskExpired", ["id": id]) }
+            }
+            task.identifier = identifier
+            guard identifier != .invalid else { return 0 }
+            self.backgroundTaskLock.lock()
+            self.backgroundTasks.insert(identifier.rawValue)
+            self.backgroundTaskLock.unlock()
+            return identifier.rawValue
+        }
+
+
+        Function("endBackgroundTask") { (id: Int) in
+            guard self.removeBackgroundTask(id) else { return }
+            UIApplication.shared.endBackgroundTask(UIBackgroundTaskIdentifier(rawValue: id))
         }
 
         Function("drainDiagnostics") {
@@ -38,6 +74,12 @@ public final class MindwtrIosSceneLifecycleModule: Module {
             )
             return records
         }
+    }
+
+    private func removeBackgroundTask(_ id: Int) -> Bool {
+        backgroundTaskLock.lock()
+        defer { backgroundTaskLock.unlock() }
+        return backgroundTasks.remove(id) != nil
     }
 
     private func drainDiagnosticsOnMainQueue() -> [[String: Any]] {
@@ -59,4 +101,9 @@ public final class MindwtrIosSceneLifecycleModule: Module {
         }
         return records
     }
+}
+
+
+private final class BackgroundTaskIdentifierBox: @unchecked Sendable {
+    var identifier = UIBackgroundTaskIdentifier.invalid
 }

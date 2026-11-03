@@ -6,11 +6,7 @@ const DESKTOP_ONBOARDING_HANDOFF_HINT_KEY_PREFIX = 'mindwtr:desktop:onboarding-h
 
 export type DesktopOnboardingHandoffPage = 'sync' | 'data';
 
-/**
- * Dismissible onboarding hints, keyed by where they appear. The settings pages
- * are handoff targets from the first-run modal; 'inbox-project' is the Inbox
- * tip that points at the multi-step decision inside Process Inbox (#592).
- */
+
 export type DesktopOnboardingHint = DesktopOnboardingHandoffPage | OnboardingTopic;
 
 type DesktopFirstRunOnboardingState = {
@@ -63,10 +59,7 @@ export function isDesktopOnboardingHintDismissed(hint: DesktopOnboardingHint): b
     }
 }
 
-/**
- * Seeded and imported projects do not demonstrate that someone used processing.
- * Retire the tip on an explicit dismissal or entering the processing flow.
- */
+
 export function shouldShowInboxProjectHint(dismissed: boolean): boolean {
     return !dismissed;
 }
@@ -76,6 +69,6 @@ export function dismissDesktopOnboardingHint(hint: DesktopOnboardingHint): void 
     try {
         getWorkspaceCache()?.setItem(getDesktopOnboardingHintKey(hint), 'dismissed');
     } catch {
-        // Onboarding hints are convenience UI; storage failures should not block the settings page.
+
     }
 }

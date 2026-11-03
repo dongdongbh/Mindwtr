@@ -146,7 +146,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
       - name: Select Xcode 27
         run: bash scripts/ci/select-apple-sdk.sh 27
       - name: Typecheck actual Apple evaluation engines against the SDK
@@ -178,7 +178,7 @@ jobs:
           test "$CALLER_EVENT" = workflow_dispatch
 
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           repository: dongdongbh/Mindwtr
           ref: ${{ inputs.source_sha || github.sha }}
@@ -239,7 +239,7 @@ jobs:
             BASE_SHA="$(git rev-parse "${HEAD_SHA}^")"
           fi
           if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            # A force-push removed the old tip ("bad object", run 36272580872), so what changed is unknown: run every lane.
+
             echo "Base $BASE_SHA is gone (force-push); running every native lane."
             for output in android android_client ios ios_client macos windows; do
               echo "$output=true" >> "$GITHUB_OUTPUT"
@@ -271,7 +271,7 @@ jobs:
                 ;;
             esac
             case "$path" in
-              apps/android-native/*|packages/core/src/*|packages/core/package.json|scripts/ci/setup-android-sdk.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/android-native/*|apps/mobile/modules/sync-file-lock/*|apps/mobile/modules/sync-file-transition-cas/*|packages/core/src/*|packages/core/package.json|scripts/ci/setup-android-sdk.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 android_client=true
                 ;;
             esac
@@ -302,13 +302,13 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
 
       - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           workspaces: apps/desktop/src-tauri
 
@@ -372,20 +372,18 @@ jobs:
     name: Windows Rust check and tests
     timeout-minutes: 35
     env:
-      # Packaged Windows builds keep the repo-wide static CRT setting, but
-      # cargo test links whisper-rs-sys objects that use the dynamic CRT.
-      # Match the proven Windows native-test job in ci.yml so the linker does
-      # not leave unresolved __imp_* CRT symbols.
+
+
       RUSTFLAGS: -C target-feature=-crt-static
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
 
       - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           workspaces: apps/desktop/src-tauri
 
@@ -398,22 +396,22 @@ jobs:
   android-native:
     if: needs.changes.outputs.android == 'true'
     needs: changes
-    # Pinned on purpose: this job builds or packages with tools from the runner image,
-    # and `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19. Bump CI first, then this.
+
+
     runs-on: ubuntu-24.04
     name: Android native compile
     timeout-minutes: 45
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 22
 
       - name: Setup Java
-        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           distribution: temurin
           java-version: 17
@@ -422,12 +420,12 @@ jobs:
         run: bash scripts/ci/setup-android-sdk.sh
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: ".bun-version"
 
       - name: Cache Bun dependencies
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
@@ -540,34 +538,33 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 22
 
       - name: Setup Java
-        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           distribution: temurin
           java-version: 17
 
       - name: Setup Android SDK
         env:
-          ANDROID_SDK_PACKAGES: "platform-tools platforms;android-36 build-tools;36.0.0"
+          ANDROID_SDK_PACKAGES: "platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.22.1"
         run: bash scripts/ci/setup-android-sdk.sh
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: ".bun-version"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # The iOS host runs the same bundle and edits host-entry.ts too: the boot gates catch an
-      # edit that breaks an Android guarantee (journaled writes, reads after a failed save, pins).
+
       - name: Typecheck the shared native host and iOS fixture entries
         run: bun run typecheck:native-host
 
@@ -581,8 +578,28 @@ jobs:
         working-directory: apps/android-native/android
         run: ./gradlew :app:assembleDebug :app:checkVariantIdentity --no-daemon
 
+
+      - name: Verify the native app's File Sync lock JNI
+        working-directory: apps/android-native/android
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/play/debug/app-play-debug.apk
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            unzip -p "$APK" "lib/$abi/libsync-file-lock.so" > "$RUNNER_TEMP/libsync-file-lock-$abi.so"
+            for symbol in tryLock unlock tryOfdLock unlockOfdLock; do
+              readelf --dyn-syms --wide "$RUNNER_TEMP/libsync-file-lock-$abi.so" \
+                | grep -F "Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_$symbol"
+            done
+          done
+          readelf -lW "$RUNNER_TEMP/libsync-file-lock-arm64-v8a.so" | awk '$1 == "LOAD" && $NF != "0x4000" { exit 1 }'
+
+
+      - name: Run the native app's JVM tests
+        working-directory: apps/android-native/android
+        run: ./gradlew :app:testPlayDebugUnitTest --no-daemon
+
   ios-client:
-    # shortcut: paused during native iOS migration; remove false && when migration is complete.
+
     if: false && needs.changes.outputs.ios_client == 'true' && needs.changes.outputs.macmini != 'true'
     needs: changes
     strategy:
@@ -590,12 +607,12 @@ jobs:
       matrix: ${{ fromJSON(needs.changes.outputs.ios_matrix) }}
     runs-on: ${{ matrix.runner }}
     name: iOS SwiftUI client and JavaScriptCore host (${{ matrix.label }})
-    # Full Swift host suites take about 72 minutes before the isolated app build.
-    # Allow compilation and evidence transfer without changing test/performance limits.
+
+
     timeout-minutes: 90
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           repository: dongdongbh/Mindwtr
           ref: ${{ inputs.source_sha || github.sha }}
@@ -608,11 +625,11 @@ jobs:
         id: apple_cache
         run: bash scripts/ci/prepare-apple-cache.sh
       - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 22
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: ".bun-version"
       - name: Install dependencies
@@ -627,7 +644,7 @@ jobs:
       - name: Upload SwiftUI validation evidence
         id: swiftui_evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: ios-swiftui-validation-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.lane }}
           path: ${{ runner.temp }}/ios-swiftui-artifacts
@@ -650,7 +667,7 @@ jobs:
     timeout-minutes: 75
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           repository: dongdongbh/Mindwtr
           ref: ${{ inputs.source_sha || github.sha }}
@@ -666,17 +683,17 @@ jobs:
         run: bash scripts/ci/prepare-apple-cache.sh
 
       - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 22
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: ".bun-version"
 
       - name: Cache Bun dependencies
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
@@ -832,8 +849,8 @@ jobs:
           EXPO_NO_TELEMETRY: "1"
           NODE_ENV: production
           RCT_NO_LAUNCH_PACKAGER: "1"
-          # The smoke launch below runs a Release build; without this every CI run
-          # counted as a new iOS install (and now a new profile) in analytics.
+
+
           ANALYTICS_HEARTBEAT_DISABLED: "1"
         run: |
           set -euo pipefail
@@ -842,7 +859,7 @@ jobs:
           BUILD_LOG="$ARTIFACTS_DIR/release-simulator-build.log"
           mkdir -p "$ARTIFACTS_DIR"
 
-          # Repackage the app from current resources while retaining compiled dependencies.
+
           rm -rf "$DERIVED_DATA/Build/Products/Release-iphonesimulator/Mindwtr.app"
           set +e
           xcodebuild \
@@ -882,7 +899,7 @@ jobs:
       - name: Upload completed simulator validation evidence
         id: ios27_pre_archive_evidence
         if: success() && runner.environment == 'self-hosted' && matrix.lane == 'xcode27' && steps.ios27_smoke.outcome == 'success'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: ios27-simulator-validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios27-artifacts
@@ -948,7 +965,7 @@ jobs:
       - name: Upload Xcode 27 validation evidence
         id: ios27_evidence
         if: ${{ always() && matrix.lane == 'xcode27' }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: ios27-native-validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios27-artifacts
@@ -979,10 +996,10 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     name: iOS Swift compile (Mac mini Xcode 27)
-    # Allow the RN build, runner queue, discovery, and evidence transfer.
+
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           persist-credentials: false
       - name: Dispatch trusted commit to the private runner repository
@@ -992,7 +1009,7 @@ jobs:
         run: bash scripts/ci/dispatch-macmini.sh
       - name: Upload Mac mini validation evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: ios27-native-validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios27-artifacts

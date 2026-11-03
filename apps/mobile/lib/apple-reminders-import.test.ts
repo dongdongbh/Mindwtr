@@ -138,8 +138,8 @@ describe('apple-reminders-import', () => {
     });
     expect(mockCreateRecoverySnapshot).toHaveBeenCalledOnce();
     expect(mockCreateRecoverySnapshot.mock.invocationCallOrder[0]).toBeLessThan(addTask.mock.invocationCallOrder[0]);
-    // The import owns the imported-id list only: the list choice and both
-    // switches belong to the settings screen.
+
+
     expect(mockSetItem).toHaveBeenCalledWith(
       APPLE_REMINDERS_IMPORT_SETTINGS_KEY,
       JSON.stringify({
@@ -148,6 +148,42 @@ describe('apple-reminders-import', () => {
         autoImportOnOpen: false,
       }),
     );
+  });
+
+  it('re-reads the source ID after a held first snapshot while retaining the earlier registry identity', async () => {
+    const originalId = 'AABBCCDD-1234-5678-9ABC-0123456789EF';
+    const changedId = '11223344-1234-5678-9ABC-0123456789EF';
+    const reminder = { id: originalId, title: ' Task ', notes: ' Notes ', completed: false };
+    mockGetRemindersAsync.mockResolvedValue([reminder] as any);
+    let releaseSnapshot!: () => void;
+    let snapshotEntered!: () => void;
+    const heldSnapshot = new Promise<void>((resolve) => { releaseSnapshot = resolve; });
+    const enteredSnapshot = new Promise<void>((resolve) => { snapshotEntered = resolve; });
+    const createRecoverySnapshot = vi.fn(async () => {
+      snapshotEntered();
+      await heldSnapshot;
+      return 'snapshot.json';
+    });
+    const addTask = vi.fn(async () => ({ success: true, id: changedId.toLowerCase() }));
+
+    const importing = importAppleRemindersIntoInbox({
+      addTask, createRecoverySnapshot, listId: 'list-1', deleteImportedReminders: true,
+    });
+    await enteredSnapshot;
+    expect(addTask).not.toHaveBeenCalled();
+    expect(mockSetItem).not.toHaveBeenCalled();
+    expect(mockDeleteReminderAsync).not.toHaveBeenCalled();
+    reminder.id = changedId;
+    releaseSnapshot();
+
+    await expect(importing).resolves.toMatchObject({ importedCount: 1, deletedCount: 1, failedCount: 0 });
+    expect(addTask).toHaveBeenCalledWith('Task', { status: 'inbox', description: 'Notes' }, {
+      captureId: changedId.toLowerCase(),
+    });
+    expect(mockSetItem).toHaveBeenCalledWith(APPLE_REMINDERS_IMPORT_SETTINGS_KEY, JSON.stringify({
+      importedReminderIds: [originalId], deleteImportedReminders: false, autoImportOnOpen: false,
+    }));
+    expect(mockDeleteReminderAsync).toHaveBeenCalledWith(changedId);
   });
 
   it('deletes reminders only after their Inbox task is created when enabled', async () => {
@@ -253,9 +289,7 @@ describe('apple-reminders-import', () => {
     );
   });
 
-  // The import runs on every foreground now (#1238), so iOS can end the app in
-  // the middle of it. Every reminder already added must be written down before
-  // the next one is attempted, or the next run adds it a second time.
+
   it('saves the imported ids after each add, so an interrupted run cannot re-import', async () => {
     const addTask = vi.fn()
       .mockResolvedValueOnce({ success: true, id: 'task-1' })
@@ -281,9 +315,7 @@ describe('apple-reminders-import', () => {
     );
   });
 
-  // core's addTask only queues a debounced snapshot, so a reminder is not
-  // really imported until that save is on disk. Recording the id first would
-  // make a kill inside that gap skip the reminder forever.
+
   it('records the id and deletes the reminder only after the task save is durable', async () => {
     const order: string[] = [];
     const addTask = vi.fn(async () => { order.push('addTask'); return { success: true, id: 'task-1' }; });
@@ -328,8 +360,7 @@ describe('apple-reminders-import', () => {
       deleteImportedReminders: true,
     })).resolves.toMatchObject({ importedCount: 0, deletedCount: 0, failedCount: 1 });
 
-    // Nothing recorded, nothing deleted, and the run stops rather than piling
-    // up more tasks that cannot be saved either.
+
     expect(mockSetItem).not.toHaveBeenCalled();
     expect(mockDeleteReminderAsync).not.toHaveBeenCalled();
     expect(getTaskById).not.toHaveBeenCalled();
@@ -344,7 +375,7 @@ describe('apple-reminders-import', () => {
       autoImportOnOpen: true,
     }));
     const addTask = vi.fn(async () => {
-      // The user turns both switches off on the settings screen mid-import.
+
       mockGetItem.mockResolvedValue(JSON.stringify({
         selectedListId: 'list-1',
         importedReminderIds: [],
@@ -492,7 +523,7 @@ describe('apple-reminders-import', () => {
     mockGetRemindersAsync.mockResolvedValue([
       { id: 'rem-1', title: 'First', completed: false },
     ] as any);
-    // Mirror what the app stores so each read sees the previous write.
+
     mockSetItem.mockImplementation((async (_key: string, value: string) => {
       mockGetItem.mockResolvedValue(value);
     }) as never);
@@ -507,7 +538,7 @@ describe('apple-reminders-import', () => {
     try {
       flipped = updateAppleRemindersImportSettings((current) => ({ ...current, autoImportOnOpen: true }));
     } finally {
-      // Always let the import finish: a wedged import would wedge the queue.
+
       releaseAdd();
     }
     await importing;
@@ -619,7 +650,7 @@ describe('apple-reminders-import', () => {
     it('serializes overlapping imports so a reminder is added once', async () => {
       mockGetItem.mockResolvedValue(stored({ autoImportOnOpen: true }));
       mockGetRemindersAsync.mockResolvedValue([{ id: 'r-2', title: 'Call bank', completed: false }] as never);
-      // Persisted ids must be visible to the second run: mirror what the app stores.
+
       mockSetItem.mockImplementation((async (_key: string, value: string) => {
         mockGetItem.mockResolvedValue(value);
       }) as never);

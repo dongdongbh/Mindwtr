@@ -35,10 +35,7 @@ function recordDiagnostic(event: AppleImageDiagnostic): void {
   });
 }
 
-/**
- * Module-scoped UI-session state survives route unmounts from MobileAppLockGate.
- * It is intentionally never written to synced settings, SQLite, or an attachment.
- */
+
 export const appleImageEvaluationController = new AppleImageEvaluationController(
   appleImageNativeBridge,
   generateUUID,
@@ -82,7 +79,7 @@ export function AppleImageCaptureEvaluation({
     setPickerError(null);
     try {
       const picker = await import('expo-image-picker');
-      // PHPicker provides system-selected access without requesting broad photo-library permission.
+
       const result = await picker.launchImageLibraryAsync({
         mediaTypes: picker.MediaTypeOptions.Images,
         allowsMultipleSelection: false,

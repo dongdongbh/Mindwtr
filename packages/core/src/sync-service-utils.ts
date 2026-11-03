@@ -24,9 +24,7 @@ export class SyncFileLockUnavailableError extends Error {
     }
 }
 
-/** A target generation stayed corrupt through the bounded recovery attempts.
- * This is terminal until the user removes that generation or selects a new
- * File Sync folder; orchestration must not schedule another automatic retry. */
+
 export class SyncFileGenerationCorruptError extends Error {
     readonly code = SYNC_FILE_GENERATION_CORRUPT_CODE;
 
@@ -36,8 +34,7 @@ export class SyncFileGenerationCorruptError extends Error {
     }
 }
 
-/** Native adapters have to cross string-only error bridges. Normalize those strings
- * immediately so orchestration policy never depends on a platform's wording. */
+
 export const normalizeSyncFileLockError = (error: unknown): unknown => {
     if (error instanceof SyncFileLockBusyError || error instanceof SyncFileLockUnavailableError) return error;
     const message = String(error ?? '');
@@ -156,7 +153,7 @@ export const getFileSyncDir = (
 };
 
 export const sanitizeSyncErrorMessage = (value: string): string => (
-    // One redactor and one key-pattern list: both live in log-sanitize.
+
     sanitizeLogMessage(value)
 );
 
@@ -164,7 +161,8 @@ export const formatSyncErrorMessage = (error: unknown, backend: SyncBackend): st
     if (error instanceof SyncFileLockUnavailableError) return error.message;
     const raw = sanitizeSyncErrorMessage(String(error));
     if (backend === 'file') {
-        if (READONLY_ERROR_PATTERN.test(raw)) {
+
+        if (READONLY_ERROR_PATTERN.test(String(error))) {
             return 'Sync file is not writable. Re-select the sync folder in Settings -> Sync, then sync again.';
         }
         return raw;

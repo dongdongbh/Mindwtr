@@ -8,6 +8,7 @@ import {
     filterCaptureProjects,
     hasExactCaptureAreaMatch,
     hasExactCaptureProjectMatch,
+    planCaptureTask,
     resolveCaptureAreaQuery,
     resolveCaptureProjectQuery,
 } from './capture';
@@ -126,8 +127,8 @@ describe('buildCaptureTaskProps', () => {
     });
 
     it('preserve mode: detected date applies while the title stays verbatim (quick capture default)', () => {
-        // In preserve mode quick-add hands back titleWithoutDate = verbatim
-        // title, so the capture keeps the typed text AND gets the due date.
+
+
         const detected = { date: '2026-08-01', matchedText: 'aug 1', titleWithoutDate: 'Pay rent aug 1' };
         const applied = buildCaptureTaskProps({
             parsed: { ...parsedBase, title: 'Pay rent aug 1', detectedDate: detected },
@@ -344,5 +345,40 @@ describe('capture picker helpers', () => {
             kind: 'select',
             area: { id: 'area-live' },
         });
+    });
+});
+
+describe('planCaptureTask start date status (#1452)', () => {
+    const start = '2026-11-02';
+    const plan = (
+        input: Partial<Parameters<typeof planCaptureTask>[0]>,
+        transformProps?: Parameters<typeof planCaptureTask>[1]['transformProps'],
+    ) => planCaptureTask({ parsed: parsedBase, rawInput: 'Write brief', projects: [], ...input }, { transformProps });
+
+    it('files an untouched default with a start date into Next and keeps the date', () => {
+        expect(plan({ parsed: { ...parsedBase, props: { startTime: start } } }))
+            .toMatchObject({ success: true, props: { status: 'next', startTime: start } });
+    });
+
+    it('treats a surface-prefilled Inbox as a default, and sees a start date a picker adds', () => {
+        expect(plan({ initialProps: { status: 'inbox' } }, (props) => ({ ...props, startTime: start })))
+            .toMatchObject({ success: true, props: { status: 'next', startTime: start } });
+    });
+
+    it('keeps a status the user chose, including Inbox', () => {
+        expect(plan({ parsed: { ...parsedBase, props: { status: 'inbox', startTime: start } } }))
+            .toMatchObject({ success: true, props: { status: 'inbox' } });
+        expect(plan({ initialProps: { status: 'inbox' }, extraProps: { status: 'inbox', startTime: start } }))
+            .toMatchObject({ success: true, props: { status: 'inbox' } });
+    });
+
+    it('keeps a contextual destination such as Someday', () => {
+        expect(plan({ initialProps: { status: 'someday', startTime: start } }))
+            .toMatchObject({ success: true, props: { status: 'someday' } });
+    });
+
+    it('leaves Inbox alone when only a due or review date is set', () => {
+        expect(plan({ parsed: { ...parsedBase, props: { dueDate: start, reviewAt: start } } }))
+            .toMatchObject({ success: true, props: { status: 'inbox' } });
     });
 });

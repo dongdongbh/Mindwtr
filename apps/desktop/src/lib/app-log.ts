@@ -13,7 +13,7 @@ import {
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { invokeNative } from './tauri-invoke';
-import { getManagedPath } from './managed-paths';
+import { getDeviceManagedPath } from './managed-paths';
 
 const LOG_DIR_NAME = 'logs';
 const LOG_FILE_NAME = 'mindwtr.log';
@@ -41,7 +41,7 @@ export function sanitizeLogMessage(value: string): string {
 }
 
 async function ensureLogDir(): Promise<string> {
-    const logDir = await getManagedPath(LOG_DIR_NAME);
+    const logDir = await getDeviceManagedPath(LOG_DIR_NAME);
     await mkdir(logDir, { recursive: true });
     return logDir;
 }
@@ -66,9 +66,8 @@ async function appendLogLine(entry: LogEntry, options?: AppendLogOptions): Promi
         try {
             return await invokeNative<string>('append_log_line', { line });
         } catch (error) {
-            // No non-append retry: writeTextFile without `append` replaces the
-            // whole file, so a failed append used to throw away every line
-            // logged so far to save the one that just failed.
+
+
             const logDir = await ensureLogDir();
             const logFile = await join(logDir, LOG_FILE_NAME);
             await writeTextFile(logFile, line, { append: true });
@@ -82,15 +81,15 @@ async function appendLogLine(entry: LogEntry, options?: AppendLogOptions): Promi
 export async function getLogPath(): Promise<string | null> {
     if (!isTauriRuntime()) return null;
     try {
-        // The backend knows where the file really lands (MS Store installs get
-        // their AppData writes redirected into the package LocalCache, #1135).
+
+
         const nativePath = (await invokeNative<string>('get_log_file_path')).trim();
         if (nativePath) return nativePath;
     } catch {
-        // Older backend without the command — fall back to the computed path.
+
     }
     try {
-        return await getManagedPath(LOG_DIR_NAME, LOG_FILE_NAME);
+        return await getDeviceManagedPath(LOG_DIR_NAME, LOG_FILE_NAME);
     } catch (error) {
         return null;
     }
@@ -103,7 +102,7 @@ export async function clearLog(): Promise<void> {
         await invokeNative('clear_log_file');
     } catch (error) {
         try {
-            const logFile = await getManagedPath(LOG_DIR_NAME, LOG_FILE_NAME);
+            const logFile = await getDeviceManagedPath(LOG_DIR_NAME, LOG_FILE_NAME);
             await remove(logFile, { recursive: false });
         } catch (_removeError) {
             return;
@@ -113,13 +112,7 @@ export async function clearLog(): Promise<void> {
 
 export type SaveLogCopyResult = 'saved' | 'cancelled' | 'missing';
 
-/**
- * The desktop counterpart of the phone's "Share log": hand the tester one file they can
- * attach to an email. A save dialog rather than "reveal in folder" on purpose: the log
- * lives in a hidden or sandbox-redirected directory (App Store container, Flatpak, MS
- * Store LocalCache), and a save dialog is the one file action every one of those allows.
- * The rotated history comes first so the copy reads oldest to newest in a single file.
- */
+
 export async function saveLogCopy(): Promise<SaveLogCopyResult> {
     if (!isTauriRuntime()) return 'missing';
     const logFile = await getLogPath();
@@ -136,7 +129,7 @@ export async function saveLogCopy(): Promise<SaveLogCopyResult> {
         .filter(Boolean);
     if (parts.length === 0) return 'missing';
 
-    const { save } = await import('@tauri-apps/plugin-dialog');
+    const { save } = await import('./native-dialog');
     const selected = await save({
         defaultPath: LOG_FILE_NAME,
         filters: [{ name: 'Log', extensions: ['log', 'txt'] }],
@@ -162,9 +155,8 @@ export async function readRecentLogText(maxChars = RECENT_LOG_MAX_CHARS): Promis
 
 export async function collectFeedbackDiagnostics(maxChars = RECENT_LOG_MAX_CHARS): Promise<string | null> {
     const breadcrumbs = getBreadcrumbs();
-    // Feedback attachment is an explicit, one-time opt-in. Build the snapshot in
-    // memory so checking the box does not persist a log when detailed logging is
-    // disabled, while still explaining the recent app flow.
+
+
     const snapshot = JSON.stringify({
         ts: new Date().toISOString(),
         level: 'info',

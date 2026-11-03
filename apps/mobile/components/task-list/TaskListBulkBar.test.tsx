@@ -57,6 +57,7 @@ const t = (key: string) => ({
   'bulk.selectRangeActive': 'Pick end',
   'bulk.selected': 'selected',
   'common.loading': 'Loading',
+  'projects.reorderTasks': 'Reorder',
   'status.archived': 'Archived',
   'status.done': 'Done',
   'status.inbox': 'Inbox',
@@ -85,6 +86,13 @@ const renderBulkBar = (overrides: Partial<React.ComponentProps<typeof TaskListBu
 );
 
 describe('TaskListBulkBar', () => {
+  it('offers the Reorder shortcut only for a list that supplies it and waits for pending bulk work', () => {
+    expect(renderBulkBar()).not.toContain('aria-label="Reorder"');
+    expect(renderBulkBar({ onReorder: vi.fn() })).toContain('aria-label="Reorder"');
+    expect(renderBulkBar({ onReorder: vi.fn(), bulkActionLoading: true }))
+      .toContain('aria-label="Reorder" data-testid="task-list-reorder-shortcut" disabled');
+  });
+
   it('offers Archived only when moving completed tasks', () => {
     expect(getBulkMoveStatusOptions('done')).toEqual([
       'inbox',

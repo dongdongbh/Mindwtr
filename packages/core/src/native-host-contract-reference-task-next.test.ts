@@ -95,6 +95,27 @@ describe('Reference leading Next is the source-bound RN status-only update', () 
         } finally { await native.close(); }
     });
 
+    it('turns a Reference list with every entry ticked into Next, not Done, and keeps the ticks (#1416)', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const ticked = [{ id: 'one', title: 'Alien', isCompleted: true }, { id: 'two', title: 'Brazil', isCompleted: true }];
+        const source = task({ taskMode: 'list', checklist: ticked });
+        const rn = await openSqliteHost(seed(source));
+        try {
+            expect(await useTaskStore.getState().updateTask(ID, { status: 'next' })).toEqual({ success: true });
+            const moved = useTaskStore.getState()._tasksById.get(ID)!;
+            expect(moved).toMatchObject({ status: 'next', checklist: ticked });
+            expect(moved.completedAt).toBeUndefined();
+        } finally { await rn.close(); }
+        const native = await openSqliteHost(seed(source));
+        try {
+            const command = await prepare(native);
+            expect(value(await native.host.commitPreparedDoneTaskStatus(command))).toEqual({ id: ID });
+            const moved = useTaskStore.getState()._tasksById.get(ID)!;
+            expect(moved).toMatchObject({ status: 'next', checklist: ticked });
+            expect(moved.completedAt).toBeUndefined();
+        } finally { await native.close(); }
+    });
+
     it('refuses the RN hidden-star slot fill at the full Focus limit without a write or receipt', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
         const sqlite = await openSqliteHost(seed(task({ isFocusedToday: true }), 1, 1));
@@ -235,17 +256,29 @@ describe('Reference leading Next is the source-bound RN status-only update', () 
         } finally { await sqlite.close(); }
     });
 
-    it('preserves harmless unrelated settings and permits a limit change when conversion fills no slot', async () => {
+    it('matches RN settings while preserving unrelated settings and a limit change when conversion fills no slot', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const changeSettings = (settings: AppData['settings']) => {
+            settings.theme = 'dark'; settings.gtd = { ...settings.gtd, focusTaskLimit: 1, autoArchiveDays: 1 };
+        };
+        const rn = await openSqliteHost(seed()); let expectedSettings: ReturnType<typeof rows>['settings'];
+        try {
+            await editSettings(rn, changeSettings); await rn.restart(undefined, { recoveryLoad: true });
+            const before = rows().settings;
+            expect(await useTaskStore.getState().updateTask(ID, { status: 'next' })).toEqual({ success: true });
+            await flushPendingSave(); expectedSettings = rows().settings;
+
+            expect(expectedSettings).toEqual(before);
+            expect(expectedSettings).toMatchObject({ theme: 'dark', gtd: { focusTaskLimit: 1, autoArchiveDays: 1 } });
+        } finally { await rn.close(); }
         const sqlite = await openSqliteHost(seed());
         try {
             const command = await prepare(sqlite);
             expect(command.prepared.checklist.effect.guards).toMatchObject({ focusCount: null, focusLimit: null, focusBoundary: null, autoArchiveDays: null });
-            await editSettings(sqlite, (settings) => { settings.theme = 'dark'; settings.gtd = { ...settings.gtd, focusTaskLimit: 1, autoArchiveDays: 1 }; });
+            await editSettings(sqlite, changeSettings);
             await sqlite.restart(undefined, { recoveryLoad: true });
-            const settings = rows().settings;
             expect(value(await sqlite.host.commitPreparedDoneTaskStatus(command))).toEqual({ id: ID });
-            expect(rows().settings).toEqual(settings);
+            expect(rows().settings).toEqual(expectedSettings!);
         } finally { await sqlite.close(); }
     });
 

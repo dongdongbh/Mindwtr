@@ -9,5 +9,24 @@ export const MOBILE_SYNC_BADGE_COLORS: Record<Exclude<MobileSyncBadgeState, 'hid
     attention: '#EF4444',
 };
 
-// The rule lives in core (sync-settings-model.ts) so the native app draws the same badge.
+
 export const resolveMobileSyncBadgeState = resolveSyncBadgeState;
+
+
+let mobileLocalChangePending = false;
+const localChangePendingListeners = new Set<() => void>();
+
+export const setMobileLocalChangePending = (pending: boolean): void => {
+    if (mobileLocalChangePending === pending) return;
+    mobileLocalChangePending = pending;
+    localChangePendingListeners.forEach((listener) => listener());
+};
+
+export const getMobileLocalChangePending = (): boolean => mobileLocalChangePending;
+
+export const subscribeMobileLocalChangePending = (listener: () => void): (() => void) => {
+    localChangePendingListeners.add(listener);
+    return () => {
+        localChangePendingListeners.delete(listener);
+    };
+};

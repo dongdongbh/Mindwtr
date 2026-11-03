@@ -1,5 +1,5 @@
 import { usePathname } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTaskStore } from '@mindwtr/core';
 
 import { useLanguage } from '../contexts/language-context';
@@ -8,7 +8,12 @@ import {
     getMobileSyncConfigurationStatus,
     subscribeMobileSyncActivityState,
 } from '../lib/sync-service';
-import { MOBILE_SYNC_BADGE_COLORS, resolveMobileSyncBadgeState } from '../lib/sync-badge';
+import {
+    getMobileLocalChangePending,
+    MOBILE_SYNC_BADGE_COLORS,
+    resolveMobileSyncBadgeState,
+    subscribeMobileLocalChangePending,
+} from '../lib/sync-badge';
 
 export function useMobileSyncBadge() {
     const pathname = usePathname();
@@ -16,6 +21,7 @@ export function useMobileSyncBadge() {
     const settings = useTaskStore((state) => state.settings);
     const [syncConfigured, setSyncConfigured] = useState(false);
     const [syncActivityState, setSyncActivityState] = useState(() => getMobileSyncActivityState());
+    const localChangePending = useSyncExternalStore(subscribeMobileLocalChangePending, getMobileLocalChangePending);
 
     const refreshSyncBadgeConfig = useCallback(async () => {
         try {
@@ -45,9 +51,11 @@ export function useMobileSyncBadge() {
         configured: syncConfigured,
         activityState: syncActivityState,
         pendingRemoteWriteAt: settings.pendingRemoteWriteAt,
+        localChangePending,
         lastSyncStatus: settings.lastSyncStatus,
         lastSyncAt: settings.lastSyncAt,
     }), [
+        localChangePending,
         settings.lastSyncAt,
         settings.lastSyncStatus,
         settings.pendingRemoteWriteAt,

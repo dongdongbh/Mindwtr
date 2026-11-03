@@ -66,7 +66,7 @@ describe('HistoryScreen', () => {
         expect(tree.root.findAllByType('ArchivedContent' as never)).toHaveLength(1);
     });
 
-    // The `history` part of the list views parity fixture: MINDWTR_CAPTURE_LIST_VIEWS=1 rewrites it.
+
     it('opens and switches tabs exactly as frozen', () => {
         const observed = [undefined, 'done', 'archived', 'ARCHIVED', 'trash', ''].map((tab) => {
             routeState.tab = tab;

@@ -14,8 +14,8 @@ const mocks = vi.hoisted(() => {
     alert,
     planningCandidates,
     areaById: new Map(),
-    // Stable identity: the controller memoizes task filtering on it, and a
-    // fresh object per render would fake an extra store expansion.
+
+
     areaFilterSelection: { included: [] as string[], excluded: [] as string[] },
     appState: { currentState: 'active' as MockAppStateStatus },
     appStateListeners: new Set<(state: MockAppStateStatus) => void>(),
@@ -24,8 +24,8 @@ const mocks = vi.hoisted(() => {
       _allTasks: null as Task[] | null,
       projects: [] as any[],
       areas: [] as any[],
-      // 'day' mode gives planningTasks a non-null selectedDate to work with;
-      // the memo returns [] outright otherwise.
+
+
       settings: { calendar: { viewMode: 'day' }, weekStart: 'sunday' } as any,
       addProject: vi.fn(async () => null),
       addTask: vi.fn(async () => ({ success: true, id: 'task-new' })),
@@ -40,7 +40,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mindwtr/core')>();
   return {
     ...actual,
-    // The screen's planning list comes from core's calendar view model.
+
     getCalendarPlanningTasks: (...args: Parameters<typeof actual.getCalendarPlanningTasks>) => {
       mocks.planningCandidates(...args);
       return actual.getCalendarPlanningTasks(...args);
@@ -117,9 +117,7 @@ const makeTask = (overrides: Partial<Task>): Task => ({
   ...overrides,
 });
 
-/** Bare host so the hook can be exercised without rendering the whole
- *  (much heavier) calendar-view screen -- this repo has no renderHook
- *  helper for mobile, so the host component stands in for one. */
+
 function ControllerHost({ onResult }: { onResult: (value: ReturnType<typeof useCalendarViewController>) => void }) {
   const controller = useCalendarViewController();
   onResult(controller);
@@ -167,21 +165,21 @@ describe('useCalendarViewController cadence', () => {
     await act(async () => {
       listener('background');
     });
-    // Going to background clears the running interval and does not start a
-    // replacement.
+
+
     expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       listener('active');
     });
-    // Returning to active starts a fresh interval.
+
     expect(setIntervalSpy).toHaveBeenCalledTimes(2);
   });
 
   it('starts the now-tick on mount when AppState reports inactive, not just active (correction #6)', async () => {
-    // iOS reports 'inactive' (not 'active') for AppState.currentState during
-    // a cold launch; only an explicit 'background' should hold the tick off.
+
+
     mocks.appState.currentState = 'inactive';
     const setIntervalSpy = vi.spyOn(global, 'setInterval');
 

@@ -6,71 +6,67 @@ import type { AppData, SettingsSyncGroup } from './types';
 
 type Settings = AppData['settings'];
 
-// Every setting is either synced between a user's devices or device-local.
-// Two hand-written functions decide which: sanitizeSettingsForRemote (what
-// leaves the device) and mergeSettingsForSync (what an incoming document may
-// change). This file writes the rule down so a new field cannot start
-// travelling between devices without someone deciding that it should.
 
 const SYNCED_TOP_LEVEL_KEYS = [
-    'syncPreferences',          // always: the choice of what to sync
-    'syncPreferencesUpdatedAt', // always: the timestamps behind that choice
-    'analyticsProfileId',       // always: one dataset = one anonymous profile
-    'supportPrompt',            // always: the cooldown is per dataset (#1237)
-    'theme',                    // group appearance
-    'appearance',               // group appearance
-    'keybindingStyle',          // group appearance
-    'language',                 // group language
-    'weekStart',                // group language
-    'dateFormat',               // group language
-    'timeFormat',               // group language
-    'gtd',                      // group gtd
-    'taskReminderDefault',      // group gtd; notification capability stays device-local
-    'quickAddAutoClean',        // group gtd
-    'markdownEditorAssist',     // group gtd
-    'features',                 // group gtd
-    'savedFilters',             // group savedFilters
-    'externalCalendars',        // group externalCalendars (local file:// and content:// entries removed)
-    'ai',                       // group ai (minus apiKey, baseUrl, openAIExtraBodyParams, speechToText.offlineModelPath, speechToText.baseUrl)
+    'taxonomy',
+    'syncPreferences',
+    'syncPreferencesUpdatedAt',
+    'analyticsProfileId',
+    'supportPrompt',
+    'theme',
+    'appearance',
+    'keybindingStyle',
+    'language',
+    'weekStart',
+    'dateFormat',
+    'timeFormat',
+    'gtd',
+    'taskReminderDefault',
+    'quickAddAutoClean',
+    'markdownEditorAssist',
+    'features',
+    'savedFilters',
+    'externalCalendars',
+    'ai',
 ];
 
 const DEVICE_LOCAL_TOP_LEVEL_KEYS = [
-    'attachments',                    // local cleanup bookkeeping and pending remote deletes
-    'calendar',                       // which calendar window this device is looking at
-    'calendarSystem',                 // device calendar system
-    'globalQuickAddShortcut',         // desktop shortcut registration is local runtime behaviour
-    'window',                         // desktop window placement and tray behaviour
-    'savedSearches',                  // device-local search shortcuts
-    'savedSearchesUpdatedAt',         // device-local search write ownership
-    'sidebarCollapsed',               // per-device layout state
-    'taskSortBy',                     // per-device list order
-    'diagnostics',                    // per-device logging switch
-    'analytics',                      // per-device heartbeat switch
-    'security',                       // per-device app lock
-    'network',                        // per-device proxy
-    'filters',                        // per-device area filter
-    'deviceId',                       // identifies this install
-    'migrations',                     // per-install migration bookkeeping
-    'lastSyncAt',                     // sync bookkeeping of this device
-    'lastSyncStatus',                 // sync bookkeeping of this device
-    'lastSyncError',                  // sync bookkeeping of this device
-    'lastSyncStats',                  // sync bookkeeping of this device
-    'lastSyncHistory',                // sync bookkeeping of this device
-    'pendingRemoteWriteAt',           // sync bookkeeping of this device
-    'pendingRemoteWriteRetryAt',      // sync bookkeeping of this device
-    'pendingRemoteWriteAttempts',     // sync bookkeeping of this device
-    'notificationsEnabled',           // notifications are a per-device permission
-    'undoNotificationsEnabled',       // per-device notification switch
-    'startDateNotificationsEnabled',  // per-device notification switch
-    'dueDateNotificationsEnabled',    // per-device notification switch
-    'reviewAtNotificationsEnabled',   // per-device notification switch
-    'dailyDigestMorningEnabled',      // per-device digest switch
-    'dailyDigestMorningTime',         // per-device digest time
-    'dailyDigestEveningEnabled',      // per-device digest switch
-    'dailyDigestEveningTime',         // per-device digest time
-    'weeklyReviewEnabled',            // per-device reminder switch
-    'weeklyReviewDay',                // per-device reminder day
-    'weeklyReviewTime',               // per-device reminder time
+    'attachments',
+    'calendar',
+    'calendarSystem',
+    'globalQuickAddShortcut',
+    'window',
+    'savedSearches',
+    'savedSearchesUpdatedAt',
+    'sidebarCollapsed',
+    'taskSortBy',
+    'diagnostics',
+    'analytics',
+    'security',
+    'network',
+    'filters',
+    'deviceId',
+    'migrations',
+    'lastSyncAt',
+    'lastSyncStatus',
+    'lastSyncError',
+    'lastSyncStats',
+    'lastSyncHistory',
+    'pendingRemoteWriteAt',
+    'pendingRemoteWriteRetryAt',
+    'pendingRemoteWriteAttempts',
+    'notificationsEnabled',
+    'undoNotificationsEnabled',
+    'startDateNotificationsEnabled',
+    'dueDateNotificationsEnabled',
+    'reviewAtNotificationsEnabled',
+    'dailyDigestMorningEnabled',
+    'dailyDigestMorningTime',
+    'dailyDigestEveningEnabled',
+    'dailyDigestEveningTime',
+    'weeklyReviewEnabled',
+    'weeklyReviewDay',
+    'weeklyReviewTime',
 ];
 
 const readInterfaceProperties = (source: string, header: string): string[] => {
@@ -93,9 +89,10 @@ const stampAll = (settings: Settings, at: string): Settings => ({
     syncPreferencesUpdatedAt: Object.fromEntries(SYNC_GROUPS.map((group) => [group, at])),
 });
 
-// One settings object with a non-default value for every classified key.
+
 const fullSettings = (): Settings => ({
-    // synced
+    taxonomy: { contexts: [{ token: '@Shared', rev: 1, revBy: 'scope-device', updatedAt: OLDER }] },
+
     syncPreferences: {
         appearance: true, language: true, gtd: true, externalCalendars: true, ai: true, savedFilters: true,
     },
@@ -141,7 +138,7 @@ const fullSettings = (): Settings => ({
             offlineModelPath: '/local/model.bin',
         },
     },
-    // device-local
+
     attachments: { lastCleanupAt: OLDER },
     calendar: { viewMode: 'week' },
     calendarSystem: 'persian',
@@ -153,7 +150,7 @@ const fullSettings = (): Settings => ({
     taskSortBy: 'due',
     diagnostics: { loggingEnabled: true },
     analytics: { heartbeatEnabled: false },
-    security: { mobileAppLockEnabled: true },
+    security: { mobileAppLockEnabled: true, mobileAppLockRelockDelayMinutes: 5 },
     network: { proxyUrl: 'http://proxy.local:8080' },
     filters: { areaId: 'area-1', areaIds: ['area-1'] },
     deviceId: 'local-device-id',
@@ -225,7 +222,7 @@ describe('settings sync scope contract', () => {
 
     it('only classified-synced keys leave the device', () => {
         const sanitized = sanitizeAppDataForRemote(asData(fullSettings())).settings;
-        // undefined values never reach the wire, so drop them the way JSON does.
+
         const onWire = JSON.parse(JSON.stringify(sanitized)) as Record<string, unknown>;
 
         expect(Object.keys(onWire).sort()).toEqual([...SYNCED_TOP_LEVEL_KEYS].sort());
@@ -247,7 +244,7 @@ describe('settings sync scope contract', () => {
         const local = stampAll(fullSettings(), OLDER);
         const incoming = stampAll({
             ...fullSettings(),
-            // every device-local key holds a different valid value
+
             attachments: { lastCleanupAt: NEWER },
             calendar: { viewMode: 'month' },
             calendarSystem: 'gregorian',
@@ -259,7 +256,7 @@ describe('settings sync scope contract', () => {
             taskSortBy: 'title',
             diagnostics: { loggingEnabled: false },
             analytics: { heartbeatEnabled: true },
-            security: { mobileAppLockEnabled: false },
+            security: { mobileAppLockEnabled: false, mobileAppLockRelockDelayMinutes: 15 },
             network: { proxyUrl: 'http://other-proxy.local:9090' },
             filters: { areaId: 'area-2', areaIds: ['area-2'] },
             deviceId: 'remote-device-id',
@@ -286,7 +283,7 @@ describe('settings sync scope contract', () => {
             weeklyReviewEnabled: false,
             weeklyReviewDay: 5,
             weeklyReviewTime: '16:00',
-            // AI credentials, endpoints and local paths must not arrive either
+
             ai: {
                 enabled: true,
                 provider: 'openai',
@@ -318,7 +315,7 @@ describe('settings sync scope contract', () => {
         expect(merged.ai?.speechToText?.baseUrl).toBe('http://localhost:8000/v1');
         expect(merged.ai?.speechToText?.offlineModelPath).toBe('/local/model.bin');
         expect(merged.ai?.apiKey).toBeUndefined();
-        // Fields outside the device-local set still sync.
+
         expect(merged.ai?.model).toBe('incoming-model');
 
         expect(mergeSettingsForSync(merged, incoming)).toEqual(merged);

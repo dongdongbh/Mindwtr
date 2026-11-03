@@ -21,6 +21,7 @@ export const AutosizeTextarea = forwardRef<HTMLTextAreaElement, AutosizeTextarea
 ) {
     const internalRef = useRef<HTMLTextAreaElement | null>(null);
     const [isFocused, setIsFocused] = useState(false);
+    const previousValueRef = useRef<string | null>(null);
 
     const setRefs = (node: HTMLTextAreaElement | null) => {
         internalRef.current = node;
@@ -39,7 +40,13 @@ export const AutosizeTextarea = forwardRef<HTMLTextAreaElement, AutosizeTextarea
 
         const scrollSnapshot = captureScrollSnapshot(node);
         const nextMinHeight = isFocused ? (focusedMinHeight ?? minHeight) : minHeight;
-        node.style.height = 'auto';
+        const value = String(props.value ?? '');
+        const previousValue = previousValueRef.current;
+        previousValueRef.current = value;
+
+
+        const canOnlyGrow = previousValue !== null && value !== previousValue && value.length >= previousValue.length;
+        if (!canOnlyGrow) node.style.height = 'auto';
         const nextHeight = Math.max(nextMinHeight, Math.min(node.scrollHeight, maxHeight));
         node.style.height = `${nextHeight}px`;
         node.style.overflowY = node.scrollHeight > maxHeight ? 'auto' : 'hidden';

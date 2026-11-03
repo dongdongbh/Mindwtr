@@ -6,7 +6,7 @@ export CI=1 EXPO_NO_TELEMETRY=1
 export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1
 
-# Match the Node major and Bun version used by the GitHub iOS release job.
+
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" != 22 ]; then
   brew install node@22
   export PATH="$(brew --prefix node@22)/bin:$PATH"
@@ -28,11 +28,10 @@ node scripts/ci/validate-ios-app-intents-availability.js
 cd apps/mobile
 npx --no-install expo prebuild --platform ios --non-interactive --no-install
 
-# A fresh clone contains only ci_scripts under ios/. Expo replaces that incomplete
-# project; restore the tracked entry point for subsequent actions and local use.
+
 git restore --source=HEAD --worktree -- ios/ci_scripts
 
-# Xcode's later build phases run in a separate shell and need the same Node path.
+
 printf 'export NODE_BINARY="%s"\nexport PATH="%s:$PATH"\n' \
   "$(command -v node)" "$(dirname "$(command -v node)")" > ios/.xcode.env.local
 

@@ -82,8 +82,7 @@ const {
   };
 });
 
-// Spies over core's real popup functions: the parse and the context scan run
-// inside core now, so the tests watch what the sheet hands them.
+
 const quickCaptureSpies = vi.hoisted(() => ({
   buildQuickCapturePreview: vi.fn(),
   getQuickCaptureContextChoices: vi.fn(),
@@ -91,7 +90,7 @@ const quickCaptureSpies = vi.hoisted(() => ({
 }));
 
 vi.mock('@mindwtr/core', async () => {
-  // The shared capture transaction is real; only its store actions are substituted.
+
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   quickCaptureSpies.buildQuickCapturePreview.mockImplementation(actual.buildQuickCapturePreview);
   quickCaptureSpies.getQuickCaptureContextChoices.mockImplementation(actual.getQuickCaptureContextChoices);
@@ -101,8 +100,8 @@ vi.mock('@mindwtr/core', async () => {
   );
   return {
   CaptureSessionCoordinator: sessionActual.CaptureSessionCoordinator,
-  // The popup's logic lives in core's quick-capture-model: real, so calls it
-  // makes inside core use real core (the mocks below reach only the sheet).
+
+
   applyQuickCaptureEdit: actual.applyQuickCaptureEdit,
   buildQuickCapturePreview: quickCaptureSpies.buildQuickCapturePreview,
   buildQuickCaptureRequest: actual.buildQuickCaptureRequest,
@@ -111,6 +110,7 @@ vi.mock('@mindwtr/core', async () => {
   getQuickCaptureBulkFailedNotice: actual.getQuickCaptureBulkFailedNotice,
   getQuickCaptureContextChoices: quickCaptureSpies.getQuickCaptureContextChoices,
   getQuickCaptureContextPicker: actual.getQuickCaptureContextPicker,
+  getSavedTaxonomyTokens: actual.getSavedTaxonomyTokens,
   getQuickCaptureLabels: actual.getQuickCaptureLabels,
   parseQuickCaptureContextQuery: actual.parseQuickCaptureContextQuery,
   planQuickCaptureSave: actual.planQuickCaptureSave,
@@ -330,7 +330,7 @@ const withPlatform = async (os: typeof Platform.OS, run: () => Promise<void>) =>
   }
 };
 
-/** How often the sheet scanned the store's tasks for context choices (resets pass no tasks). */
+
 const contextScans = () => quickCaptureSpies.getQuickCaptureContextChoices.mock.calls
   .filter(([tasks]) => tasks === selectStore.getState().tasks).length;
 
@@ -583,8 +583,7 @@ describe('QuickCaptureSheet save handling', () => {
       const blur = vi.fn();
       getBody().props.inputRef.current = { blur, focus };
 
-      // Ignore the baseline keyboard-inset listeners registered on mount; this
-      // test only cares about the keyboardDidHide gate the More toggle adds.
+
       hideListeners.length = 0;
       showListeners.length = 0;
 
@@ -593,17 +592,14 @@ describe('QuickCaptureSheet save handling', () => {
         await Promise.resolve();
       });
 
-      // The keyboard is dismissed, but the lift must stay on and the sheet must
-      // stay collapsed until the keyboard is actually gone. Dropping the lift now
-      // would slam the sheet behind the still-visible keyboard (the flicker).
+
       expect(keyboardDismiss).toHaveBeenCalledOnce();
       expect(blur).toHaveBeenCalledOnce();
       expect(hideListeners).toHaveLength(1);
       expect(getBody().props.optionsExpanded).toBe(false);
       expect(getBody().props.keyboardAvoidingEnabled).toBe(true);
 
-      // A premature timer must not expand the sheet on its own; only the keyboard
-      // hide event (or the far safety-net) may.
+
       await act(async () => {
         vi.advanceTimersByTime(160);
         await Promise.resolve();
@@ -611,7 +607,7 @@ describe('QuickCaptureSheet save handling', () => {
       expect(getBody().props.optionsExpanded).toBe(false);
       expect(getBody().props.keyboardAvoidingEnabled).toBe(true);
 
-      // Keyboard finished hiding: now expand and drop the lift together.
+
       await act(async () => {
         hideListeners.forEach((cb) => cb());
         await Promise.resolve();
@@ -669,8 +665,7 @@ describe('QuickCaptureSheet save handling', () => {
 
       getBody().props.inputRef.current = { blur: vi.fn(), focus: vi.fn() };
 
-      // Drop the baseline keyboard-inset listeners registered on mount so we can
-      // assert the More toggle adds only the refocus guard.
+
       addListener.mockClear();
 
       await act(async () => {
@@ -693,6 +688,7 @@ describe('QuickCaptureSheet save handling', () => {
     const deleted = { id: 'deleted', title: 'Deleted', status: 'next', contexts: ['@deleted-only'], tags: [], deletedAt: '2026-09-27T00:00:00.000Z' };
     selectStore.getState().tasks = [active, done] as never;
     selectStore.getState()._allTasks = [active, done, archived, bare, deleted] as never;
+    selectStore.getState().settings = { taxonomy: { contexts: [{ token: '@unused', rev: 1, revBy: 'test', updatedAt: '2026-10-20T00:00:00.000Z' }] } };
 
     let tree!: ReturnType<typeof create>;
     await act(async () => {
@@ -726,7 +722,7 @@ describe('QuickCaptureSheet save handling', () => {
     expect(contextScans()).toBe(1);
     const pickers = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetPickers')[0];
     if (!pickers) throw new Error('QuickCaptureSheetPickers not found');
-    expect(pickers.props.filteredContexts).toEqual(['@active-only', '@done-only']);
+    expect(pickers.props.filteredContexts).toEqual(['@active-only', '@done-only', '@unused']);
     expect(pickers.props.contextOptionsLoading).toBe(false);
     await act(async () => {
       pickers.props.onContextQueryChange('arch');
@@ -767,7 +763,7 @@ describe('QuickCaptureSheet save handling', () => {
       await Promise.resolve();
     });
 
-    // The strip is fed by the draft, live.
+
     expect(getBody().props.preview).toBeTruthy();
     expect(getBody().props.preview.props.entries).toContainEqual(
       expect.objectContaining({ kind: 'context', value: '@errands' }),
@@ -784,14 +780,14 @@ describe('QuickCaptureSheet save handling', () => {
     const saveCall = quickCaptureSpies.saveQuickCapture.mock.calls[0]?.[0];
     expect(saveCall).toBeDefined();
     expect(saveCall.text).toBe(previewCall[0]);
-    // Same options object, not a look-alike rebuilt at save time.
+
     expect(saveCall.context.parseOptions).toBe(previewCall[2].parseOptions);
     expect(addTask).toHaveBeenCalledWith('call mom', expect.objectContaining({ contexts: ['@errands'] }));
   });
 
   it('knows a multi-word context created earlier in the same capture burst', async () => {
-    // Real parsing: the point is which tokens the SECOND capture recognizes,
-    // which depends on the known-token bag being rebuilt between captures.
+
+
     addTask.mockImplementation(async (title: string, props: Record<string, unknown>) => {
       selectStore.getState().tasks.push({ id: `task-${title}`, title, ...props } as never);
       return { success: true, id: `task-${title}` };
@@ -828,8 +824,7 @@ describe('QuickCaptureSheet save handling', () => {
       contexts: ['@deep work'],
     }));
 
-    // Second capture of the burst: the sheet never closed, so only a refreshed
-    // bag can tokenize the unquoted form.
+
     await act(async () => {
       getBody().props.onValueChange('write notes @deep work');
       await Promise.resolve();
@@ -1715,11 +1710,7 @@ describe('QuickCaptureSheet save handling', () => {
     }));
   });
 
-  // The confirm is rendered inside the capture sheet's own modal. It used to go
-  // through Alert.alert, which on iOS stacked a second native presentation on
-  // the sheet and never became visible — a .txt import looked like it silently
-  // did nothing (#940). These tests pin the in-sheet confirm and that no Alert
-  // is raised from the sheet at all.
+
   const findBulkConfirm = (tree: ReturnType<typeof create>) => (
     tree.root.findAll((node) => (node.type as { name?: string })?.name === 'BulkQuickAddConfirm')[0]
   );
@@ -1902,7 +1893,7 @@ describe('QuickCaptureSheet save handling', () => {
         await Promise.resolve();
       });
 
-      // No delay, no Alert: the confirm is already on screen inside the sheet.
+
       expect(alertSpy).not.toHaveBeenCalled();
       expect(findBulkConfirm(tree)?.props.title).toBe('Create 2 tasks?');
     });
@@ -2380,8 +2371,7 @@ describe('QuickCaptureSheet save handling', () => {
       await Promise.resolve();
     });
 
-    // Same merge as the full capture screen: neither note is dropped, the typed
-    // field leads.
+
     expect(addTask).toHaveBeenCalledWith('Renew passport', expect.objectContaining({
       description: 'typed in the field\nfrom the token',
     }));

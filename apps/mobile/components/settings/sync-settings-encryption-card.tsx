@@ -34,25 +34,21 @@ import { styles } from './settings.styles';
 type Translate = (key: string) => string;
 
 export type SyncEncryptionCardProps = {
-    /** Supplies the attachment worklist; phase 2 leaves attachments plaintext without it. */
+
     appData: AppData;
     t: Translate;
     tc: ThemeColors;
     language?: Language;
-    /** True while a sync/test/save transport action runs. On its falling edge the card
-     *  re-reads the encryption state: activating a folder that already holds ciphertext
-     *  persists 'remote-encrypted-no-key' during the probe, and the card must flip from
-     *  "set a new passphrase" to "enter the existing passphrase" without the user first
-     *  failing an enable (#1001). */
+
+
     transportBusy?: boolean;
 };
 
-// The card's rules live in core (sync-encryption-card.ts) so the native app runs them too;
-// this component binds them to the sync encryption service and draws the card.
+
 export function SyncEncryptionCard({ appData, t, tc, language, transportBusy = false }: SyncEncryptionCardProps) {
     const appDataRef = useRef(appData);
     appDataRef.current = appData;
-    // One controller per card, created on first use.
+
     const [card] = useState(() => createSyncEncryptionCard({
         getStatus: () => getSyncEncryptionStatus(),
         isBackendPending: () => isSyncEncryptionBackendPending(),
@@ -86,7 +82,7 @@ export function SyncEncryptionCard({ appData, t, tc, language, transportBusy = f
 
     useEffect(() => card.refresh(), [card]);
 
-    // Falling-edge refresh: see the transportBusy prop comment.
+
     const previousTransportBusy = React.useRef(transportBusy);
     useEffect(() => {
         const wasBusy = previousTransportBusy.current;
@@ -189,9 +185,7 @@ export function SyncEncryptionCard({ appData, t, tc, language, transportBusy = f
         </TouchableOpacity>
     );
 
-    // Rendered next to the fields it is about, not at the end of the card. Appended after
-    // the action rows it landed below the fold on a phone — a wrong passphrase then looked
-    // exactly like no answer at all, which is what the Dropbox device test saw.
+
     const errorBlock = errorMessage
         ? (
             <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
@@ -233,7 +227,7 @@ export function SyncEncryptionCard({ appData, t, tc, language, transportBusy = f
                 testID="sync-encryption-guide-link"
             />
             <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
-                {/* Partly encrypted here: nothing syncs or turns on until the location is whole again. */}
+                {                                                                                         }
                 {state === 'off' && partlyEncrypted && (
                     <>
                         <View style={styles.settingRowColumn}>
@@ -310,8 +304,8 @@ export function SyncEncryptionCard({ appData, t, tc, language, transportBusy = f
                         </View>
                         {flow === 'none' && (
                             <>
-                                {/* Changing the passphrase would run against a location that no
-                                    longer holds ciphertext — disabling here is the only remedy. */}
+                                {
+                                                                                                     }
                                 {state === 'enabled' && renderAction(t('settings.syncEncryptionChange'), () => openFlow('change'))}
                                 {renderAction(t('settings.syncEncryptionDisable'), () => openFlow('disable'))}
                             </>
@@ -385,7 +379,7 @@ export function SyncEncryptionCard({ appData, t, tc, language, transportBusy = f
                     </>
                 )}
 
-                {/* "Abandon setup": an unfinished change this device cannot finish is dropped here only. */}
+                {                                                                                           }
                 {flow === 'abandon' && (
                     <>
                         <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
@@ -413,8 +407,8 @@ export function SyncEncryptionCard({ appData, t, tc, language, transportBusy = f
                         </Text>
                     </View>
                 )}
-                {/* Errors raised outside a flow (an incomplete transition found by the
-                    status read) have no field to sit next to. */}
+                {
+                                                                 }
                 {flow === 'none' && errorBlock}
                 {flow !== 'abandon' && incompleteTransition
                     && renderAction(t('settings.syncEncryptionAbandon'), () => openFlow('abandon'))}

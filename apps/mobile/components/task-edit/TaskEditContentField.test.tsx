@@ -1,11 +1,12 @@
 import React from 'react';
-import { Platform, Text, TextInput, View } from 'react-native';
+import { Platform, Switch, Text, TextInput, View } from 'react-native';
 import { act, create as createRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useTaskStore } from '@mindwtr/core';
 
 import { TaskEditContentField } from './TaskEditContentField';
+import { ChecklistDragScrollContext } from './use-checklist-handle-drag';
 
 const renderedTrees: ReturnType<typeof createRenderer>[] = [];
 const create = (...args: Parameters<typeof createRenderer>) => {
@@ -262,6 +263,36 @@ const createChecklistState = (checklist = [{ id: 'check-1', title: 'Item 1', isC
 };
 
 describe('TaskEditContentField', () => {
+  it('lets the user remove a missing file the sync location could not find', () => {
+
+    const removeAttachment = vi.fn();
+    const missing = { id: 'gone', kind: 'file' as const, title: 'scan.pdf', uri: '', cloudKey: 'attachments/gone.pdf',
+      localStatus: 'missing' as const, createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z' };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TaskEditContentField {...baseProps} fieldId="attachments" visibleAttachments={[missing]} removeAttachment={removeAttachment} />);
+    });
+    const remove = tree.root.findAll((node) => node.props.accessibilityLabel === 'attachments.remove' && typeof node.props.onPress === 'function')[0]!;
+    act(() => remove.props.onPress());
+    expect(removeAttachment).toHaveBeenCalledWith('gone');
+  });
+
+  it('edits the recurring checklist policy without changing current items', () => {
+    const setDraftField = vi.fn();
+    const checklist = [{ id: 'a', title: 'First', isCompleted: true }];
+    const props = { ...baseProps, fieldId: 'checklist' as const, checklist, setDraftField,
+      draft: { recurrence: 'weekly', preserveChecklistOnRepeat: false, status: 'next' }, task: { taskMode: 'task' } };
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<TaskEditContentField {...props} />); });
+    const toggle = tree.root.findByType(Switch);
+    expect(toggle.props.value).toBe(true);
+    act(() => toggle.props.onValueChange(false));
+    expect(setDraftField).toHaveBeenCalledWith('preserveChecklistOnRepeat', true);
+    expect(checklist[0].isCompleted).toBe(true);
+    act(() => tree.update(<TaskEditContentField {...props} task={{ taskMode: 'list' } as any} />));
+    expect(tree.root.findAllByType(Switch)).toHaveLength(0);
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     logInfoMock.mockReset();
@@ -270,7 +301,7 @@ describe('TaskEditContentField', () => {
 
   afterEach(() => {
     try {
-      // Flush delayed caret restoration before Vitest closes the worker console RPC.
+
       act(() => {
         vi.runOnlyPendingTimers();
         for (const tree of renderedTrees.splice(0)) tree.unmount();
@@ -301,7 +332,7 @@ describe('TaskEditContentField', () => {
       accessibilityRole: 'checkbox',
     });
     const checkboxVisual = checkbox.findByType(View);
-    // A vector check, not a "✓" text glyph: text glyphs depend on the device font.
+
     const checkmark = checkbox.findByType('Icon' as never);
 
     expect(checkbox.props.accessibilityState).toEqual({ checked: true });
@@ -309,7 +340,20 @@ describe('TaskEditContentField', () => {
     expect(checkmark.props.color).toBe(baseProps.tc.onTint);
   });
 
-  it('edits a draft Reference checklist as a plain list without changing completion state', () => {
+  it('adds the first item to an empty Reference checklist (#1416)', () => {
+    const applyChecklistUpdate = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TaskEditContentField {...baseProps} draft={{ status: 'reference' }}
+        checklist={[]} fieldId="checklist" applyChecklistUpdate={applyChecklistUpdate} />);
+    });
+    act(() => {
+      tree.root.findByProps({ testID: 'mobile-checklist-add-item' }).props.onPress();
+    });
+    expect(applyChecklistUpdate).toHaveBeenCalledWith([{ id: expect.any(String), title: '', isCompleted: false }]);
+  });
+
+  it('gives a draft Reference list checkboxes that tick an entry, struck when checked, with Reset (#1416)', () => {
     const checklist = [
       { id: 'check-1', title: 'Completed **source**', isCompleted: true },
       { id: 'check-2', title: '[Pending link](https://example.com)', isCompleted: false },
@@ -331,28 +375,28 @@ describe('TaskEditContentField', () => {
     });
 
     expect(tree.root.findAllByProps({ children: 'taskEdit.tab.list' })).not.toHaveLength(0);
-    expect(tree.root.findAll((node) => node.props.accessibilityRole === 'checkbox')).toHaveLength(0);
-    expect(tree.root.findAll((node) => node.props.accessibilityState?.checked !== undefined)).toHaveLength(0);
-    expect(tree.root.findAllByType(Text).filter((node) => node.props.children === '•')).toHaveLength(2);
-    expect(tree.root.findAllByProps({ children: 'taskEdit.resetChecklist' })).toHaveLength(0);
-    expect(tree.root.findByProps({ testID: 'mobile-checklist-add-item' })).toBeTruthy();
-    expect(tree.root.findByProps({ testID: 'mobile-checklist-order-toggle' })).toBeTruthy();
+    const boxes = tree.root.findAll((node) => node.props.accessibilityRole === 'checkbox' && typeof node.type !== 'string');
+    expect(boxes.map((node) => [node.props.accessibilityLabel, node.props.accessibilityState])).toEqual([
+      ['Completed **source**', { checked: true }],
+      ['[Pending link](https://example.com)', { checked: false }],
+    ]);
+    expect(tree.root.findAllByType(Text).filter((node) => node.props.children === '•')).toHaveLength(0);
+    expect(tree.root.findAllByProps({ children: 'taskEdit.resetChecklist' })).not.toHaveLength(0);
 
     const completedInput = tree.root.findByProps({ accessibilityLabel: 'taskEdit.tab.list 1' });
-    expect(flattenStyle(completedInput.props.style).color).toBe(baseProps.tc.text);
-    expect(flattenStyle(completedInput.props.style).textDecorationLine).toBeUndefined();
+    expect(flattenStyle(completedInput.props.style).color).toBe(baseProps.tc.secondaryText);
 
     act(() => {
-      completedInput.props.onChangeText('Edited **source**');
+      boxes[1].props.onPress();
     });
 
     expect(applyChecklistUpdate).toHaveBeenCalledWith([
-      { id: 'check-1', title: 'Edited **source**', isCompleted: true },
-      checklist[1],
+      checklist[0],
+      { ...checklist[1], isCompleted: true },
     ]);
   });
 
-  it('strips pasted checkbox markers in Reference without importing completion state', () => {
+  it('keeps pasted checked markers checked in Reference, as in a checklist (#1416)', () => {
     let checklist = [
       { id: 'check-1', title: 'Replace me', isCompleted: false },
       { id: 'check-2', title: 'Existing completed item', isCompleted: true },
@@ -386,7 +430,7 @@ describe('TaskEditContentField', () => {
       'Imported open marker',
       'Existing completed item',
     ]);
-    expect(checklist.map((item) => item.isCompleted)).toEqual([false, false, true]);
+    expect(checklist.map((item) => item.isCompleted)).toEqual([true, false, true]);
     expect(checklist[0].id).toBe('check-1');
     expect(checklist[2].id).toBe('check-2');
 
@@ -397,7 +441,7 @@ describe('TaskEditContentField', () => {
     expect(tree.root.findByProps({
       accessibilityLabel: 'Imported checked marker',
       accessibilityRole: 'checkbox',
-    }).props.accessibilityState).toEqual({ checked: false });
+    }).props.accessibilityState).toEqual({ checked: true });
     expect(tree.root.findByProps({
       accessibilityLabel: 'Imported open marker',
       accessibilityRole: 'checkbox',
@@ -793,6 +837,46 @@ describe('TaskEditContentField', () => {
     });
 
     expect(getState().checklist[0].title).toBe('(');
+  });
+
+  it.each(['()', '[]', '``'])('deletes an empty checklist %s pair after stale native echoes', (pair) => {
+    withPlatform('android', () => {
+      for (const prefix of ['', 'note ']) {
+        const { getState, applyChecklistUpdate } = createChecklistState([
+          { id: 'check-1', title: prefix, isCompleted: false },
+        ]);
+        let tree!: ReturnType<typeof create>;
+        const render = () => (
+          <TaskEditContentField {...baseProps} fieldId="checklist"
+            checklist={getState().checklist} applyChecklistUpdate={applyChecklistUpdate} />
+        );
+        act(() => { tree = create(render()); });
+        const input = () => tree.root.findByProps({ accessibilityLabel: 'taskEdit.checklist 1' });
+        const rawInsertion = prefix + pair[0];
+        act(() => { input().props.onChangeText(rawInsertion); });
+        act(() => { tree.update(render()); });
+        expect(input().props.value).toBe(prefix + pair);
+        act(() => { input().props.onChangeText(rawInsertion); });
+        act(() => { input().props.onChangeText(rawInsertion); });
+        expect(getState().checklist[0].title).toBe(prefix + pair);
+
+        const preventDefault = vi.fn();
+        act(() => {
+          input().props.onKeyPress?.({ nativeEvent: { key: 'Backspace' }, preventDefault });
+          input().props.onChangeText(rawInsertion);
+        });
+        act(() => { tree.update(render()); });
+        expect(input().props.value).toBe(rawInsertion);
+        act(() => {
+          input().props.onKeyPress?.({ nativeEvent: { key: 'Backspace' }, preventDefault });
+          input().props.onChangeText(prefix);
+        });
+        act(() => { tree.update(render()); });
+        expect(input().props.value).toBe(prefix);
+        expect(preventDefault).not.toHaveBeenCalled();
+        act(() => { tree.unmount(); });
+      }
+    });
   });
 
   it('keeps Android checklist cursor inside a collapsed pair and ignores duplicate native insertion', () => {
@@ -1268,7 +1352,7 @@ describe('TaskEditContentField', () => {
     });
     expect(baseProps.setShowDescriptionPreview).toHaveBeenCalledTimes(1);
 
-    // In preview mode the same control reads as Edit and shows a pencil.
+
     let previewTree!: ReturnType<typeof create>;
     act(() => {
       previewTree = create(
@@ -1336,4 +1420,97 @@ describe('TaskEditContentField', () => {
     });
     expect(removeAttachment).toHaveBeenCalledWith('a-1');
   });
+});
+
+
+describe('checklist handle reordering', () => {
+  afterEach(() => {
+    act(() => { for (const tree of renderedTrees.splice(0)) tree.unmount(); });
+    vi.unstubAllGlobals();
+  });
+  it('moves the selected duplicate row and preserves the mounted input and unsaved text', () => {
+    let saved: { id: string; title: string; isCompleted: boolean }[] = [];
+    function Harness() {
+      const [items, setItems] = React.useState([
+        { id: 'duplicate', title: 'First', isCompleted: false },
+        { id: 'duplicate', title: 'Second', isCompleted: true },
+        { id: 'last', title: 'Last', isCompleted: false },
+      ]);
+      saved = items;
+      return <TaskEditContentField {...baseProps} fieldId="checklist" checklist={items} applyChecklistUpdate={setItems} />;
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness />); });
+    const second = tree.root.findAllByType(TextInput)[1];
+    act(() => second.props.onChangeText('Unsaved text'));
+    const handle = tree.root.findByProps({ testID: 'mobile-checklist-drag-checklist-row-2' });
+    act(() => handle.props.onAccessibilityAction({ nativeEvent: { actionName: 'activate' } }));
+    const toTop = tree.root.findAll((node) => node.props.onPress && node.findAllByType(Text).some((text) => text.props.children === 'taskEdit.moveChecklistTop'))[0];
+    act(() => toTop.props.onPress());
+    expect(saved.map((row) => [row.id, row.title, row.isCompleted])).toEqual([
+      ['duplicate', 'Unsaved text', true], ['duplicate', 'First', false], ['last', 'Last', false],
+    ]);
+    expect(tree.root.findAllByType(TextInput)[0]).toBe(second);
+  });
+
+  it('commits a handle drag once on drop and leaves the draft unchanged on cancellation', () => {
+    const frames = installAnimationFrameHarness();
+    let saved: { id: string; title: string; isCompleted: boolean }[] = [];
+    const changed = vi.fn();
+    let scrollOffset = 0;
+    const scroll = {
+      begin: vi.fn(), end: vi.fn(), offset: () => scrollOffset,
+      viewport: () => ({ top: 100, bottom: 400 }),
+      scrollBy: vi.fn((delta: number) => { scrollOffset += delta; }),
+    };
+    function Harness() {
+      const [items, setItems] = React.useState(Array.from({ length: 30 }, (_, index) => ({ id: String(index), title: `Row ${index}`, isCompleted: index === 0 })));
+      saved = items;
+      return <ChecklistDragScrollContext.Provider value={scroll}>
+        <TaskEditContentField {...baseProps} fieldId="checklist" checklist={items}
+          applyChecklistUpdate={(next: typeof items) => { changed(next); setItems(next); }} />
+      </ChecklistDragScrollContext.Provider>;
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness />, { createNodeMock: () => ({ measureInWindow: (callback: (x: number, y: number) => void) => callback(0, 100), blur: vi.fn() }) }); });
+    const layoutRows = () => tree.root.findAll((node) => node.type === View && String(node.props.testID ?? '').startsWith('mobile-checklist-row-'))
+      .forEach((row, index) => row.props.onLayout({ nativeEvent: { layout: { y: index * 50, height: 50 } } }));
+    act(layoutRows);
+    const handle = tree.root.findByProps({ testID: 'mobile-checklist-drag-checklist-row-1' });
+    act(() => handle.props.onResponderGrant({ nativeEvent: { pageY: 125 } }));
+    act(() => { handle.props.onResponderMove({ nativeEvent: { pageY: 1525 } }); frames.runNext(); });
+    expect(changed).not.toHaveBeenCalled();
+    expect(scroll.begin).toHaveBeenCalled();
+    expect(scroll.scrollBy).toHaveBeenCalledWith(expect.any(Number));
+    expect(scrollOffset).toBeGreaterThan(0);
+    act(() => handle.props.onResponderTerminate());
+    expect(scroll.end).toHaveBeenCalled();
+    const scrollCalls = scroll.scrollBy.mock.calls.length;
+    act(() => frames.runAll());
+    expect(scroll.scrollBy).toHaveBeenCalledTimes(scrollCalls);
+    expect(saved[0].title).toBe('Row 0');
+    act(() => handle.props.onResponderGrant({ nativeEvent: { pageY: 125 } }));
+    act(() => { handle.props.onResponderMove({ nativeEvent: { pageY: 1525 } }); frames.runNext(); });
+    act(() => handle.props.onResponderRelease());
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(saved[28]).toEqual({ id: '0', title: 'Row 0', isCompleted: true });
+  });
+  it('cancels the active drag when a different task reuses the editor', () => {
+    installAnimationFrameHarness();
+    const changed = vi.fn();
+    const checklist = [{ id: 'a', title: 'A', isCompleted: false }, { id: 'b', title: 'B', isCompleted: false }];
+    let tree!: ReturnType<typeof create>;
+    const content = (id: string) => <TaskEditContentField {...baseProps} fieldId="checklist" task={{ ...baseProps.task, id }} checklist={checklist} applyChecklistUpdate={changed} />;
+    act(() => { tree = create(content('first'), { createNodeMock: () => ({ measureInWindow: (callback: (x: number, y: number) => void) => callback(0, 0), blur: vi.fn() }) }); });
+    const rows = tree.root.findAll((node) => node.type === View && String(node.props.testID ?? '').startsWith('mobile-checklist-row-'));
+    act(() => rows.forEach((row, index) => row.props.onLayout({ nativeEvent: { layout: { y: index * 50, height: 50 } } })));
+    const first = tree.root.findByProps({ testID: 'mobile-checklist-drag-first-row-1' });
+    act(() => first.props.onResponderGrant({ nativeEvent: { pageY: 25 } }));
+    act(() => first.props.onResponderMove({ nativeEvent: { pageY: 75 } }));
+    act(() => tree.update(content('second')));
+    const second = tree.root.findByProps({ testID: 'mobile-checklist-drag-second-row-1' });
+    act(() => second.props.onResponderRelease());
+    expect(changed).not.toHaveBeenCalled();
+  });
+
 });

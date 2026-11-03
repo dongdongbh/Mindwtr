@@ -968,7 +968,7 @@ final class EditorDraftRecoveryHostTests: XCTestCase {
         var pending = try object(String(contentsOf: journal))
         XCTAssertNil(pending["terminal"])
         var tampered = try XCTUnwrap(pending["editorDraft"] as? [String: Any])
-        tampered["generation"] = 2 // Internally well formed, but different from the frozen attempt.
+        tampered["generation"] = 2
         pending["editorDraft"] = tampered
         let changed = try json(pending)
         try Data(changed.utf8).write(to: journal)

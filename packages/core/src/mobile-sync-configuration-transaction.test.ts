@@ -33,7 +33,7 @@ const CONFIG_KEYS = [
     CLOUD_URL_KEY,
     CLOUD_ALLOW_INSECURE_HTTP_KEY,
 ];
-/** One protocol read: the whole persisted configuration plus both secrets. */
+
 const READ_CONFIG = [
     `read:${CONFIG_KEYS.join(',')}`,
     `read-secret:${WEBDAV_PASSWORD_KEY}`,
@@ -201,10 +201,7 @@ describe('commitProvenMobileSyncConfiguration', () => {
         );
     });
 
-    // Desktop verifies its whole persisted configuration after disabling the
-    // backend, so a disable that perturbs a transport aborts before any
-    // credential is written. Mobile proves the same over the snapshot's own key
-    // footprint.
+
     it('aborts before writing the candidate when disabling sync perturbs a transport', async () => {
         const harness = createHarness({
             [SYNC_BACKEND_KEY]: 'webdav',
@@ -234,11 +231,7 @@ describe('commitProvenMobileSyncConfiguration', () => {
             },
         }, harness.dependencies)).rejects.toThrow(/Disabling sync changed the persisted transport configuration/);
 
-        // Asserting the stored values alone would also pass if rollback had
-        // rewritten every slot, so pin the scoping directly: the candidate's
-        // secret never reaches the store, and the untouched cloud bundle is never
-        // written. The webdav secret IS rewritten — the perturbed url marks that
-        // whole bundle touched — but only ever with the prior value.
+
         expect(harness.events.some((event) => event.includes(':new-password'))).toBe(false);
         expect(harness.events).toContain(`set-secret:${WEBDAV_PASSWORD_KEY}:old-password`);
         expect(harness.events).not.toContain(CLOUD_WRITE);
@@ -248,9 +241,7 @@ describe('commitProvenMobileSyncConfiguration', () => {
         expect(harness.storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
     });
 
-    // #1043: a prior secret can become unreadable while its endpoint stays
-    // configured. Re-entering it must work, which it only does because the
-    // tolerant read makes the unreadable prior opaque rather than absent.
+
     it('commits a re-entered password over an unreadable prior secret', async () => {
         const harness = createHarness({
             [SYNC_BACKEND_KEY]: 'webdav',
@@ -287,9 +278,7 @@ describe('commitProvenMobileSyncConfiguration', () => {
         expect(harness.storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
     });
 
-    // Settings restore keys off the literal 'cloudkit' in the provider slot
-    // (use-sync-settings-transport-actions.ts), which the canonical
-    // 'dropbox' | 'selfhosted' union cannot express.
+
     it.each<{ label: string; stored: Record<string, string> }>([
         { label: 'over a Dropbox provider', stored: { [CLOUD_PROVIDER_KEY]: 'dropbox' } },
         { label: 'on a fresh install', stored: {} },
@@ -340,23 +329,18 @@ describe('commitProvenMobileSyncConfiguration', () => {
     });
 });
 
-// Characterization goldens for the sync-configuration commit protocol, matching
-// the desktop golden scenario matrix step for step so the two platforms'
-// protocols can be compared directly. Treat a change here as a protocol change,
-// not a test update.
+
 describe('mobile commit protocol goldens', () => {
     type GoldenFailure = {
-        /** Throw on the candidate's transport write (before it is verified). */
+
         transportWrite?: boolean;
-        /** Throw when the backend key is set to this value. */
+
         activation?: string;
-        /** Throw on the transport write inside the restore path. */
+
         transportRestore?: boolean;
     };
 
-    // Decorates the shared harness so reads are recorded too — desktop's golden
-    // records every verification read, and the verify steps are the part of the
-    // protocol being compared.
+
     const goldenHarness = (
         initialStorage: Record<string, string>,
         initialSecrets: Record<string, string> = {},

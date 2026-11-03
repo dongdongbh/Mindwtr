@@ -33,6 +33,25 @@ import {
 } from './date';
 
 describe('date utils', () => {
+    it.each(['system', 'ymd'])('falls back to the app language for invalid system locales with %s dates', (dateFormat) => {
+        for (const systemLocale of ['C', 'C.UTF-8', 'en_US.UTF-8', '@invalid']) {
+            const locale = resolveDateLocaleTag({ language: 'de', dateFormat, systemLocale });
+            expect(locale).toBe('de-DE');
+            expect(() => new Intl.DateTimeFormat(locale).format(new Date(2026, 3, 19))).not.toThrow();
+        }
+    });
+
+    it('validates locales when the host has DateTimeFormat without getCanonicalLocales', () => {
+        const canonicalLocales = Intl.getCanonicalLocales;
+        Object.defineProperty(Intl, 'getCanonicalLocales', { value: undefined, configurable: true, writable: true });
+        try {
+            expect(resolveDateLocaleTag({ language: 'en', systemLocale: 'C' })).toBe('en-US');
+            expect(resolveDateLocaleTag({ language: 'en', systemLocale: 'de_DE-u-hc-h23' })).toBe('de-DE-u-hc-h23');
+        } finally {
+            Object.defineProperty(Intl, 'getCanonicalLocales', { value: canonicalLocales });
+        }
+    });
+
     it('parses date-only strings as local dates', () => {
         const parsed = safeParseDate('2025-01-02');
         expect(parsed).not.toBeNull();
@@ -53,9 +72,7 @@ describe('date utils', () => {
         expect(parsed.getMinutes()).toBe(4);
     });
 
-    // #766: full ISO instants take a Date.parse fast path instead of parseISO.
-    // It has to agree with parseISO exactly — including on the shapes it must
-    // decline and hand back to the general path.
+
     it.each([
         '2025-01-02T03:04:05.678Z',
         '2025-01-02T03:04:05Z',
@@ -80,8 +97,7 @@ describe('date utils', () => {
         expect(parsed?.getTime()).toBe(reference.getTime());
     });
 
-    // The instant fast path already rejects these; the date-only/local branch used
-    // to let `new Date(y, m, d)` roll them into the next month instead.
+
     it.each([
         '2024-02-31',
         '2025-02-29',
@@ -135,11 +151,7 @@ describe('date utils', () => {
         })).toBe('fa-IR-u-ca-persian');
     });
 
-    // add-persian-20260730-14: pins that selecting Persian as the APP LANGUAGE
-    // (not just an already-Persian system locale) flows through to Jalali date
-    // resolution. System locale is deliberately English here so this fails if
-    // 'fa' language support were ever dropped from isPersianLocaleTag/date
-    // locale resolution while system-locale-driven detection kept working.
+
     it('flows the Persian app language into Jalali date-locale resolution', () => {
         expect(canUseJalaliCalendar({ language: 'fa', systemLocale: 'en-US' })).toBe(true);
         expect(resolveCalendarSystemSetting('jalali', { language: 'fa', systemLocale: 'en-US' })).toBe('jalali');
@@ -161,7 +173,7 @@ describe('date utils', () => {
         expect(normalizeWeekStartSetting('monday')).toBe('monday');
         expect(normalizeWeekStartSetting('saturday')).toBe('saturday');
         expect(normalizeWeekStartSetting('sunday')).toBe('sunday');
-        // Absent, 'system', and invalid values follow the device locale.
+
         expect(normalizeWeekStartSetting('friday')).toBe(getSystemWeekStart());
         expect(normalizeWeekStartSetting('system')).toBe(getSystemWeekStart());
         expect(normalizeWeekStartSetting(undefined)).toBe(getSystemWeekStart());
@@ -185,7 +197,7 @@ describe('date utils', () => {
         expect(getSystemWeekStart('pt-BR')).toBe('sunday');
         expect(getSystemWeekStart('ar-EG')).toBe('saturday');
         expect(getSystemWeekStart('fa-IR')).toBe('saturday');
-        // No region and no week info still lands on a sane default.
+
         expect(['monday', 'sunday', 'saturday']).toContain(getSystemWeekStart('en'));
     });
 
@@ -218,9 +230,7 @@ describe('date utils', () => {
         ]).toEqual([tag, tag, tag]);
     });
 
-    // One rule for "does this locale write the day first", so a headless caller
-    // (the widget payload, built with no app configured) cannot disagree with
-    // the app. Note en-ZA: this repo calls it day-first, CLDR does not.
+
     it('answers day-first for a locale tag without any configured state', () => {
         expect(isLocaleDateDayFirst('en-GB')).toBe(true);
         expect(isLocaleDateDayFirst('en-ZA')).toBe(true);
@@ -319,21 +329,15 @@ describe('date utils', () => {
         configureDateFormatting({ language: 'en', dateFormat: 'system', timeFormat: 'system', systemLocale: 'en-US' });
     });
 
-    // Portuguese resolves to BRAZILIAN conventions in both formatting paths:
-    // DATE_LOCALE_BY_LANGUAGE gives date-fns `ptBR`, LOCALE_TAG_BY_LANGUAGE gives Intl
-    // `pt-BR`. That is a deliberate product choice, not an oversight to "fix" back to
-    // pt-PT — the two paths render into the same screens, so they must agree, and
-    // Brazilian serves by far the larger share of Portuguese speakers.
+
     it('keeps Portuguese on Brazilian conventions in both formatting paths', () => {
         expect(resolveDateLocaleTag({ language: 'pt', dateFormat: 'dmy' })).toBe('pt-BR');
 
         configureDateFormatting({ language: 'pt', dateFormat: 'dmy', timeFormat: 'system' });
-        // ptBR: "8 ago 2026". European pt would be "8 de ago. de 2026".
+
         expect(safeFormatDate('2026-08-08', 'PP')).toBe('8 ago 2026');
-        // ptBR drops the accent European Portuguese keeps. This pins the locale's
-        // identity, not a rendered string: the app formats weekdays with 'EEEE'
-        // (full name, accented in both) and takes short labels from CLDR, so
-        // 'EEEEEE' never reaches a screen.
+
+
         expect(safeFormatDate('2026-08-08', 'EEEEEE')).toBe('sab');
 
         configureDateFormatting({ language: 'en', dateFormat: 'system', timeFormat: 'system', systemLocale: 'en-US' });
@@ -394,9 +398,8 @@ describe('date utils', () => {
 });
 
 describe('getShortWeekdayLabels (#929)', () => {
-    // Guard the environment first: if this fails, the test runner's ICU
-    // lacks locale data and every expectation below would silently degrade
-    // rather than genuinely pass.
+
+
     it('is byte-identical to today for English', () => {
         expect(getShortWeekdayLabels('en-US')).toEqual(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
     });
@@ -404,7 +407,7 @@ describe('getShortWeekdayLabels (#929)', () => {
     it('starts on Sunday after the time zone changes (no load-time anchor date)', () => {
         const originalTz = process.env.TZ;
         try {
-            // Fresh locales, so the per-locale cache cannot answer from an earlier zone.
+
             for (const [zone, locale] of [['Pacific/Kiritimati', 'en-AU'], ['Pacific/Pago_Pago', 'en-NZ']]) {
                 process.env.TZ = zone;
                 expect(getShortWeekdayLabels(locale)[0]).toBe('Sun');
@@ -417,15 +420,15 @@ describe('getShortWeekdayLabels (#929)', () => {
 
     it('returns Sunday at index 0', () => {
         const labels = getShortWeekdayLabels('en-US');
-        const sunday = new Date(2023, 0, 1); // Jan 1, 2023 was a Sunday
+        const sunday = new Date(2023, 0, 1);
         expect(sunday.getDay()).toBe(0);
         expect(labels[sunday.getDay()]).toBe('Sun');
     });
 
     it.each([
-        ['pt-PT', ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']], // full words truncate to three
-        ['pt-BR', ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']], // already short, just loses the period
-        ['fr-FR', ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']], // trailing periods stripped
+        ['pt-PT', ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']],
+        ['pt-BR', ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']],
+        ['fr-FR', ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']],
         ['pl', ['nie', 'pon', 'wt', 'śr', 'czw', 'pt', 'sob']],
         ['hi', ['रवि', 'सोम', 'मंग', 'बुध', 'गुर', 'शुक', 'शनि']],
     ])('truncates %s to three graphemes without collisions', (locale, expected) => {
@@ -445,7 +448,7 @@ describe('host system locale for week start', () => {
     afterEach(() => setHostSystemLocale(null));
 
     it('uses the locale a native host passed when the runtime gives none', () => {
-        // A native host (QuickJS) has no Intl locale; core must use the device locale the host sent.
+
         setHostSystemLocale('de-DE');
         expect(getSystemWeekStart()).toBe('monday');
         setHostSystemLocale('en-US');

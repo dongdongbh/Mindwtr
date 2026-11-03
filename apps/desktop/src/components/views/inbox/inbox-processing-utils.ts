@@ -1,13 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { normalizeClockTimeInput, type Area, type Person, type Project, type TimeEstimate } from '@mindwtr/core';
+import { normalizeClockTimeInput, type Area, type Person, type Project, type Section, type TimeEstimate } from '@mindwtr/core';
 import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 
-/**
- * Put the caret in the processing title as each capture opens, so a
- * keyboard-first pass can type `@phone !Work /due:tomorrow` without reaching
- * for the mouse (#1088). The caret lands at the end rather than selecting the
- * text: the first keystroke has to refine the captured thought, never wipe it.
- */
+
 export function useProcessingTitleFocus(taskId?: string, step?: string) {
     const ref = useRef<HTMLInputElement | null>(null);
     useEffect(() => {
@@ -20,7 +15,7 @@ export function useProcessingTitleFocus(taskId?: string, step?: string) {
     return ref;
 }
 
-/** The delegate's email, taken from their saved mailto: reference link ('' when unknown). */
+
 export const resolveDelegateEmail = (people: readonly Person[], who: string): string => {
     const name = who.trim().toLowerCase();
     if (!name) return '';
@@ -43,8 +38,7 @@ export const parseTokenListInput = (value: string, prefix: '@' | '#'): string[] 
 
 export const formatTokenListInput = (tokens: string[]): string => tokens.join(', ');
 
-/** Contexts and tags live in the draft as the raw input text; every reader
- *  parses them the same way so a prefix can never drift between surfaces. */
+
 export const parseContextsInput = (value: string): string[] => parseTokenListInput(value, '@');
 export const parseTagsInput = (value: string): string[] => parseTokenListInput(value, '#');
 
@@ -87,10 +81,7 @@ export const buildDateTimeUpdate = (
     return joinDateTime(date, resolvedTime);
 };
 
-/**
- * Which fields the processing panels render. Derived once from the task-editor
- * layout settings so the wizard and the quick panel cannot disagree.
- */
+
 export type InboxProcessingVisibility = {
     showProjectField: boolean;
     showAreaField: boolean;
@@ -104,9 +95,11 @@ export type InboxProcessingVisibility = {
     showReferenceOption: boolean;
 };
 
-/** The lists both panels choose values from. */
+
 export type InboxProcessingOptionLists = {
     projects: Project[];
+
+    sections: Section[];
     areas: Area[];
     allContexts: string[];
     allTags: string[];

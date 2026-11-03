@@ -32,7 +32,7 @@ export function MobileWorkspaceBootGate({ children }: { children: React.ReactNod
             setupGlobalErrorLogging({ crashMetadata: readCrashMetadata() });
             void recoverRetainedFatalCrash().catch(() => false);
         } catch {
-            // Crash capture is an optional capability and must not block workspace startup.
+
         }
         let cancelled = false;
         void initializeMobileWorkspace()

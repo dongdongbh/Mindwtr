@@ -1,6 +1,7 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import { useEffect, useMemo, useState } from 'react';
 import type { Project, Section, Task, TaskDraftSetter, Area } from '@mindwtr/core';
-import { getFrequentTaskTokens, getPersonOptionNames, getRetainedTaskContexts, getUsedTaskTokens, useTaskStore,
+import { getFrequentTaskTokens, getPersonOptionNames, getRetainedTaskContexts, getSavedTaxonomyTokens, getUsedTaskTokens, useTaskStore,
     baseTextCollator,
 } from '@mindwtr/core';
 
@@ -74,11 +75,12 @@ export function useTaskItemProjectContext({
     const [allContexts, setAllContexts] = useState<string[]>([]);
     const [popularContextOptions, setPopularContextOptions] = useState<string[]>([]);
     const [assignedToOptions, setAssignedToOptions] = useState<string[]>([]);
+    const tokenSettings = useTaskStore((state) => loadTokenOptions ? state.settings : null);
     const retainedTaskRevision = useTaskStore((state) => loadTokenOptions ? state._allTasks : null);
 
     useEffect(() => {
         if (!isEditing && !loadTokenOptions) return;
-        const { tasks: storeTasks, _allTasks: retainedTasks, projects: storeProjects, people: storePeople } = useTaskStore.getState();
+        const { tasks: storeTasks, _allTasks: retainedTasks, projects: storeProjects, people: storePeople, settings } = useTaskStore.getState();
         if (isEditing) {
             if (editProjectId) {
                 setField('areaId', '');
@@ -102,7 +104,7 @@ export function useTaskItemProjectContext({
         if (!loadTokenOptions) return;
 
         const allTagOptions = uniquePrefixedTokenOptions(
-            getUsedTaskTokens(storeTasks, (candidate) => candidate.tags),
+            [...getUsedTaskTokens(storeTasks, (candidate) => candidate.tags), ...getSavedTaxonomyTokens(settings, 'tag')],
             '#'
         );
         const frequentTagOptions = uniquePrefixedTokenOptions(
@@ -110,7 +112,7 @@ export function useTaskItemProjectContext({
             '#'
         );
         const allContextOptions = uniquePrefixedTokenOptions(
-            getRetainedTaskContexts(retainedTasks),
+            [...getRetainedTaskContexts(retainedTasks), ...getSavedTaxonomyTokens(settings, 'context')],
             '@'
         );
         const frequentContextOptions = uniquePrefixedTokenOptions(
@@ -122,13 +124,13 @@ export function useTaskItemProjectContext({
         setAllContexts(sortTokenOptions(allContextOptions));
         setPopularContextOptions(frequentContextOptions);
         setAssignedToOptions(getPersonOptionNames(storePeople, storeTasks));
-    }, [editProjectId, isEditing, loadTokenOptions, project, retainedTaskRevision, setField, task.id, task.projectId]);
+    }, [editProjectId, isEditing, loadTokenOptions, project, retainedTaskRevision, tokenSettings, setField, task.id, task.projectId]);
 
     return {
         sectionsByProject,
         currentProject: project,
         currentTaskArea: project?.areaId ? projectArea : taskArea,
-        currentProjectColor: projectArea?.color,
+        currentProjectColor: project ? getProjectAccentColor(project, new Map(projectArea ? [[projectArea.id, projectArea]] : [])) : undefined,
         projectContext,
         tagOptions,
         popularTagOptions,

@@ -3,8 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Full RN ordinary checkpoint/request, actual bundled JSC, SQLite and native
-/// descriptor jobs. Seeded Add history is a fixture, not AddV3 producer evidence.
+
 final class AttachmentMixedSaveHostTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private var root: URL!
@@ -76,8 +75,8 @@ final class AttachmentMixedSaveHostTests: XCTestCase {
             payloadJSON: try payload(baseline, edited: edited, note: note))
         try await host.checkpointEditorDraft(snapshot)
         if adds > 0 {
-            // Reuse real V2 publication jobs and retain their exact proofs, then
-            // explicitly seed the separately validated V3 tagged fixture.
+
+
             _ = try await host.beginAttachmentDraftV2(expectedSession: snapshot.sessionID, expectedGeneration: 1)
             let source = cache.appendingPathComponent("borrowed.txt"); try Data("borrowed cache sentinel".utf8).write(to: source)
             for _ in 0..<adds {
@@ -158,7 +157,7 @@ final class AttachmentMixedSaveHostTests: XCTestCase {
     func testFullOrdinaryChangedSavePreservesCloudDriftAndOtherRowsThenRetiresBaseline() async throws {
         let host = try await seed(); try await remove(host)
         let other = try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks WHERE id='unrelated'").utf8)))
-        // Current stored cloud/content metadata is retained by the shared merge.
+
         await host.close(); var attachment = baseline(0); attachment["cloudKey"] = "new-cloud-object"; attachment["title"] = "Remote rename"
         _ = try sql("UPDATE tasks SET attachments=?,rev=rev+1 WHERE id=?", [json([attachment]), taskID])
         let fresh = core(); _ = try await fresh.start()
@@ -376,8 +375,8 @@ final class AttachmentMixedSaveHostTests: XCTestCase {
             let outcomes = try XCTUnwrap(settlement()["targets"] as? [[String: Any]])
             XCTAssertEqual(outcomes[0]["outcome"] as? String, mode == "reference" ? "referenced" : "taskChanged")
             await host.close(); bundle = originalBundle; let fresh = core(noWrites()); _ = try await fresh.start(); try released()
-            // The reference/state mutation existed only in the previous runtime.
-            // Its durably recorded keep still wins after that reference is gone.
+
+
             XCTAssertEqual(try Data(contentsOf: target()), bytes); await fresh.close()
         }
     }

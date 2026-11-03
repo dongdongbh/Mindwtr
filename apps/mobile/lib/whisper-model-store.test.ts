@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Two-set model of the filesystem: a uri is either a known directory, a known
-// file (with an optional recorded size), or absent from both. Mirrors the
-// mock shape used by speech-to-text.test.ts so directory-vs-file ambiguity
-// (ADR 0019 #9) is testable the same way on both sides of the store.
+
 const fileSystemMock = vi.hoisted(() => ({
   directoryUris: new Set<string>(),
   fileUris: new Set<string>(),
@@ -127,8 +124,8 @@ describe('whisper-model-store', () => {
     fileSystemMock.fileSizes.clear();
     reactNativeMock.NativeModules.RNFSManager = {};
     vi.clearAllMocks();
-    // download() always tries to resolve a Hugging Face redirect via fetch
-    // before the native streaming download; keep that off the network here.
+
+
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network disabled in tests'); }));
   });
 
@@ -145,10 +142,8 @@ describe('whisper-model-store', () => {
     });
 
     it('reports the model as absent when it is nowhere in the candidate ladder', async () => {
-      // Bare fallback (no directory prefix): locate() never creates or
-      // assumes a directory — that's ensure()'s job. See the ensureLocation
-      // "creates the preferred directory..." test below for the ensure-side
-      // fallback, which does resolve to the canonical whisper-models path.
+
+
       await expect(locate(TINY_ID)).resolves.toMatchObject({
         exists: false,
         size: 0,
@@ -210,7 +205,7 @@ describe('whisper-model-store', () => {
       const resolved = await ensureLocation(TINY_ID);
 
       expect(resolved).toMatchObject({ uri: DOC_PREFERRED, exists: true, size: TINY_SIZE });
-      // The copy actually landed in the preferred directory, not just the report.
+
       expect(fileSystemMock.fileUris.has(normalizeMockUri(DOC_PREFERRED))).toBe(true);
     });
 
@@ -267,7 +262,7 @@ describe('whisper-model-store', () => {
     });
 
     it('rejects a model whose hash does not match the pinned digest and cleans it up', async () => {
-      // Wrong hash on every attempt: two download hosts in each fallback directory (Documents, Cache).
+
       for (let attempt = 0; attempt < 4; attempt += 1) rnfsMock.hash.mockResolvedValueOnce('0'.repeat(64));
       rnfsMock.downloadFile.mockImplementation((options: { toFile: string }) => {
         fileSystemMock.fileUris.add(normalizeMockUri(`file://${options.toFile}`));
@@ -300,8 +295,7 @@ describe('whisper-model-store', () => {
 
       await remove(TINY_ID);
 
-      // remove() only targets the whisper-models subdirectory candidates; a
-      // legacy root-of-cache file is a read fallback, never a delete target.
+
       expect(fileSystemMock.fileUris.has(normalizeMockUri(CACHE_LEGACY))).toBe(true);
     });
   });

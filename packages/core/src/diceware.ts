@@ -1,9 +1,5 @@
-// The EFF "long" Diceware wordlist, bundled verbatim (7776 words) so passphrase
-// generation needs neither a network fetch nor a dependency. Source:
-// https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt
-// (sha256 addd35536511597a02fa0a9ff1e5284677b8883b83e986e43f15a3db996b903e).
-// The list's five-digit dice columns are dropped: an index into this array is
-// the same thing as a dice roll, and we draw indices from a CSPRNG instead.
+
+
 
 import { defaultSyncCryptoPrimitives } from './sync-crypto';
 
@@ -676,45 +672,40 @@ const WORDS = `
     zippy zips zit zodiac zombie zone zoning zookeeper zoologist zoology zoom
 `;
 
-export const DICEWARE_WORDLIST: readonly string[] = WORDS.trim().split(/\s+/);
+let wordlist: readonly string[] | null = null;
 
-/** Six words out of 7776 is ~77 bits, the EFF's own recommendation for a
- *  passphrase a human still has to be able to write down and retype. */
+
+export function dicewareWordlist(): readonly string[] {
+    return wordlist ??= WORDS.trim().split(/\s+/);
+}
+
+
 export const DICEWARE_DEFAULT_WORD_COUNT = 6;
 
-// Whole 32-bit draws at or above this value are discarded and redrawn. `value %
-// 7776` on its own would over-represent the first 2560 words, because 2^32 is
-// not a multiple of 7776 — small, but this is the one number the passphrase's
-// strength claim rests on.
-const UNIFORM_DRAW_LIMIT = Math.floor(0x1_0000_0000 / DICEWARE_WORDLIST.length) * DICEWARE_WORDLIST.length;
 
-// Rejection runs at p ≈ 6e-7 per draw against a real CSPRNG; the bound only
-// exists so a stuck or misconfigured RNG surfaces as an error instead of a hang.
 const MAX_DRAWS_PER_WORD = 128;
 
-function drawWordIndex(randomBytes: (n: number) => Uint8Array): number {
+function drawWordIndex(randomBytes: (n: number) => Uint8Array, count: number): number {
+    const limit = Math.floor(0x1_0000_0000 / count) * count;
     for (let attempt = 0; attempt < MAX_DRAWS_PER_WORD; attempt += 1) {
         const bytes = randomBytes(4);
         if (bytes.length < 4) throw new Error(`randomBytes(4) returned ${bytes.length} bytes`);
         const value = (bytes[0] * 0x100_0000) + (bytes[1] * 0x1_0000) + (bytes[2] * 0x100) + bytes[3];
-        if (value < UNIFORM_DRAW_LIMIT) return value % DICEWARE_WORDLIST.length;
+        if (value < limit) return value % count;
     }
     throw new Error('Diceware: the random source never produced an unbiased draw');
 }
 
-/**
- * A space-separated Diceware passphrase. `randomBytes` is injected so each
- * platform passes the crypto source it already uses for sync encryption
- * (WebCrypto on desktop, the native module on mobile) — never Math.random.
- */
+
 export function generateDicewarePassphrase(
     words: number = DICEWARE_DEFAULT_WORD_COUNT,
     randomBytes: (n: number) => Uint8Array = defaultSyncCryptoPrimitives.randomBytes,
 ): string {
     if (!Number.isInteger(words) || words < 1) throw new Error(`Diceware: invalid word count ${words}`);
+    const list = dicewareWordlist();
     const picked: string[] = [];
     for (let index = 0; index < words; index += 1) {
-        picked.push(DICEWARE_WORDLIST[drawWordIndex(randomBytes)]);
+        picked.push(list[drawWordIndex(randomBytes, list.length)]);
     }
     return picked.join(' ');
 }

@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The RN TaskFilterSheet contents shared by the two core list DTOs.
-/// Query, paging and edit ownership remain with the calling screen's model.
+
 struct ListFilterControls: View {
     let data: CoreObject
     let strings: CoreObject
@@ -110,6 +109,18 @@ struct ListFilterControls: View {
                     .accessibilityIdentifier(prefix + "-include-archived-projects")
             }
             VStack(alignment: .leading, spacing: 8) {
+                let taskDates = filters.object("taskDates")
+                let statuses = filters.objects("statuses")
+                if !statuses.isEmpty {
+                    sectionLabel(localized("taskEdit.statusLabel"))
+                    optionChips(statuses, id: prefix + "-filter-status")
+                }
+                if !taskDates.isEmpty {
+                    let dateOptions = taskDates.objects("options")
+                    overviewRow(taskDates.text("label"), summary: summary(dateOptions.filter { $0.flag("selected") }.map { $0.text("label") }),
+                                expanded: expanded.contains("taskDates"), id: prefix + "-filter-taskDates") { toggle("taskDates") }
+                    if expanded.contains("taskDates") { optionChips(dateOptions, id: prefix + "-filter-taskDates") }
+                }
                 if filters.object("tokens").number("total") > 0 {
                     overviewRow(localized("filters.contexts"), summary: tokenSummary, id: prefix + "-filter-tokens") {
                         focusedField = nil
@@ -172,10 +183,11 @@ struct ListFilterControls: View {
                         id: prefix + "-filter-picker-search", value: $pickerQuery)
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    if pickerCurrent {
+
+                    Group {
                         let items = picker.objects("items")
                         ForEach(items.indices, id: \.self) { index in pickerOption(items[index]) }
-                        if items.isEmpty {
+                        if pickerCurrent && items.isEmpty {
                             Text(localized("search.noResults")).rnFont(14).foregroundStyle(palette.secondary).padding(.vertical, 28)
                         }
                         if items.count < picker.number("total") {
@@ -186,31 +198,39 @@ struct ListFilterControls: View {
                             .accessibilityIdentifier(prefix + "-filter-picker-more")
                         }
                         if pickerName == "tokens" {
-                            let controls = filters.objects("matchModes")
-                            ForEach(controls.indices, id: \.self) { index in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    sectionLabel(controls[index].text("label"))
-                                    optionChips(controls[index].objects("options"), id: prefix + "-filter-match-" + controls[index].text("kind"))
+
+                            VStack(alignment: .leading, spacing: 0) {
+                                let controls = filters.objects("matchModes")
+                                ForEach(controls.indices, id: \.self) { index in
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        sectionLabel(controls[index].text("label"))
+                                        optionChips(controls[index].objects("options"), id: prefix + "-filter-match-" + controls[index].text("kind"))
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
                             }
                         }
                     }
-                    if let error = error { filterFailure(error, picker: false) }
-                    else if let error = pickerError { filterFailure(error, picker: true) }
-                    else if !pickerCurrent { ProgressView().frame(maxWidth: .infinity).padding(16) }
+                    .disabled(!pickerEnabled)
                 }
                 .padding(.vertical, 8)
             }
+            .overlay {
+                if !pickerCurrent && error == nil && pickerError == nil {
+                    ProgressView().allowsHitTesting(false)
+                }
+            }
             .scrollDismissesKeyboard(.interactively)
             .accessibilityIdentifier(prefix + "-filter-picker-scroll")
+            if let error = error { filterFailure(error, picker: false) }
+            else if let error = pickerError { filterFailure(error, picker: true) }
         }
     }
 
     private func pickerOption(_ item: CoreObject) -> some View {
         let token = pickerName == "tokens"
         let selected = token ? item.text("state") == "included" : item.flag("selected")
-        let excluded = token && item.text("state") == "excluded"
+        let excluded = token ? item.text("state") == "excluded" : item.flag("excluded")
         let label = item.text(token ? "value" : "title")
         return Button { apply(item.object("edit")) } label: {
             HStack(spacing: 12) {
@@ -314,10 +334,10 @@ struct ListFilterControls: View {
         })
     }
     private var projectSummary: String {
-        // Chips include selected projects beyond the first picker window.
+
         summary(data.objects("chips").filter {
-            $0.object("action").object("filterEdit").text("type") == "toggleProject"
-        }.map { $0.text("label") })
+            ["toggleProject", "removeProject", "cycleProject"].contains($0.object("action").object("filterEdit").text("type"))
+        }.map { ($0.flag("excluded") ? localized("filters.excluded") + ": " : "") + $0.text("label") })
     }
     private var moreSummary: String {
         var labels = filters.objects("priorities").filter { $0.flag("selected") }.map { $0.text("label") }

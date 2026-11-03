@@ -43,7 +43,7 @@ const toTimeValue = (date: Date) => {
     return `${hours}:${minutes}`;
 };
 
-/** Settings › Notifications, drawn from core's model (packages/core/src/notifications-settings-model.ts), which the native app draws too. */
+
 export function NotificationsSettingsScreen() {
     const tc = useThemeColors();
     const { language, t } = useSettingsLocalization();
@@ -137,7 +137,7 @@ export function NotificationsSettingsScreen() {
             updateSettings(update).catch(console.error);
             return;
         }
-        // The persistent capture notification is this device's own switch, never a synced setting.
+
         const enabled = edit.value as boolean;
         setPersistentCaptureEnabled(enabled);
         applyPersistentCaptureNotification(enabled, model.persistentCaptureNotification);

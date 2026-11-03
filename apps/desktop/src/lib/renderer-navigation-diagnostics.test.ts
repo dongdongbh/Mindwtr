@@ -142,7 +142,7 @@ describe('renderer navigation diagnostics through the sandbox native log boundar
         const first = beginRendererNavigation('history');
         const cancel = commitRendererNavigation('history', first);
         cancel();
-        frames[0](10); // Even a callback already delivered by the scheduler is fenced.
+        frames[0](10);
         const second = beginRendererNavigation('board');
         const cancelSecond = commitRendererNavigation('board', second);
         const third = beginRendererNavigation('reference');

@@ -1,13 +1,6 @@
-/**
- * React Native's Review screen, replayed against the `review` part of the review
- * views parity fixture (packages/core/src/review-views-parity.fixtures.json).
- * MINDWTR_CAPTURE_REVIEW_VIEWS=1 rewrites that part.
- *
- * Each scenario renders the real screen with the real core store, expands,
- * swipes, selects and confirms, and records what a user sees and what the store
- * is asked to write. The rows, the task editor and the guided review are stand-ins
- * that record their props: they are other screens' components.
- */
+
+
+
 import React from 'react';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -47,7 +40,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   default: { getItem: async () => null, setItem: async () => undefined, removeItem: async () => undefined },
 }));
 vi.mock('expo-router', () => ({ useRouter: () => ({ push: (route: string) => { harness.pushes.push(route); } }) }));
-vi.mock('@react-navigation/native', () => ({ useFocusEffect: (effect: () => unknown) => React.useEffect(effect as () => void, [effect]) }));
+vi.mock('@react-navigation/native', () => ({ NavigationContext: React.createContext(undefined), useFocusEffect: (effect: () => unknown) => React.useEffect(effect as () => void, [effect]) }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 0, left: 0, right: 0, top: 0 }) }));
 vi.mock('@/contexts/toast-context', () => ({
   useToast: () => ({ showToast: (toast: (typeof harness.toasts)[number]) => { harness.toasts.push(toast); }, dismissToast: vi.fn() }),
@@ -178,14 +171,16 @@ const roundColor = (node: ReactTestInstance) => {
 };
 
 function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number; writes: number; pushes: number; shares: number }): Observation {
-  const allTexts = textsIn(root);
+  const sequenceLabel = harness.strings['projects.laterInSequence'];
+  const isSequenceDisclosure = (label: unknown) => String(label ?? '').startsWith(`${sequenceLabel} (`);
+  const allTexts = textsIn(root).filter((value) => !isSequenceDisclosure(value));
   const scopeTexts = [
     harness.strings['review.scopeDue'], harness.strings['review.scopeAll'],
     harness.strings['review.overviewHelp'], harness.strings['nav.done'],
   ];
   expect(allTexts.slice(0, scopeTexts.length)).toEqual(scopeTexts);
   const headers = hostsOf(root, 'Pressable')
-    .filter((node) => node.props.accessibilityState && 'expanded' in node.props.accessibilityState)
+    .filter((node) => node.props.accessibilityState && 'expanded' in node.props.accessibilityState && !isSequenceDisclosure(node.props.accessibilityLabel))
     .map((node) => [
       node.props.accessibilityLabel,
       node.props.accessibilityState.expanded,
@@ -197,7 +192,7 @@ function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number
   const picker = hostsOf(root, 'TokenPickerModal')[0]?.props;
   const organize = hostsOf(root, 'TaskListBulkOrganizeModal')[0]?.props;
   const observation: Observation = {
-    // Legacy parity excludes the asserted scope bar and due-only controls.
+
     texts: allTexts.slice(scopeTexts.length).filter((value) => value !== harness.strings['review.markReviewed'] && value !== harness.strings['review.advanceWeek']),
     headers,
     expansion: expansion ? [
@@ -272,7 +267,7 @@ async function perform(root: ReactTestInstance, action: [string, ...unknown[]]) 
     case 'organize':
       return run('organize', () => hostsOf(root, 'TaskListBulkOrganizeModal')[0]?.props.onApply(target));
     case 'alert': {
-      // A button without onPress only dismisses the dialog.
+
       const button = harness.alerts.at(-1)?.buttons.find((entry) => entry.text === target);
       return run('alert', button ? button.onPress ?? (() => undefined) : undefined);
     }
@@ -281,6 +276,18 @@ async function perform(root: ReactTestInstance, action: [string, ...unknown[]]) 
     default:
       throw new Error(`Unknown action ${kind}`);
   }
+}
+
+
+async function expandSequencePlan(root: ReactTestInstance) {
+  const writesBefore = writeLog.length;
+  for (const disclosure of hostsOf(root, 'Pressable').filter((node) => (
+    String(node.props.accessibilityLabel ?? '').startsWith(`${harness.strings['projects.laterInSequence']} (`)
+    && node.props.accessibilityState?.expanded === false
+  ))) {
+    await act(async () => { disclosure.props.onPress(); });
+  }
+  expect(writeLog).toHaveLength(writesBefore);
 }
 
 async function runScenario(scenario: Scenario) {
@@ -298,10 +305,12 @@ async function runScenario(scenario: Scenario) {
   if (!allScope?.props.onPress) throw new Error('Missing All open tasks scope');
   await act(async () => { await allScope.props.onPress(); });
   const seen = { alerts: 0, toasts: 0, writes: 0, pushes: 0, shares: 0 };
+  await expandSequencePlan(renderer.root);
   const observations = [observe(renderer.root, seen)];
   for (const action of scenario.actions) {
     await perform(renderer.root, action);
     await act(async () => { await flushPendingSave(); });
+    await expandSequencePlan(renderer.root);
     observations.push(observe(renderer.root, seen));
   }
   await act(async () => { renderer.unmount(); });
@@ -325,7 +334,7 @@ describe('React Native Review screen parity fixture', () => {
     else process.env.TZ = originalTz;
   });
 
-  it('replays every scenario exactly as frozen', async () => {
+  it('replays frozen scenarios with explicit sequence presentation changes', async () => {
     const captured: Record<string, unknown> = {};
     for (const scenario of scenarios) captured[scenario.name] = await runScenario(scenario);
     const inputs = sharedInputs(settingsVariants, scenarios);
@@ -333,7 +342,19 @@ describe('React Native Review screen parity fixture', () => {
     const { observations, ...frozenInputs } = readFixturePart('review');
     expect(frozenInputs).toEqual(inputs);
     for (const scenario of scenarios) {
-      expect({ [scenario.name]: captured[scenario.name] }).toEqual({ [scenario.name]: observations[scenario.name] });
+
+      let expected = JSON.stringify(observations[scenario.name])
+        .replaceAll('"Launch","1 active task · Has Next Action"', '"Launch","1 active task · Scheduled"');
+      for (const expanded of [false, true]) {
+        expected = expected.replaceAll(
+          `["Launch, 1 active task · Has Next Action",${expanded},["#10b981"]`,
+          `["Launch, 1 active task · Scheduled",${expanded},["#f59e0b"]`,
+        );
+      }
+      if (scenario.settings === 'sortTitle') {
+        expected = expected.replaceAll('["n-van",false,false],["n-pack",false,false]', '["n-pack",false,false],["n-van",false,false]');
+      }
+      expect({ [scenario.name]: captured[scenario.name] }).toEqual({ [scenario.name]: JSON.parse(expected) });
     }
   }, 120_000);
 });

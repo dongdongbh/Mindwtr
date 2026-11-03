@@ -13,7 +13,7 @@ const value = <T,>(result: NativeHostResult<T>): T => {
     return result.value;
 };
 
-// RN's Notes Preview shows the typed draft (MarkdownText of the unsaved notes); the native preview reads core's blocks for it.
+
 describe('Project Notes draft preview', () => {
     let host: ReturnType<typeof createNativeHostContract>;
     let writes: ReturnType<typeof vi.fn>;

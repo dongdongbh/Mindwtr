@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
     buildTasksByProjectId,
     buildTrashTimeline,
@@ -15,6 +15,7 @@ import { computeSyncChangeFingerprint } from './sync-helpers';
 import { mergeAppDataWithStats } from './sync';
 import { buildQuickAddParseOptions } from './quick-add';
 import { buildFocusPools, buildFocusTaskSections, deriveFocusTaskLists } from './focus-sections';
+import { getReviewOverviewGroups, getWeeklyReviewBuckets } from './review-utils';
 import { isTaskActionable } from './task-status';
 import { createProjectToSectionPreviewer } from './project-to-section';
 import type {
@@ -103,7 +104,7 @@ const LARGE_STORE_PERFORMANCE_BUDGETS_MS: Record<LargeStoreSize, Record<Budgeted
     },
 };
 
-// 200 projects x 5k tasks. Calling previewProjectToSection per destination took 88-126 ms here.
+
 const PROJECT_TO_SECTION_BUDGET_MS = 3;
 
 const STORE_MUTATION_BUDGETS_MS: Record<LargeStoreSize, number> = {
@@ -121,8 +122,7 @@ const FULL_MERGE_BUDGETS_MS: Record<LargeStoreSize, number> = {
     50_000: 7_500,
 };
 
-// "Select all -> Move" hands batchUpdateTasks every visible task in one
-// synchronous set(), the largest mutation a user can trigger.
+
 const BATCH_MUTATION_BUDGETS_MS: Record<LargeStoreSize, number> = {
     1_000: 75,
     10_000: 250,
@@ -309,6 +309,71 @@ function measureBest(operation: () => number, attempts = 3): { durationMs: numbe
     return { durationMs: bestDurationMs, value: bestValue };
 }
 
+function measureHotPath(operation: () => number): { durationMs: number; value: number } {
+    operation();
+    const samples = Array.from({ length: 5 }, () => {
+        const sample = measureBest(() => {
+            let value = 0;
+            for (let iteration = 0; iteration < 3; iteration += 1) value = operation();
+            return value;
+        }, 1);
+        return { ...sample, durationMs: sample.durationMs / 3 };
+    });
+    samples.sort((left, right) => left.durationMs - right.durationMs);
+    return samples[2];
+}
+
+function expectGrowthWithinBudget(
+    operation: Pick<BudgetedOperation, 'label' | 'maxGrowthFrom10kTo50k'>,
+    tenKDuration: number,
+    fiftyKDuration: number,
+) {
+    if (tenKDuration < GROWTH_BASELINE_FLOOR_MS) return;
+    const growth = fiftyKDuration / tenKDuration;
+    expect(
+        growth,
+        `${operation.label} grew ${growth.toFixed(2)}x from 10k to 50k tasks; max allowed is ${operation.maxGrowthFrom10kTo50k}x`,
+    ).toBeLessThanOrEqual(operation.maxGrowthFrom10kTo50k);
+}
+
+describe('performance measurement harness', () => {
+    it('excludes warm-up and returns the median batch with its observed result', () => {
+        let clock = 0;
+        let calls = 0;
+        const durations = [100, ...[9, 11, 10, 1_000, 12].flatMap((duration) => [duration, duration, duration])];
+        const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+        try {
+            const result = measureHotPath(() => {
+                const duration = durations.shift();
+                if (duration === undefined) throw new Error('Unexpected measurement');
+                clock += duration;
+                return ++calls;
+            });
+            expect(result).toEqual({ durationMs: 11, value: 7 });
+            expect(durations).toEqual([]);
+        } finally {
+            now.mockRestore();
+        }
+    });
+
+    it('accepts linear growth and rejects quadratic growth through the measured budget gate', () => {
+        let clock = 0;
+        const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+        const operation = { label: 'Synthetic hot path', maxGrowthFrom10kTo50k: 8 };
+        const measureCost = (cost: number) => measureHotPath(() => {
+            clock += cost;
+            return 1;
+        }).durationMs;
+        try {
+            const tenKDuration = measureCost(10);
+            expect(() => expectGrowthWithinBudget(operation, tenKDuration, measureCost(50))).not.toThrow();
+            expect(() => expectGrowthWithinBudget(operation, tenKDuration, measureCost(250))).toThrow('grew 25.00x');
+        } finally {
+            now.mockRestore();
+        }
+    });
+});
+
 const PERF_MEASUREMENTS_PATH = '.perf/measurements.json';
 
 type PerfMeasurement = { actualMs: number; budgetMs: number; label: string; size: LargeStoreSize };
@@ -367,10 +432,8 @@ const operations: BudgetedOperation[] = [
         },
     },
     {
-        // The whole path the Focus screen runs, in the order it runs it, not
-        // just the Next-actions sort above: narrow to actionable tasks, build
-        // the pools, bucket and sort them, then build the sections. This is
-        // what a phone with a big store actually pays to open Focus.
+
+
         id: 'focusScreenDerivation',
         label: 'Focus screen derivation',
         maxGrowthFrom10kTo50k: 12,
@@ -423,19 +486,37 @@ describePerf('large-store performance budgets', () => {
         writeFileSync(PERF_MEASUREMENTS_PATH, JSON.stringify(perfMeasurements, null, 2));
     });
 
+    it('derives weekly and overview manual sequence projections within large-store budgets', () => {
+        const measurements = new Map<LargeStoreSize, number>();
+        for (const size of DATASET_SIZES) {
+            const fixture = createLargeStoreFixture(size);
+            const projects = fixture.projects.map((project) => ({ ...project, isSequential: true }));
+            const start = performance.now();
+            const weekly = getWeeklyReviewBuckets(fixture.tasks, projects, { now: NOW, sections: fixture.sections });
+            const overview = getReviewOverviewGroups({ tasks: fixture.tasks, projects, sections: fixture.sections, orderedAreas: fixture.areas,
+                areaFilter: { included: [], excluded: [] }, sortBy: 'default', now: NOW });
+            const duration = performance.now() - start;
+            measurements.set(size, duration);
+            expect(weekly.projectEntries.length).toBeGreaterThan(0);
+            expect(overview.length).toBeGreaterThan(0);
+            expect(weekly.projectEntries.some((entry) => entry.laterTasks.length > 0)).toBe(true);
+            expectWithinBudget('Review sequence derivation', size, duration, { 1000: 150, 10000: 700, 50000: 2500 }[size]);
+        }
+        if (measurements.get(10_000)! >= GROWTH_BASELINE_FLOOR_MS) expect(measurements.get(50_000)! / measurements.get(10_000)!).toBeLessThanOrEqual(10);
+    });
+
     it('keeps full snapshot merging within absolute and growth budgets', () => {
         const measurements = new Map<LargeStoreSize, number>();
         for (const size of DATASET_SIZES) {
             const seed = createLargeStoreFixture(size).data;
-            // The shared UI fixture includes updates throughout June. Run
-            // after those dates so this measures an ordinary aligned merge,
-            // not per-entity clock-skew warning serialization.
+
+
             const options = { nowIso: '2026-07-01T12:00:00.000Z' };
             const canonical = mergeAppDataWithStats(seed, structuredClone(seed), options).data;
             let best = Infinity;
             for (let attempt = 0; attempt < 3; attempt++) {
-                // A remote snapshot arrives as new objects. Never benchmark a
-                // warmed identity cache or charge fixture cloning to the merge.
+
+
                 const local = structuredClone(canonical);
                 const incoming = structuredClone(canonical);
                 const start = performance.now();
@@ -475,7 +556,7 @@ describePerf('large-store performance budgets', () => {
 
     it('builds the 200-project convert-to-section destination list over 5k tasks within budget', () => {
         const fixture = createLargeStoreFixture(10_000);
-        // An eligible source: no sections, tags, dates, or focus. Ineligible sources exit early.
+
         const source = { ...fixture.projects[0], status: 'active' as const, tagIds: [], dueDate: undefined, isFocused: false };
         const projects = [source, ...fixture.projects.slice(1, 200)];
         const state = {
@@ -483,7 +564,7 @@ describePerf('large-store performance budgets', () => {
             _allSections: fixture.sections.filter((row) => row.projectId !== source.id && projects.some((p) => p.id === row.projectId)),
             _allTasks: fixture.tasks.slice(0, 5_000),
         };
-        // What one dialog render does: build once, then filter every project through it.
+
         const result = measureBest(() => {
             const previewDestination = createProjectToSectionPreviewer(state, source.id);
             return projects.filter((project) => previewDestination(project.id).ok).length;
@@ -503,7 +584,7 @@ describePerf('large-store performance budgets', () => {
             expect(fixture.projects).toHaveLength(fixture.projectCount);
 
             operations.forEach((operation) => {
-                const result = measureBest(() => operation.run(fixture));
+                const result = measureHotPath(() => operation.run(fixture));
                 expect(result.value, `${operation.label} should produce a non-empty result`).toBeGreaterThan(0);
                 expectWithinBudget(
                     operation.label,
@@ -526,13 +607,7 @@ describePerf('large-store performance budgets', () => {
                 throw new Error(`Missing measurements for ${operation.label}`);
             }
 
-            if (tenKDuration >= GROWTH_BASELINE_FLOOR_MS) {
-                const growth = fiftyKDuration / tenKDuration;
-                expect(
-                    growth,
-                    `${operation.label} grew ${growth.toFixed(2)}x from 10k to 50k tasks; max allowed is ${operation.maxGrowthFrom10kTo50k}x`,
-                ).toBeLessThanOrEqual(operation.maxGrowthFrom10kTo50k);
-            }
+            expectGrowthWithinBudget(operation, tenKDuration, fiftyKDuration);
         });
     }, 30_000);
 

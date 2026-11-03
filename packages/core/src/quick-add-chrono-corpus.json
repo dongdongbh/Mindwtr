@@ -1,0 +1,4930 @@
+[
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-03-04",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-04-03",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "dmy",
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-03-04",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "en",
+  "dateFormat": "mdy",
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-04-03",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Zahnarzt anrufen nächsten Freitag",
+  "result": {
+   "title": "Zahnarzt anrufen nächsten Freitag",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "nächsten Freitag",
+    "titleWithoutDate": "Zahnarzt anrufen"
+   }
+  },
+  "commands": {
+   "title": "Zahnarzt anrufen nächsten Freitag",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Bericht morgen",
+  "result": {
+   "title": "Bericht morgen",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "morgen",
+    "titleWithoutDate": "Bericht"
+   }
+  },
+  "commands": {
+   "title": "Bericht morgen",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Miete zahlen am 5. September",
+  "result": {
+   "title": "Miete zahlen am 5. September",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05",
+    "matchedText": "am 5. September",
+    "titleWithoutDate": "Miete zahlen"
+   }
+  },
+  "commands": {
+   "title": "Miete zahlen am 5. September",
+   "props": {}
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Treffen /due:übermorgen",
+  "result": {
+   "title": "Treffen",
+   "props": {
+    "dueDate": "2026-08-06"
+   }
+  },
+  "commands": {
+   "title": "Treffen",
+   "props": {
+    "dueDate": "2026-08-06"
+   }
+  }
+ },
+ {
+  "language": "de",
+  "dateFormat": null,
+  "input": "Termin in 3 Tagen um 15 Uhr",
+  "result": {
+   "title": "Termin in 3 Tagen um 15 Uhr",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-07T15:00:00.000Z",
+    "matchedText": "in 3 Tagen um 15 Uhr",
+    "titleWithoutDate": "Termin"
+   }
+  },
+  "commands": {
+   "title": "Termin in 3 Tagen um 15 Uhr",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-04-03",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Llamar al dentista el próximo viernes",
+  "result": {
+   "title": "Llamar al dentista el próximo viernes",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "próximo viernes",
+    "titleWithoutDate": "Llamar al dentista"
+   }
+  },
+  "commands": {
+   "title": "Llamar al dentista el próximo viernes",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Revisar informe el lunes",
+  "result": {
+   "title": "Revisar informe el lunes",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "lunes",
+    "titleWithoutDate": "Revisar informe"
+   }
+  },
+  "commands": {
+   "title": "Revisar informe el lunes",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Enviar informe para el 5 de septiembre",
+  "result": {
+   "title": "Enviar informe para el 5 de septiembre",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05",
+    "matchedText": "5 de septiembre",
+    "titleWithoutDate": "Enviar informe"
+   }
+  },
+  "commands": {
+   "title": "Enviar informe para el 5 de septiembre",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Comprar leche del super mañana",
+  "result": {
+   "title": "Comprar leche del super mañana",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "mañana",
+    "titleWithoutDate": "Comprar leche del super"
+   }
+  },
+  "commands": {
+   "title": "Comprar leche del super mañana",
+   "props": {}
+  }
+ },
+ {
+  "language": "es",
+  "dateFormat": null,
+  "input": "Reunión /due:pasado mañana",
+  "result": {
+   "title": "Reunión /due:pasado mañana",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:pasado mañana"
+   ]
+  },
+  "commands": {
+   "title": "Reunión /due:pasado mañana",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:pasado mañana"
+   ]
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-04-03",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Appeler le dentiste vendredi prochain",
+  "result": {
+   "title": "Appeler le dentiste vendredi prochain",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "vendredi prochain",
+    "titleWithoutDate": "Appeler le dentiste"
+   }
+  },
+  "commands": {
+   "title": "Appeler le dentiste vendredi prochain",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Revoir le rapport le lundi",
+  "result": {
+   "title": "Revoir le rapport le lundi",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "lundi",
+    "titleWithoutDate": "Revoir le rapport"
+   }
+  },
+  "commands": {
+   "title": "Revoir le rapport le lundi",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Payer le loyer pour le 5 septembre",
+  "result": {
+   "title": "Payer le loyer pour le 5 septembre",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05",
+    "matchedText": "5 septembre",
+    "titleWithoutDate": "Payer le loyer"
+   }
+  },
+  "commands": {
+   "title": "Payer le loyer pour le 5 septembre",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Réunion au 12 septembre",
+  "result": {
+   "title": "Réunion au 12 septembre",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-12",
+    "matchedText": "12 septembre",
+    "titleWithoutDate": "Réunion"
+   }
+  },
+  "commands": {
+   "title": "Réunion au 12 septembre",
+   "props": {}
+  }
+ },
+ {
+  "language": "fr",
+  "dateFormat": null,
+  "input": "Acheter du pain demain",
+  "result": {
+   "title": "Acheter du pain demain",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "demain",
+    "titleWithoutDate": "Acheter du pain"
+   }
+  },
+  "commands": {
+   "title": "Acheter du pain demain",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-04-03",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Pagare affitto il 10 settembre",
+  "result": {
+   "title": "Pagare affitto il 10 settembre",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-10",
+    "matchedText": "10 settembre",
+    "titleWithoutDate": "Pagare affitto"
+   }
+  },
+  "commands": {
+   "title": "Pagare affitto il 10 settembre",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Rivedere report il prossimo lunedì",
+  "result": {
+   "title": "Rivedere report il prossimo lunedì",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "lunedì",
+    "titleWithoutDate": "Rivedere report"
+   }
+  },
+  "commands": {
+   "title": "Rivedere report il prossimo lunedì",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Riunione per domani",
+  "result": {
+   "title": "Riunione per domani",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "domani",
+    "titleWithoutDate": "Riunione"
+   }
+  },
+  "commands": {
+   "title": "Riunione per domani",
+   "props": {}
+  }
+ },
+ {
+  "language": "it",
+  "dateFormat": null,
+  "input": "Chiamare /due:dopodomani",
+  "result": {
+   "title": "Chiamare /due:dopodomani",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:dopodomani"
+   ]
+  },
+  "commands": {
+   "title": "Chiamare /due:dopodomani",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:dopodomani"
+   ]
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-03-04",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "歯医者に電話 明日",
+  "result": {
+   "title": "歯医者に電話 明日",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "明日",
+    "titleWithoutDate": "歯医者に電話"
+   }
+  },
+  "commands": {
+   "title": "歯医者に電話 明日",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "レポート提出 来週の金曜日",
+  "result": {
+   "title": "レポート提出 来週の金曜日",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-07",
+    "matchedText": "金曜日",
+    "titleWithoutDate": "レポート提出 来週の"
+   }
+  },
+  "commands": {
+   "title": "レポート提出 来週の金曜日",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "会議 9月5日 15時",
+  "result": {
+   "title": "会議 9月5日 15時",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "9月5日 15時",
+    "titleWithoutDate": "会議"
+   }
+  },
+  "commands": {
+   "title": "会議 9月5日 15時",
+   "props": {}
+  }
+ },
+ {
+  "language": "ja",
+  "dateFormat": null,
+  "input": "買い物 /due:明後日",
+  "result": {
+   "title": "買い物 /due:明後日",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:明後日"
+   ]
+  },
+  "commands": {
+   "title": "買い物 /due:明後日",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:明後日"
+   ]
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-04-03",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Tandarts bellen volgende vrijdag",
+  "result": {
+   "title": "Tandarts bellen volgende vrijdag",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "volgende vrijdag",
+    "titleWithoutDate": "Tandarts bellen"
+   }
+  },
+  "commands": {
+   "title": "Tandarts bellen volgende vrijdag",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Rapport morgen",
+  "result": {
+   "title": "Rapport morgen",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "morgen",
+    "titleWithoutDate": "Rapport"
+   }
+  },
+  "commands": {
+   "title": "Rapport morgen",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Huur betalen op 5 september",
+  "result": {
+   "title": "Huur betalen op 5 september",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05",
+    "matchedText": "5 september",
+    "titleWithoutDate": "Huur betalen op"
+   }
+  },
+  "commands": {
+   "title": "Huur betalen op 5 september",
+   "props": {}
+  }
+ },
+ {
+  "language": "nl",
+  "dateFormat": null,
+  "input": "Vergadering /due:overmorgen",
+  "result": {
+   "title": "Vergadering /due:overmorgen",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:overmorgen"
+   ]
+  },
+  "commands": {
+   "title": "Vergadering /due:overmorgen",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:overmorgen"
+   ]
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-04-03",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Pagar aluguel no dia 5 de setembro",
+  "result": {
+   "title": "Pagar aluguel no dia 5 de setembro",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05",
+    "matchedText": "5 de setembro",
+    "titleWithoutDate": "Pagar aluguel"
+   }
+  },
+  "commands": {
+   "title": "Pagar aluguel no dia 5 de setembro",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Revisar relatório na próxima segunda",
+  "result": {
+   "title": "Revisar relatório na próxima segunda",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "segunda",
+    "titleWithoutDate": "Revisar relatório"
+   }
+  },
+  "commands": {
+   "title": "Revisar relatório na próxima segunda",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Comprar pão amanhã",
+  "result": {
+   "title": "Comprar pão amanhã",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "amanhã",
+    "titleWithoutDate": "Comprar pão"
+   }
+  },
+  "commands": {
+   "title": "Comprar pão amanhã",
+   "props": {}
+  }
+ },
+ {
+  "language": "pt",
+  "dateFormat": null,
+  "input": "Reunião /due:depois de amanhã",
+  "result": {
+   "title": "Reunião /due:depois de amanhã",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:depois de amanhã"
+   ]
+  },
+  "commands": {
+   "title": "Reunião /due:depois de amanhã",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:depois de amanhã"
+   ]
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-04-03",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Позвонить врачу завтра",
+  "result": {
+   "title": "Позвонить врачу завтра",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "завтра",
+    "titleWithoutDate": "Позвонить врачу"
+   }
+  },
+  "commands": {
+   "title": "Позвонить врачу завтра",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Отчёт в следующую пятницу",
+  "result": {
+   "title": "Отчёт в следующую пятницу",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "в следующую пятницу",
+    "titleWithoutDate": "Отчёт"
+   }
+  },
+  "commands": {
+   "title": "Отчёт в следующую пятницу",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Оплатить аренду 5 сентября",
+  "result": {
+   "title": "Оплатить аренду 5 сентября",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05",
+    "matchedText": "5 сентября",
+    "titleWithoutDate": "Оплатить аренду"
+   }
+  },
+  "commands": {
+   "title": "Оплатить аренду 5 сентября",
+   "props": {}
+  }
+ },
+ {
+  "language": "ru",
+  "dateFormat": null,
+  "input": "Встреча /due:послезавтра",
+  "result": {
+   "title": "Встреча",
+   "props": {
+    "dueDate": "2026-08-06"
+   }
+  },
+  "commands": {
+   "title": "Встреча",
+   "props": {
+    "dueDate": "2026-08-06"
+   }
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-03-04",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Ring tandläkaren på fredag",
+  "result": {
+   "title": "Ring tandläkaren på fredag",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-07",
+    "matchedText": "på fredag",
+    "titleWithoutDate": "Ring tandläkaren"
+   }
+  },
+  "commands": {
+   "title": "Ring tandläkaren på fredag",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Rapport imorgon",
+  "result": {
+   "title": "Rapport imorgon",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "imorgon",
+    "titleWithoutDate": "Rapport"
+   }
+  },
+  "commands": {
+   "title": "Rapport imorgon",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Betala hyran den 5 september",
+  "result": {
+   "title": "Betala hyran den 5 september",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05",
+    "matchedText": "den 5 september",
+    "titleWithoutDate": "Betala hyran"
+   }
+  },
+  "commands": {
+   "title": "Betala hyran den 5 september",
+   "props": {}
+  }
+ },
+ {
+  "language": "sv",
+  "dateFormat": null,
+  "input": "Möte /due:i övermorgon",
+  "result": {
+   "title": "Möte /due:i övermorgon",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:i övermorgon"
+   ]
+  },
+  "commands": {
+   "title": "Möte /due:i övermorgon",
+   "props": {},
+   "invalidDateCommands": [
+    "/due:i övermorgon"
+   ]
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-03-04",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "给牙医打电话 明天",
+  "result": {
+   "title": "给牙医打电话 明天",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "明天",
+    "titleWithoutDate": "给牙医打电话"
+   }
+  },
+  "commands": {
+   "title": "给牙医打电话 明天",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "提交报告 下周五",
+  "result": {
+   "title": "提交报告 下周五",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "下周五",
+    "titleWithoutDate": "提交报告"
+   }
+  },
+  "commands": {
+   "title": "提交报告 下周五",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "开会 9月5日 下午3点",
+  "result": {
+   "title": "开会 9月5日 下午3点",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "9月5日 下午3点",
+    "titleWithoutDate": "开会"
+   }
+  },
+  "commands": {
+   "title": "开会 9月5日 下午3点",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh",
+  "dateFormat": null,
+  "input": "买东西 /due:后天",
+  "result": {
+   "title": "买东西",
+   "props": {
+    "dueDate": "2026-08-06"
+   }
+  },
+  "commands": {
+   "title": "买东西",
+   "props": {
+    "dueDate": "2026-08-06"
+   }
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-10-08"
+   }
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-03-04",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "給牙醫打電話 明天",
+  "result": {
+   "title": "給牙醫打電話 明天",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "明天",
+    "titleWithoutDate": "給牙醫打電話"
+   }
+  },
+  "commands": {
+   "title": "給牙醫打電話 明天",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "提交報告 下週五",
+  "result": {
+   "title": "提交報告 下週五",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "下週五",
+    "titleWithoutDate": "提交報告"
+   }
+  },
+  "commands": {
+   "title": "提交報告 下週五",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "開會 9月5日 下午3點",
+  "result": {
+   "title": "開會 9月5日 下午3點",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "9月5日 下午3點",
+    "titleWithoutDate": "開會"
+   }
+  },
+  "commands": {
+   "title": "開會 9月5日 下午3點",
+   "props": {}
+  }
+ },
+ {
+  "language": "zh-Hant",
+  "dateFormat": null,
+  "input": "買東西 /due:後天",
+  "result": {
+   "title": "買東西",
+   "props": {
+    "dueDate": "2026-08-06"
+   }
+  },
+  "commands": {
+   "title": "買東西",
+   "props": {
+    "dueDate": "2026-08-06"
+   }
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Call mom tomorrow",
+  "result": {
+   "title": "Call mom tomorrow",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-05",
+    "matchedText": "tomorrow",
+    "titleWithoutDate": "Call mom"
+   }
+  },
+  "commands": {
+   "title": "Call mom tomorrow",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Pay rent next friday",
+  "result": {
+   "title": "Pay rent next friday",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-14",
+    "matchedText": "next friday",
+    "titleWithoutDate": "Pay rent"
+   }
+  },
+  "commands": {
+   "title": "Pay rent next friday",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Dentist on 5 september at 3pm",
+  "result": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-09-05T15:00:00.000Z",
+    "matchedText": "on 5 september at 3pm",
+    "titleWithoutDate": "Dentist"
+   }
+  },
+  "commands": {
+   "title": "Dentist on 5 september at 3pm",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Review report in 2 weeks",
+  "result": {
+   "title": "Review report in 2 weeks",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-18",
+    "matchedText": "in 2 weeks",
+    "titleWithoutDate": "Review report"
+   }
+  },
+  "commands": {
+   "title": "Review report in 2 weeks",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Plan trip /due:10/8",
+  "result": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Plan trip",
+   "props": {
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Ship v2 /due:next monday /start:tomorrow",
+  "result": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  },
+  "commands": {
+   "title": "Ship v2",
+   "props": {
+    "startTime": "2026-08-05",
+    "dueDate": "2026-08-10"
+   }
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Deploy 26.06.",
+  "result": {
+   "title": "Deploy 26.06.",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Deploy 26.06.2027",
+  "result": {
+   "title": "Deploy 26.06.2027",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-06-26",
+    "matchedText": "26.06.2027",
+    "titleWithoutDate": "Deploy"
+   }
+  },
+  "commands": {
+   "title": "Deploy 26.06.2027",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "python 3.12 upgrade",
+  "result": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  },
+  "commands": {
+   "title": "python 3.12 upgrade",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Meeting /due:2026-09-01 @work #urgent",
+  "result": {
+   "title": "Meeting",
+   "props": {
+    "dueDate": "2026-09-01",
+    "contexts": [
+     "@work"
+    ],
+    "tags": [
+     "#urgent"
+    ]
+   }
+  },
+  "commands": {
+   "title": "Meeting @work #urgent",
+   "props": {
+    "dueDate": "2026-09-01"
+   }
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Buy milk",
+  "result": {
+   "title": "Buy milk",
+   "props": {}
+  },
+  "commands": {
+   "title": "Buy milk",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Standup at 9:30",
+  "result": {
+   "title": "Standup at 9:30",
+   "props": {}
+  },
+  "commands": {
+   "title": "Standup at 9:30",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Report due 3/4",
+  "result": {
+   "title": "Report due 3/4",
+   "props": {},
+   "detectedDate": {
+    "date": "2027-04-03",
+    "matchedText": "3/4",
+    "titleWithoutDate": "Report due"
+   }
+  },
+  "commands": {
+   "title": "Report due 3/4",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Write /start:in 3 days",
+  "result": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  },
+  "commands": {
+   "title": "Write",
+   "props": {
+    "startTime": "2026-08-07"
+   }
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Trip from august 10 to august 12",
+  "result": {
+   "title": "Trip from august 10 to august 12",
+   "props": {},
+   "detectedDate": {
+    "date": "2026-08-10",
+    "matchedText": "august 10 to august 12",
+    "titleWithoutDate": "Trip from"
+   }
+  },
+  "commands": {
+   "title": "Trip from august 10 to august 12",
+   "props": {}
+  }
+ },
+ {
+  "language": "pl",
+  "dateFormat": null,
+  "input": "Gift \\/due:tomorrow literal",
+  "result": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  },
+  "commands": {
+   "title": "Gift /due:tomorrow literal",
+   "props": {}
+  }
+ }
+]

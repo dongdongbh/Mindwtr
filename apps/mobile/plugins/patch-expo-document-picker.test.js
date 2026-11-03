@@ -7,12 +7,12 @@ const plugin = require('./patch-expo-document-picker');
 
 const { APPLIED_MARKER, applyPersistableGrant, getModuleCandidates, patchModuleSource } = plugin.__testables;
 
-// The real vendored file. It may already carry the patch from an earlier prebuild.
+
 const vendoredModulePath = [process.cwd(), path.join(process.cwd(), 'apps', 'mobile')]
   .flatMap((root) => getModuleCandidates(root))
   .find((candidate) => fs.existsSync(candidate));
 
-// The upstream region the patch anchors on, verbatim from expo-document-picker 14.0.8.
+
 const PRISTINE_SOURCE = `class DocumentPickerModule : Module() {
   private fun readDocumentDetails(uri: Uri): DocumentInfo {
     val originalDocumentDetails = DocumentDetailsReader(context).read(uri)
@@ -49,11 +49,11 @@ describe('patch-expo-document-picker plugin', () => {
 
     expect(patched).toContain(APPLIED_MARKER);
     expect(patched).toContain('context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)');
-    // Only the uncopied branch keeps the provider's URI; the grant goes there, before its details return.
+
     const grant = patched.indexOf('takePersistableUriPermission');
     expect(grant).toBeGreaterThan(patched.indexOf('val details = if (!copyToCacheDirectory) {'));
     expect(grant).toBeLessThan(patched.indexOf('    } else {'));
-    // A provider that offers no persistable grant keeps the pick working, as before.
+
     expect(patched).toContain('catch (_: SecurityException)');
   });
 

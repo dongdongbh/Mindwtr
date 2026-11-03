@@ -31,8 +31,8 @@ describe('useListFilterControls', () => {
     });
 
     it('drops the emptied key instead of leaving an empty array behind', () => {
-        // hasActiveFilterCriteria counts an empty array as active, so a
-        // leftover key keeps the "filtered" chip lit with nothing selected.
+
+
         const { result } = renderHook(() => useListFilterControls());
 
         act(() => result.current.toggleToken('@computer'));

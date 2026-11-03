@@ -7,8 +7,8 @@ import { resolveMindwtrDataPath, resolveMindwtrDbPath } from './mindwtr-paths';
 
 const originalPlatform = process.platform;
 const originalEnv = {
-    // HOME is restored too: discovery now reads it (Flatpak roots), and a developer with the
-    // Flatpak app installed must never have their real profile opened by a test.
+
+
     HOME: process.env.HOME,
     APPDATA: process.env.APPDATA,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
@@ -97,9 +97,7 @@ describe('automation script database discovery', () => {
         expect(resolveMindwtrDbPath()).toBe(flatDb);
     });
 
-    // A Flatpak install keeps the profile under ~/.var/app/<app id>/, which no XDG root covers.
-    // Without this root the CLI found nothing, fell back to the first candidate and created a
-    // second database the app never reads.
+
     test('finds a Flatpak profile on Linux when the XDG roots are empty', () => {
         const home = makeTempDir();
         const xdgHome = makeTempDir();
@@ -161,14 +159,13 @@ describe('automation script explicit paths', () => {
         const pinnedData = join(root, 'scratch', 'data.json');
         clearOverrides();
 
-        // The CLI contract: --data/--db at a fresh path means "make the profile here".
+
         expect(resolveMindwtrDbPath(pinnedDb)).toBe(pinnedDb);
         expect(resolveMindwtrDataPath(pinnedData)).toBe(pinnedData);
         expect(existsSync(join(root, 'scratch'))).toBe(false);
     });
 
-    // `data.json` and `data/` are two of the most generic names there are, and the
-    // storage layer rewrites whatever file it opens. Only a real profile may win.
+
     test('ignores a sibling folder that is not a Mindwtr profile', () => {
         const root = makeTempDir();
         const unrelated = join(root, 'data.json');

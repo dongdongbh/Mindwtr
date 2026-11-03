@@ -38,12 +38,14 @@ export type ProjectActions = Pick<
     | 'commitPreparedProjectSectionOrder'
     | 'commitPreparedProjectTaskOrder'
     | 'commitPreparedAreaCreate'
+    | 'commitPreparedInboxOrganizeDestinationCreate'
     | 'commitPreparedAreaColor'
     | 'commitPreparedAreaRename'
     | 'commitPreparedAreaOrder'
     | 'commitPreparedAreaDelete'
     | 'commitPreparedTaxonomy'
     | 'updateProject'
+    | 'setProjectFlowMode'
     | 'cancelProject'
     | 'deleteProject'
     | 'restoreProject'
@@ -74,8 +76,10 @@ export type ProjectActions = Pick<
     | 'deletePerson'
     | 'restorePerson'
     | 'deleteTag'
+    | 'addTag'
     | 'renameTag'
     | 'deleteContext'
+    | 'addContext'
     | 'renameContext'
 >;
 
@@ -111,6 +115,7 @@ export type ProjectCoreActions = Pick<
     | 'commitPreparedProjectDate'
     | 'commitPreparedProjectArea'
     | 'updateProject'
+    | 'setProjectFlowMode'
     | 'cancelProject'
     | 'deleteProject'
     | 'restoreProject'
@@ -123,19 +128,19 @@ export type ProjectCoreActions = Pick<
 export type SectionActions = Pick<ProjectActions, 'addSection' | 'commitPreparedProjectSectionCreate' | 'commitPreparedProjectSectionRename' | 'commitPreparedProjectSectionDelete' | 'updateSection' | 'deleteSection'>;
 export type ProjectToSectionActions = Pick<ProjectActions, 'convertProjectToSection' | 'undoProjectToSection'>;
 
-export type AreaActions = Pick<ProjectActions, 'addArea' | 'commitPreparedAreaCreate' | 'commitPreparedAreaColor' | 'commitPreparedAreaRename' | 'commitPreparedAreaOrder' | 'commitPreparedAreaDelete' | 'updateArea' | 'deleteArea' | 'restoreArea' | 'reorderAreas'>;
+export type AreaActions = Pick<ProjectActions, 'addArea' | 'commitPreparedAreaCreate' | 'commitPreparedInboxOrganizeDestinationCreate' | 'commitPreparedAreaColor' | 'commitPreparedAreaRename' | 'commitPreparedAreaOrder' | 'commitPreparedAreaDelete' | 'updateArea' | 'deleteArea' | 'restoreArea' | 'reorderAreas'>;
 
 export type OrderingActions = Pick<ProjectActions, 'reorderProjects' | 'reorderProjectTasks' | 'reorderBoardTasks' | 'reorderSections' | 'commitPreparedProjectSectionOrder' | 'commitPreparedProjectTaskOrder'>;
 
 export type PeopleActions = Pick<ProjectActions, 'addPerson' | 'commitPreparedPersonCreate' | 'commitPreparedPersonDelete' | 'commitPreparedPersonEdit' | 'updatePerson' | 'renamePerson' | 'deletePerson' | 'restorePerson'>;
 
-export type TaxonomyActions = Pick<ProjectActions, 'deleteTag' | 'renameTag' | 'deleteContext' | 'renameContext' | 'commitPreparedTaxonomy'>;
+export type TaxonomyActions = Pick<ProjectActions, 'addTag' | 'addContext' | 'deleteTag' | 'renameTag' | 'deleteContext' | 'renameContext' | 'commitPreparedTaxonomy'>;
 
 export type { AppData, Area, Person, Project, Section, Task, TaskStatus };
 
 export type DetachedProjectTask = { id: string; sectionId?: string };
 
-/** RN Undo's eligible-current-Task rule, shared with the native prepared effect. */
+
 export function projectDeleteUndoReattachments(projectId: string, links: readonly DetachedProjectTask[],
     sections: readonly Section[], tasks: readonly Task[]): { id: string; updates: Pick<Task, 'projectId' | 'sectionId'> }[] {
     const liveSectionIds = new Set(sections

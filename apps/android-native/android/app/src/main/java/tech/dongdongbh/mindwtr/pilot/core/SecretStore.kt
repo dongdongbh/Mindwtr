@@ -12,14 +12,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/**
- * RN's expo-secure-store format (v15, Android), so an in-place upgrade from RN finds the secrets RN saved and RN finds
- * these: SharedPreferences "SecureStore", the entry "key_v1-<key>", an item `{ ct, iv, tlen, scheme: "aes",
- * usesKeystoreSuffix, keystoreAlias, requireAuthentication }` sealed with the AndroidKeyStore AES-256-GCM key
- * "AES/GCM/NoPadding:key_v1:keystoreUnauthenticated". A read falls back as RN's does (the bare key, the alias without
- * its suffix), and an item whose key is gone or no longer opens it is deleted and read as none, as RN does.
- * Called on HostIo's secrets thread only.
- */
+
 internal class SecretStore(context: Context) {
     companion object {
         private const val SERVICE = "key_v1"
@@ -28,7 +21,7 @@ internal class SecretStore(context: Context) {
         private const val LEGACY_ALIAS = "$CIPHER:$SERVICE"
         private val KEY = Regex("^[\\w.-]+$")
 
-        /** expo-secure-store's key rule: letters, digits, ".", "-" and "_". */
+
         fun requireKey(key: String) = require(KEY.matches(key)) { "Invalid secret key" }
     }
 
@@ -53,7 +46,7 @@ internal class SecretStore(context: Context) {
         return try {
             String(cipher.doFinal(Base64.decode(item.getString("ct"), Base64.DEFAULT)), Charsets.UTF_8)
         } catch (_: BadPaddingException) {
-            // Sealed under an older key (a reinstall): it can never open again.
+
             delete(key)
             null
         }

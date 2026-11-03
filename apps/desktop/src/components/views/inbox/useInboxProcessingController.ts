@@ -46,7 +46,7 @@ import {
 import { useInboxProcessingState } from './useInboxProcessingState';
 import { createSomedaySection } from '../../../lib/someday-section-actions';
 
-/** Organization picks a finished session must not hand to the next one. */
+
 const CLEARED_ON_SESSION_END = ['contexts', 'tags', 'energyLevel', 'assignedTo', 'priority', 'timeEstimate'] as const;
 
 type UseInboxProcessingControllerParams = {
@@ -93,6 +93,8 @@ export function useInboxProcessingController({
     const allTasks = useTaskStore((state) => state._allTasks);
     const people = useTaskStore((state) => state.people);
     const addPerson = useTaskStore((state) => state.addPerson);
+    const sections = useTaskStore((state) => state.sections);
+    const addSection = useTaskStore((state) => state.addSection);
     const personOptions = useMemo(() => getPersonOptionNames(people, tasks), [people, tasks]);
     const {
         processInboxPlan,
@@ -186,8 +188,8 @@ export function useInboxProcessingController({
         [draft.title, parseProcessingTitle],
     );
     const isReturningItem = Boolean(processingTask && isProcessInboxReturningTask(processingTask));
-    // The draft holds the raw token text; the commit path needs the parsed
-    // lists, keyed on the text so callbacks keep their identity between edits.
+
+
     const selectedContexts = useMemo(() => parseContextsInput(draft.contexts), [draft.contexts]);
     const selectedTags = useMemo(() => parseTagsInput(draft.tags), [draft.tags]);
     const similarityIndex = useMemo(
@@ -228,8 +230,8 @@ export function useInboxProcessingController({
         addBreadcrumb('inbox:done');
         setProcessingSession(nextSession);
         setIsProcessing(false);
-        // Queue drained: drop the organization picks so they cannot leak into a
-        // later session (closing also resets the whole draft one tick later).
+
+
         for (const field of CLEARED_ON_SESSION_END) setField(field, '');
     }, [
         eligibleInboxTasks,
@@ -289,8 +291,8 @@ export function useInboxProcessingController({
         } = {},
     ): Promise<boolean> => {
         if (!processingTask) return false;
-        // The same draft-to-write builder the mobile modal uses, so both
-        // platforms write the same fields for the same input.
+
+
         const prepared = prepareProcessInboxCommit({
             task: processingTask,
             plan: processInboxPlan,
@@ -300,6 +302,7 @@ export function useInboxProcessingController({
             parseTitle: (input) => (input === draft.title ? parsedTitle : parseProcessingTitle(input)),
             selection: {
                 projectId: draft.projectId || null,
+                sectionId: draft.sectionId || null,
                 areaId: draft.areaId || null,
                 contexts: selectedContexts,
                 tags: selectedTags,
@@ -329,11 +332,8 @@ export function useInboxProcessingController({
             }
             return false;
         }
-        // The write as one store command, merged field by field onto the row as stored when it is admitted, against
-        // the task the draft was hydrated from (core's mergeTaskDraftOntoLatest, as mobile's): a field another device
-        // changed is written only if the step changed it too; tags and contexts merge by token, and
-        // attachments by mergeTaskDraftAttachments, which appends the title's /link attachments to the latest list. A
-        // token or an attachment a sync save brought stays.
+
+
         const base = processingBaseRef.current?.id === processingTask.id ? processingBaseRef.current : processingTask;
         const updateTaskFromDraft = (id: string, updates: Partial<Task>) => saveTaskDraftOntoLatest(id, base, updates, {
             write: (taskId, merged): Promise<StoreActionResult> | StoreActionResult => (Object.keys(merged).length > 0
@@ -586,8 +586,8 @@ export function useInboxProcessingController({
         ];
         const body = bodyParts.join('\n');
         const subject = `Delegation: ${title}`;
-        // The saved person's mailto: reference doubles as the recipient; the
-        // shell-open scope also requires one (a bare "mailto:?..." is refused).
+
+
         const email = resolveDelegateEmail(people, who);
         const mailto = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
         if (!isTauriRuntime()) {
@@ -600,7 +600,7 @@ export function useInboxProcessingController({
                 await open(mailto);
                 return;
             } catch {
-                // No mail handler (or scope refusal) — fall through to the clipboard.
+
             }
         }
         try {
@@ -729,9 +729,7 @@ export function useInboxProcessingController({
             );
             if (!project) return;
 
-            // Extra actions are independent durable writes. Commit and remove
-            // each one before moving the original Inbox task, so a failure can
-            // be retried without losing or duplicating actions already saved.
+
             const extraActions = extraActionDrafts
                 .map((draftValue) => ({ draftValue, title: draftValue.trim() }))
                 .filter(({ title }) => Boolean(title));
@@ -796,6 +794,23 @@ export function useInboxProcessingController({
         if (!person) showToast(tFallback(t, 'task.addFailed', 'Failed to add task'), 'error');
     }, [addPerson, showToast, t]);
 
+
+    const handleCreateSection = useCallback(async (title: string) => {
+        const trimmed = title.trim();
+        if (!trimmed || !draft.projectId) return null;
+        const existing = sections.find((section) => (
+            section.projectId === draft.projectId && !section.deletedAt
+            && section.title.toLowerCase() === trimmed.toLowerCase()
+        ));
+        if (existing) return existing.id;
+        try {
+            return (await addSection(draft.projectId, trimmed))?.id ?? null;
+        } catch (error) {
+            reportError('Failed to create a project section during Inbox Processing', error);
+            return null;
+        }
+    }, [addSection, draft.projectId, sections]);
+
     const handleCreateSomedaySection = useCallback(async (title: string) => {
         try {
             return await createSomedaySection(title);
@@ -857,6 +872,7 @@ export function useInboxProcessingController({
 
     const options = useMemo<InboxProcessingOptionLists>(() => ({
         projects,
+        sections,
         areas: activeAreas,
         allContexts,
         allTags,
@@ -870,6 +886,7 @@ export function useInboxProcessingController({
         allTags,
         personOptions,
         projects,
+        sections,
         suggestedContexts,
         suggestedTags,
         timeEstimateOptions,
@@ -906,6 +923,7 @@ export function useInboxProcessingController({
             onSendDelegateRequest: handleSendDelegateRequest,
             onCreatePerson: handleCreatePerson,
             onCreateSomedaySection: handleCreateSomedaySection,
+            onCreateSection: handleCreateSection,
             toggleContext,
             toggleTag,
             convertToProject,
@@ -959,6 +977,7 @@ export function useInboxProcessingController({
         handleConfirmSomeday,
         onCreatePerson: handleCreatePerson,
         onCreateSomedaySection: handleCreateSomedaySection,
+        onCreateSection: handleCreateSection,
         customContext,
         setCustomContext,
         addCustomContext,

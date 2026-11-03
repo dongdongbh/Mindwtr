@@ -8,11 +8,7 @@ const {
   patchMainActivity,
 } = plugin.__testables;
 
-// ContextAutomationReceiver.kt and ContextAutomationHeadlessService.kt used to be
-// generated here as template strings (see git history); they are now real .kt
-// files in the local context-automation Expo module. These tests read that
-// module's source directly to keep the 9-fallback deep-link payload parser and
-// the headless task wiring covered now that this plugin no longer builds them.
+
 const contextAutomationModuleDir = path.join(
   __dirname,
   '..',
@@ -44,8 +40,7 @@ describe('android-startup-trace', () => {
     expect(receiver).toContain('ContextAutomationHeadlessService::class.java');
     expect(receiver).toContain('HeadlessJsTaskService.acquireWakeLockNow(context)');
 
-    // The 9-fallback deep-link payload parser (#819-adjacent): every branch,
-    // in order. A dropped fallback here breaks a real intent shape silently.
+
     const fallbackOrder = [
       'clean(intent.getStringExtra("context"))',
       'clean(intent.getStringExtra("name"))',
@@ -124,7 +119,13 @@ class MainActivity : ReactActivity() {
     expect(output).toContain('"context"');
     expect(output).toContain('NotificationOpenPayloadStore.cache(payload)');
     expect(output).toContain('override fun onNewIntent(intent: Intent)');
-    expect(output).toContain('normalizeCreateNoteIntent(intent)\n    normalizeContextAutomationIntent(intent)\n    super.onNewIntent(intent)');
+    expect(output).toContain('normalizeCreateNoteIntent(intent)\n    normalizeContextAutomationIntent(intent)\n    WidgetLaunchCover.receive(this, intent)\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n    super.onNewIntent(intent)');
+    expect(output.match(/WidgetLaunchCover\.receive\(this, intent\)/g)).toHaveLength(2);
+    expect(output).toContain('WidgetLaunchCover.receive(this, intent)\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n    startupMark("native.main_activity.on_create:end")');
+    expect(output).toContain('override fun onPause() {\n    WidgetLaunchCover.cancel(this)\n    super.onPause()');
+    expect(output).toContain('override fun onResume() {\n    super.onResume()\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n    WidgetLaunchCover.resume(this)');
+    expect(output).toContain('override fun onDestroy() {\n    WidgetLaunchCover.cancel(this)\n    super.onDestroy()');
+    expect(patchMainActivity(output)).toBe(output);
     expect(output).toContain('copyNestedData(extras.get("data"))');
     expect(output).toContain('value != JSONObject.NULL');
     expect(output).toContain('emit("OnNotificationOpened", JSONObject(payload).toString())');
@@ -155,12 +156,11 @@ class MainActivity : ReactActivity() {
 
     const output = patchMainActivity(input);
 
-    // Both entry points run through cacheNotificationOpenPayload, so guarding it
-    // once covers the cold start and the onNewIntent replay.
+
     expect(output).toContain('private fun isSelfLaunchedIntent(intent: Intent?): Boolean');
     expect(output).toContain('if (!isSelfLaunchedIntent(intent)) return null');
     expect(output).toContain('referrer?.host == packageName');
-    // getReferrer() prefers the caller-supplied extras, so those disqualify the intent.
+
     expect(output).toContain('Intent.EXTRA_REFERRER');
     expect(output).toContain('Intent.EXTRA_REFERRER_NAME');
   });
@@ -349,7 +349,7 @@ class MainActivity : ReactActivity() {
     expect(output).toContain('private fun normalizeCreateNoteIntent(intent: Intent?)');
     expect(output).toContain('private fun normalizeContextAutomationIntent(intent: Intent?)');
     expect(output).toContain('override fun onNewIntent(intent: Intent)');
-    expect(output).toContain('normalizeCreateNoteIntent(intent)\n    normalizeContextAutomationIntent(intent)\n    super.onNewIntent(intent)');
+    expect(output).toContain('normalizeCreateNoteIntent(intent)\n    normalizeContextAutomationIntent(intent)\n    WidgetLaunchCover.receive(this, intent)\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n    super.onNewIntent(intent)');
     expect(output).not.toContain('fun consumePendingNotificationOpenPayload()');
     expect(output).not.toContain('override fun onNewIntent(intent: Intent?)');
     expect(output).not.toContain('pendingNotificationOpenPayload = LinkedHashMap(payload)');

@@ -11,9 +11,7 @@ import * as mcpQueries from './queries.js';
 
 const tempDirs: string[] = [];
 
-// These tests bootstrap a real SQLite database from data.json. On a loaded shared CI
-// runner that alone ran past bun's 5s default (5.3s on 2026-08-30), so give them the
-// same explicit budget the cross-process lock tests carry; a timeout at 20s is real.
+
 const REAL_SQLITE_TEST_TIMEOUT_MS = 20_000;
 
 const createTempDir = (): string => {
@@ -406,9 +404,7 @@ describe('mcp service', () => {
     expect(closedCoreAdapterCount).toBe(1);
   });
 
-  // The update rule is "this is the complete list of links": the row's file attachments and
-  // its tombstones must survive, and a live link left out has to be tombstoned rather than
-  // dropped (a dropped record is resurrected by the sync merge - see link-attachments.ts).
+
   test('updateTask rewrites links from the entity reloaded inside the core write lock', async () => {
     let receivedUpdateInput: any = null;
     const logs: Array<{ message: string; context?: Record<string, unknown> }> = [];
@@ -526,8 +522,8 @@ describe('mcp service', () => {
         { id: 'link-1', kind: 'link', title: 'Old note', uri: 'https://example.com/old', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
       ],
     };
-    // Simulates a concurrent write (the app, or a second MCP call) tombstoning link-1 in the
-    // window between the first failed attempt and the retried second attempt.
+
+
     const storedTaskAfterRace = {
       ...storedTaskBeforeRace,
       attachments: [
@@ -558,8 +554,8 @@ describe('mcp service', () => {
 
     expect(updateTaskAttempts).toBe(2);
     const written = receivedUpdateInput.updates.attachments;
-    // The row already had link-1 tombstoned by the time the retry re-reads it, so the
-    // retried write must keep it tombstoned rather than reviving it from a stale read.
+
+
     const oldLink = written.find((item: any) => item.id === 'link-1');
     expect(oldLink.deletedAt).toBe('2026-01-01T12:00:00.000Z');
     const newLink = written.find((item: any) => item.uri === 'obsidian://open?vault=v&file=n');
@@ -944,19 +940,7 @@ describe('mcp service', () => {
     }
   }, REAL_SQLITE_TEST_TIMEOUT_MS);
 
-  // R-08's executable guard for the invariants documented at runCoreWriteWithRetries: every
-  // core write flushes before returning, and the retried callback re-reads storage. Together
-  // they make a two-write quickAdd capture (addProject then addTask) safe to retry whole.
-  //
-  // Real database, real core adapter, real parser — only addTask is wrapped, to fail once
-  // between the two writes. The project assertion doubles as the harness control: an earlier
-  // attempt spread `...queries` into deps and silently swapped in queries.ts's same-named
-  // parseQuickAdd (it drops projectTitle), so no project was created at all and the run looked
-  // like a persistence bug. If the harness breaks capture again, projects is 0 and this fails.
-  //
-  // ONE case on purpose: core-adapter holds module-level singletons (coreService/coreQueue),
-  // so a second case in this process runs against the previous case's store and reports
-  // duplicates that are test-isolation artifacts, not product behaviour.
+
   test('a retried quickAdd capture leaves one project and one task', async () => {
     const dir = createTempDir();
     writeFileSync(
@@ -969,7 +953,7 @@ describe('mcp service', () => {
       ...mcpDb,
       ...mcpQueries,
       closeCoreAdapter,
-      // The core parser, NOT queries.ts's narrowing wrapper of the same name.
+
       parseQuickAdd,
       runCoreService: (options: any, fn: any) => runCoreService(options, (core: any) => fn(
         new Proxy(core, {
@@ -995,10 +979,71 @@ describe('mcp service', () => {
       const shipTasks = tasks.filter((task) => task.title === 'Ship it');
       expect(launchProjects).toHaveLength(1);
       expect(shipTasks).toHaveLength(1);
-      // By title, not by index: `bun test` runs every file in one process and the
-      // core adapter's singleton store can carry another file's projects into this
-      // list, so `projects[0]` is not necessarily Launch (CI run 33716419352).
+
+
       expect(shipTasks[0]?.projectId).toBe(launchProjects[0]?.id);
+    } finally {
+      await service.close();
+    }
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
+
+  test('a core write on a second database reloads the store instead of refusing it as a partial snapshot', async () => {
+    const at = '2026-10-01T09:00:00.000Z';
+    const seed = (dir: string, prefix: string) => writeFileSync(join(dir, 'data.json'), JSON.stringify({
+      tasks: [{ id: `${prefix}-task`, title: `${prefix} task`, status: 'next', tags: [], contexts: [], createdAt: at, updatedAt: at }],
+      projects: [{ id: `${prefix}-project`, title: prefix, status: 'active', color: '#6B7280', order: 0, tagIds: [], createdAt: at, updatedAt: at }],
+      sections: [{ id: `${prefix}-section`, projectId: `${prefix}-project`, title: 'Plan', order: 0, createdAt: at, updatedAt: at }],
+      areas: [], people: [], settings: {},
+    }));
+    const first = createTempDir();
+    seed(first, 'first');
+    const firstService = createService({ dbPath: join(first, 'mindwtr.db'), readonly: false });
+    try {
+      await firstService.updateSection({ id: 'first-section', title: 'Plan A' });
+    } finally {
+      await firstService.close();
+    }
+    const second = createTempDir();
+    seed(second, 'second');
+    const secondService = createService({ dbPath: join(second, 'mindwtr.db'), readonly: false });
+    try {
+      expect((await secondService.updateSection({ id: 'second-section', title: 'Plan B' })).title).toBe('Plan B');
+      expect((await secondService.listTasks({ status: 'all' })).map((task) => task.id)).toEqual(['second-task']);
+    } finally {
+      await secondService.close();
+    }
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
+
+  test('reads Per section Flow mode, keeps it through MCP edits, and blocks only Sequential sections (#1429)', async () => {
+    const dir = createTempDir();
+    const dbPath = join(dir, 'mindwtr.db');
+    const at = '2026-10-01T09:00:00.000Z';
+    const task = (id: string, sectionId: string, order: number) => ({
+      id, title: id, status: 'next', projectId: 'trip', sectionId, order, tags: [], contexts: [], createdAt: at, updatedAt: at,
+    });
+    writeFileSync(join(dir, 'data.json'), JSON.stringify({
+      tasks: [task('find-site', 'book', 1), task('reserve-site', 'book', 2), task('find-tent', 'prep', 1)],
+      projects: [{ id: 'trip', title: 'Camping Trip', status: 'active', color: '#6B7280', order: 0, tagIds: [],
+        isSequential: false, perSectionFlow: true, createdAt: at, updatedAt: at }],
+      sections: [
+        { id: 'book', projectId: 'trip', title: 'Book campsite', order: 0, isSequential: true, createdAt: at, updatedAt: at },
+        { id: 'prep', projectId: 'trip', title: 'Prep', order: 1, isSequential: false, createdAt: at, updatedAt: at },
+      ],
+      areas: [], people: [], settings: {},
+    }));
+    const service = createService({ dbPath, readonly: false });
+    try {
+      expect((await service.getProject({ id: 'trip' })).perSectionFlow).toBe(true);
+      await service.updateSection({ id: 'book', title: 'Book the campsite' });
+      await service.updateProject({ id: 'trip', title: 'Camping' });
+      const sections = await service.listSections({ projectId: 'trip' });
+      expect(sections.map((row) => [row.id, row.title, row.isSequential])).toEqual([
+        ['book', 'Book the campsite', true], ['prep', 'Prep', false],
+      ]);
+      expect((await service.getProject({ id: 'trip' })).perSectionFlow).toBe(true);
+      const ids = async (view: 'available' | 'blocked') => (await service.listTasks({ status: 'all', view })).map((row) => row.id).sort();
+      expect(await ids('available')).toEqual(['find-site', 'find-tent']);
+      expect(await ids('blocked')).toEqual(['reserve-site']);
     } finally {
       await service.close();
     }
@@ -1204,12 +1249,7 @@ describe('mcp service', () => {
   }, REAL_SQLITE_TEST_TIMEOUT_MS);
 });
 
-// core-adapter.ts's ensureActionSucceeded used to map EVERY core store failure to
-// NotFoundError, so a plain input-validation problem (a bogus areaId reference, a focus-cap
-// hit) reported code 'not_found' instead of 'validation_error' through the local adapter --
-// while cloud-service.ts's mapCloudError already reported 'validation_error' for the same kind
-// of mistake. These pin the fix: only a genuine "<Entity> not found" lookup miss (or a
-// post-mutation findTask miss) is NotFoundError; everything else is ValidationError.
+
 describe('mcp service error taxonomy (local core adapter)', () => {
   const seedRealService = (extraTasks: Record<string, unknown>[] = []) => {
     const dir = createTempDir();
@@ -1238,18 +1278,8 @@ describe('mcp service error taxonomy (local core adapter)', () => {
   }, REAL_SQLITE_TEST_TIMEOUT_MS);
 
   test('updateTask hitting the focus-task cap is a validation error, not not_found', async () => {
-    // Built up through live addTask/updateTask calls on one service session (like the "persists
-    // write operations" test above), not a multi-task bootstrap-JSON seed: a bootstrap seed of
-    // several already-focused tasks proved unreliable back-to-back with that other real-core-
-    // backed test in this same file (core-adapter.ts's module-level store singleton doesn't
-    // cleanly rehydrate between two independently-bootstrapped databases in one test process) --
-    // a test-isolation quirk, not a bug in the fix under test here.
-    // core-adapter.ts's store is a process-wide singleton, so earlier real-core-backed
-    // test files can leave focused tasks in the in-memory store that this session still
-    // counts toward the cap — and a listTasks-based cleanup can't see them, because SQL
-    // reads hit this session's fresh database while store writes validate against the
-    // stale memory. Don't assume a clean slate: drive TO the cap by focusing new tasks
-    // until one rejects, and assert that first rejection is the validation error.
+
+
     const service = seedRealService();
     try {
       let capError: { code?: string; message?: string } | null = null;

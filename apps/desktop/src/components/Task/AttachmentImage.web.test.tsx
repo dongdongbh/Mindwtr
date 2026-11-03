@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import type { Attachment } from '@mindwtr/core';
 import { AttachmentImage } from './AttachmentImage';
+import { createWebAttachmentDraft } from '../../lib/web-attachment-upload';
 
 const fetchWebCloudAttachmentBlobMock = vi.fn();
 
@@ -74,5 +75,23 @@ describe('AttachmentImage in the web build', () => {
 
         expect(screen.getByAltText('photo')).toHaveAttribute('src', 'https://example.com/photo.png');
         expect(fetchWebCloudAttachmentBlobMock).not.toHaveBeenCalled();
+    });
+
+    it('shows a pasted image from its draft before Save uploads it, and stops once the draft is discarded (#1433)', async () => {
+        (URL as unknown as { createObjectURL: unknown }).createObjectURL = vi.fn(() => 'blob:staged-bytes');
+        const draft = createWebAttachmentDraft();
+        const staged = draft.stage(new File([new Uint8Array([1, 2, 3])], 'clip.png', { type: 'image/png' }));
+
+        const { unmount } = render(<AttachmentImage attachment={staged} alt="pasted" />);
+
+        expect(screen.getByAltText('pasted')).toHaveAttribute('src', 'blob:staged-bytes');
+        expect(fetchWebCloudAttachmentBlobMock).not.toHaveBeenCalled();
+        unmount();
+
+        draft.discard();
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:staged-bytes');
+        fetchWebCloudAttachmentBlobMock.mockResolvedValue(null);
+        render(<AttachmentImage attachment={staged} alt="pasted" />);
+        await waitFor(() => expect(fetchWebCloudAttachmentBlobMock).toHaveBeenCalledWith(staged));
     });
 });

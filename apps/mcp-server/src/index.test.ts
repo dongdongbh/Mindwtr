@@ -11,10 +11,10 @@ import type { MindwtrService } from './service.js';
 type RegisteredTool = {
   name: string;
   inputSchema: ZodTypeAny;
-  /** Parses through the registered inputSchema first, like the SDK does. */
+
   handler: (input: any) => Promise<any>;
-  /** The handler on its own, for the tests that cover its runtime validators
-   *  directly with input the schema would already have rejected. */
+
+
   rawHandler: (input: any) => Promise<any>;
 };
 
@@ -22,9 +22,8 @@ const createMockServer = () => {
   const tools = new Map<string, RegisteredTool>();
   const server = {
     registerTool: (name: string, meta: any, handler: (input: any) => Promise<any>) => {
-      // The SDK validates each call against the registered inputSchema before the
-      // handler runs. Keep the schema and do the same here, so the caps it declares
-      // (search length, offset ceiling, limit range, enums, date shape) are covered.
+
+
       const inputSchema = meta?.inputSchema as ZodTypeAny;
       tools.set(name, {
         name,
@@ -93,6 +92,7 @@ const createMockService = (): MindwtrService => ({
   listTasks: async () => [mockTask()],
   listProjects: async () => [mockProject()],
   listSections: async () => [mockSection()],
+  listViewSections: async () => [],
   listAreas: async () => [mockArea()],
   listPeople: async () => [mockPerson()],
   getTask: async () => mockTask(),
@@ -143,9 +143,7 @@ describe('mcp server index', () => {
     expect(parseBooleanFlag(undefined, 'write')).toBeUndefined();
   });
 
-  // SEC-11: an unrecognized string value used to silently parse as `true` - the OPPOSITE of
-  // what a typo like `--write=disabled` looks like it should mean. It must fail closed (throw,
-  // naming the flag) instead of guessing.
+
   test('rejects an unrecognized boolean flag value instead of defaulting to true', () => {
     expect(() => parseBooleanFlag('nope', 'write')).toThrow(/--write/);
     expect(() => parseBooleanFlag('disabled', 'write')).toThrow(/--write/);
@@ -169,9 +167,7 @@ describe('mcp server index', () => {
     });
   });
 
-  // SEC-11: `--write=nope` used to silently parse `write` as true (parseBooleanFlag's
-  // fail-open default) - enabling edits from a typo that reads like it should mean the
-  // opposite. Startup must now fail loudly instead.
+
   test('rejects an unrecognized --write value at startup instead of silently enabling writes', () => {
     expect(() => resolveServerModeFlags(parseArgs(['--write=nope']))).toThrow(/--write/);
   });
@@ -242,12 +238,13 @@ describe('mcp server index', () => {
   test('registers all mindwtr tools', () => {
     const { server, tools } = createMockServer();
     registerMindwtrTools(server, createMockService(), false);
-    expect(tools.size).toBe(27);
+    expect(tools.size).toBe(28);
     expect(tools.has('mindwtr_list_tasks')).toBe(true);
     expect(tools.has('mindwtr_add_task')).toBe(true);
     expect(tools.has('mindwtr_restore_task')).toBe(true);
     expect(tools.has('mindwtr_get_project')).toBe(true);
     expect(tools.has('mindwtr_list_sections')).toBe(true);
+    expect(tools.has('mindwtr_list_view_sections')).toBe(true);
     expect(tools.has('mindwtr_get_section')).toBe(true);
     expect(tools.has('mindwtr_add_section')).toBe(true);
     expect(tools.has('mindwtr_update_section')).toBe(true);
@@ -421,7 +418,7 @@ describe('mcp server index', () => {
   test('validates add_task title length', async () => {
     const { server, tools } = createMockServer();
     registerMindwtrTools(server, createMockService(), false);
-    // The registered schema caps the title too; this covers the handler's own guard.
+
     const addHandler = tools.get('mindwtr_add_task')?.rawHandler;
     expect(addHandler).toBeTruthy();
     const longTitle = 'x'.repeat(501);
@@ -671,8 +668,8 @@ describe('registered tool input schemas', () => {
     await expect(addTask({ title: 'Buy milk', dueDate: '2026/01/01' })).rejects.toThrow();
     await expect(addTask({ title: 'Buy milk', tags: ['  '] })).rejects.toThrow();
     expect((await addTask({ title: 'Buy milk', dueDate: '2026-01-01' })).isError).toBeUndefined();
-    // Known gap: the date schema checks shape only, so an impossible calendar date
-    // reaches the handler. Tightening it is a schema change, out of this test's scope.
+
+
     expect((await addTask({ title: 'Buy milk', dueDate: '2026-13-45' })).isError).toBeUndefined();
   });
 });

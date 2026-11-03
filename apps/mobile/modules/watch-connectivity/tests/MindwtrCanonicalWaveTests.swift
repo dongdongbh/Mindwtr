@@ -95,7 +95,7 @@ final class MindwtrCanonicalWaveTests: XCTestCase {
         let canonical = try MindwtrCanonicalWave.header(dataByteCount: dataByteCount)
 
         var wrongRate = canonical
-        wrongRate[24] = 0x44 // 44_100 Hz instead of 16_000
+        wrongRate[24] = 0x44
         wrongRate[25] = 0xAC
         XCTAssertFalse(MindwtrCanonicalWave.validateHeader(
             wrongRate,

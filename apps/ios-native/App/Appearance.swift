@@ -1,7 +1,6 @@
 import SwiftUI
 
-// Presentation tokens from mobile/constants/theme{,-presets}.ts and use-theme-tokens.ts.
-// Core supplies the selected theme descriptor and all status/priority colors.
+
 struct AppPalette {
     let values: [String]
     let dark: Bool
@@ -44,6 +43,8 @@ struct AppPalette {
         "nord": ["2E3440", "3B4252", "3B4252", "ECEFF4", "D8DEE9", "4C566A", "88C0D0", "2E3440", "434C5E", "BF616A", "A3BE8C", "EBCB8B", "434C5E"],
         "catppuccin-macchiato": ["24273A", "363A4F", "363A4F", "CAD3F5", "A5ADCB", "5B6078", "C6A0F6", "24273A", "494D64", "ED8796", "A6DA95", "EED49F", "494D64"],
         "dracula": ["282A36", "343746", "343746", "F8F8F2", "ADB5CB", "44475A", "BD93F9", "282A36", "424450", "FF5555", "50FA7B", "FFB86C", "424450"],
+        "gruvbox-light": ["F2E5BC", "FBF1C7", "FBF1C7", "3C3836", "665C54", "D5C4A1", "076678", "FBF1C7", "EBDBB2", "9D0006", "79740E", "AD3903", "EBDBB2"],
+        "gruvbox-dark": ["282828", "32302F", "32302F", "EBDBB2", "BDAE93", "504945", "9EB9AE", "282828", "3C3836", "FB4934", "B8BB26", "FABD2F", "3C3836"],
         "sepia": ["F4ECD8", "FAF3E3", "FAF3E3", "3B2F2F", "7A5C3E", "E2D3B5", "956735", "FFF6E7", "F0E3C8", "B44B3B", "5F7D4A", "B5813C", "EFE2C7"],
         "oled": ["000000", "000000", "000000", "E5E7EB", "9CA3AF", "1F2937", "4F9DFF", "000000", "0B0B0B", "F87171", "34D399", "FBBF24", "0B0B0B"],
     ]
@@ -72,7 +73,7 @@ private struct RNFont: ViewModifier {
 }
 
 extension View {
-    // RN caps compact controls explicitly; reading content keeps full scaling.
+
     func rnFont(_ size: Double, _ weight: Font.Weight = .regular, maxScale: Double? = nil) -> some View {
         modifier(RNFont(size: size, weight: weight, maxScale: maxScale))
     }
@@ -92,7 +93,7 @@ struct AppIcon: View {
     }
 }
 
-// Match RN FocusStarIcon in capture, task rows and Projects.
+
 struct AppFocusStar: View {
     let focused: Bool
     var disabled = false

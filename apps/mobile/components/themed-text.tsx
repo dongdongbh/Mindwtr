@@ -9,11 +9,8 @@ export type ThemedTextProps = TextProps & {
   lightColor?: string;
   darkColor?: string;
   type?: 'default' | 'title' | 'defaultSemiBold' | 'subtitle' | 'link';
-  /**
-   * Material 3 type-scale role. Only applied when the active theme is Material 3
-   * (`isMaterial`); under every other theme it is ignored and the legacy `type`
-   * styling is used unchanged.
-   */
+
+
   m3?: M3TypeRole;
 };
 

@@ -14,7 +14,7 @@ import {
     iosWidgetProjectionOptions,
     isWidgetAudioCaptureEnabled,
 } from '@mindwtr/core/widget-payload';
-import { WIDGET_FIXED_LIST_IDS } from '@mindwtr/core/widget-lists';
+import { WIDGET_FIXED_LIST_IDS, WIDGET_FOCUS_AVAILABLE_LIST_ID } from '@mindwtr/core/widget-lists';
 import {
     buildShortcutsSnapshot,
     createWidgetPayloadProjection,
@@ -73,9 +73,7 @@ async function resolvePayloadLanguage(data: AppData): Promise<Language> {
     return resolveWidgetLanguage(languageValue, data.settings?.language, getSystemDefaultLanguage());
 }
 
-// What each platform's payload carries is core's (widget-payload.ts); this
-// reads the inputs only the app has: the system colour scheme, the Focus
-// screen's current filter (#1173) and the lists placed Android widgets chose.
+
 function widgetPayloadOptions(): Omit<WidgetPayloadBuildOptions, 'maxItems'> {
     const input = {
         systemColorScheme: getSystemColorSchemeForWidget(),
@@ -98,9 +96,25 @@ const WIDGET_FOCUS_TODAY_RELEASE_CHECK = 'v1.3.0/widget-focus-today';
 const IOS_WIDGET_PARITY_RELEASE_CHECK = 'v1.3.1/ios-widget-parity';
 let androidWidgetUnavailableLogged = false;
 
+
+function logFocusAvailablePublished(payload: TasksWidgetPayload, platform: 'android' | 'ios'): void {
+    const list = payload.lists[WIDGET_FOCUS_AVAILABLE_LIST_ID];
+    if (!list) return;
+    void logInfo('Focus widget available actions published', {
+        scope: 'widget',
+        force: true,
+        extra: {
+            releaseCheck: 'v1.3.8/widget-focus-available',
+            platform,
+            count: String(list.sections?.find((section) => section.key === 'available')?.items.length ?? 0),
+            totalItems: String(list.totalCount),
+        },
+    });
+}
+
 async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, language: Language, audioEnabled: boolean): Promise<boolean> {
     if (Platform.OS !== 'android') return false;
-    // Expo Go does not link modules/android-widget. Say so once, then stay quiet.
+
     if (!AndroidWidget.isSupported()) {
         if (!androidWidgetUnavailableLogged) {
             androidWidgetUnavailableLogged = true;
@@ -113,7 +127,7 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
         const payload = buildAndroidTasksWidgetPayload(rendered, language, audioEnabled);
         AndroidWidget.setPayload(JSON.stringify(payload));
         const refreshResult = AndroidWidget.updateWidgets();
-        // Older installed native modules return only the compatibility count.
+
         const legacyWidgetCount = typeof refreshResult === 'number' ? refreshResult : refreshResult?.legacyWidgetCount;
         const hiddenCheckoffCount = typeof refreshResult === 'object' ? refreshResult.hiddenCheckoffCount : undefined;
         const serializedCheckoffCount = typeof refreshResult === 'object' ? refreshResult.serializedCheckoffCount : undefined;
@@ -179,13 +193,18 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
         });
         void logInfo('Android widget context and tag snapshots published', {
             scope: 'widget', force: true,
-            extra: { releaseCheck: 'v1.3.7/widget-context-selection', count: (payload.contexts?.length ?? 0) + (payload.tags?.length ?? 0) },
+            extra: {
+                releaseCheck: 'v1.3.7/widget-context-selection', count: (payload.contexts?.length ?? 0) + (payload.tags?.length ?? 0),
+
+                lists: Object.keys(payload.lists).filter((id) => /^(context|tag|filter):/.test(id)).length,
+            },
         });
-        void logInfo('Upcoming widget snapshot published', {
+        void logInfo('Widget lists published from one snapshot', {
             scope: 'widget',
             force: true,
-            extra: { releaseCheck: 'v1.3.7/widget-upcoming', platform: 'android', count: payload.lists.upcoming?.items.length ?? 0 },
+            extra: { releaseCheck: 'v1.3.8/widget-snapshot-rollover', platform: 'android', count: payload.lists.upcoming?.items.length ?? 0 },
         });
+        logFocusAvailablePublished(payload, 'android');
         void logInfo('Android widget fixed lists published', {
             scope: 'widget',
             extra: {
@@ -266,11 +285,12 @@ async function updateIosWidgetPayloads(projection: WidgetPayloadProjection): Pro
             extra: { releaseCheck: 'v1.3.0/widget-batch-derivation', count: 5 },
         });
         const payload = payloadEntries[0][1];
-        void logInfo('Upcoming widget snapshot published', {
+        void logInfo('Widget lists published from one snapshot', {
             scope: 'widget',
             force: true,
-            extra: { releaseCheck: 'v1.3.7/widget-upcoming', platform: 'ios', count: payload.lists.upcoming?.items.length ?? 0 },
+            extra: { releaseCheck: 'v1.3.8/widget-snapshot-rollover', platform: 'ios', count: payload.lists.upcoming?.items.length ?? 0 },
         });
+        logFocusAvailablePublished(payload, 'ios');
         void logInfo('iOS Focus widget payload published', {
             scope: 'widget',
             extra: {
@@ -302,13 +322,7 @@ async function updateIosWidgetPayloads(projection: WidgetPayloadProjection): Pro
     }
 }
 
-// Separate from the widget payload write above (#980 correction): the
-// snapshot changes on edits the widget never shows (for example project
-// metadata outside the widget's own top-N slice), so it needs
-// its own change-skip gate. Sharing one fingerprint would either miss those
-// snapshot-only changes or re-run the widget's five setItem calls plus three
-// reloadTimelines on every one of them, which is exactly what #766 added a
-// cache to avoid.
+
 async function updateIosShortcutsSnapshotFromData(snapshot: ShortcutsSnapshot): Promise<boolean> {
     if (Platform.OS !== 'ios') return false;
     const widgetApi = await getIosWidgetApi();
@@ -333,26 +347,16 @@ async function updateIosShortcutsSnapshotFromData(snapshot: ShortcutsSnapshot): 
     }
 }
 
-// Storage fires widget updates on every save and load, but the native render
-// (Android RemoteViews / iOS timeline reload) costs seconds on mid-range
-// devices while the payload build costs milliseconds (#766). Remember what was
-// last rendered and skip the native update when nothing any widget shows
-// changed. Newly placed or resized Android widgets draw from the last stored
-// payload natively, so they never depend on this path.
+
 const WIDGET_FINGERPRINT_MAX_ITEMS = 50;
 const WIDGET_RENDER_SCHEMA_REVISION = 2;
-// Folded into the fingerprint (not just the storage key) so an app upgrade
-// that changes what a render writes without changing the payload data still
-// forces a render: a persisted fingerprint from an older build never matches
-// the newly computed one (correction #4).
+
+
 const WIDGET_RENDER_APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 let lastRenderedWidgetFingerprint: string | null = null;
 let lastRenderedShortcutsSnapshotFingerprint: string | null = null;
 
-// The rendered fingerprint above only lives in module scope, which is cold on
-// every invocation of the scheduled background sync (a headless RN instance):
-// the #766 native-render skip never fired there. Persist it so a background
-// cycle that changed nothing still skips the native render (#766 follow-up).
+
 const WIDGET_FINGERPRINT_STORAGE_KEY = 'mindwtr-widget-render-fingerprint';
 let widgetFingerprintLoadedFromStorage = false;
 let widgetFingerprintLoadPromise: Promise<void> | null = null;
@@ -365,7 +369,7 @@ async function ensureLastRenderedWidgetFingerprintLoaded(): Promise<void> {
                 const stored = await AsyncStorage.getItem(WIDGET_FINGERPRINT_STORAGE_KEY);
                 if (stored !== null) lastRenderedWidgetFingerprint = stored;
             } catch {
-                // Read failure: treat as null (render).
+
             } finally {
                 widgetFingerprintLoadedFromStorage = true;
             }
@@ -374,18 +378,14 @@ async function ensureLastRenderedWidgetFingerprintLoaded(): Promise<void> {
     await widgetFingerprintLoadPromise;
 }
 
-// Gate 0's cache: {lastDataChangeAt, language, localDayKey} of the last
-// successful render, so a repeated store-driven update (the immediate + 800ms
-// pair after a foreground transition) can skip building/stringifying the
-// widget payload entirely when nothing that could change it moved. Only
-// `updateMobileWidgetFromStore` has `lastDataChangeAt`, so this gate lives
-// there rather than in `updateMobileWidgetFromData`.
+
 type WidgetRenderContext = {
     lastDataChangeAt: number;
     language: Language;
     localDayKey: string;
     systemColorScheme: ReturnType<typeof getSystemColorSchemeForWidget>;
     focusFilterKey: string;
+    listSelectionsKey: string;
 };
 let lastRenderContext: WidgetRenderContext | null = null;
 
@@ -405,14 +405,12 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
     const projection = createPayloadProjectionFromData(data, language);
     const iosProjection = Platform.OS === 'ios' ? projection : null;
 
-    // Gate 1: the widget's own payload fingerprint, exactly as before #980 --
-    // this is the #766 skip and must not fire on changes the widget doesn't
-    // show.
+
     const fingerprintPayload = projection.build(
         Platform.OS === 'android' ? ANDROID_WIDGET_MAX_ITEMS : WIDGET_FINGERPRINT_MAX_ITEMS,
     );
-    // Include audio availability in the fingerprint so a setting-only change
-    // refreshes the dialog.
+
+
     const audioEnabled = isWidgetAudioCaptureEnabled(data.settings);
     const nativeCaptureFingerprint = Platform.OS === 'android' ? `:audio=${audioEnabled}` : '';
     const widgetFingerprint = `${WIDGET_RENDER_SCHEMA_REVISION}:${WIDGET_RENDER_APP_VERSION}:${language}:${JSON.stringify(fingerprintPayload)}${nativeCaptureFingerprint}`;
@@ -426,11 +424,14 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
             )
             : await updateIosWidgetPayloads(iosProjection as WidgetPayloadProjection);
         if (widgetUpdated) {
+            await logInfo('Widget list presentation published', {
+                scope: 'widget', force: true,
+                extra: { releaseCheck: 'v1.3.8/widget-list-presentation',
+                    lists: Object.values(fingerprintPayload.lists).filter((list) => list.sections?.length).length },
+            });
             lastRenderedWidgetFingerprint = widgetFingerprint;
-            // Awaited (still error-swallowed): the headless background-sync
-            // instance this cache targets can tear down as soon as this
-            // function's promise settles, so a fire-and-forget write could
-            // never land (correction #5).
+
+
             await AsyncStorage.setItem(WIDGET_FINGERPRINT_STORAGE_KEY, widgetFingerprint).catch(() => undefined);
             void logInfo('Widget Focus pools published to native host', {
                 scope: 'widget',
@@ -440,9 +441,7 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
         }
     }
 
-    // Gate 2: the Shortcuts/Spotlight snapshot's own fingerprint (iOS only),
-    // independent of the widget gate above. `generatedAt` is excluded -- it
-    // always changes, and folding it in would defeat the point of this cache.
+
     let snapshotUpdated = true;
     if (Platform.OS === 'ios') {
         const snapshot = buildShortcutsSnapshot(data);
@@ -495,18 +494,17 @@ export async function updateMobileWidgetFromStore(): Promise<boolean> {
         settings: settings ?? {},
     };
 
-    // Gate 0: cheap pre-check before building/stringifying the widget payload.
-    // `language` still needs its own (cheap, single-key) AsyncStorage read to
-    // compare -- the JSON-heavy gate 1 fingerprint below is what this skips.
-    // The system colour scheme is included because the payload's palette
-    // depends on it (widget-data.ts reads getSystemColorSchemeForWidget) but
-    // nothing else in this key moves when it flips (correction #2).
+
     const language = await resolvePayloadLanguage(data);
     const localDayKey = getLocalDayKey();
     const systemColorScheme = getSystemColorSchemeForWidget();
-    // Changing a filter on the Focus screen moves no task data, so without this
-    // the gate below would skip the republish that shows the new selection.
+
+
     const currentFocusFilterKey = focusWidgetFilterKey(getFocusWidgetFilter());
+
+
+    const listSelectionsKey = Platform.OS === 'android' && AndroidWidget.isSupported()
+        ? JSON.stringify(AndroidWidget.getWidgetListSelections()) : '';
     if (
         lastRenderContext
         && lastRenderContext.lastDataChangeAt === lastDataChangeAt
@@ -514,21 +512,21 @@ export async function updateMobileWidgetFromStore(): Promise<boolean> {
         && lastRenderContext.localDayKey === localDayKey
         && lastRenderContext.systemColorScheme === systemColorScheme
         && lastRenderContext.focusFilterKey === currentFocusFilterKey
+        && lastRenderContext.listSelectionsKey === listSelectionsKey
     ) {
         return true;
     }
 
     const result = await updateMobileWidgetFromData(data);
-    // Only remember this context on a successful render -- a failed render
-    // (native call threw, iOS widget API unavailable) must not disable the
-    // callers' retry (immediate + 800ms) via gate 0 (correction #1, blocking).
+
+
     if (result) {
-        lastRenderContext = { lastDataChangeAt, language, localDayKey, systemColorScheme, focusFilterKey: currentFocusFilterKey };
+        lastRenderContext = { lastDataChangeAt, language, localDayKey, systemColorScheme, focusFilterKey: currentFocusFilterKey, listSelectionsKey };
     }
     return result;
 }
 
-// Backwards-compatible aliases for older imports.
+
 export const updateAndroidWidgetFromData = updateMobileWidgetFromData;
 export const updateAndroidWidgetFromStore = updateMobileWidgetFromStore;
 

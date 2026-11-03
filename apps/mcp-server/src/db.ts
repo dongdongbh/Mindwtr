@@ -122,11 +122,8 @@ async function bootstrapMindwtrDbFromJson(dbPath: string, dataJsonPath: string):
   const data = normalizeBootstrapData(core, parsed);
 
   mkdirSync(dirname(dbPath), { recursive: true });
-  // Build at a temp path and publish it only when the canonical path is still free.
-  // A SIGKILL, a host startup timeout,
-  // or the server's own SIGINT handler partway through must never leave a
-  // schema-only database at the canonical path: the next start would see the file,
-  // skip the bootstrap, and serve an empty library forever.
+
+
   const tempPath = `${dbPath}.bootstrap-${randomUUID()}.tmp`;
   const removeTemp = () => {
     rmSync(tempPath, { force: true });
@@ -144,8 +141,8 @@ async function bootstrapMindwtrDbFromJson(dbPath: string, dataJsonPath: string):
     const adapter = new core.SqliteAdapter(client);
     await adapter.ensureSchema();
     await adapter.saveData(data);
-    // Fold the WAL into the database file before publication: the -wal sibling is
-    // left behind at the temp path, so the published file has to be self-contained.
+
+
     await client.exec('PRAGMA wal_checkpoint(TRUNCATE);');
     closeOnce();
     try {
@@ -161,10 +158,7 @@ async function bootstrapMindwtrDbFromJson(dbPath: string, dataJsonPath: string):
   }
 }
 
-// v1.3.2 moved an installed Windows or macOS profile from <root>/ into <root>/data/
-// (#1245). A path pinned in an MCP client config, or copied from docs written for
-// the other side of that move, is one folder off; the database itself is right
-// there. Checked in both directions so a config can also be ahead of the app.
+
 function findSiblingLayoutDbPath(dbPath: string): string | null {
   const dir = dirname(dbPath);
   const sibling = basename(dir) === 'data'
@@ -179,7 +173,7 @@ export async function ensureMindwtrDbPath(options: DbOptions = {}): Promise<stri
 
   const siblingPath = findSiblingLayoutDbPath(path);
   if (siblingPath) {
-    // stderr only: stdout carries the MCP stdio protocol.
+
     console.warn(
       `[mindwtr-mcp] Using the Mindwtr database at: ${siblingPath} (nothing at the configured path: ${path})`
     );
@@ -188,11 +182,8 @@ export async function ensureMindwtrDbPath(options: DbOptions = {}): Promise<stri
 
   const dataJsonPath = resolveMindwtrDataJsonPath(options.dbPath);
   if (existsSync(dataJsonPath)) {
-    // Build the database beside the data.json it comes from. Discovery may have
-    // picked the installed data/ candidate on a profile whose data.json is still
-    // flat, and the desktop app only ever looks where its own data.json lives;
-    // a database anywhere else is an orphan it never reads (#1245). With an
-    // explicit --db the two already share a directory, so this keeps that path.
+
+
     const bootstrapPath = join(dirname(dataJsonPath), basename(path));
     try {
       const outcome = await withMcpWriteLock(bootstrapPath, async () => {
@@ -229,7 +220,7 @@ export async function openMindwtrDb(options: DbOptions = {}) {
   let db: DbClient;
   if (isBun()) {
     const mod = await import('bun:sqlite');
-    // bun:sqlite doesn't accept { readonly: false }, only omit or { readonly: true }
+
     db = options.readonly
       ? new mod.Database(path, { readonly: true })
       : new mod.Database(path);
@@ -242,7 +233,7 @@ export async function openMindwtrDb(options: DbOptions = {}) {
     });
   }
 
-  // Configure pragmas - use pragma method if available, otherwise fall back to exec
+
   const runPragma = (sql: string) => {
     if (db.pragma) {
       db.pragma(sql);
@@ -261,7 +252,7 @@ export function closeDb(db: DbClient) {
   try {
     db.close();
   } catch {
-    // ignore close errors
+
   }
 }
 

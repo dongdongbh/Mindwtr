@@ -22,11 +22,15 @@ import {
   normalizeNullableTaskRecurrence,
   normalizeNullableTaskRelativeStartOffset,
   normalizeNullableTaskRepeatReminderMinutes,
+  normalizeNullableTaskDueReminderLeadMinutes,
+  normalizeNullableTaskStartReminderLeadMinutes,
   normalizeNullableTaskTimeSpentMinutes,
   normalizeNullableTaskTokens,
   normalizeOptionalTaskRecurrence,
   normalizeOptionalTaskRelativeStartOffset,
   normalizeOptionalTaskRepeatReminderMinutes,
+  normalizeOptionalTaskDueReminderLeadMinutes,
+  normalizeOptionalTaskStartReminderLeadMinutes,
   normalizeOptionalTaskTimeSpentMinutes,
   normalizeOptionalTaskTokens,
 } from './input-validation.js';
@@ -61,6 +65,8 @@ import type {
 } from './queries.js';
 import { pickDefinedTaskFields, TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fields.js';
 import { applyLinkAttachmentsWithResult, buildLinkAttachments } from './link-attachments.js';
+
+import { listViewSectionsFromSettings, logViewSectionWrite, normalizeViewSectionIds } from './view-sections.js';
 
 export type CloudServiceOptions = {
   url: string;
@@ -108,10 +114,7 @@ const normalizeOffset = (value: number | undefined): number => (
   Number.isFinite(value) ? Math.max(0, value as number) : 0
 );
 
-// Matches the local adapter's `date(dueDate)` (queries.ts), which normalizes to the UTC
-// calendar day rather than slicing the string as written - an offset-bearing dueDate
-// (e.g. a time zone behind/ahead of UTC near midnight) can name a different day than its
-// first 10 characters. Falls back to the raw prefix only when the value doesn't parse.
+
 const dateKey = (value: string | undefined | null): string => {
   if (typeof value !== 'string' || value.length < 10) return '';
   const parsed = Date.parse(value);
@@ -166,7 +169,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
   if (!url) throw new ValidationError('Cloud URL is required');
   if (!token) throw new ValidationError('Cloud token is required');
   const dataUrl = normalizeCloudUrl(url);
-  // normalizeCloudUrl always yields a URL ending in /data; the REST resources live beside it.
+
   const apiBase = dataUrl.replace(/\/data$/i, '');
   const requestOptions = {
     token,
@@ -304,9 +307,8 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       const data = await readData();
       const dueDateFrom = dateKey(input.dueDateFrom);
       const dueDateTo = dateKey(input.dueDateTo);
-      // mindwtr_list_tasks has no default done/archived hiding (unlike the cloud REST
-      // API's GET /v1/tasks) - opt out of taskMatchesQuery's archived default explicitly
-      // via includeArchived rather than special-casing this surface's own default.
+
+
       const filtered = data.tasks.filter((task) => {
         if (!taskMatchesQuery(task, {
           status: input.status,
@@ -320,12 +322,11 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
         if (dueDateTo && (!due || due > dueDateTo)) return false;
         return true;
       });
-      // Same operator language (status:/context:/due:<=7d/negation/quotes) as the local
-      // adapter (queries.ts) - both route through core's filterTasksBySearch.
+
+
       const searched = input.search ? filterTasksBySearch(filtered, data.projects, input.search) : filtered;
-      // GTD availability, same as the local adapter: derived from the WHOLE task/project
-      // set (a sequential project's slot depends on tasks outside this page/filter), not
-      // re-derived per platform - see getTaskFocusEligibility's own doc comment.
+
+
       const viewed = input.view ? (() => {
         const context = buildTaskFocusEligibilityContext({ tasks: data.tasks, projects: data.projects, sections: data.sections });
         const wanted = input.view === 'blocked' ? 'sequential' : input.view === 'deferred' ? 'deferred' : 'eligible';
@@ -338,6 +339,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       const data = await readData();
       return data.projects.filter(isLive).map(mapProject);
     },
+    listViewSections: async (input = {}) => listViewSectionsFromSettings((await readData()).settings, input),
     listSections: async (input: ListSectionsInput = {}) => {
       const data = await readData();
       return data.sections
@@ -379,11 +381,10 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
         throw new ValidationError(`Quick-add input too long (max ${MAX_TASK_QUICK_ADD_LENGTH} characters)`);
       }
       const props = filterUndefined({
-        // Every other create-writable Task field (checklist, areaId, reviewAt,
-        // isFocusedToday, taskMode, ...) is derived from TASK_CREATE_FIELD_NAMES — see
-        // task-write-fields.ts. Spread first so the explicit, semantically-normalized
-        // overrides below win for the three fields that need more than a raw pass-through.
+
+
         ...pickDefinedTaskFields(TASK_CREATE_FIELD_NAMES, input),
+        viewSectionIds: normalizeViewSectionIds(input.viewSectionIds),
         status: input.status,
         projectId: input.projectId,
         sectionId: input.sectionId,
@@ -400,14 +401,17 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
         relativeStartOffset: normalizeOptionalTaskRelativeStartOffset(input.relativeStartOffset),
         timeSpentMinutes: normalizeOptionalTaskTimeSpentMinutes(input.timeSpentMinutes),
         repeatReminderMinutes: normalizeOptionalTaskRepeatReminderMinutes(input.repeatReminderMinutes),
+        dueReminderLeadMinutes: normalizeOptionalTaskDueReminderLeadMinutes(input.dueReminderLeadMinutes),
+        startReminderLeadMinutes: normalizeOptionalTaskStartReminderLeadMinutes(input.startReminderLeadMinutes),
         attachments: buildLinkAttachments(input.attachments),
       });
       const body = hasQuickAdd ? { input: input.quickAdd, props } : { title: input.title, props };
       const result = await request<{ task: AppData['tasks'][number] }>('POST', '/tasks', body);
+      logViewSectionWrite(options.logInfo, 'task', 'create', input.viewSectionIds);
       return mapTask(result.task);
     },
     updateTask: async (input: UpdateTaskInput) => {
-      // null clears a field on the cloud API (undefined keys are dropped by JSON), so pass nulls through.
+
       const patch: Record<string, unknown> = {};
       if (input.title !== undefined) patch.title = input.title;
       if (input.status !== undefined) patch.status = input.status;
@@ -425,16 +429,21 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       if (input.energyLevel !== undefined) patch.energyLevel = input.energyLevel;
       if (input.assignedTo !== undefined) patch.assignedTo = input.assignedTo;
       if (input.timeEstimate !== undefined) patch.timeEstimate = input.timeEstimate;
-      // Every other patch-writable Task field (reviewAt, isFocusedToday, checklist, areaId,
-      // order, boardOrder, focusOrder, ...) is derived from TASK_PATCH_FIELD_NAMES — see
-      // task-write-fields.ts. Adding a synced field there needs no edit here.
+
+
       for (const name of TASK_PATCH_FIELD_NAMES) {
         const value = (input as Record<string, unknown>)[name];
         if (value === undefined) continue;
-        if (name === 'relativeStartOffset') {
+        if (name === 'viewSectionIds') {
+          patch.viewSectionIds = normalizeViewSectionIds(value, true);
+        } else if (name === 'relativeStartOffset') {
           patch.relativeStartOffset = normalizeNullableTaskRelativeStartOffset(value as RelativeStartOffset | null);
         } else if (name === 'timeSpentMinutes') {
           patch.timeSpentMinutes = normalizeNullableTaskTimeSpentMinutes(value as number | null);
+        } else if (name === 'dueReminderLeadMinutes') {
+          patch.dueReminderLeadMinutes = normalizeNullableTaskDueReminderLeadMinutes(value as number | null) ?? 0;
+        } else if (name === 'startReminderLeadMinutes') {
+          patch.startReminderLeadMinutes = normalizeNullableTaskStartReminderLeadMinutes(value as number | null) ?? 0;
         } else if (name === 'repeatReminderMinutes') {
           patch.repeatReminderMinutes = normalizeNullableTaskRepeatReminderMinutes(value as number | null);
         } else {
@@ -449,9 +458,11 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           patch,
           input.attachments,
         );
+        logViewSectionWrite(options.logInfo, 'task', 'update', input.viewSectionIds);
         return mapTask(task);
       }
       const result = await request<{ task: AppData['tasks'][number] }>('PATCH', `/tasks/${encodeURIComponent(input.id)}`, patch);
+      logViewSectionWrite(options.logInfo, 'task', 'update', input.viewSectionIds);
       return mapTask(result.task);
     },
     completeTask: async (id: string) => {
@@ -466,7 +477,9 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       const result = await request<{ project: AppData['projects'][number] }>('POST', '/projects', {
         title: input.title,
         props: filterUndefined({
+          viewSectionIds: normalizeViewSectionIds(input.viewSectionIds),
           color: input.color,
+          colorOverride: input.colorOverride,
           status: input.status,
           cancelledAt: input.cancelledAt ?? undefined,
           areaId: input.areaId ?? undefined,
@@ -479,12 +492,15 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           attachments: buildLinkAttachments(input.attachments),
         }),
       });
+      logViewSectionWrite(options.logInfo, 'project', 'create', input.viewSectionIds);
       return mapProject(result.project);
     },
     updateProject: async (input: UpdateProjectInput) => {
       const patch: Record<string, unknown> = {};
+      if (input.viewSectionIds !== undefined) patch.viewSectionIds = normalizeViewSectionIds(input.viewSectionIds, true);
       if (input.title !== undefined) patch.title = input.title;
       if (input.color !== undefined) patch.color = input.color;
+      if (input.colorOverride !== undefined) patch.colorOverride = input.colorOverride;
       if (input.status !== undefined) patch.status = input.status;
       if (input.cancelledAt !== undefined) patch.cancelledAt = input.cancelledAt;
       if (input.areaId !== undefined) patch.areaId = input.areaId;
@@ -502,9 +518,11 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           patch,
           input.attachments,
         );
+        logViewSectionWrite(options.logInfo, 'project', 'update', input.viewSectionIds);
         return mapProject(project);
       }
       const result = await request<{ project: AppData['projects'][number] }>('PATCH', `/projects/${encodeURIComponent(input.id)}`, patch);
+      logViewSectionWrite(options.logInfo, 'project', 'update', input.viewSectionIds);
       return mapProject(result.project);
     },
     deleteProject: async (id: string) => mapProject(await deleteEntity('/projects', id, (data) => data.projects, 'Project')),

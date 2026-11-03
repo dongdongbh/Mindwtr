@@ -12,7 +12,7 @@ import { taskFocusAction, taskFocusEffect, taskFocusScope } from './store-tasks'
 import { sameTaskSqliteRow } from './store-projects/section-actions';
 import { TASK_SYNC_FIELD_SCHEMA, taskToSqliteRow } from './task-sync-schema';
 import type { PreparedTaskFocus, TaskFocusWitnessRow } from './store-types';
-import { projectFocusDateValues, type FocusDateProjection } from './task-utils';
+import { getProjectFlowMode, projectFocusDateValues, type FocusDateProjection } from './task-utils';
 import { isTaskActionable } from './task-status';
 import { hasRecurrenceRule } from './recurrence';
 import { isStatusListTaskReadOnly } from './menu-views-model';
@@ -100,7 +100,7 @@ const validWitnessRow = (value: unknown): value is TaskFocusWitnessRow => {
     return value.recurrence === null || record(value.recurrence);
 };
 
-/** A frozen parse must remain tied to the raw calendar wall value, including each DST offset. */
+
 export const validFrozenFocusDate = (value: unknown): value is FocusDateProjection => {
     if (!record(value) || !exact(value, DATE_KEYS) || typeof value.value !== 'string' || !value.value
         || value.value.length > 10_000) return false;
@@ -113,7 +113,7 @@ export const validFrozenFocusDate = (value: unknown): value is FocusDateProjecti
     const localParts = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2})(?::(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?)?$/.exec(raw);
     const baseWall = localParts ? Date.parse(`${localParts[1]}-${localParts[2]}-${localParts[3]}T00:00:00.000Z`) : Number.NaN;
     const rawValid = Number.isFinite(baseWall) && new Date(baseWall).toISOString().slice(0, 10) === raw.slice(0, 10);
-    // RN's local parser deliberately lets clock fields roll into the next day.
+
     const rawWall = rawValid ? baseWall + Number(localParts?.[4] ?? 0) * 3_600_000
         + Number(localParts?.[5] ?? 0) * 60_000 + Number(localParts?.[6] ?? 0) * 1_000
         + Number((localParts?.[7] ?? '0').padEnd(3, '0')) : Number.NaN;
@@ -150,9 +150,11 @@ export const validFrozenFocusDate = (value: unknown): value is FocusDateProjecti
 
 const requiredDates = (scope: PreparedTaskFocus['scope']): string[] => {
     const values: Array<string | null | undefined> = [scope.task.startTime, scope.task.reviewAt];
-    if (scope.project?.isSequential || !scope.task.startTime && hasRecurrenceRule(scope.task.recurrence))
+
+    const sequenced = scope.project ? getProjectFlowMode(scope.project) !== 'parallel' : false;
+    if (sequenced || !scope.task.startTime && hasRecurrenceRule(scope.task.recurrence))
         values.push(scope.task.dueDate);
-    if (scope.project?.isSequential) {
+    if (sequenced) {
         scope.peers.forEach((row) => values.push(row.dueDate, row.reviewAt));
     }
     scope.focused.forEach((row) => {
@@ -163,7 +165,7 @@ const requiredDates = (scope: PreparedTaskFocus['scope']): string[] => {
     return [...new Set(values.filter((part): part is string => typeof part === 'string' && part.length > 0))].sort();
 };
 
-/** Pure cold-journal validation, with no store or SQLite access. */
+
 const readPrepared = (value: unknown): NativePreparedTaskFocus | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

@@ -1,5 +1,5 @@
 {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "fields": [
         { "name": "id", "nullability": "required", "cloudSynced": false, "cloudWrite": "managed", "sqliteColumn": "id", "sqliteOrder": 0, "sqliteType": null },
         { "name": "title", "nullability": "required", "cloudSynced": true, "cloudWrite": "patch", "sqliteColumn": "title", "sqliteOrder": 1, "sqliteType": null },
@@ -26,17 +26,21 @@
         { "name": "startDate", "nullability": "optional", "cloudSynced": true, "cloudWrite": "create-patch", "sqliteColumn": "startDate", "sqliteOrder": 22, "sqliteType": "TEXT" },
         { "name": "cancelledAt", "nullability": "optional", "cloudSynced": true, "cloudWrite": "create-patch", "sqliteColumn": "cancelledAt", "sqliteOrder": 23, "sqliteType": "TEXT" },
         { "name": "archivedAt", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "archivedAt", "sqliteOrder": 25, "sqliteType": "TEXT" },
-        { "name": "viewSectionIds", "nullability": "optional", "cloudSynced": true, "cloudWrite": "create-patch", "sqliteColumn": "viewSectionIds", "sqliteOrder": 24, "sqliteType": "TEXT" }
+        { "name": "viewSectionIds", "nullability": "optional", "cloudSynced": true, "cloudWrite": "create-patch", "sqliteColumn": "viewSectionIds", "sqliteOrder": 24, "sqliteType": "TEXT" },
+        { "name": "colorOverride", "nullability": "optional", "cloudSynced": true, "cloudWrite": "create-patch", "sqliteColumn": "colorOverride", "sqliteOrder": 26, "sqliteType": "TEXT" },
+        { "name": "perSectionFlow", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "perSectionFlow", "sqliteOrder": 27, "sqliteType": "INTEGER" }
     ],
     "fixture": {
         "id": "project-schema-fixture",
         "title": "Verify every Project field",
         "status": "active",
         "color": "#3B82F6",
+        "colorOverride": "#f97316",
         "order": 4,
         "tagIds": ["tag-schema"],
         "isSequential": true,
         "sequentialScope": "section",
+        "perSectionFlow": true,
         "taskSortBy": "due",
         "isFocused": true,
         "supportNotes": "Schema fixture support notes",

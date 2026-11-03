@@ -5,9 +5,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Project details' write order and keeping (review PD 2), the edits a close stores (PD 1), and late replies (PD 3). */
+
 class ProjectDetailsTest {
-    /** A write that cannot start (another action runs, a retry is owed) waits in order; none is dropped, and one runs at a time. */
+
     @Test fun writesWaitInOrderAndNoneIsDropped() {
         var busy = true
         val started = mutableListOf<String>()
@@ -20,7 +20,7 @@ class ProjectDetailsTest {
         busy = false
         queue.pump()
         assertEquals(listOf("title"), started)
-        // One at a time: the next waits for the first to finish.
+
         queue.pump()
         assertEquals(listOf("title"), started)
         finish.removeAt(0)()
@@ -29,40 +29,70 @@ class ProjectDetailsTest {
         assertFalse(queue.waiting)
     }
 
-    /** Leaving a project (Back, another project) stores its typed title and notes, as RN's end of editing and blur on close do. */
+
     @Test fun leavingStoresTheTypedTitleAndNotes() {
         assertEquals(listOf("projectRename" to "New", "projectNotes" to "Typed notes"),
             editsOnLeave(title = "  New  ", storedTitle = "Old", notes = "Typed notes", storedNotes = "Old notes"))
-        // RN stores no blank title, and nothing unchanged.
+
         assertEquals(emptyList<Pair<String, String>>(), editsOnLeave(title = "   ", storedTitle = "Old", notes = "Old notes", storedNotes = "Old notes"))
         assertEquals(emptyList<Pair<String, String>>(), editsOnLeave(title = "Old ", storedTitle = "Old", notes = null, storedNotes = "Old notes"))
         assertEquals(emptyList<Pair<String, String>>(), editsOnLeave(title = null, storedTitle = "Old", notes = null, storedNotes = null))
-        // Notes keep their exact text, blank included.
+
         assertEquals(listOf("projectNotes" to ""), editsOnLeave(title = null, storedTitle = "Old", notes = "", storedNotes = "Old notes"))
     }
 
-    /** A reply applies only if it answers the newest read of its kind in the current session (review PD 3). */
+
+    @Test fun aCommitStoresOnlyATypedRename() {
+
+        assertEquals(null, titleToStore(typed = null, stored = "  Padded title  "))
+        assertEquals(null, titleToStore(typed = "  Padded title  ", stored = "  Padded title  "))
+        assertEquals(null, titleToStore(typed = "Padded title", stored = "  Padded title  "))
+        assertEquals(null, titleToStore(typed = "   ", stored = "Old"))
+        assertEquals("New", titleToStore(typed = " New ", stored = "  Padded title  "))
+    }
+
+
+    @Test fun aCommitComparesWithTheTitleAtOpenOrLastSent() {
+
+        assertEquals(null, titleToStore(typed = "Old ", stored = titleBase(sent = null, opened = "Old", stored = "Remote")))
+
+        assertEquals(null, titleToStore(typed = "New", stored = titleBase(sent = "New", opened = "Old", stored = "Old")))
+        assertEquals("Newer", titleToStore(typed = "Newer", stored = titleBase(sent = "New", opened = "Old", stored = "Old")))
+
+        assertEquals("New", titleToStore(typed = "New", stored = titleBase(sent = null, opened = null, stored = "Old")))
+    }
+
+
     @Test fun lateOrClosedRepliesNeverApply() {
         val guard = ReplyGuard()
         val older = guard.ticket("notes")
         val newer = guard.ticket("notes")
         assertFalse(guard.current(older))
         assertTrue(guard.current(newer))
-        // Another kind's read does not outdate this one.
+
         val picker = guard.ticket("picker")
         assertTrue(guard.current(newer))
-        // Leaving the screen or another project closes the session: an Area read answering then never opens its picker.
+
         guard.close()
         assertFalse(guard.current(picker))
         assertFalse(guard.current(newer))
         assertTrue(guard.current(guard.ticket("picker")))
     }
 
-    /** An edit as journaled: core's NativeProjectEdit (request UUID, project, kind, the field's new value), nothing else. */
+
     @Test fun anEditCarriesItsRequestProjectKindAndValue() {
         val edit = projectEdit("r-1", "p", "date", org.json.JSONObject().put("field", "reviewAt").put("value", "2026-11-20").put("opened", "2026-10-04T21:23:37.456Z"))
         assertEquals(setOf("requestId", "projectId", "kind", "field", "value", "opened"), edit.keys().asSequence().toSet())
         assertEquals("date", edit.getString("kind"))
         assertEquals("2026-11-20", edit.getString("value"))
+    }
+
+
+    @Test fun aFlowModeTapStoresExactlyThatModeAndTheShownModeSendsNothing() {
+        assertEquals(listOf("parallel", "sequential", "perSection"), PROJECT_FLOW_MODES.map { it.first })
+        assertEquals(listOf("projects.parallel", "projects.sequential", "projects.perSection"), PROJECT_FLOW_MODES.map { it.second })
+        assertEquals(null, flowModeEdit(shown = "perSection", picked = "perSection"))
+        for (picked in listOf("parallel", "sequential")) assertEquals(picked, flowModeEdit(shown = "perSection", picked = picked)?.getString("mode"))
+        assertEquals("perSection", flowModeEdit(shown = "sequential", picked = "perSection")?.getString("mode"))
     }
 }

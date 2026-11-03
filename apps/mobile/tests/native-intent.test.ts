@@ -7,6 +7,7 @@ const appLogMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/app-log', () => appLogMocks);
+vi.mock('@/lib/widget-launch-routing', () => ({ recordWidgetLaunchRouting: vi.fn() }));
 
 describe('redirectSystemPath', () => {
     beforeEach(() => {
@@ -18,8 +19,8 @@ describe('redirectSystemPath', () => {
         for (const scheme of ['mindwtr', 'mindwtr-dev']) {
             for (const suffix of ['', '/', '#weburl', '/#text', '#file', '#media']) {
                 const path = `${scheme}://dataUrl=${scheme}ShareKey${suffix}`;
-                // Warm deliveries must not navigate over a capture modal that
-                // the independent share provider may already have opened.
+
+
                 expect(redirectSystemPath({ path, initial })).toBe(initial ? '/inbox' : '');
                 await vi.dynamicImportSettled();
             }
@@ -169,8 +170,7 @@ describe('redirectSystemPath', () => {
             .toBe('/capture-modal?origin=system');
     });
 
-    // The iOS Control Center control cannot be tried off-device. Its app-side intent tags the
-    // link, and the log line is the only proof a tester can share that the tap was routed.
+
     it('logs a Control Center quick capture, and only that one', async () => {
         expect(redirectSystemPath({ path: 'mindwtr:///capture-quick?mode=text', initial: true }))
             .toBe('/capture-modal?origin=system');

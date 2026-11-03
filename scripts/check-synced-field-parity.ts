@@ -3,13 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-// Every import in this script (and everything it transitively imports) must resolve
-// without `bun install`: the "native-schema" CI job runs `bun run schema:check` on a
-// fresh checkout with no install step. That's why these come from task-sync-schema.ts
-// (TASK_SQLITE_COLUMNS/TASK_SQLITE_MIGRATION_COLUMNS live there, not in sqlite-adapter.ts,
-// specifically so this script can import them — sqlite-adapter.ts transitively pulls in
-// `date-fns` via recurrence.ts/saved-filters.ts and would break this job) and from
-// sync-signatures.ts / server-config.ts, neither of which has a real npm dependency.
+
+
 import {
     TASK_SQLITE_COLUMNS,
     TASK_SQLITE_MIGRATION_COLUMNS,
@@ -25,16 +20,12 @@ import {
     TASK_CONTENT_COMPARISON_EXCLUDED_KEYS,
 } from '../packages/core/src/sync-signatures';
 import { CLOUD_TASK_PATCH_ALLOWED_PROP_KEYS } from '../apps/cloud/src/server-config';
-// task-write-field-exclusions.ts's only import is `import type` (erased before execution), so
-// unlike its sibling task-write-fields.ts (which needs `@mindwtr/core/task-sync-schema`, a
-// package-style specifier requiring `bun install`) this one resolves fine in this job.
+
+
 import { TASK_WRITE_FIELD_EXCLUSIONS } from '../apps/mcp-server/src/task-write-field-exclusions';
 import cloudKitProductionSchema from '../packages/core/src/cloudkit-production-schema.json';
 
-// Stable releases must not ship a CloudKit-mapped field that isn't confirmed live in
-// Apple's Production container (see the header comment in task-sync-schema.ts). RCs may
-// still have fields pending — only `--release-gate` (wired into release.yml, not
-// release-rc.yml) turns a non-empty pendingProduction list into a failure.
+
 const RELEASE_GATE = process.argv.includes('--release-gate');
 
 type Entity = 'task' | 'project' | 'section' | 'area' | 'person';
@@ -49,8 +40,7 @@ const expectedTaskSqliteFields = Array.from(new Set(
         .filter((column): column is string => column !== null),
 ));
 
-// Same derivation as the task lists above, generalized: every entity's EXPECTED cloud/sqlite
-// field list comes from its own descriptor module, never a hand-maintained literal here.
+
 const expectedCloudFields = (schema: readonly { name: string; cloudSynced: boolean }[]): string[] =>
     schema.filter((field) => field.cloudSynced).map((field) => field.name);
 const expectedSqliteFields = (schema: readonly { sqliteColumn: string | null }[]): string[] => Array.from(new Set(
@@ -85,9 +75,8 @@ const EXPECTED: Record<Entity, Record<Surface, string[]>> = {
 const PATHS = {
     coreTypes: 'packages/core/src/types.ts',
     coreSqliteSchema: 'packages/core/src/sqlite-schema.ts',
-    // SQLITE_SCHEMA, the required pragmas and the INSERT statements all live in
-    // storage.rs. They were in lib.rs until dfc748ab1 moved them next to their
-    // only users; this check reads the DDL and the inserts from the same file.
+
+
     desktopRustStorage: 'apps/desktop/src-tauri/src/storage.rs',
     swiftMapper: 'apps/mobile/modules/cloudkit-sync/ios/CloudKitRecordMapper.swift',
     objcMapper: 'apps/desktop/src-tauri/src/macos_cloudkit_bridge.m',
@@ -201,17 +190,7 @@ const compareFtsTriggers = (
     return failures;
 };
 
-// core's own schema is the source of truth for which columns REFERENCES
-// another table's `id` (revision-aware sync relies on ON DELETE SET
-// NULL/CASCADE actions, not app code, to keep container references
-// consistent - #964's sibling schema race). Comparing Rust against core
-// directly, rather than against a hand-maintained roster here, means a
-// future FK core adds is enforced automatically instead of needing this
-// script updated too. This mirrors parseCreateTableColumns's own CREATE
-// TABLE extraction but reads the REFERENCES clause instead of just the
-// leading column name, so a schema that silently drops a foreign key (as
-// apps/desktop's Rust copy did until this check existed) fails here instead
-// of only surfacing as an insert-order bug at migration time.
+
 const parseForeignKeyReferences = (source: string, table: string): Record<string, string> => {
     const match = source.match(new RegExp(`CREATE TABLE IF NOT EXISTS ${table} \\(([\\s\\S]*?)\\n\\);`));
     if (!match) throw new Error(`Could not find CREATE TABLE for ${table}.`);
@@ -233,10 +212,7 @@ const compareForeignKeys = (
         actual[column] ? `REFERENCES ${actual[column]}(id)` : 'no REFERENCES clause'
     }`);
 
-// #964's fix (PRAGMA temp_store = MEMORY, so a spilled statement journal never
-// hits a read-only /tmp on Android) lives once in core's SQLITE_BASE_SCHEMA;
-// every native CREATE TABLE copy of that schema must carry the same pragma
-// line verbatim rather than re-deriving it.
+
 const REQUIRED_SQLITE_PRAGMAS = [
     'PRAGMA journal_mode = WAL;',
     'PRAGMA foreign_keys = ON;',
@@ -259,13 +235,7 @@ const compareDesktopRequiredPragmas = (label: string, source: string): string[] 
     return failures;
 };
 
-// TASK_SQLITE_COLUMNS, TASK_UPSERT_UPDATE_CLAUSE, and the ensureTaskColumns migration
-// list are now generated from TASK_SYNC_FIELD_SCHEMA in sqlite-adapter.ts itself (same
-// module-load pass, same source array), so they can no longer drift from each other
-// independently — imported directly below instead of regex-parsed from source text.
-// TASK_UPSERT_UPDATE_CLAUSE has no standalone check for the same reason: it's built from
-// TASK_SQLITE_COLUMNS by construction (packages/core/src/sqlite-adapter.ts), verified by
-// a snapshot-equality test in task-sync-schema.test.ts.
+
 const coreTaskUpdateColumns = (): string[] => unique(
     TASK_SQLITE_COLUMNS.filter((column) => column !== 'id'),
     'TASK_UPSERT_UPDATE_CLAUSE',
@@ -609,7 +579,7 @@ const runNativeTaskMapperFixtureChecks = (): string[] => {
     return failures;
 };
 
-// Falsifiable guard for the CloudKit Production-container deploy step.
+
 type CloudKitProductionRecord = {
     deployed: string[];
     pendingProduction: string[];
@@ -698,12 +668,7 @@ const objcTaskFieldSpecs = objcFieldSpecs.task;
 
 failures.push(...compareTaskInterface(coreTypes));
 
-// Check: every Task field the schema knows about must be tracked in
-// sync-signatures.ts, either as a content-comparable key (returned by
-// normalizeTaskForContentComparison) or as one of the deliberately-excluded
-// keys (TaskContentComparisonExcludedKey). A new Task field that lands in
-// neither list would silently never take part in conflict-signature
-// comparison — this must fail loudly instead.
+
 const syncSignatureComparableKeys = Object.keys(
     normalizeTaskForContentComparison(TASK_SYNC_SCHEMA_FIXTURE),
 );
@@ -712,11 +677,8 @@ const syncSignatureTaskFieldUnion = Array.from(new Set([
     ...syncSignatureComparableKeys,
     ...syncSignatureExcludedKeys,
 ]));
-// Fields the schema declares but that sync-signatures.ts is deliberately not
-// expected to track. Empty today — every schema field is tracked either as a
-// comparable key or in TaskContentComparisonExcludedKey. Add an entry here
-// (with a one-line reason) only once a real, defensible gap is found; do not
-// use this to silence an actual drift.
+
+
 const SYNC_SIGNATURE_FIELD_UNION_EXCEPTIONS: string[] = [];
 failures.push(...compareSet(
     'sync-signatures.ts task field union',
@@ -726,10 +688,7 @@ failures.push(...compareSet(
         .filter((name) => !SYNC_SIGNATURE_FIELD_UNION_EXCEPTIONS.includes(name)),
 ));
 
-// Check: CLOUD_TASK_PATCH_ALLOWED_PROP_KEYS must be a superset of the fields
-// the schema marks as writable via a cloud API patch (cloudWrite
-// 'create-patch' or 'patch'), so a future schema field promoted to
-// client-writable can't be forgotten on the server allowlist.
+
 const requiredCloudTaskPatchFields = Array.from(new Set(
     TASK_SYNC_FIELD_SCHEMA
         .filter((field) => field.cloudWrite === 'create-patch' || field.cloudWrite === 'patch')
@@ -764,15 +723,7 @@ failures.push(...compareNativeTaskFixtureRoundTrip('macOS CloudKit task mapper',
 failures.push(...runNativeTaskMapperFixtureChecks());
 failures.push(...checkCloudKitProductionSchema(swiftFieldSpecs, cloudKitRecordTypes));
 
-// MCP read tools promise core Task/Project entities. Keep their SELECT lists schema-derived.
-// There used to be a third check here (assertSuperset over a regex-parsed MCP mapProjectRow)
-// guarding against a newly persisted project field silently disappearing from MCP's own
-// hand-written row mapper. That mapper (and section/area/person's equivalents) no longer
-// exist: MCP now imports projectFromSqliteRow/sectionFromSqliteRow/areaFromSqliteRow/
-// personFromSqliteRow from core instead of hand-writing four of its own (sqlite-row-codec
-// follow-up). The generic round-trip test in packages/core/src/sync-schema-row-codec.test.ts
-// covers the same "a field silently disappears" failure mode for all five entities now, so
-// there is nothing left to regex-parse out of MCP's source.
+
 failures.push(...requireSourcePattern(
     'MCP task projection',
     mcpQueries,
@@ -784,15 +735,7 @@ failures.push(...requireSourcePattern(
     /const BASE_PROJECT_COLUMNS = \[\.\.\.PROJECT_SQLITE_COLUMNS\];/,
 ));
 
-// Check: MCP's write-surface exclusion list (apps/mcp-server/src/task-write-fields.ts derives
-// TASK_CREATE_FIELD_NAMES/TASK_PATCH_FIELD_NAMES from TASK_SYNC_FIELD_SCHEMA minus this list)
-// must not go stale — every excluded key has to still name a field the schema currently marks
-// client-writable. An exclusion for a renamed or since-removed field would otherwise silently
-// stop meaning anything, and nobody would notice. (The derivation's actual field-name output
-// can't be checked here too — task-write-fields.ts needs `@mindwtr/core/task-sync-schema`,
-// which requires `bun install`, unlike this script's own zero-install TASK_SYNC_FIELD_SCHEMA
-// import; task-field-schemas.test.ts is where that gets independently cross-checked, including
-// against the real Zod tool schemas.)
+
 failures.push(...assertSuperset(
     'MCP TASK_WRITE_FIELD_EXCLUSIONS',
     TASK_SYNC_FIELD_SCHEMA
@@ -803,9 +746,8 @@ failures.push(...assertSuperset(
 
 for (const entity of ENTITIES) {
     const table = entity === 'person' ? 'people' : `${entity}s`;
-    // Older databases can still carry these Area columns from the short-lived
-    // project-archive format. Native storage preserves them on round trips even
-    // though they are no longer part of the Area model.
+
+
     const legacySqlite = entity === 'area'
         ? ['deletedAtBeforeProjectArchive', 'projectArchivedAt']
         : [];

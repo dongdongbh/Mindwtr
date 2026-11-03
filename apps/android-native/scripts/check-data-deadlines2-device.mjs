@@ -1,7 +1,6 @@
-// Settings › Data's size-scaled deadlines on the S23 (pass D1c design §3.4), part 2: check-data-device.mjs's DL3-DL5 rows alone,
-// each with its failing control first (DL1-DL2: check-data-deadlines-device.mjs), so each part fits the batch's hour per
-// check. Same arguments and exit codes.
-//   node apps/android-native/scripts/check-data-deadlines2-device.mjs <adb-serial>
+
+
+
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     buildQuickAddParseOptions,
     buildReviewSteps,
@@ -10,6 +10,7 @@ import {
     getExternalCalendarDaySummaries,
     getUsedTaskTokens,
     getWeeklyReviewBuckets,
+    getProjectAccentColor,
     isSandboxMode,
     isTaskInActiveProject,
     isTaskFinished,
@@ -43,12 +44,14 @@ import { useLanguage } from '../../../contexts/language-context';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../../lib/ai-config';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 import { useUiStore } from '../../../store/ui-store';
+import { dispatchNavigateEvent } from '../../../lib/navigation-events';
 import { getWorkspaceCache } from '../../../lib/workspace-cache';
 import { ShareCardDialog } from '../../ShareCardDialog';
 import { runAfterTaskEditExit } from '../../Task/task-edit-session';
 import { filterVisibleReviewCalendarEvents } from '../calendar/use-calendar-external-events';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { reportError } from '../../../lib/report-error';
+import { logInfo } from '../../../lib/app-log';
 
 type ReviewStep = 'inbox' | 'stale' | 'calendar' | 'waiting' | 'contexts' | 'projects' | 'someday' | 'completed';
 type ReviewStepDefinition = {
@@ -99,18 +102,21 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const [isProcessing, setIsProcessing] = useState(false);
     const [expandedExternalDays, setExpandedExternalDays] = useState<Set<string>>(new Set());
     const [expandedContextGroups, setExpandedContextGroups] = useState<Set<string>>(new Set());
+    const [expandedLaterProjects, setExpandedLaterProjects] = useState<Set<string>>(new Set());
     const [showScheduledWaiting, setShowScheduledWaiting] = useState(false);
     const [showScheduledSomeday, setShowScheduledSomeday] = useState(false);
     const [shareCardOpen, setShareCardOpen] = useState(false);
     const [projectTaskPrompt, setProjectTaskPrompt] = useState<{ projectId: string; projectTitle: string } | null>(null);
     const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
+    const [expandedStaleProjectId, setExpandedStaleProjectId] = useState<string | null>(null);
     const [keepProjectsStep, setKeepProjectsStep] = useState(false);
     const completingProjectRef = useRef(false);
     const { requestConfirmation, confirmModal } = useConfirmDialog();
-    const { tasks, projects, areas, settings, addProject, updateProject, updateTask, deleteTask, batchUpdateTasks } = useTaskStore(
+    const { tasks, projects, sections, areas, settings, addProject, updateProject, updateTask, deleteTask, batchUpdateTasks } = useTaskStore(
         (state) => ({
             tasks: state.tasks,
             projects: state.projects,
+            sections: state.sections,
             areas: state.areas,
             settings: state.settings,
             addProject: state.addProject,
@@ -187,11 +193,11 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const aiEnabled = settings?.ai?.enabled === true;
     const includeContextStep = settings?.gtd?.weeklyReview?.includeContextStep !== false;
     const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
-    // One core derivation owns every Weekly Review candidate, project-health,
-    // stale-item, and completion-summary decision.
+
+
     const weeklyBuckets = useMemo(
-        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart }),
-        [projects, settings?.weekStart, tasks],
+        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart, sections }),
+        [projects, sections, settings?.weekStart, tasks],
     );
     const staleItems = weeklyBuckets.staleItems;
     const staleItemTitleMap = useMemo(() => {
@@ -200,14 +206,11 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
             return acc;
         }, {} as Record<string, string>);
     }, [staleItems]);
-    // Deliberately over tasks (visible tasks), not the store's _tasksById
-    // (all tasks incl. hidden) — PERF-03 leaves this site alone on purpose.
+
+
     const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
-    // Any save bumps updatedAt, so a stale task stops being stale the moment it is
-    // touched. Its row is also its inline editor, so dropping the row closed the
-    // editor mid-edit (adding a checklist item did it). Every task this review has
-    // listed stays listed, in its first order, while it is still Next or Waiting, and
-    // the step keeps counting as having work, so the review does not jump ahead (#1262).
+
+
     const seenStaleTasksRef = useRef(new Map<string, number>());
     const staleTaskEntries = useMemo(() => {
         const stillStale = new Set<string>();
@@ -216,12 +219,14 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
             stillStale.add(item.id);
             if (!seenStaleTasksRef.current.has(item.id)) seenStaleTasksRef.current.set(item.id, item.daysStale);
         }
+        const laterTaskIds = new Set(weeklyBuckets.projectEntries.flatMap((entry) => entry.laterTasks.map((task) => task.id)));
         return Array.from(seenStaleTasksRef.current).flatMap(([id, daysStale]) => {
             const task = taskById.get(id);
             if (!task || (task.status !== 'next' && task.status !== 'waiting')) return [];
+            if (laterTaskIds.has(id) && !stillStale.has(id)) return [];
             return [{ daysStale: stillStale.has(id) ? daysStale : null, task }];
         });
-    }, [staleItems, taskById]);
+    }, [staleItems, taskById, weeklyBuckets.projectEntries]);
     const staleProjectItems = useMemo(
         () => staleItems.filter((item) => item.id.startsWith('project:')),
         [staleItems],
@@ -230,11 +235,20 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const waitingGroups = weeklyBuckets.waitingGroups;
     const somedayGroups = weeklyBuckets.somedayGroups;
     const projectEntries = weeklyBuckets.projectEntries;
+    const projectEntryById = useMemo(
+        () => new Map(projectEntries.map((entry) => [entry.project.id, entry])),
+        [projectEntries],
+    );
+
+    const openProject = (projectId: string) => runAfterTaskEditExit(() => {
+        onClose();
+        useUiStore.getState().setProjectView({ selectedProjectId: projectId });
+        dispatchNavigateEvent('projects');
+    });
     const contextReviewGroups = weeklyBuckets.contextGroups;
     const calendarReviewItems = weeklyBuckets.calendarItems;
-    // Only used for the "nothing waiting/someday at all" empty state; the
-    // step content itself renders due+unscheduled and a collapsible
-    // "not due yet" section from waitingGroups/somedayGroups directly.
+
+
     const waitingTasks = useMemo(
         () => [...waitingGroups.due, ...waitingGroups.scheduled, ...waitingGroups.unscheduled],
         [waitingGroups],
@@ -251,9 +265,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const reviewLookBack = weeklyBuckets.lookBack;
     const estimatedDuration = formatTimeSpentLabel(reviewLookBack.estimatedMinutes);
     const trackedDuration = formatTimeSpentLabel(reviewLookBack.trackedMinutes);
-    // Time estimates default ON, so `=== true` read the default as OFF and hid
-    // the look-back (and the tracked row under it) for everyone who never
-    // touched the setting. Both flags go through resolveFeatureFlags.
+
+
     const { pomodoro: pomodoroEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
     const showEstimateLookBack = reviewLookBack.estimatedTaskCount > 0 && timeEstimatesEnabled;
     const showTrackedLookBack = showEstimateLookBack
@@ -300,6 +313,11 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
             setCurrentStep(displayedStep);
         }
     }, [currentStep, displayedStep, setCurrentStep]);
+    const stepScrollRef = useRef<HTMLDivElement>(null);
+
+    useLayoutEffect(() => {
+        if (stepScrollRef.current) stepScrollRef.current.scrollTop = 0;
+    }, [displayedStep]);
 
     useEffect(() => {
         getWorkspaceCache()?.setItem(WEEKLY_REVIEW_STEP_STORAGE_KEY, JSON.stringify(reviewSession));
@@ -451,9 +469,17 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         setAiLoading(true);
         try {
             const provider = createAIProvider(await buildAIConfig(settings, apiKey, language));
+            void logInfo('Weekly review sequence candidates prepared', {
+                extra: {
+                    releaseCheck: 'v1.3.8/review-sequence',
+                    candidateCount: staleItems.length,
+                    staleTaskCount: staleItems.filter((item) => !item.id.startsWith('project:')).length,
+                    staleProjectCount: staleItems.filter((item) => item.id.startsWith('project:')).length,
+                },
+            });
             const response = await provider.analyzeReview({ items: staleItems });
-            // Filter here, not in the apply path, so what is displayed and what
-            // can be written never diverge.
+
+
             const suggestions = filterReviewSuggestionsToKnownIds(
                 response.suggestions || [],
                 staleItems.map((item) => item.id),
@@ -543,9 +569,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         const trimmed = value.trim();
         if (!trimmed) return null;
 
-        // Same quick-add grammar as the quick-add box, matching the project
-        // next-action prompt (#859). Read people lazily: the prompt is rare
-        // and the modal shouldn't subscribe to more of the store for it.
+
         const state = useTaskStore.getState();
         const { title, props, invalidDateCommands } = parseProjectNextActionInput(trimmed, {
             projectId: targetProject.projectId,
@@ -573,8 +597,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
 
     const saveAndEditProjectTask = (value: string) => {
         void createProjectTaskFromPrompt(value).then((taskId) => {
-            // The new task renders as a TaskItem in the project step; claiming
-            // editingTaskId opens its inline editor without leaving the review.
+
+
             if (taskId) runAfterTaskEditExit(() => setEditingTaskId(taskId));
         });
     };
@@ -848,17 +872,61 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                         )}
                                     </div>
                                 ))}
-                                {staleProjectItems.map((item) => (
-                                    <div key={item.id} className="border border-border rounded-lg p-3 flex items-center justify-between gap-3">
-                                        <div className="flex items-center gap-2 min-w-0">
-                                            <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
-                                            <span className="text-sm font-medium truncate">{item.title}</span>
+                                {staleProjectItems.map((item) => {
+
+                                    const entry = projectEntryById.get(item.id.slice('project:'.length));
+                                    const expanded = Boolean(entry) && expandedStaleProjectId === entry?.project.id;
+                                    return (
+                                        <div key={item.id} className="border border-border rounded-lg">
+                                            <button
+                                                type="button"
+                                                disabled={!entry}
+                                                aria-expanded={entry ? expanded : undefined}
+                                                onClick={() => setExpandedStaleProjectId(expanded ? null : entry?.project.id ?? null)}
+                                                className="w-full p-3 flex items-center justify-between gap-3 rounded-lg text-left enabled:hover:bg-muted/40 transition-colors"
+                                            >
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    {!entry
+                                                        ? <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                                        : expanded
+                                                            ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                                            : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                                                    <span className="text-sm font-medium truncate">{item.title}</span>
+                                                </div>
+                                                <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                                                    {formatI18nTemplate(t('review.staleDaysInactive'), { days: item.daysStale })}
+                                                </span>
+                                            </button>
+                                            {entry && expanded && (
+                                                <div className="space-y-2 px-3 pb-3 pl-9">
+                                                    {entry.tasks.map((task) => (
+                                                        <TaskItem key={task.id} task={task} showProjectBadgeInActions={false} />
+                                                    ))}
+                                                    {entry.tasks.length === 0 && (
+                                                        <div className="text-sm text-muted-foreground italic">{t('review.noActiveTasks')}</div>
+                                                    )}
+                                                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setProjectTaskPrompt({ projectId: entry.project.id, projectTitle: entry.project.title })}
+                                                            className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors"
+                                                        >
+                                                            {t('projects.addTask')}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            aria-label={formatI18nTemplate(t('task.aria.openProject'), { name: entry.project.title })}
+                                                            onClick={() => openProject(entry.project.id)}
+                                                            className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors"
+                                                        >
+                                                            {t('common.open')}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
-                                        <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
-                                            {formatI18nTemplate(t('review.staleDaysInactive'), { days: item.daysStale })}
-                                        </span>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                         {aiEnabled && (
@@ -949,12 +1017,12 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                     <div className="space-y-6">
                         <p className="text-muted-foreground">{t('review.projectsHint')}</p>
                         <div className="space-y-4">
-                            {projectEntries.map(({ project, tasks: projectTasks, nextActionState }) => {
+                            {projectEntries.map(({ project, tasks: projectTasks, currentTasks, laterTasks, nextActionState }) => {
                                 return (
                                     <div key={project.id} className="border border-border rounded-lg p-4">
                                         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                                             <div className="flex items-center gap-2">
-                                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: (project.areaId ? areaById.get(project.areaId)?.color : undefined) || DEFAULT_AREA_COLOR }} />
+                                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getProjectAccentColor(project, areaById) || DEFAULT_AREA_COLOR }} />
                                                 <h3 className="font-semibold">{project.title}</h3>
                                             </div>
                                             <div className="flex flex-wrap items-center gap-2">
@@ -964,6 +1032,14 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                                     className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors"
                                                 >
                                                     {t('projects.addTask')}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    aria-label={formatI18nTemplate(t('task.aria.openProject'), { name: project.title })}
+                                                    onClick={() => openProject(project.id)}
+                                                    className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors"
+                                                >
+                                                    {t('common.open')}
                                                 </button>
                                                 <button
                                                     type="button"
@@ -977,23 +1053,47 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                                     className={cn(
                                                         "text-xs px-2 py-1 rounded-full",
                                                         nextActionState === 'next' && "bg-success/10 text-success",
-                                                        // Delegated, not stuck: amber, not the red alarm (#1086).
+
                                                         nextActionState === 'waiting' && "bg-warning/10 text-warning",
                                                         nextActionState === 'none' && "bg-destructive/10 text-destructive",
+                                                        nextActionState === 'deferred' && "bg-muted text-muted-foreground",
                                                     )}
                                                 >
                                                     {nextActionState === 'next'
                                                         ? t('review.hasNextAction')
                                                         : nextActionState === 'waiting'
                                                             ? t('status.waiting')
-                                                            : t('review.needsAction')}
+                                                            : nextActionState === 'deferred'
+                                                                ? t('review.projectDeferred')
+                                                                : t('review.needsAction')}
                                                 </div>
                                             </div>
                                         </div>
                                         <div className="space-y-2 pl-5">
-                                            {projectTasks.map((task) => (
+                                            {currentTasks.map((task) => (
                                                 <TaskItem key={task.id} task={task} showProjectBadgeInActions={false} />
                                             ))}
+                                            {laterTasks.length > 0 && (
+                                                <div>
+                                                    <button
+                                                        type="button"
+                                                        aria-expanded={expandedLaterProjects.has(project.id)}
+                                                        onClick={() => setExpandedLaterProjects((current) => {
+                                                            const next = new Set(current);
+                                                            if (next.has(project.id)) next.delete(project.id);
+                                                            else next.add(project.id);
+                                                            return next;
+                                                        })}
+                                                        className="flex items-center gap-2 py-2 text-sm text-muted-foreground hover:text-foreground"
+                                                    >
+                                                        {expandedLaterProjects.has(project.id) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                                        {t('projects.laterInSequence')} ({laterTasks.length})
+                                                    </button>
+                                                    {expandedLaterProjects.has(project.id) && laterTasks.map((task) => (
+                                                        <TaskItem key={task.id} task={task} showProjectBadgeInActions={false} />
+                                                    ))}
+                                                </div>
+                                            )}
                                             {projectTasks.length > 0 && (
                                                 <div className="mt-2 text-xs text-muted-foreground bg-muted/30 p-2 rounded border border-border/50">
                                                     <span className="font-semibold mr-1">{t('review.stuckQuestion')}</span>
@@ -1187,7 +1287,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                     {renderStepRail()}
                 </div>
 
-                <div className="flex-1 overflow-y-auto pr-2">
+                <div ref={stepScrollRef} className="flex-1 overflow-y-auto pr-2">
                     {renderStepContent()}
                 </div>
 

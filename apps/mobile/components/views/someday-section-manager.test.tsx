@@ -79,7 +79,7 @@ describe('SomedaySectionManager', () => {
       tree.root.findByProps({ accessibilityLabel: 'Move down: Books to read' }).props.onPress();
     });
 
-    // The stored order stays; only the order numbers of the two sections change.
+
     expect(onChange).toHaveBeenCalledWith([
       { id: 'books', title: 'Books to read', order: 1 },
       { id: 'career', title: 'Career ideas', order: 0 },

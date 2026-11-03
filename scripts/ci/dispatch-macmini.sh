@@ -31,7 +31,7 @@ echo "Mac mini run: https://github.com/$private_repo/actions/runs/$run_id"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   echo "Mac mini validation: https://github.com/$private_repo/actions/runs/$run_id (source $SOURCE_SHA)" >> "$GITHUB_STEP_SUMMARY"
 fi
-# Use the Actions API: gh run watch requires permissions unavailable to fine-grained tokens.
+
 while true; do
   run="$(gh api "repos/$private_repo/actions/runs/$run_id")"
   status="$(jq -r .status <<< "$run")"

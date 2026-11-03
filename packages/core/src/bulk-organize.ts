@@ -3,16 +3,13 @@ import type { Task, TaskStatus } from './types';
 export type BulkOrganizeStatus = Exclude<TaskStatus, 'inbox' | 'archived'>;
 
 export type BulkOrganizeTaskUpdateInput = {
-    /** Omit to keep each task's current status. */
+
     status?: BulkOrganizeStatus;
     projectId?: string | null;
-    /**
-     * Omit to keep each task's current section, null to clear it. A section
-     * belongs to exactly one project, so it is only applied to tasks that end
-     * up in `sectionProjectId` - see buildBulkOrganizeTaskUpdate.
-     */
+
+
     sectionId?: string | null;
-    /** The project owning `sectionId`. Without it a section is never applied. */
+
     sectionProjectId?: string | null;
     areaId?: string | null;
     contexts?: string[];
@@ -84,7 +81,7 @@ export function buildBulkOrganizeTaskUpdate(
 
     if (hasOwn(input, 'sectionId')) {
         const sectionId = normalizedOptionalString(input.sectionId);
-        // The project the task lands in once the choices above are applied.
+
         const effectiveProjectId = hasOwn(updates, 'projectId')
             ? updates.projectId
             : normalizedOptionalString(task.projectId);
@@ -93,10 +90,8 @@ export function buildBulkOrganizeTaskUpdate(
         } else if (effectiveProjectId && effectiveProjectId === normalizedOptionalString(input.sectionProjectId)) {
             updates.sectionId = sectionId;
         }
-        // Otherwise the section belongs to another project: leave the task's
-        // section alone rather than sending the store a mismatched pair it
-        // would reject (resolveTaskContainerAssignment: 'Section does not
-        // belong to project'). A project move clears the stale section there.
+
+
     }
 
     const contexts = mergeTokens(task.contexts, input.contexts);
@@ -122,8 +117,8 @@ export function buildBulkOrganizeTaskUpdates(
         const task = isTaskMap(tasksById) ? tasksById.get(id) : tasksById[id];
         if (!task) return [];
         const updates = buildBulkOrganizeTaskUpdate(task, input);
-        // An all-"keep" apply has nothing to say; skip the write so tasks do
-        // not get a pointless rev/updatedAt bump.
+
+
         if (Object.keys(updates).length === 0) return [];
         return [{ id, updates }];
     });

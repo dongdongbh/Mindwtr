@@ -3,13 +3,13 @@ import fixture from './__fixtures__/focus-admission/cases.json';
 import { resolveTaskFocusUpdate } from './focus-star';
 import type { Task } from './types';
 
-// The same table runs against the desktop Local API PATCH path in local_api.rs.
+
 const originalTz = process.env.TZ;
 
 const timeZoneFor = (offsetMinutes: number): string => {
     if (offsetMinutes % 60 !== 0) throw new Error(`whole-hour offsets only: ${offsetMinutes}`);
     const hours = offsetMinutes / 60;
-    // Etc/GMT zones invert the sign: Etc/GMT-9 is UTC+09:00.
+
     return hours === 0 ? 'UTC' : `Etc/GMT${hours > 0 ? '-' : '+'}${Math.abs(hours)}`;
 };
 

@@ -463,6 +463,18 @@ describe('backup transfer', () => {
         expect(restored.settings.security).toEqual({ mobileAppLockEnabled: true });
     });
 
+    it('keeps this device\'s App Lock relock delay through a restore, and never takes the file\'s (#1423)', () => {
+        const data = buildAppData();
+        data.settings = { security: { mobileAppLockEnabled: true, mobileAppLockRelockDelayMinutes: 15 } };
+        const previousData = buildAppData();
+        previousData.settings = { security: { mobileAppLockEnabled: true, mobileAppLockRelockDelayMinutes: 1 } };
+        const restoredAt = '2026-04-01T00:00:10.000Z';
+
+        expect(prepareRestoredBackupDataForSync(data, { restoredAt, previousData }).settings.security)
+            .toEqual({ mobileAppLockEnabled: true, mobileAppLockRelockDelayMinutes: 1 });
+        expect(prepareRestoredBackupDataForSync(data, { restoredAt }).settings.security).toBeUndefined();
+    });
+
     it('restores 32768 saved-filter tombstones, more times than a QuickJS call takes arguments', () => {
         const backup = buildAppData();
         const at = '2026-09-01T00:00:00.000Z';
@@ -1373,10 +1385,8 @@ describe('backup transfer', () => {
     });
 
     it('does not let the remote hand back records the restored backup dropped (#939)', () => {
-        // The reported flow: import a pile of tasks, delete them, then restore a
-        // backup taken before the import. The backup has no trace of them, the
-        // remote still does, and without carrying the deletion forward the next
-        // merge reads that absence as "new over there" and restores them.
+
+
         const restoredAt = '2026-04-01T00:00:10.000Z';
         const backup = buildAppData();
         const previousData: AppData = {
@@ -1411,9 +1421,8 @@ describe('backup transfer', () => {
     });
 
     it('leaves records the restoring device never saw alone (#939)', () => {
-        // Absence from a backup only means "deleted" for ids this device knew
-        // about. A task another device created while this one was offline is not
-        // ours to tombstone.
+
+
         const restoredAt = '2026-04-01T00:00:10.000Z';
         const backup = buildAppData();
         const restored = prepareRestoredBackupDataForSync(backup, { previousData: backup, restoredAt });
@@ -1438,9 +1447,8 @@ describe('backup transfer', () => {
     });
 
     it('sanitizes hostile attachment paths out of a restored backup (SEC-08)', () => {
-        // A backup file is user-supplied bytes, and restore stamps fresh revisions so its
-        // records win the next merge — a traversal uri/cloudKey smuggled in here would be
-        // published to every device without ever passing the sync-merge sanitizer.
+
+
         const restoredAt = '2026-04-01T00:00:10.000Z';
         const backup = buildAppData();
         const hostile = {
@@ -1459,7 +1467,7 @@ describe('backup transfer', () => {
         const restored = prepareRestoredBackupDataForSync(backup, { restoredAt });
 
         for (const attachments of [restored.tasks[0].attachments, restored.projects[0].attachments]) {
-            // Degraded to "missing locally", never dropped: the user's record survives.
+
             expect(attachments).toHaveLength(1);
             expect(attachments?.[0].id).toBe('attachment-1');
             expect(attachments?.[0].uri).toBe('');
@@ -1469,11 +1477,8 @@ describe('backup transfer', () => {
     });
 
     describe('countActiveRecords', () => {
-        // Pinned verbatim from desktop's and mobile's data-transfer.ts before this refactor —
-        // both had this exact 4-field object and both silently omitted `people`. Per the "a test
-        // that iterates the new thing can't catch it shrinking" gotcha, this compares against the
-        // OLD predicate directly rather than re-deriving expectations from countActiveRecords
-        // itself, so a regression that drops a field back out would fail this test.
+
+
         const oldFourFieldPredicate = (data: AppData) => ({
             tasks: data.tasks.filter((task) => !task.deletedAt).length,
             projects: data.projects.filter((project) => !project.deletedAt).length,

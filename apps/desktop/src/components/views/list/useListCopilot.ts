@@ -80,8 +80,7 @@ export function useListCopilot({ settings, language = 'en', newTaskTitle, allCon
         };
     }, [aiEnabled, aiKey, allContexts, allTags, keyRequired, language, newTaskTitle, settings]);
 
-    // Per-part apply (#1022). This row has no time estimate to suggest, so the
-    // parts are the context and one per tag.
+
     const pendingCopilotParts = useMemo<CopilotPart[]>(() => {
         if (!visibleCopilotSuggestion) return [];
         const parts: CopilotPart[] = [];

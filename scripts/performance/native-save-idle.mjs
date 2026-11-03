@@ -14,8 +14,7 @@ export function isNativeSaveIdle(status) {
     && !desktop.pending && !desktop.reconciliationPending;
 }
 
-// Two idle observations with unchanged generations across event-loop turns.
-// This is a boundary on known local work, not a promise against future writers.
+
 export async function waitForNativeSaveIdle(read, { timeoutMs = 60_000, pollMs = 50,
   now = () => performance.now(), sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const start = now();

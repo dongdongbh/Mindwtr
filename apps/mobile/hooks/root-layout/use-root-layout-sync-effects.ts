@@ -8,13 +8,15 @@ import { createMobileSyncTriggers, type MobileSyncTriggers } from '@mindwtr/core
 import type { ToastOptions } from '@/contexts/toast-context';
 import { getNotificationPermissionStatus, startMobileNotifications, stopMobileNotifications } from '@/lib/notification-service';
 import { getCalendarPushEnabled, runFullCalendarSync, startCalendarPushSync, stopCalendarPushSync } from '@/lib/calendar-push-sync';
-import { abortMobileSync, performMobileSync } from '@/lib/sync-service';
+import { abortMobileSync, performMobileSync, waitForMobileSyncIdle } from '@/lib/sync-service';
 import { syncMobileBackgroundSyncRegistration } from '@/lib/background-sync-task';
 import { classifySyncFailure, coerceSupportedBackend, isLikelyOfflineSyncError, resolveBackend } from '@/lib/sync-service-utils';
 import { SYNC_BACKEND_KEY } from '@/lib/sync-constants';
 import { isCloudKitAvailable, subscribeToCloudKitChanges } from '@/lib/cloudkit-sync';
 import { updateMobileWidgetFromStore } from '@/lib/widget-service';
-import { logError, logWarn } from '@/lib/app-log';
+import { logError, logInfo, logWarn } from '@/lib/app-log';
+import { setMobileLocalChangePending } from '@/lib/sync-badge';
+import { beginIosBackgroundTask } from '@/modules/ios-scene-lifecycle';
 
 type ResolveText = (key: string, fallback: string) => string;
 
@@ -137,9 +139,7 @@ export function useRootLayoutSyncEffects({
         });
     }, []);
 
-    // The trigger rules live in core (mobile-sync-triggers.ts) with the shared pacing machine;
-    // one instance for the life of the hook. Everything they do not own — AppState and store
-    // wiring, widget and notification recomputes, the toast copy — stays here.
+
     const getTriggers = useCallback((): MobileSyncTriggers => {
         triggersRef.current ??= createMobileSyncTriggers({
             initialAppState: appStateAtMount.current,
@@ -154,7 +154,12 @@ export function useRootLayoutSyncEffects({
             classifySyncFailure: (error) => classifySyncFailure(error),
             reportError: logAppError,
             logWarn: (message, context) => logWarn(message, context),
+            logInfo: (message, context) => logInfo(message, context),
+            onLocalChangePendingChange: setMobileLocalChangePending,
             showSyncIssue,
+
+            holdBackgroundExecution: (onExpire) => beginIosBackgroundTask('Mindwtr sync', onExpire),
+            waitForSyncIdle: () => waitForMobileSyncIdle(),
         });
         return triggersRef.current;
     }, [showSyncIssue]);
@@ -195,7 +200,7 @@ export function useRootLayoutSyncEffects({
                     .then((permission) => {
                         if (!triggers.isRuntimeActive()) return;
                         if (!permission.granted) {
-                            // The same cleanup as a denied start: the Pomodoro alarm goes too.
+
                             stopMobileNotifications({ permissionDenied: true }).catch(logAppError);
                             if (!notificationPermissionWarningShown.current) {
                                 notificationPermissionWarningShown.current = true;
@@ -263,7 +268,7 @@ export function useRootLayoutSyncEffects({
         return () => unsubscribe();
     }, [disabled]);
 
-    // Start calendar push sync on mount if enabled; stop on unmount.
+
     useEffect(() => {
         if (disabled) return undefined;
         let stopSync: (() => void) | null = null;

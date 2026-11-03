@@ -118,8 +118,8 @@ describe('useSettingsMainPage', () => {
     it('resolves System theme through the native command when webview media is stale', async () => {
         const originalMatchMedia = window.matchMedia;
         window.matchMedia = vi.fn().mockReturnValue({ matches: false } as MediaQueryList);
-        // The command goes through the invoke seam, which needs a Tauri runtime
-        // to reach the mocked @tauri-apps/api/core.
+
+
         (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
 
         try {
@@ -137,8 +137,8 @@ describe('useSettingsMainPage', () => {
 });
 
 describe('useSettingsMainPage appearance writes', () => {
-    // The store merges appearance into the latest settings; sending the page's whole copy would put back
-    // a key another device changed since this page last rendered.
+
+
     it('sends only the changed appearance key', async () => {
         const updateSettings = vi.fn().mockResolvedValue(undefined);
         const { result } = renderHook(() => useSettingsMainPage({

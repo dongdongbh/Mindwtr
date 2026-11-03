@@ -21,7 +21,6 @@ import { LanguageProvider, useLanguage } from '../contexts/language-context';
 import {
   ACTIVE_APP_ANNOUNCEMENT,
   APP_ANNOUNCEMENT_DISMISSED_VALUE,
-  DONATION_PROMPT_ANNOUNCEMENT,
   addBreadcrumb,
   buildCoreLogExtra,
   consoleLogger,
@@ -29,23 +28,29 @@ import {
   getAnnouncementDismissalStorageKey,
   isSupportedLanguage,
   recordDonationPromptShown,
-  recordUpdateReminderChecked,
   recordUpdateReminderDismissed,
-  recordUpdateReminderShown,
   setSha256HexProvider,
   setLogger,
-  shouldCheckUpdateReminder,
-  shouldShowAppAnnouncement,
-  shouldShowDonationPrompt,
   withSupportPromptShown,
-  shouldShowUpdateReminder,
   translateWithFallback,
   useStartupPromptQueue,
   useTaskStore,
   isSandboxMode,
   resolveAndroidInstallerSource,
+  resolveMobileDonationPromptAllowed,
+  resolveMobileUpdateReminderAllowed,
+  fetchMobileUpdateReminderInfo,
+  buildUpdateReminderAnnouncement,
+  buildMobileStartupPromptDescriptors,
+  translateDonationPromptAnnouncement,
+  PROMPT_TEST_ANNOUNCEMENT,
+  UPDATE_REMINDER_RELEASES_URL,
+  UPDATE_NOW_ACTION_LABEL,
+  VIEW_RELEASE_ACTION_LABEL,
+  type AndroidInstallerSource,
   type AppAnnouncement,
   type AppAnnouncementAction,
+  type MobileUpdateReminderInfo,
   type StartupPromptDescriptor,
   type UserPromptState,
 } from '@mindwtr/core';
@@ -61,6 +66,7 @@ import { useRootLayoutContextAutomation } from '@/hooks/root-layout/use-root-lay
 import { useRootLayoutExternalCapture } from '@/hooks/root-layout/use-root-layout-external-capture';
 import { useRootLayoutAppleRemindersAutoImport } from '@/hooks/root-layout/use-root-layout-apple-reminders';
 import { useRootLayoutPendingCaptures } from '@/hooks/root-layout/use-root-layout-pending-captures';
+import { useRootLayoutGmailCapture } from '@/hooks/root-layout/use-root-layout-gmail-capture';
 import { useRootLayoutPomodoro } from '@/hooks/root-layout/use-root-layout-pomodoro';
 import { useRootLayoutWatch } from '@/hooks/root-layout/use-root-layout-watch';
 import { useRootLayoutNotificationOpenHandler } from '@/hooks/root-layout/use-root-layout-notification-open-handler';
@@ -76,13 +82,13 @@ import { AppAnnouncementModal } from '@/components/app-announcement-modal';
 import { MobileOnboardingFlow } from '@/components/MobileOnboardingFlow';
 import { MobileAppLockGate } from '@/components/mobile-app-lock-gate';
 import { useIncomingUrl } from '@/hooks/use-incoming-url';
+import { useWidgetLaunch, WidgetLaunchContext } from '@/hooks/use-widget-launch';
 import { PersistenceFailureBanner } from '@/components/persistence-failure-banner';
 import { MobileWorkspaceBootGate } from '@/components/mobile-workspace-boot-gate';
 import { MobileWorkspaceSwitchOverlay, SandboxWorkspaceBanner } from '@/components/sandbox-workspace-banner';
 import { applyAndroidSystemBars } from '@/lib/android-system-bars';
 import { isCloudKitAvailable } from '@/lib/cloudkit-sync';
 import {
-  readLocalUserPromptState,
   recordLocalPromptActivity,
   updateLocalUserPromptState,
 } from '@/lib/user-prompt-state';
@@ -90,21 +96,16 @@ import { subscribePromptTest } from '@/lib/prompt-test-controls';
 import { requestStoreReviewForTesting } from '@/lib/store-review-prompt';
 import {
   readMobileOnboardingDismissed,
-  shouldOpenMobileFirstRunOnboarding,
   subscribeMobileOnboardingEvent,
   writeMobileOnboardingDismissed,
 } from '@/lib/mobile-onboarding-events';
 import { SYNC_BACKEND_KEY } from '@/lib/sync-constants';
-import { coerceSupportedBackend, resolveBackend, type SyncBackend } from '@/lib/sync-service-utils';
+import { coerceSupportedBackend, resolveBackend } from '@/lib/sync-service-utils';
 import { persistLastRoute, sanitizeAndroidActivityNavigationState } from '@/lib/session-restore';
 import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
 import { useIosSceneDiagnostics } from '@/hooks/use-ios-scene-diagnostics';
 
-// Blurred screens stay mounted, so every store change re-rendered every list in
-// the stack: a #766 log showed three project task lists (tab route + two pushed
-// stack entries) each spending ~1s on the same 133 rows per tap. Freezing
-// non-focused screens skips those renders; state, scroll position and native
-// views are retained, and the screen re-renders with current data on focus.
+
 enableFreeze(true);
 
 let coreLoggerBridgeInstalled = false;
@@ -145,91 +146,9 @@ type MobileExtraConfig = {
 const parseBool = (value: unknown): boolean =>
   value === true || value === 1 || value === '1' || value === 'true';
 
-const resolveMobileDonationPromptAllowed = async (options: {
-  isExpoGo: boolean;
-  donationPromptEnabled: boolean;
-}): Promise<boolean> => {
-  if (!options.donationPromptEnabled) return false;
-  if (options.isExpoGo) return false;
-  return Platform.OS === 'android' || Platform.OS === 'ios';
-};
-
-const ANNOUNCEMENT_STARTUP_DELAY_MS = 250;
-const DONATION_PROMPT_STARTUP_DELAY_MS = 2000;
-const UPDATE_REMINDER_STARTUP_DELAY_MS = 1750;
-// fetchMobileUpdateReminderInfo is a plain fetch with no timeout; cap present()
-// so a hung network never holds the single prompt slot for the whole session.
-const UPDATE_REMINDER_FETCH_TIMEOUT_MS = 15000;
-const UPDATE_REMINDER_RELEASES_API = 'https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest';
-const UPDATE_REMINDER_RELEASES_URL = 'https://github.com/dongdongbh/Mindwtr/releases/latest';
 const APP_STORE_APP_ID = '6758597144';
 const APP_STORE_REVIEW_URL = `itms-apps://itunes.apple.com/app/id${APP_STORE_APP_ID}?action=write-review`;
 const APP_STORE_LISTING_URL = `https://apps.apple.com/app/mindwtr/id${APP_STORE_APP_ID}`;
-const UPDATE_NOW_ACTION_LABEL = 'Update now';
-const VIEW_RELEASE_ACTION_LABEL = 'View release';
-
-type MobileUpdateReminderInfo = {
-  currentVersion: string;
-  latestVersion: string;
-  latestReleasedAt: string | null;
-  releaseUrl: string;
-  actionLabel?: string;
-  testOnly?: boolean;
-};
-
-type AndroidInstallerSource = 'play-store' | 'sideload' | 'unknown';
-
-type GitHubLatestRelease = {
-  tag_name?: unknown;
-  html_url?: unknown;
-  published_at?: unknown;
-};
-
-const resolveMobileUpdateReminderAllowed = async (options: {
-  androidInstallerSource: AndroidInstallerSource;
-  isExpoGo: boolean;
-  isFossBuild: boolean;
-}): Promise<boolean> => {
-  if (options.isExpoGo) return false;
-  if (Platform.OS !== 'android') return false;
-  if (options.isFossBuild) return false;
-  return options.androidInstallerSource === 'sideload';
-};
-
-const fetchMobileUpdateReminderInfo = async (currentVersion: string): Promise<MobileUpdateReminderInfo> => {
-  const response = await fetch(UPDATE_REMINDER_RELEASES_API, {
-    headers: {
-      Accept: 'application/vnd.github.v3+json',
-      'User-Agent': 'Mindwtr-App',
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.status}`);
-  }
-  const release = await response.json() as GitHubLatestRelease;
-  const latestVersion = String(release.tag_name || '').trim().replace(/^v/i, '');
-  if (!latestVersion) throw new Error('GitHub release returned no version');
-  return {
-    currentVersion,
-    latestVersion,
-    latestReleasedAt: typeof release.published_at === 'string' ? release.published_at : null,
-    releaseUrl: typeof release.html_url === 'string' && release.html_url.trim()
-      ? release.html_url.trim()
-      : UPDATE_REMINDER_RELEASES_URL,
-    actionLabel: UPDATE_NOW_ACTION_LABEL,
-  };
-};
-
-const buildUpdateReminderAnnouncement = (info: MobileUpdateReminderInfo): AppAnnouncement => ({
-  id: `update-reminder-${info.latestVersion}`,
-  title: 'Update available',
-  body: `Mindwtr ${info.latestVersion} is available. You are using ${info.currentVersion}. Update when you have a minute to keep fixes and improvements current.`,
-  action: {
-    type: 'url',
-    label: info.actionLabel ?? VIEW_RELEASE_ACTION_LABEL,
-    url: info.releaseUrl,
-  },
-});
 
 const getAndroidPackageName = (): string => (
   Constants.expoConfig?.android?.package || Application.applicationId || 'tech.dongdongbh.mindwtr'
@@ -286,12 +205,6 @@ const getMobileUpdateTestTarget = (options: {
   return { label: VIEW_RELEASE_ACTION_LABEL, url: UPDATE_REMINDER_RELEASES_URL };
 };
 
-const PROMPT_TEST_ANNOUNCEMENT: AppAnnouncement = {
-  id: 'prompt-test-announcement',
-  title: 'Test announcement',
-  body: 'This is the temporary announcement template test. It uses the same popup surface as a real maintainer announcement.',
-};
-
 const getDeviceLocale = (): string => {
   try {
     return String(Intl.DateTimeFormat().resolvedOptions().locale || '').trim();
@@ -312,11 +225,10 @@ const getViewBreadcrumb = (pathname: string | null): string | null => {
 
 installCoreLoggerBridge();
 
-// Hermes has no crypto.subtle, so core's attachment integrity checks have nothing to
-// digest with until this is registered (see mobileSha256Hex).
+
 setSha256HexProvider(mobileSha256Hex);
 
-// Keep splash visible until app is ready.
+
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 markStartupPhase('js.root_layout.module_loaded');
 
@@ -347,6 +259,7 @@ function RootLayoutContentInner() {
   const navigationRef = useNavigationContainerRef();
   const pathname = usePathname();
   const { url: incomingUrl, key: incomingUrlKey } = useIncomingUrl();
+  const widgetLaunch = useWidgetLaunch(incomingUrlKey);
   const { isDark, isReady: themeReady } = useTheme();
   const tc = useThemeColors();
   const { language, setLanguage, isReady: languageReady, t } = useLanguage();
@@ -374,6 +287,9 @@ function RootLayoutContentInner() {
   const settingsCalendarSystem = useTaskStore((state) => state.settings?.calendarSystem);
   const settingsTimeFormat = useTaskStore((state) => state.settings?.timeFormat);
   const mobileAppLockEnabled = useTaskStore((state) => state.settings?.security?.mobileAppLockEnabled === true);
+
+
+  const [appLocked, setAppLocked] = useState(true);
   const seedGettingStarted = useTaskStore((state) => state.seedGettingStarted);
   const visibleDataCount = useTaskStore((state) => (
     state.tasks.length + state.projects.length + state.sections.length + state.areas.length
@@ -393,8 +309,8 @@ function RootLayoutContentInner() {
   const [recoveredActivityNavigationState, setRecoveredActivityNavigationState] = useState<ReturnType<
     typeof sanitizeAndroidActivityNavigationState
   >>(null);
-  // Prompt state read once at startup so the descriptors below can answer
-  // `isEligible` synchronously; null until it lands (or if the read failed).
+
+
   const [promptStateSnapshot, setPromptStateSnapshot] = useState<UserPromptState | null>(null);
   const activeAnnouncement = testAnnouncement ?? ACTIVE_APP_ANNOUNCEMENT;
 
@@ -402,21 +318,7 @@ function RootLayoutContentInner() {
     translateWithFallback(t, key, fallback)
   ), [t]);
 
-  const donationPromptAnnouncement = useMemo<AppAnnouncement>(() => ({
-    ...DONATION_PROMPT_ANNOUNCEMENT,
-    title: resolveText('donationPrompt.title', DONATION_PROMPT_ANNOUNCEMENT.title),
-    body: resolveText('donationPrompt.body', DONATION_PROMPT_ANNOUNCEMENT.body),
-    dismissLabel: resolveText(
-      'donationPrompt.dismiss',
-      DONATION_PROMPT_ANNOUNCEMENT.dismissLabel ?? DONATION_PROMPT_ANNOUNCEMENT.title,
-    ),
-    action: DONATION_PROMPT_ANNOUNCEMENT.action
-      ? {
-        ...DONATION_PROMPT_ANNOUNCEMENT.action,
-        label: resolveText('donationPrompt.action', DONATION_PROMPT_ANNOUNCEMENT.action.label),
-      }
-      : undefined,
-  }), [resolveText]);
+  const donationPromptAnnouncement = useMemo<AppAnnouncement>(() => translateDonationPromptAnnouncement(resolveText), [resolveText]);
 
   const buildQuickCaptureInitialProps = useCallback((initialProps?: QuickCaptureOptions['initialProps']) => {
     const nextInitialProps = initialProps ? { ...initialProps } : {};
@@ -493,9 +395,9 @@ function RootLayoutContentInner() {
 
   useEffect(() => {
     if (!isFirstPaintReady || !recoveredActivityNavigationState) return undefined;
-    // A freshly delivered URL/share owns startup routing. The recovered root
-    // never replays or displaces an external one-shot action.
-    if (incomingUrlKey > 0 || hasShareIntent) {
+
+
+    if (incomingUrlKey > 0 || hasShareIntent || widgetLaunch.pending) {
       setRecoveredActivityNavigationState(null);
       return undefined;
     }
@@ -515,7 +417,7 @@ function RootLayoutContentInner() {
           },
         });
       } catch {
-        // Optional same-process recovery fails back to Expo Router startup.
+
       }
       setRecoveredActivityNavigationState(null);
     };
@@ -529,19 +431,19 @@ function RootLayoutContentInner() {
     isFirstPaintReady,
     navigationRef,
     recoveredActivityNavigationState,
+    widgetLaunch.pending,
   ]);
 
   useRootLayoutNotificationOpenHandler({
-    // A cold-start notification Complete action writes the store, so it waits
-    // for canonical data like the startup writers below.
+
+
     appReady: isFirstPaintReady && canonicalDataReady,
     disabled: sandboxMode,
     pathname,
     router,
   });
-  // Android drops notifications on reboot and OEMs drop them when they kill
-  // the app process; re-arm the persistent quick-capture notification (when
-  // enabled) on start and on every return to the foreground (#819).
+
+
   useEffect(() => {
     if (sandboxMode || !languageReady || Platform.OS !== 'android') return;
     return keepPersistentCaptureNotificationArmed(() => ({
@@ -550,10 +452,8 @@ function RootLayoutContentInner() {
       channelName: resolveText('captureNotification.channelName', 'Quick capture'),
     }));
   }, [languageReady, resolveText, sandboxMode]);
-  // Startup writers wait for canonical (SQLite) data, not the backup snapshot
-  // that paints first. A store write on top of the snapshot makes core discard
-  // the canonical load, and the session then runs on stale data. Their inputs
-  // (queue files, share intents, URLs) stay held until then.
+
+
   useRootLayoutContextAutomation({
     canonicalDataReady,
     disabled: sandboxMode,
@@ -569,6 +469,7 @@ function RootLayoutContentInner() {
     hasShareIntent,
     incomingUrl,
     incomingUrlKey,
+    locked: mobileAppLockEnabled && appLocked,
     providerReady: shareIntentReady,
     resolveText,
     resetShareIntent,
@@ -582,6 +483,7 @@ function RootLayoutContentInner() {
   });
   useRootLayoutPomodoro({ canonicalDataReady, disabled: sandboxMode, resolveText });
   const drainPendingCaptures = useRootLayoutPendingCaptures({ canonicalDataReady, disabled: sandboxMode });
+  useRootLayoutGmailCapture({ canonicalDataReady, disabled: sandboxMode });
   useRootLayoutAppleRemindersAutoImport({ canonicalDataReady, disabled: sandboxMode, showToast, t });
   useRootLayoutWatch({ canonicalDataReady, disabled: sandboxMode, language, onPendingCapture: drainPendingCaptures });
 
@@ -601,12 +503,11 @@ function RootLayoutContentInner() {
     addBreadcrumb(breadcrumb);
   }, [pathname, sandboxMode]);
 
-  // Remember the screen the user is on so a reopen shortly after the OS kills
-  // the app resumes there instead of resetting to Focus (#842).
+
   const globalSearchParams = useGlobalSearchParams<{ projectId?: string; tab?: string }>();
   const routeProjectId = typeof globalSearchParams.projectId === 'string' ? globalSearchParams.projectId : undefined;
-  // History keeps its Done/Archived choice in this param, so the snapshot must
-  // carry it or the screen comes back on the wrong tab.
+
+
   const routeTab = typeof globalSearchParams.tab === 'string' ? globalSearchParams.tab : undefined;
   const lastRouteRef = useRef<{ pathname: string; projectId?: string; tab?: string }>({ pathname });
   useEffect(() => {
@@ -616,8 +517,8 @@ function RootLayoutContentInner() {
   }, [pathname, routeProjectId, routeTab, sandboxMode]);
   useEffect(() => {
     if (sandboxMode) return;
-    // The snapshot timestamp must reflect when the session left the app, not
-    // the last navigation — refresh it whenever the app goes to background.
+
+
     const subscription = AppState.addEventListener('change', (state) => {
       if (state !== 'background' && state !== 'inactive') return;
       const { pathname: lastPathname, projectId, tab } = lastRouteRef.current;
@@ -710,128 +611,56 @@ function RootLayoutContentInner() {
     };
   }, [sandboxMode]);
 
-  // Startup prompts share one gate and open one at a time. The descriptors
-  // below carry each prompt's own eligibility/present logic; the queue owns
-  // precedence (onboarding > announcement > update > donation), the startup
-  // delays, and session dismissal. See packages/core/src/startup-prompts.ts.
+
   const startupPromptsEnabled = !sandboxMode && process.env.NODE_ENV !== 'test';
+
+
+  const onboardingHeldLogged = useRef(false);
+  const dataLoadFailed = useTaskStore((state) => Boolean(state.error));
+  useEffect(() => {
+    if (!startupPromptsEnabled || onboardingHeldLogged.current || !mobileOnboardingDismissalLoaded) return;
+    if (!dataReady || canonicalDataReady || !dataLoadFailed || mobileOnboardingDismissed || visibleDataCount !== 0) return;
+    onboardingHeldLogged.current = true;
+    void logWarn('First-run onboarding held: the local data did not load', {
+      scope: 'onboarding',
+      force: true,
+      extra: { releaseCheck: 'v1.3.8/onboarding-waits-for-canonical-load', outcome: 'held' },
+    });
+  }, [
+    canonicalDataReady,
+    dataLoadFailed,
+    dataReady,
+    mobileOnboardingDismissalLoaded,
+    mobileOnboardingDismissed,
+    startupPromptsEnabled,
+    visibleDataCount,
+  ]);
   const startupPromptGateOpen = isFirstPaintReady && mobileOnboardingDismissalLoaded;
-  const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => [
-    {
-      // First-run onboarding outranks everything: a brand-new user must not meet
-      // an announcement or a donation ask before the welcome flow.
-      id: 'onboarding',
-      priority: 40,
-      delayMs: 0,
-      isEligible: () => dataReady && !mobileOnboardingDismissed && visibleDataCount === 0,
-      present: async (signal) => {
-        let syncBackend: SyncBackend = 'off';
-        try {
-          const rawBackend = await AsyncStorage.getItem(SYNC_BACKEND_KEY);
-          syncBackend = coerceSupportedBackend(resolveBackend(rawBackend), isCloudKitAvailable());
-        } catch (error) {
-          void logError(error, { scope: 'onboarding', extra: { step: 'readMobileSyncBackend' } });
-        }
-        if (signal.aborted) return false;
-        return shouldOpenMobileFirstRunOnboarding({
-          dataReady,
-          dismissed: mobileOnboardingDismissed,
-          syncBackend,
-          visibleDataCount,
-        });
-      },
+  const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => buildMobileStartupPromptDescriptors({
+    storage: AsyncStorage,
+    dataReady,
+    canonicalDataReady,
+    mobileOnboardingDismissed,
+    visibleDataCount,
+    readSyncBackend: async () => coerceSupportedBackend(resolveBackend(await AsyncStorage.getItem(SYNC_BACKEND_KEY)), isCloudKitAvailable()),
+    onSyncBackendReadError: (error) => {
+      void logError(error, { scope: 'onboarding', extra: { step: 'readMobileSyncBackend' } });
     },
-    {
-      // Maintainer announcement: when one is configured it also blocks the
-      // donation and update prompts (see their isEligible).
-      id: 'announcement',
-      priority: 30,
-      delayMs: ANNOUNCEMENT_STARTUP_DELAY_MS,
-      isEligible: () => shouldShowAppAnnouncement(ACTIVE_APP_ANNOUNCEMENT, null),
-      present: async (signal) => {
-        const announcement = ACTIVE_APP_ANNOUNCEMENT;
-        if (!shouldShowAppAnnouncement(announcement, null)) return false;
-        let dismissedValue: string | null = null;
-        try {
-          dismissedValue = await AsyncStorage.getItem(getAnnouncementDismissalStorageKey(announcement.id));
-        } catch {
-          dismissedValue = null;
-        }
-        if (signal.aborted) return false;
-        return shouldShowAppAnnouncement(announcement, dismissedValue);
-      },
+    updateReminderAllowed,
+    donationPromptAllowed,
+    promptStateSnapshot,
+    onUpdateCheckRecordError: (error) => {
+      void logWarn('Failed to record update reminder check', {
+        scope: 'prompt-state',
+        extra: { error: error instanceof Error ? error.message : String(error) },
+      });
     },
-    {
-      // Update reminder: records the check on selection, then confirms an update
-      // actually exists before opening (declines otherwise).
-      id: 'update-reminder',
-      priority: 20,
-      delayMs: UPDATE_REMINDER_STARTUP_DELAY_MS,
-      presentTimeoutMs: UPDATE_REMINDER_FETCH_TIMEOUT_MS,
-      isEligible: () => {
-        if (updateReminderAllowed !== true) return false;
-        if (ACTIVE_APP_ANNOUNCEMENT) return false;
-        if (!promptStateSnapshot) return false;
-        return shouldCheckUpdateReminder({
-          nowMs: Date.now(),
-          promptState: promptStateSnapshot,
-          updateReminderAllowed: true,
-        });
-      },
-      onSelect: () => {
-        // Safe here and only here: the queue runs onSelect after this descriptor
-        // has won the slot, so the once-a-day check is never burned by a prompt
-        // that never ran.
-        void updateLocalUserPromptState((state) => recordUpdateReminderChecked(state, Date.now()))
-          .catch((error) => {
-            void logWarn('Failed to record update reminder check', {
-              scope: 'prompt-state',
-              extra: { error: error instanceof Error ? error.message : String(error) },
-            });
-          });
-      },
-      present: async (signal) => {
-        const info = await fetchMobileUpdateReminderInfo(appVersion);
-        if (signal.aborted) return false;
-        const latestPromptState = await readLocalUserPromptState();
-        if (signal.aborted) return false;
-        if (!shouldShowUpdateReminder({
-          nowMs: Date.now(),
-          promptState: latestPromptState,
-          updateReminderAllowed: true,
-          currentVersion: info.currentVersion,
-          latestVersion: info.latestVersion,
-          latestReleasedAt: info.latestReleasedAt,
-        })) {
-          return false;
-        }
-        await updateLocalUserPromptState((state) => recordUpdateReminderShown(state, Date.now()));
-        if (signal.aborted) return false;
-        setUpdateReminderInfo(info);
-        return true;
-      },
-    },
-    {
-      // Donation ask: lowest precedence; suppressed whenever an announcement is
-      // configured or an update reminder is showing (via the queue).
-      id: 'donation',
-      priority: 10,
-      delayMs: DONATION_PROMPT_STARTUP_DELAY_MS,
-      isEligible: () => {
-        if (donationPromptAllowed !== true) return false;
-        if (ACTIVE_APP_ANNOUNCEMENT) return false;
-        if (!promptStateSnapshot) return false;
-        return shouldShowDonationPrompt({
-          nowMs: Date.now(),
-          promptState: promptStateSnapshot,
-          supportPrompt: useTaskStore.getState().settings.supportPrompt,
-          donationAllowed: true,
-        });
-      },
-      present: () => true,
-    },
-  ], [
+    fetchUpdateInfo: () => fetchMobileUpdateReminderInfo(appVersion, fetch),
+    onUpdateReminderInfo: setUpdateReminderInfo,
+    getSupportPrompt: () => useTaskStore.getState().settings.supportPrompt,
+  }), [
     appVersion,
+    canonicalDataReady,
     dataReady,
     donationPromptAllowed,
     mobileOnboardingDismissed,
@@ -839,8 +668,8 @@ function RootLayoutContentInner() {
     updateReminderAllowed,
     visibleDataCount,
   ]);
-  // dismiss/forceOpen/closeAll are stable across renders; depending on them
-  // (rather than on the queue object) keeps the prompt callbacks stable too.
+
+
   const {
     openId: startupPromptOpenId,
     dismiss: dismissStartupPrompt,
@@ -862,7 +691,7 @@ function RootLayoutContentInner() {
       });
     },
   });
-  // "Show onboarding again" from settings bypasses the gate entirely.
+
   useEffect(() => subscribeMobileOnboardingEvent(() => {
     setMobileOnboardingBusy(false);
     setMobileOnboardingError(null);
@@ -996,7 +825,7 @@ function RootLayoutContentInner() {
           extra: { error: error instanceof Error ? error.message : String(error) },
         });
       });
-    // Synced so the other installs on this dataset skip the same ask (#1237).
+
     const { settings, updateSettings } = useTaskStore.getState();
     void updateSettings({ supportPrompt: withSupportPromptShown(settings.supportPrompt, nowMs) });
   }, []);
@@ -1119,9 +948,8 @@ function RootLayoutContentInner() {
   useEffect(() => {
     if (sandboxMode || !isFirstPaintReady) return undefined;
     let cancelled = false;
-    // Today's activity is recorded first so the snapshot the donation and update
-    // descriptors read already counts this launch. A failed read leaves the
-    // snapshot null, which keeps both prompts out of the queue for the session.
+
+
     recordLocalPromptActivity()
       .then((promptState) => {
         if (!cancelled) setPromptStateSnapshot(promptState);
@@ -1143,7 +971,7 @@ function RootLayoutContentInner() {
       return;
     }
     let cancelled = false;
-    resolveMobileDonationPromptAllowed({ donationPromptEnabled, isExpoGo })
+    resolveMobileDonationPromptAllowed({ platform: Platform.OS, donationPromptEnabled, isExpoGo })
       .then((allowed) => {
         if (!cancelled) setDonationPromptAllowed(allowed);
       })
@@ -1165,7 +993,7 @@ function RootLayoutContentInner() {
       return;
     }
     let cancelled = false;
-    resolveMobileUpdateReminderAllowed({ androidInstallerSource, isExpoGo, isFossBuild })
+    resolveMobileUpdateReminderAllowed({ platform: Platform.OS, androidInstallerSource, isExpoGo, isFossBuild })
       .then((allowed) => {
         if (!cancelled) setUpdateReminderAllowed(allowed);
       })
@@ -1181,7 +1009,7 @@ function RootLayoutContentInner() {
     };
   }, [androidInstallerSource, isExpoGo, isFossBuild, sandboxMode]);
 
-  // Avoid mounting task screens against the empty default store before local hydration finishes.
+
   if (!isFirstPaintReady) {
     return null;
   }
@@ -1207,12 +1035,13 @@ function RootLayoutContentInner() {
       }}
     >
       <NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
-          <MobileAppLockGate enabled={mobileAppLockEnabled}>
+          <MobileAppLockGate enabled={mobileAppLockEnabled} onLockedChange={setAppLocked}>
           <ProjectNextActionPromptProvider>
           <StartupReadinessContext.Provider value={startupReadiness}>
             <PersistenceFailureBanner />
           <SandboxWorkspaceBanner />
           <MobileWorkspaceSwitchOverlay />
+          <WidgetLaunchContext.Provider value={widgetLaunch}>
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false, animation: 'none' }} />
             <Stack.Screen name="(drawer)" options={{ headerShown: false, animation: 'none' }} />
@@ -1253,6 +1082,7 @@ function RootLayoutContentInner() {
               }}
             />
           </Stack>
+          </WidgetLaunchContext.Provider>
           <MobileOnboardingFlow
             busy={mobileOnboardingBusy}
             error={mobileOnboardingError}
@@ -1276,7 +1106,7 @@ function RootLayoutContentInner() {
             onShown={recordDonationPromptVisible}
           />
           <AppAnnouncementModal
-            announcement={updateReminderInfo ? buildUpdateReminderAnnouncement(updateReminderInfo) : null}
+            announcement={updateReminderInfo ? buildUpdateReminderAnnouncement(updateReminderInfo, resolveText) : null}
             visible={startupPromptOpenId === 'update-reminder'}
             onAction={handleUpdateReminderAction}
             onDismiss={dismissUpdateReminder}
@@ -1298,7 +1128,9 @@ function RootLayoutContentInner() {
 export default function RootLayout() {
   return (
     <MobileWorkspaceBootGate>
-      <ShareIntentProvider>
+      {
+                                                                                                       }
+      <ShareIntentProvider options={{ resetOnBackground: false }}>
         <ThemeProvider>
           <LanguageProvider>
             <ErrorBoundary>

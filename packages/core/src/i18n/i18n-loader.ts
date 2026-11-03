@@ -25,7 +25,7 @@ const loadWithFallback = async <T>(
         try {
             return syncLoader();
         } catch {
-            // Fall back to dynamic import for web/desktop bundlers.
+
         }
     }
     return await asyncLoader();
@@ -53,9 +53,8 @@ async function ensureLoaded(lang: Language): Promise<void> {
         }
 
         const descriptor = LOCALES[lang];
-        // Each entry's loaders are typed as its own concrete module shape (so the real
-        // export name/shape is checked once, at its declaration site in i18n-locales.ts);
-        // widen to the common shape here, where the lookup is keyed dynamically by `lang`.
+
+
         const loadSync = descriptor.loadSync as () => Record<string, unknown>;
         const loadAsync = descriptor.loadAsync as () => Promise<Record<string, unknown>>;
         const mod = await loadWithFallback(loadSync, loadAsync) as Record<string, Record<string, string>>;

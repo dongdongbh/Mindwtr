@@ -9,8 +9,7 @@ import {
 import { secureSecretStorage, secureSecretVault } from './secure-secret-store';
 import { backgroundSafeFetch } from './background-safe-fetch';
 
-// Token storage and refresh live in core (dropbox-auth-tokens.ts); this module binds them to
-// AsyncStorage, expo-secure-store and the background-safe fetch.
+
 export { isDropboxClientConfigured } from '@mindwtr/core/dropbox-auth-tokens';
 export type { DropboxAccessTokenResolution, DropboxAuthTokens };
 
@@ -49,7 +48,7 @@ export async function refreshDropboxAccessToken(
     return tokenStore.refreshDropboxAccessToken(clientId, refreshToken, fetcher);
 }
 
-/** Resolve an access token from an explicit credential bundle without touching storage. */
+
 export async function getValidDropboxAccessTokenForTokens(
     clientId: string,
     tokens: DropboxAuthTokens,
@@ -58,7 +57,7 @@ export async function getValidDropboxAccessTokenForTokens(
     return tokenStore.getValidDropboxAccessTokenForTokens(clientId, tokens, fetcher);
 }
 
-/** Force-refresh an explicit credential bundle without promoting it to storage. */
+
 export async function forceRefreshDropboxAccessTokenForTokens(
     clientId: string,
     tokens: DropboxAuthTokens,
@@ -81,7 +80,7 @@ export async function forceRefreshDropboxAccessToken(
     return tokenStore.forceRefreshDropboxAccessToken(clientId, fetcher);
 }
 
-/** Revoke an explicit token bundle without reading or clearing durable credentials. */
+
 export async function revokeDropboxTokens(
     clientId: string,
     tokens: DropboxAuthTokens,

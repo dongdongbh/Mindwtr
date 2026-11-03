@@ -1,7 +1,6 @@
-// One run per phone at a time. Several sessions share the test phones, and two checks on one phone break each other, so
-// a device check (run as `node <check>.mjs <serial> ...`) runs itself again under flock on
-// ~/.mindwtr-harness/device-<serial>.lock and waits for any other run on that serial. A runner that holds the same lock
-// for a whole batch sets MINDWTR_DEVICE_LOCKED=<serial>, so its checks do not wait on it.
+
+
+
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';

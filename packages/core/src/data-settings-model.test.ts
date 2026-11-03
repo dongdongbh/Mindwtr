@@ -4,7 +4,7 @@ import { getDocsGuideUrl } from './docs-guidance';
 import { getTranslator } from './i18n';
 import { createSyncSettingsTranslator } from './sync-settings-model';
 
-/** RN's SyncBackupSection (sync-settings-sections.tsx) and its screen's import guide, key for key. */
+
 describe('Settings › Data model: RN\'s Backup and Import folds', () => {
     it.each(['en', 'ar', 'de', 'zh-Hans'] as const)('reads every text through RN\'s own key (%s)', (language) => {
         const t = getTranslator(language);
@@ -34,7 +34,7 @@ describe('Settings › Data model: RN\'s Backup and Import folds', () => {
             description: t('settings.importDataDesc'),
             guide: { title: t('settings.importSetupGuideTitle'), description: t('settings.importSetupGuideDesc'), url: getDocsGuideUrl('import/', language) },
             failed: t('settings.backupMobile.importFailed'),
-            // RN's row order (sync-settings-sections.tsx): Todoist, TickTick, DGT GTD, OmniFocus, Mindwtr CSV.
+
             rows: [
                 { key: 'todoist', mode: 'todoist', label: tr('settings.syncMobile.importFromTodoist'), description: tr('settings.syncMobile.importTodoistCsvOrZipExportsIntoMindwtrProjects'), mimeTypes: IMPORT_PICKER_MIME_TYPES.todoist },
                 { key: 'ticktick', mode: 'ticktick', label: tr('settings.syncMobile.importFromTicktick'), description: tr('settings.syncMobile.importTicktickCsvOrZipBackupsIntoMindwtrAreas'), mimeTypes: IMPORT_PICKER_MIME_TYPES.ticktick },
@@ -49,7 +49,7 @@ describe('Settings › Data model: RN\'s Backup and Import folds', () => {
         });
     });
 
-    // Frozen from RN's IMPORT_PICKER_DESCRIPTORS (apps/mobile/lib/data-transfer.ts) before the move into core.
+
     it('keeps RN\'s picker types for each importer', () => {
         const csvZip = ['text/csv', 'text/comma-separated-values', 'application/zip', 'application/x-zip-compressed', 'application/octet-stream'];
         expect(IMPORT_PICKER_MIME_TYPES).toEqual({

@@ -1,30 +1,31 @@
 import { formatTimeEstimateLabel } from './calendar-scheduling';
 import { countActiveFilterCriteria, criteriaFromSelections } from './filter-criteria';
 import { tFallback } from './i18n';
+import { buildAdvancedFilterCriteriaChips } from './saved-filter-labels';
 import type { TaskMetadataFilterVisibility } from './task-metadata-filter-visibility';
 import type {
+    DateRange,
     FilterCriteria,
     MultiValueFilterMatchMode,
     TaskEnergyLevel,
     TaskPriority,
+    TaskStatus,
     TimeEstimate,
 } from './types';
 
-/**
- * The list filter picker's state as plain data, for hosts that cannot run
- * `useTaskFilterSelections` (task-filter-selections.ts). The edits, the pruning
- * and the chips mirror that hook without a saved filter applied, which is how
- * Someday, Reference and Done use it.
- */
+
 export type ListFilterState = {
     searchQuery: string;
     tokens: string[];
     excludedTokens: string[];
     projects: string[];
+    excludedProjects?: string[];
+    statuses?: TaskStatus[];
     priorities: TaskPriority[];
     energyLevels: TaskEnergyLevel[];
     timeEstimates: TimeEstimate[];
     location: string;
+    anyDateRange?: DateRange;
     contextMatchMode: MultiValueFilterMatchMode;
     tagMatchMode: MultiValueFilterMatchMode;
 };
@@ -42,16 +43,20 @@ export const EMPTY_LIST_FILTER_STATE: ListFilterState = {
     tagMatchMode: 'all',
 };
 
-/** One picker control's change, exactly as the hook's setter of the same name makes it. */
+
 export type ListFilterEdit =
     | { type: 'toggleToken'; value: string }
     | { type: 'removeToken'; value: string }
     | { type: 'toggleProject'; value: string }
+    | { type: 'cycleProject'; value: string }
+    | { type: 'removeProject'; value: string }
+    | { type: 'toggleStatus'; value: TaskStatus }
     | { type: 'togglePriority'; value: TaskPriority }
     | { type: 'toggleEnergyLevel'; value: TaskEnergyLevel }
     | { type: 'toggleTimeEstimate'; value: TimeEstimate }
     | { type: 'setSearch'; value: string }
     | { type: 'setLocation'; value: string }
+    | { type: 'setAnyDateRange'; value: DateRange | null }
     | { type: 'setMatchMode'; kind: 'context' | 'tag'; value: MultiValueFilterMatchMode }
     | { type: 'clear' };
 
@@ -68,7 +73,7 @@ export function applyListFilterEdit(state: ListFilterState, edit: ListFilterEdit
                 excludedTokens: state.excludedTokens.filter((item) => item !== edit.value),
             };
         case 'toggleToken': {
-            // Tri-state cycle: neutral → included → excluded → neutral.
+
             const token = edit.value;
             if (state.tokens.includes(token)) {
                 return {
@@ -84,6 +89,18 @@ export function applyListFilterEdit(state: ListFilterState, edit: ListFilterEdit
         }
         case 'toggleProject':
             return { ...state, projects: toggleValue(state.projects, edit.value) };
+        case 'removeProject':
+            return { ...state, projects: state.projects.filter((id) => id !== edit.value),
+                excludedProjects: (state.excludedProjects ?? []).filter((id) => id !== edit.value) };
+        case 'cycleProject': {
+            const excluded = state.excludedProjects ?? [];
+            if (state.projects.includes(edit.value)) return { ...state,
+                projects: state.projects.filter((id) => id !== edit.value), excludedProjects: [...excluded, edit.value] };
+            if (excluded.includes(edit.value)) return { ...state, excludedProjects: excluded.filter((id) => id !== edit.value) };
+            return { ...state, projects: [...state.projects, edit.value] };
+        }
+        case 'toggleStatus':
+            return { ...state, statuses: toggleValue(state.statuses ?? [], edit.value) };
         case 'togglePriority':
             return { ...state, priorities: toggleValue(state.priorities, edit.value) };
         case 'toggleEnergyLevel':
@@ -94,6 +111,10 @@ export function applyListFilterEdit(state: ListFilterState, edit: ListFilterEdit
             return { ...state, searchQuery: edit.value };
         case 'setLocation':
             return { ...state, location: edit.value };
+        case 'setAnyDateRange': {
+            const { anyDateRange: _previous, ...rest } = state;
+            return edit.value ? { ...rest, anyDateRange: edit.value } : rest;
+        }
         case 'setMatchMode':
             return edit.kind === 'context' ? { ...state, contextMatchMode: edit.value } : { ...state, tagMatchMode: edit.value };
         case 'clear':
@@ -106,21 +127,21 @@ export const getListSearchChipLabel = (search: string, t: (key: string) => strin
 export type ListFilterChip = {
     id: string;
     label: string;
-    /** Excluded chips subtract; they render struck through. */
+
     excluded: boolean;
-    /** What pressing the chip sends: the hook's own chip action. */
+
     edit: ListFilterEdit;
 };
 
 export type ResolvedListFilter = {
-    /** The state with selections the view no longer offers dropped, as the hook's effects drop them. */
+
     state: ListFilterState;
     criteria: FilterCriteria;
     searchQuery: string;
     activeCount: number;
     hasActive: boolean;
     chips: ListFilterChip[];
-    /** The match mode control shows once two tokens of a kind are selected. */
+
     showContextMatchMode: boolean;
     showTagMatchMode: boolean;
 };
@@ -129,7 +150,7 @@ export function resolveListFilterState(
     input: ListFilterState,
     options: {
         visibility: TaskMetadataFilterVisibility;
-        /** Offered tokens from older callers; explicit selections remain clearable when absent. */
+
         retainTokens?: readonly string[];
         retainProjects?: readonly string[];
         getProjectLabel?: (projectId: string) => string | undefined;
@@ -151,12 +172,15 @@ export function resolveListFilterState(
         tokens: state.tokens,
         excludedTokens: state.excludedTokens,
         projects: state.projects,
+        excludedProjects: state.excludedProjects,
+        statuses: state.statuses,
         locations: visibility.location && state.location.trim() ? [state.location.trim()] : [],
         priorities: visibility.priority ? state.priorities : [],
         energyLevels: visibility.energyLevel ? state.energyLevels : [],
         timeEstimates: visibility.timeEstimate ? state.timeEstimates : [],
         contextMatchMode: state.contextMatchMode,
         tagMatchMode: state.tagMatchMode,
+        anyDateRange: state.anyDateRange,
     });
     const criteria: FilterCriteria = {
         ...currentCriteria,
@@ -179,8 +203,14 @@ export function resolveListFilterState(
     state.projects.forEach((projectId) => {
         const label = getProjectLabel?.(projectId);
         if (!label) return;
-        chips.push({ id: `project:${projectId}`, label, excluded: false, edit: { type: 'toggleProject', value: projectId } });
+        chips.push({ id: `project:${projectId}`, label, excluded: false, edit: { type: 'removeProject', value: projectId } });
     });
+    state.excludedProjects?.forEach((projectId) => {
+        chips.push({ id: `excluded-project:${projectId}`, label: getProjectLabel?.(projectId) ?? projectId,
+            excluded: true, edit: { type: 'removeProject', value: projectId } });
+    });
+    state.statuses?.forEach((status) => chips.push({ id: `status:${status}`, label: t(`status.${status}`),
+        excluded: false, edit: { type: 'toggleStatus', value: status } }));
     if (visibility.priority) {
         state.priorities.forEach((priority) => {
             chips.push({ id: `priority:${priority}`, label: t(`priority.${priority}`), excluded: false, edit: { type: 'togglePriority', value: priority } });
@@ -194,6 +224,14 @@ export function resolveListFilterState(
     if (visibility.timeEstimate) {
         state.timeEstimates.forEach((estimate) => {
             chips.push({ id: `time:${estimate}`, label: formatTimeEstimateLabel(estimate), excluded: false, edit: { type: 'toggleTimeEstimate', value: estimate } });
+        });
+    }
+    if (state.anyDateRange) {
+        chips.push({
+            id: 'anyDateRange',
+            label: buildAdvancedFilterCriteriaChips({ anyDateRange: state.anyDateRange }, { resolveText: (key, fallback) => tFallback(t, key, fallback) })[0].label,
+            excluded: false,
+            edit: { type: 'setAnyDateRange', value: null },
         });
     }
     const location = state.location.trim();

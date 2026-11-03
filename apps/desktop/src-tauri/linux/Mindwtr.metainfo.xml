@@ -88,6 +88,27 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="1.3.7" date="2026-10-22">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.7</url>
+      <description>
+        <p>Mindwtr 1.3.7 adds per-section project flow, reminder defaults, Priority sorting and Gruvbox themes.</p>
+        <p xml:lang="de">Mindwtr 1.3.7 ergänzt Ablauf pro Abschnitt, Standard-Erinnerungen, Sortierung nach Priorität und Gruvbox-Designs.</p>
+        <ul>
+          <li>Make each project section Parallel or Sequential with the Per section flow mode.</li>
+          <li xml:lang="de">Lege mit dem Ablauf „Pro Abschnitt“ jeden Projektabschnitt als parallel oder sequenziell fest.</li>
+          <li>Set default task reminders, tick Reference checklists, sort by Priority and give projects their own color.</li>
+          <li xml:lang="de">Lege Standard-Erinnerungen fest, hake Referenz-Checklisten ab, sortiere nach Priorität und gib Projekten eine eigene Farbe.</li>
+          <li>Tap a context to switch to it, Ctrl-click to combine, and see nested contexts as groups.</li>
+          <li xml:lang="de">Tippe auf einen Kontext, um zu ihm zu wechseln, kombiniere mit Strg-Klick und sieh verschachtelte Kontexte als Gruppen.</li>
+          <li>Use a roomier pop-up editor, hover task submenus, Timeline reordering and Task dates filters.</li>
+          <li xml:lang="de">Nutze einen größeren Pop-up-Editor, Untermenüs per Hover, Sortieren in Timeline und Filter nach Aufgabendaten.</li>
+          <li>Set separate MCP permissions for edits, archiving and deletion, choose its port and copy Codex settings.</li>
+          <li xml:lang="de">Lege getrennte MCP-Rechte für Bearbeiten, Archivieren und Löschen fest, wähle den Port und kopiere Codex-Einstellungen.</li>
+          <li>Fix Copy Title and task links on Linux, and keep other devices' changes when editing during a sync.</li>
+          <li xml:lang="de">Behebt Titel kopieren und Aufgabenlinks unter Linux und behält Änderungen anderer Geräte beim Bearbeiten während einer Synchronisierung.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.3.6" date="2026-10-12">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.6</url>
       <description>

@@ -1,8 +1,5 @@
-// S4 (correction pass on encwire-20260821-03): the two "Required tests" the original
-// handoff named but the first pass never wrote. Encryption wraps already-serialized bytes
-// at the storage seam only — merge stays plaintext-in-memory and untouched (pinned
-// architecture) — so this proves that wrapping is fully transparent to a real merge cycle
-// using core's actual `mergeAppDataWithStats`, not a hand-rolled equality check.
+
+
 
 import { describe, expect, it } from 'vitest';
 import { mergeAppDataWithStats } from './sync';
@@ -60,11 +57,7 @@ function createFakeLocalState(): SyncEncryptionLocalStatePort {
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const decode = (b: Uint8Array): AppData => JSON.parse(new TextDecoder().decode(b)) as AppData;
 
-/** One "sync cycle" against an already-encrypted remote: decrypt -> merge with `local` ->
- *  re-encrypt -> write back. Exactly the seam-then-merge composition a real sync run does,
- *  minus the platform IO plumbing (webdav/dropbox/file), which is already covered
- *  elsewhere (webdav-sync-document.test.ts, dropbox.test.ts) — this test's job is the
- *  merge-under-encryption claim specifically. */
+
 async function runEncryptedCycle(
     remote: ReturnType<typeof createFakeRemote>,
     material: SyncKeyMaterial,
@@ -98,11 +91,7 @@ describe('encrypted sync cycle convergence (S4, required test 4)', () => {
         expect(first.merged.tasks).toHaveLength(1);
         expect(first.merged.tasks[0]).toMatchObject({ id: 't1', title: 'Task t1' });
 
-        // Second cycle: local is exactly what the first cycle produced and uploaded —
-        // the "nothing changed anywhere" steady state a real device settles into. The
-        // merge normalizes tasks (fills default fields), so the meaningful "zero diffs"
-        // claim is that a SECOND pass over already-normalized, already-aligned data is a
-        // byte-for-byte no-op — not that it matches the original, pre-normalization fixture.
+
         const second = await runEncryptedCycle(remote, material, first.merged);
         expect(second.stats.tasks.conflicts).toBe(0);
         expect(second.stats.tasks.localOnly).toBe(0);
@@ -118,8 +107,8 @@ describe('encrypted sync cycle convergence (S4, required test 4)', () => {
             createMockTask('t1', '2026-08-01T00:00:00.000Z'),
             createMockTask('t2', '2026-08-02T00:00:00.000Z'),
         ]);
-        // Two devices that happen to hold byte-identical data (e.g. a fresh clone) —
-        // the remote is seeded with the SAME content this "device" already has locally.
+
+
         await remote.write('data.json', utf8(JSON.stringify(aligned)), null);
         await runEnableSyncEncryptionOverRemote('correct horse', remote, keyCache, localState, undefined, undefined, { mKib: 8, t: 1, p: 1 });
         const material: SyncKeyMaterial = {

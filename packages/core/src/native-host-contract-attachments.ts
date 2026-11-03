@@ -1,50 +1,6 @@
-/**
- * The native host contract for attachments: the task editor's Attachments field and the
- * project screen's Attachments card, as React Native's use-task-edit-attachments.ts and
- * use-project-attachments.ts run them. Kept in its own file and spread into
- * createNativeHostContract; every rule comes from attachment-editor-model.ts, the module
- * React Native's hooks call. The host does the platform IO (the pickers, opening a file or
- * a link, the share sheet, the image preview, the audio player) and binds `attachments`
- * (NativeAttachmentsHost) to core's mobile attachment modules over its file bridge.
- *
- * Owners. A task's attachments live in the editor's draft until Save, as in React Native:
- * every task command takes the draft's list (`owner.attachments`) and returns the next one,
- * writing nothing; saveTaskDraft's `attachments` half saves it (mergeTaskDraftAttachments),
- * and settleTaskDraftAttachments deletes the copies a discarded or replaced draft left
- * behind. A project's attachments are written at once, as React Native's project screen
- * writes them.
- *
- * - getAttachmentList: the rows (core's display title, Missing, Download, Loading; a
- *   project row's transfer progress) and whether the owner takes edits. Send the IDs of
- *   attachments with a Download or Open call in flight as `downloading`: their rows show
- *   Loading, as React Native's do while the download runs.
- * - addAttachmentFile: Add file and Add photo, with what the picker handed back. The new
- *   attachment's ID is the request UUID, so its managed copy (files/attachments/<id><ext>)
- *   is the same file on a retry and the attachment is added once.
- * - getAttachmentLinkCheck: the link sheet's line check while typing (Save stays off on an invalid line).
- * - submitAttachmentLinks: the link sheet's Save. Each link's ID derives from the request
- *   UUID (requestRowId), so a retry adds none twice. With `editing` (task only: the link's
- *   ID and its title and uri when the sheet opened), saves that link's new text,
- *   compare-and-set: a link that no longer holds those values is refused (STALE_REVISION).
- * - removeAttachment: a soft delete (sync removes the remote file); one already removed
- *   stays as it is.
- * - downloadAttachment and openAttachment: the bytes first, then (open) what to do with
- *   the attachment: `open` (AttachmentOpenPlan). A task answer carries `update`: apply it
- *   to the editor's draft as it is when the answer arrives with applyAttachmentUpdate,
- *   which drops it when the attachment changed meanwhile. A project's answer is already
- *   written. A missing file's download is marked `downloading` while it runs and restored
- *   to `missing` when it fails; a failed download never deletes local bytes.
- *
- * Crash safety (native-request-receipts.ts). Project writes run once per request UUID; on
- * the native host their receipt commits with the project, so a replay after a restart
- * answers from the first reply. Without a receipt each is target-state: an attachment the
- * request already added (by its ID) or removed is left alone. Downloads are idempotent: a
- * replay finds the bytes on disk, or downloads again. Replies carry IDs, never URIs, and
- * logs name a URI only by describeAttachmentUriForLog: a link can hold a password.
- *
- * Only functions read this module's imports from native-host-contract.ts, so the import
- * cycle between the two files is safe.
- */
+
+
+
 import {
     addPickedAttachment,
     attachmentPatchChanges,
@@ -80,6 +36,7 @@ import {
     type AttachmentAvailabilityOutcome,
 } from './mobile-attachment-availability';
 import type { NativeHostResult } from './native-host-contract';
+import type { LocalAttachmentPresence } from './attachment-transfer';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { createNativeRequestReceipts, requestRowId, runStoreWrite, settleWrite, taskRevisionOf } from './native-request-receipts';
@@ -90,70 +47,68 @@ import type { PersistAttachmentOutcome } from './mobile-attachment-files';
 import { taskEditValuesEqual } from './json-value-equality';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 
-/** Core's mobile attachment modules, bound by the host to its file bridge. */
+
 export type NativeAttachmentsHost = {
-    /** createMobileAttachmentFiles(...).persistAttachmentLocally: copies a picked file into files/attachments/. */
+
     persistAttachmentLocally(attachment: Attachment): Promise<Attachment>;
-    /** createMobileAttachmentAvailability(...).ensureAttachmentAvailableDetailed: the on-demand download. */
+
     ensureAttachmentAvailableDetailed(attachment: Attachment): Promise<AttachmentAvailabilityOutcome>;
-    /**
-     * createMobileAttachmentFiles(...).deleteManagedAttachmentFile: removes a managed copy, never
-     * another file. Call `keep` after every await, immediately before the delete; true keeps it.
-     */
+
+
     deleteManagedAttachmentFile(attachment: Attachment, options?: { keep?: () => boolean }): Promise<unknown>;
-    /**
-     * A file share's IO (prepareSharedFiles, the capture screen); a host without them takes no shared files.
-     * createMobileAttachmentFiles(...).persistAttachmentLocallyDetailed: copies a staged shared file into files/attachments/.
-     */
+
+
     persistAttachmentLocallyDetailed?(attachment: Attachment): Promise<PersistAttachmentOutcome>;
-    /** createMobileAttachmentFiles(...).canUploadAttachmentFrom: whether a uri is a managed copy (flat, no traversal). */
+
     canUploadAttachmentFrom?(uri: string): boolean;
+
+    getLocalAttachmentPresence?(uri: string): Promise<LocalAttachmentPresence>;
 };
 
-/** Whose attachments: the task editor's draft list, or a project's stored list. */
+
 export type NativeAttachmentOwner =
     | { kind: 'task'; taskId: string; attachments: Attachment[] }
     | { kind: 'project'; projectId: string };
 
-/** What a picker handed back. */
+
 export type NativePickedAttachment = { uri: string; name: string | null; mimeType: string | null; size: number | null };
 
 export type NativeAttachmentRow = AttachmentRowState & {
-    /** Canonical captured download identity; display-only and null for links. */
+
     readonly downloadIdentity: string | null;
-    /** A task's link: the pencil opens the link sheet on this text; null for any other row. */
+
     editText: string | null;
-    /** A project row's transfer bar: null hides it; `percentage` null shows the bar empty with "...". */
+
     progress: { percentage: number | null } | null;
 };
 
 export type NativeAttachmentList = { rows: NativeAttachmentRow[]; canEdit: boolean };
 
-/** A task command's answer carries the draft's next list; a project's was written. */
+
 export type NativeAttachmentChange =
-    /** Show `message` under the Attachments title; nothing changed (keep the link sheet open). */
+
     | { kind: 'refused'; message: string }
-    /** An archived or deleted project: nothing happens, as in React Native. */
+
     | { kind: 'blocked' }
-    /** Blank link text: mark the field touched. */
+
     | { kind: 'empty' }
-    /** Link text with no line: nothing happens. */
+
     | { kind: 'nothing' }
-    /** Done (close the link sheet). `attachments`: the task draft's next list; null for a project. */
+
     | { kind: 'saved'; ids: string[]; attachments: Attachment[] | null };
 
 export type NativeAttachmentUpdate = { attachmentId: string; identity: string; patch: Partial<Attachment> };
 
 export type NativeAttachmentResolution = {
     status: AttachmentResolution['status'];
-    /** Show under the Attachments title; null shows nothing. */
+
     message: string | null;
-    /** A task download's change to the draft: applyAttachmentUpdate. Null for a project (written) or no change. */
+
     update: NativeAttachmentUpdate | null;
 };
 
 export type NativeAttachmentOpen = NativeAttachmentResolution & {
-    /** What to do once the bytes are there; null when `status` is not `available`. */
+
     open: (AttachmentOpenPlan & { failedMessage?: string }) | null;
 };
 
@@ -185,7 +140,7 @@ const isAttachment = (value: unknown): value is Attachment => isObjectRecord(val
     && (value.staleContentHash === undefined || typeof value.staleContentHash === 'string')
     && (value.localStatus === undefined || LOCAL_STATUSES.has(String(value.localStatus)));
 
-/** A bounded list of attachment records, as the store keeps them; null when it is not one. */
+
 export const readNativeAttachments = (value: unknown): Attachment[] | null => (
     Array.isArray(value) && value.length <= LIST_LIMIT && value.every(isAttachment)
         && new Set(value.map((attachment) => attachment.id)).size === value.length && isNativeJsonWithinBytes(value)
@@ -204,7 +159,7 @@ const linkTextValid = (attachment: Attachment): boolean => {
             || attachment.title === parsed.entries[0].title);
 };
 
-/** The iOS prepared editor owns only URL edits. Keep every old record, including tombstones. */
+
 export const readNativeTaskLinkHalf = (input: unknown, requireChanged = true): NativeTaskLinkHalf | null => {
     if (!isObjectRecord(input) || Object.keys(input).length !== 2 || !('base' in input) || !('value' in input)) return null;
     const base = readNativeAttachments(input.base), value = readNativeAttachments(input.value);
@@ -235,7 +190,7 @@ export const readNativeTaskLinkHalf = (input: unknown, requireChanged = true): N
     return changed || !requireChanged ? { base, value } : null;
 };
 
-/** Merge local URL edits onto latest saved rows, refusing even a forged base for a live file. */
+
 export const mergeNativeTaskLinkHalf = (stored: readonly Attachment[], half: NativeTaskLinkHalf): Attachment[] | null => {
     const before = new Map(half.base.map((attachment) => [attachment.id, attachment]));
     const value = new Map(half.value.map((attachment) => [attachment.id, attachment]));
@@ -270,8 +225,8 @@ const readPicked = (value: unknown): NativePickedAttachment | null => (
 );
 
 const availabilityOf = (host: NativeAttachmentsHost): AttachmentAvailabilityPort => ({
-    // The download waits on the network outside the write gate; resolveAttachmentAvailability reads the store
-    // again and checks the attachment's identity before it applies the result.
+
+
     ensureAttachmentAvailableDetailed: (attachment) => runOutsideStoreGate(() => host.ensureAttachmentAvailableDetailed(attachment)),
     getAttachmentDownloadIdentity,
     hasAttachmentDownloadIdentity,
@@ -286,7 +241,7 @@ const progressOf = (attachmentId: string): NativeAttachmentRow['progress'] => {
     return { percentage: total > 0 ? Math.min(100, Math.round((progress.bytesTransferred / total) * 100)) : null };
 };
 
-/** A task draft's attachment `update`, applied while that attachment still has `identity`. */
+
 export const applyNativeAttachmentUpdate = (attachments: readonly Attachment[], update: NativeAttachmentUpdate): Attachment[] => {
     const current = attachments.find((attachment) => attachment.id === update.attachmentId);
     return hasAttachmentDownloadIdentity(current, update.identity)
@@ -322,7 +277,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
         const project = storedProject(projectId);
         return project && project.status !== 'archived' ? project : null;
     };
-    /** A project download's availability fields were written to the store: save them. */
+
     const saveProjectWrites = async (owner: NativeAttachmentOwner): Promise<NativeHostResult<null>> => {
         if (owner.kind !== 'project') return { ok: true, value: null };
         if (useTaskStore.getState().persistenceFailure) {
@@ -339,10 +294,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
         return settleWrite<NativeAttachmentChange>(written, { kind: 'saved', ids, attachments: null });
     };
 
-    /**
-     * Download and Open's first half, as React Native resolves an attachment: a task's
-     * changes go to a copy of the draft (returned as `update`), a project's to the store.
-     */
+
     const resolve = async (owner: NativeAttachmentOwner, attachmentId: string, host: NativeAttachmentsHost) => {
         const availability = availabilityOf(host);
         if (owner.kind === 'task') {
@@ -399,7 +351,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
     };
 
     return {
-        /** The owner's attachment rows (removed ones hidden) and whether it takes edits. */
+
         getAttachmentList(input: { owner: NativeAttachmentOwner; downloading?: string[] }): NativeHostResult<NativeAttachmentList> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -437,10 +389,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
             return isNativeJsonWithinBytes(value) ? { ok: true, value } : fail('INVALID_INPUT', 'The attachment list exceeds the bounded native response');
         },
 
-        /**
-         * The link sheet's line check while typing, as React Native's sheets show it under the field: the first line that is
-         * not a link, and Save stays off while there is one. The edit sheet (`editing`) takes one line and shows none.
-         */
+
         getAttachmentLinkCheck(input: { text: string; editing?: boolean }): NativeHostResult<{ error: string | null }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -451,7 +400,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
             return { ok: true, value: { error: invalidLine === null ? null : formatI18nTemplate(deps.t()('attachments.invalidLinkLine'), { line: invalidLine }) } };
         },
 
-        /** Add file (`file`) or Add photo (`image`): the picked file is validated and copied into files/attachments/. */
+
         async addAttachmentFile(input: {
             requestId: string;
             owner: NativeAttachmentOwner;
@@ -507,14 +456,14 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
                 if (!mutableProject(owner.projectId)) return { ok: true, value: { kind: 'blocked' } };
                 const outcome = await add();
                 if (outcome.kind === 'refused') return { ok: true, value: outcome };
-                // As React Native checks again after the copy: the project may have been archived meanwhile.
+
                 const project = mutableProject(owner.projectId);
                 if (!project) return { ok: true, value: { kind: 'blocked' } };
                 return writeProject(project.id, [...(project.attachments ?? []), outcome.attachment], [id]);
             });
         },
 
-        /** The link sheet's Save: new links, one per line, or (task) the edited link. */
+
         async submitAttachmentLinks(input: {
             requestId: string;
             owner: NativeAttachmentOwner;
@@ -552,8 +501,8 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
                     const edit = planAttachmentLinkEdit(input.text, now, t);
                     if (edit.kind === 'refused') return { ok: true, value: edit };
                     const before = owner.attachments.find((attachment) => attachment.id === editing.attachmentId)!;
-                    // Compare-and-set: a retry whose link already holds the text changes nothing; a
-                    // link changed since the sheet opened (a later edit) is never undone.
+
+
                     if (before.title === edit.patch.title && before.uri === edit.patch.uri) {
                         return { ok: true, value: { kind: 'saved', ids: [before.id], attachments: owner.attachments } };
                     }
@@ -572,12 +521,12 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
             }
             const batch = planAttachmentLinkBatch(input.text, { newId, now, t });
             const ids = batch.kind === 'add' ? batch.added.map((attachment) => attachment.id) : [];
-            // Inside the receipt, so a retry answers its first reply even once the project is archived.
+
             return receipts.run<NativeAttachmentChange>(requestId, JSON.stringify(['attachmentLinks', owner.projectId, input.text]), async () => {
                 if (storedProject(owner.projectId)?.attachments?.some((attachment) => ids.includes(attachment.id))) {
                     return { ok: true, value: { kind: 'saved', ids, attachments: null } };
                 }
-                // As React Native's project screen: an archived project takes no link, and asks nothing.
+
                 const project = mutableProject(owner.projectId);
                 if (!project) return { ok: true, value: { kind: 'blocked' } };
                 if (batch.kind !== 'add') return { ok: true, value: batch };
@@ -585,7 +534,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
             });
         },
 
-        /** Remove: a soft delete. Reuse `requestId` to retry a project's. */
+
         async removeAttachment(input: { requestId: string; owner: NativeAttachmentOwner; attachmentId: string; urlOnly?: boolean }): Promise<NativeHostResult<NativeAttachmentChange>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -617,7 +566,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
             });
         },
 
-        /** Download, and its retry: fetches a synced file's bytes. */
+
         async downloadAttachment(input: { owner: NativeAttachmentOwner; attachmentId: string }): Promise<NativeHostResult<NativeAttachmentResolution>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -637,7 +586,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
             } };
         },
 
-        /** Open: the bytes first (downloading a synced file), then what to open. */
+
         async openAttachment(input: { owner: NativeAttachmentOwner; attachmentId: string; urlOnly?: boolean }): Promise<NativeHostResult<NativeAttachmentOpen>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -684,7 +633,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
             } };
         },
 
-        /** A task download's answer applied to the editor's draft as it is now. */
+
         applyAttachmentUpdate(input: { attachments: Attachment[]; update: NativeAttachmentUpdate }): NativeHostResult<Attachment[]> {
             if (!isObjectRecord(input) || !isObjectRecord(input.update) || !isText(input.update.attachmentId, ID_LIMIT)
                 || !isText(input.update.identity, TEXT_LIMIT) || !isObjectRecord(input.update.patch)) {
@@ -696,16 +645,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
             return readNativeAttachments(next) ? { ok: true, value: next } : fail('INVALID_INPUT', 'The update does not fit an attachment');
         },
 
-        /**
-         * After the editor's Save (`committed`: the saved task's attachments) or Discard
-         * (`committed`: `baseline`): deletes the managed copies no attachment owns any more,
-         * as React Native's editor settles its draft. `taskRevision` is the task's as
-         * getTaskView showed it after the Save (or at the Discard). The bytes are checked
-         * against the store as it is now: a file any live task or project attachment still
-         * points to is kept (an attachment restored before the cleanup ran), and a removed or
-         * replaced saved file is kept once the task changed after `taskRevision`. A kept copy
-         * no record owns is left for the orphan cleanup.
-         */
+
         async settleTaskDraftAttachments(input: {
             taskId: string;
             taskRevision: string;
@@ -727,7 +667,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
             const candidates = planAttachmentDraftSettlement({ baselineAttachments, draftAttachments, committedAttachments });
             let deleted = 0;
             for (const { attachment, reason } of candidates) {
-                // Asked by the host after its own awaits, immediately before the delete.
+
                 const keep = () => {
                     const state = useTaskStore.getState();
                     const task = state._tasksById.get(input.taskId);

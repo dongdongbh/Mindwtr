@@ -77,8 +77,7 @@ export function useProjectAttachments({
     has: (attachment, expected): attachment is Attachment => hasAttachmentDownloadIdentity(attachment, expected),
   }), []);
 
-  // One store command reads the row, builds the whole attachment list and writes it: a sync save admitted first
-  // publishes newer rows (a sibling another device added), and a list built before it would drop them.
+
   const updateProjectAttachmentIfCurrent = useCallback((
     projectId: string,
     attachmentId: string,
@@ -105,7 +104,7 @@ export function useProjectAttachments({
     return nextAttachment;
   }), [currentProjectAttachmentForIdentity, setSelectedProject, updateProject]);
 
-  // Same rule for the add and remove buttons: [build] gets the list as stored when the write is admitted.
+
   const writeProjectAttachments = useCallback((
     projectId: string,
     build: (attachments: Attachment[]) => Attachment[],
@@ -161,14 +160,13 @@ export function useProjectAttachments({
       }
       return;
     }
-    // `audio: false`: the project screen has no player, so audio opens as a file.
+
     if (plan.kind !== 'file') {
       setImagePreviewAttachment(plan.attachment);
       return;
     }
 
-    // Android: a real ACTION_VIEW open first — the share sheet below only
-    // reaches send/save targets, so a PDF "open" only offered saving it.
+
     if (await tryOpenWithAndroidViewer(plan.uri, plan.mimeType ?? undefined)) return;
     const available = await Sharing.isAvailableAsync().catch((error) => {
       void logWarn('[Sharing] availability check failed', {

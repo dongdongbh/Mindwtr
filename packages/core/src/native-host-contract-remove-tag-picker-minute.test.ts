@@ -66,7 +66,7 @@ const clock = () => {
 describe('Remove tag picker paging keeps data authority across a display minute', () => {
     it.each(['reference', 'done'] as const)('%s: pages 100 and 200 survive elapsed minutes without restarting page zero', async (list) => {
         clock();
-        // openSqliteHost boots the actual createNativeHostContract; no mocked list/dependency revision.
+
         const sqlite = await open(list);
         try {
             const host = sqlite.host;
@@ -92,7 +92,7 @@ describe('Remove tag picker paging keeps data authority across a display minute'
             expect([...page0.picker!.items, ...page100.picker!.items, ...page200.picker!.items].map((item) => item.value)).toEqual(expected);
             expect(page200.selectedIds).toEqual(SELECTED);
             expect(page200.taskRevisions).toEqual(page0.taskRevisions);
-            // Display-only revisions still refresh normally; only the Remove tag picker is stable.
+
             expect(value(host.getBulkActions({ list, params: params(list), taskIds: SELECTED })).revision).not.toBe(displayBefore);
             expect(buildSaveSnapshot(useTaskStore.getState())).toEqual(memoryBefore);
             expect(await rawDomain(sqlite)).toEqual(rawBefore);

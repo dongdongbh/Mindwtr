@@ -5,8 +5,7 @@ import { LanguageProvider } from '../contexts/language-context';
 import { RichMarkdown } from './RichMarkdown';
 
 describe('RichMarkdown', () => {
-    it('keeps explicit UpNote links clickable with the original encoded URI', () => {
-        const uri = 'upnote://x-callback-url/openNote?noteId=Note%2FCase%2520&new_window=true';
+    it.each(['upnote://x-callback-url/openNote?noteId=Note%2FCase%2520&new_window=true', 'obsidian://open?vault=Obsidian%20Vault&file=Folder%2FNote%2520&heading=Section%20One'])('keeps explicit app links clickable with the original URI: %s', (uri) => {
         render(<LanguageProvider><RichMarkdown markdown={`[Note](${uri})`} /></LanguageProvider>);
         expect(screen.getByRole('link', { name: 'Note' })).toHaveAttribute('title', uri);
     });
@@ -43,17 +42,15 @@ describe('RichMarkdown', () => {
     });
 
     it('autolinks bare emails without lookbehind regexes (old WebKit crashes on them)', async () => {
-        // The gfm autolink transform is patched (patches/mdast-util-gfm-autolink-literal@2.0.1.patch)
-        // because its lookbehind regex throws "invalid group specifier name" on
-        // WKWebView < Safari 16.4. Guard both the behavior and the patch itself.
+
+
         render(
             <LanguageProvider>
                 <RichMarkdown markdown={'Contact person@example.com please.'} />
             </LanguageProvider>
         );
 
-        // The URL lives in title, never href — an href invites the engine's
-        // speculative preconnect to the linked host (#913).
+
         expect(screen.getByRole('link', { name: 'person@example.com' })).toHaveAttribute(
             'title',
             'mailto:person@example.com'
@@ -76,4 +73,31 @@ describe('RichMarkdown', () => {
 
         expect(screen.getByRole('link', { name: 'email' })).toHaveAttribute('title', 'mid:960830.1639@example.com');
     });
+});
+
+
+it.each(['\u0001//example.com/track.png', '\u001fhttps://example.com/track.png', 'file:///%01//example.com/track.png'])('blocks image paths with browser-stripped controls: %j', (uri) => {
+    const attachment = { id: 'image-1', kind: 'file' as const, title: 'Screenshot', uri, mimeType: 'image/png', createdAt: '2026-10-13', updatedAt: '2026-10-13' };
+    const { container } = render(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[attachment]} />);
+    expect(container.querySelector('img')).toBeNull();
+});
+
+it('renders only task-owned image attachments and blocks remote, deleted and unrelated images', () => {
+    const attachment = { id: 'image-1', kind: 'file' as const, title: 'Screenshot', uri: '/managed/image.png', mimeType: 'image/png', createdAt: '2026-10-13', updatedAt: '2026-10-13' };
+    const { container, rerender } = render(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[attachment]} />);
+    expect(container.querySelector('img')).toHaveAttribute('src', '/managed/image.png');
+    rerender(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[{ ...attachment, deletedAt: '2026-10-13' }]} />);
+    expect(container.querySelector('img')).toBeNull();
+    rerender(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[]} />);
+    expect(container.querySelector('img')).toBeNull();
+    rerender(<RichMarkdown markdown="![Tracker](https://example.com/track.png)" attachments={[attachment]} />);
+    expect(container.querySelector('img')).toBeNull();
+    rerender(<RichMarkdown markdown="![Tracker](mindwtr://attachment/image-1)" attachments={[{ ...attachment, uri: 'https://example.com/track.png' }]} />);
+    expect(container.querySelector('img')).toBeNull();
+    for (const uri of ['/\t/example.com/track.png', '/\r/example.com/track.png', '/\n/example.com/track.png', '//example.com/track.png', ' //example.com/track.png', ' \\\\example.com\\track.png', 'file://example.com/track.png', 'file:////example.com/track.png', 'file:///%2Fexample.com/track.png', 'file:///%09/example.com/track.png']) {
+        rerender(<RichMarkdown markdown="![Tracker](mindwtr://attachment/image-1)" attachments={[{ ...attachment, uri }]} />);
+        expect(container.querySelector('img')).toBeNull();
+    }
+    rerender(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[{ ...attachment, uri: 'file:///C:/managed/image.png' }]} />);
+    expect(container.querySelector('img')).toHaveAttribute('src', 'file:///C:/managed/image.png');
 });

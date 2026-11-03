@@ -60,10 +60,6 @@ import { SettingsTopBar } from './settings.shell';
 import { styles } from './settings.styles';
 
 
-// A loaded key belongs to the provider it was loaded for. Effects in one commit
-// all see that commit's values, so a bare `key` string would still be the old
-// provider's secret on the render where the provider flipped — tagging it lets
-// the fetch gate itself off until the matching key arrives.
 type LoadedKey = { provider: string; value: string };
 
 export function AISettingsScreen() {
@@ -93,13 +89,13 @@ export function AISettingsScreen() {
         formatOpenAIExtraBodyParams(settings.ai?.openAIExtraBodyParams)
     );
     const [openAIExtraParamsError, setOpenAIExtraParamsError] = useState('');
-    // Live provider model lists (#986). null = nothing fetched yet or the fetch
-    // failed, which mergeModelOptions degrades to the static catalog.
+
+
     const [fetchedChatModels, setFetchedChatModels] = useState<string[] | null>(null);
     const [fetchedSpeechModels, setFetchedSpeechModels] = useState<string[] | null>(null);
     const [appleClarificationBackend, setAppleClarificationBackend] = useState<AppleClarificationBackend>('configured');
     const [appleClarificationAvailability, setAppleClarificationAvailability] = useState('');
-    // This device's consent record (null until read): a model list asks only a provider it covers (canDiscoverAIModels).
+
     const [consentMap, setConsentMap] = useState<Record<string, boolean> | null>(null);
 
     const {
@@ -131,9 +127,7 @@ export function AISettingsScreen() {
     const speechApiKey = speechKey.provider === speechProvider ? speechKey.value : '';
     const speechModelOptions = mergeModelOptions(fetchedSpeechModels, staticSpeechModelOptions, speechModel);
 
-    // Each change merges into the settings stored when its write is admitted, never into this render's
-    // copy: two changes in one render (the FOSS corrections) would otherwise undo each other, and a sync
-    // save's newer keys stay.
+
     const updateAISettings = useCallback((next: Partial<NonNullable<AppSettings['ai']>>) => {
         updateSettingsFromLatest((latest) => ({ ai: { ...(latest.ai ?? {}), ...next } }), { write: updateSettings, read: () => useTaskStore.getState().settings }).catch(logSettingsError);
     }, [updateSettings]);
@@ -258,17 +252,13 @@ export function AISettingsScreen() {
             .catch(logSettingsError);
     }, [speechProvider]);
 
-    // Live assistant/copilot model list (#986). The keys above arrive
-    // asynchronously, so this reruns once aiApiKey lands. Any failure keeps the
-    // static catalog — the pickers must never break on a bad network.
+
     useEffect(() => {
         setFetchedChatModels(null);
         const apiKey = aiApiKey.trim();
         const baseUrl = aiBaseUrl.trim();
-        // FOSS builds only ever talk to the user's own server, so a base URL is
-        // required and no key is; elsewhere a self-hosted OpenAI-compatible
-        // server needs no key either (#930), while the official endpoints list
-        // nothing without one.
+
+
         if (!canFetchAIChatModels({ isFossBuild, provider: aiProvider, apiKey, baseUrl })) return;
         if (!consentMap || !canDiscoverAIModels({ provider: aiProvider, consent: consentMap, aiEnabled, aiProvider })) return;
         let cancelled = false;
@@ -278,7 +268,7 @@ export function AISettingsScreen() {
                     if (!cancelled) setFetchedChatModels(models);
                 })
                 .catch(() => {
-                    // Static catalog stays; nothing to tell the user.
+
                 });
         }, AI_MODEL_FETCH_DEBOUNCE_MS);
         return () => {
@@ -287,8 +277,7 @@ export function AISettingsScreen() {
         };
     }, [aiApiKey, aiBaseUrl, aiEnabled, aiProvider, consentMap, isFossBuild]);
 
-    // Live speech model list (#986). Whisper is a local sha256-pinned catalog —
-    // never fetched, which also covers FOSS builds (Whisper is their only STT).
+
     useEffect(() => {
         setFetchedSpeechModels(null);
         const apiKey = speechApiKey.trim();
@@ -303,7 +292,7 @@ export function AISettingsScreen() {
                     if (!cancelled) setFetchedSpeechModels(models);
                 })
                 .catch(() => {
-                    // Static list stays.
+
                 });
         }, AI_MODEL_FETCH_DEBOUNCE_MS);
         return () => {
@@ -382,21 +371,14 @@ export function AISettingsScreen() {
 
     const selectedWhisperModel = getSelectedMobileWhisperModel(speechModel);
 
-    // Lazy initializer runs synchronously on first render, so a model that's
-    // already downloaded shows "ready" from frame one instead of flashing
-    // "not downloaded" until the effect below confirms it. locateSync is the
-    // same Expo-only fast path locate() itself uses before falling back to
-    // the native RNFS pass.
+
     const [whisperResolved, setWhisperResolved] = useState<WhisperModelLocation | null>(() => (
         speechProvider === 'whisper' && selectedWhisperModel
             ? whisperModelStore.locateSync(speechModel, speechSettings.offlineModelPath)
             : null
     ));
 
-    // Single source of "where is the model, and is it there": locate() runs the
-    // whole candidate ladder (Expo sync pass, then native RNFS pass per ADR 0019
-    // #10) and, if the stored path has drifted from where the file actually is
-    // (or nowhere), reconciles offlineModelPath to match.
+
     useEffect(() => {
         if (speechProvider !== 'whisper' || !selectedWhisperModel) {
             setWhisperResolved(null);
@@ -404,9 +386,8 @@ export function AISettingsScreen() {
         }
         let cancelled = false;
         const storedPath = speechSettings.offlineModelPath;
-        // Re-seed with the sync fast path immediately (covers switching models
-        // mid-session, where the lazy initializer above only ran once at mount)
-        // before the slower native-confirming pass lands.
+
+
         setWhisperResolved(whisperModelStore.locateSync(speechModel, storedPath));
         void whisperModelStore.locate(speechModel, storedPath).then((resolved) => {
             if (cancelled) return;
@@ -422,8 +403,7 @@ export function AISettingsScreen() {
         };
     }, [speechModel, speechProvider, selectedWhisperModel, speechSettings.offlineModelPath, updateSpeechSettings]);
 
-    // A file can exist without being a complete model (interrupted download) —
-    // validate the exact expected byte count, not just presence.
+
     const whisperDownloaded = Boolean(selectedWhisperModel && whisperResolved && isWhisperModelFileReady(
         selectedWhisperModel,
         { exists: whisperResolved.exists, isDirectory: false, size: whisperResolved.size }
@@ -459,11 +439,8 @@ export function AISettingsScreen() {
             setWhisperDownloadState('success');
             clearSuccess();
         } catch (error) {
-            // The store cannot translate, so the actionable hint lives here — but only
-            // for the store's retryOnWifi-tagged errors (the actual network/streaming
-            // attempt), matching the pre-store code's scope: a setup/safety failure
-            // (blocked directory, unsafe target) isn't a network issue and "retry on
-            // Wi-Fi" would be misleading for it.
+
+
             const detail = error instanceof Error ? error.message : String(error);
             const message = error instanceof Error && (error as whisperModelStore.WhisperDownloadError).retryOnWifi
                 ? `${tr('settings.aiMobile.downloadFailedPleaseRetryOnWiFiLargeModelsCannot')}\n${detail}`

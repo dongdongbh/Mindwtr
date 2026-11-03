@@ -18,7 +18,7 @@ afterEach(async () => {
     vi.resetModules();
 });
 
-// Each test imports the store from scratch: about 4 s alone, more under a full parallel run.
+
 describe('Calendar subscription store registration', () => {
     it('direct store producers fail closed when helpers have not registered', async () => {
         vi.resetModules();

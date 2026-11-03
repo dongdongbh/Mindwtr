@@ -36,13 +36,11 @@ android {
 }
 
 dependencies {
-  // Apache-2 licensed, FOSS-safe. PlatformStorage (API 31+) is the AOSP
-  // framework-backed AppSearch implementation — no Play-services artifacts.
+
+
   implementation("androidx.appsearch:appsearch:1.2.0-alpha01")
   implementation("androidx.appsearch:appsearch-platform-storage:1.2.0-alpha01")
-  // The AppSearch async API surface is typed against ListenableFuture. The RN
-  // build force-resolves the standalone listenablefuture artifact to the empty
-  // 9999 jar because full Guava is already on the app classpath — so depend on
-  // Guava itself; it adds nothing to the APK.
+
+
   implementation("com.google.guava:guava:33.3.1-android")
 }

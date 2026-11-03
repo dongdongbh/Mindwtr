@@ -9,7 +9,7 @@ enum NativeCalendarWriteOutcome: Sendable {
     case notStarted, succeeded(NativeCalendarWriteValue), failed(NativeCalendarWriteError)
     case failedBeforeMutation(NativeCalendarWriteError), confirmedMissingEvent
 
-    /// Shared policy may remove mappings only for the explicit successful absence observation.
+
     var replyError: NativeCalendarWriteError? {
         switch self {
         case .failed(let error), .failedBeforeMutation(let error): return error == .missingEvent ? .failed : error
@@ -19,7 +19,7 @@ enum NativeCalendarWriteOutcome: Sendable {
     }
 }
 
-/// EventKit operations are synchronous: cancellation drains them, never interrupts them.
+
 final class NativeCalendarJobs: @unchecked Sendable {
     static let maximumRequestBytes = 1024 * 1024
     static let maximumReplyBytes = 8 * 1024 * 1024
@@ -108,7 +108,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
         try enqueue(parse(json))
     }
 
-    /// Only the retained native recovery owner may ask for an exact provider identity.
+
     func submitRecoveryEvent(eventID: String, calendarID: String) throws -> String {
         guard NativeCalendarWriteValidation.id(eventID), NativeCalendarWriteValidation.id(calendarID) else { throw invalid() }
         return try enqueue(.recoveryEvent(eventID, calendarID))
@@ -126,15 +126,13 @@ final class NativeCalendarJobs: @unchecked Sendable {
         let id = "cal:\(generation):\(sequence)"
         let job = Job(id: id, registryID: registryID, token: token, request: request)
         jobs[id] = job
-        // Lock admission through enqueue to preserve accepted FIFO order.
+
         worker.async { [self] in execute(job) }
         condition.unlock()
         return id
     }
 
-    /// Caller retains exact ownership and persists started effects before mutations.
-    /// Drain, persist immutable mutation completion, then retire before library/KV
-    /// release. Sources needs ownership but no durable effect record.
+
     func submitWrite(_ request: NativeCalendarWriteRequest, operationID: UUID) throws {
         let token = NativeAttachmentCancellation(), registryID = UUID()
         registry.register(token, id: registryID)
@@ -158,7 +156,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
         return writeSlot.flatMap { $0.id == operationID ? $0.outcome : nil }
     }
 
-    /// Advisory only; submitWrite retains the authoritative atomic admission check.
+
     var writeAdmissionAvailable: Bool {
         condition.lock(); defer { condition.unlock() }
         return accepting && !registry.isClosing && jobs.isEmpty && taken == nil && writeSlot == nil
@@ -185,8 +183,8 @@ final class NativeCalendarJobs: @unchecked Sendable {
                 guard let writer = provider as? any NativeCalendarWriting else { throw NativeCalendarWriteError.unavailable }
                 if job.token.isCancelled || registry.isClosing { outcome = .notStarted }
                 else {
-                    // Once entered, retain the actual provider result even if close
-                    // or cancellation happens before its synchronous return.
+
+
                     let value: NativeCalendarWriteValue
                     if let witnessed = writer as? any NativeCalendarWriteWitnessing {
                         value = try witnessed.writeWitnessed(job.request, beforeProviderMutation: {
@@ -198,13 +196,13 @@ final class NativeCalendarJobs: @unchecked Sendable {
                         case .sources: break
                         default:
                             guard mutationEntered, !absenceConfirmed else {
-                                // A claimed mutation success without entry proof is uncertain, never safe to clear.
+
                                 mutationEntered = true
                                 throw NativeCalendarWriteError.failed
                             }
                         }
                     } else {
-                        // Old writers combine preflight and effects; every throw after this point is uncertain.
+
                         mutationEntered = true
                         switch job.request {
                         case .sources: value = .sources(try writer.sources())
@@ -271,7 +269,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
         return String(decoding: bytes, as: UTF8.self)
     }
     private func error(_ message: String, id: String) -> String {
-        // Both fields are native-owned ASCII, with JSON-safe UUID/sequence IDs.
+
         "{\"id\":\"\(id)\",\"error\":\"\(message)\"}"
     }
 
@@ -351,8 +349,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
         return (answer, completed)
     }
 
-    /// Metadata transfers only this exact job's body; cancellation stays owned
-    /// until the bytes have been consumed or refused, then releases once.
+
     func body() throws -> String {
         condition.lock()
         guard let job = taken else { condition.unlock(); throw HostFailure("Calendar body is unavailable") }
@@ -367,6 +364,19 @@ final class NativeCalendarJobs: @unchecked Sendable {
     }
 
     func drain() { worker.sync {} }
+
+
+    func clearNotesSuffix(eventID: String, calendarID: String, suffix: String) {
+        condition.lock()
+        let idle = accepting && !registry.isClosing && jobs.isEmpty && taken == nil && writeSlot == nil
+        condition.unlock()
+        guard idle, NativeCalendarWriteValidation.id(eventID), NativeCalendarWriteValidation.id(calendarID) else { return }
+        worker.sync {
+            let provider: any NativeCalendarReading
+            if let reader { provider = reader } else { provider = readerFactory(); reader = provider }
+            try? (provider as? NativeCalendarNotesSuffixClearing)?.clearNotesSuffix(eventID: eventID, calendarID: calendarID, suffix: suffix)
+        }
+    }
 
     func shutdown() {
         condition.lock(); accepting = false; wake = nil; let current = Array(jobs.values); let write = writeSlot; condition.unlock()

@@ -35,21 +35,19 @@ const resolveWhisperRnPath = (relativePath) => {
 
 const config = getDefaultConfig(projectRoot);
 
-// CI bundles must not depend on a persistent Watchman daemon or desktop login.
+
 if (process.env.CI === '1' || process.env.CI === 'true') {
     config.resolver.useWatchman = false;
 }
 
-// Expo public flags are inlined during transformation. Explicitly isolate the
-// optional profiler variants: export:embed can otherwise reuse a disabled
-// capture transform even after a forced bundle with --reset-cache (and vice versa).
+
 const captureProfiling = process.env.EXPO_PUBLIC_CAPTURE_PROFILING === '1';
 const startupProfiling = ['1', 'true'].includes(
     String(process.env.EXPO_PUBLIC_STARTUP_PROFILING || '').trim().toLowerCase(),
 );
 config.cacheVersion = `${config.cacheVersion}-mindwtr-profiling-${Number(captureProfiling)}-${Number(startupProfiling)}`;
 
-// 0. CRITICAL: Load polyfill shim BEFORE any other module
+
 config.serializer = {
     ...config.serializer,
     getModulesRunBeforeMainModule: () => [
@@ -58,23 +56,23 @@ config.serializer = {
     ],
 };
 
-// 1. Watch all files within the monorepo (preserve Expo defaults)
+
 const defaultWatchFolders = config.watchFolders || [];
 config.watchFolders = Array.from(new Set([...defaultWatchFolders, workspaceRoot]));
 
-// 1.1 CRITICAL: Exclude build output directories that cause Metro to crash
+
 config.resolver.blockList = [
     /apps\/desktop\/src-tauri\/target\/.*/,
     /apps\/mobile\/app\/.*\.(?:test|spec)\.[jt]sx?$/,
     /(^|\/)\.worktrees\/.*/,
     /\.git\/.*/,
     /node_modules\/.*\/\.git\/.*/,
-    // vitest coverage output is rewritten while suites run; Metro's file
-    // watcher crashes on the vanishing sub-dirs (ENOENT in FallbackWatcher).
+
+
     /(^|\/)coverage\/.*/,
 ];
 
-// 2. Let Metro know where to resolve packages and in what order
+
 config.resolver.nodeModulesPaths = [
     projectNodeModulesRoot,
     coreNodeModulesRoot,
@@ -82,7 +80,7 @@ config.resolver.nodeModulesPaths = [
 ];
 config.resolver.disableHierarchicalLookup = false;
 
-// 2.1 Force Metro to resolve runtime helpers from the workspace root.
+
 config.resolver.extraNodeModules = {
     react: projectReactRoot,
     'react-native': projectReactNativeRoot,
@@ -90,10 +88,10 @@ config.resolver.extraNodeModules = {
     '@babel/runtime': workspaceBabelRuntimeRoot,
 };
 
-// 3. Handle bun's symlink structure
+
 config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
 
-// 4. Custom resolver to handle workspace packages and problematic modules
+
 config.resolver.resolveRequest = (context, moduleName, platform) => {
     if (isFossBuild && moduleName === 'expo-store-review') {
         return {
@@ -102,8 +100,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         };
     }
 
-    // Ensure relative Babel helper imports always resolve from the helper directory.
-    // This avoids sporadic Expo Go resolution failures for helpers like arrayWithHoles.js.
+
     if (
         moduleName.startsWith('./')
         && context.originModulePath
@@ -160,7 +157,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         }
     }
 
-    // Force all React imports (including subpaths) to resolve from app-local node_modules.
+
     if (moduleName === 'react' || moduleName.startsWith('react/')) {
         try {
             const resolved = require.resolve(moduleName, {
@@ -171,7 +168,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
                 type: 'sourceFile',
             };
         } catch {
-            // Fall through to Metro default resolver.
+
         }
     }
 
@@ -185,7 +182,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
                 type: 'sourceFile',
             };
         } catch {
-            // Fall through to Metro default resolver.
+
         }
     }
 
@@ -199,13 +196,11 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
                 type: 'sourceFile',
             };
         } catch {
-            // Fall through to Metro default resolver.
+
         }
     }
 
-    // Force Expo packages to resolve from app-local node_modules.
-    // In this monorepo we can have duplicate workspace copies, and Metro occasionally
-    // mis-resolves package entrypoints like expo-modules-core during dev bundling.
+
     if (
         moduleName === 'expo'
         || moduleName.startsWith('expo/')
@@ -221,8 +216,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         }
     }
 
-    // Intercept ALL URL polyfill imports and redirect to our custom shim
-    // This completely bypasses the problematic packages
+
     if (
         moduleName === 'react-native-url-polyfill' ||
         moduleName === 'react-native-url-polyfill/auto' ||
@@ -236,7 +230,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         };
     }
 
-    // Metro does not honor this workspace package's TypeScript subpath export.
+
     if (moduleName === '@mindwtr/core/share-card') {
         return {
             filePath: path.resolve(workspaceRoot, 'packages/core/src/share-card.ts'),
@@ -244,7 +238,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         };
     }
 
-    // Handle @mindwtr/core workspace package
+
     if (moduleName === '@mindwtr/core' || moduleName.startsWith('@mindwtr/core/')) {
         const corePath = path.resolve(workspaceRoot, 'packages/core/src/index.ts');
         return {
@@ -253,7 +247,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         };
     }
 
-    // Force Babel helpers to resolve from workspace root for stable helper resolution.
+
     if (moduleName === '@babel/runtime' || moduleName.startsWith('@babel/runtime/')) {
         const helperPath = path.resolve(workspaceRoot, 'node_modules', `${moduleName}.js`);
         if (moduleName !== '@babel/runtime' && fs.existsSync(helperPath)) {
@@ -271,7 +265,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
                 type: 'sourceFile',
             };
         } catch {
-            // Fall through to Metro default resolver.
+
         }
     }
 

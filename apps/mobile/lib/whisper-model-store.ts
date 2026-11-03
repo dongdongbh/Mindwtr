@@ -1,23 +1,6 @@
-// Single owner of "where is the local Whisper model on disk, and is it there?"
-//
-// Before this module, speech-to-text.ts (read side, for transcription) and
-// ai-settings-screen.tsx/ai-settings-whisper-model.ts (write side, for
-// download/delete) each grew their own directory naming, candidate search,
-// RNFS<->expo-file-system fallback, and URI<->native-path conversion. They
-// disagreed in small ways (one hardcoded 'whisper-models' instead of reading
-// the shared constant; only one of three URI converters percent-decoded the
-// native path), which is exactly how "model downloaded but not found" happens.
-//
-// This module owns: WHISPER_MODEL_DIR_NAME, the candidate ladder, the RNFS<->
-// expo-file-system fallback, and the one URI normalizer. Everything else
-// should call locate/ensure/download/remove (plus the small sync/probe
-// helpers below for genuinely synchronous callers) instead of touching the
-// filesystem directly.
-//
-// See docs/adr/0019-mobile-local-whisper-audio-contract.md, especially #9
-// (the whisper-models directory is a directory invariant; a blocking file
-// must be repaired, not ignored) and #10 (readiness checks must use the
-// native-aware resolver, not only synchronous Expo metadata).
+
+
+
 import { Directory, File, Paths } from 'expo-file-system';
 import { NativeModules } from 'react-native';
 import { WHISPER_MODEL_BASE_URLS, WHISPER_MODELS } from '@mindwtr/core/whisper-models';
@@ -36,17 +19,11 @@ import {
 export const WHISPER_MODEL_DIR_NAME = 'whisper-models';
 
 export type WhisperModelLocation = { uri: string; path: string; exists: boolean; size: number };
-// download()'s network-phase failures carry this marker so the UI can show
-// network-specific guidance (e.g. "retry on Wi-Fi") without this module
-// needing to know about i18n or copy.
+
+
 export type WhisperDownloadError = Error & { retryOnWifi?: boolean };
 type WhisperPathInfo = { exists: boolean; isDirectory: boolean; size: number };
 
-// ---------------------------------------------------------------------------
-// RNFS <-> expo-file-system fallback. Expo Go, a dev build, and a store build
-// resolve native modules differently, so every lookup degrades to "missing"
-// instead of throwing at import time.
-// ---------------------------------------------------------------------------
 
 type RNFSModule = typeof import('react-native-fs');
 let rnfsModuleCache: RNFSModule | null | undefined;
@@ -99,9 +76,7 @@ const getRNFSModule = (): RNFSModule | null => {
   }
 };
 
-// Exported so speech-to-text.ts's realtime PCM capture (an unrelated use of the
-// same react-native-fs handle, passed into whisper.rn's realtime transcriber)
-// shares this module's cache instead of resolving RNFS a second time.
+
 export const getRNFSModuleAsync = async (): Promise<RNFSModule | null> => {
   const loaded = getRNFSModule();
   if (loaded || rnfsModuleRequireFailed || rnfsModuleImportFailed) return loaded;
@@ -117,15 +92,7 @@ export const getRNFSModuleAsync = async (): Promise<RNFSModule | null> => {
   }
 };
 
-// ---------------------------------------------------------------------------
-// The one URI <-> native-path normalizer. `uri` is a file:// URI for Expo's
-// File/Directory/Paths APIs; `path` is a bare, percent-decoded filesystem path
-// for react-native-fs (stat/hash/unlink/downloadFile). Only one of the five
-// previous copies of this logic decoded percent-escapes (the download path).
-// A native `stat` on an undecoded path silently misses a file whose real path
-// has an encoded character, which is exactly how a model can be "downloaded
-// but not found" — decoding uniformly here closes that gap.
-// ---------------------------------------------------------------------------
+
 export const normalizeWhisperModelUri = (value: string): { path: string; uri: string } => {
   let rawPath = value;
   let uri = value;
@@ -141,7 +108,7 @@ export const normalizeWhisperModelUri = (value: string): { path: string; uri: st
   try {
     path = decodeURI(rawPath);
   } catch {
-    // Leave it percent-encoded if it isn't validly encoded.
+
   }
   return { path, uri };
 };
@@ -152,11 +119,7 @@ const getPathInfoSize = (info: unknown): number => {
   return typeof size === 'number' ? size : 0;
 };
 
-// Sync, Expo-only probe for "does this file candidate exist" — used by the
-// candidate ladder and by file-target checks (download/remove). File wins
-// over Directory on an ambiguous backend: a model-file candidate must not be
-// reported as a directory. Use probeDirectoryPathSync (below) instead when
-// the question is "is this whisper-models path itself a ready directory."
+
 export const probeModelPathSync = (uri?: string): WhisperPathInfo => {
   if (!uri) return { exists: false, isDirectory: false, size: 0 };
   let pathInfo: ReturnType<typeof Paths.info> | null = null;
@@ -166,13 +129,10 @@ export const probeModelPathSync = (uri?: string): WhisperPathInfo => {
       return { exists: true, isDirectory: true, size: getPathInfoSize(pathInfo) };
     }
   } catch {
-    // Fall back to File/Directory metadata when Paths.info cannot handle the uri.
+
   }
-  // File before Directory: a model-file candidate must win a File check over a
-  // Directory check on the same path. The read side's original file probe
-  // (checkFile) never even instantiated Directory for a file-candidate lookup;
-  // Directory-first here would misreport a file as a directory on any backend
-  // (real or test double) that doesn't strictly type-check the wrapped path.
+
+
   try {
     const file = new File(uri);
     if (file.exists) {
@@ -183,13 +143,13 @@ export const probeModelPathSync = (uri?: string): WhisperPathInfo => {
       return { exists: true, isDirectory: false, size };
     }
   } catch {
-    // Ignore and try Directory below.
+
   }
   try {
     const dir = new Directory(uri);
     if (dir.exists) return { exists: true, isDirectory: true, size: 0 };
   } catch {
-    // Ignore and fall back to Paths.info below.
+
   }
   if (pathInfo?.exists) {
     return { exists: true, isDirectory: Boolean(pathInfo.isDirectory), size: getPathInfoSize(pathInfo) };
@@ -197,12 +157,7 @@ export const probeModelPathSync = (uri?: string): WhisperPathInfo => {
   return { exists: false, isDirectory: false, size: 0 };
 };
 
-// Sync, Expo-only probe for "is this whisper-models path itself a ready
-// directory" — used by directory create/repair bookkeeping and diagnostics.
-// Directory wins over File here: ADR 0019 #9 treats whisper-models as a
-// directory invariant, so a path that resolves as both must report as the
-// directory it's supposed to be, the opposite priority from
-// probeModelPathSync's file-candidate question.
+
 const probeDirectoryPathSync = (uri?: string): WhisperPathInfo => {
   if (!uri) return { exists: false, isDirectory: false, size: 0 };
   let pathInfo: ReturnType<typeof Paths.info> | null = null;
@@ -212,13 +167,13 @@ const probeDirectoryPathSync = (uri?: string): WhisperPathInfo => {
       return { exists: true, isDirectory: true, size: getPathInfoSize(pathInfo) };
     }
   } catch {
-    // Fall back to Directory/File metadata when Paths.info cannot handle the uri.
+
   }
   try {
     const dir = new Directory(uri);
     if (dir.exists) return { exists: true, isDirectory: true, size: 0 };
   } catch {
-    // Ignore and try File below.
+
   }
   try {
     const file = new File(uri);
@@ -226,7 +181,7 @@ const probeDirectoryPathSync = (uri?: string): WhisperPathInfo => {
       return { exists: true, isDirectory: false, size: typeof file.size === 'number' ? file.size : 0 };
     }
   } catch {
-    // Ignore and fall back to Paths.info below.
+
   }
   if (pathInfo?.exists) {
     return { exists: true, isDirectory: Boolean(pathInfo.isDirectory), size: getPathInfoSize(pathInfo) };
@@ -236,10 +191,7 @@ const probeDirectoryPathSync = (uri?: string): WhisperPathInfo => {
 
 type NativeStatLike = { size?: unknown; isFile?: () => boolean; isDirectory?: () => boolean };
 
-// Async, native RNFS stat. Some Android storage backends lag or omit
-// synchronous Expo metadata for a file react-native-fs just wrote (ADR 0019
-// #10) — this is the fallback pass for that case. A missing native module or
-// a failed stat degrades to "not found," never throws.
+
 export const probeModelPathNative = async (path: string): Promise<WhisperPathInfo> => {
   const rnfs = await getRNFSModuleAsync() as (RNFSModule & { stat?: (path: string) => Promise<NativeStatLike> }) | null;
   if (!rnfs || typeof rnfs.stat !== 'function') return { exists: false, isDirectory: false, size: 0 };
@@ -250,7 +202,7 @@ export const probeModelPathNative = async (path: string): Promise<WhisperPathInf
     const size = typeof stat.size === 'number' && Number.isFinite(stat.size) ? stat.size : 0;
     if (isFile || isDirectory) return { exists: true, isDirectory, size };
   } catch {
-    // Native stat failures degrade to "not found."
+
   }
   return { exists: false, isDirectory: false, size: 0 };
 };
@@ -270,9 +222,6 @@ const hashNative = async (uri: string): Promise<string> => {
   return rnfs.hash(normalizeWhisperModelUri(uri).path, 'sha256');
 };
 
-// ---------------------------------------------------------------------------
-// Directory ownership + candidate ladder.
-// ---------------------------------------------------------------------------
 
 const getModel = (modelId: string | undefined) => (
   modelId ? WHISPER_MODELS.find((entry) => entry.id === modelId) : undefined
@@ -288,18 +237,24 @@ const buildModelFileUri = (rootUri: string, fileName: string): string => {
   return `${dirUri.endsWith('/') ? dirUri : `${dirUri}/`}${fileName}`;
 };
 
-// Documents is preferred (backed up, survives cache eviction); Cache is the
-// fallback when Documents is unwritable. Order matters: it's the same order
-// download() tries directories in, and the order locate() searches in.
+
 const getWhisperModelRoots = (): Directory[] => {
   const roots: Directory[] = [];
-  try { roots.push(Paths.document); } catch { /* unavailable on this build */ }
-  try { roots.push(Paths.cache); } catch { /* unavailable on this build */ }
+  try { roots.push(Paths.document); } catch {                                 }
+  try { roots.push(Paths.cache); } catch {                                 }
   return roots;
 };
 
 const getWhisperModelDirectories = (): Directory[] => getWhisperModelRoots()
   .map((root) => new Directory(buildWhisperModelDirectoryUri(root.uri)));
+
+
+const whisperDirectoryRoot = (uri: string): string => {
+  const normalized = normalizeWhisperModelUri(uri).uri;
+  const root = getWhisperModelRoots().find((candidate) => normalized.startsWith(normalizeWhisperModelUri(candidate.uri).uri));
+  if (!root) return 'other';
+  try { return root.uri === Paths.document.uri ? 'document' : 'cache'; } catch { return 'cache'; }
+};
 
 const isKnownWhisperModelDirectoryUri = (uri: string): boolean => {
   const normalized = normalizeWhisperModelUri(uri).uri.replace(/\/+$/u, '');
@@ -307,15 +262,12 @@ const isKnownWhisperModelDirectoryUri = (uri: string): boolean => {
     .some((dir) => normalizeWhisperModelUri(dir.uri).uri.replace(/\/+$/u, '') === normalized);
 };
 
-// The whisper-models directory is a directory invariant (ADR 0019 #9): if a
-// file ever occupies that path, repair it rather than fail forever. Only
-// ever repairs a path that resolves to one of our own known model
-// directories — never an arbitrary caller-supplied target.
+
 const repairDirectoryBlockingFile = async (uri: string, reason: string): Promise<boolean> => {
   const normalized = normalizeWhisperModelUri(uri).uri;
   if (!isKnownWhisperModelDirectoryUri(normalized)) {
     void logWarn('Refusing to repair unsafe Whisper model directory target', {
-      scope: 'speech', force: true, extra: { uri: normalized, reason },
+      scope: 'speech', force: true, extra: { root: whisperDirectoryRoot(normalized), reason },
     });
     return false;
   }
@@ -328,7 +280,7 @@ const repairDirectoryBlockingFile = async (uri: string, reason: string): Promise
   } catch (error) {
     void logWarn('Whisper model directory file cleanup failed', {
       scope: 'speech', force: true,
-      extra: { uri: normalized, reason, error: error instanceof Error ? error.message : String(error) },
+      extra: { root: whisperDirectoryRoot(normalized), reason, error: error instanceof Error ? error.message : String(error) },
     });
   }
   if (!deleted) {
@@ -337,7 +289,7 @@ const repairDirectoryBlockingFile = async (uri: string, reason: string): Promise
     } catch (error) {
       void logWarn('Whisper model directory file cleanup with native fs failed', {
         scope: 'speech', force: true,
-        extra: { uri: normalized, reason, error: error instanceof Error ? error.message : String(error) },
+        extra: { root: whisperDirectoryRoot(normalized), reason, error: error instanceof Error ? error.message : String(error) },
       });
     }
   }
@@ -365,9 +317,7 @@ const ensureDirectoryReady = async (directory: Directory): Promise<void> => {
   }
 };
 
-// Zero-I/O: where a model *would* live once ensured/downloaded. Used by
-// callers that need a deterministic default path synchronously (e.g. a React
-// render body, which cannot await) before any existence check has run.
+
 export const getPreferredModelUri = (modelId: string | undefined): string | undefined => {
   const fileName = getModel(modelId)?.fileName;
   if (!fileName) return undefined;
@@ -388,8 +338,8 @@ const buildCandidates = (modelId: string | undefined, storedPath?: string): stri
     const appendCandidates = (base?: string | null) => {
       if (!base) return;
       const normalizedBase = base.endsWith('/') ? base : `${base}/`;
-      candidates.push(buildModelFileUri(normalizedBase, fileName)); // preferred: <base>/whisper-models/<file>
-      candidates.push(`${normalizedBase}${fileName}`); // legacy: <base>/<file> (pre-whisper-models layout)
+      candidates.push(buildModelFileUri(normalizedBase, fileName));
+      candidates.push(`${normalizedBase}${fileName}`);
     };
     appendCandidates(Paths.document?.uri ?? null);
     appendCandidates(Paths.cache?.uri ?? null);
@@ -416,10 +366,7 @@ const listDirectorySample = (uri?: string): string => {
   }
 };
 
-// "Model downloaded but not found" is exactly the failure class this module
-// exists to close. When locate/ensure can't find a model anywhere in the
-// candidate ladder, log where it looked so a real report is diagnosable
-// instead of a bare "missing" line.
+
 const buildMissingModelDiagnostics = (
   modelId: string | undefined,
   storedPath: string | undefined,
@@ -467,15 +414,7 @@ const buildMissingModelDiagnostics = (
   };
 };
 
-// ---------------------------------------------------------------------------
-// Public surface: locate / ensure / download / remove.
-// ---------------------------------------------------------------------------
 
-// Sync, Expo-only pass over the candidate ladder — no native RNFS fallback.
-// For callers that cannot await (a React render body, for the first paint
-// before any effect runs) and are OK with an under-report on the rare backend
-// where Expo's synchronous metadata lags a native write (ADR 0019 #10);
-// follow up with locate() to confirm/correct once mounted.
 export const locateSync = (modelId: string | undefined, storedPath?: string): WhisperModelLocation => {
   const candidates = buildCandidates(modelId, storedPath);
   for (const candidate of candidates) {
@@ -490,8 +429,7 @@ export const locateSync = (modelId: string | undefined, storedPath?: string): Wh
   return { uri: fallback.uri, path: fallback.path, exists: false, size: 0 };
 };
 
-// Searches the full candidate ladder: locateSync's fast Expo-only pass first,
-// then a native RNFS pass over every candidate (ADR 0019 #10).
+
 export const locate = async (modelId: string | undefined, storedPath?: string): Promise<WhisperModelLocation> => {
   const syncResult = locateSync(modelId, storedPath);
   if (syncResult.exists) return syncResult;
@@ -507,11 +445,7 @@ export const locate = async (modelId: string | undefined, storedPath?: string): 
   return syncResult;
 };
 
-// Creates (and repairs, per ADR 0019 #9) the preferred whisper-models
-// directory. Tries Documents first, falls back to Cache if Documents can't be
-// prepared — same root order as the candidate ladder and download(). Runs
-// unconditionally so a later download always has a ready target, even when
-// the model isn't found anywhere right now.
+
 const ensurePreferredModelDirectory = async (): Promise<string | null> => {
   for (const directory of getWhisperModelDirectories()) {
     try {
@@ -520,17 +454,14 @@ const ensurePreferredModelDirectory = async (): Promise<string | null> => {
     } catch (error) {
       void logWarn('Whisper model directory create failed', {
         scope: 'speech', force: true,
-        extra: { uri: directory.uri, error: error instanceof Error ? error.message : String(error) },
+        extra: { root: whisperDirectoryRoot(directory.uri), error: error instanceof Error ? error.message : String(error) },
       });
     }
   }
   return null;
 };
 
-// Resolves the model, then copies it into the preferred directory if it was
-// only found somewhere else in the candidate ladder — so transcription always
-// loads from one canonical location regardless of where a previous app
-// version or a manual restore left the file.
+
 const ensureLocation = async (modelId: string | undefined, storedPath?: string): Promise<WhisperModelLocation> => {
   const resolved = await locate(modelId, storedPath);
   const fileName = getModel(modelId)?.fileName;
@@ -560,7 +491,7 @@ const ensureLocation = async (modelId: string | undefined, storedPath?: string):
           return { uri: preferred.uri, path: preferred.path, exists: true, size: destInfo.size };
         }
       } catch {
-        // Fall through and report the location it was actually found at.
+
       }
     }
   }
@@ -575,21 +506,14 @@ const ensureLocation = async (modelId: string | undefined, storedPath?: string):
   return preferredUri ? { ...normalizeWhisperModelUri(preferredUri), exists: false, size: 0 } : resolved;
 };
 
-// Spec surface: resolved native PATH (not a file:// uri — this is what
-// whisper.rn's initWhisper({ filePath }) wants), copying the model into the
-// preferred directory if it was found elsewhere. Callers that also need
-// exists/size (there is no synchronous way to get both without redoing the
-// I/O) should import ensureLocation from this module directly.
+
 export const ensure = async (modelId: string | undefined, storedPath?: string): Promise<string> => (
   (await ensureLocation(modelId, storedPath)).path
 );
 
 export { ensureLocation };
 
-// Returns the downloaded model's file:// uri (not a native path — this is
-// what settings.offlineModelPath has always stored). Marks errors from the
-// actual network/streaming attempt with `retryOnWifi` so the UI can show
-// network-specific guidance without this module owning any i18n string.
+
 export const download = async (
   modelId: string,
   onProgress?: (loaded: number, total?: number) => void
@@ -690,7 +614,7 @@ export const download = async (
 
       try {
         const nativeFs = resolveWhisperNativeFsModule(await getRNFSModuleAsync());
-        // Try each host in order; the first host's error is the one reported.
+
         let firstHostError: unknown;
         for (const baseUrl of WHISPER_MODEL_BASE_URLS) {
           try {
@@ -705,26 +629,22 @@ export const download = async (
         }
         throw firstHostError;
       } catch (error) {
-        // Only the actual network/streaming attempt is tagged retryable — not
-        // the setup/safety checks above (unsafe target, blocked directory),
-        // which "retry on Wi-Fi" would misleadingly imply are network issues.
+
+
         if (error instanceof Error) (error as WhisperDownloadError).retryOnWifi = true;
         throw error;
       }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       void logWarn('Whisper model download failed', {
-        scope: 'speech', force: true, extra: { directory: directory.uri, error: lastError.message },
+        scope: 'speech', force: true, extra: { root: whisperDirectoryRoot(directory.uri), error: lastError.message },
       });
     }
   }
   throw lastError ?? new Error('Whisper storage unavailable');
 };
 
-// Deletes the model from whichever canonical directory (Documents or Cache
-// whisper-models) it's actually in. Only ever a canonical `whisper-models`
-// subdirectory path is a valid delete target — a legacy root-of-Documents
-// candidate is a read fallback, never a delete target.
+
 export const remove = async (modelId: string): Promise<void> => {
   const model = getModel(modelId);
   if (!model) return;

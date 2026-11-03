@@ -29,19 +29,7 @@ import {
     personToSqliteRow,
 } from './person-sync-schema';
 
-// One generic round-trip guard covering every entity's SQLite row codec (toRow/fromRow, added
-// to the *-sync-schema.ts files alongside the already-generated column lists). Before this,
-// only `task` had any test touching its row VALUES at all (the older, weaker
-// "keeps SQLite columns, serialization, and row mapping exhaustive" test in
-// task-sync-schema.test.ts, which only asserts presence, not correctness) — project, section,
-// area, and person had zero coverage on their value arrays, because those lived as inline,
-// unexported positional literals in sqlite-adapter.ts.
-//
-// This assert reconstructs the fixture from its own row and checks full equality, so a value
-// landing in the wrong column (or a column silently missing a value) fails immediately instead
-// of corrupting data on disk. See the "deliberate corruption" demonstration referenced in this
-// batch's task handoff: temporarily inserting an unwired field into any one of the four
-// project/section/area/person fixture+schema JSON files reliably fails the matching case below.
+
 const zipRow = (columns: readonly string[], row: unknown[]): Record<string, unknown> =>
     Object.fromEntries(columns.map((column, index) => [column, row[index]]));
 
@@ -51,15 +39,8 @@ type RowCodecCase<T> = {
     toRow: (entity: T) => unknown[];
     fromRow: (row: Record<string, unknown>) => T;
     fixture: T;
-    // A fixture with every optional field absent — the case the "dense" fixture above can't
-    // cover, and the one real disk data hits constantly. Catches a NULL SQLite column getting
-    // read back as `null` instead of `undefined` for a field declared `field?: T` (not
-    // `field?: T | null`) in types.ts (see fromOptional in entity-sync-schema.ts). Fields that
-    // are booleans coerce a missing value to `false` by established, pre-existing design
-    // (fromBool/toBool never preserved undefined, on any entity, before or after this task) —
-    // sparse fixtures set those explicitly to keep the round-trip meaningful rather than
-    // asserting a behaviour this task didn't change. The one exception is
-    // `showFutureRecurrence`, whose canonical form is `true` or absent, never `false`.
+
+
     sparseFixture: T;
 };
 
@@ -68,11 +49,11 @@ const ISO = '2026-01-01T00:00:00.000Z';
 const sparseTask: Task = {
     id: 'task-sparse', title: 'Sparse task', status: 'inbox', tags: [], contexts: [],
     createdAt: ISO, updatedAt: ISO,
-    // showFutureRecurrence is deliberately absent: its canonical form is `true` or
-    // nothing, so a stored 0/NULL reads back absent (fromPresentBool).
+
+
     isFocusedToday: false, suppressMindwtrReminders: false,
-    // Project-archive nulls are canonicalized to absent on read because SQLite cannot
-    // distinguish a legacy explicit null from an omitted value (#1156).
+
+
 };
 
 const sparseProject: Project = {
@@ -84,7 +65,7 @@ const sparseProject: Project = {
 const sparseSection: Section = {
     id: 'section-sparse', projectId: 'project-sparse', title: 'Sparse section', order: 0,
     createdAt: ISO, updatedAt: ISO, isCollapsed: false,
-    // Legacy explicit null reads back as absent — see sparseTask's comment above.
+
 };
 
 const sparseArea: Area = {

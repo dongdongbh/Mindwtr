@@ -56,7 +56,7 @@ describe('sync-client-helpers', () => {
         const expected = getInMemoryAppDataSnapshot();
 
         const captured = captureInMemoryAppDataSnapshot();
-        // The store replaces its lists after the capture; the capture keeps the state it read.
+
         useTaskStore.setState({ _allTasks: [], _allPeople: [] });
         const copy = runToEnd(cloneAppDataPass(captured));
 
@@ -98,10 +98,10 @@ describe('sync-client-helpers', () => {
         const prepared = runToEnd(prepareSyncedDataPublishPass(doc));
         expect(applySyncedDataToStore(doc, useTaskStore, prepared)).toBe(true);
         expect(shown()).toEqual(inGate);
-        // The row whose revision did not change keeps the store's object, as a load does.
+
         expect(useTaskStore.getState()._tasksById.get('t2')).toBe(before._allTasks[1]);
 
-        // Built against a store that has moved since, or for another document: computed in the gate.
+
         useTaskStore.setState(before, true);
         const stale = runToEnd(prepareSyncedDataPublishPass(doc));
         useTaskStore.setState((state) => ({ settings: { ...state.settings, lastSyncStatus: 'syncing' } }));
@@ -111,12 +111,11 @@ describe('sync-client-helpers', () => {
         expect(shown()).toEqual(inGate);
     });
 
-    // The refresh drop (D9b W6) rests on this: a prepared publish says the end-of-cycle load changes nothing exactly when
-    // fetchData with the same document, run after the publish, leaves the store's data as it was.
+
     it.each([
         ['a document the load leaves as it is', true, (doc: AppData) => doc],
         ['a row that needs normalizeTaskForLoad', false, (doc: AppData) => ({
-            // An update time before the creation time: the load moves it, so the row's revision identity changes.
+
             ...doc, tasks: [...doc.tasks, { id: 'raw', title: 'Raw', status: 'inbox', createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', rev: 1 } as AppData['tasks'][number]],
         })],
         ['a row a load migration changes', false, (doc: AppData) => ({
@@ -132,7 +131,7 @@ describe('sync-client-helpers', () => {
         await flushPendingSave();
         resetForTests();
         const now = new Date().toISOString();
-        // An empty store: a load never drops rows the store holds (its partial-snapshot guard).
+
         useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {} });
         await useTaskStore.getState().fetchData({ silent: true, preloadedData: {
             tasks: [
@@ -145,7 +144,7 @@ describe('sync-client-helpers', () => {
         await flushPendingSave();
         expect(useTaskStore.getState()._allTasks.map((task) => task.id)).toEqual(['t1', 't2']);
         expect(useTaskStore.getState().settings).toMatchObject({ deviceId: 'this-device', migrations: { version: expect.any(Number) } });
-        // What the store shows after a load: every row load-normalized, every migration applied.
+
         const doc = change(getInMemoryAppDataSnapshot());
 
         const prepared = runToEnd(prepareSyncedDataPublishPass(doc));
@@ -173,8 +172,7 @@ describe('sync-client-helpers', () => {
         }));
         const before = getInMemorySyncChangeFingerprint();
 
-        // Sync bookkeeping is patched straight into settings after every cycle;
-        // it must never look like a change worth syncing again (#766).
+
         useTaskStore.setState((state) => ({
             settings: { ...state.settings, lastSyncAt: now, lastSyncStatus: 'success' },
         }));

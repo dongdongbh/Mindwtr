@@ -19,9 +19,7 @@ enum MindwtrWatchAudioPathKind {
     }
 }
 
-/// iOS may change the app-container UUID during restore/update. A stored file
-/// URL is accepted only as proof of one UUID-owned Watch audio leaf, then is
-/// rebased under the current Documents directory instead of being opened.
+
 enum MindwtrWatchAudioPathResolver {
     static func rebase(
         absoluteString: String,

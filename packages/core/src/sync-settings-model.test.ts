@@ -53,7 +53,7 @@ describe('sync settings model', () => {
     it('names the cause of a failure, and keeps the detail of one it cannot classify (#1151)', () => {
         expect(getSyncFailureMessage(new Error('HTTP 401 Unauthorized'), t)).toBe('settings.syncFailureAuth');
         expect(getSyncFailureMessage(new Error('boom'), t)).toBe('settings.syncFailureGeneric\nboom');
-        // An oversized File Sync document: localized guidance only; its code stays in the log.
+
         expect(getSyncFailureMessage(new Error("SAF_DOCUMENT_TOO_LARGE: the document exceeds this device's read limit"), t))
             .toBe('settings.syncFailureGeneric');
         expect(getSyncFailureMessage(new Error('SAF_DOCUMENT_INCOMPLETE: short read'), t)).toBe('settings.syncFailureConflict');
@@ -127,6 +127,8 @@ describe('resolveSyncBadgeState (React Native\'s sync badge, moved)', () => {
         ['hidden when sync is not configured', { configured: false, activityState: 'idle' }, 'hidden'],
         ['syncing while a cycle runs', { configured: true, activityState: 'syncing', lastSyncStatus: 'success', lastSyncAt: at }, 'syncing'],
         ['syncing with a pending remote write', { configured: true, activityState: 'idle', pendingRemoteWriteAt: at, lastSyncStatus: 'success' }, 'syncing'],
+        ['syncing while a local change waits to upload after a healthy sync (#1431)', { configured: true, activityState: 'idle', localChangePending: true, lastSyncStatus: 'success', lastSyncAt: at }, 'syncing'],
+        ['attention when a local change waits after a failed sync', { configured: true, activityState: 'idle', localChangePending: true, lastSyncStatus: 'error', lastSyncAt: at }, 'attention'],
         ['attention when a pending remote write failed', { configured: true, activityState: 'idle', pendingRemoteWriteAt: at, lastSyncStatus: 'error' }, 'attention'],
         ['healthy after a sync', { configured: true, activityState: 'idle', lastSyncStatus: 'success', lastSyncAt: at }, 'healthy'],
         ['healthy after a resolved conflict', { configured: true, activityState: 'idle', lastSyncStatus: 'conflict', lastSyncAt: at }, 'healthy'],

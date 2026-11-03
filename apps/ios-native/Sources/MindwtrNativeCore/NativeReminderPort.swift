@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-/// SDK objects are inspected on their callback queue; only immutable observations leave it.
+
 struct NativeReminderObservation: Sendable, Equatable {
     let identifier: String
     let ownedID: Int?
@@ -25,7 +25,7 @@ protocol NativeReminderPort: Sendable {
     func removeDelivered(_ identifiers: [String]) async throws
 }
 
-/// Passive observations and explicit mutations only; authorization/categories/actions are deliberately absent.
+
 final class NativeSystemReminderPort: NativeReminderPort, @unchecked Sendable {
     private let center = UNUserNotificationCenter.current()
     func permission() async throws -> NativeNotificationPermission { await NativeNotificationPermission.read() }

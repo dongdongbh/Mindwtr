@@ -6,7 +6,7 @@ import { logInfo } from './app-log';
 
 import { secureSecretStorage, secureSecretVault } from './secure-secret-store';
 
-// The key rules are core's (createAIKeyStore), over this app's AsyncStorage and keystore.
+
 let keyStore: AIKeyStore | null = null;
 const aiKeys = (): AIKeyStore => {
     keyStore ??= createAIKeyStore({ storage: AsyncStorage, secrets: secureSecretStorage, vault: secureSecretVault });
@@ -21,7 +21,7 @@ export function saveAIKey(provider: AIProviderId, value: string): Promise<void> 
     return aiKeys().save(provider, value);
 }
 
-/** The rule is core's (the native host asks the AI by it too). */
+
 export function isAIKeyRequired(settings: AppData['settings'] | undefined): boolean {
     return isCoreAIKeyRequired(settings);
 }

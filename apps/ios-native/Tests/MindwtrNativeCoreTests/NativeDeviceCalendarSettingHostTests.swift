@@ -297,9 +297,8 @@ final class NativeDeviceCalendarSettingHostTests: XCTestCase {
         do { _ = try await cold.start(); XCTFail("Unknown old operation must not reapply across a later marker") }
         catch { XCTAssertTrue(error.localizedDescription.hasPrefix("STALE_REVISION:"), "\(error)") }
         XCTAssertEqual(try Data(contentsOf: manifest), baseline, "The later manifest must retain its exact bytes")
-        // Cold recovery re-ACKs the decoded command with JSONEncoder, whose outer
-        // object order is unspecified. The entire wrapper and raw frozen argument
-        // witness must stay the same even if those outer member positions change.
+
+
         let currentJournal = try object(String(contentsOf: journal, encoding: .utf8))
         let retainedJournal = try object(String(decoding: retained, as: UTF8.self))
         XCTAssertEqual(Data(try json(currentJournal).utf8), Data(try json(retainedJournal).utf8), "The complete retained command must be unchanged")

@@ -1,15 +1,6 @@
-// Local sync servers and a second device on this computer, for check-sync-device.mjs (and its --dry-run, which plays the
-// phone with a second device too). Nothing here reaches a real server.
-//
-// - serveWebdav: a WebDAV folder in memory with strong ETags and RN's conditional writes (If-Match, If-None-Match: *,
-//   412), Basic auth (`open`: none, for measure-merge-device.mjs), and three faults a check can switch on: `failWrites` (a PUT of the sync document answers 500),
-//   `down` (every request answers 503, as a server that went away behind a proxy) and `weakEtags` (every ETag is weak,
-//   W/"…", as a server that cannot promise byte-equal versions; sync encryption must refuse it).
-// - startCloud: the real self-hosted Mindwtr cloud (apps/cloud) under Bun, with one token and a scratch data folder.
-// - hostDevice: the real native bundle (core-host.js) in a Node VM, on node:sqlite, an in-memory RKStorage and secret
-//   store, node:http for its fetch, and @noble/hashes and node:crypto for its sync crypto: core running as a second device,
-//   bound exactly as the Android host binds it. `automaticSync: false` leaves out core's automatic triggers (syncStart), so the
-//   device syncs only when a check tells it: its own timed syncs otherwise take the folder's fence while the phone syncs.
+
+
+
 import { spawn } from 'node:child_process';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2.js';
@@ -21,88 +12,10 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { gunzipSync } from 'node:zlib';
 import vm from 'node:vm';
 
-// ---- WebDAV ----
 
-export const serveWebdav = ({ port, username, password, open = false }) => new Promise((ready) => {
-    const files = new Map();
-    let version = 0;
-    // `requests`: every request as it arrived; `authorized`: only those that carried the folder's user and password.
-    // `delayMs`: every answer waits that long (a slow server).
-    const state = { files, requests: [], authorized: [], failWrites: 0, down: false, delayMs: 0, weakEtags: false };
-    const authorized = (req) => open || req.headers.authorization === `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
-    const server = createServer((req, res) => {
-        const chunks = [];
-        req.on('data', (chunk) => chunks.push(chunk));
-        req.on('end', () => setTimeout(() => {
-            const body = Buffer.concat(chunks);
-            const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-            state.requests.push(`${req.method} ${path}`);
-            const answer = (status, headers = {}, data = '') => {
-                res.writeHead(status, headers);
-                res.end(req.method === 'HEAD' ? undefined : data);
-            };
-            if (state.down) return answer(503, { 'Content-Type': 'text/plain' }, 'down');
-            if (!authorized(req)) return answer(401, { 'WWW-Authenticate': 'Basic realm="mindwtr-test"' });
-            state.authorized.push(`${req.method} ${path}`);
-            const file = files.get(path);
-            const ifMatch = req.headers['if-match'];
-            const ifNoneMatch = req.headers['if-none-match'];
-            const preconditionFails = () => (ifMatch !== undefined && (!file || file.dir || ifMatch !== file.etag))
-                || (ifNoneMatch === '*' && file !== undefined);
-            switch (req.method) {
-                case 'GET':
-                case 'HEAD':
-                    if (!file || file.dir) return answer(404);
-                    return answer(200, { ETag: file.etag, 'Content-Type': 'application/octet-stream', 'Content-Length': String(file.body.length) }, file.body);
-                case 'PUT': {
-                    if (preconditionFails()) return answer(412);
-                    if (state.failWrites > 0 && path.endsWith('/data.json')) {
-                        state.failWrites -= 1;
-                        return answer(500, { 'Content-Type': 'text/plain' }, 'write failed');
-                    }
-                    const etag = `${state.weakEtags ? 'W/' : ''}"${++version}-${createHash('sha1').update(body).digest('hex').slice(0, 12)}"`;
-                    files.set(path, { body, etag });
-                    return answer(file ? 204 : 201, { ETag: etag });
-                }
-                case 'DELETE':
-                    if (!file) return answer(404);
-                    if (preconditionFails()) return answer(412);
-                    files.delete(path);
-                    return answer(204);
-                case 'MKCOL':
-                    if (file) return answer(405);
-                    files.set(path, { dir: true });
-                    return answer(201);
-                case 'PROPFIND': {
-                    const prefix = path.endsWith('/') ? path : `${path}/`;
-                    const entries = [...files].filter(([name]) => name === path || (name.startsWith(prefix) && !name.slice(prefix.length).includes('/')));
-                    if (entries.length === 0 && path !== '/') return answer(404);
-                    const xml = `<?xml version="1.0" encoding="utf-8"?><d:multistatus xmlns:d="DAV:">${entries.map(([name, entry]) => (
-                        `<d:response><d:href>${encodeURI(name)}</d:href><d:propstat><d:prop>${entry.dir ? '<d:resourcetype><d:collection/></d:resourcetype>'
-                            : `<d:resourcetype/><d:getetag>${entry.etag}</d:getetag><d:getcontentlength>${entry.body.length}</d:getcontentlength>`}</d:prop>`
-                        + '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>'
-                    )).join('')}</d:multistatus>`;
-                    return answer(207, { 'Content-Type': 'application/xml; charset=utf-8' }, xml);
-                }
-                default:
-                    return answer(405);
-            }
-        }, state.delayMs));
-    });
-    server.listen(port, '127.0.0.1', () => ready({ server, state, close: () => new Promise((done) => server.close(done)) }));
-});
+export { serveWebdav, webdavDocument } from './webdav-harness.mjs';
 
-/** The sync document the WebDAV folder holds now, parsed; null when there is none. */
-export const webdavDocument = (dav, folder) => {
-    const file = dav.state.files.get(`${folder}/data.json`);
-    return file && !file.dir ? JSON.parse(file.body.toString('utf8')) : null;
-};
 
-// ---- The self-hosted cloud ----
-
-/** apps/cloud under Bun on 127.0.0.1:[port], allowing only [token], its data under [dataDir]. The body limit is raised from
- *  the server's 2 MB default: the test phone's own library outgrew it (10-07, ~3,500 tasks), and the checks prove sync, not
- *  that limit. */
 export const startCloud = async ({ repo, port, token, dataDir }) => {
     mkdirSync(dataDir, { recursive: true });
     const child = spawn(process.env.BUN ?? 'bun', ['run', resolve(repo, 'apps/cloud/src/server.ts'), '--port', String(port), '--host', '127.0.0.1'], {
@@ -124,22 +37,18 @@ export const startCloud = async ({ repo, port, token, dataDir }) => {
     throw new Error(`cloud server did not start: ${output}`);
 };
 
-// ---- A second device: the native bundle in a Node VM ----
 
-/**
- * core-host.js as the Android host runs it, with Node standing in for its Kotlin bridges: SqliteBridge (node:sqlite, one
- * connection), RnKeyValue (a Map), SecretStore (a Map), HostIo's fetch (node:http, OkHttp's redirect rules, whole bodies
- * only), and CoreHost's pumps: [call] waits on its own operation as callAsync does; an idle pump runs timers and settles
- * answers between calls, as CoreHost's does.
- */
-export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, automaticSync = true }) => {
+export const hostDevice = async ({
+    bundle, name, log = () => {}, filesRoot, automaticSync = true, trace, onSql,
+    database: databasePath = ':memory:', keyValue = new Map(), secrets = new Map(), nativeSubscribers = false, gmail = false,
+}) => {
     const { DatabaseSync } = await import('node:sqlite');
-    const database = new DatabaseSync(':memory:');
-    const keyValue = new Map();
-    const secrets = new Map();
+    const database = new DatabaseSync(databasePath);
+    let dead = false;
     const answers = [];
     const events = [];
     const lines = [];
+    const published = [];
     let taken = '';
     let ids = 0;
     const controllers = new Map();
@@ -147,13 +56,43 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
     const guarded = (work) => (...args) => {
         try { return work(...args); } catch (error) { return `!MindwtrNativeError:${error.message}`; }
     };
+
+    const fault = (sql, phase, json) => {
+        if (dead) throw new Error('the process is dead');
+        const answer = onSql?.(sql, phase, json);
+        if (answer === 'kill') { device.kill(); throw new Error('the process is dead'); }
+        if (answer === 'fail') throw new Error(`injected fault at: ${sql.slice(0, 60)}`);
+    };
+    const statement = (sql, run, json = '') => { fault(sql, 'before', json); const result = run(); fault(sql, 'after', json); return result; };
     const bridge = {
-        sqlRun: guarded((sql, json) => { database.prepare(sql).all(...params(json)); return null; }),
-        sqlAll: guarded((sql, json) => JSON.stringify(database.prepare(sql).all(...params(json)))),
-        sqlExec: guarded((sql) => { database.exec(sql); return null; }),
+        sqlRun: guarded((sql, json) => statement(sql, () => { database.prepare(sql).all(...params(json)); return null; }, json)),
+        sqlAll: guarded((sql, json) => statement(sql, () => JSON.stringify(database.prepare(sql).all(...params(json))), json)),
+        sqlExec: guarded((sql) => statement(sql, () => { database.exec(sql); return null; })),
         nowMs: () => performance.now(),
         randomBytes: (n) => JSON.stringify([...randomBytes(n)]),
         log: (line) => { lines.push(String(line)); log(`${name}: ${line}`); },
+        ...(trace ? { trace: (section) => { trace(section); return null; } } : {}),
+        ...(nativeSubscribers ? {
+            widgetInputs: () => JSON.stringify({ systemColorScheme: 'light', systemLocale: 'en-US', listSelections: [] }),
+            widgetPublish: (payload) => { published.push(['widget', payload.length]); return null; },
+            widgetAppState: () => 'active',
+            alarmApply: (plan) => { published.push(['alarms', plan.length]); return null; },
+            notificationsAllowed: () => true,
+            rnAlarmCleanup: () => 0,
+            reminderReceiverCounts: () => JSON.stringify({ dropped: 0, notQueued: 0 }),
+            reminderLedger: () => JSON.stringify({ fired: [], shown: [] }),
+        } : {}),
+        ...(gmail ? {
+            gmailCall(json) {
+                const id = String(++ids);
+                const { op } = JSON.parse(json);
+                setTimeout(() => answers.push({ json: JSON.stringify(op === 'status'
+                    ? { id, value: { available: false, connected: false, account: null, accountId: null } } : { id, error: 'E_GMAIL_CONFIG' }) }), 1);
+                return id;
+            },
+            gmailFile: guarded(() => { throw new Error('No Gmail receipts file in this build'); }),
+            gmailSql: guarded(() => { throw new Error('No Gmail receipts file in this build'); }),
+        } : {}),
         collationKey: (text) => text,
         rnStateCommit: () => null,
         logFile: () => '',
@@ -203,8 +142,8 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
             return id;
         },
         netAbort(id) { controllers.get(id)?.abort(); return null; },
-        // HostCrypto.kt's Argon2id and AES-GCM with core's reference implementations (@noble/hashes, as core's own default, and
-        // OpenSSL's AES-GCM): what this device seals, the phone's BouncyCastle must open, and the other way round.
+
+
         cryptoCall(json) {
             const request = JSON.parse(json);
             const id = String(++ids);
@@ -239,12 +178,20 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
             setTimeout(() => answers.push({ json: JSON.stringify({ id, value: op === 'get' ? secrets.get(key) ?? null : null }) }), 2);
             return id;
         },
-        // HostFiles.kt's attachment file port and HostInstaller.kt's install and hash, on a folder of this computer: the second
-        // device's files/ and cache/ (each call answered through the pump, as on the phone).
+
+
         fileDirectories: () => JSON.stringify({ document: `file://${files.dir}/`, cache: `file://${files.cache}/` }),
         fileCall: (json) => files.answer(json, files.call),
         installerCall: (json) => files.answer(json, files.install),
         fileDeleteNow: (uri) => { rmSync(files.path(uri), { recursive: true, force: true }); return null; },
+
+        fileList: guarded((path) => {
+            const dir = files.relative(path);
+            if (!existsSync(dir) || !statSync(dir).isDirectory()) return 'null';
+            return JSON.stringify(readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name));
+        }),
+        fileRead: guarded((path) => readFileSync(files.relative(path), 'utf8')),
+        fileDelete: guarded((path) => { rmSync(files.relative(path), { force: true }); return null; }),
         fileAbort: () => null,
         ioNext: () => {
             const next = answers.shift();
@@ -264,6 +211,15 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
             return path;
         },
         missing: () => Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' }),
+        relative: (path) => {
+            const [top, ...rest] = path.split('/');
+            const base = top === 'files' ? files.dir : top === 'cache' ? files.cache : null;
+            if (!base) throw new Error(`Not an app file: ${path}`);
+            const file = resolve(base, rest.join('/'));
+
+            if (!file.startsWith(`${base}/`)) throw new Error(`Not an app file: ${path}`);
+            return file;
+        },
         call: (request, bytes) => {
             if (request.op === 'sha256') return { value: createHash('sha256').update(bytes ?? Buffer.alloc(0)).digest('hex') };
             if (request.op === 'barrier' || request.op === 'syncParent') return { value: null };
@@ -286,7 +242,7 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
                 default: throw new Error(`Unsupported file call ${request.op}`);
             }
         },
-        // RN's installer's outcomes for a fresh install: the staged bytes become the target unless another generation is there.
+
         install: (request) => {
             const sha = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
             if (request.op === 'hash') {
@@ -306,6 +262,7 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
         answer: (json, run) => {
             const id = String(++ids);
             setTimeout(() => {
+                if (dead) return;
                 const request = JSON.parse(json);
                 const bytes = request.base64 === undefined ? undefined : Buffer.from(request.base64, 'base64');
                 delete request.base64;
@@ -322,15 +279,23 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
     };
     mkdirSync(files.dir, { recursive: true });
     mkdirSync(files.cache, { recursive: true });
+
+    for (const [method, work] of Object.entries(bridge)) {
+        if (typeof work === 'function') bridge[method] = (...args) => { if (dead) throw new Error('the process is dead'); return work(...args); };
+    }
     const context = vm.createContext({ console: {}, Intl: undefined, __mindwtrNative: bridge });
     vm.runInContext(readFileSync(bundle, 'utf8'), context);
     const host = context.MindwtrHost;
-    // CoreHost's idle pump, and callAsync's wait on one operation.
-    const pump = setInterval(() => { try { context.__pumpTimers(); } catch (error) { log(`${name}: pump ${error}`); } }, 10);
+
+
+    let pumping = true;
+    const pump = setInterval(() => { if (!pumping || dead) return; try { context.__pumpTimers(); } catch (error) { log(`${name}: pump ${error}`); } }, 10);
     const call = async (method, ...args) => {
+        if (dead) throw new Error(`${name}: killed`);
         const id = host[method](...args);
         for (const deadline = Date.now() + 10 * 60_000; Date.now() < deadline; await sleep(5)) {
-            context.__pumpTimers();
+            if (dead) throw new Error(`${name}: killed`);
+            if (pumping) context.__pumpTimers();
             const answer = host.poll(id);
             if (answer) {
                 const reply = JSON.parse(answer);
@@ -341,33 +306,44 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
         throw new Error(`${name}: ${method} timed out`);
     };
     const device = {
-        name, keyValue, secrets, events, lines, files,
-        /** Live task rows straight from this device's database: id, title, status, rev. */
+        name, keyValue, secrets, events, lines, files, published,
+
         tasks: () => database.prepare("SELECT id, title, status, rev FROM tasks WHERE COALESCE(deletedAt, '') = '' ORDER BY id").all().map((row) => ({ ...row })),
-        /** The bundle's MindwtrHost method names (check-boot-gates.mjs: Android's table). */
+
         methods: Object.keys(host),
         call,
-        stop: () => { clearInterval(pump); database.close(); },
-        /** Boots on an empty database, reports the network online, and starts sync as ProcessCoreHost does (unless [automaticSync] is off). */
-        async boot() {
-            await call('boot', '', '', '');
+        stop: () => { clearInterval(pump); if (!dead) database.close(); },
+        freeze: () => { pumping = false; },
+        thaw: () => { pumping = true; },
+
+        pumpOnce: () => context.__pumpTimers(),
+        inTransaction: () => database.isTransaction,
+        query: (sql, ...values) => database.prepare(sql).all(...values).map((row) => ({ ...row })),
+
+        kill: () => {
+            if (dead) return;
+            dead = true;
+            clearInterval(pump);
+            database.close();
+        },
+
+
+        async boot(writeJournal = '') {
+            await call('boot', '', '', writeJournal);
             await call('language', 'en', 'en-US');
             await call('syncNetwork', JSON.stringify({ isConnected: true, isInternetReachable: true }));
             return automaticSync ? call('syncStart', 'active') : null;
         },
-        /** A Sync screen command (CoreHost.syncCommand). */
+
         sync: (command, input = {}) => call('menuCommand', command, JSON.stringify(input)),
         view: (draft = {}) => call('menuRead', 'syncSettings', JSON.stringify({ draft })),
-        /** RN's quick capture: one new Inbox task titled [title]. */
+
         async capture(title) {
             const opened = await call('captureOpen');
             return call('captureSubmit', JSON.stringify({ text: title, options: opened.options, captureId: randomUUID(), openAfterSave: false }));
         },
-        /**
-         * Every Inbox title, window by window at one revision (the phone's library outgrows one window). This device's own
-         * automatic sync can change the Inbox between windows: core then answers STALE_REVISION, and paging restarts at
-         * offset zero, as the contract says.
-         */
+
+
         async titles() {
             for (let attempt = 0; ; attempt += 1) {
                 try {
@@ -385,7 +361,7 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
                 }
             }
         },
-        /** Configures [kind] ('webdav' or 'selfhosted') from the Sync screen as a user does: choose, fill, Save. */
+
         async configure(kind, fields) {
             await device.sync('openSyncSettings');
             await device.sync('selectSyncBackend', { requestId: randomUUID(), option: kind });

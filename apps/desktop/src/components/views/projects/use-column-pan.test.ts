@@ -31,7 +31,7 @@ describe('useMiddleMousePan', () => {
         onPointerDown(pointerDown(1, 100));
         movePointer(140);
 
-        // Dragging right pulls the content right, so the strip scrolls back.
+
         expect(element.scrollLeft).toBe(-40);
 
         movePointer(120);

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createReferenceTasksMoveMethods, type NativeReferenceTasksMoveEnvelope } from './native-host-contract-reference-bulk-status';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { openScratchSqlite, openSqliteHost as openHost } from './screen-parity.replay';
 const openSqliteHost: typeof openHost = (seed, wrap, bindings) => openHost(seed, wrap, bindings, { rejectConcurrentWrites: true });
 import { NativeReceiptSqliteAdapter, taskRevisionOf } from './native-request-receipts';
@@ -67,6 +68,24 @@ const ids = () => {
 afterEach(async () => { await flushPendingSave(); resetForTests(); vi.restoreAllMocks(); vi.useRealTimers(); if (ORIGINAL_TZ === undefined) delete process.env.TZ; else process.env.TZ = ORIGINAL_TZ; });
 
 describe('guarded Reference bulk Move status', () => {
+    it('preserves the legacy V1 envelope and canonical receipt payload bytes', async () => {
+        process.env.TZ = 'America/New_York'; clock();
+        const sqlite = await openSqliteHost({ tasks: [task('golden', { title: 'Golden' })],
+            settings: { deviceId: DEVICE, analyticsProfileId: REQUEST_ID } });
+        try {
+            const host = methods(); const command = await prepare(host, request('waiting', ['golden']));
+            const payload = JSON.stringify(['referenceTasksMove', command], (_name, item) => item && typeof item === 'object' && !Array.isArray(item)
+                ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
+
+            expect(createHash('sha256').update(payload).digest('hex')).toBe('500190e913caf6573e8776bdb0b962cba9cc4a24981da3b9251fa8d833d920ca');
+            expect(command.request).not.toHaveProperty('source');
+            value(await host.commitPreparedReferenceTasksMove(command));
+            const fingerprint = deterministicHash128(payload).map((part) => part.toString(16).padStart(8, '0')).join('');
+            expect(await sqlite.sql('SELECT method,reply FROM native_request_receipts')).toEqual([
+                { method: 'referenceTasksMove:' + fingerprint, reply: '{"count":1,"status":"waiting"}' }]);
+        } finally { await sqlite.close(); }
+    });
+
     it.each(getBulkMoveStatusOptions('reference'))('matches actual RN batchMoveTasks complete AppData and nine SQLite domains for %s', async (status) => {
         clock(); const rn = await openSqliteHost(seed()); let expected; let expectedRaw;
         try {
@@ -83,7 +102,7 @@ describe('guarded Reference bulk Move status', () => {
             expect(rows()).toEqual(expected); expect(await raw(sqlite)).toEqual(expectedRaw);
             if (status === 'next') {
                 const future = rows().tasks.find((row) => row.id === 'b')!;
-                expect(future.status).toBe('next'); // Actual RN keeps Next, clears the star and retains this hidden order.
+                expect(future.status).toBe('next');
                 expect(future.isFocusedToday).toBe(false); expect(future.focusOrder).toBe(9);
             }
             expect(await sqlite.receiptIds()).toEqual([REQUEST_ID]);
@@ -133,7 +152,7 @@ describe('guarded Reference bulk Move status', () => {
             task('unrelated-peer')], settings: { deviceId: DEVICE, analyticsProfileId: REQUEST_ID } } as Partial<AppData>;
         const command = await parity(initial, ['other-series', 'second', 'first']);
         expect(command.prepared.scope.tasks.map((row) => row.id)).toEqual(initial.tasks!.map((row) => row.id));
-        expect(command.prepared.allocatedIds).toHaveLength(4); // first checklist + first candidate + second candidate + independent candidate
+        expect(command.prepared.allocatedIds).toHaveLength(4);
         expect(command.prepared.effect.createdTasks).toHaveLength(1);
         expect(command.prepared.effect.createdTasks[0].recurrence?.seriesId).toBe('other-series');
     });
@@ -285,7 +304,7 @@ describe('guarded Reference bulk Move status', () => {
             const before = await raw(sqlite); const memory = useTaskStore.getState();
             const replacement = new NativeReceiptSqliteAdapter(sqlite.client(), { rejectConcurrentWrites: true });
             const committing = memory.commitPreparedReferenceTasksMove(command.prepared, read.authority);
-            // The commit has yielded at import(), with no store or database changes.
+
             setStorageAdapter(replacement);
             expect(useTaskStore.getState()).toBe(memory);
             expect(await committing).toMatchObject({ success: false, reason: 'conflict' });
@@ -420,8 +439,8 @@ describe('guarded Reference bulk Move status', () => {
     });
 
     it('records actual RN invalid-FK failure and refuses invalid empty-project peer authority before preparing a native journal', async () => {
-        // React Native's adapter (no concurrent-write guard) rewrites every row on its first save, so the invalid peer fails it.
-        // The guarded native adapter compares with its full read and writes only what changed; its own refusal is checked below.
+
+
         clock(); const setup = async (open: typeof openHost = openSqliteHost) => {
             const sqlite = await open({ tasks: [task('source', { title: 'Shared source', recurrence: { rule: 'daily', seriesId: 'projectless' }, dueDate: '2026-10-03' }),
                 task('empty-peer', { title: 'Shared source', recurrence: { rule: 'daily', seriesId: 'projectless' }, dueDate: '2026-10-04' }),

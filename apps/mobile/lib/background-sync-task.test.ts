@@ -31,9 +31,18 @@ const taskManagerMock = vi.hoisted(() => {
   };
 });
 
-const coreMock = vi.hoisted(() => ({
-  flushPendingSave: vi.fn(),
-}));
+const coreMock = vi.hoisted(() => {
+  const noopStorage = { name: 'noop' };
+  const state = { adapter: noopStorage as unknown, fetchData: vi.fn(async () => undefined) };
+  return {
+    state,
+    noopStorage,
+    flushPendingSave: vi.fn(),
+    getStorageAdapter: vi.fn(() => state.adapter),
+    setStorageAdapter: vi.fn((adapter: unknown) => { state.adapter = adapter; }),
+    useTaskStore: { getState: () => ({ fetchData: state.fetchData }) },
+  };
+});
 
 const syncServiceMock = vi.hoisted(() => ({
   abortMobileSync: vi.fn(),
@@ -43,6 +52,7 @@ const syncServiceMock = vi.hoisted(() => ({
 }));
 
 const storageAdapterMock = vi.hoisted(() => ({
+  mobileStorage: { name: 'mobile' },
   quiesceMobileStorage: vi.fn(),
 }));
 
@@ -97,8 +107,7 @@ const reactNativeMock = vi.hoisted(() => {
   };
 });
 
-/** Fires every 'change' listener registered via AppState.addEventListener —
- *  the harness has no real OS to deliver the event, so a test drives it directly. */
+
 const emitAppStateChange = (state: string) => {
   reactNativeMock.AppState.currentState = state;
   for (const listener of reactNativeMock.appStateListeners) listener(state);
@@ -131,6 +140,7 @@ describe('mobile background sync task', () => {
       nativeBackgroundTaskState.registered = false;
     });
     coreMock.flushPendingSave.mockResolvedValue(undefined);
+    coreMock.state.adapter = coreMock.noopStorage;
     syncServiceMock.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'off', configured: false });
     syncServiceMock.performMobileSync.mockResolvedValue({ success: true });
     storageAdapterMock.quiesceMobileStorage.mockResolvedValue(undefined);
@@ -198,7 +208,7 @@ describe('mobile background sync task', () => {
       extra: expect.objectContaining({ decision: 'deferred-until-foreground', appState: 'background' }),
     }));
 
-    // On screen the same inputs mean the registration really is gone: register.
+
     reactNativeMock.AppState.currentState = 'active';
     const registered = await module.syncMobileBackgroundSyncRegistration();
     expect(backgroundTaskMock.registerTaskAsync).toHaveBeenCalledTimes(1);
@@ -250,7 +260,7 @@ describe('mobile background sync task', () => {
     expect(coreMock.flushPendingSave).toHaveBeenCalledTimes(1);
     expect(syncServiceMock.performMobileSync).toHaveBeenCalledTimes(1);
     expect(result).toBe(backgroundTaskMock.BackgroundTaskResult.Success);
-    // The start/finish pair is the field diagnostic for a run that never settles.
+
     expect(appLogMock.logInfo).toHaveBeenCalledWith('Mobile background sync started', expect.objectContaining({
       extra: { timersPaused: 'true' },
     }));
@@ -280,9 +290,7 @@ describe('mobile background sync task', () => {
     expect(result).toBe(backgroundTaskMock.BackgroundTaskResult.Failed);
   });
 
-  // The task body runs in a headless RN instance that is destroyed as soon as this
-  // promise settles. Deferred op-sqlite work left in flight resolves into a freed
-  // Hermes heap and kills the process, so quiescing must happen on every exit path.
+
   it('skips a background run while the failure cooldown is live and resumes after it', async () => {
     const { BACKGROUND_SYNC_FAILURE_STATE_KEY } = await import('./sync-constants');
     syncServiceMock.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'webdav', configured: true });
@@ -296,7 +304,7 @@ describe('mobile background sync task', () => {
       }));
     };
 
-    // Two failures in a row: the second is recorded with an escalated cooldown.
+
     expect(await taskManagerMock.state.executor?.()).toBe(backgroundTaskMock.BackgroundTaskResult.Failed);
     expect(JSON.parse(asyncStorageMock.store.get(BACKGROUND_SYNC_FAILURE_STATE_KEY)!))
       .toMatchObject({ consecutiveFailures: 1 });
@@ -306,7 +314,7 @@ describe('mobile background sync task', () => {
     expect(JSON.parse(asyncStorageMock.store.get(BACKGROUND_SYNC_FAILURE_STATE_KEY)!))
       .toMatchObject({ consecutiveFailures: 2 });
 
-    // The third invocation lands one interval later, inside the 2-interval cooldown.
+
     rewind(1, 2);
     expect(await taskManagerMock.state.executor?.()).toBe(backgroundTaskMock.BackgroundTaskResult.Success);
     expect(syncServiceMock.performMobileSync).toHaveBeenCalledTimes(2);
@@ -316,7 +324,7 @@ describe('mobile background sync task', () => {
       expect.objectContaining({ extra: expect.objectContaining({ consecutiveFailures: '2' }) }),
     );
 
-    // Past the cooldown it runs again, and a success clears the record.
+
     rewind(3, 2);
     syncServiceMock.performMobileSync.mockResolvedValue({ success: true });
     expect(await taskManagerMock.state.executor?.()).toBe(backgroundTaskMock.BackgroundTaskResult.Success);
@@ -334,7 +342,7 @@ describe('mobile background sync task', () => {
       }));
     };
 
-    // Far more failures than the ceiling: the wait is the ceiling, never 2^40 intervals.
+
     setRecord(module.MOBILE_BACKGROUND_SYNC_MAX_FAILURE_COOLDOWN_MS - 60_000);
     expect(await taskManagerMock.state.executor?.()).toBe(backgroundTaskMock.BackgroundTaskResult.Success);
     expect(syncServiceMock.performMobileSync).not.toHaveBeenCalled();
@@ -375,16 +383,16 @@ describe('mobile background sync task', () => {
 
       expect(await run).toBe(backgroundTaskMock.BackgroundTaskResult.Failed);
       expect(syncServiceMock.abortMobileSync).toHaveBeenCalledTimes(1);
-      // The deadline's own abort: a lifecycle abort would queue a follow-up cycle that runs once timers resume.
+
       expect(syncServiceMock.abortMobileSync).toHaveBeenCalledWith('deadline');
       expect(storageAdapterMock.quiesceMobileStorage).toHaveBeenCalledTimes(1);
-      // A run this long is written even with debug logging off.
+
       expect(appLogMock.logWarn).toHaveBeenCalledWith('Mobile background sync run took longer than a minute', expect.objectContaining({
         force: true,
         extra: expect.objectContaining({ outcome: 'abandoned' }),
       }));
-      // The request deadline is what holds while timers are paused; it must be
-      // armed for the run and cleared afterwards.
+
+
       const deadlineCalls = syncServiceMock.setMobileSyncRequestDeadline.mock.calls;
       expect(deadlineCalls[0]?.[0]).toBeGreaterThan(Date.now() - 1);
       expect(deadlineCalls.at(-1)?.[0]).toBeNull();
@@ -397,8 +405,8 @@ describe('mobile background sync task', () => {
     vi.useFakeTimers();
     try {
       syncServiceMock.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'webdav', configured: true });
-      // Never settles on its own — only abortMobileSync (called by the deadline
-      // handling below) ends the run, same as a CloudKit op stuck mid-request.
+
+
       syncServiceMock.performMobileSync.mockImplementation(() => new Promise(() => undefined));
 
       const module = await loadModule();
@@ -407,23 +415,21 @@ describe('mobile background sync task', () => {
 
       const startedAt = Date.now();
       const run = executor();
-      // Let the run's own awaits (drain, failure-state read) settle so it has
-      // reached the deadline race and registered the AppState listener.
+
+
       await vi.advanceTimersByTimeAsync(0);
 
-      // The app is suspended mid-operation: the clock moves on, but the OS
-      // pauses JavaScript timers, so nothing scheduled with setTimeout fires.
+
       vi.setSystemTime(startedAt + module.MOBILE_BACKGROUND_SYNC_DEADLINE_MS + 5000);
       expect(syncServiceMock.abortMobileSync).not.toHaveBeenCalled();
 
-      // The app resumes: AppState delivers 'active' the instant JS runs again.
+
       emitAppStateChange('active');
 
       expect(await run).toBe(backgroundTaskMock.BackgroundTaskResult.Failed);
       expect(syncServiceMock.abortMobileSync).toHaveBeenCalledTimes(1);
-      // One line for both branches, with `stage` telling them apart: which of
-      // the two wins on resume is a race the app does not control, so the
-      // tester's release check must not depend on it.
+
+
       expect(appLogMock.logWarn).toHaveBeenCalledWith(
         'Mobile background sync did not finish before its deadline and was abandoned',
         expect.objectContaining({
@@ -504,7 +510,7 @@ describe('mobile background sync task', () => {
     const executor = taskManagerMock.state.executor;
     if (!executor) throw new Error('Expected the background sync task to be defined');
 
-    // expo-background-task delivered three queued events in the same millisecond.
+
     const overlapping = Promise.all([executor(), executor(), executor()]);
     await syncStarted.promise;
     expect(syncServiceMock.performMobileSync).toHaveBeenCalledTimes(1);
@@ -516,7 +522,7 @@ describe('mobile background sync task', () => {
       backgroundTaskMock.BackgroundTaskResult.Success,
     ]);
 
-    // The guard coalesces concurrent events; it must not block the next window.
+
     syncServiceMock.performMobileSync.mockResolvedValue({ success: true });
     await executor();
     expect(syncServiceMock.performMobileSync).toHaveBeenCalledTimes(2);
@@ -772,6 +778,28 @@ describe('mobile background sync task', () => {
       expect(done).toBe(false);
       reconciled.resolve();
       await run;
+    });
+
+    it('loads the store before reconciling reminders after a cold headless sync (#1424)', async () => {
+      configureSync();
+      const order: string[] = [];
+      coreMock.state.fetchData.mockImplementationOnce(async () => {
+        order.push(`fetch:${(coreMock.state.adapter as { name: string }).name}`);
+      });
+      reminderMock.mockImplementationOnce(async () => { order.push('reconcile'); });
+      await loadModule();
+      await taskManagerMock.state.executor?.();
+      expect(order).toEqual(['fetch:mobile', 'reconcile']);
+    });
+
+    it('keeps an already connected store as it is before reconciling reminders', async () => {
+      configureSync();
+      coreMock.state.adapter = storageAdapterMock.mobileStorage;
+      await loadModule();
+      await taskManagerMock.state.executor?.();
+      expect(coreMock.setStorageAdapter).not.toHaveBeenCalled();
+      expect(coreMock.state.fetchData).not.toHaveBeenCalled();
+      expect(reminderMock).toHaveBeenCalledWith('sync');
     });
 
     it('does not reconcile after a failed sync', async () => {

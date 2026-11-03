@@ -1,3 +1,4 @@
+import { getProjectAccentColor, groupProjectsForPicker, tFallback, useTaskStore, type Project as CoreProject } from '@mindwtr/core';
 import React from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Folder, X } from 'lucide-react-native';
@@ -8,7 +9,8 @@ import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 
 type Area = { id: string; name: string; color?: string };
-type Project = { id: string; title: string; areaId?: string };
+type Project = { id: string; title: string; status?: CoreProject['status']; areaId?: string; color?: string; colorOverride?: string | null };
+type Section = { id: string; title: string };
 
 type Props = {
   t: (key: string) => string;
@@ -34,6 +36,10 @@ type Props = {
   handleCreateProjectEarly: () => void;
   handleConvertToProject: () => void;
   selectProjectEarly: (id: string | null) => void;
+
+  projectSections?: Section[];
+  selectedSectionId?: string | null;
+  selectSection?: (id: string | null) => void;
 };
 
 export function InboxProjectSection({
@@ -60,8 +66,12 @@ export function InboxProjectSection({
   handleCreateProjectEarly,
   handleConvertToProject,
   selectProjectEarly,
+  projectSections = [],
+  selectedSectionId = null,
+  selectSection,
 }: Props) {
   const filledButton = useFilledButtonColors();
+  const areas = useTaskStore((state) => state.areas);
   if (!show) return null;
 
   const areaOptions = Array.from(areaById.values());
@@ -136,6 +146,66 @@ export function InboxProjectSection({
     );
   };
 
+  const renderSectionPicker = () => {
+    if (!showProjectField || !selectedProjectId || projectSections.length === 0 || !selectSection) return null;
+    const sectionLabel = t('taskEdit.sectionLabel');
+    const options = [{ id: null, title: t('taskEdit.noSectionOption') }, ...projectSections];
+    return (
+      <View style={styles.projectFieldGroup}>
+        <Text style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>{sectionLabel}</Text>
+        <View style={styles.projectListContainer}>
+          {options.map((section) => {
+            const isSelected = (selectedSectionId ?? null) === section.id;
+            return (
+              <TouchableOpacity
+                key={section.id ?? 'none'}
+                accessibilityRole="button"
+                accessibilityLabel={optionLabel(sectionLabel, section.title)}
+                style={[
+                  styles.projectChip,
+                  isSelected
+                    ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
+                    : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
+                ]}
+                onPress={() => selectSection(section.id)}
+                accessibilityState={{ selected: isSelected }}
+              >
+                <Text style={[styles.projectChipText, { color: tc.text }]}>
+                  {isSelected && section.id === null ? '✓ ' : ''}{section.title}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
+
+
+  const projectGroups = groupProjectsForPicker(filteredProjects, areas);
+  const renderProjectChip = (project: Project) => {
+    const projectColor = getProjectAccentColor(project, areaById);
+    const isSelected = selectedProjectId === project.id;
+    return (
+      <TouchableOpacity
+        key={project.id}
+        accessibilityRole="button"
+        accessibilityLabel={optionLabel(projectLabel, project.title)}
+        style={[
+          styles.projectChip,
+          isSelected
+            ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
+            : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
+        ]}
+        onPress={() => selectProjectEarly(project.id)}
+        accessibilityState={{ selected: isSelected }}
+      >
+        <View style={[styles.projectDot, { backgroundColor: projectColor || tc.secondaryText }]} />
+        <Text style={[styles.projectChipText, { color: tc.text }]}>{project.title}</Text>
+      </TouchableOpacity>
+    );
+  };
+
   const renderProjectPicker = () => {
     const noProjectSelected = !selectedProjectId;
     return (
@@ -154,6 +224,7 @@ export function InboxProjectSection({
           <Text style={[styles.projectChipText, { color: tc.text }]}>✓ {currentProject.title}</Text>
         </TouchableOpacity>
       )}
+      {renderSectionPicker()}
       {renderAreaPicker()}
       {showProjectField && (
         <>
@@ -196,28 +267,16 @@ export function InboxProjectSection({
                 {noProjectSelected ? '✓ ' : ''}{t('inbox.noProject')}
               </Text>
             </TouchableOpacity>
-            {filteredProjects.map((project) => {
-              const projectColor = project.areaId ? areaById.get(project.areaId)?.color : undefined;
-              const isSelected = selectedProjectId === project.id;
-              return (
-                <TouchableOpacity
-                  key={project.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={optionLabel(projectLabel, project.title)}
-                  style={[
-                    styles.projectChip,
-                    isSelected
-                      ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
-                      : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
-                  ]}
-                  onPress={() => selectProjectEarly(project.id)}
-                  accessibilityState={{ selected: isSelected }}
-                >
-                  <View style={[styles.projectDot, { backgroundColor: projectColor || tc.secondaryText }]} />
-                  <Text style={[styles.projectChipText, { color: tc.text }]}>{project.title}</Text>
-                </TouchableOpacity>
-              );
-            })}
+            {[projectGroups.active, projectGroups.deferred].map((group, groupIndex) => (
+              <React.Fragment key={groupIndex === 0 ? 'active' : 'deferred'}>
+                {groupIndex === 1 && group.length > 0 ? (
+                  <Text style={[styles.projectFieldLabel, { color: tc.secondaryText, marginBottom: 8 }]} accessibilityRole="header">
+                    {tFallback(t, 'projects.deferredSection', 'Someday / Waiting')}
+                  </Text>
+                ) : null}
+                {group.map(renderProjectChip)}
+              </React.Fragment>
+            ))}
           </View>
         </>
       )}
@@ -235,10 +294,10 @@ export function InboxProjectSection({
             <Text style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>
               {t('process.nextAction')}
             </Text>
-            {/* Enter chains into a fresh action row (desktop parity) and keeps
-                the keyboard up — blurring here collapses the Android keyboard
-                inset and makes the sheet visibly jump (#827 rc.3 feedback).
-                The Create project button is the only way to finish the step. */}
+            {
+
+
+                                                                                }
             <TextInput
               value={nextActionDraft}
               onChangeText={setNextActionDraft}
@@ -304,8 +363,8 @@ export function InboxProjectSection({
       <View style={styles.stepQuestionRow}>
         <Folder size={20} color={tc.text} accessible={false} />
         <Text style={[styles.stepQuestion, styles.stepQuestionInline, { color: tc.text }]}>
-          {/* The "more than one step?" question is its own step now; this
-              section is the answer's field, whichever way it went. */}
+          {
+                                                                      }
           {showProjectField && convertToProject ? t('projects.title') : t('inbox.assignProjectQuestion')}
         </Text>
       </View>

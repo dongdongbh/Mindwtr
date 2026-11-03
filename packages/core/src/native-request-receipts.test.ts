@@ -14,7 +14,7 @@ const ok = <T,>(value: T): NativeHostResult<T> => ({ ok: true, value });
 const saveFailed: NativeHostResult<never> = { ok: false, error: { code: 'SAVE_FAILED', message: 'disk unavailable' } };
 afterEach(() => resetNativeRequestReceipts());
 
-/** A save that fails while `failing` is set, and can be held open. */
+
 function createSave() {
     const state = { failing: false, calls: 0, hold: null as Promise<void> | null };
     const save = vi.fn(async (): Promise<NativeHostResult<null>> => {
@@ -67,7 +67,7 @@ describe('native request receipts', () => {
             expect(receipts.saved(ids[0], payloads[0])).toEqual(ok({ original: true }));
             expect(receipts.saved(ids[1], payloads[1])).toEqual(ok({ original: true }));
             expect(receipts.saved(ids[2], payloads[2])).toBeNull();
-            // An explicit empty snapshot restores normal expiry; unknown scoped rows stay reserved.
+
             expect(await pruneNativeRequestReceipts(sqlite.client, new Date('2026-10-09T00:00:00.000Z'), {
                 retainedRequestIds: [], retainedCommands: [],
             })).toBe(2);
@@ -119,13 +119,14 @@ describe('native request receipts', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(receipts.saved(otherId, otherPayload)).toBeNull();
         expect(receipts.checkIdentity(otherId, payload)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        expect(writes).toHaveLength(1); // schema creation only; loader never rewrites unknown rows
-        expect(await pruneNativeRequestReceipts(client, new Date('2026-12-01T00:00:00.000Z'))).toBe(1);
         expect(writes).toHaveLength(2);
-        expect(writes[1].sql).toBe('DELETE FROM native_request_receipts WHERE request_id = ? AND saved_at < ?');
-        expect(writes[1].params?.[0]).toBe(appId); // unknown other row remains on disk
+        expect(writes.every((write) => write.sql.startsWith('CREATE TABLE IF NOT EXISTS'))).toBe(true);
+        expect(await pruneNativeRequestReceipts(client, new Date('2026-12-01T00:00:00.000Z'))).toBe(1);
+        expect(writes).toHaveLength(3);
+        expect(writes[2].sql).toBe('DELETE FROM native_request_receipts WHERE request_id = ? AND saved_at < ?');
+        expect(writes[2].params?.[0]).toBe(appId);
         resetNativeRequestReceipts();
-        expect(await loadNativeRequestReceipts(client)).toBe(2); // Android default still reads all
+        expect(await loadNativeRequestReceipts(client)).toBe(2);
         expect(createNativeRequestReceipts({ save }).saved(otherId, otherPayload)).toEqual(ok({ legacy: true }));
     });
 
@@ -222,11 +223,11 @@ describe('native request receipts', () => {
             ok: false, error: { code: 'ACTION_FAILED', message: 'Earlier changes are not saved yet. Retry them first.' },
         });
         expect(writes[3]).not.toHaveBeenCalled();
-        // Storage recovers: the first write's retry saves every earlier write.
+
         state.failing = false;
         expect(await receipts.run(ids[0], 'x', writes[0])).toEqual(ok(0));
         expect(await receipts.run(ids[3], 'x', writes[3])).toEqual(ok(3));
-        // The saved entry that made room is gone; the others still answer without writing.
+
         expect(await receipts.run(ids[2], 'x', writes[2])).toEqual(ok(2));
         expect(writes.map((write) => write.mock.calls.length)).toEqual([1, 1, 1, 1]);
     });
@@ -241,7 +242,7 @@ describe('native request receipts', () => {
         expect(await receipts.run(unsaved, 'x', write)).toEqual(saveFailed);
         expect(await receipts.run(next, 'x', write)).toEqual(saveFailed);
         state.failing = false;
-        // The unsaved write kept its receipt: its retry saves and does not write again.
+
         expect(await receipts.run(unsaved, 'x', write)).toEqual(ok('w'));
         expect(write).toHaveBeenCalledTimes(3);
     });
@@ -249,7 +250,7 @@ describe('native request receipts', () => {
     it('keeps a write that landed while its save failed: a retry only saves, and answers with its value', async () => {
         const { save } = createSave();
         const receipts = createNativeRequestReceipts({ save });
-        // The store applied the change in memory, then could not save it.
+
         const write = vi.fn(async () => settleWrite(saveFailed as NativeHostResult<null>, 'moved'));
         const id = generateUUID();
         expect(await receipts.run(id, 'a', write)).toEqual(saveFailed);
@@ -263,12 +264,12 @@ describe('native request receipts', () => {
     it('says a store call landed only when it changed the store\'s data', async () => {
         resetForTests();
         useTaskStore.setState({ persistenceFailure: { message: 'disk unavailable', failedAt: '2026-09-24T00:00:00.000Z', retrying: false } });
-        // Refused before it changed anything: it did not land, whatever earlier save failed.
+
         expect(await runStoreWrite(async () => ({ success: false, error: 'Task not found' })))
             .toEqual({ ok: false, error: { code: 'ACTION_FAILED', message: 'Task not found' } });
         expect(await runStoreWrite(async () => { throw new Error('boom'); }))
             .toEqual({ ok: false, error: { code: 'ACTION_FAILED', message: 'boom' } });
-        // Changed the data, then failed to save it: it landed.
+
         expect(await runStoreWrite(async () => {
             useTaskStore.setState({ _allTasks: [] });
             return { success: false, error: 'Failed to save' };
@@ -287,12 +288,12 @@ describe('native request receipts', () => {
         await vi.waitFor(() => expect(state.calls).toBe(1));
         state.hold = null;
         state.failing = true;
-        // The second write lands while the first save is still running, and its own save fails.
+
         expect(await receipts.run(second, 'x', async () => ok(2))).toEqual(saveFailed);
         state.failing = false;
         release();
         expect(await firstRun).toEqual(ok(1));
-        // So its retry still saves.
+
         const calls = state.calls;
         expect(await receipts.run(second, 'x', async () => ok(99))).toEqual(ok(2));
         expect(state.calls).toBe(calls + 1);

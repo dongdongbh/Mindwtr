@@ -6,13 +6,13 @@ import { normalizeOptionalContainerId, resolveTaskContainerAssignment } from './
 import { resolveDefaultNewTaskAreaId } from './area-utils';
 import { normalizeCancellationTimestamp, normalizeTaskLifecycleFields } from './task-status';
 import { normalizeRecurrenceForLoad } from './recurrence';
-import { normalizeRepeatReminderMinutes } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
 import { resolveTaskFocusCreation } from './focus-star';
 import { isTaskFutureFocusCandidate, isTaskFutureFocusCandidateBeforeBoundary, type FocusDateLookup } from './task-utils';
 
 const hasOwnField = (value: object, field: PropertyKey) => Object.prototype.hasOwnProperty.call(value, field);
 
-/** The task factory shared by ordinary creation and journaled native capture. */
+
 export function buildNewTask({
     title, initialTaskProps, id, now, deviceId, state, tasks, focusedCount, focusTaskLimit, projectOrderReserver, endOfTodayIso, frozenDates,
 }: {
@@ -26,7 +26,7 @@ export function buildNewTask({
     focusedCount: number;
     focusTaskLimit: number;
     projectOrderReserver: ProjectOrderReserver;
-    /** Native prepared creation only; ordinary RN callers use the current local day. */
+
     endOfTodayIso?: string;
     frozenDates?: FocusDateLookup;
 }): { ok: true; task: Task; focusedCount: number } | { ok: false; error: string } {
@@ -50,9 +50,8 @@ export function buildNewTask({
     }
 
     const resolvedStatus = (initialTaskProps.status ?? 'inbox') as TaskStatus;
-    // Unlike the star creation path below there is no focus cap or
-    // eligibility gate here: nothing is being starred. See
-    // resolveCaptureStatusForStart for the shared promotion rule.
+
+
     const cancellationTimestamp = normalizeCancellationTimestamp(initialTaskProps.cancelledAt);
     const effectiveStatus: TaskStatus = cancellationTimestamp && !hasOwnField(initialTaskProps, 'status')
         ? 'archived'
@@ -62,7 +61,7 @@ export function buildNewTask({
     const resolvedSectionId = containerResolution.sectionId;
     const resolvedAreaId = containerResolution.areaId;
     const referenceClears = resolvedStatus === 'reference'
-        ? getReferenceTaskFieldClears()
+        ? getReferenceTaskFieldClears(initialTaskProps.dueReminderLeadMinutes, initialTaskProps.startReminderLeadMinutes)
         : {};
     const explicitOrder = getTaskOrder(initialTaskProps);
     const resolvedOrder = !hasTaskOrder && resolvedProjectId
@@ -82,6 +81,8 @@ export function buildNewTask({
         pushCount: initialTaskProps.pushCount ?? 0,
         recurrence: normalizeRecurrenceForLoad(initialTaskProps.recurrence),
         repeatReminderMinutes: normalizeRepeatReminderMinutes(initialTaskProps.repeatReminderMinutes),
+        dueReminderLeadMinutes: normalizeDueReminderLeadMinutes(initialTaskProps.dueReminderLeadMinutes),
+        startReminderLeadMinutes: normalizeStartReminderLeadMinutes(initialTaskProps.startReminderLeadMinutes),
         rev: 1,
         revBy: deviceId,
         createdAt: now,
@@ -89,11 +90,8 @@ export function buildNewTask({
         deletedAt: undefined,
         purgedAt: undefined,
         archivedAt: effectiveStatus === 'archived' ? now : undefined,
-        // Synced booleans whose canonical form is an explicit `false`
-        // (sync-normalization.ts materializes both). SQLite hides the
-        // gap by re-materializing every boolean column on read, so an
-        // omission here only shows up on a path that uploads the
-        // in-memory snapshot. Keep the creation literal canonical.
+
+
         isFocusedToday: initialTaskProps.isFocusedToday ?? false,
         reminderPolicy,
         suppressMindwtrReminders: !shouldSendTaskReminders({ reminderPolicy }, state.settings),

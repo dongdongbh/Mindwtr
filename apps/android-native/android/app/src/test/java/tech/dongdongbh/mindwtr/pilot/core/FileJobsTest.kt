@@ -14,7 +14,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
-/** Review finding 2: a picked document's provider stuck in open() holds only its own call's thread, never the shared file queue. */
+
 class FileJobsTest {
     @get:Rule val folder = TemporaryFolder()
 

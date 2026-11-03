@@ -4,6 +4,7 @@ import {
   createPomodoroState,
   DEFAULT_POMODORO_DURATIONS,
   resetPomodoroState,
+  flushPendingSave,
   runStoreCommand,
   sanitizePomodoroSessionHistory,
   type PomodoroAutoStartOptions,
@@ -41,14 +42,11 @@ type Storage = Pick<typeof AsyncStorage, 'getItem' | 'setItem'>;
 type TaskStoreAccess = () => {
   tasks: Task[];
   updateTask: (id: string, updates: Partial<Task>) => Promise<unknown>;
+
+  flush?: () => Promise<void>;
 };
 
-/**
- * A finished focus session's time owed to its task: the task's time moves from `from` to `to`. It is stored with the
- * session before the task is written, and leaves the session once the task holds it, so a restart between the two
- * writes credits it exactly once: a task still at `from` takes it, a task at any other time already took it (or was
- * changed since, which wins).
- */
+
 type PomodoroCredit = { taskId: string; from?: number; to: number };
 
 const readCredits = (value: unknown): PomodoroCredit[] => (Array.isArray(value) ? value : []).flatMap((item) => {
@@ -96,7 +94,16 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
   const storage = options.storage ?? AsyncStorage;
   const getTaskStore = options.getTaskStore ?? (() => {
     const state = useTaskStore.getState();
-    return { tasks: state.tasks, updateTask: state.updateTask };
+    return {
+      tasks: state.tasks,
+      updateTask: state.updateTask,
+
+
+      flush: async () => {
+        await flushPendingSave();
+        if (useTaskStore.getState().persistenceFailure !== null) throw new Error('The task store has an unsaved change');
+      },
+    };
   });
   const now = options.now ?? Date.now;
   let state: MobilePomodoroControllerState = {
@@ -106,10 +113,12 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
   };
   let hydrationPromise: Promise<void> | null = null;
   let persistenceQueue: Promise<void> = Promise.resolve();
-  /** Task credits owed, oldest first; stored with the session until their task holds them. */
+
   let pendingCredits: PomodoroCredit[] = [];
-  /** The owed credits a load found (the app stopped between the two writes): the diagnostics log says how each settled. */
+
   let loadedCredits = new Set<PomodoroCredit>();
+
+  const writtenCredits = new WeakSet<PomodoroCredit>();
   const listeners = new Set<() => void>();
 
   const emit = () => listeners.forEach((listener) => listener());
@@ -125,7 +134,7 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
       if (delta <= 0) continue;
       const task = tasks.find((candidate) => candidate.id === taskId);
       if (!task) continue;
-      // After a credit still owed to this task, from the time that credit leaves it at.
+
       const owed = pendingCredits.filter((credit) => credit.taskId === taskId).pop();
       const from = owed ? owed.to : task.timeSpentMinutes;
       const to = addTimeSpentMinutes(from, delta * focusMinutes);
@@ -134,23 +143,67 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
     }
   };
 
-  /** Each stored credit given to its task in order; the settled ones leave the session. Answers whether any settled. */
+  const payloadOf = (credits: PomodoroCredit[]): StoredPomodoroSession & { pendingCredits?: PomodoroCredit[] } => ({
+    ...serializePomodoroSession(state),
+    updatedAtMs: state.updatedAtMs,
+    ...(credits.length > 0 ? { pendingCredits: credits } : {}),
+  });
+
+
   const settleCredits = async (credits: PomodoroCredit[]): Promise<boolean> => {
     let settled = 0;
     for (const credit of credits) {
-      // The from check and the write run as one command, so a time a sync save brought is never overwritten.
+
       const outcome = await runStoreCommand(async () => {
         const task = getTaskStore().tasks.find((candidate) => candidate.id === credit.taskId);
-        if (!task || task.timeSpentMinutes !== credit.from) return 'already-applied';
+        if (!task) return 'already-applied';
+
+        if (task.timeSpentMinutes === credit.to && credit.to !== credit.from) return 'written';
+        if (task.timeSpentMinutes !== credit.from) {
+
+
+          if (loadedCredits.has(credit) || writtenCredits.has(credit)) return 'already-applied';
+          const from = task.timeSpentMinutes;
+          let chainTo = credit.to;
+          credit.to = addTimeSpentMinutes(from, credit.to - (credit.from ?? 0)) ?? credit.to;
+          if (from === undefined) delete credit.from; else credit.from = from;
+
+          let movedTo = credit.to;
+          for (const later of pendingCredits.slice(pendingCredits.indexOf(credit) + 1)) {
+            if (later.taskId !== credit.taskId || later.from !== chainTo || loadedCredits.has(later)) continue;
+            chainTo = later.to;
+            later.to = addTimeSpentMinutes(movedTo, later.to - later.from) ?? later.to;
+            later.from = movedTo;
+            movedTo = later.to;
+          }
+
+          if (!await storage.setItem(POMODORO_SESSION_STORAGE_KEY, JSON.stringify(payloadOf(pendingCredits))).then(() => true, () => false)) return null;
+          void logInfo('Pomodoro credit moved onto the task time', {
+            scope: 'pomodoro',
+            extra: { releaseCheck: 'v1.3.8/pomodoro-credit-moved', outcome: 'moved' },
+          });
+        }
         const result = await getTaskStore().updateTask(credit.taskId, { timeSpentMinutes: credit.to }).catch(() => ({ success: false }));
-        return (result as { success?: boolean } | undefined)?.success === false ? null : 'applied';
+        if ((result as { success?: boolean } | undefined)?.success === false) return null;
+        writtenCredits.add(credit);
+        return 'applied';
       });
       if (!outcome) break;
+
+
+      if (outcome !== 'already-applied' && !await (getTaskStore().flush?.() ?? Promise.resolve()).then(() => true, () => false)) {
+        void logWarn('Pomodoro credit kept owed: the task save did not finish', {
+          scope: 'pomodoro',
+          extra: { releaseCheck: 'v1.3.8/pomodoro-credit-durable', outcome: 'owed' },
+        });
+        break;
+      }
       settled += 1;
       if (loadedCredits.has(credit)) {
         void logInfo('Pomodoro credit replayed after a restart', {
           scope: 'pomodoro',
-          extra: { releaseCheck: 'v1.3.5/pomodoro-credit-once', outcome },
+
+          extra: { releaseCheck: 'v1.3.5/pomodoro-credit-once', outcome: outcome === 'written' ? 'already-applied' : outcome },
         });
       }
     }
@@ -162,15 +215,11 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
 
   const persist = () => {
     const credits = pendingCredits.slice();
-    const payload: StoredPomodoroSession & { pendingCredits?: PomodoroCredit[] } = {
-      ...serializePomodoroSession(state),
-      updatedAtMs: state.updatedAtMs,
-      ...(credits.length > 0 ? { pendingCredits: credits } : {}),
-    };
+    const payload = payloadOf(credits);
     persistenceQueue = persistenceQueue
       .catch(() => undefined)
       .then(() => storage.setItem(POMODORO_SESSION_STORAGE_KEY, JSON.stringify(payload)))
-      // The credits are stored with the session first; once their task holds them, the session is stored without them.
+
       .then(async () => {
         if (credits.length > 0 && await settleCredits(credits)) persist();
       });
@@ -184,7 +233,7 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
 
   const replaceSession = (
     next: ResolvedPomodoroSession,
-    config: { persist?: boolean; updatedAtMs?: number; previousHistory?: PomodoroSessionHistory } = {},
+    config: { persist?: boolean; updatedAtMs?: number; previousHistory?: PomodoroSessionHistory; creditFocusMinutes?: number } = {},
   ): boolean => {
     const previousHistory = config.previousHistory ?? state.sessionHistory;
     const changed = !sessionEquals(state, next)
@@ -192,7 +241,7 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
       || state.isHydrating;
     if (!changed) return false;
     const owed = pendingCredits.length;
-    queueCredits(previousHistory, next.sessionHistory, next.durations.focusMinutes);
+    queueCredits(previousHistory, next.sessionHistory, config.creditFocusMinutes ?? next.durations.focusMinutes);
     state = {
       ...next,
       isHydrating: false,
@@ -214,7 +263,7 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
           return;
         }
         const parsed = JSON.parse(raw) as StoredPomodoroSession & { pendingCredits?: unknown };
-        // Credits a session stored before its task held them (the app stopped in between): settled with this load.
+
         pendingCredits = readCredits(parsed.pendingCredits);
         loadedCredits = new Set(pendingCredits);
         const previousHistory = sanitizePomodoroSessionHistory(parsed.sessionHistory);
@@ -250,9 +299,17 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
     autoStartOptions: PomodoroAutoStartOptions = {},
     nowMs = now(),
   ): boolean => {
+    const completedBeforeAction = state.sessionHistory.totalCompletedFocusSessions;
     const current = resolvePomodoroSession(state, nowMs, autoStartOptions);
     const updatedAtMs = Math.max(nowMs, state.updatedAtMs + 1);
-    return replaceSession(mutation(current, nowMs), { updatedAtMs });
+    const changed = replaceSession(mutation(current, nowMs), { updatedAtMs, creditFocusMinutes: current.durations.focusMinutes });
+    if (changed && current.sessionHistory.totalCompletedFocusSessions > completedBeforeAction) {
+      void logInfo('Pomodoro elapsed focus boundary resolved before action', {
+        scope: 'pomodoro',
+        extra: { releaseCheck: 'v1.3.5/pomodoro-rn-boundary', outcome: 'elapsed-focus-resolved' },
+      }).catch(() => undefined);
+    }
+    return changed;
   };
 
   const setDurations = (durations: PomodoroDurations, autoStartOptions: PomodoroAutoStartOptions = {}) => mutate((current) => ({
@@ -306,8 +363,8 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
     const effectiveCommandMs = Number.isFinite(commandMs) ? commandMs : now();
     if (effectiveCommandMs < state.updatedAtMs) return 'stale';
     if (effectiveCommandMs === state.updatedAtMs && state.updatedAtMs > 0) {
-      // A queue replay after a failed AsyncStorage write retries durability;
-      // a replay after success is an idempotent extra write.
+
+
       persist();
       await persistenceQueue;
       return 'already-applied';
@@ -413,7 +470,7 @@ const getNotificationSnapshot = (): MobilePomodoroNotificationState => {
   return notificationSnapshot;
 };
 
-/** Stable selector: second-by-second remaining time cannot rerender RootLayout. */
+
 export const useMobilePomodoroNotificationState = (): MobilePomodoroNotificationState => (
   useSyncExternalStore(
     mobilePomodoroController.subscribe,

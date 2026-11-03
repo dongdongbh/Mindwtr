@@ -53,7 +53,7 @@ const readRequest = (input: unknown): NativeSomedaySectionDeleteRequest | null =
     return request;
 };
 
-/** Pure journal validation, before SQLite opens. */
+
 export function validateSomedaySectionDeleteWrite(input: unknown): NativeHostResult<NativeSomedaySectionDeleteResult> {
     const request = readRequest(input);
     return request ? { ok: true, value: answer(request) }
@@ -149,7 +149,7 @@ export function createSomedaySectionDeleteMethods(deps: {
                     buildSomedaySectionsSettingsUpdate(settings, plannedSections(request))));
                 return settleWrite(written, answer(request));
             });
-            // A saved receipt cannot acknowledge a later changed or recreated array.
+
             return outcome.ok ? target(request) : outcome;
         },
     };

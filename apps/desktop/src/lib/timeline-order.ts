@@ -18,7 +18,7 @@ export type TimelineOrderSnapshot = { target: TimelineOrderTarget; token: string
 export const timelineOrderScope = (target: TimelineOrderTarget): string => JSON.stringify(target.kind === 'project'
     ? ['project', target.areaId ?? null] : ['task', target.projectId, target.sectionId]);
 
-/** Capture the whole ordering scope, including work hidden by dates or filters. */
+
 export function captureTimelineOrder(target: TimelineOrderTarget, state: TaskStore = useTaskStore.getState()): TimelineOrderSnapshot | null {
     const project = state._allProjects.find((row) => row.id === (target.kind === 'project' ? target.id : target.projectId));
     if (!project || project.deletedAt || project.purgedAt || project.status === 'archived') return null;
@@ -67,7 +67,7 @@ export function commitTimelineOrder(snapshot: TimelineOrderSnapshot, over: Timel
         const write = snapshot.target.kind === 'project'
             ? state.reorderProjects(orderedIds, snapshot.target.areaId)
             : state.reorderProjectTasks(snapshot.target.projectId, orderedIds, snapshot.target.sectionId, snapshot.target.id);
-        // Store order mutations apply synchronously, before yielding to persistence.
+
         const applied = captureTimelineOrder(snapshot.target);
         await write;
         if (!applied || applied.token === live.token) return 'noop';

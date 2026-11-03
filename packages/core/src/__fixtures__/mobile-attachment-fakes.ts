@@ -1,5 +1,5 @@
-// In-memory hosts for the mobile attachment modules' tests: a file system with the React
-// Native layout (`<files>/attachments/`), a key-value store and a log that records its lines.
+
+
 import type { MobileAttachmentFileSystemPort, MobileAttachmentSafPort } from '../mobile-attachment-files';
 import type { SyncKeyValueStoragePort } from '../sync-storage-keys';
 
@@ -13,7 +13,7 @@ export const createMemoryFileSystem = (options: { saf?: MobileAttachmentSafPort;
   const files = new Map<string, { bytes: Uint8Array; mtimeMs: number }>();
   const directories = new Set<string>();
   const calls: string[] = [];
-  /** A fault makes the next matching call throw. */
+
   const faults: { op: FileOp; uri?: string; error: unknown }[] = [];
   let clock = 1_000_000;
 
@@ -38,7 +38,7 @@ export const createMemoryFileSystem = (options: { saf?: MobileAttachmentSafPort;
       enter('getInfo', uri);
       const file = files.get(uri);
       if (file) return { exists: true, size: file.bytes.byteLength, modificationTime: file.mtimeMs / 1000 };
-      return { exists: directories.has(uri) };
+      return directories.has(uri) ? { exists: true, isDirectory: true } : { exists: false };
     },
     makeDirectory: async (uri) => {
       enter('makeDirectory', uri);
@@ -46,8 +46,10 @@ export const createMemoryFileSystem = (options: { saf?: MobileAttachmentSafPort;
     },
     readDirectory: async (uri) => {
       enter('readDirectory', uri);
-      return [...files.keys()]
-        .filter((key) => key.startsWith(uri) && !key.slice(uri.length).includes('/'))
+
+      const subfolders = [...directories].map((dir) => dir.replace(/\/$/, ''))
+        .filter((dir) => dir.startsWith(uri) && dir.length > uri.length && !dir.slice(uri.length).includes('/'));
+      return [...[...files.keys()].filter((key) => key.startsWith(uri) && !key.slice(uri.length).includes('/')), ...subfolders]
         .map((key) => key.slice(uri.length));
     },
     readBytes: async (uri) => {

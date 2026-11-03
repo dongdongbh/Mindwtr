@@ -3,14 +3,12 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// The installed expo-share-intent, as patches/expo-share-intent@5.1.1.patch leaves it (bun applies the patch on install;
-// scripts/ci/apply_bun_patches.sh applies it to npm installs). The module has no test set, so these pin its source: each
-// security expression exactly, and each pin is shown to fail on the change it guards against (the mutations below).
+
 const require = createRequire(import.meta.url);
 const moduleSource = readFileSync(path.join(path.dirname(require.resolve('expo-share-intent/package.json')),
     'android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt'), 'utf8');
 
-/** One function's text: from `fun name(` to the closing brace at its own indent. */
+
 const body = (source: string, name: string) => {
     const start = source.indexOf(`fun ${name}(`);
     if (start < 0) return '';
@@ -20,7 +18,7 @@ const body = (source: string, name: string) => {
     return source.slice(start, end < 0 ? undefined : end);
 };
 
-/** The pins that fail on [source]: empty when every security expression is in place. */
+
 const failedPins = (source: string): string[] => {
     const guard = body(source, 'isForeignContentUri');
     const handle = body(source, 'handleShareIntent');
@@ -28,25 +26,25 @@ const failedPins = (source: string): string[] => {
     const resolve = body(source, 'getAbsolutePath');
     const info = body(source, 'getFileInfo');
     const pins: [string, boolean][] = [
-        // A hostile share (Dirty Stream): only another app's content URI is taken.
+
         ['scheme', guard.includes('if (!"content".equals(uri.scheme, ignoreCase = true)) return false')],
-        // ContentResolver opens content://0@<authority> as <authority>: the check looks up that same name.
+
         ['authority', guard.includes("val authority = uri.authority?.substringAfterLast('@')?.takeIf { it.isNotEmpty() } ?: return false")],
         ['owner', guard.includes('return owner != context.packageName')],
         ['lookup error', /resolveContentProvider\(authority, 0\)\?\.packageName\n\s*\} catch \(e: Exception\) \{\n\s*return false\n/.test(guard)],
         ['one file', handle.includes('if (uri != null && isForeignContentUri(uri))')],
         ['several files', handle.includes('EXTRA_STREAM)?.filter { isForeignContentUri(it) }')],
-        // The cache copy's name is generated; the display name is a title only.
+
         ['extension', cacheFile.includes('?.takeIf { it.matches(Regex("[A-Za-z0-9]{1,8}")) }')],
         ['cache name', cacheFile.includes('return File(context.cacheDir, "share-${UUID.randomUUID()}" + (extension?.let { ".$it" } ?: ""))')],
         ['no name in path', !/File\(context\.cacheDir,[^\n]*displayName/.test(source) && !/File\(context\.cacheDir,\s*fileName\)/.test(source)],
         ['copy uses it', body(source, 'getDataColumn').includes('val targetFile = sharedCacheFile(displayName, resolver.getType(uri))')],
-        // A shared-storage document is copied through its provider (the sender's grant), never read by a built path.
+
         ['no built path', !source.includes('getExternalStorageDirectory()')
             && /isExternalStorageDocument\(uri\)\) \{\n(\s*\/\/[^\n]*\n)*\s*return getDataColumn\(uri, null, null\)\n/.test(resolve)],
-        // One copy per shared file.
+
         ['one copy', info.includes('retriever.setDataSource(filePath)') && info.includes('"filePath" to filePath,')],
-        // No URI in an error message (it reaches the diagnostics log).
+
         ['no uri in errors', !/notifyError\([^\n]*\$uri/.test(source)],
     ];
     return pins.filter(([, ok]) => !ok).map(([name]) => name);

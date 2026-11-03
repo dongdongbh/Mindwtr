@@ -3,8 +3,7 @@ import CoreFoundation
 import CryptoKit
 import CMindwtrArgon2
 
-/// Two retained slots cover admitted work and undelivered bytes. Crypto never
-/// enters JSC/SQLite and ordinary caller cancellation does not abort a primitive.
+
 final class NativeCryptoJobs: @unchecked Sendable {
     static let maximumBytes = 8 * 1024 * 1024
     private let lock = NSLock()
@@ -95,7 +94,7 @@ final class NativeCryptoJobs: @unchecked Sendable {
         let token = NativeAttachmentCancellation(), registryID = UUID()
         registry.register(token, id: registryID)
         lock.lock()
-        // Reserve before JSON/base64 decoding, including a not-yet-enqueued request.
+
         guard accepting, !token.isCancelled, jobs.count + reserved < 2, sequence < UInt64.max else {
             lock.unlock(); registry.remove(registryID)
             throw HostFailure("Crypto bridge is unavailable or at capacity")
@@ -201,14 +200,14 @@ final class NativeCryptoJobs: @unchecked Sendable {
         guard !job.token.isCancelled else { throw HostFailure("I/O response body is unavailable") }
         return (encoded, true)
     }
-    /// Wait for an accepted primitive before its owning invocation releases.
+
     func drain() { worker.sync {} }
 
     func shutdown() {
         lock.lock(); accepting = false; wake = nil; let current = Array(jobs.values); lock.unlock()
         current.forEach { $0.token.cancel() }
-        // A bounded running KDF has no truthful midcall cancellation. No Engine
-        // callback is needed to finish this serial barrier and release ownership.
+
+
         worker.sync {}
         current.forEach { job in job.clearInputs(); Self.clear(&job.output); registry.remove(job.registryID) }
         lock.lock(); jobs.removeAll(); ready.removeAll(); taken = nil; lock.unlock()

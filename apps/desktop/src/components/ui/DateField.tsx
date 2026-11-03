@@ -47,10 +47,7 @@ function parseDateInputDate(value: string): Date | null {
     return parsed;
 }
 
-/**
- * A year-less entry ("1/1") means the next occurrence of that day and month:
- * this year while it is still ahead, next year once it has passed (#1050).
- */
+
 function resolveYearlessDate(month: string, day: string): string | null {
     if (month.length > 2 || day.length > 2) return null;
     const now = new Date();
@@ -132,12 +129,7 @@ function formatDateInputDisplay(value: string, order: DateInputOrder, calendarSy
     return `${year}-${month}-${day}`;
 }
 
-/**
- * `lenient` additionally accepts year-less ("1/1") and 2-digit-year ("1/1/27")
- * entry. Those forms only resolve when the user leaves the field: completing
- * them on every keystroke committed a date mid-typing, which rewrote the text
- * under the user and made "1/1/27" impossible to type (#1050).
- */
+
 function parseDateInputDisplay(
     value: string,
     order: DateInputOrder,
@@ -168,7 +160,7 @@ function parseDateInputDisplay(
     const parts = trimmed.match(/\d{1,4}/g);
     if (!parts) return null;
     if (parts.length === 2 && lenient) {
-        // ymd has no year to lead with here, so its two-part form reads month/day.
+
         return order === 'dmy'
             ? resolveYearlessDate(parts[1], parts[0])
             : resolveYearlessDate(parts[0], parts[1]);
@@ -188,7 +180,7 @@ function parseDateInputDisplay(
         [year, month, day] = parts;
     }
 
-    // A 2-digit year is read as the 2000s: "1/1/27" is 2027 (#1050).
+
     if (year.length === 2 && lenient) year = String(2000 + Number(year));
     if (year.length !== 4) return null;
     const normalized = normalizeDateInputValue(
@@ -199,9 +191,9 @@ function parseDateInputDisplay(
 
 type DateFieldProps = {
     t: (key: string) => string;
-    /** Rendered above the input. Omit when the host already labels the field. */
+
     label?: string;
-    /** Leading icon for the rendered label, per the shared editor vocabulary. */
+
     labelIcon?: LucideIcon;
     labelToken?: string;
     dateAriaLabel: string;
@@ -212,23 +204,18 @@ type DateFieldProps = {
     dateInputClassName: string;
     timeInput?: ReactNode;
     onDateChange: (value: string) => void;
-    /** Omit where the value cannot be emptied: no clear button, and typing the
-     *  field empty reverts on blur instead of committing a clear. */
+
+
     onClear?: () => void;
     onDateOnly?: () => void;
     hasValue?: boolean;
-    /** Focus the date input on mount, for hosts that open with this field ready. */
+
     autoFocus?: boolean;
-    /** Merged onto the root; hosts widen past the editor's 22rem cap with it. */
+
     className?: string;
 };
 
-/**
- * The one desktop date input: locale-ordered display, Jalali calendar support,
- * and a positioned calendar popover with quick-date suggestions. Every
- * user-facing date on desktop goes through this so a Jalali user never meets a
- * Gregorian control halfway through a flow.
- */
+
 export function DateField({
     t,
     label,
@@ -311,8 +298,7 @@ export function DateField({
         setDraftDateValue(formatDateInputDisplay(dateValue, dateInputOrder, calendarSystem));
     }, [calendarSystem, dateInputOrder, dateValue]);
 
-    /** Leaving the field completes lenient-only forms ("1/1", "1/1/27"); an
-     *  unparseable draft still reverts to the saved value. */
+
     const commitOrResetFieldState = useCallback(() => {
         const parsed = parseDateInputDisplay(draftDateValue, dateInputOrder, calendarSystem, true);
         if (parsed && parsed !== dateValue) {
@@ -377,19 +363,15 @@ export function DateField({
         }
         onDateChange(parsed);
     };
-    // Unparseable text never commits (blur reverts to the saved value), but
-    // without a signal it looked accepted while typed (#1050).
+
+
     const isDraftInvalid = draftDateValue.trim() !== ''
         && parseDateInputDisplay(draftDateValue, dateInputOrder, calendarSystem, true) === null;
-    // The border turns while typing, but `aria-invalid` only after the field is
-    // left: a half-typed date is invalid on nearly every keystroke, and flipping
-    // the attribute each time makes a screen reader call the field invalid before
-    // the user has finished entering a date that will parse fine.
+
+
     const announceInvalid = isDraftInvalid && announceDraftInvalid;
-    // Date-field buttons keep focus on the text field while pressed. WebKit on macOS does not
-    // focus a button on click, so without this the field blurs to nothing and deferred cleanup
-    // can undo the button action (#1254, #1265, #1266). Chromium and WebKitGTK focus the clicked
-    // button, which is why it never showed on Windows or Linux.
+
+
     const keepFieldFocus = (event: ReactMouseEvent<HTMLButtonElement>) => event.preventDefault();
     const applyCalendarDate = (date: Date) => {
         const nextDateValue = safeFormatDate(date, 'yyyy-MM-dd');
@@ -442,10 +424,8 @@ export function DateField({
                         aria-invalid={announceInvalid || undefined}
                         onChange={(event) => handleDateInputChange(event.target.value)}
                         onBlur={() => setAnnounceDraftInvalid(true)}
-                        // The calendar icon is a small target, so the whole field opens the
-                        // popover (#896). openCalendar only positions and shows it — it never
-                        // moves focus — so the caret stays where it was clicked and the date
-                        // can still be typed straight over it.
+
+
                         onClick={openCalendar}
                         onKeyDown={(event) => {
                             if (event.key === 'Escape') {

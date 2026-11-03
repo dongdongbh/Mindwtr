@@ -1,5 +1,44 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const deOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Vor dem Start",
+    "settings.gmailCapture": "Gmail",
+    "settings.gmailCaptureDesc": "Verbinde Google und erfasse E-Mails mit einem Label deiner Wahl.",
+    "settings.gmailCaptureDisclosure": "Google gewährt schreibgeschützten Zugriff auf dein gesamtes Postfach, obwohl Mindwtr nur E-Mails mit dem ausgewählten Label importiert. Mindwtr ändert niemals E-Mails oder Labels. Importierte Absenderinformationen und E-Mail-Texte werden zu gewöhnlichen Aufgabendaten und können in deine konfigurierte Synchronisierung, Backups, Exporte oder optionale KI-Funktionen einfließen. Verwende nur ein eigens dafür vorgesehenes Testkonto.",
+    "settings.gmailCaptureUnavailable": "Die Gmail-Erfassung ist in dieser Version nicht verfügbar.",
+    "settings.gmailCaptureConnect": "Gmail verbinden",
+    "settings.gmailCaptureConnecting": "Warten auf Google…",
+    "settings.gmailCaptureCancel": "Verbindung abbrechen",
+    "settings.gmailCaptureReconnect": "Gmail erneut verbinden",
+    "settings.gmailCaptureDisconnect": "Gmail trennen",
+    "settings.gmailCaptureDisconnected": "Gmail wurde getrennt. Vorhandene Aufgaben wurden beibehalten.",
+    "settings.gmailCaptureRevokeManually": "Die lokalen Zugangsdaten wurden entfernt. Google konnte den Widerruf nicht bestätigen; entferne den Zugriff von Mindwtr in den Berechtigungen deines Google-Kontos.",
+    "settings.gmailCaptureAccount": "Verbundenes Konto",
+    "settings.gmailCaptureLabel": "Gmail-Label",
+    "settings.gmailCaptureChooseLabel": "Label auswählen",
+    "settings.gmailCaptureLabelHint": "Erstelle bei Bedarf zuerst ein Label in Gmail. Die Auswahl eines Labels startet keinen Import; bestätige mit Erfassung starten.",
+    "settings.gmailCaptureSave": "Erfassung starten / Label speichern",
+    "settings.gmailCaptureSaving": "Wird gespeichert…",
+    "settings.gmailCaptureActive": "E-Mails mit dem gespeicherten Label werden erfasst.",
+    "settings.gmailCapturePaused": "Die Erfassung pausiert, bis du ein Label bestätigst.",
+    "settings.gmailCaptureCheckNow": "Jetzt prüfen",
+    "settings.gmailCaptureChecking": "Wird geprüft…",
+    "settings.gmailCaptureLastChecked": "Zuletzt geprüft",
+    "settings.gmailCaptureNeverChecked": "Noch nicht geprüft",
+    "settings.gmailCaptureImportedCount": "{{count}} E-Mails importiert",
+    "settings.gmailCaptureFailed": "Die Gmail-Erfassung ist fehlgeschlagen. Versuche es erneut.",
+    "settings.gmailCaptureAuthFailed": "Verbinde Gmail erneut, um den Zugriff wiederherzustellen.",
+    "settings.gmailCaptureNetworkFailed": "Gmail ist vorübergehend nicht erreichbar. Die Erfassung versucht es später erneut.",
+    "settings.gmailCaptureConfigFailed": "Prüfe dein Gmail-Label und die Verbindung.",
+    "settings.gmailCaptureStorageFailed": "Die Gmail-Erfassung konnte nicht sicher speichern. Prüfe den sicheren Speicher und den verfügbaren Speicherplatz.",
+    "settings.gmailCaptureReceiptsReset": "Die Liste der bereits übernommenen E-Mails war beschädigt. Sie wurde zurückgesetzt, und die Gmail-Erfassung ist aus. Wähle ein Label und starte die Erfassung erneut.",
+    "settings.gmailCaptureCancelled": "Die Gmail-Verbindung wurde abgebrochen.",
+    "attachments.webUploadRequiresCloud": "Browser-Uploads erfordern die Synchronisierung mit einer selbst gehosteten Cloud.",
+    "attachments.webUploadEncrypted": "Für Browser-Uploads muss die Synchronisierungsverschlüsselung ausgeschaltet sein.",
+    "attachments.webUploadOffline": "Offline können keine Dateien hochgeladen werden.",
+    "attachments.webUploadChanged": "Der Entwurf oder die Synchronisierungskonfiguration wurde geändert. Wähle die Datei erneut aus.",
+    "attachments.webUploadFailed": "Der Anhang wurde nicht gespeichert.",
+    "attachments.webUploadRetry": "Versuche erneut zu speichern oder entferne die Datei, um fortzufahren.",
+    "attachments.webProjectUploadUnsupported": "Projekt-Uploads sind im Browser nicht verfügbar. Füge die Datei einer Aufgabe hinzu.",
     "projects.convertBlocked.destination-section-sequence": "Wähle ein Zielprojekt mit Sequenziell → Innerhalb von Abschnitten. Der neue Abschnitt behält seine Aufgabenreihenfolge; andere Abschnitte können unabhängig fortfahren.",
     'timeline.moveTaskDates': "Aufgabendaten verschieben",
     'timeline.moveProjectDates': "Projektdaten verschieben",
@@ -39,6 +78,8 @@ export const deOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "Die Tag-Änderung konnte nicht bestätigt werden. Starte Mindwtr neu, um die gespeicherten Daten erneut zu laden.",
     "task.copyTaskLink": "Aufgabenlink kopieren",
     "task.copyTaskId": "Aufgaben-ID kopieren",
+    "task.addToChecklist": "Zur Checkliste hinzufügen…",
+    "task.addedToChecklist": "Zur Checkliste hinzugefügt",
     "task.linkNotFound": "Diese Aufgabe ist nicht in dieser Bibliothek. Sie wurde möglicherweise gelöscht oder noch nicht mit diesem Gerät synchronisiert.",
     'task.doneCompletedAtOutcomeUnknown': "Die Änderung des Abschlusszeitpunkts konnte nicht bestätigt werden. Starte Mindwtr neu, um die gespeicherten Daten erneut zu laden.",
     'task.destinationOutcomeUnknown': "Die Änderung des Ziels konnte nicht bestätigt werden. Starte Mindwtr neu, um die gespeicherten Daten erneut zu laden.",
@@ -77,6 +118,28 @@ export const deOverrides: Record<string, string> = {
     'sandbox.confirmTitle': "Sandbox öffnen?",
     'sandbox.confirmDescription': "Nutze fiktive Aufgaben und Projekte, um einen Fehler aufzuzeichnen oder Mindwtr vorzuführen. Deine persönlichen Daten bleiben getrennt. Änderungen in der Sandbox werden beim Verlassen verworfen.",
     'sandbox.enter': "Sandbox öffnen",
+    'workspaces.title': "Arbeitsumgebungen",
+    'workspaces.description': "Halte Aufgaben, Anhänge, Sync-Server und Einstellungen auf diesem Computer getrennt. Es ist immer eine Arbeitsumgebung geöffnet, und nur sie synchronisiert und sendet Erinnerungen.",
+    'workspaces.defaultName': "Standard",
+    'workspaces.open': "Geöffnet",
+    'workspaces.add': "Arbeitsumgebung hinzufügen",
+    'workspaces.namePlaceholder': "Name der Arbeitsumgebung",
+    'workspaces.switch': "Wechseln",
+    'workspaces.switchTitle': "Arbeitsumgebung wechseln?",
+    'workspaces.switchDesc': "Mindwtr startet neu, um {{name}} zu öffnen.",
+    'workspaces.switchNow': "Jetzt wechseln",
+    'workspaces.createdTitle': "Arbeitsumgebung hinzugefügt",
+    'workspaces.later': "Später",
+    'workspaces.saveFailed': "Deine Änderungen konnten nicht gespeichert werden, deshalb wurde die Arbeitsumgebung nicht gewechselt. Versuche es erneut.",
+    'workspaces.failed': "Die Arbeitsumgebung konnte nicht geändert werden.",
+    'workspaces.deleteTitle': "{{name}} löschen?",
+    'workspaces.deleteDesc': "Dadurch werden die lokalen Aufgaben, Anhänge und Einstellungen dieser Arbeitsumgebung von diesem Computer entfernt. Auf ihrem Sync-Server ändert sich nichts.",
+    'workspaces.dataFolder': "Datenordner",
+    'workspaces.cliHint': "Der MCP-Server und die Befehlszeile öffnen die Standard-Arbeitsumgebung. Für eine andere Arbeitsumgebung gib ihre Datei mindwtr.db mit --db an.",
+    'workspaces.unavailable': "Arbeitsumgebungen sind erst verfügbar, wenn Mindwtr das Verschieben des Profilordners abgeschlossen hat. Starte Mindwtr neu und versuche es erneut.",
+    'workspaces.unreadable': "Die Liste der Arbeitsumgebungen konnte nicht gelesen werden, deshalb wurde die Standard-Arbeitsumgebung geöffnet. Prüfe die Datei workspaces.toml im Mindwtr-Konfigurationsordner.",
+    'workspaces.iCloudDefaultOnly': "iCloud-Synchronisierung ist nur in der Standard-Arbeitsumgebung verfügbar.",
+    'workspaces.switcherLabel': "Arbeitsumgebung",
     'sandbox.title': "Sandbox · Beispieldaten",
     'sandbox.exit': "Sandbox verlassen",
     'sandbox.reset': "Beispieldaten zurücksetzen",
@@ -98,7 +161,7 @@ export const deOverrides: Record<string, string> = {
         'settings.automationCaptureLoadFailed': 'Die Einstellungen für die automatisierte Erfassung konnten nicht geladen werden.',
         'settings.automationCaptureUpdateFailed': 'Die Einstellungen für die automatisierte Erfassung konnten nicht aktualisiert werden.',
         'taskEdit.quickAddTokenHint': 'Schnelles Hinzufügen: {{token}}',
-        //App
+
         'app.name': 'Mindwtr',
         'app.closeStillSavingTitle': 'Mindwtr speichert noch',
         'app.closeStillSavingBody': 'Mindwtr hat Deine letzten Änderungen noch nicht gespeichert. Trotzdem beenden? Ungespeicherte Änderungen gehen verloren.',
@@ -112,8 +175,8 @@ export const deOverrides: Record<string, string> = {
         'markdown.copyLink': "Link kopieren",
         'markdown.openLinkFailed': "Dieser Link konnte nicht geöffnet werden. Prüfe, ob die zugehörige App installiert ist. Du kannst den Link kopieren und dort öffnen.",
         'markdown.copyLinkFailed': "Dieser Link konnte nicht kopiert werden.",
-        
-        //Navigation
+
+
         'nav.main': 'Start',
         'nav.inbox': 'Eingang',
         'nav.board': 'Tafelansicht',
@@ -136,15 +199,16 @@ export const deOverrides: Record<string, string> = {
         'nav.sectionOrganize': 'Organisieren',
         'nav.sectionArchive': 'Archiv',
 
-        // Accessibility
+
         'accessibility.skipToContent': 'Weiter zum Inhalt',
         'accessibility.mainContent': 'Hauptinhalt',
-        
-        //Quick Add        
+
+
         'quickAdd.help': 'Schnell-Hinzufügen unterstützt /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> oder !Area, @context, #tag, +Project, %Person (oder %"Full Name").',
         'quickAdd.example': 'Beispiel: Mama anrufen /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tipp: Mama anrufen /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hilfe zur Schnell-Hinzufügen-Syntax',
+        'quickAdd.pasteImagesHint': 'Füge Bilder oder Screenshots mit {{shortcut}} ein, um sie anzuhängen.',
         'quickAdd.placeholder': 'Eine Aufgabe hinzufügen … benutze @context +Project #tag',
         'quickAdd.inputLabel': 'Schnelle Eingabe',
         'quickAdd.inputHint': 'Gib eine Aufgabe ein und drücke Eingabe zum Speichern.',
@@ -184,6 +248,7 @@ export const deOverrides: Record<string, string> = {
         'quickAdd.audioRecording': 'Aufnehmen…',
         'quickAdd.audioReady': 'Aufnahme bereit zum Speichern.',
         'quickAdd.audioQueued': 'Gespeichert. Die Aufnahme wird beim Öffnen von Mindwtr transkribiert.',
+        'quickAdd.textQueued': "Gespeichert. Deine Aufgabe wird beim Öffnen von Mindwtr hinzugefügt.",
         'quickAdd.audioProcessing': 'Verarbeite Sprachaufnahme…',
         'quickAdd.audioSavingSpeechToText': 'Aufnahme wird gespeichert und Sprache in Text umgewandelt.',
         'quickAdd.audioNoteTitle': 'Sprachnotiz',
@@ -200,11 +265,11 @@ export const deOverrides: Record<string, string> = {
         'quickDate.nextWeek': 'Nächste Woche',
         'quickDate.nextMonth': 'Nächster Monat',
         'quickDate.noDate': 'Kein Datum',
-        
-         // Checklist
+
+
         'checklist.progress': 'Fortschritt der Checkliste',
-        
-        // Keybindings (Desktop)
+
+
         'keybindings.helpTitle': 'Tastaturkürzel',
         'keybindings.helpSubtitle': 'Esc drücken zum Schließen',
         'keybindings.styleLabel': 'Tastaturbelegungsstil',
@@ -252,16 +317,16 @@ export const deOverrides: Record<string, string> = {
         'keybindings.list.setStatus': 'Status setzen: Eingang / Nächstes / Abwarten / Irgendwann / Erledigt / Archiviert',
         'keybindings.list.toggleDetails': 'Listendetails umschalten',
         'keybindings.list.toggleDensity': 'Dichte umschalten',
-        
-        // Tabs (Mobile)
+
+
         'tab.inbox': 'Eingang',
         'tab.next': 'Fokus',
         'tab.board': 'Tafel',
         'tab.menu': 'Menü',
         'tab.calendar': 'Kalender',
         'tab.review': 'Revision',
-        
-        // List Views
+
+
         'list.inbox': 'Eingang',
         'list.todo': 'Zu tun',
         'list.inProgress': 'In Arbeit',
@@ -291,8 +356,8 @@ export const deOverrides: Record<string, string> = {
         'reference.includeArchivedProjects': 'Archivierte Projekte einbeziehen',
         'reference.convertToAction': 'In nächste Aktion umwandeln',
         'reference.empty': 'Noch keine Referenzeinträge.',
-        
-        // Status Labels
+
+
         'status.inbox': 'Eingang',
         'status.todo': 'Zu tun',
         'status.next': 'Nächstes',
@@ -303,16 +368,21 @@ export const deOverrides: Record<string, string> = {
         'status.done': 'Erledigt',
         'status.archived': 'Archiviert',
         'status.active': 'Aktiv',
-        
-        // Priority Labels
+
+
         'priority.low': 'Niedrig',
         'priority.medium': 'Mittel',
         'priority.high': 'Hoch',
         'priority.urgent': 'Dringend',
-        
-        // Task Edit
+
+
         'taskEdit.editTask': 'Aufgabe bearbeiten',
         'taskEdit.checklist': 'Checkliste',
+        'taskEdit.dragChecklistItem': "Zum Neuordnen ziehen",
+        'taskEdit.checklistItemActions': "Aktionen für Checklisteneintrag",
+        'taskEdit.moveChecklistTop': "Ganz nach oben",
+        'taskEdit.moveChecklistBottom': "Ganz nach unten",
+        'taskEdit.addChecklistBelow': "Eintrag darunter hinzufügen",
         'taskEdit.tab.task': 'Aufgabe',
         'taskEdit.tab.list': 'Liste',
         'taskEdit.tab.view': 'Ansicht',
@@ -320,6 +390,8 @@ export const deOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Einkaufsliste?',
         'taskEdit.openChecklistMode': 'Checklisten-Modus öffnen?',
         'taskEdit.addItem': 'Element hinzufügen',
+        'taskEdit.resetChecklistOnRepeat': "Checkliste für die nächste Wiederholung zurücksetzen",
+        'taskEdit.resetChecklistOnRepeatHint': "Deaktivieren, um abgehakte Einträge bei der Wiederholung beizubehalten.",
         'taskEdit.resetChecklist': 'Checkliste zurücksetzen',
         'task.convertToReference': 'In eine Referenz umwandeln',
         'task.createProjectFromTask': 'Projekt aus Aufgabe erstellen',
@@ -381,6 +453,9 @@ export const deOverrides: Record<string, string> = {
         'markdown.toolbar.italic': 'Kursiv',
         'markdown.toolbar.strikethrough': 'Durchgestrichen',
         'markdown.toolbar.bulletList': 'Punkteliste',
+        'markdown.toolbar.quote': 'Zitat',
+        'markdown.toolbar.orderedList': 'Nummerierte Liste',
+        'markdown.toolbar.taskList': 'Aufgabenliste',
         'markdown.toolbar.horizontalRule': 'Horizontale Linie',
         'markdown.toolbar.link': 'Link einfügen',
         'markdown.toolbar.code': 'Code einfügen',
@@ -477,8 +552,8 @@ export const deOverrides: Record<string, string> = {
         'task.aria.dueDate': 'Fälligkeitsdatum',
         'task.aria.dueTime': 'Fälligkeitszeit',
         'task.aria.location': 'Standort',
-        
-        // Recurrence Labels
+
+
         'recurrence.none': 'Keine',
         'recurrence.daily': 'Täglich',
         'recurrence.weekly': 'Wöchentlich',
@@ -516,8 +591,8 @@ export const deOverrides: Record<string, string> = {
         'recurrence.afterCompletionShort': 'Nach Abschluss',
         'recurrence.showFutureInCalendar': 'Künftige Wiederholungen im Kalender anzeigen',
         'recurrence.showFutureInCalendarHint': 'Nur Planungsvorschau; die nächste echte Aufgabe wird erst erstellt, wenn diese abgeschlossen wird.',
-        
-        // Inbox (Mobile)
+
+
         'inbox.title': 'Eingang',
         'inbox.processButton': 'Eingang verarbeiten',
         'inbox.projectHint': 'Etwas, das mehrere Handlungen erfordert? Wähle beim Verarbeiten „Ja, erstelle ein Projekt“, um das Ergebnis und dessen erste nächste Aktion zu benennen.',
@@ -555,7 +630,7 @@ export const deOverrides: Record<string, string> = {
         'inbox.noProject': 'Kein Projekt',
         'inbox.skip': 'Überspringen',
 
-        // Next Actions (Mobile)
+
         'next.title': 'Nächste Aktionen',
         'next.ready': 'Aufgaben, die sofort ausgeführt werden können',
         'next.current': 'Aktuelle Aktionen',
@@ -566,7 +641,9 @@ export const deOverrides: Record<string, string> = {
         'next.warningCount': 'Elemente in Nächste Aktionen',
         'next.warningHint': 'Überlege Dir, Dich auf weniger Projekte zu konzentrieren. GTD empfiehlt, höchstens 10-15 Elemente in Nächste Aktionen zu lassen für eine bessere Übersicht.',
 
-        // Contact / Contexts (Mobile updates)
+
+    'contexts.new': 'Neuer Kontext',
+    'tags.new': 'Neues Tag',
         'contexts.title': 'Kontexte',
         'contexts.filter': 'Aufgaben nach Kontexten filtern',
         'filters.label': 'Filter',
@@ -588,6 +665,13 @@ export const deOverrides: Record<string, string> = {
         'filters.starred': 'Markiert',
         'filters.notStarred': 'Nicht markiert',
         'filters.datePreset.today': 'Heute',
+        "filters.taskDates": "Aufgabendaten",
+        "filters.anyTime": "Jederzeit",
+        "filters.datePreset.next_7_days": "Nächste 7 Tage",
+        "filters.datePreset.overdue_next_7_days": "Überfällig + nächste 7 Tage",
+        "filters.datePreset.next_14_days": "Nächste 14 Tage",
+        "filters.datePreset.next_30_days": "Nächste 30 Tage",
+        "filters.datePreset.upcoming": "Alle kommenden",
         'filters.datePreset.this_week': 'Diese Woche',
         'filters.datePreset.this_month': 'Dieser Monat',
         'filters.datePreset.overdue': 'Überfällig',
@@ -599,7 +683,7 @@ export const deOverrides: Record<string, string> = {
         'contexts.noContexts': 'Keine Kontexte gefunden. Füge Deinen Aufgaben Kontexte wie z. B. @home, @work, @computer hinzu.',
         'contexts.noTasks': 'Keine aktiven Aufgaben für diesen Kontext',
 
-        // Board
+
         'board.title': 'Tafelansicht',
         'board.next': 'Nächste Aktionen',
         'board.todo': 'Zu tun',
@@ -610,7 +694,7 @@ export const deOverrides: Record<string, string> = {
         'board.dragTask': 'Aufgabe verschieben',
         'board.delete': 'Löschen',
 
-        // Calendar
+
         'calendar.title': 'Kalender',
         'calendar.addTask': 'Neue Aufgabe hinzufügen …',
         'calendar.schedulePlaceholder': 'Aufgaben suchen zum Einplanen …',
@@ -650,7 +734,7 @@ export const deOverrides: Record<string, string> = {
         'shortcuts.captureUnavailable': 'Erfassungs-Kurzbefehl nicht verfügbar',
         'shortcuts.missingTitle': 'Mindwtr konnte aus diesem Kurzbefehl-Link keinen Aufgabentitel lesen.',
 
-        // Projects
+
         'projects.title': 'Projekte',
         'projects.activeSection': 'Aktive Projekte',
         'projects.noProjects': 'Noch keine Projekte.',
@@ -661,6 +745,11 @@ export const deOverrides: Record<string, string> = {
         'projects.noActiveTasks': 'Keine aktiven Aufgaben in diesem Projekt.',
         'projects.projectName': 'Projektname',
         'projects.color': 'Farbe',
+        'projects.useAreaColor': "Bereichsfarbe verwenden",
+        'projects.colorSaveFailed': "Die Farbe konnte nicht gespeichert werden.",
+        'projects.sequenceMode': "Ablaufmodus",
+        'projects.perSection': "Pro Abschnitt",
+        'projects.perSectionTooltip': "Pro Abschnitt: Jeder Abschnitt ist parallel oder sequenziell, wählbar im Menü des Abschnitts.",
         'projects.create': 'Erstellen',
         'areas.create': 'Erstellen',
         'areas.deleteConfirm': 'Diesen Bereich löschen? Projekte und Aufgaben in diesem Bereich bleiben erhalten und werden nach Nicht zugewiesen verschoben.',
@@ -693,6 +782,7 @@ export const deOverrides: Record<string, string> = {
         'projects.moveUp': 'Nach oben verschieben',
         'projects.moveDown': 'Nach unten verschieben',
         'focus.reorderPosition': '{{title}}. Position {{position}} von {{count}}',
+        'focus.hiddenByArea': "{{count}} in anderen Bereichen ausgewählt",
         'focus.reorderHint': 'Lange drücken und zum Neuanordnen ziehen',
         'projects.tagFilter': 'Schlagwörter filtern',
         'projects.allTags': 'Alle Schlagwörter',
@@ -721,8 +811,8 @@ export const deOverrides: Record<string, string> = {
         'projects.noNextAction': 'Keine Nächste Aktion',
         'projects.taskMovedTo': 'Verschoben nach {{name}}',
         'projects.taskMoveFailed': 'Aufgabe konnte nicht verschoben werden',
-        
-        // Review Steps
+
+
         'review.title': 'Revision',
         'review.openTasks': 'Offene Aufgaben',
         'review.intro': 'Klarheit bringen, Aktuelles anzeigen und kreativ werden.',
@@ -787,6 +877,7 @@ export const deOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Sicherstellen, dass jedes aktive Projekt eine nächste Aktion enthält.',
         'review.projectsHint': 'Jedes Projekt revidieren. Enthält es zumindest eine konkrete nächste Aktion? Wenn nicht, füge jetzt eine hinzu. Markiere abgeschlossene Projekte als erledigt.',
         'review.hasNextAction': 'Enthält eine nächste Aktion',
+    'review.projectDeferred': 'Geplant',
         'review.needsAction': 'Benötigt eine nächste Aktion',
         'review.noActiveTasks': 'Keine aktiven Aufgaben',
         'review.somedayStep': 'Irgendwann/Vielleicht',
@@ -816,8 +907,8 @@ export const deOverrides: Record<string, string> = {
         'review.contexts': 'Kontexte',
         'review.markDone': 'Als Erledigt markieren',
         'review.noTasks': 'Keine Aufgaben zu revidieren',
-        
-        // Processing
+
+
         'process.title': 'Element verarbeiten',
         'process.refineTitle': 'Die Aufgabe präzisieren',
         'process.refineDesc': 'Kläre es ab, bevor Du entscheidest, was Du damit tun willst.',
@@ -879,8 +970,8 @@ export const deOverrides: Record<string, string> = {
         'process.quickDesc': 'Überprüfe die Details, wähle das Ergebnis und wechsle direkt zum nächsten Element.',
         'process.quickApplyHint': 'Wende diese Auswahl an und fahre mit dem nächsten Eingangseintrag fort.',
         'process.quickMoveHint': 'Verschiebe dieses Element und fahre mit dem nächsten Eingangseintrag fort.',
-        
-        // Settings
+
+
         'settings.title': 'Einstellungen',
         'settings.subtitle': 'Passe Dein Mindwtr-Erlebnis an',
         'settings.appearance': 'Darstellung',
@@ -946,6 +1037,11 @@ export const deOverrides: Record<string, string> = {
         'settings.terms': 'Nutzungsbedingungen',
         'settings.mobile.appLock': 'App-Sperre',
         'settings.mobile.appLockDesc': 'Gerätesperre beim Öffnen von Mindwtr oder beim Zurückkehren zur App verlangen. Das schützt die App-Ansicht, nicht die Datenbank auf dem Gerät.',
+        'settings.mobile.appLockRelock': 'Entsperren verlangen',
+        'settings.mobile.appLockRelockImmediately': 'Sofort',
+        'settings.mobile.appLockRelockAfter1': 'Nach 1 Minute',
+        'settings.mobile.appLockRelockAfter5': 'Nach 5 Minuten',
+        'settings.mobile.appLockRelockAfter15': 'Nach 15 Minuten',
         'appLock.title': 'Mindwtr ist gesperrt',
         'appLock.description': 'Verwende die Gerätesperre, um Mindwtr zu öffnen. Das schützt die App-Ansicht, nicht die Datenbank auf dem Gerät.',
         'appLock.prompt': 'Mindwtr entsperren',
@@ -956,6 +1052,14 @@ export const deOverrides: Record<string, string> = {
         'appLock.unavailable': 'Richte einen Gerätecode oder Biometrie ein, um die App-Sperre zu verwenden.',
         'appLock.cancelled': 'Mindwtr bleibt gesperrt.',
         'appLock.failed': 'Authentifizierung fehlgeschlagen. Bitte erneut versuchen.',
+        "settings.desktopAppLockDesc": "Beim Öffnen von Mindwtr und nach deiner Abwesenheit Windows Hello oder Touch ID (oder dein Mac-Passwort) verlangen. Das verbirgt nur das App-Fenster; das macOS-Widget, die lokale API und der MCP-Server können deine Daten weiterhin lesen.",
+        "settings.desktopAppLockUnavailable": "Richte Windows Hello oder ein Mac-Anmeldepasswort ein, um die App-Sperre zu nutzen.",
+        "appLock.lockNow": "Mindwtr sperren",
+        "appLock.lockedReminder": "Mindwtr-Erinnerung",
+        "appLock.turnOff": "App-Sperre ausschalten",
+        "appLock.osCheckUnavailable": "Windows Hello oder Touch ID ist auf diesem Gerät gerade nicht verfügbar.",
+        "appLock.macUnlockReason": "entsperren und deine Aufgaben anzeigen",
+        "appLock.macEnableReason": "die App-Sperre einschalten",
         'settings.data': 'Daten',
         'settings.menuDesc.general': 'Darstellung, Sprache, Anzeige',
         'settings.menuDesc.gtd': 'Erfassen, Review, Aufgabeneditor',
@@ -1085,6 +1189,7 @@ export const deOverrides: Record<string, string> = {
         'settings.aiReasoningHintFoss': 'Von unterstützten Modellen benutzt.',
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'Gemini',
+        'settings.aiEffortMinimalSaved': 'Gespeichert: Minimal',
         'settings.aiEffortLow': 'Niedrig',
         'settings.aiEffortMedium': 'Mittel',
         'settings.aiEffortHigh': 'Hoch',
@@ -1172,8 +1277,8 @@ export const deOverrides: Record<string, string> = {
         'settings.weeklyReviewIncludeContextsStepDesc': 'Zeigt einen eigenen Kontext-Revisionsschritt zwischen Warten auf und Projekte an.',
         'widget.capture': 'Schnelleingabe',
         'widget.viewAllTasks': 'Alle {{count}} Aufgaben anzeigen',
-        
-        //Digest
+
+
         'digest.morningTitle': 'Morgendliche Tagesplanung',
         'digest.morningBody': 'Öffne Mindwtr, um Deinen Tag zu planen.',
         'digest.eveningTitle': 'Abendliche Revision',
@@ -1185,8 +1290,8 @@ export const deOverrides: Record<string, string> = {
         'digest.focus': 'Fokus',
         'digest.reviewDue': 'Revision fällig',
         'digest.noItems': 'Heute keine dringenden Elemente.',
-        
-        // Common
+
+
         'common.tasks': 'Aufgaben',
         'common.day': 'Tag',
         'common.days': 'Tage',
@@ -1231,8 +1336,8 @@ export const deOverrides: Record<string, string> = {
         'errorBoundary.message': 'Die App ist auf einen unerwarteten Fehler gestoßen.',
         'errorBoundary.retry': 'Nochmals versuchen',
         'audio.loading': 'Audio laden…',
-        
-        // Bulk Actions
+
+
         'bulk.select': 'Auswählen',
         'bulk.exitSelect': 'Erledigt',
         'bulk.selected': 'ausgewählt',
@@ -1245,8 +1350,8 @@ export const deOverrides: Record<string, string> = {
         'bulk.exportCsv': 'Ausgewählte Aufgaben als CSV exportieren',
         'bulk.confirmDeleteTitle': 'Aufgaben löschen',
         'bulk.confirmDeleteBody': 'Ausgewählte Aufgaben löschen?',
-        
-        // Sorting
+
+
         'sort.label': 'Sortieren',
         'sort.default': 'Standard',
         'sort.due': 'Fälligkeitsdatum',
@@ -1263,8 +1368,8 @@ export const deOverrides: Record<string, string> = {
         'list.completedGroup.previous7Days': 'Letzte 7 Tage',
         'list.completedGroup.earlier': 'Früher',
         'list.completedGroup.notCompleted': 'Nicht abgeschlossen',
-        
-        // Agenda
+
+
         'agenda.title': 'Fokus',
         'agenda.active': 'Aktive Elemente',
         'agenda.collapseOtherSections': 'Nur Fokus',
@@ -1286,27 +1391,32 @@ export const deOverrides: Record<string, string> = {
         'agenda.upcoming': 'Anstehend',
         'widget.upcomingStarts': 'Beginnt',
         'widget.upcomingReturns': 'Kehrt zurück',
+        'widget.background': 'Hintergrund',
+        'widget.backgroundLightText': 'Durchsichtig, helle Schrift',
+        'widget.backgroundDarkText': 'Durchsichtig, dunkle Schrift',
+        'widget.availableActions': 'Verfügbare Aktionen',
+        'widget.includeAvailableActions': 'Nächste Aktionen hinzufügen, deren Startdatum erreicht ist',
         'agenda.laterToday': 'Später heute',
         'agenda.allClear': 'Alles geklärt!',
         'agenda.noTasks': 'Gerade nichts im Fokus. Markiere eine Aufgabe mit einem Stern oder gib ihr ein Fälligkeitsdatum, dann erscheint sie hier.',
         'agenda.emptyStart': 'Noch keine Aufgaben. Schreib alles, was Dir durch den Kopf geht, in den Eingang und sortiere es später.',
         'focus.schedule': 'Heute',
         'focus.nextActions': 'Nächste Aktionen',
-        
-        // Task Age
+
+
         'taskAge.day': 'Tag alt',
         'taskAge.days': 'Tage alt',
         'taskAge.week': 'Woche alt',
         'taskAge.weeks': 'Wochen alt',
         'taskAge.month': 'Monat alt',
         'taskAge.months': 'Monate alt',
-        
-        // Energy Contexts
+
+
         'context.energy.focused': 'Konzentriert',
         'context.energy.lowenergy': 'Wenig Energie',
         'context.energy.creative': 'Kreativ',
-        
-        // Waiting (Mobile)
+
+
         'waiting.title': 'Warten auf',
         'waiting.subtitle': 'Aufgaben, die von anderen Personen oder externen Ereignissen abhängen',
         'waiting.count': 'Warten',
@@ -1315,8 +1425,8 @@ export const deOverrides: Record<string, string> = {
         'waiting.markDone': 'Als Erledigt markieren',
         'waiting.empty': 'Es gibt nichts, worauf Du warten musst',
         'waiting.emptyHint': 'Speichere Aufgaben hier, wenn der nächste Schritt bei jemand anderem liegt – Du wirst sie sehen, bis sie erledigt sind',
-        
-        // Someday (Mobile)
+
+
         'someday.title': 'Irgendwann/Vielleicht',
         'someday.subtitle': 'Ideen und Ziele, die Du in Zukunft vielleicht verfolgen möchtest',
         'someday.ideas': 'Ideen',
@@ -1325,8 +1435,8 @@ export const deOverrides: Record<string, string> = {
         'someday.archive': 'Archiv',
         'someday.empty': 'Keine Irgendwann/Vielleicht-Elemente',
         'someday.emptyHint': 'Sammele hier Ideen und Ziele, die Du vielleicht später verfolgen möchtest – aus dem Blickfeld, aber nicht aus dem Kopf verlieren',
-        
-        // Search
+
+
         'search.title': 'Suchen',
         'search.placeholder': 'Aufgaben und Projekte suchen …',
         'search.scopeHint': 'Aufgaben, Projekte, Personen',
@@ -1341,6 +1451,7 @@ export const deOverrides: Record<string, string> = {
         'search.saveSearchPrompt': 'Diese Suchabfrage benennen',
         'search.savedSearches': 'Suchabfrage gespeichert',
         'search.noSavedSearches': 'Noch keine gespeicherte Suchabfragen.',
+        'search.sortUseGlobal': 'Globale Einstellung verwenden ({sort})',
         'search.deleteConfirm': 'Diese gespeicherte Suchabfrage löschen?',
         'search.helpOperators': 'Du kannst Operatoren benutzen wie z. B. status:, context:, tag:, project:, due:<=7d.',
         'search.hiddenCompletedMatches': '{{count}} weitere in Erledigt und Archiviert',
@@ -1362,8 +1473,8 @@ export const deOverrides: Record<string, string> = {
         'search.due.thisWeek': 'Diese Woche',
         'search.due.nextWeek': 'Nächste Woche',
         'search.due.none': 'Kein Fälligkeitsdatum',
-        
-        // Archived
+
+
         'archived.tasksSegment': 'Aufgaben',
         'archived.title': 'Archiviert',
         'archived.searchPlaceholder': 'Suchen nach archivierten Aufgaben …',
@@ -1541,7 +1652,7 @@ export const deOverrides: Record<string, string> = {
         'settings.externalCalendarUrlPlaceholder': 'https://example.com/calendar.ics',
         'settings.webdavUrlPlaceholder': 'https://example.com/remote.php/dav/files/<username>/mindwtr',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'Kopf leeren',
         'mindSweep.title': 'Kopf leeren',
         'mindSweep.intro': 'Gehe einige Stichwortlisten durch und schreibe auf, was Dir in den Sinn kommt. Nicht filtern, nicht ordnen — jeder Eintrag landet im Eingang und wird später sortiert.',
@@ -1648,7 +1759,7 @@ export const deOverrides: Record<string, string> = {
         'obsidian.bringIntoMindwtrFailed': 'Aufgabe konnte nicht zu Mindwtr hinzugefügt werden.',
         'obsidian.sourceAttachmentTitle': 'Obsidian-Quelle',
 
-        // Seeded Getting Started content (first-run tutorial data)
+
         'starter.projectTitle': 'Erste Schritte',
         'starter.projectNotes': 'Diese Einstiegsaufgaben sind optional. Lösche dieses Projekt jederzeit, wenn Mindwtr eingerichtet ist.',
         'starter.processInbox.title': 'Starte hier: verarbeite Deinen ersten Eingang-Eintrag',
@@ -1689,7 +1800,7 @@ export const deOverrides: Record<string, string> = {
         'starter.sampleBuyMilk': 'Milch kaufen',
         'starter.sampleReplySam': 'Sam antworten',
 
-        // First-run onboarding modal (both platforms)
+
         'onboarding.title': 'Willkommen bei Mindwtr',
         'onboarding.subtitle': 'Halte fest, was Dir im Kopf herumgeht, sortiere später und konzentriere Dich auf wenige Dinge zugleich. Bring Deine vorhandenen Daten mit oder starte mit einem kleinen geführten Projekt.',
         'onboarding.skip': 'Einführung überspringen',
@@ -2110,6 +2221,10 @@ export const deOverrides: Record<string, string> = {
         'settings.backupMobile.recoverySnapshotSaved': 'Wiederherstellungs-Schnappschuss als {{snapshotName}} gespeichert.',
         'settings.backupMobile.restoreBackup': 'Sicherung wiederherstellen?',
         'settings.backupMobile.restoreComplete': 'Wiederherstellung abgeschlossen',
+        'settings.backupMobile.undoUnavailableTitle': 'Rückgängig ist möglicherweise nicht verfügbar',
+        'settings.backupMobile.undoUnavailableConfirm': 'Diese Bibliothek ist möglicherweise zu groß, um diese Änderung rückgängig zu machen. Ein Wiederherstellungs-Schnappschuss wird trotzdem zuerst gespeichert. Fortfahren?',
+        'settings.backupMobile.undoUnavailableContinue': 'Fortfahren',
+        'settings.backupMobile.undoUnavailableResult': 'Rückgängig ist für diese Änderung nicht verfügbar: Die Bibliothek ist zu groß.',
         'settings.backupMobile.restoreFailed': 'Wiederherstellung fehlgeschlagen',
         'settings.backupMobile.restoreRecoverySnapshot': 'Wiederherstellungs-Schnappschuss wiederherstellen?',
         'settings.backupMobile.restoreSnapshotReplaceLocalData': '{{snapshotName}} wiederherstellen? Dadurch werden die aktuellen lokalen Daten ersetzt.',
@@ -2215,6 +2330,8 @@ export const deOverrides: Record<string, string> = {
         'settings.deviceCalendars': 'Gerätekalender',
         'settings.deviceCalendarsDesc': 'Liest Ereignisse aus Kalendern, die bereits auf diesem Gerät synchronisiert sind (DAVx5, iCloud, Outlook usw.).',
         'settings.dracula': 'Dracula',
+        'settings.gruvboxLight': 'Gruvbox Light',
+        'settings.gruvboxDark': 'Gruvbox Dark',
         'settings.dropboxCleanupRetry': 'Die Dropbox-Einrichtung wurde gespeichert. Die Bereinigung der Anmeldedaten wird erneut versucht.',
         'settings.dropboxStatus': 'Status',
         'settings.dropboxTestAccessibility': 'Dropbox-Verbindung testen',
@@ -2625,6 +2742,8 @@ export const deOverrides: Record<string, string> = {
         'settings.syncOff': 'Synchronisierung ist aus',
         'settings.syncOffDesc': 'Du kannst die Synchronisierung jederzeit über diesen Bildschirm wieder einschalten.',
         'settings.syncPreferenceSavedFilters': 'Gespeicherte Filter',
+        'savedFilters.saveTitle': "Filter speichern",
+        'savedFilters.namePlaceholder': "Filtername",
         'settings.syncQueuedBody': 'Während der Synchronisierung kamen lokale Änderungen an. Ein erneuter Versuch wurde automatisch eingereiht.',
         'settings.syncReadMergeFolder': 'Sync-Ordner lesen und zusammenführen',
         'settings.syncReadMergeSelfHosted': 'Selbst gehostete Daten lesen und zusammenführen',

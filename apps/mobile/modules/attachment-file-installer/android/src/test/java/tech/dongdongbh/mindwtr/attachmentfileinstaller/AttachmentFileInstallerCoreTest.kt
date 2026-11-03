@@ -512,7 +512,7 @@ class AttachmentFileInstallerCoreTest {
     assertEquals(listOf("restored"), recovered.map { it.outcome })
     assertEquals("old generation", target.readText())
     assertTrue(fixture.internalArtifacts().isEmpty())
-    // Nothing is left for a second boot.
+
     assertTrue(fixture.installer(ops).recoverInterruptedInstalls().isEmpty())
   }
 
@@ -549,7 +549,7 @@ class AttachmentFileInstallerCoreTest {
     } catch (_: IllegalStateException) {
     }
     val journal = fixture.internalArtifacts().single { it.name.endsWith(".journal") }
-    // A journal under a name that is not its target's, and one that cannot be read: both stay, byte for byte.
+
     val renamed = journal.resolveSibling("$INSTALLER_ARTIFACT_PREFIX${"0".repeat(32)}.journal")
     Files.move(journal.toPath(), renamed.toPath())
     val garbled = journal.resolveSibling("$INSTALLER_ARTIFACT_PREFIX${"f".repeat(32)}.journal").apply { writeText("not a journal") }
@@ -627,8 +627,7 @@ class AttachmentFileInstallerCoreTest {
     } catch (_: IllegalStateException) {
     }
 
-    // Model an uncoordinated writer creating a distinct inode with the same
-    // bytes at the active quarantine name before recovery observes it.
+
     val quarantine = fixture.activeArtifact(".quarantine").apply { writeText("old generation") }
     RandomAccessFile(quarantine, "rw").use { lateWriter ->
       val result = fixture.installer(ops).install(
@@ -1122,8 +1121,8 @@ class AttachmentFileInstallerCoreTest {
     val recovery = fixture.recovery(ops)
     val identity = recovery.snapshot(staged, target, hash("candidate"))
     val outcome = RandomAccessFile(staged, "r").use {
-      // Keep the unlinked inode allocated so the filesystem cannot immediately
-      // reuse its identity for the same-path replacement.
+
+
       Files.delete(staged.toPath())
       staged.writeText("candidate")
       assertTrue(ops.fileIdentity(staged).fileKey != identity.stagedIdentity)

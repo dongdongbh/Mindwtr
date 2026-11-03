@@ -74,7 +74,7 @@ private enum MindwtrSiriCaptureLauncher {
 
     @MainActor
     static func open(_ url: URL) {
-        // React Native may still be attaching its Linking listener on a cold Siri launch.
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             UIApplication.shared.open(url, options: [:], completionHandler: nil)
         }
@@ -96,8 +96,7 @@ private enum MindwtrSiriCaptureLauncher {
         open(url)
     }
 
-    // Same route as WIDGET_QUICK_CAPTURE_URI (apps/mobile/lib/widget-data.ts). `source=control`
-    // changes nothing about the routing; it lets the app log that the control's tap arrived.
+
     @MainActor
     static func openQuickCapture() {
         guard let url = appURL(
@@ -113,12 +112,7 @@ private enum MindwtrSiriCaptureLauncher {
     }
 }
 
-// The Control Center "Add Task" control (widgets-ios/MindwtrCaptureLockWidget.swift) names a
-// type with this exact name. A control's foreground intent runs in the APP process only when
-// the app target contains the type as well; living in the widget extension alone, the tap did
-// nothing, and `OpenURLIntent` there cannot open a custom `mindwtr://` URL (it is for universal
-// links). This is the app's copy: it runs here and opens quick capture the way the Siri intents
-// above do. Keep the name, title and modes identical in both copies.
+
 @available(iOS 16.0, *)
 struct MindwtrOpenQuickCaptureIntent: AppIntent {
     static var title: LocalizedStringResource = "Add Task"
@@ -143,7 +137,7 @@ struct MindwtrOpenQuickCaptureIntent: AppIntent {
     }
 }
 
-// Paired with the widget target: small widgets use foreground buttons for task taps.
+
 @available(iOS 17.0, *)
 struct MindwtrOpenWidgetTaskIntent: AppIntent {
     static var title: LocalizedStringResource = "Open Task"
@@ -324,7 +318,7 @@ struct MindwtrOpenListIntent: AppIntent {
     }
 }
 
-// A separate action preserves existing Open List automations and their enum values.
+
 @available(iOS 16.0, *)
 struct MindwtrSavedListEntity: AppEntity {
     let id: String
@@ -379,25 +373,17 @@ struct MindwtrOpenSavedListIntent: AppIntent {
     }
 }
 
-// Background captures never touch the app database from Swift. The intent
-// appends a JSON payload to Documents/pending-captures/ and the React Native
-// side ingests it through the normal store/sync write path on next launch or
-// foreground (#845).
+
 private enum MindwtrPendingCaptureQueue {
     static let directoryName = "pending-captures"
 
-    // Shortcuts' Date parameter always carries a time even when the user only
-    // picked a day; serializing to a local calendar day here keeps due/start
-    // dates queue-side date-only so the RN drain never has to guess (mirrors
-    // the date-only handling pending-captures.ts applies on read, #755).
+
     static let dateOnlyFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = .current
-        // Fixed-format dates need a fixed locale (Apple QA1480) -- without it
-        // a device set to arabic-indic/extended-arabic digits would write
-        // non-ASCII digits that the RN drain's ASCII-only date regex quietly
-        // discards, silently dropping the picked date.
+
+
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
@@ -526,22 +512,13 @@ struct MindwtrBackgroundCaptureIntent: AppIntent {
         ) else {
             throw MindwtrBackgroundCaptureError.writeFailed
         }
-        // The drain decides where the task actually lands (project match or
-        // Inbox fallback), so the dialog never promises a specific placement.
+
+
         return .result(dialog: "Added to Mindwtr.")
     }
 }
 
-// MARK: - Shortcuts snapshot (Get Tasks + Spotlight)
-//
-// The snapshot is app-maintained, read-only, derived data: RN refreshes it
-// alongside the widget payload (widget-service.ts `updateMobileWidgetFromData`
-// -> `buildShortcutsSnapshot`) into the same shared App Group UserDefaults the
-// widget already writes to. Background intents and Spotlight indexing here
-// only ever READ this key; they never touch Mindwtr's on-device database,
-// matching the pending-captures write-only rule for intents (#845, #980).
-// Guarded because `items(forList:)` takes the iOS 16+ `MindwtrGetTasksList`
-// (deployment target is iOS 15.1) -- every caller is already iOS 16+/18+.
+
 @available(iOS 16.0, *)
 private enum MindwtrShortcutsSnapshotStore {
     static let appGroup = "group.tech.dongdongbh.mindwtr"
@@ -598,8 +575,7 @@ private enum MindwtrShortcutsSnapshotStore {
         return max(0, omitted.intValue)
     }
 
-    /// All snapshot items, deduped by id (a task can appear both in its list
-    /// bucket and its project bucket).
+
     static func loadAllItems() -> [MindwtrShortcutsSnapshotItem] {
         guard let root = rawSnapshot() else { return [] }
         var items: [MindwtrShortcutsSnapshotItem] = []
@@ -702,11 +678,7 @@ enum MindwtrGetTasksList: String, AppEnum {
     }
 }
 
-// A task's stored dueDate can be date-only ("yyyy-MM-dd", e.g. from the
-// Shortcuts date params above) or a full ISO datetime (from anywhere else in
-// the app). Display must not just interpolate whichever raw string it is --
-// date-only stays date-only, a timed value renders a localized short
-// date+time instead of raw ISO text.
+
 private enum MindwtrTaskDueDateDisplay {
     private static let mediumDateOnly: DateFormatter = {
         let formatter = DateFormatter()
@@ -745,11 +717,7 @@ private enum MindwtrTaskDueDateDisplay {
     }
 }
 
-// MindwtrTaskEntity itself stays a plain AppEntity available from iOS 16 --
-// EntityStringQuery and Get Tasks results both need it there. IndexedEntity
-// (iOS 18+) is added in a separate `@available` extension below with a manual
-// `attributeSet`, because `@Property(indexingKey:)` on a stored property
-// would raise this whole type's minimum availability past iOS 16.
+
 @available(iOS 16.0, *)
 struct MindwtrTaskEntity: AppEntity {
     let id: String
@@ -805,9 +773,7 @@ struct MindwtrTaskEntityQuery: EntityStringQuery {
     }
 }
 
-// Spotlight indexing (#980, Stage 3). Guarded to iOS 18+ where IndexedEntity
-// and CSSearchableIndex.indexAppEntities(_:) are available; the base entity
-// above stays usable from iOS 16 for Shortcuts/Get Tasks regardless.
+
 @available(iOS 18.0, *)
 extension MindwtrTaskEntity: IndexedEntity {
     var attributeSet: CSSearchableItemAttributeSet {
@@ -817,9 +783,8 @@ extension MindwtrTaskEntity: IndexedEntity {
         if let dueDate, let parsedDueDate = MindwtrTaskDueDateDisplay.date(dueDate) {
             attributes.dueDate = parsedDueDate
         }
-        // Stable task ids, rather than titles, drive the exact-task deep link.
-        // React Native revalidates that id against current hydrated state before
-        // navigating, so a deleted/capped-out result never opens a replacement.
+
+
         attributes.contentURL = openURL
         return attributes
     }
@@ -904,22 +869,15 @@ struct MindwtrGetTasksIntent: AppIntent {
     }
 }
 
-// Reindexing is driven by the app's own refresh path (AppDelegate launch,
-// wired by the plugin -- see addSiriShortcutsRegistrationToAppDelegate in
-// ios-widgets-and-shortcuts.js), never by an intent's perform(): intents stay
-// read-only against the snapshot.
+
 @available(iOS 18.0, *)
 enum MindwtrShortcutsSpotlightIndexer {
     static func reindexIfNeeded() {
         let items = MindwtrShortcutsSnapshotStore.loadAllItems()
         let entities = items.map(MindwtrTaskEntity.init(item:))
         Task {
-            // indexAppEntities only adds/updates -- a task that's completed,
-            // deleted, or fell off the snapshot cap since the last launch
-            // would otherwise stay searchable forever. Mindwtr indexes
-            // nothing else in Spotlight, so a full clear-then-replace per
-            // launch is simpler and cheap enough at this cap than tracking
-            // which ids to remove.
+
+
             try? await CSSearchableIndex.default().deleteAllSearchableItems()
             guard !entities.isEmpty else { return }
             try? await CSSearchableIndex.default().indexAppEntities(entities)

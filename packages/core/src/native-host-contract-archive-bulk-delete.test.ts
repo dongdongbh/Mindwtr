@@ -391,8 +391,8 @@ describe('Removed and purged Undo parent evidence', () => {
         const remove = async (sqlite: Awaited<ReturnType<typeof openSqliteHost>>) => {
             if (mode === 'purged') await sqlite.client().run('UPDATE projects SET deletedAt = ?, purgedAt = ?, rev = rev + 1 WHERE id = ?', [NOW, NOW, 'parent']);
             else {
-                // A legacy dangling reference preserves source equality. Normal FK
-                // deletion changes the task itself and correctly becomes stale.
+
+
                 await sqlite.client().exec('PRAGMA foreign_keys = OFF');
                 await sqlite.client().run('DELETE FROM projects WHERE id = ?', ['parent']);
                 await sqlite.client().exec('PRAGMA foreign_keys = ON');
@@ -427,8 +427,8 @@ describe('Missing saved device initialization', () => {
             },
         }));
         try {
-            // Recovery activation must retain the captured disk authority even
-            // if a normal boot initialized local settings before journaling.
+
+
             await sqlite.client().run("UPDATE settings SET data = json_remove(data, '$.deviceId') WHERE id = 1");
             await sqlite.restart(undefined, { recoveryLoad: true });
             expect(useTaskStore.getState().settings.deviceId).toBeUndefined();

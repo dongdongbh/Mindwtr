@@ -41,7 +41,7 @@ describe('native host contract: Board', () => {
         vi.restoreAllMocks();
     });
 
-    // Revisions read the clock.
+
     const freezeClock = () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(part.now));
@@ -59,10 +59,10 @@ describe('native host contract: Board', () => {
         if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
         return result.value;
     };
-    /** The revision a card shows: what a move or a delete sends back. */
+
     const shown = (host: ReturnType<typeof createNativeHostContract>, taskId: string) => value(host.getBoardView({ limit: 100 })).columns
         .flatMap((column) => column.cards).find((card) => card.row.id === taskId)!.row.taskRevision;
-    /** The Board as core's model builds it straight from the store. */
+
     const direct = (filters = EMPTY_BOARD_FILTER_STATE) => {
         const state = useTaskStore.getState();
         const areas = sortAreasForDisplay(state.areas);
@@ -94,6 +94,26 @@ describe('native host contract: Board', () => {
             expect(view.sheet.tokens.items.map((token) => token.value)).toEqual(expected.options.tokens);
             expect(view.sheet.projects.items.map(({ id, title }) => ({ id, title }))).toEqual(expected.options.projects);
         }
+    });
+
+    it('accepts its returned project chip removal without changing the other Board filters', async () => {
+        freezeClock();
+        const saveData = vi.fn().mockResolvedValue(undefined);
+        const { host, recorder } = await openHost(saveData);
+        const choices = value(host.getBoardView({ limit: 100 })).sheet.projects.items.slice(0, 2).map((project) => project.id);
+        expect(choices).toHaveLength(2);
+        const selected = value(host.getBoardView({ filters: {
+            projects: choices, tokens: ['@home'], excludedTokens: ['#later'], searchQuery: 'e', duePreset: 'overdue',
+        }, limit: 100 }));
+        saveData.mockClear();
+        const chip = selected.sheet.chips.items.find((item) => item.id === `project:${choices[0]}`)!;
+        expect(chip.edit).toEqual({ type: 'removeProject', value: choices[0] });
+        const removed = value(host.getBoardView({ filters: selected.filters, filterEdit: chip.edit, limit: 100 }));
+        expect(removed.filters).toEqual({ ...selected.filters, projects: choices.slice(1) });
+
+        expect(value(host.getBoardView({ filters: removed.filters, filterEdit: chip.edit, limit: 100 })).filters).toEqual(removed.filters);
+        expect(recorder.log).toEqual([]);
+        expect(saveData).not.toHaveBeenCalled();
     });
 
     it('speaks the host language', async () => {
@@ -130,7 +150,7 @@ describe('native host contract: Board', () => {
         const rest = value(host.getBoardList({ list: 'cards', status: 'someday', offset: 100, limit: 100, revision: view.revision }));
         expect(rest.items.map((card) => (card as { row: { id: string } }).row.id)).toEqual(bulk.slice(100).map((task) => task.id));
         expect(value(host.getBoardList({ list: 'tokens', offset: 100, limit: 100, revision: view.revision })).items).toHaveLength(69);
-        // The sheet's chips page too: 150 selected tokens.
+
         const filters = { tokens: bulk.slice(0, 100).map((task) => task.contexts[0]), excludedTokens: bulk.slice(100).map((task) => task.contexts[0]) };
         const filtered = value(host.getBoardView({ filters, limit: 1 }));
         expect([filtered.sheet.chips.total, filtered.sheet.chips.items.length]).toEqual([150, 100]);
@@ -138,7 +158,7 @@ describe('native host contract: Board', () => {
         expect(moreChips.items).toEqual(bulk.slice(100).map((task) => ({
             id: `excluded-token:${task.contexts[0]}`, label: task.contexts[0], excluded: true, edit: { type: 'removeToken', value: task.contexts[0] },
         })));
-        // Filters name their own revision.
+
         expect(value(host.getBoardView({ filters: { searchQuery: 'bulk 1' }, limit: 1 })).revision).not.toBe(view.revision);
 
         await useTaskStore.getState().updateTask('bulk-0', { title: 'Renamed' });
@@ -146,7 +166,7 @@ describe('native host contract: Board', () => {
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         const renamed = value(host.getBoardView({ limit: 100 }));
         expect(renamed.revision).not.toBe(view.revision);
-        // A setting the cards read changes the revision too.
+
         await useTaskStore.getState().updateSettings({ features: { timeEstimates: false } });
         const noEstimates = value(host.getBoardView({ limit: 100 }));
         expect(noEstimates.revision).not.toBe(renamed.revision);
@@ -163,7 +183,7 @@ describe('native host contract: Board', () => {
         const filters = { tokens: ['@room1'] };
         const view = value(host.getBoardView({ filters, limit: 1 }));
         const { options } = direct({ ...EMPTY_BOARD_FILTER_STATE, ...view.filters });
-        // TaskFilterSheet's filter, as mobile's Board runs it.
+
         const mobileFilter = <T,>(entries: T[], label: (entry: T) => string, query: string) => {
             const normalized = query.trim().toLocaleLowerCase();
             return normalized ? entries.filter((entry) => label(entry).toLocaleLowerCase().includes(normalized)) : entries;
@@ -178,11 +198,11 @@ describe('native host contract: Board', () => {
             expect(tokens.items).toEqual(expected.slice(0, 100).map((value) => ({
                 value, state: view.filters.tokens.includes(value) ? 'included' : 'none',
             })));
-            // The Inbox tokens' rule.
+
             expect(tokens.items.map((item) => (item as { value: string }).value)).toEqual(options.tokens.filter((token) => matchesPickerQuery(token, query)).slice(0, 100));
         }
         expect(list('tokens', ' ROOM1').items[0]).toEqual({ value: '@room1', state: 'included' });
-        // A long search pages under the same revision.
+
         const rooms = list('tokens', 'room');
         expect([rooms.total, rooms.items.length]).toEqual([120, 100]);
         expect(list('tokens', 'room', 100).items).toHaveLength(20);
@@ -191,7 +211,7 @@ describe('native host contract: Board', () => {
             expect(list('projects', query).items).toEqual(expected.map((project) => ({ ...project, selected: false })));
         }
         expect(list('projects', ' gar').total).toBeGreaterThan(0);
-        // A query goes with the sheet's pickers only; a stale revision is refused.
+
         const invalid = { ok: false, error: { code: 'INVALID_INPUT' } };
         expect(host.getBoardList({ list: 'chips', query: 'a', offset: 0, limit: 10, revision: view.revision })).toMatchObject(invalid);
         expect(host.getBoardList({ list: 'cards', status: 'next', query: 'a', offset: 0, limit: 10, revision: view.revision })).toMatchObject(invalid);
@@ -240,12 +260,12 @@ describe('native host contract: Board', () => {
         expect(JSON.stringify(previous)).toBe(previousJSON);
         expect(value(host.getBoardView({ filters: previous.filters, limit: 1 }))).toEqual(previous);
         expect(value(host.getBoardList(pageInput))).toEqual(previousPage);
-        // The selection ceiling does not truncate the offered picker options.
+
         for (const list of ['tokens', 'projects'] as const) {
             const first = previous.sheet[list];
             const tail = value(host.getBoardList({ filters: previous.filters, list, offset: 100, limit: 100, revision: previous.revision }));
             expect(first.items).toHaveLength(100);
-            expect(first.total).toBe(list === 'tokens' ? 103 : 104); // Includes No project.
+            expect(first.total).toBe(list === 'tokens' ? 103 : 104);
             expect(first.items.length + tail.items.length).toBe(first.total);
             const offered = [...first.items, ...tail.items] as ({ value: string } | { id: string })[];
             const ids = offered.map(item => 'value' in item ? item.value : item.id);
@@ -272,7 +292,7 @@ describe('native host contract: Board', () => {
         expect(recorder.log).toHaveLength(1);
         const saved = saveData.mock.lastCall?.[0] as { tasks: { id: string; status: string }[] };
         expect(saved.tasks.find(({ id }) => id === 'n-rent')?.status).toBe('waiting');
-        // A lost reply repeats the request: no write, no save.
+
         const saves = saveData.mock.calls.length;
         expect(value(await host.runBoardAction(input))).toEqual({ changed: true, open: null });
         expect(saveData).toHaveBeenCalledTimes(saves);
@@ -294,12 +314,24 @@ describe('native host contract: Board', () => {
         expect(retried).toEqual({ changed: true, open: { taskId: copies[0].id, projectId: 'p-launch', tab: 'task' } });
     });
 
-    it('replays a duplicate after restart without a second copy and refuses a different source', async () => {
+    it.each(['next', 'reference'] as const)('replays a %s duplicate with mixed checklist progress after restart without a second copy and refuses a different source', async (status) => {
         freezeClock();
         const { host } = await openHost();
+        await useTaskStore.getState().updateTask('n-draft', { status, checklist: [
+            { id: 'done-step', title: 'Completed step', isCompleted: true },
+            { id: 'open-step', title: 'Remaining step', isCompleted: false },
+        ] });
+        await flushPendingSave();
+        const source = structuredClone(useTaskStore.getState()._tasksById.get('n-draft')!);
         const requestId = generateUUID();
         const action = { type: 'duplicateTask' as const, taskId: 'n-draft' };
         const first = value(await host.runBoardAction({ requestId, action }));
+        const copy = useTaskStore.getState()._tasksById.get(requestId)!;
+        expect(copy.checklist).toMatchObject([{ title: 'Completed step', isCompleted: true },
+            { title: 'Remaining step', isCompleted: false }]);
+        expect(copy.checklist!.every((item) => !source.checklist!.some((original) => original.id === item.id))).toBe(true);
+        expect(new Set(copy.checklist!.map((item) => item.id)).size).toBe(2);
+        expect(useTaskStore.getState()._tasksById.get(source.id)).toEqual(source);
         expect(first).toMatchObject({ changed: true, open: { taskId: requestId } });
         const before = useTaskStore.getState()._allTasks.map((task) => [task.id, task.rev]);
         const restarted = createNativeHostContract();
@@ -308,7 +340,7 @@ describe('native host contract: Board', () => {
         expect(await restarted.runBoardAction({ requestId, action: { ...action, taskId: 'n-demo' } }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(useTaskStore.getState()._allTasks.map((task) => [task.id, task.rev])).toEqual(before);
-        // An edit of the copy since: the replay is refused and writes nothing.
+
         await useTaskStore.getState().updateTask(requestId, { title: 'Edited copy' });
         const replayed = await replayAfterRestart((restarted) => restarted.runBoardAction({ requestId, action }));
         expect(replayed.result).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -323,7 +355,7 @@ describe('native host contract: Board', () => {
         const trash = { requestId: generateUUID(), action: { type: 'trashTask' as const, taskId: 'n-bulbs', taskRevision: shown(host, 'n-bulbs') } };
         expect(value(await host.runBoardAction(move))).toEqual({ changed: true, open: null });
         expect(value(await host.runBoardAction(trash))).toEqual({ changed: true, open: null });
-        // Later changes: the card goes back to Next, the deleted task comes back.
+
         await useTaskStore.getState().updateTask('n-rent', { status: 'next' });
         await useTaskStore.getState().restoreTask('n-bulbs');
         for (const input of [move, trash]) {
@@ -358,20 +390,20 @@ describe('native host contract: Board', () => {
             [generateUUID(), { type: 'moveCard', taskId: 'w-alice', status: 'someday' }],
             [generateUUID(), { type: 'moveCard', taskId: 'n-loose', status: 'next', afterId: null }],
             [generateUUID(), { type: 'moveCard', taskId: 'n-demo', status: 'next', afterId: 'n-gone' }],
-            // Under a search: the card lands after one the search shows.
+
             [generateUUID(), { type: 'moveCard', taskId: 'w-vendor', status: 'waiting', afterId: 'n-rent', filters: { searchQuery: 'e' } }],
             [generateUUID(), { type: 'trashTask', taskId: 'n-bulbs' }],
         ];
         const run = (target: typeof host, requestId: string, action: unknown) => target.runBoardAction({ requestId, action: action as never });
         for (const [requestId, action] of actions) {
-            // Each request carries the revision its card shows when it is sent.
+
             action.taskRevision = shown(host, action.taskId as string);
             expect(value(await run(host, requestId, action))).toMatchObject({ changed: true });
         }
         const writes = recorder.log.length;
         const revisions = () => useTaskStore.getState()._allTasks.map((task) => [task.id, task.rev, task.status, task.boardOrder]);
         const before = revisions();
-        // A new host has no receipts, as after a restart: every replay finds its target state.
+
         const restarted = createNativeHostContract();
         expect(await restarted.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
         for (const [requestId, action] of actions) {
@@ -383,8 +415,8 @@ describe('native host contract: Board', () => {
 
     it('writes a reorder when unordered cards move in the Board order', async () => {
         freezeClock();
-        // Two cards without a board order: the Board shows them in list order, the store
-        // orders them by creation. Moving B above A asks for the store's own order.
+
+
         const card = (id: string, createdAt: string) => ({ id, title: id, status: 'someday' as const, contexts: [], tags: [], createdAt, updatedAt: createdAt });
         const { host, recorder } = await openHost(undefined, { ...part, tasks: [...part.tasks, card('A', '2026-09-20T12:00:00.000Z'), card('B', '2026-09-10T12:00:00.000Z')] });
         const someday = () => value(host.getBoardView({ limit: 10 })).columns.find((column) => column.status === 'someday')!.cards.map((entry) => entry.row.id);
@@ -402,7 +434,7 @@ describe('native host contract: Board', () => {
         const move = { type: 'moveCard' as const, taskId: 'n-rent', status: 'waiting' as const, taskRevision: shown(host, 'n-rent') };
         const requestId = generateUUID();
         value(await host.runBoardAction({ requestId, action: move }));
-        // Saves fail from here on; a finished move replayed after a restart still answers.
+
         saveData.mockRejectedValue(new Error('disk unavailable'));
         const saves = saveData.mock.calls.length;
         const restarted = createNativeHostContract();
@@ -412,7 +444,7 @@ describe('native host contract: Board', () => {
         const trashed = taskRevisionOf(useTaskStore.getState()._tasksById.get('t-trashed')!);
         expect(await host.runBoardAction({ requestId: noOp, action: { type: 'trashTask', taskId: 't-trashed', taskRevision: trashed } })).toEqual({ ok: true, value: { changed: false, open: null } });
         expect(saveData).toHaveBeenCalledTimes(saves);
-        // No receipt was kept: the same ID can carry another action.
+
         saveData.mockResolvedValue(undefined);
         expect(value(await host.runBoardAction({ requestId: noOp, action: { type: 'trashTask', taskId: 'n-bulbs', taskRevision: shown(host, 'n-bulbs') } }))).toEqual({ changed: true, open: null });
         expect(recorder.log).toEqual([['updateTask', 'n-rent', { status: 'waiting' }], ['deleteTask', 'n-bulbs']]);
@@ -421,25 +453,27 @@ describe('native host contract: Board', () => {
     it('refuses invalid input', async () => {
         freezeClock();
         const { host } = await openHost();
-        // As the journaling Android host: each write must carry its replay tokens.
+
         setNativeReplayTokens('required');
         const invalid = { ok: false, error: { code: 'INVALID_INPUT' } };
         expect(host.getBoardView({ limit: 101 })).toMatchObject(invalid);
         expect(host.getBoardView({ filters: { tokens: '@home' } as never, limit: 1 })).toMatchObject(invalid);
         expect(host.getBoardView({ filters: { color: 'red' } as never, limit: 1 })).toMatchObject(invalid);
         expect(host.getBoardView({ filterEdit: { type: 'explode' } as never, limit: 1 })).toMatchObject(invalid);
+        expect(host.getBoardView({ filterEdit: { type: 'removeProject', value: '' }, limit: 1 })).toMatchObject(invalid);
+        expect(host.getBoardView({ filterEdit: { type: 'cycleProject', value: 'p1' } as never, limit: 1 })).toMatchObject(invalid);
         expect(host.getBoardList({ list: 'cards', offset: 0, limit: 10, revision: 'r' })).toMatchObject(invalid);
         const run = (action: unknown) => host.runBoardAction({ requestId: generateUUID(), action: action as never });
         const taskRevision = shown(host, 'n-rent');
         expect(await host.runBoardAction({ requestId: 'not-a-uuid', action: { type: 'trashTask', taskId: 'n-rent', taskRevision } })).toMatchObject(invalid);
         expect(await run({ type: 'moveCard', taskId: 'n-rent', status: 'reference', taskRevision })).toMatchObject(invalid);
-        // A drop into another column has no position; a drop inside names a card shown there.
+
         expect(await run({ type: 'moveCard', taskId: 'n-rent', status: 'waiting', afterId: 'w-alice', taskRevision })).toMatchObject(invalid);
         expect(await run({ type: 'moveCard', taskId: 'n-rent', status: 'next', afterId: 'w-alice', taskRevision })).toMatchObject(invalid);
         expect(await run({ type: 'moveCard', taskId: 'n-rent', status: 'next', afterId: 'n-demo', filters: { searchQuery: 'demo' }, taskRevision })).toMatchObject(invalid);
         expect(await run({ type: 'moveCard', taskId: 'r-manual', status: 'next', taskRevision })).toMatchObject(invalid);
         expect(await run({ type: 'moveCard', taskId: 'missing', status: 'next', taskRevision })).toMatchObject({ ok: false, error: { code: 'TASK_NOT_FOUND' } });
-        // A move or a delete carries the revision its card showed.
+
         expect(await run({ type: 'moveCard', taskId: 'n-rent', status: 'waiting' })).toMatchObject(invalid);
         expect(await run({ type: 'trashTask', taskId: 'n-rent', taskRevision: '' })).toMatchObject(invalid);
         expect(await run({ type: 'duplicateTask', taskId: 't-trashed' })).toMatchObject({ ok: false, error: { code: 'TASK_NOT_FOUND' } });

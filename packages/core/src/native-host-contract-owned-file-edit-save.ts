@@ -42,7 +42,7 @@ const exact = (value: unknown, fields: readonly string[]): value is Record<strin
 const invalid = (): NativeHostResult<never> => ({ ok: false, error: { code: 'INVALID_INPUT',
     message: 'A bounded mixed file-edit Save and complete checkpoint are required' } });
 
-/** Unbound metadata/settlement authority only. Native ownership and file proofs remain separate. */
+
 export function createOwnedEditorFileEditTaskDraftSaveMethods(deps: NativeTaskDraftSaveDependencies) {
     const readSaveRequest = (input: unknown): OwnedEditorFileEditSaveRequest['saveRequest'] | null => {
         if (!record(input) || !exact(input, ['id', 'base', 'patch', 'scheduleBase', 'attachments',
@@ -107,7 +107,7 @@ export function createOwnedEditorFileEditTaskDraftSaveMethods(deps: NativeTaskDr
         const settlementPlan = planAttachmentDraftSettlement({ baselineAttachments: request.saveRequest.attachments.base,
             draftAttachments: request.saveRequest.attachments.value, committedAttachments: effect.task.after.attachments });
         const validation: Validation = { version: 1, kind: KIND, result, settlementPlan };
-        // The complete actual plan is bounded together with the result. No 128-candidate clipping.
+
         if (!isNativeJsonWithinBytes(validation, PREPARED_BYTES)) return null;
         return { envelope: { request, prepared: { version: 1, kind: KIND, request, decision } }, validation };
     };
@@ -158,7 +158,7 @@ export type OwnedEditorCompleteCancellationUndoEnvelope = {
     request: NativeTaskCancellationUndoRequest; prepared: PreparedOwnedEditorCompleteCancellationUndo;
 };
 
-/** Internal complete-owned selection. Legacy factories and bridge grammars remain sealed. */
+
 export function createOwnedEditorCompleteTaskDraftSaveMethods(deps: NativeTaskChecklistSaveDependencies) {
     const authority = createOwnedCompleteTaskChecklistSaveAuthority(deps);
     const readRequest = (input: unknown): OwnedEditorCompleteSaveRequest | null => {
@@ -194,7 +194,7 @@ export function createOwnedEditorCompleteTaskDraftSaveMethods(deps: NativeTaskCh
         const checklistResult = decision.prepared.result;
         const result: OwnedEditorCompleteSaveResult = { id: request.saveRequest.id, draft: createTaskDraft(after),
             ...('cancellation' in checklistResult ? { cancellation: checklistResult.cancellation } : {}) };
-        // Empty file history grants no cleanup ownership, including old baseline tombstones.
+
         const settlementPlan = request.ownedDraft.priorOperations.length === 0 ? [] : planAttachmentDraftSettlement({
             baselineAttachments: request.saveRequest.attachments.base, draftAttachments: request.saveRequest.attachments.value,
             committedAttachments: after.attachments });

@@ -5,17 +5,15 @@ import { logInfo } from '@/lib/app-log';
 
 export type IncomingUrl = {
     url: string | null;
-    // Increments on every delivery, so the same link opened twice in a row
-    // (an Action Button shortcut that always sends the same capture URL)
-    // is handled twice. expo-linking's useURL() only re-renders when the
-    // string changes, which made a repeated shortcut capture a no-op.
+
+
     key: number;
 };
 
 const INITIAL: IncomingUrl = { url: null, key: 0 };
 const DUPLICATE_DELIVERY_WINDOW_MS = 1_000;
 
-// Scheme and host only: a capture link carries the task title in its path/query.
+
 const logIncomingDelivery = (url: string, delivery: number, deduped: boolean): void => {
     let scheme = 'none';
     let host = 'none';
@@ -24,7 +22,7 @@ const logIncomingDelivery = (url: string, delivery: number, deduped: boolean): v
         scheme = parsed.scheme ?? 'none';
         host = parsed.hostname ?? 'none';
     } catch {
-        // A link the parser rejects is still worth counting.
+
     }
     void logInfo('Incoming link delivered', {
         scope: 'link',
@@ -56,9 +54,8 @@ export function useIncomingUrl(): IncomingUrl {
             .catch(() => undefined);
         const subscription = Linking.addEventListener('url', (event) => {
             const now = Date.now();
-            // iOS can deliver the launch URL through the event as well as
-            // getInitialURL(); a repeat of the same link within a second is
-            // that echo, not a second press.
+
+
             if (event.url === lastDelivery.url && now - lastDelivery.at < DUPLICATE_DELIVERY_WINDOW_MS) {
                 logIncomingDelivery(event.url, deliveries, true);
                 return;
@@ -66,8 +63,8 @@ export function useIncomingUrl(): IncomingUrl {
             lastDelivery = { url: event.url, at: now };
             deliveries += 1;
             logIncomingDelivery(event.url, deliveries, false);
-            // One slot: it keeps only the latest link. A link that arrives while
-            // an earlier one waits for canonical data replaces the earlier one.
+
+
             setIncoming((previous) => ({ url: event.url, key: previous.key + 1 }));
         });
         return () => {

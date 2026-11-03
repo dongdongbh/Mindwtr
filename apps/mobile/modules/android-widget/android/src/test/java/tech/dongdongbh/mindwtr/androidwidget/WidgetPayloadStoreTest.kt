@@ -27,7 +27,7 @@ class WidgetPayloadStoreTest {
   @Test
   fun aCommitThatDidNotReachTheDiskReportsFailure() {
     val real = context.getSharedPreferences(WidgetPayloadStore.PREFS_NAME, Context.MODE_PRIVATE)
-    // The editor's commit() answers false, as SharedPreferences does when its file cannot be written.
+
     val failingEditor = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences.Editor::class.java)) { proxy, method, args ->
       if (method.name == "commit") false else { method.invoke(real.edit(), *(args ?: emptyArray())); proxy }
     } as SharedPreferences.Editor

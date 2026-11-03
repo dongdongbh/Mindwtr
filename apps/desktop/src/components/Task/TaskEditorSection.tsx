@@ -22,8 +22,7 @@ export function TaskEditorSection({ title, count, open, onToggle, children }: Ta
             const section = sectionRef.current;
             if (!section) return;
 
-            // Inline lists and modal editors can have nested scrollports. Native
-            // nearest scrolling handles all of them without moving visible content.
+
             let availableHeight = window.innerHeight;
             for (let parent = section.parentElement; parent; parent = parent.parentElement) {
                 if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) {
@@ -33,8 +32,8 @@ export function TaskEditorSection({ title, count, open, onToggle, children }: Ta
             if (section.getBoundingClientRect().height <= availableHeight) {
                 section.scrollIntoView({ block: 'nearest', behavior: 'instant' });
             } else {
-                // The full section cannot fit: show its beginning, including the
-                // toggle, rather than scrolling straight to its last fields.
+
+
                 headerRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' });
             }
         });

@@ -60,8 +60,7 @@ describe('DiagnosticsSection', () => {
         expect(onAnalyticsHeartbeatChange).toHaveBeenCalledWith(true);
     });
 
-    // Desktop had only the log's path as text; a tester could not get the file out of a
-    // hidden or sandboxed folder.
+
     it('offers Save log next to Clear log', () => {
         const onSaveLog = vi.fn();
         const { getByRole } = render(<DiagnosticsSection {...baseProps} onSaveLog={onSaveLog} />);

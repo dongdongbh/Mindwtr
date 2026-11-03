@@ -15,7 +15,7 @@ import {
 } from './diagnostics-log';
 import { addBreadcrumb, clearBreadcrumbs } from './log-breadcrumbs';
 
-/** An in-memory log file; `append: false` leaves out append and size, as RN's legacy Expo file system has neither. */
+
 const fakeFile = (options: { path?: string | null; append?: boolean } = {}) => {
     const path = options.path === undefined ? 'files/logs/mindwtr.log' : options.path;
     const state = { text: null as string | null, aside: null as string | null, calls: [] as string[] };
@@ -109,9 +109,18 @@ describe('diagnostics log', () => {
         expect(failed.context?.breadcrumbs).toMatch(/:view:inbox$/);
         expect(failed.context?.url).toBeDefined();
         expect(JSON.stringify(failed)).not.toMatch(/abc\.def\.ghi|stack-secret|alex:pw/);
-        // An info line never has a stack key; an error without one leaves it out of the JSON.
+
         expect(Object.keys(info)).toEqual(['ts', 'level', 'scope', 'message', 'context']);
         expect(formatDiagnosticsLogLine(buildDiagnosticsErrorEntry('plain', { scope: 'x' }))).not.toContain('"stack"');
+    });
+
+    it('writes no local file or document URI from a failed sync\'s error line (File Sync, S5)', () => {
+        const uri = 'file:///storage/emulated/0/private-folder/data.json';
+        const error = new Error(`EACCES: permission denied, open '${uri}'`);
+        error.stack = `Error: EACCES: permission denied, open '${uri}'\n    at write (content://provider/tree/private-folder)`;
+        const line = formatDiagnosticsLogLine(buildDiagnosticsErrorEntry(error, { scope: 'sync', extra: { error: error.message, step: 'write-remote' } }));
+        expect(line).not.toContain('private-folder');
+        expect(line).toContain('[redacted-file-uri]');
     });
 
     it('turns a core logger payload into the line React Native\'s bridge writes', () => {
@@ -132,7 +141,7 @@ describe('diagnostics log', () => {
         await log.append(entry('over the cap'));
         expect(state.text.length).toBe(ROTATED_LOG_RETAIN_CHARS);
         expect(state.text.endsWith(`${JSON.stringify(entry('over the cap'))}\n`)).toBe(true);
-        // Under the cap nothing is rewritten.
+
         state.calls.length = 0;
         await log.append(entry('small'));
         expect(state.calls).toEqual(['ensure', 'append']);
@@ -150,7 +159,7 @@ describe('diagnostics log', () => {
     });
 
     it('never erases the log when the file cannot be read: the line is dropped instead', async () => {
-        // RN's app-log.ts read '' after a failed read and rewrote the whole log as the one new line.
+
         const rewrite = fakeFile({ append: false });
         const log = createDiagnosticsLog({ isEnabled: () => enabled, files: [rewrite.file] });
         await log.append(entry('kept'));
@@ -158,7 +167,7 @@ describe('diagnostics log', () => {
         await expect(log.append(entry('dropped'))).resolves.toBeNull();
         expect(rewrite.state.text).toBe(formatDiagnosticsLogLine(entry('kept')));
 
-        // And its trim after an append wrote '' (an empty log) when the read failed.
+
         const appending = fakeFile();
         const trimmed = createDiagnosticsLog({ isEnabled: () => enabled, files: [appending.file] });
         await trimmed.append(entry('first'));
@@ -169,7 +178,7 @@ describe('diagnostics log', () => {
     });
 
     it('keeps logging when a file over the cap cannot be read, and moves it aside past twice the cap', async () => {
-        // A failed trim read used to stop the log for good: every later line returned null until Clear log.
+
         const { file, state } = fakeFile();
         const log = createDiagnosticsLog({ isEnabled: () => enabled, files: [file] });
         const unreadable = 'u'.repeat(MAX_LOG_FILE_BYTES + 1);
@@ -178,7 +187,7 @@ describe('diagnostics log', () => {
         for (let i = 0; i < 5; i += 1) await expect(log.append(entry(`fresh ${i}`))).resolves.toBe('files/logs/mindwtr.log');
         expect(state.text.startsWith(unreadable)).toBe(true);
         expect(state.text.endsWith(formatDiagnosticsLogLine(entry('fresh 4')))).toBe(true);
-        // Past twice the cap it is moved aside whole (nothing erased) and a new file starts; 60 lines cross a 50th write.
+
         const huge = 'u'.repeat(2 * MAX_LOG_FILE_BYTES + 1);
         state.text = huge;
         for (let i = 0; i < 60; i += 1) await expect(log.append(entry(`later ${i}`))).resolves.toBe('files/logs/mindwtr.log');
@@ -189,7 +198,7 @@ describe('diagnostics log', () => {
     });
 
     it('writes a line once when the trim after its append fails', async () => {
-        // RN's app-log.ts caught that failure and wrote the line again through its legacy file (the same file on disk).
+
         const primary = fakeFile();
         const fallback = fakeFile({ path: 'legacy/logs/mindwtr.log', append: false });
         const log = createDiagnosticsLog({ isEnabled: () => enabled, files: [primary.file, fallback.file] });
@@ -318,7 +327,7 @@ describe('diagnostics checked clear', () => {
     it.each([1, 'true', {}])('requires literal true from a runtime probe, refusing truthy %j', async (answer) => {
         const { file, state } = strictFile();
         state.text = 'before';
-        // JavaScript file ports can violate the declared return type; truthiness proves no absence.
+
         file.isAbsent = async () => answer as unknown as boolean;
         await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'unconfirmed' });
         expect(state.text).toBeNull();

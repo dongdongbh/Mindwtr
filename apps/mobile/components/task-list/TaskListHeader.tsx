@@ -6,6 +6,7 @@ import { formatListItemCount, getTaskListHeaderText } from '@mindwtr/core';
 
 import { ListOverflowMenu } from '@/components/list-overflow-menu';
 import { styles } from './task-list.styles';
+import { TaskListSortButton } from './TaskListSortButton';
 
 type ThemeColors = {
   border: string;
@@ -21,7 +22,7 @@ type ThemeColors = {
 export type TaskListActiveFilterChip = {
   id: string;
   label: string;
-  /** Excluded (subtracting) token — struck through and danger-colored. */
+
   excluded?: boolean;
   onPress: () => void;
 };
@@ -29,7 +30,7 @@ export type TaskListActiveFilterChip = {
 type TaskListHeaderProps = {
   activeFilterChips: TaskListActiveFilterChip[];
   count: number;
-  /** Inbox-only: keep Sort, Group, and Filters as direct compact controls. */
+
   directControls?: boolean;
   headerAccessory?: React.ReactNode;
   filterActiveCount: number;
@@ -72,7 +73,7 @@ export function TaskListHeader({
   themeColors,
   title,
 }: TaskListHeaderProps) {
-  // Every label comes from core, shared with the native host.
+
   const text = getTaskListHeaderText({ sortByLabel, groupByLabel, hasActiveFilters, filterActiveCount, t });
   const activeFilterControl = !directControls && showFilterButton && hasActiveFilters ? (
     <TouchableOpacity
@@ -93,16 +94,7 @@ export function TaskListHeader({
   const directControlGroup = directControls ? (
     <View style={styles.headerAccessoryControls}>
       {showSort ? (
-        <TouchableOpacity
-          accessibilityLabel={text.sortAccessibilityLabel}
-          accessibilityRole="button"
-          onPress={onOpenSort}
-          style={styles.directControlButton}
-        >
-          <View style={[styles.directControlVisual, { borderColor: themeColors.border, backgroundColor: themeColors.filterBg }]}>
-            <ArrowUpDown size={16} color={themeColors.secondaryText} strokeWidth={2} />
-          </View>
-        </TouchableOpacity>
+        <TaskListSortButton accessibilityLabel={text.sortAccessibilityLabel} onPress={onOpenSort} themeColors={themeColors} />
       ) : null}
       {onOpenGroup ? (
         <TouchableOpacity
@@ -139,7 +131,7 @@ export function TaskListHeader({
               color={hasActiveFilters ? themeColors.tint : themeColors.secondaryText}
               strokeWidth={2}
             />
-            {/* How many filters are on, not just that some are. */}
+            {                                                      }
             {hasActiveFilters ? (
               <Text style={[styles.activeFiltersButtonText, { color: themeColors.tint }]}>
                 {filterActiveCount}

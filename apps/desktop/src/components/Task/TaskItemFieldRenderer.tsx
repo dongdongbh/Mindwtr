@@ -1,3 +1,4 @@
+import { getClipboardImageFiles, getImageExtension, isEmptyPasteEvent, readAsyncClipboardImageFiles } from '../../lib/clipboard-images';
 import { Calendar, CalendarClock, CalendarDays, Navigation, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import {
@@ -101,7 +102,7 @@ export type MonthlyRecurrenceInfo = {
     interval: number;
 };
 
-/** Locale- and settings-derived facts the field editors render against. */
+
 export type TaskEditorEnv = {
     t: (key: string) => string;
     language: string;
@@ -112,7 +113,7 @@ export type TaskEditorEnv = {
     showObsidianNoteAttachment: boolean;
 };
 
-/** Token/person option lists (lazily loaded by useTaskItemProjectContext). */
+
 export type TaskEditorOptionLists = {
     allContextOptions: string[];
     allTagOptions: string[];
@@ -121,11 +122,12 @@ export type TaskEditorOptionLists = {
     assignedToOptions: string[];
 };
 
-/** The slice of useTaskItemAttachments the attachments field consumes. */
+
 export type TaskEditorAttachments = {
     attachmentError: string | null;
     visibleEditAttachments: Attachment[];
     addFileAttachment: () => void;
+    addDroppedFileAttachments: (files: File[]) => Promise<Attachment[] | null>;
     addLinkAttachment: () => void;
     addFolderLinkAttachment: () => void;
     addObsidianNoteAttachment: () => void;
@@ -193,6 +195,7 @@ export function TaskItemFieldRenderer({
         attachmentError,
         visibleEditAttachments,
         addFileAttachment,
+        addDroppedFileAttachments,
         addLinkAttachment,
         addFolderLinkAttachment,
         addObsidianNoteAttachment,
@@ -211,8 +214,8 @@ export function TaskItemFieldRenderer({
     const showDescriptionPreview = descriptionPreview.visible;
     const toggleDescriptionPreview = descriptionPreview.toggle;
     const editDescriptionFromPreview = descriptionPreview.editSource;
-    // Draft values and their setField bindings, under the names the field
-    // editors below were written against.
+
+
     const {
         description: editDescription,
         startTime: editStartTime,
@@ -269,6 +272,7 @@ export function TaskItemFieldRenderer({
     const descriptionUndoRef = useRef<Array<{ value: string; selection: MarkdownSelection }>>([]);
     const [descriptionUndoDepth, setDescriptionUndoDepth] = useState(0);
     const [descriptionAudioState, setDescriptionAudioState] = useState<DescriptionAudioState>('idle');
+    const descriptionRendererActiveRef = useRef(true);
     const [descriptionAudioError, setDescriptionAudioError] = useState<string | null>(null);
     const descriptionAudioStateRef = useRef<DescriptionAudioState>('idle');
     const descriptionCaptureRef = useRef<AudioCaptureSession | null>(null);
@@ -290,6 +294,8 @@ export function TaskItemFieldRenderer({
         descriptionUndoRef.current = [];
         setDescriptionUndoDepth(0);
         setDescriptionAudioError(null);
+        descriptionRendererActiveRef.current = true;
+        return () => { descriptionRendererActiveRef.current = false; };
     }, [taskId]);
     const parsedRecurrenceRRule = parseRRuleString(editRecurrenceRRule);
     const recurrenceEndMode: 'never' | 'until' | 'count' = parsedRecurrenceRRule.count
@@ -356,6 +362,8 @@ export function TaskItemFieldRenderer({
             : nextUndoEntries;
         setDescriptionUndoDepth(descriptionUndoRef.current.length);
     };
+    const latestDescriptionRef = useRef(editDescription);
+    latestDescriptionRef.current = editDescription;
     const applyDescriptionValue = (
         value: string,
         options?: {
@@ -364,9 +372,10 @@ export function TaskItemFieldRenderer({
             baseSelection?: MarkdownSelection;
         },
     ) => {
-        if ((options?.recordUndo ?? true) && value !== editDescription) {
-            pushDescriptionUndoEntry(editDescription, options?.baseSelection ?? descriptionSelectionRef.current);
+        if ((options?.recordUndo ?? true) && value !== latestDescriptionRef.current) {
+            pushDescriptionUndoEntry(latestDescriptionRef.current, options?.baseSelection ?? descriptionSelectionRef.current);
         }
+        latestDescriptionRef.current = value;
         setEditDescription(value);
         if (options?.nextSelection) {
             descriptionSelectionRef.current = options.nextSelection;
@@ -505,7 +514,40 @@ export function TaskItemFieldRenderer({
         lastDescriptionPairSelectionRef.current = null;
         applyDescriptionKeyboardResult(next);
     };
+    const pasteDescriptionImages = (textarea: HTMLTextAreaElement, images: File[], text: string) => {
+        const pastedValue = textarea.value;
+        const pastedSelection = { start: textarea.selectionStart, end: textarea.selectionEnd };
+        const files = images.map((file) => new File([file], file.name || `clipboard.${getImageExtension(file)}`, { type: file.type }));
+        void addDroppedFileAttachments(files).then((imported) => {
+
+            if (!descriptionRendererActiveRef.current || !imported || (imported.length === 0 && !text)) return;
+            const value = latestDescriptionRef.current;
+            const start = value === pastedValue ? pastedSelection.start : value.length;
+            const end = value === pastedValue ? pastedSelection.end : value.length;
+            const insertion = `${text}${text ? '\n\n' : ''}${imported.map((attachment) => `![Image](mindwtr://attachment/${attachment.id})`).join('\n\n')}`;
+            const selection = { start: start + insertion.length, end: start + insertion.length };
+            applyDescriptionValue(`${value.slice(0, start)}${insertion}${value.slice(end)}`, { baseSelection: { start, end }, nextSelection: selection });
+            void logInfo('Description clipboard image references inserted', {
+                scope: 'attachment',
+                extra: { releaseCheck: 'v1.3.8/description-clipboard-images', count: imported.length },
+            });
+            if (textarea.isConnected && document.activeElement === textarea) restoreDescriptionTextareaSelection(textarea, selection);
+        }).catch((error) => setDescriptionAudioError(error instanceof Error ? error.message : t('attachments.fileNotReadable')));
+    };
     const handleDescriptionPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+        const images = getClipboardImageFiles(event.clipboardData);
+        if (images.length > 0) {
+            event.preventDefault();
+            pasteDescriptionImages(event.currentTarget, images, event.clipboardData.getData('text/plain'));
+            return;
+        }
+        if (isEmptyPasteEvent(event.clipboardData)) {
+            const textarea = event.currentTarget;
+            void readAsyncClipboardImageFiles().then((files) => {
+                if (files.length > 0 && descriptionRendererActiveRef.current) pasteDescriptionImages(textarea, files, '');
+            });
+            return;
+        }
         const pastedText = event.clipboardData.getData('text/plain');
         if (!pastedText) return;
         const eventTextarea = event.currentTarget;
@@ -587,9 +629,8 @@ export function TaskItemFieldRenderer({
         if (descriptionAudioState !== 'recording') {
             setDescriptionAudioError(null);
             try {
-                // No fixed name: a failed transcription keeps this file as an
-                // attachment (below), and a reused name would let the next take
-                // overwrite it and a later success delete it (#1245).
+
+
                 descriptionCaptureRef.current = await startAudioCapture();
                 setDescriptionAudioState('recording');
             } catch (error) {
@@ -648,11 +689,8 @@ export function TaskItemFieldRenderer({
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setDescriptionAudioError(message || tFallback(t, 'attachments.transcriptionFailed', 'Transcription failed. Please try again.'));
-            // The transcript was the only thing that would have carried the
-            // words, and it never arrived. Keep the recording and attach it to
-            // the task instead of deleting it (#1245). Transcription runs for
-            // many seconds, so the list to append to is the one the store holds
-            // now, never the one captured when this callback was built.
+
+
             const { tasks: currentTasks } = useTaskStore.getState();
             const existing = currentTasks.find((item) => item.id === taskId);
             if (capture && existing) {
@@ -669,8 +707,8 @@ export function TaskItemFieldRenderer({
                 };
                 appendRetainedAttachment(retainedAttachment, existing.attachments ?? []);
                 try {
-                    // Appended on the row as it is when the write is admitted, so an attachment a sync
-                    // save brought meanwhile is kept.
+
+
                     const updateResult = await updateTaskFromLatest(taskId, (latest) => ({
                         attachments: [...(latest.attachments ?? []), retainedAttachment],
                     }));
@@ -780,6 +818,7 @@ export function TaskItemFieldRenderer({
                     t={t}
                     taskTitle={task.title}
                     taskId={taskId}
+                    attachments={visibleEditAttachments}
                     showDescriptionPreview={showDescriptionPreview}
                     editDescription={editDescription}
                     isRtl={isRtl}
@@ -790,7 +829,7 @@ export function TaskItemFieldRenderer({
                     descriptionSelection={descriptionSelectionRef.current}
                     descriptionAutocomplete={descriptionAutocomplete}
                     descriptionAudioState={descriptionAudioState}
-                    descriptionAudioError={descriptionAudioError}
+                    descriptionAudioError={descriptionAudioError || attachmentError}
                     onTogglePreview={toggleDescriptionPreview}
                     onEditFromPreview={handleEditDescriptionFromPreview}
                     onExpand={() => setDescriptionExpanded(true)}
@@ -860,7 +899,7 @@ export function TaskItemFieldRenderer({
                     ];
                 const applyRelativeStartOffset = (amountValue: number, unitValue: NonNullable<Task['relativeStartOffset']>['unit']) => {
                     if (!editDueDate || !Number.isFinite(amountValue)) return;
-                    // 0 is valid: start on the due date itself.
+
                     const magnitude = Math.max(0, Math.floor(amountValue));
                     const offset = { amount: magnitude === 0 ? 0 : -magnitude, unit: unitValue };
                     const computedStart = computeRelativeStartTime(editDueDate, offset);
@@ -898,6 +937,21 @@ export function TaskItemFieldRenderer({
                             hasValue: Boolean(editStartTime),
                             warning: dateIssueLabel,
                         })}
+                        {reminders.startAdvance && (
+                            <label className="mt-2 block text-xs text-muted-foreground">
+                                <span>{reminders.startAdvance.label}</span>
+                                <select
+                                    aria-label={reminders.startAdvance.label}
+                                    disabled={!reminders.startAdvance.enabled}
+                                    value={draft.startReminderLeadMinutes ?? 0}
+                                    onChange={(event) => setField('startReminderLeadMinutes', Number(event.target.value))}
+                                    className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-50"
+                                >
+                                    {reminders.startAdvance.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                                {reminders.startAdvance.hint && <span className="mt-1 block leading-snug">{reminders.startAdvance.hint}</span>}
+                            </label>
+                        )}
                         {editDueDate && (
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                 <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5" aria-label={t('taskEdit.startModeLabel')}>
@@ -950,7 +1004,7 @@ export function TaskItemFieldRenderer({
             {
                 const { date: dateValue, time: timeValue } = splitDateTime(editDueDate);
                 const hasTime = Boolean(timeValue);
-                const hasReminderHandoffSchedule = hasTimeComponent(editStartTime) || hasTime;
+                const hasReminderHandoffSchedule = hasTimeComponent(editStartTime) || Boolean(editDueDate) || (draft.dueReminderLeadMinutes ?? 0) > 0;
                 const parsed = editDueDate ? safeParseDate(editDueDate) : null;
                 const updateDueDate = (nextDueDate: string) => {
                     setEditDueDate(nextDueDate);
@@ -1002,9 +1056,10 @@ export function TaskItemFieldRenderer({
                             const repeatLabel = reminders.repeatLabel;
                             const current = editRepeatReminderMinutes ?? 0;
                             const showRepeat = reminders.showRepeat;
-                            const isDefault = draft.reminderPolicy === 'inherit' && (!showRepeat || current === 0);
+                            const isDefault = draft.reminderPolicy === 'inherit' && (!showRepeat || current === 0) && !(draft.dueReminderLeadMinutes ?? 0);
                             const summary = [
                                 `${reminders.policyLabel}: ${reminders.policyValueLabel}`,
+                                ...((draft.dueReminderLeadMinutes ?? 0) > 0 ? [`${reminders.advanceLabel}: ${reminders.advanceValueLabel}`] : []),
                                 ...(showRepeat ? [`${repeatLabel}: ${reminders.repeatValueLabel}`] : []),
                             ].join(' · ');
                             return (
@@ -1036,6 +1091,19 @@ export function TaskItemFieldRenderer({
                                                 </select>
                                                 <span className="mt-1 block leading-snug">{reminders.hint}</span>
                                                 {reminders.disabledHint && <span className="mt-1 block leading-snug">{reminders.disabledHint}</span>}
+                                            </label>
+                                            <label className="block text-xs text-muted-foreground">
+                                                <span>{reminders.advanceLabel}</span>
+                                                <select
+                                                    aria-label={reminders.advanceLabel}
+                                                    disabled={!reminders.showAdvance}
+                                                    value={draft.dueReminderLeadMinutes ?? 0}
+                                                    onChange={(event) => setField('dueReminderLeadMinutes', Number(event.target.value))}
+                                                    className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-50"
+                                                >
+                                                    {reminders.advanceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                </select>
+                                                {reminders.advanceHint && <span className="mt-1 block leading-snug">{reminders.advanceHint}</span>}
                                             </label>
                                             {showRepeat && (
                                                 <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={repeatLabel}>
@@ -1144,8 +1212,8 @@ export function TaskItemFieldRenderer({
                 />
             );
         case 'timeEstimate':
-            // Time spent is opt-in: it only appears while the Pomodoro timer's
-            // task linking is engaged, so the default editor stays estimate-only.
+
+
             if (!timeSpentEnabled) {
                 return <TimeEstimateField t={t} value={editTimeEstimate} onChange={setEditTimeEstimate} />;
             }
@@ -1191,13 +1259,25 @@ export function TaskItemFieldRenderer({
             );
         case 'checklist':
             return (
-                <ChecklistField
-                    t={t}
-                    taskId={taskId}
-                    checklist={task.checklist}
-                    plainList={editStatus === 'reference'}
-                    resetTaskChecklist={resetTaskChecklist}
-                />
+                <div className="flex flex-col gap-2">
+                    {editRecurrence && task.taskMode !== 'list' && editStatus !== 'reference' && Boolean(task.checklist?.length) && (
+                        <label className="flex flex-col gap-1 text-xs">
+                            <span className="flex items-center gap-2">
+                                <input type="checkbox" aria-label={t('taskEdit.resetChecklistOnRepeat')} checked={!draft.preserveChecklistOnRepeat}
+                                    onChange={(event) => setField('preserveChecklistOnRepeat', !event.target.checked)} />
+                                {t('taskEdit.resetChecklistOnRepeat')}
+                            </span>
+                            <span className="text-muted-foreground">{t('taskEdit.resetChecklistOnRepeatHint')}</span>
+                        </label>
+                    )}
+                    <ChecklistField
+                        t={t}
+                        taskId={taskId}
+                        checklist={task.checklist}
+                        isReference={editStatus === 'reference'}
+                        resetTaskChecklist={resetTaskChecklist}
+                    />
+                </div>
             );
         default:
             return null;

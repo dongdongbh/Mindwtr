@@ -40,7 +40,9 @@ export const selectTaskItemStoreState = ({ task, propProject, isEditing, hasQuic
             deleteTask: state.deleteTask,
             moveTask: state.moveTask,
             projects: isEditing ? state.projects : EMPTY_PROJECTS,
-            sections: isEditing ? state.sections : EMPTY_SECTIONS,
+
+
+            sections: isEditing || includeQuickActionFocusData ? state.sections : EMPTY_SECTIONS,
             areas: includePickers ? state.areas : EMPTY_AREAS,
             project,
             mutationProject,
@@ -65,6 +67,7 @@ export const selectTaskItemStoreState = ({ task, propProject, isEditing, hasQuic
             activeTasksByStatus: derived?.activeTasksByStatus ?? EMPTY_TASKS_BY_STATUS,
             sequentialProjectIds: derived?.sequentialProjectIds ?? EMPTY_ID_SET,
             sequentialWithinSectionProjectIds: derived?.sequentialWithinSectionProjectIds ?? EMPTY_ID_SET,
+            sequentialSectionKeys: derived?.sequentialSectionKeys ?? EMPTY_ID_SET,
         };
     };
 

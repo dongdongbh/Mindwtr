@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Native generation proof only; domain/candidate/reference permission is later.
+
 final class AttachmentBaselineRetirementTests: XCTestCase {
     private typealias Proof = NativeAttachmentFiles.BaselineAttachmentProof
     private enum Stop: Error { case cancelled, fault }
@@ -147,8 +147,8 @@ final class AttachmentBaselineRetirementTests: XCTestCase {
         guard case .noOwnedGeneration(_, .leafAbsent(_)) = observation else { return XCTFail("Expected observation") }
         let later = Data("Later generation remains untouched".utf8); try later.write(to: missing)
         let identity = try token(missing)
-        // The retirement API takes BaselineAttachmentProof, not this enum. No
-        // facade accepts the absent observation or extracts deletion permission.
+
+
         XCTAssertEqual(try Data(contentsOf: missing), later); XCTAssertEqual(try token(missing), identity); try sameTarget()
     }
 

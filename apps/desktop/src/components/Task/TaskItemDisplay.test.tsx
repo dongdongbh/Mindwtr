@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import type { Area, Project, Task } from '@mindwtr/core';
-import { configureDateFormatting, getDateFormattingConfig, getTaskAgeLabel, hasTimeComponent, safeFormatDate, useTaskStore } from '@mindwtr/core';
+import { configureDateFormatting, formatTimeEstimateLabel, getDateFormattingConfig, getTaskAgeLabel, hasTimeComponent, safeFormatDate, useTaskStore } from '@mindwtr/core';
 
 import { LanguageProvider } from '../../contexts/language-context';
 import { TaskItemDisplay } from './TaskItemDisplay';
@@ -442,6 +442,26 @@ describe('TaskItemDisplay', () => {
         expect(getByText('Starts after due date')).toBeInTheDocument();
     });
 
+    it.each([
+        { compactMetaEnabled: true, isViewOpen: false, timeEstimatesEnabled: true, shown: true },
+        { compactMetaEnabled: false, isViewOpen: false, timeEstimatesEnabled: true, shown: false },
+        { compactMetaEnabled: false, isViewOpen: true, timeEstimatesEnabled: true, shown: true },
+        { compactMetaEnabled: true, isViewOpen: true, timeEstimatesEnabled: true, shown: true },
+        { compactMetaEnabled: true, isViewOpen: false, timeEstimatesEnabled: false, shown: false },
+    ])('shows an estimate-only task\'s estimate once with Show details on (#1476): %o', ({ compactMetaEnabled, isViewOpen, timeEstimatesEnabled, shown }) => {
+        const label = formatTimeEstimateLabel('30min');
+        const { queryAllByText } = render(<LanguageProvider><TaskItemDisplay
+            task={{ ...baseTask, status: 'next', timeEstimate: '30min' }} language="en" selectionMode={false}
+            isViewOpen={isViewOpen} compactMetaEnabled={compactMetaEnabled}
+            actions={{ onToggleView: vi.fn(), onEdit: vi.fn(), onDelete: vi.fn(),
+                onDuplicate: vi.fn(), onStatusChange: vi.fn(), openAttachment: vi.fn() }}
+            visibleAttachments={[]} recurrenceRule="" recurrenceStrategy="strict"
+            prioritiesEnabled={false} timeEstimatesEnabled={timeEstimatesEnabled} isStagnant={false}
+            showQuickDone={false} readOnly={false} t={(key) => key}
+        /></LanguageProvider>);
+        expect(queryAllByText(label)).toHaveLength(shown ? 1 : 0);
+    });
+
     it('shows the daily recurrence interval in task metadata', () => {
         const { getByText } = render(
             <LanguageProvider>
@@ -481,10 +501,10 @@ describe('TaskItemDisplay', () => {
         expect(getByText(/^Daily · Repeat every 3 day\(s\) · Next calendar preview: /)).toBeInTheDocument();
     });
 
-    // #1164: Waiting For completes from the quick action; Someday still promotes.
+
     it.each([
-        ['waiting', 'Done', 'done', 'Next'],
-        ['someday', 'Next', 'next', 'Done'],
+        ['waiting', 'Mark Done', 'done', 'Next'],
+        ['someday', 'Next', 'next', 'Mark Done'],
     ] as const)('quick action on a %s task offers %s', (status, buttonName, expectedStatus, absentButton) => {
         const onStatusChange = vi.fn();
         const { getByRole, queryByRole, unmount } = render(
@@ -513,19 +533,65 @@ describe('TaskItemDisplay', () => {
                     t={(key: string) => ({
                         'status.next': 'Next',
                         'status.done': 'Done',
+                        'review.markDone': 'Mark Done',
                     }[key] ?? key)}
                 />
             </LanguageProvider>
         );
 
-        fireEvent.click(getByRole('button', { name: buttonName }));
+        const quickAction = getByRole('button', { name: buttonName });
+        expect(quickAction.hasAttribute('data-task-complete')).toBe(expectedStatus === 'done');
+        fireEvent.click(quickAction);
         expect(onStatusChange).toHaveBeenCalledWith(expectedStatus);
         expect(queryByRole('button', { name: absentButton })).not.toBeInTheDocument();
         unmount();
     });
 
-    // #1155: the row status menu listed Reference only for a task that already
-    // was one, so a task inside a project could not be filed as reference.
+    it('copies the canonical task link without opening or selecting the row', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        vi.stubGlobal('navigator', { clipboard: { writeText } });
+        const onRowClick = vi.fn();
+        const onToggleView = vi.fn();
+        const onToggleSelect = vi.fn();
+        const onEdit = vi.fn();
+        const { getByRole } = render(<div onClick={onRowClick}>
+            <LanguageProvider><TaskItemDisplay
+                task={{ ...baseTask, id: 'task /?&' }} language="en" selectionMode={false} isViewOpen={false}
+                actions={{ onToggleView, onToggleSelect, onEdit, onDelete: vi.fn(),
+                    onDuplicate: vi.fn(), onStatusChange: vi.fn(), openAttachment: vi.fn() }}
+                visibleAttachments={[]} recurrenceRule="" recurrenceStrategy="strict"
+                prioritiesEnabled={false} timeEstimatesEnabled={false} isStagnant={false}
+                showQuickDone readOnly={false} t={(key) => key}
+            /></LanguageProvider>
+        </div>);
+        const copyLink = getByRole('button', { name: 'Copy task link' });
+        copyLink.focus();
+        expect(copyLink).toHaveFocus();
+        fireEvent.pointerDown(copyLink);
+        fireEvent.click(copyLink, { detail: 0 });
+        await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith('mindwtr://open?task=task%20%2F%3F%26'));
+        expect(onRowClick).not.toHaveBeenCalled();
+        expect(onToggleSelect).not.toHaveBeenCalled();
+        expect(onToggleView).not.toHaveBeenCalled();
+        expect(onEdit).not.toHaveBeenCalled();
+    });
+
+    it('keeps a completed quick-control slot visibly checked without completing again', () => {
+        const onStatusChange = vi.fn();
+        const { getByRole, queryByRole } = render(<LanguageProvider><TaskItemDisplay
+            task={{ ...baseTask, status: 'done' }} language="en" selectionMode={false} isViewOpen={false}
+            actions={{ onToggleView: vi.fn(), onEdit: vi.fn(), onDelete: vi.fn(),
+                onDuplicate: vi.fn(), onStatusChange, openAttachment: vi.fn() }}
+            visibleAttachments={[]} recurrenceRule="" recurrenceStrategy="strict"
+            prioritiesEnabled={false} timeEstimatesEnabled={false} isStagnant={false}
+            showQuickDone readOnly t={(key) => key}
+        /></LanguageProvider>);
+        expect(getByRole('img', { name: 'status.done' })).toBeInTheDocument();
+        expect(queryByRole('button', { name: 'Mark Done' })).not.toBeInTheDocument();
+        expect(onStatusChange).not.toHaveBeenCalled();
+    });
+
+
     it('lets the row status menu send a task to Reference', () => {
         const onStatusChange = vi.fn();
         const { getByRole } = render(
@@ -613,8 +679,8 @@ describe('TaskItemDisplay', () => {
     });
 
     it('shows the projected recurrence date in task preview metadata', () => {
-        // The projected date is computed from "now"; freeze it so the
-        // hardcoded Jul 9 expectation stays valid after that date passes.
+
+
         vi.useFakeTimers();
         vi.setSystemTime(new Date(2026, 6, 3, 12, 0, 0));
         const { getByText } = render(
@@ -733,6 +799,94 @@ describe('TaskItemDisplay', () => {
         expect(queryByText(/\*\*Call\*\*/)).toBeNull();
         expect(queryByText(/\[ \]/)).toBeNull();
         expect(queryByText('Second line')).toBeNull();
+    });
+
+    it('opens a URL in the collapsed description preview without toggling the row (#1425)', () => {
+        const onToggleView = vi.fn();
+        const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+        const { getByRole, getByText, container } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={{ ...baseTask, description: 'See https://example.com/spec before the call' }}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView,
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        fireEvent.click(getByRole('link', { name: 'https://example.com/spec' }));
+        expect(openSpy).toHaveBeenCalledWith('https://example.com/spec', '_blank', 'noopener,noreferrer');
+        expect(onToggleView).not.toHaveBeenCalled();
+
+
+        fireEvent.click(getByText(/before the call/));
+        expect(onToggleView).not.toHaveBeenCalled();
+        fireEvent.click(container.querySelector('[data-task-view-toggle]')!);
+        expect(onToggleView).toHaveBeenCalledTimes(1);
+
+        openSpy.mockRestore();
+    });
+
+    it('opens a bare www. address in the collapsed description preview, as the opened description does (#1425)', () => {
+        const onToggleView = vi.fn();
+        const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+        const { getByRole, getByText, container } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={{ ...baseTask, description: 'www.google.com before the call' }}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView,
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        fireEvent.click(getByRole('link', { name: 'www.google.com' }));
+        expect(openSpy).toHaveBeenCalledWith('http://www.google.com', '_blank', 'noopener,noreferrer');
+        expect(onToggleView).not.toHaveBeenCalled();
+
+
+        fireEvent.click(getByText(/before the call/));
+        expect(onToggleView).not.toHaveBeenCalled();
+        fireEvent.click(container.querySelector('[data-task-view-toggle]')!);
+        expect(onToggleView).toHaveBeenCalledTimes(1);
+
+        openSpy.mockRestore();
     });
 
     it('shows the completion date and time for completed tasks when compact details are off', () => {
@@ -1050,8 +1204,7 @@ describe('TaskItemDisplay', () => {
             </LanguageProvider>
         );
 
-        // A real anchor since #1048 — checklist links used to render as dead
-        // text because the whole row was one toggle button.
+
         expect(queryByRole('link', { name: 'spec' })).toBeInTheDocument();
         expect(container.textContent).toContain('Draft spec');
         expect(container.textContent).not.toContain('**');
@@ -1409,7 +1562,7 @@ describe('TaskItemDisplay', () => {
         expect(getByRole('button', { name: 'More options' })).toBeInTheDocument();
         const statusSelect = getByRole('combobox', { name: 'task.aria.status' });
         expect(statusSelect).toBeInTheDocument();
-        // Status pills wear the Board's per-status tint (an inbox task here).
+
         expect(statusSelect).toHaveClass('bg-[hsl(var(--status-inbox)/0.14)]', 'text-[hsl(var(--status-inbox))]');
         expect(queryByRole('button', { name: 'task.convertToReference' })).not.toBeInTheDocument();
         expect(queryByRole('button', { name: 'task.aria.delete' })).not.toBeInTheDocument();
@@ -1502,7 +1655,7 @@ describe('TaskItemDisplay', () => {
         expect(openAttachment).toHaveBeenCalledWith(imageAttachment);
     });
 
-    it('renders preserved reference checklists as ordered plain lists without completion behavior', () => {
+    it('renders a reference list with checkboxes that tick its entries, without a progress count (#1416)', () => {
         const onToggleChecklistItem = vi.fn();
         const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
         const referenceTask: Task = {
@@ -1545,21 +1698,18 @@ describe('TaskItemDisplay', () => {
             </LanguageProvider>
         );
 
-        const list = getByRole('list');
-        const items = Array.from(list.querySelectorAll('li'));
         expect(queryByText('1/2')).not.toBeInTheDocument();
         expect(getByText('Existing description')).toBeInTheDocument();
-        expect(items).toHaveLength(2);
-        expect(items.map((item) => item.textContent)).toEqual(['Finished source', 'First line\nsecond line']);
+        const boxes = Array.from(container.querySelectorAll('[aria-pressed]'));
+        expect(boxes.map((box) => box.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
+        expect(container.querySelector('.line-through')?.textContent).toBe('Finished source');
         const sourceLink = getByRole('link', { name: 'source' });
-        expect(sourceLink).toBeInTheDocument();
-        expect(container.querySelector('[aria-pressed]')).not.toBeInTheDocument();
-        expect(items[0]).not.toHaveClass('line-through');
 
         fireEvent.click(sourceLink);
         expect(openSpy).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener,noreferrer');
-        fireEvent.click(items[0]);
         expect(onToggleChecklistItem).not.toHaveBeenCalled();
+        fireEvent.click(boxes[1]);
+        expect(onToggleChecklistItem).toHaveBeenCalledWith(1);
     });
 
     it('renders Reference as a memo summary without task-only metadata or controls', () => {
@@ -1790,7 +1940,7 @@ describe('TaskItemDisplay', () => {
                 </LanguageProvider>
             );
             const label = safeFormatDate(dueDate, hasTimeComponent(dueDate) ? 'Pp' : 'P');
-            // The urgency class lands on the badge wrapper, not the label span.
+
             const className = getByText(label).closest('.metadata-badge')?.className ?? '';
             unmount();
             return className;
@@ -1798,7 +1948,7 @@ describe('TaskItemDisplay', () => {
 
         const hour = 60 * 60 * 1000;
         const overdue = dueColorFor(new Date(Date.now() - hour).toISOString());
-        // Urgent: inside 24h, which used to be destructive and read as overdue.
+
         const urgent = dueColorFor(new Date(Date.now() + (6 * hour)).toISOString());
         const upcoming = dueColorFor(new Date(Date.now() + (48 * hour)).toISOString());
         const later = dueColorFor(new Date(Date.now() + (30 * 24 * hour)).toISOString());
@@ -1879,8 +2029,7 @@ describe('TaskItemDisplay', () => {
             expect(strip?.className).toContain('-start-1.5');
         });
 
-        // Desktop keeps the priority text badge, so the strip is decoration only
-        // and must not reach the accessibility tree twice.
+
         it('is decorative: aria-hidden with no role', () => {
             const strip = renderStrip({ ...baseTask, priority: 'urgent' }, true);
             expect(strip?.ariaHidden).toBe('true');
@@ -1902,8 +2051,7 @@ describe('TaskItemDisplay', () => {
             expect(renderStrip(baseTask, true)).toBeNull();
         });
 
-        // A completed task keeps the row's own dimming; the strip gets no
-        // special-cased "done" color (decision: no green).
+
         it('keeps the priority color on a completed task', () => {
             expect(renderStrip({ ...baseTask, status: 'done', priority: 'low' }, true)?.background)
                 .toBe('rgb(59, 130, 246)');

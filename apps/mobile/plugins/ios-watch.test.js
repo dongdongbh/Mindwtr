@@ -237,7 +237,7 @@ describe('ios-watch', () => {
     ));
     expect(generatedIcon.readUInt32BE(16)).toBe(1024);
     expect(generatedIcon.readUInt32BE(20)).toBe(1024);
-    // PNG IHDR color type2 is RGB, without an alpha channel.
+
     expect(generatedIcon[25]).toBe(2);
   });
 
@@ -297,8 +297,8 @@ describe('ios-watch', () => {
     expect(phaseForTarget(project, hostTarget, 'PBXCopyFilesBuildPhase', 'Embed Watch Content').files).toHaveLength(1);
     expect(phaseForTarget(project, watchTarget, 'PBXCopyFilesBuildPhase', 'Embed Watch Extensions').files).toHaveLength(1);
     expect(project.writeSync()).toContain('MindwtrWatchWidgets.appex in Embed Watch Extensions');
-    // The iPhone widget plugin asks this before creating its own embed phase.
-    // node-xcode must not return the Watch target's phase as a global fallback.
+
+
     expect(project.buildPhaseObject('PBXCopyFilesBuildPhase', 'Embed App Extensions', 'HOST_TARGET')).toBeNull();
   });
 
@@ -307,8 +307,7 @@ describe('ios-watch', () => {
     const project = createFixtureProject();
     reconcileWatchProject(project, enabledOptions(directories));
 
-    // expo-share-intent adds a bare privacy manifest after our plugin during
-    // clean prebuild; xcode's helper searches all targets by file path.
+
     project.addBuildPhase(['PrivacyInfo.xcprivacy'], 'PBXResourcesBuildPhase', 'Resources', 'HOST_TARGET');
     const uses = buildFileUseCounts(project);
     expect([...uses.values()].every((count) => count === 1)).toBe(true);

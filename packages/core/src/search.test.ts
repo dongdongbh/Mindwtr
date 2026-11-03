@@ -176,7 +176,7 @@ describe('search', () => {
         expect(filterTasksBySearch(tasks, [], '#chores').map((task) => task.id)).toEqual(['home']);
         expect(filterTasksBySearch(tasks, [], '%alex').map((task) => task.id)).toEqual(['work']);
         expect(filterTasksBySearch(tasks, [], '@work plants')).toEqual([]);
-        // A bare prefix is still a text search.
+
         expect(filterTasksBySearch(tasks, [], '@').map((task) => task.id)).toEqual(['work']);
     });
 

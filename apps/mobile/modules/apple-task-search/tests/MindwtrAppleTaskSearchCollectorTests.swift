@@ -27,8 +27,7 @@ final class MindwtrAppleTaskSearchCollectorTests: XCTestCase {
         let polledState = await collector.drainState()
         XCTAssertTrue(polledState.allObservedQueriesComplete)
 
-        // Models the listener actor interleaving after the coordinator poll but
-        // before its close attempt.
+
         await collector.record(
             queryToken: "second",
             replyItems: [MindwtrAppleTaskSearchReference(indexedId: "index-2", taskId: "task-2")],

@@ -212,6 +212,7 @@ const createProps = (overrides: FixtureOverrides = {}): Omit<RendererProps, 'fie
             attachmentError: null,
             visibleEditAttachments: [],
             addFileAttachment: vi.fn(),
+            addDroppedFileAttachments: vi.fn(async () => []),
             addLinkAttachment: vi.fn(),
             addFolderLinkAttachment: vi.fn(),
             addObsidianNoteAttachment: vi.fn(),
@@ -230,22 +231,24 @@ const createProps = (overrides: FixtureOverrides = {}): Omit<RendererProps, 'fie
     };
 };
 
-/** Field harness with a live draft: setField writes through the core reducer. */
+
 function DraftFieldHarness({
     fieldId,
     initialDraft = {},
     options = {},
+    attachments = {},
 }: {
     fieldId: RendererProps['fieldId'];
     initialDraft?: Partial<TaskDraft>;
     options?: Partial<TaskEditorOptionLists>;
+    attachments?: Partial<RendererProps['attachments']>;
 }) {
     const [draft, setDraft] = useState<TaskDraft>(() => ({ ...createTaskDraft(baseTask), ...initialDraft }));
 
     return (
         <TaskItemFieldRenderer
             fieldId={fieldId}
-            {...createProps({ options })}
+            {...createProps({ options, attachments })}
             draft={draft}
             setField={(field, value) => setDraft((current) => setTaskDraftField(current, field, value))}
         />
@@ -314,9 +317,7 @@ function AssignedToAutocompleteHarness() {
     );
 }
 
-// #1245 left every stored speech-model path stale, so offline transcription
-// failed on every recording. The dictation WAV was deleted regardless, which
-// threw away the only record of what was said. Keep it and attach it instead.
+
 describe('TaskItemFieldRenderer description dictation', () => {
     const initialTaskState = useTaskStore.getState();
 
@@ -430,9 +431,7 @@ describe('TaskItemFieldRenderer description dictation', () => {
         expect(updateTask).not.toHaveBeenCalled();
     });
 
-    // The web recorder writes to the name the caller asks for. A fixed name
-    // means the next take overwrites the file a kept attachment points at, and
-    // a later success then deletes it — so the kept recording must be unique.
+
     it('never pins the capture file name', async () => {
         audioMocks.processAudioCapture.mockResolvedValue({ transcript: 'Buy milk' });
         seedStore(baseTask, vi.fn(async () => ({ success: true })));
@@ -445,9 +444,7 @@ describe('TaskItemFieldRenderer description dictation', () => {
         expect(options?.defaultName).toBeUndefined();
     });
 
-    // Transcription runs for many seconds; a sync pass or the editor's own save
-    // can change the attachment list meanwhile. Writing the render-time list
-    // back would drop whatever landed in between.
+
     it('appends to the attachment list the store holds at write time', async () => {
         audioMocks.processAudioCapture.mockRejectedValue(new Error('Whisper model not found'));
         const updateTask = vi.fn(async () => ({ success: true }));
@@ -559,7 +556,24 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(getByText(label)).not.toHaveClass('font-medium');
     });
 
-    it('uses the effective draft status to edit a retained reference checklist as a plain list', () => {
+    it('offers recurrence reset only for ordinary recurring checklists and edits only the preference', () => {
+        const setField = vi.fn();
+        const task: Task = { ...baseTask, recurrence: { rule: 'weekly' },
+            checklist: [{ id: 'a', title: 'First', isCompleted: true }] };
+        const props = createProps({ task, draft: { recurrence: 'weekly', preserveChecklistOnRepeat: false }, setField });
+        const view = render(<TaskItemFieldRenderer fieldId="checklist" {...props} />);
+        const toggle = view.getByRole('checkbox', { name: 'taskEdit.resetChecklistOnRepeat' });
+        expect(toggle).toBeChecked();
+        fireEvent.click(toggle);
+        expect(setField).toHaveBeenCalledWith('preserveChecklistOnRepeat', true);
+        expect(task.checklist![0].isCompleted).toBe(true);
+        view.rerender(<TaskItemFieldRenderer fieldId="checklist" {...props} task={{ ...task, taskMode: 'list' }} />);
+        expect(view.queryByRole('checkbox', { name: 'taskEdit.resetChecklistOnRepeat' })).toBeNull();
+        view.rerender(<TaskItemFieldRenderer fieldId="checklist" {...createProps({ task, draft: { recurrence: '' } })} />);
+        expect(view.queryByRole('checkbox', { name: 'taskEdit.resetChecklistOnRepeat' })).toBeNull();
+    });
+
+    it('uses the effective draft status to label a retained reference checklist List, with checkboxes and Reset (#1416)', () => {
         const task: Task = {
             ...baseTask,
             status: 'next',
@@ -573,8 +587,8 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         );
 
         expect(getByText('List')).toBeInTheDocument();
-        expect(queryByRole('button', { name: 'Checklist 1' })).not.toBeInTheDocument();
-        expect(queryByText('taskEdit.resetChecklist')).not.toBeInTheDocument();
+        expect(queryByRole('button', { name: 'List 1' })).toBeInTheDocument();
+        expect(queryByText('taskEdit.resetChecklist')).toBeInTheDocument();
     });
 
     it('shows a date-coherence note on conflicting start and due date fields', () => {
@@ -647,7 +661,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
             />
         );
 
-        // Picking Relative first, with no start date yet, is a supported flow.
+
         fireEvent.click(getByRole('button', { name: 'Relative' }));
 
         expect(setField).toHaveBeenCalledWith('relativeStartOffset', { amount: -3, unit: 'day' });
@@ -722,7 +736,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
             />
         );
 
-        // Resting state: no policy selector or repeat chips.
+
         expect(queryByRole('combobox', { name: 'Start/due reminders' })).toBeNull();
         expect(queryByRole('group', { name: 'Repeat reminder' })).toBeNull();
         const summaryRow = getByRole('button', { name: 'Start/due reminders: Send · Repeat reminder: Off' });
@@ -749,8 +763,8 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
     });
 
     it('leaves the summary at rest when a stored repeat interval is out of reach', () => {
-        // Due time cleared but repeatReminderMinutes lingers: the repeat control is
-        // gone, so highlighting a value nothing can show or clear would be a dead end.
+
+
         const { getByRole } = render(
             <TaskItemFieldRenderer
                 fieldId="dueDate"
@@ -773,7 +787,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         );
 
         expect(getByRole('button', { name: 'Start/due reminders: Skip' })).toBeInTheDocument();
-        // Repeat is meaningless while reminders are skipped, so it stays out of both states.
+
         fireEvent.click(getByRole('button', { name: 'Start/due reminders: Skip' }));
         expect(queryByRole('group', { name: 'Repeat reminder' })).toBeNull();
     });
@@ -944,16 +958,13 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
 
         fireEvent.focus(getByLabelText('Due date'));
 
-        // Suggestions now live only inside the fixed calendar popover, so focusing
-        // the field must not mount anything that shifts the editor layout (#901).
+
         expect(queryByRole('dialog', { name: 'Due Date Calendar' })).not.toBeInTheDocument();
         expect(queryByRole('button', { name: 'Today' })).not.toBeInTheDocument();
         expect(queryByRole('button', { name: 'Next month' })).not.toBeInTheDocument();
     });
 
-    // The calendar glyph is a small target, so clicking the text part of the field
-    // opens the popover too (#896). Focus alone still must not — see the test above,
-    // which keeps tabbing through the editor from popping calendars open.
+
     it('opens the calendar popover when the date input itself is clicked', () => {
         const { getByLabelText, getByRole, queryByRole } = render(
             <TaskItemFieldRenderer
@@ -994,12 +1005,10 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(setField).toHaveBeenCalledWith(draftKey, '2026-04-18T10:15');
     });
 
-    // step=5 made the browser report stepMismatch for any minute count off the
-    // grid, so entering 7 minutes was flagged invalid (#896).
+
     it('accepts a Time Spent value that is not a multiple of five', () => {
-        // The live-draft harness is required here: with a no-op setField the
-        // controlled input never actually holds 7, and an empty value reports no
-        // stepMismatch, so the assertion would pass no matter what step is set to.
+
+
         const { getByLabelText } = render(<DraftFieldHarness fieldId="timeEstimate" />);
 
         const input = getByLabelText('Time Spent') as HTMLInputElement;
@@ -1150,8 +1159,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         fireEvent.keyDown(getByLabelText('Due date'), { key: 'ArrowDown' });
         expect(getByRole('dialog', { name: 'Due Date Calendar' })).toBeInTheDocument();
 
-        // No pointer press is in flight, so the teardown runs on the next-tick
-        // timeout rather than waiting for a pointerup that will never come.
+
         fireEvent.blur(getByLabelText('Due date'));
         await waitFor(() => {
             expect(queryByRole('dialog', { name: 'Due Date Calendar' })).not.toBeInTheDocument();
@@ -1173,19 +1181,18 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(statusGroup).toBeInTheDocument();
         const selectedStatus = getByRole('button', { name: 'Inbox' });
         expect(selectedStatus).toHaveAttribute('aria-pressed', 'true');
-        // The active status pill wears its own status color, not the generic primary.
+
         expect(selectedStatus).toHaveClass('border-[hsl(var(--status-inbox))]', 'text-[hsl(var(--status-inbox))]');
         expect(getByRole('button', { name: 'Archived' })).toBeInTheDocument();
-        // Every status pill leads with its fixed glyph and keeps its text label. The glyphs
-        // are the shared ones the sidebar wears too (lib/task-status-icons, #1256).
-        // lucide spells some class names without a hyphen before a digit, so match by prefix.
+
+
         const statusGlyphCount = statusGroup.querySelectorAll(
             '.lucide-inbox, .lucide-arrow-right, .lucide-pause-circle, [class*="lucide-clock"], .lucide-book, .lucide-check, .lucide-archive'
         );
         expect(statusGlyphCount).toHaveLength(7);
         expect(getByRole('button', { name: 'Someday' }).querySelector('[class*="lucide-calendar"]')).toBeNull();
         expect(getByRole('button', { name: 'Next' }).querySelector('.lucide-arrow-right')).not.toBeNull();
-        // Waiting must not wear the hourglass: this editor uses it for Time estimate.
+
         expect(getByRole('button', { name: 'Waiting' }).querySelector('.lucide-hourglass')).toBeNull();
         expect(getByRole('button', { name: 'Waiting' }).querySelector('.lucide-pause-circle')).not.toBeNull();
 
@@ -1194,8 +1201,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(setField).toHaveBeenCalledWith('status', 'waiting');
     });
 
-    // #1155: Reference used to appear only once the task already was one, so a
-    // task inside a project could not be turned into a reference.
+
     it('offers Reference as a status choice for a task that is not one yet', () => {
         const setField = vi.fn();
 
@@ -1264,14 +1270,14 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         const selectedPriority = getByRole('button', { name: 'Low' });
         expect(selectedPriority).toHaveAttribute('aria-pressed', 'true');
         expect(selectedPriority).toHaveClass('bg-primary', 'text-primary-foreground');
-        // The four non-empty pills carry the canonical decorative flag; None carries none.
+
         expect(priorityGroup.querySelectorAll('[data-priority-flag]')).toHaveLength(4);
         expect(priorityGroup.querySelector('[data-priority-flag="low"]')).toHaveAttribute('stroke', '#3b82f6');
         expect(priorityGroup.querySelector('[data-priority-flag="urgent"]')).toHaveAttribute('stroke', '#dc2626');
         const nonePriorityButton = getByRole('button', { name: 'None' });
         expect(nonePriorityButton.querySelector('[data-priority-flag]')).toBeNull();
-        // None is an icon-only pill: CircleSlash replaces the visible text while
-        // `label` (kept as aria-label) preserves the accessible name.
+
+
         expect(nonePriorityButton.querySelector('.lucide-circle-slash')).not.toBeNull();
         expect(nonePriorityButton).not.toHaveTextContent('None');
 
@@ -1296,7 +1302,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         const selectedEnergyLevel = getByRole('button', { name: 'Medium energy' });
         expect(selectedEnergyLevel).toHaveAttribute('aria-pressed', 'true');
         expect(selectedEnergyLevel).toHaveClass('bg-primary', 'text-primary-foreground');
-        // Each non-empty energy chip leads with its battery glyph and keeps text.
+
         expect(energyGroup.querySelectorAll('.lucide-battery-low, .lucide-battery-medium, .lucide-battery-full')).toHaveLength(3);
         expect(getByRole('button', { name: 'Low energy' }).querySelector('.lucide-battery-low')).not.toBeNull();
         expect(getByRole('button', { name: 'High energy' }).querySelector('.lucide-battery-full')).not.toBeNull();
@@ -1891,7 +1897,7 @@ describe('TaskItemFieldRenderer reminder policy', () => {
 
     const timedTask: Task = { ...baseTask, dueDate: '2026-04-19T11:45' };
 
-    /** The selector lives behind the collapsed reminder summary line. */
+
     const openReminders = (getByRole: ReturnType<typeof render>['getByRole']) => {
         fireEvent.click(getByRole('button', { name: /^Start\/due reminders:/ }));
     };
@@ -1903,7 +1909,7 @@ describe('TaskItemFieldRenderer reminder policy', () => {
 
         openReminders(getByRole);
         const toggle = getByRole('combobox', { name: 'Start/due reminders' }) as HTMLSelectElement;
-        // A saved legacy task without a policy remains explicit Send.
+
         expect(toggle.value).toBe('send');
 
         fireEvent.change(toggle, { target: { value: 'skip' } });
@@ -1931,16 +1937,16 @@ describe('TaskItemFieldRenderer reminder policy', () => {
         useTaskStore.setState({ settings: previous });
     });
 
-    it('stays hidden for a date-only due date until a suppressible time exists', () => {
+    it('explains why the advance reminder is disabled for a date-only due date', () => {
         const { queryByRole, getByRole, rerender } = render(
             <TaskItemFieldRenderer fieldId="dueDate" {...createProps({ draft: { dueDate: '2026-04-19' } })} />
         );
-        expect(queryByRole('button', { name: /^Start\/due reminders:/ })).toBeNull();
+        openReminders(getByRole);
+        expect(getByRole('combobox', { name: 'Advance reminder' })).toBeDisabled();
 
         rerender(
             <TaskItemFieldRenderer fieldId="dueDate" {...createProps({ draft: { dueDate: '2026-04-19T11:45' } })} />
         );
-        openReminders(getByRole);
         expect(queryByRole('combobox', { name: 'Start/due reminders' })).not.toBeNull();
     });
 
@@ -1952,9 +1958,47 @@ describe('TaskItemFieldRenderer reminder policy', () => {
             />
         );
 
-        // No due time, so the summary carries no repeat clause.
+
         openReminders(getByRole);
         expect(getByRole('combobox', { name: 'Start/due reminders' })).not.toBeNull();
+    });
+
+    it('offers start presets only for an explicit start time and writes Off explicitly', () => {
+        const setField = vi.fn();
+        const { getByRole, queryByRole, rerender } = render(
+            <TaskItemFieldRenderer fieldId="startTime" {...createProps({ draft: { startTime: '2026-04-19T09:30', startReminderLeadMinutes: 15 }, setField })} />
+        );
+        const control = getByRole('combobox', { name: 'Before start' });
+        expect(control).toHaveValue('15');
+        expect(Array.from(control.querySelectorAll('option'), (option) => option.value)).toEqual(['0', '5', '15', '30', '60']);
+        fireEvent.change(control, { target: { value: '30' } });
+        fireEvent.change(control, { target: { value: '0' } });
+        expect(setField).toHaveBeenNthCalledWith(1, 'startReminderLeadMinutes', 30);
+        expect(setField).toHaveBeenNthCalledWith(2, 'startReminderLeadMinutes', 0);
+        rerender(<TaskItemFieldRenderer fieldId="startTime" {...createProps({ draft: { startTime: '2026-04-19', startReminderLeadMinutes: 15 }, setField })} />);
+        expect(queryByRole('combobox', { name: 'Before start' })).toBeNull();
+        expect(setField).toHaveBeenCalledTimes(2);
+    });
+
+    it('selects advance presets, preserves the choice while inactive, and turns it Off explicitly', () => {
+        const { getByRole, getByText } = render(
+            <DraftFieldHarness fieldId="dueDate" initialDraft={{ dueDate: '2026-04-19T11:45', dueReminderLeadMinutes: 90 }} />
+        );
+        openReminders(getByRole);
+        const advance = getByRole('combobox', { name: 'Advance reminder' });
+        expect(advance).toHaveValue('90');
+        expect(getByRole('option', { name: '90 min before' })).toBeInTheDocument();
+        fireEvent.change(advance, { target: { value: '1440' } });
+        expect(advance).toHaveValue('1440');
+        fireEvent.change(getByRole('combobox', { name: 'Start/due reminders' }), { target: { value: 'skip' } });
+        expect(advance).toBeDisabled();
+        expect(advance).toHaveValue('1440');
+        expect(getByText(/Enable start\/due reminders for this task/)).toBeInTheDocument();
+        fireEvent.change(getByRole('combobox', { name: 'Start/due reminders' }), { target: { value: 'send' } });
+        expect(advance).not.toBeDisabled();
+        expect(advance).toHaveValue('1440');
+        fireEvent.change(advance, { target: { value: '0' } });
+        expect(advance).toHaveValue('0');
     });
 
     it('serializes legacy controls as explicit reminder policies', () => {
@@ -2003,4 +2047,61 @@ describe('TaskItemFieldRenderer quick-add token hints (#918)', () => {
             expect(queryByTitle(/^Quick add:/)).not.toBeInTheDocument();
         },
     );
+});
+
+
+describe('browser description image paste', () => {
+    it('inserts a managed reference once and preserves intervening typing', async () => {
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+        let finish!: (attachments: import('@mindwtr/core').Attachment[]) => void;
+        const addDroppedFileAttachments = vi.fn((_files: File[]) => new Promise<import('@mindwtr/core').Attachment[]>((resolve) => { finish = resolve; }));
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: 'Before' }} attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        const image = new File(['image'], 'image.png', { type: 'image/png' });
+        fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: image.type, getAsFile: () => new File([image], image.name, { type: image.type }) }], files: [image], getData: () => 'caption' } });
+        fireEvent.change(textarea, { target: { value: 'Before typing' } });
+        await act(async () => finish([{ id: 'image-1', kind: 'file', title: 'image.png', uri: '', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt }]));
+        expect(addDroppedFileAttachments).toHaveBeenCalledOnce();
+        expect(addDroppedFileAttachments.mock.calls[0][0]).toHaveLength(1);
+        expect(textarea.value).toBe('Before typingcaption\n\n![Image](mindwtr://attachment/image-1)');
+    });
+
+    it('reads the image through the async clipboard when WebKitGTK sends an empty paste (#1403)', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        const png = new Blob(['png'], { type: 'image/png' });
+        const read = vi.fn(async () => [{ types: ['image/png'], getType: async () => png }]);
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { read } });
+        const attachment = { id: 'linux-image', kind: 'file' as const, title: 'clipboard-0', uri: '/data/attachments/linux-image.png', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt };
+        const addDroppedFileAttachments = vi.fn(async (_files: File[]) => [attachment]);
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: '' }} attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        await act(async () => {
+            fireEvent.paste(textarea, { clipboardData: { items: [], files: [], types: [], getData: () => '' } });
+        });
+        await vi.waitFor(() => expect(textarea.value).toBe('![Image](mindwtr://attachment/linux-image)'));
+        expect(read).toHaveBeenCalledOnce();
+        expect(addDroppedFileAttachments.mock.calls[0][0][0]).toMatchObject({ type: 'image/png' });
+        Reflect.deleteProperty(navigator, 'clipboard');
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    });
+
+    it('imports a pasted image in the desktop app and inserts its managed reference (#1403)', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        logMocks.logInfo.mockClear();
+        const attachment = { id: 'desktop-image', kind: 'file' as const, title: 'image.png', uri: '/data/attachments/desktop-image.png', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt };
+        const addDroppedFileAttachments = vi.fn(async () => [attachment]);
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: 'Notes' }} attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        textarea.setSelectionRange(5, 5);
+        await act(async () => {
+            fireEvent.paste(textarea, { clipboardData: { items: [], files: [new File(['x'], 'image.png', { type: 'image/png' })], getData: () => '' } });
+        });
+        expect(addDroppedFileAttachments).toHaveBeenCalledOnce();
+        expect(textarea.value).toBe('Notes![Image](mindwtr://attachment/desktop-image)');
+        expect(logMocks.logInfo).toHaveBeenCalledWith('Description clipboard image references inserted', {
+            scope: 'attachment',
+            extra: { releaseCheck: 'v1.3.8/description-clipboard-images', count: 1 },
+        });
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    });
 });

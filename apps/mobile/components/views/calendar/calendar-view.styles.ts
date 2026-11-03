@@ -398,11 +398,13 @@ export const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 16,
   },
-  // Bounded so a day full of all-day items cannot crowd out the timeline. The
-  // list scrolls past this height, so it holds every item — do not add a count
-  // cap on top of it: that drops the overflow with nothing on screen saying so.
+
+
   allDayList: {
-    maxHeight: 132,
+    maxHeight: 176,
+  },
+  allDayListContent: {
+    gap: 4,
   },
   sectionLabel: {
     fontSize: 12,
@@ -412,13 +414,26 @@ export const styles = StyleSheet.create({
   },
   allDayItem: {
     fontSize: 13,
-    paddingVertical: 2,
+    fontWeight: '600',
   },
-  allDayPressable: {
+  allDayChip: {
+    borderLeftWidth: 3,
     borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
-  // 9 above and below the grid (half the 18-high hour row), so the first and
-  // last hour labels show whole.
+  allDayMore: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+  },
+  allDayMoreText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+
   timelineCard: {
     borderWidth: 1,
     borderRadius: 12,
@@ -442,7 +457,7 @@ export const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
   },
-  // Raised by half its height, so the rule lies on the current minute.
+
   nowLine: {
     position: 'absolute',
     left: 50,
@@ -464,8 +479,8 @@ export const styles = StyleSheet.create({
     height: 2,
     backgroundColor: '#EF4444',
   },
-  // Raised by half its height, so the divider lies on its hour, where blocks
-  // starting at that hour begin.
+
+
   hourLine: {
     position: 'absolute',
     left: 0,
@@ -551,7 +566,7 @@ export const styles = StyleSheet.create({
     position: 'relative',
   },
   weekTimeGutterPinned: {
-    // Day columns are later siblings, so they would paint over the pinned gutter without this.
+
     zIndex: 5,
   },
   weekDayHeader: {
@@ -614,10 +629,15 @@ export const styles = StyleSheet.create({
   weekAllDayTextCompact: {
     fontSize: 8,
   },
+  weekAllDayMore: {
+    fontSize: 10,
+    fontWeight: '700',
+    paddingHorizontal: 2,
+  },
   weekVertical: {
     flex: 1,
   },
-  // Room for the first hour label, which rises 7 to center on its rule.
+
   weekVerticalContent: {
     paddingTop: 7,
     paddingBottom: 24,
@@ -643,7 +663,7 @@ export const styles = StyleSheet.create({
     height: 1,
     opacity: 0.7,
   },
-  // Raised by half its height, so the rule lies on the current minute.
+
   weekNowLine: {
     position: 'absolute',
     left: 0,

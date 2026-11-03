@@ -1,5 +1,5 @@
-// Launcher copy is resolved by Android before the app/payload is available.
-// Keep locale coverage aligned with packages/core/src/i18n/locales.
+
+
 const compactWidgetLocales = {
   en: ['Compact', 'A simple focus list with quick capture'],
   ar: ['مختصر', 'قائمة تركيز بسيطة مع إضافة سريعة'],

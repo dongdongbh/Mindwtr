@@ -245,7 +245,7 @@ describe('Sync Logic', () => {
                 attachments: [localAttachment],
             };
             const incomingTask: Task = {
-                ...createMockTask('1', '2023-01-03'), // incoming wins task conflict
+                ...createMockTask('1', '2023-01-03'),
                 attachments: [incomingAttachment],
             };
 
@@ -257,11 +257,8 @@ describe('Sync Logic', () => {
         });
 
         it('a cleanup-cleared attachment tombstone converges instead of resurrecting (#1064)', () => {
-            // Cleanup used to strip the tombstoned record from the local doc;
-            // the union merge re-imported the peer's copy every cycle, renewing
-            // an attachments conflict forever. Cleanup now keeps the tombstone
-            // and clears its cloudKey with a fresh updatedAt — that version
-            // must win the merge and the follow-up merge must be a no-op.
+
+
             const clearedTombstone: Attachment = {
                 id: 'att-1',
                 kind: 'file',
@@ -372,16 +369,16 @@ describe('Sync Logic', () => {
 
                 const forward = mergeAppData(mockAppData([localTask]), mockAppData([incomingTask]));
                 const forwardAttachment = forward.tasks[0].attachments?.find((a) => a.id === 'att-rev');
-                // Task-level (attachment-level) LWW picks local (the later updatedAt), so
-                // non-content fields like title come from local...
+
+
                 expect(forwardAttachment?.title).toBe('local-title.txt');
-                // ...but the higher contentRev (incoming) wins the content identity outright.
+
                 expect(forwardAttachment?.contentRev).toBe(5);
                 expect(forwardAttachment?.fileHash).toBe('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
                 expect(forwardAttachment?.contentMtimeMs).toBe(2000);
                 expect(forwardAttachment?.contentSize).toBe(20);
 
-                // Convergent regardless of merge direction.
+
                 const reverse = mergeAppData(mockAppData([incomingTask]), mockAppData([localTask]));
                 const reverseAttachment = reverse.tasks[0].attachments?.find((a) => a.id === 'att-rev');
                 expect(reverseAttachment?.contentRev).toBe(forwardAttachment?.contentRev);
@@ -478,8 +475,8 @@ describe('Sync Logic', () => {
 
                 const merged = mergeAppData(mockAppData([localTask]), mockAppData([incomingTask]));
                 const attachment = merged.tasks[0].attachments?.find((a) => a.id === 'att-tie');
-                // Local wins the attachment-level LWW (later updatedAt); a tied contentRev
-                // means there's nothing else to prefer, so its content fields come along.
+
+
                 expect(attachment?.contentRev).toBe(3);
                 expect(attachment?.fileHash).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
             });
@@ -511,9 +508,7 @@ describe('Sync Logic', () => {
                 const oldClientTask: Task = { ...createMockTask('1', '2023-01-02'), attachments: [oldClientAttachment] };
                 const newClientTask: Task = { ...createMockTask('1', '2023-01-01'), attachments: [newClientAttachment] };
 
-                // New client's contentRev (1) beats the old client's implicit 0 regardless
-                // of which side is "local" vs "incoming", and regardless of which side wins
-                // the (irrelevant, older-updatedAt) attachment-level LWW.
+
                 const oldLocal = mergeAppData(mockAppData([oldClientTask]), mockAppData([newClientTask]));
                 const newLocal = mergeAppData(mockAppData([newClientTask]), mockAppData([oldClientTask]));
                 for (const merged of [oldLocal, newLocal]) {
@@ -524,8 +519,7 @@ describe('Sync Logic', () => {
                     expect(attachment?.contentSize).toBe(50);
                 }
 
-                // Merging the already-merged result against itself is a no-op (second-merge
-                // idempotence): re-merging never re-derives a different content identity.
+
                 const second = mergeAppData(oldLocal, oldLocal);
                 const secondAttachment = second.tasks[0].attachments?.find((a) => a.id === 'att-old-client');
                 expect(secondAttachment?.contentRev).toBe(1);
@@ -533,12 +527,8 @@ describe('Sync Logic', () => {
             });
 
             it('keeps this device\'s recorded stat when merging against its own stripped remote twin (no local churn)', async () => {
-                // Steady state on one device: local carries the stat, the remote copy of the
-                // same attachment is sanitized (no uri/localStatus/stat), everything else is
-                // byte-for-byte equal, so the attachment-level LWW is a tie. Whichever copy the
-                // tie hands to `winner`, the merged record must keep the local stat: dropping it
-                // made every post-merge check-on-touch pass re-record it, which persisted a
-                // local write, which queued another sync, forever (desktop, WebDAV, 2026-08-31).
+
+
                 const localAttachment: Attachment = {
                     id: 'att-twin',
                     kind: 'file',
@@ -566,7 +556,7 @@ describe('Sync Logic', () => {
                     uri: '/device/attachments/att-twin.jpg',
                 });
 
-                // And the post-merge lifecycle sees nothing to record: no patch, no local write.
+
                 const { patches } = await runAttachmentTransferLifecycle({
                     attachmentsById: new Map([[attachment!.id, attachment!]]),
                     getLocalFilePresence: async () => 'present' as const,
@@ -582,12 +572,8 @@ describe('Sync Logic', () => {
             });
 
             it('two devices with byte-identical content and different local mtimes converge to zero remote writes (review B1)', async () => {
-                // Reproduces the reviewer's exact scenario: two devices hold the same bytes but
-                // recorded their own stat at different times (1000ms vs 2000ms) — nothing about
-                // the actual content ever changes. Before the fix, contentMtimeMs/contentSize
-                // traveled on the wire, so the merge would force one device to "adopt" the
-                // other's foreign mtime, which its own next check-on-touch pass would "correct"
-                // back — an unbounded remote-write loop on both sides.
+
+
                 const sharedFile = (contentMtimeMs: number): Attachment => ({
                     id: 'att-shared',
                     kind: 'file',
@@ -609,12 +595,10 @@ describe('Sync Logic', () => {
 
                 let localA = mockAppData([taskFor(sharedFile(1000))]);
                 let localB = mockAppData([taskFor(sharedFile(2000))]);
-                // Remote starts already converged (both devices previously fully synced).
+
                 let remote = sanitizeAppDataForRemote(localA);
 
-                // One sync cycle for one device: merge against remote, run the post-merge
-                // attachment lifecycle against that device's own (unchanging) disk file, then
-                // report whether the resulting sanitized document differs from remote.
+
                 const runCycle = async (
                     local: AppData,
                     ownStat: { mtimeMs: number; size: number },
@@ -638,8 +622,7 @@ describe('Sync Logic', () => {
                     return { local: merged, remoteWrite, sanitized };
                 };
 
-                // Cycle 1 may legitimately write once per device while remote catches up
-                // to whichever's sanitized shape wins the tie.
+
                 const cycle1A = await runCycle(localA, { mtimeMs: 1000, size: 10 });
                 if (cycle1A.remoteWrite) remote = cycle1A.sanitized;
                 localA = cycle1A.local;
@@ -647,8 +630,7 @@ describe('Sync Logic', () => {
                 if (cycle1B.remoteWrite) remote = cycle1B.sanitized;
                 localB = cycle1B.local;
 
-                // Cycles 2 and 3: nothing changed anywhere on either device — must be
-                // complete no-ops (the acceptance-critical invariant).
+
                 for (let cycle = 0; cycle < 2; cycle += 1) {
                     const cycleA = await runCycle(localA, { mtimeMs: 1000, size: 10 });
                     expect(cycleA.remoteWrite).toBe(false);
@@ -947,12 +929,8 @@ describe('Sync Logic', () => {
         });
 
         it('keeps a cleared area color cleared against a peer that still has it (#974)', () => {
-            // rev and updatedAt disagree on purpose: the cleared side has the
-            // HIGHER rev but the OLDER updatedAt, and the still-colored peer
-            // has the newer updatedAt but the lower rev. If merge fell back
-            // to plain updatedAt LWW, the still-colored peer (newer
-            // updatedAt) would win and this test would fail — so a pass here
-            // actually pins the rev-based mechanism, not just "clear wins".
+
+
             const clearedArea: Area = {
                 ...createMockArea('area-1', '2024-01-01T00:00:00.000Z'),
                 color: undefined,
@@ -1344,7 +1322,7 @@ describe('Sync Logic', () => {
 
         it('should update local item if incoming is newer', () => {
             const local = mockAppData([createMockTask('1', '2023-01-01')]);
-            const incoming = mockAppData([createMockTask('1', '2023-01-02')]); // Newer
+            const incoming = mockAppData([createMockTask('1', '2023-01-02')]);
 
             const merged = mergeAppData(local, incoming);
 
@@ -1353,7 +1331,7 @@ describe('Sync Logic', () => {
         });
 
         it('should keep local item if local is newer', () => {
-            const local = mockAppData([createMockTask('1', '2023-01-02')]); // Newer
+            const local = mockAppData([createMockTask('1', '2023-01-02')]);
             const incoming = mockAppData([createMockTask('1', '2023-01-01')]);
 
             const merged = mergeAppData(local, incoming);
@@ -1364,7 +1342,7 @@ describe('Sync Logic', () => {
 
         it('should handle soft deletions correctly (incoming delete wins if newer)', () => {
             const local = mockAppData([createMockTask('1', '2023-01-01')]);
-            const incoming = mockAppData([createMockTask('1', '2023-01-02', '2023-01-02')]); // Deleted and Newer
+            const incoming = mockAppData([createMockTask('1', '2023-01-02', '2023-01-02')]);
 
             const merged = mergeAppData(local, incoming);
 
@@ -1373,7 +1351,7 @@ describe('Sync Logic', () => {
         });
 
         it('should handle soft deletions correctly (local delete wins if newer)', () => {
-            const local = mockAppData([createMockTask('1', '2023-01-02', '2023-01-02')]); // Deleted and Newer
+            const local = mockAppData([createMockTask('1', '2023-01-02', '2023-01-02')]);
             const incoming = mockAppData([createMockTask('1', '2023-01-01')]);
 
             const merged = mergeAppData(local, incoming);
@@ -2296,8 +2274,8 @@ describe('Sync Logic', () => {
         });
 
         it('does not use Date.now for entity clamping after normalizing the merge clock', () => {
-            // Vitest timestamps captured console output with Date.now. Keep
-            // diagnostic reporting out of this merge-clock-only assertion.
+
+
             const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
             const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-01-01T00:00:00.000Z').getTime());
             try {
@@ -2397,9 +2375,9 @@ describe('Sync Logic', () => {
         });
 
         it('should revive item if update is newer than deletion', () => {
-            // This case implies "undo delete" or "re-edit" happened after delete on another device
-            const local = mockAppData([createMockTask('1', '2023-01-01', '2023-01-01')]); // Deleted
-            const incoming = mockAppData([createMockTask('1', '2023-01-02')]); // Undone/Edited later
+
+            const local = mockAppData([createMockTask('1', '2023-01-01', '2023-01-01')]);
+            const incoming = mockAppData([createMockTask('1', '2023-01-02')]);
 
             const merged = mergeAppData(local, incoming);
 
@@ -2412,13 +2390,8 @@ describe('Sync Logic', () => {
 });
 
 describe('mergeAppDataWithStats normalizes even when the two sides are identical', () => {
-    // A verbatim early-out here is tempting and wrong: mergeAppData is
-    // contractually a normalizer, and its output shape is pinned across
-    // implementations by sync-entity-arbitration-parity.fixtures.json. Handing
-    // back the local object would let two devices running different code paths
-    // store different bytes for the same content. Skips belong at the call
-    // sites that can prove both sides are already merge output — see the local
-    // reconcile in sync-run.ts.
+
+
     it('emits the normalized shape rather than the input object', () => {
         const local = mockAppData([createMockTask('t-1')]);
         const incoming = mockAppData([createMockTask('t-1')]);

@@ -147,8 +147,8 @@ vi.mock('expo-file-system', () => ({
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const { mockCore } = await import('../test-support/mock-core');
-  // Only the id and clock are pinned, so attachment names stay deterministic;
-  // `buildTaskUpdatesFromSpeechResult` runs for real.
+
+
   return mockCore(importOriginal, () => ({}), {
     generateUUID: coreMocks.generateUUID,
     safeFormatDate: (_value: Date | string, format: string) => {
@@ -395,9 +395,8 @@ describe('useQuickCaptureAudio', () => {
     });
 
     expect(speechMocks.transcribeLocalWhisper).not.toHaveBeenCalled();
-    // Core's default 'smart' field strategy puts a short transcript (<=15 words)
-    // in the title. The stub this suite used to carry always wrote `description`,
-    // so this line asserted behaviour the app does not have.
+
+
     expect(storeMocks.updateTask).toHaveBeenCalledWith('task-1', { title: 'Buy milk' });
     expect(handleClose).toHaveBeenCalledOnce();
     expect(fileMocks.delete).toHaveBeenCalledWith(expect.stringMatching(/^file:\/\/\/document\/audio-captures\//));
@@ -405,9 +404,8 @@ describe('useQuickCaptureAudio', () => {
   });
 
   it('shows a notice and never starts the recorder when speech-to-text is unconfigured', async () => {
-    // Reporter scenario (#886): STT was never enabled/configured. The voice button must
-    // surface a translated notice pointing at Settings and keep the sheet open, instead of
-    // showing a recording indicator and then silently aborting.
+
+
     storeMocks.state.settings = unconfiguredSettings;
 
     await act(async () => {
@@ -428,6 +426,33 @@ describe('useQuickCaptureAudio', () => {
     expect(audioMocks.AudioRecorder).not.toHaveBeenCalled();
     expect(latest?.recording).toBeNull();
     expect(handleClose).not.toHaveBeenCalled();
+  });
+
+
+  it('reads a Whisper model whose file is gone as speech not set up: a notice, no recording, and a log line', async () => {
+    speechMocks.ensureWhisperModelPathForConfigAsync.mockResolvedValue({
+      exists: false,
+      path: '/document/whisper-models/ggml-tiny.en.bin',
+      uri: 'file:///document/whisper-models/ggml-tiny.en.bin',
+    });
+    await act(async () => {
+      create(<Harness />);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await latest?.startRecording();
+      await flushPromises();
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'quickAdd.speechNotConfigured' })
+    );
+    expect(audioMocks.requestRecordingPermissionsAsync).not.toHaveBeenCalled();
+    expect(audioMocks.AudioRecorder).not.toHaveBeenCalled();
+    expect(appLogMock.logInfo).toHaveBeenCalledWith('Quick capture Whisper model file missing', expect.objectContaining({
+      extra: { releaseCheck: 'v1.3.8/whisper-model-missing', outcome: 'not-configured' },
+    }));
   });
 
   it('does not auto-start unconfigured audio after the preferred input resolves to text', async () => {
@@ -495,8 +520,7 @@ describe('useQuickCaptureAudio', () => {
         await flushPromises();
       });
 
-      // The preferred Audio input requests one automatic start for this open
-      // capture. A configuration warning must not re-arm the same request.
+
       expect(toastMock.showToast).toHaveBeenCalledTimes(1);
       expect(audioMocks.requestRecordingPermissionsAsync).not.toHaveBeenCalled();
 
@@ -508,8 +532,7 @@ describe('useQuickCaptureAudio', () => {
       expect(toastMock.showToast).toHaveBeenCalledTimes(1);
       expect(appLogMock.logInfo).toHaveBeenCalledTimes(1);
 
-      // The one-shot guard belongs only to automatic scheduling. A user can
-      // still retry manually after configuring speech or dismissing a warning.
+
       await act(async () => {
         await latest?.startRecording();
         await flushPromises();
@@ -952,6 +975,38 @@ describe('useQuickCaptureAudio', () => {
     const managedAttachmentUri = updateActivitySubmission.mock.calls.at(-1)?.[1]?.[0]?.uri;
     expect(fileMocks.delete).toHaveBeenCalledWith('file:///recording.m4a');
     expect(fileMocks.delete).not.toHaveBeenCalledWith(managedAttachmentUri);
+  });
+
+
+  it('keeps a title typed after the save when the transcript arrives later', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    const pendingTranscription = deferred<string>();
+    speechMocks.transcribeLocalWhisper.mockReturnValue(pendingTranscription.promise);
+    await act(async () => {
+      create(<Harness />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+    expect(storeMocks.state.tasks).toHaveLength(1);
+    storeMocks.state.tasks[0]!.title = 'Typed meanwhile';
+
+    await act(async () => {
+      pendingTranscription.resolve('Spoken words');
+      await pendingTranscription.promise;
+      await flushPromises();
+      await flushPromises();
+    });
+
+    expect(speechMocks.transcribeLocalWhisper).toHaveBeenCalledOnce();
+    expect(storeMocks.updateTask).not.toHaveBeenCalledWith('task-1', expect.objectContaining({ title: expect.anything() }));
+    expect(storeMocks.state.tasks[0]!.title).toBe('Typed meanwhile');
   });
 
   it('finishes deferred audio transcription once after the submitting Activity is replaced', async () => {

@@ -12,13 +12,7 @@ import { tFallback } from './i18n';
 import { isTaskActionable } from './task-status';
 import { taskDraftToUpdatePatch, type TaskDraft } from './task-draft';
 
-/**
- * The Today's Focus star as one module: every surface that toggles a task's
- * star (row star, quick-action menu, editor, review modals, mobile swipe)
- * resolves the same action here, so eligibility, the cap, labels, and the
- * update patch cannot drift per surface. Status promotion on starring is NOT
- * part of the patch — the store's star↔status rules own it at the write path.
- */
+
 export type FocusStarBlockedReason = 'deferred' | 'sequential' | 'clarify' | 'limit' | null;
 
 export type FocusStarContext = {
@@ -29,22 +23,23 @@ export type FocusStarContext = {
     focusTaskLimit: number;
     sequentialProjectIds?: Set<string>;
     sectionScopedProjectIds?: Set<string>;
+    sequentialSectionKeys?: Set<string>;
     now?: Date;
     endOfTodayIso?: string;
     frozenDates?: FocusDateLookup;
-    /** The task editor is a clarifying surface: it may star unclarified tasks. */
+
     allowUnclarified?: boolean;
 };
 
 export type FocusStarAction = {
     isFocused: boolean;
-    /** False only when adding is blocked; removing a star is always allowed. */
+
     canToggle: boolean;
     blockedReason: FocusStarBlockedReason;
-    /** i18n key for the control label. */
+
     labelKey: 'agenda.addToFocus' | 'agenda.removeFromFocus';
-    /** Patch to apply when toggling; store rules handle status promotion. */
-    patch: Pick<Task, 'isFocusedToday'>;
+
+    patch: Pick<Task, 'isFocusedToday'> & Partial<Pick<Task, 'status'>>;
 };
 
 export type TaskFocusCreationOutcome =
@@ -82,6 +77,7 @@ export function resolveFocusStarAction(task: Task, context: FocusStarContext): F
         frozenDates: context.frozenDates,
         sequentialProjectIds: context.sequentialProjectIds,
         sectionScopedProjectIds: context.sectionScopedProjectIds,
+        sequentialSectionKeys: context.sequentialSectionKeys,
         sections: context.sections,
         allowFutureStart: queued,
     });
@@ -103,7 +99,21 @@ export function resolveFocusStarAction(task: Task, context: FocusStarContext): F
     };
 }
 
-/** Resolve an editor's unsaved values against the same Focus rules as a task row. */
+const withCandidate = (tasks: Task[], candidate: Task): Task[] => (
+    tasks.some((item) => item.id === candidate.id)
+        ? tasks.map((item) => item.id === candidate.id ? candidate : item)
+        : [...tasks, candidate]
+);
+
+
+export function resolveRowFocusStarAction(task: Task, context: FocusStarContext): FocusStarAction {
+    if (task.status !== 'inbox' || task.isFocusedToday === true) return resolveFocusStarAction(task, context);
+    const candidate: Task = { ...task, status: 'next' };
+    const action = resolveFocusStarAction(candidate, { ...context, tasks: withCandidate(context.tasks, candidate) });
+    return action.canToggle ? { ...action, patch: { ...action.patch, status: 'next' } } : action;
+}
+
+
 export function resolveTaskEditorFocusStar(
     task: Task,
     draft: TaskDraft,
@@ -117,9 +127,7 @@ export function resolveTaskEditorFocusStar(
     };
     const add = resolveFocusStarAction(candidate, {
         ...context,
-        tasks: context.tasks.some((item) => item.id === task.id)
-            ? context.tasks.map((item) => item.id === task.id ? candidate : item)
-            : [...context.tasks, candidate],
+        tasks: withCandidate(context.tasks, candidate),
         focusedCount: Math.max(0, context.focusedCount - (task.isFocusedToday && !isTaskFutureFocusCandidate(task, context.now) ? 1 : 0)),
     });
     const available = !task.deletedAt && isTaskActionable(draft.status);
@@ -137,11 +145,7 @@ export function resolveTaskEditorFocusStar(
     };
 }
 
-/**
- * Resolve a task's initial Focus state before it is persisted. A starred Inbox
- * capture is evaluated as Next, but that promotion is committed only when the
- * star is accepted. This keeps a refused capture at its requested status.
- */
+
 export function resolveTaskFocusCreation(
     task: Task,
     context: Pick<FocusStarContext, 'tasks' | 'projects' | 'sections' | 'focusedCount' | 'focusTaskLimit' | 'now'>
@@ -200,13 +204,7 @@ export type TaskFocusUpdateDecision =
     | { outcome: 'unchanged' | 'focused' | 'queued' }
     | { outcome: 'refused-limit'; message: string };
 
-/**
- * Decide whether a normalized task update may take a Focus slot. Any write
- * that makes the task newly count as Focus takes one, refused at the cap: a
- * new star, and also clearing or moving the future start of a queued star. A
- * new star on a later-day start is queued and takes no slot. Writers keep
- * their own count source, error shape, and logs.
- */
+
 export function resolveTaskFocusUpdate(
     before: Task,
     after: Task,
@@ -223,15 +221,12 @@ export function resolveTaskFocusUpdate(
         : { outcome: 'unchanged' };
 }
 
-/** Quick-add capture star: no task exists yet, only the cap applies. */
+
 export function canStarNewCapture(context: Pick<FocusStarContext, 'focusedCount' | 'focusTaskLimit'>): boolean {
     return context.focusedCount < context.focusTaskLimit;
 }
 
-/**
- * Human text for a blocked star (tooltip or toast), or null when not blocked.
- * Keys live in the core locales, so both platforms resolve them with their t.
- */
+
 export function getFocusStarBlockedText(
     t: (key: string) => string,
     action: Pick<FocusStarAction, 'blockedReason'>,
@@ -254,7 +249,7 @@ export function getFocusStarBlockedText(
     }
 }
 
-/** The active-status pool eligibility is judged against. */
+
 export function collectFocusEligibilityTasks(activeTasksByStatus: Map<Task['status'], Task[]>): Task[] {
     return FOCUS_ELIGIBILITY_ACTIVE_STATUSES.flatMap((status) => activeTasksByStatus.get(status) ?? []);
 }

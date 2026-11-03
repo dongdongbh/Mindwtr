@@ -1,9 +1,6 @@
-// Shows who holds the S23 test phone and who waits for it: every flock on /home/dd/scratch/s23.lock (and on the per-check
-// device lock of device-lock.mjs), with start time, the check running now and the log folder when the command line shows it.
-//
-//   node apps/android-native/scripts/phone-queue.mjs
-//
-// It reads /proc only (/proc/locks for who holds, /proc/<pid>/cmdline and stat for the rest), not `ps`.
+
+
+
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -25,7 +22,7 @@ for (const pid of readdirSync('/proc').filter((d) => /^\d+$/.test(d))) {
     const stat = read(`/proc/${pid}/stat`);
     if (!argv.length || !stat) continue;
     const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    // Field 4 is the parent, field 22 the start time in clock ticks after boot (USER_HZ is 100 on Linux).
+
     procs.set(Number(pid), { pid: Number(pid), argv, ppid: Number(fields[1]), start: new Date((bootTime + Number(fields[19]) / 100) * 1000) });
 }
 const descendants = (pid) => [...procs.values()].filter((p) => p.ppid === pid).flatMap((p) => [p, ...descendants(p.pid)]);

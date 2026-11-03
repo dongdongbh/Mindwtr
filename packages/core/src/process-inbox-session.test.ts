@@ -34,9 +34,7 @@ describe('Process Inbox session', () => {
         expect(queue.map(({ id }) => id)).toEqual(['one']);
     });
 
-    // #1089: an incubated item is Someday with a return date. When that date
-    // arrives it belongs in the clarify pass — the question it was parked with
-    // was "decide this later", and this pass is where deciding happens.
+
     it('includes an incubated item once its return date arrives, and not before', () => {
         const now = new Date('2026-09-10T09:00:00.000Z');
         const queue = selectProcessInboxCandidates([

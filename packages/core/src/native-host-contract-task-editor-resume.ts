@@ -24,9 +24,9 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'TASK_NOT_FOUND' | 'SAV
 
 export type NativeTaskEditorResumeCheck = {
     id: string;
-    /** Exact opening draft values for all owned fields, including raw-only and no-op inputs. Null records a missing optional value. */
+
     touchedBase: Record<string, unknown>;
-    /** Raw opening witnesses, present exactly when that group is owned. */
+
     scheduleBase?: NativeTaskScheduleBase;
     recurrenceBase?: NativeTaskRecurrenceBase;
     checklistBase?: ChecklistItem[];
@@ -43,7 +43,7 @@ export type NativeTaskEditorResumeReady = {
     freshAttachmentsBase: Attachment[];
 };
 
-/** Read the saved raw row without flushing queued writes or touching the write journal. */
+
 async function currentTask(id: string): Promise<NativeHostResult<{ task: Task; projects: ReturnType<typeof useTaskStore.getState>['_allProjects'] }>> {
     const adapter = getStorageAdapter();
     const state = useTaskStore.getState();
@@ -74,7 +74,7 @@ export function validateNativeTaskEditorOpeningFields(
 ): NativeHostResult<Omit<NativeTaskEditorResumeReady, 'kind' | 'freshAttachmentsBase'>> {
     const touched = Object.keys(input.touchedBase);
     if (task.id !== input.id || OWNED_GROUPS.some((group) => group.some((field) => touched.includes(field))
-            && !group.every((field) => touched.includes(field)))
+            && !group.every((field) => field === 'preserveChecklistOnRepeat' || touched.includes(field)))
         || own(input, 'scheduleBase') !== SCHEDULE.some((field) => touched.includes(field))
         || own(input, 'recurrenceBase') !== RECURRENCE.some((field) => touched.includes(field)))
         return fail('INVALID_INPUT', 'Incomplete editor recovery group');
@@ -82,8 +82,8 @@ export function validateNativeTaskEditorOpeningFields(
     if (checklist === null) return fail('INVALID_INPUT', 'Invalid editor recovery checklist');
     const freshScheduleBase = getNativeTaskScheduleBase(task);
     const freshRecurrenceBase = getNativeTaskRecurrenceBase({ ...task, recurrence: normalizeRecurrenceForLoad(task.recurrence) });
-    // The save parser owns field type grammar. An untouched schedule uses its fresh witness;
-    // a touched schedule carries the opening witness and cannot be silently rebased.
+
+
     const candidate = readNativeTaskDraftSaveRequest({
         id: input.id, base: input.touchedBase, patch: input.touchedBase,
         scheduleBase: input.scheduleBase ?? freshScheduleBase,
@@ -101,8 +101,8 @@ export function validateNativeTaskEditorOpeningFields(
     const matchesOpening = (field: string) => taskEditValuesEqual(freshDraft[field as keyof TaskDraft],
         input.touchedBase[field] === null && ['relativeStartOffset', 'timeSpentMinutes'].includes(field)
             ? undefined : input.touchedBase[field]);
-    // A matching raw witness makes the current projection the opening projection.
-    // Its touched draft half must agree too; otherwise the snapshot is internally inconsistent.
+
+
     if (touched.some((field) => (SCHEDULE.includes(field as typeof SCHEDULE[number])
         || RECURRENCE.includes(field as typeof RECURRENCE[number])) && !matchesOpening(field)))
         return fail('INVALID_INPUT', 'Editor recovery draft disagrees with its opening witness');
@@ -147,7 +147,7 @@ export function createTaskEditorResumeMethods(deps: ResumeDependencies) {
 
             const touched = Object.keys(input.touchedBase);
             if (OWNED_GROUPS.some((group) => group.some((field) => touched.includes(field))
-                    && !group.every((field) => touched.includes(field)))
+                    && !group.every((field) => field === 'preserveChecklistOnRepeat' || touched.includes(field)))
                 || own(input, 'scheduleBase') !== SCHEDULE.some((field) => touched.includes(field))
                 || own(input, 'recurrenceBase') !== RECURRENCE.some((field) => touched.includes(field)))
                 return fail('INVALID_INPUT', 'Incomplete editor recovery group');
@@ -164,7 +164,7 @@ export function createTaskEditorResumeMethods(deps: ResumeDependencies) {
     };
 }
 
-/** Internal historical lineage selection; native file/editor authority remains outside this factory. */
+
 export function createOwnedTaskEditorResumeMethods(deps: ResumeDependencies) {
     return {
         async checkOwnedTaskEditorResume(input: unknown): Promise<NativeHostResult<NativeTaskEditorResumeReady>> {

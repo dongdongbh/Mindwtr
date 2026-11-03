@@ -1,8 +1,7 @@
 import Foundation
 import Security
 
-/// SecItem work is synchronous and cannot be rolled back by cancelling its caller.
-/// Only plain records cross this serial worker; two retained replies bound memory.
+
 final class NativeSecretJobs: @unchecked Sendable {
     static let maximumBytes = 64 * 1024
     private let condition = NSCondition()
@@ -18,6 +17,7 @@ final class NativeSecretJobs: @unchecked Sendable {
     #if DEBUG
     private let faults: HostIOFaults?
     var beforeRead: ((String) throws -> Void)?
+    var beforeAIProviderQuery: (([String: Any], NativeAttachmentCancellation) -> Void)?
     #endif
 
     private final class Job {
@@ -74,7 +74,13 @@ final class NativeSecretJobs: @unchecked Sendable {
             guard Set(input.keys) == Set(["op", "key"]) else { throw HostFailure("Secure storage request is invalid") }
             value = nil; accessibility = "when-unlocked"
         }
-        let token = NativeAttachmentCancellation(), registryID = UUID()
+        return try enqueue(operation: operation, account: account, value: value, accessibility: accessibility,
+                           token: NativeAttachmentCancellation()).id
+    }
+
+    private func enqueue(operation: String, account: String, value: String?, accessibility: String,
+                         token: NativeAttachmentCancellation) throws -> Job {
+        let registryID = UUID()
         registry.register(token, id: registryID)
         condition.lock()
         guard accepting, !token.isCancelled, jobs.count < 2, sequence < UInt64.max else {
@@ -86,10 +92,10 @@ final class NativeSecretJobs: @unchecked Sendable {
         let job = Job(id: id, registryID: registryID, token: token, operation: operation,
                       account: account, value: value, accessibility: accessibility)
         jobs[id] = job
-        // Enqueue while admission is locked, so serial execution follows admission order.
+
         worker.async { [self] in execute(job) }
         condition.unlock()
-        return id
+        return job
     }
 
     private func query(_ account: String, alias: String) -> [String: Any] {
@@ -139,6 +145,46 @@ final class NativeSecretJobs: @unchecked Sendable {
         }
         return nil
     }
+
+    private func inspectAIProviderItem(_ job: Job) throws -> String {
+        for alias in ["no-auth", "auth", "legacy"] {
+            try job.token.check()
+            var input = query(job.account, alias: alias)
+            input[kSecMatchLimit as String] = kSecMatchLimitOne
+            input[kSecReturnAttributes as String] = true
+            #if DEBUG
+            beforeAIProviderQuery?(input, job.token)
+            #endif
+            try job.token.check()
+            var attributes: CFTypeRef?
+            let result = status("ai-metadata", alias: alias) { SecItemCopyMatching(input as CFDictionary, &attributes) }
+            try job.token.check()
+            if result == errSecItemNotFound { continue }
+            return result == errSecSuccess ? "present" : "unavailable"
+        }
+        return "absent"
+    }
+
+
+    func inspectAIProviderItem(account: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        guard ["mindwtr-ai-key_openai", "mindwtr-ai-key_gemini", "mindwtr-ai-key_anthropic"].contains(account) else {
+            throw HostFailure("AI provider device metadata request is invalid")
+        }
+        try cancellation.check()
+        let job = try enqueue(operation: "ai-metadata", account: account, value: nil,
+                              accessibility: "when-unlocked", token: cancellation)
+        worker.sync {}
+        condition.lock()
+        let open = accepting
+        jobs.removeValue(forKey: job.id); ready.removeAll { $0 == job.id }
+        let answer = job.answer, succeeded = job.succeeded
+        condition.unlock(); registry.remove(job.registryID)
+        try cancellation.check()
+        guard open, succeeded, let metadata = answer["secureItem"] as? String else {
+            throw HostFailure("AI provider device metadata is unavailable")
+        }
+        return metadata
+    }
     private func write(_ job: Job) throws {
         let base = query(job.account, alias: "no-auth")
         var input = base
@@ -150,7 +196,7 @@ final class NativeSecretJobs: @unchecked Sendable {
             let changes = [kSecValueData as String: Data(job.value!.utf8)]
             try check(status("update", alias: "no-auth") { SecItemUpdate(base as CFDictionary, changes as CFDictionary) })
         } else { try check(result) }
-        // Stage1 intentionally retains legacy/auth aliases; no write-induced migration.
+
     }
     private func delete(_ account: String) throws {
         var failure: Error?
@@ -166,16 +212,21 @@ final class NativeSecretJobs: @unchecked Sendable {
     private func execute(_ job: Job) {
         let answer: [String: Any], succeeded: Bool
         do {
-            // This is the last cancellation boundary: a started synchronous
-            // SecItem operation completes even if close arrives during the call.
+
+
             guard !job.token.isCancelled else { throw HostFailure("Secure storage bridge is closed") }
-            let value: String?
-            switch job.operation {
-            case "get": value = try read(job.account)
-            case "set": try write(job); value = nil
-            default: try delete(job.account); value = nil
+            if job.operation == "ai-metadata" {
+                answer = ["id": job.id, "secureItem": try inspectAIProviderItem(job)]
+            } else {
+                let value: String?
+                switch job.operation {
+                case "get": value = try read(job.account)
+                case "set": try write(job); value = nil
+                default: try delete(job.account); value = nil
+                }
+                answer = ["id": job.id, "value": value.map { $0 as Any } ?? NSNull()]
             }
-            answer = ["id": job.id, "value": value.map { $0 as Any } ?? NSNull()]; succeeded = true
+            succeeded = true
         } catch {
             answer = ["id": job.id, "error": (error as? HostFailure)?.message ?? "Secure storage operation failed"]; succeeded = false
         }
@@ -193,10 +244,10 @@ final class NativeSecretJobs: @unchecked Sendable {
         condition.unlock(); registry.remove(job.registryID)
         return (String(decoding: try JSONSerialization.data(withJSONObject: answer), as: UTF8.self), completed)
     }
-    /// Do not abort accepted work: finally compensation still runs in this runtime.
+
     func drain() { worker.sync {} }
-    /// The selected attachment owner compares the same read-only account at its
-    /// serialized mutation boundaries. This does not lock external Keychain writers.
+
+
     func readCloudTokenForAttachmentOwner(cancellation: NativeAttachmentCancellation) throws -> String? {
         try readForAttachmentOwner("mindwtr_cloud_token", cancellation: cancellation)
     }

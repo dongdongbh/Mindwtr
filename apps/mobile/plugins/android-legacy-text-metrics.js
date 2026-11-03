@@ -8,12 +8,7 @@ const APP_THEME = AndroidConfig.Styles.getAppThemeGroup();
 const TEXT_VIEW_STYLE = { name: 'Mindwtr.TextView', parent: 'Widget.AppCompat.TextView' };
 const EDIT_TEXT_STYLE = { name: 'Mindwtr.EditText', parent: 'Widget.AppCompat.EditText' };
 
-// Android 15 flips TextView drawing defaults for apps targeting SDK 35+
-// (useBoundsForWidth, elegantTextHeight, locale-preferred minimum line
-// heights). React Native measures text without those flags, so drawn text
-// runs wider/taller than its measured box and the trailing glyph or final
-// wrapped line hard-clips, especially at large font scales (issue #632).
-// Pin the pre-Android-15 drawing behavior so it matches RN measurement.
+
 const LEGACY_TEXT_ITEMS = [
   ['android:elegantTextHeight', 'false'],
   ['android:useLocalePreferredLineHeightForMinimum', 'false', '35'],

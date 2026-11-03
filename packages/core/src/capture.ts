@@ -4,33 +4,24 @@ import type { StoreActionResult } from './store-types';
 import { getQuickAddProjectInitialProps } from './quick-add';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
+import { resolveCaptureStatusForStart } from './store-helpers';
 
-/**
- * Capture assembly as one module: turning parsed quick-add input plus surface
- * state into `addTask` props. Every capture surface (desktop Quick Add, the
- * mobile capture sheet, the mobile in-list quick add) is an adapter over this
- * — the project match/create policy, Container exclusivity, detected-date
- * precedence, and the title fallback chain live here once.
- *
- * A capture is never dropped: a `+Project` naming only an archived project
- * behaves like an unknown name and requests a fresh project (archived
- * projects accept no new tasks).
- */
+
 export type CaptureAssemblyInput = {
     parsed: Pick<QuickAddResult, 'title' | 'props' | 'projectTitle' | 'detectedDate' | 'invalidDateCommands'>;
     rawInput: string;
-    /** Last-resort title (e.g. an attachment's name) when input parses empty. */
+
     fallbackTitle?: string;
     projects: readonly Project[];
-    /** Surface defaults merged under the parsed props. */
+
     initialProps?: Partial<Task>;
-    /** Surface overrides merged over the parsed props. */
+
     extraProps?: Partial<Task>;
-    /** Area applied when the capture has no project home (Container exclusivity). */
+
     selectedAreaId?: string | null;
-    /** Star for Today's Focus; the store gates eligibility/cap on write. */
+
     starNewTask?: boolean;
-    /** Set when the surface already holds an explicit due date (a picker). */
+
     suppressDetectedDate?: boolean;
 };
 
@@ -46,7 +37,7 @@ export type CaptureAssembly =
         ok: true;
         title: string;
         props: Partial<Task>;
-        /** When set: create this project, then applyCapturedProject(props, id). */
+
         projectToCreate?: CaptureProjectToCreate;
         invalidDateCommands?: string[];
     };
@@ -61,11 +52,8 @@ export type CaptureTransactionActions = {
 };
 
 export type CaptureTransactionOptions = {
-    /**
-     * Surface-only enrichment applied after shared assembly and before writes.
-     * This keeps parsing/picker concerns at the edge while the transaction owns
-     * Container normalization and the project/task write sequence.
-     */
+
+
     transformProps?: (props: Partial<Task>) => Partial<Task>;
 };
 
@@ -209,11 +197,8 @@ export function resolveCaptureAreaQuery(areas: readonly Area[], query: string): 
 
 export function buildCaptureTaskProps(input: CaptureAssemblyInput): CaptureAssembly {
     const { parsed, projects } = input;
-    // Only the PARSED project id is validated: user-typed +Project tokens can
-    // name archived or deleted projects, which accept no new tasks — dropping
-    // the token lets the surface's own project (in-project quick add) show
-    // through. Surface-provided initialProps/extraProps are trusted; the
-    // surface knows its own context better than a possibly-stale snapshot.
+
+
     const parsedProps = { ...parsed.props };
     if (parsedProps.projectId && !isAssignableProjectId(projects, parsedProps.projectId)) {
         delete parsedProps.projectId;
@@ -226,7 +211,7 @@ export function buildCaptureTaskProps(input: CaptureAssemblyInput): CaptureAssem
     };
     if (!props.status) props.status = 'inbox';
 
-    // Natural-language date applies only when nothing more explicit set one.
+
     const detectedDate = parsed.detectedDate;
     const applyDetectedDate = Boolean(
         detectedDate?.date && !props.dueDate && !input.suppressDetectedDate,
@@ -242,8 +227,8 @@ export function buildCaptureTaskProps(input: CaptureAssemblyInput): CaptureAssem
     if (!title) return { ok: false, reason: 'empty-title' };
 
     if (input.starNewTask) {
-        // The store's addTask evaluates eligibility and the focus cap before
-        // the star commits (a refused star leaves an unstarred inbox capture).
+
+
         props.isFocusedToday = true;
     }
 
@@ -261,8 +246,7 @@ export function buildCaptureTaskProps(input: CaptureAssemblyInput): CaptureAssem
         }
     }
 
-    // Container exclusivity: a project home clears the direct area; the area
-    // fallback applies only when the capture has no project home at all.
+
     const hasProjectHome = Boolean(props.projectId || projectToCreate);
     if (hasProjectHome) {
         props.areaId = undefined;
@@ -279,7 +263,7 @@ export function buildCaptureTaskProps(input: CaptureAssemblyInput): CaptureAssem
     };
 }
 
-/** Attach the created project to the capture, keeping Container exclusivity. */
+
 export function applyCapturedProject(props: Partial<Task>, projectId: string): Partial<Task> {
     return { ...props, projectId, areaId: undefined };
 }
@@ -290,21 +274,17 @@ const captureErrorMessage = (error: unknown, fallback: string): string => {
     return fallback;
 };
 
-/** The write a capture would make, without making it. */
+
 export type CaptureTaskPlan = {
     success: true;
     title: string;
     props: Partial<Task>;
-    /** When set, the capture creates this project first (the props then take its id). */
+
     projectToCreate?: CaptureProjectToCreate;
     invalidDateCommands?: string[];
 };
 
-/**
- * Plan the durable task write without writing: parsed input, surface
- * enrichment, and the project the capture would create. prepareCaptureTask
- * is this plan plus the project write.
- */
+
 export function planCaptureTask(
     input: CaptureAssemblyInput,
     options: CaptureTransactionOptions = {},
@@ -325,8 +305,14 @@ export function planCaptureTask(
         ? options.transformProps({ ...assembly.props })
         : assembly.props;
 
-    // A surface picker is more explicit than a parsed +Project token. Avoid
-    // creating an orphan parsed project when enrichment supplied a project id.
+
+    const statusChosen = Boolean(input.parsed.props.status || input.extraProps?.status);
+    if (!statusChosen && props.status === 'inbox') {
+        const { status: _defaultStatus, ...unchosen } = props;
+        props = { ...props, status: resolveCaptureStatusForStart(unchosen, 'inbox') };
+    }
+
+
     if (props.projectId) {
         props = applyCapturedProject(props, props.projectId);
     }
@@ -340,11 +326,7 @@ export function planCaptureTask(
     };
 }
 
-/**
- * Prepare the durable task write, including the optional project write.
- * Batch and audio capture adapters may use this phase before their specialized
- * task write; ordinary interactive capture should use executeCaptureTransaction.
- */
+
 export async function prepareCaptureTask(
     input: CaptureAssemblyInput,
     actions: Pick<CaptureTransactionActions, 'addProject'>,
@@ -389,11 +371,7 @@ export async function prepareCaptureTask(
     };
 }
 
-/**
- * Commit one interactive capture as a single explicit outcome. Project
- * resolution/creation, Container assignment, and the final task write are
- * sequenced here so every UI surface handles the same failure contract.
- */
+
 export async function executeCaptureTransaction(
     input: CaptureAssemblyInput,
     actions: CaptureTransactionActions,

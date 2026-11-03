@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-/** Synthetic, fixed dates: never import a real user's export into a benchmark. */
+
 export function fixture(count) {
   if (!Number.isInteger(count) || count < 0 || count > 50000) throw new Error('Fixture size must be 0..50000');
   const timestamp = '2020-01-01T00:00:00.000Z';

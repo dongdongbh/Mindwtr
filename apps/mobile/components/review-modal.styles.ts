@@ -394,6 +394,9 @@ export const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingHorizontal: 20,
     },
+    promptOverlay: {
+        ...StyleSheet.absoluteFillObject,
+    },
     promptCard: {
         width: '100%',
         borderRadius: 12,
@@ -506,5 +509,15 @@ export const styles = StyleSheet.create({
         borderLeftWidth: 2,
         borderLeftColor: '#3B82F6',
         paddingLeft: 8,
+    },
+    reviewOpenProjectButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingVertical: 10,
+    },
+    reviewOpenProjectText: {
+        fontSize: 13,
+        fontWeight: '600',
     },
 });

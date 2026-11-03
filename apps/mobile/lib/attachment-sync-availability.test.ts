@@ -2,10 +2,6 @@ import * as nodeCrypto from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_DOWNLOAD_BYTES, type Attachment } from '@mindwtr/core';
 
-// On-demand attachment fetch (`ensureAttachmentAvailable`) had no coverage at all: it is
-// the path a user hits when tapping an attachment that only exists on the remote, it has
-// one branch per sync backend, and it is the last place integrity validation runs before
-// bytes land on disk.
 
 const sha256Hex = (bytes: Uint8Array): string => nodeCrypto.createHash('sha256').update(bytes).digest('hex');
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => bytes.slice().buffer as ArrayBuffer;
@@ -46,8 +42,8 @@ const cloudKitSyncMock = vi.hoisted(() => {
 });
 
 vi.mock('expo-file-system/legacy', () => fileSystemMock);
-// SafDocumentsCore's listing and lookup through the expo SAF mock above (a path-like provider:
-// the display name is the decoded tail of the document ID).
+
+
 vi.mock('./saf-documents', () => {
   const nameOf = (uri: string) => {
     const decoded = decodeURIComponent(uri).replace(/\/+$/, '');
@@ -89,23 +85,12 @@ vi.mock('./secure-config', () => ({
   isSecretConfigKey: vi.fn().mockReturnValue(true),
 }));
 
-// Encryption off: the plaintext path is what every branch below exercises.
-//
-// Review finding S2: this used to be a two-key object literal that replaced the WHOLE
-// module. `./attachment-sync-backends/common` (imported transitively via
-// `ensureAttachmentAvailable`) grew a `logSyncEncryptionEvent` import for its `remote-read`
-// diagnostic line (fresh-join-attachment-posture packet -10, correction pass) and that import
-// resolved to `undefined` under the old mock, throwing a `TypeError` deep inside the seam that
-// surfaced here as `null`/`undefined` results with no stack trace pointing at the real cause.
-// The `importOriginal` spread (same pattern this file already uses for `@mindwtr/core` below)
-// keeps every export of the real module — so a future import add can never repeat this — and
-// overrides only the two functions this suite actually needs stubbed.
+
 vi.mock('./sync-encryption-state', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync-encryption-state')>()),
   getSyncEncryptionMaterial: vi.fn().mockResolvedValue(null),
-  // The attachment byte seams' `remote-read` diagnostic line rides this emitter on every
-  // call. A no-op stub is enough here — this file exercises transport/hash behavior, not the
-  // diagnostics trail.
+
+
   logSyncEncryptionEvent: vi.fn(),
 }));
 
@@ -132,7 +117,7 @@ vi.mock('./app-log', () => ({
   sanitizeLogMessage: (value: string) => value,
 }));
 
-// Network transports only — the real hash validation and path/key derivation run.
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mindwtr/core')>();
   return {
@@ -158,24 +143,17 @@ const makeAttachment = (id: string, overrides: Partial<Attachment> = {}): Attach
 });
 
 describe('ensureAttachmentAvailable', () => {
-  // Loaded once, in a hook. The first import pulls the real @mindwtr/core barrel through
-  // `importOriginal` and measured ~4s on its own (the call it sets up takes ~1ms). Inside a
-  // test body that cost lands on whichever test happens to run first and blows the 5s test
-  // timeout under parallel load — which is exactly how this file went red in CI. A hook is
-  // paid once and against hookTimeout, raised here because 4s of import has no headroom
-  // under a loaded machine. The work itself cannot be lightened: running the real core is
-  // the point of this suite (TEST-01).
+
+
   let ensureAttachmentAvailable: typeof import('./attachment-sync-availability')['ensureAttachmentAvailable'];
   let ensureAttachmentAvailableDetailed: typeof import('./attachment-sync-availability')['ensureAttachmentAvailableDetailed'];
   let getAttachmentAvailabilityPatch: typeof import('./attachment-sync-availability')['getAttachmentAvailabilityPatch'];
-  let getAttachmentUnrecoverablePatch: typeof import('./attachment-sync-availability')['getAttachmentUnrecoverablePatch'];
 
   beforeAll(async () => {
     ({
       ensureAttachmentAvailable,
       ensureAttachmentAvailableDetailed,
       getAttachmentAvailabilityPatch,
-      getAttachmentUnrecoverablePatch,
     } = await import('./attachment-sync-availability'));
   }, 30_000);
 
@@ -183,7 +161,7 @@ describe('ensureAttachmentAvailable', () => {
     vi.clearAllMocks();
     asyncStorageMock.store.clear();
     fileSystemMock.getInfoAsync.mockReset();
-    // Nothing is in the managed attachments dir yet, so every branch has to fetch.
+
     fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
       uri.includes('.mindwtr-download-')
         ? { exists: true, size: REMOTE_BYTES.byteLength, modificationTime: 1000 }
@@ -731,7 +709,8 @@ describe('ensureAttachmentAvailable', () => {
     });
   });
 
-  it('returns an explicit terminal patch when the CloudKit asset is confirmed missing', async () => {
+  it('answers a confirmed missing CloudKit asset as unavailable and leaves the row as it is', async () => {
+
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloudkit');
     cloudKitSyncMock.fetchCloudKitAttachmentAsset.mockRejectedValue(
       new cloudKitSyncMock.CloudKitAttachmentNotFoundError(),
@@ -743,19 +722,8 @@ describe('ensureAttachmentAvailable', () => {
       mimeType: 'application/pdf',
     });
 
-    const result = await ensureAttachmentAvailableDetailed(attachment);
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({ status: 'unavailable' });
 
-    expect(result).toMatchObject({
-      status: 'unrecoverable',
-      attachment: {
-        title: 'Current title.pdf',
-        mimeType: 'application/pdf',
-        cloudKey: undefined,
-        fileHash: undefined,
-        localStatus: 'missing',
-        deletedAt: expect.any(String),
-      },
-    });
     expect(attachment).toMatchObject({
       cloudKey: 'cloudkit:cloudkit-terminal-missing',
       fileHash: sha256Hex(REMOTE_BYTES),
@@ -766,16 +734,7 @@ describe('ensureAttachmentAvailable', () => {
       { idempotent: true },
     );
     expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
-    if (result.status !== 'unrecoverable') throw new Error('Expected terminal CloudKit outcome');
-    expect(getAttachmentUnrecoverablePatch(result.attachment)).toEqual({
-      cloudKey: undefined,
-      fileHash: undefined,
-      localStatus: 'missing',
-      deletedAt: result.attachment.deletedAt,
-      updatedAt: result.attachment.updatedAt,
-    });
   });
-
   it('patches only local availability and adopts a verified hash only for a legacy missing-hash record', () => {
     const legacy = makeAttachment('legacy', { fileHash: undefined });
     const verified = makeAttachment('legacy', {
@@ -799,9 +758,8 @@ describe('ensureAttachmentAvailable', () => {
   });
 
   it('decrypts a self-hosted cloud download before validating and writing it', async () => {
-    // The cloud branch was the only one building bytes straight from the response: with
-    // sync encryption on it either failed integrity validation or wrote the MWENC1
-    // container to disk as the user's file.
+
+
     const core = await import('@mindwtr/core');
     const { setSyncCryptoNativeModuleForTests } = await import('./sync-crypto-native');
     setSyncCryptoNativeModuleForTests({
@@ -831,8 +789,8 @@ describe('ensureAttachmentAvailable', () => {
     vi.mocked(core.cloudGetFile).mockResolvedValue(toArrayBuffer(sealed) as never);
 
     const result = await ensureAttachmentAvailable(
-      // fileHash describes the PLAINTEXT — it is a plaintext-domain value inside the
-      // synced document and must stay stable across re-encryptions.
+
+
       makeAttachment('a-sealed', { fileHash: sha256Hex(REMOTE_BYTES) })
     );
 
@@ -855,7 +813,7 @@ describe('ensureAttachmentAvailable', () => {
     vi.mocked(getSyncEncryptionMaterial).mockResolvedValue(null);
   });
 
-  it('treats a self-hosted cloud 404 as terminal, as WebDAV: the row loses its Download button and a retry asks the server nothing', async () => {
+  it('answers a self-hosted cloud 404 as unavailable, as WebDAV: the row stays and a later tap asks again', async () => {
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloud');
     asyncStorageMock.store.set('@mindwtr_cloud_url', 'https://cloud.example/v1/data');
     asyncStorageMock.store.set('@mindwtr_cloud_token', 'cloud-token');
@@ -863,13 +821,12 @@ describe('ensureAttachmentAvailable', () => {
     vi.mocked(core.cloudGetFile).mockRejectedValue(Object.assign(new Error('Cloud File GET failed (404)'), { status: 404 }));
     const attachment = makeAttachment('cloud-gone', { fileHash: sha256Hex(REMOTE_BYTES) });
 
-    const result = await ensureAttachmentAvailableDetailed(attachment);
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({ status: 'unavailable' });
 
-    if (result.status !== 'unrecoverable') throw new Error(`Expected a terminal outcome, got ${result.status}`);
-    const patched = { ...attachment, ...getAttachmentUnrecoverablePatch(result.attachment) };
-    expect(core.getAttachmentRowState(patched)).toMatchObject({ canDownload: false });
-    await expect(ensureAttachmentAvailableDetailed(patched)).resolves.toEqual({ status: 'unavailable' });
-    expect(core.cloudGetFile).toHaveBeenCalledTimes(1);
+    expect(attachment).not.toHaveProperty('deletedAt');
+    expect(attachment.cloudKey).toBeTruthy();
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({ status: 'unavailable' });
+    expect(core.cloudGetFile).toHaveBeenCalledTimes(2);
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith('file://document/attachments/cloud-gone.txt', expect.anything());
     const appLog = await import('./app-log');
     expect(appLog.logWarn).toHaveBeenCalledWith(
@@ -877,24 +834,20 @@ describe('ensureAttachmentAvailable', () => {
       expect.objectContaining({ extra: expect.objectContaining({ releaseCheck: 'v1.3.4/cloud-download-not-found' }) }),
     );
   });
-
-  it('treats a Dropbox not-found as terminal, as WebDAV', async () => {
+  it('answers a Dropbox not-found as unavailable, as WebDAV', async () => {
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloud');
     asyncStorageMock.store.set('@mindwtr_cloud_provider', 'dropbox');
     const dropbox = await import('./dropbox-sync');
     vi.mocked(dropbox.downloadDropboxFile).mockRejectedValue(new dropbox.DropboxFileNotFoundError('Dropbox file not found'));
     const attachment = makeAttachment('dropbox-gone', { fileHash: sha256Hex(REMOTE_BYTES) });
 
-    const result = await ensureAttachmentAvailableDetailed(attachment);
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({ status: 'unavailable' });
 
-    if (result.status !== 'unrecoverable') throw new Error(`Expected a terminal outcome, got ${result.status}`);
-    const patched = { ...attachment, ...getAttachmentUnrecoverablePatch(result.attachment) };
-    await expect(ensureAttachmentAvailableDetailed(patched)).resolves.toEqual({ status: 'unavailable' });
-    expect(dropbox.downloadDropboxFile).toHaveBeenCalledTimes(1);
+    expect(attachment).not.toHaveProperty('deletedAt');
+    expect(attachment.cloudKey).toBeTruthy();
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith('file://document/attachments/dropbox-gone.txt', expect.anything());
   });
-
-  it('treats a WebDAV 404 as terminal: the row loses its Download button and a retry asks the server nothing', async () => {
+  it('answers a WebDAV 404 as unavailable: the row keeps its Download button and a later tap asks again', async () => {
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'webdav');
     asyncStorageMock.store.set('@mindwtr_webdav_url', 'https://dav.example/data.json');
     asyncStorageMock.store.set('@mindwtr_webdav_username', 'u');
@@ -902,16 +855,13 @@ describe('ensureAttachmentAvailable', () => {
     const core = await import('@mindwtr/core');
     vi.mocked(core.webdavGetFile).mockRejectedValue(Object.assign(new Error('WebDAV GET failed (404)'), { status: 404 }));
     const attachment = makeAttachment('dav-gone', { fileHash: sha256Hex(REMOTE_BYTES) });
-    expect(core.getAttachmentRowState(attachment).canDownload).toBe(true);
 
-    const result = await ensureAttachmentAvailableDetailed(attachment);
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({ status: 'unavailable' });
 
-    if (result.status !== 'unrecoverable') throw new Error(`Expected a terminal outcome, got ${result.status}`);
-    const patched = { ...attachment, ...getAttachmentUnrecoverablePatch(result.attachment) };
-    expect(core.getAttachmentRowState(patched)).toMatchObject({ canDownload: false });
-    expect(patched.deletedAt).toEqual(expect.any(String));
-    await expect(ensureAttachmentAvailableDetailed(patched)).resolves.toEqual({ status: 'unavailable' });
-    expect(core.webdavGetFile).toHaveBeenCalledTimes(1);
+    expect(attachment).not.toHaveProperty('deletedAt');
+    expect(core.getAttachmentRowState(attachment)).toMatchObject({ canDownload: true });
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({ status: 'unavailable' });
+    expect(core.webdavGetFile).toHaveBeenCalledTimes(2);
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith('file://document/attachments/dav-gone.txt', expect.anything());
     const appLog = await import('./app-log');
     expect(appLog.logWarn).toHaveBeenCalledWith(
@@ -919,7 +869,6 @@ describe('ensureAttachmentAvailable', () => {
       expect.objectContaining({ extra: expect.objectContaining({ releaseCheck: 'v1.3.4/webdav-download-not-found' }) }),
     );
   });
-
   it('falls back to WebDAV for any other backend that has a cloud key', async () => {
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'webdav');
     asyncStorageMock.store.set('@mindwtr_webdav_url', 'https://dav.example/data.json');

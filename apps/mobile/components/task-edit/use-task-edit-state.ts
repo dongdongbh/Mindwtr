@@ -59,7 +59,7 @@ type TaskEditActivitySession = {
     taskEditDraft: TaskEditDraft;
     taskId: string;
     titleDraft: string;
-    /** The task the draft was opened or last saved on: its save's merge base (absent in older snapshots). */
+
     baseTask?: Task;
 };
 
@@ -162,6 +162,7 @@ export function useTaskEditState({
     const baseTaskRef = React.useRef<Task | null>(null);
     const attachmentDraftSettledRef = React.useRef(true);
     const saveAwaitingDurabilityRef = React.useRef(false);
+    const pendingSavesRef = React.useRef(0);
     const pendingCancellationPatchRef = React.useRef<Partial<Task> | null>(null);
     const [cancelRetryPending, setCancelRetryPending] = React.useState(false);
     const setDraftField = React.useCallback<SetTaskEditDraftField>((field, value, markDirty = true) => {
@@ -189,7 +190,7 @@ export function useTaskEditState({
         });
     }, []);
 
-    const [showDatePicker, setShowDatePicker] = React.useState<'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end' | null>(null);
+    const [showDatePicker, setShowDatePicker] = React.useState<'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'review-time' | 'recurrence-end' | null>(null);
     const [pendingStartDate, setPendingStartDate] = React.useState<Date | null>(null);
     const [pendingDueDate, setPendingDueDate] = React.useState<Date | null>(null);
     const [editTab, setEditTab] = React.useState<TaskEditTab>(() => resolveInitialTaskEditTab(defaultTab, task));
@@ -201,10 +202,8 @@ export function useTaskEditState({
     const [descriptionDraft, setDescriptionDraft] = React.useState('');
     const descriptionDraftRef = React.useRef('');
     const descriptionDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-    // The preview's "add checklist item" input keeps its text here until the
-    // user submits it. Save reads it synchronously: on React Native a press on
-    // the Save button does not reliably blur the input first, so a blur handler
-    // would lose the text (or race the save in the same tick).
+
+
     const checklistDraftRef = React.useRef('');
     const [contextInputDraft, setContextInputDraft] = React.useState('');
     const [tagInputDraft, setTagInputDraft] = React.useState('');
@@ -310,8 +309,8 @@ export function useTaskEditState({
         if (!visible || !recoverableLiveTask || snapshot.taskId !== recoverableLiveTask.id) return;
         taskEditDraftRef.current = snapshot.taskEditDraft;
         setTaskEditDraftState(snapshot.taskEditDraft);
-        // The draft's own base, not the live task: a sync that landed while the activity was recreated must read
-        // as another device's change, or the save would put the draft's copy back over it.
+
+
         baseTaskRef.current = snapshot.baseTask?.id === recoverableLiveTask.id ? snapshot.baseTask : recoverableLiveTask;
         attachmentDraftSettledRef.current = false;
         isDirtyRef.current = snapshot.isDirty;
@@ -364,9 +363,8 @@ export function useTaskEditState({
 
     const settleCurrentAttachmentDraft = React.useCallback((committedAttachments?: readonly Attachment[]) => {
         if (attachmentDraftSettledRef.current) return;
-        // A successful store action is still optimistic: its immediate SQLite
-        // write may be in flight. On a durability failure preserve every file
-        // that either the old snapshot or the retrying new snapshot can own.
+
+
         if (saveAwaitingDurabilityRef.current) return;
         const baselineTask = baseTaskRef.current ?? liveTask;
         const currentDraft = taskEditDraftRef.current;
@@ -388,8 +386,8 @@ export function useTaskEditState({
     }, [taskEditSourceActivityId]);
 
     const writePatch = React.useCallback((taskId: string, updates: Partial<Task>): boolean | Promise<boolean> => {
-        // This prop boundary intentionally retains its synchronous branch:
-        // void-returning modal callbacks must close in the same tick.
+
+
         const settle = (result: unknown) => {
             if (!isActionFailure(result)) return true;
             onSaveError(getActionFailureMessage(result));
@@ -410,7 +408,7 @@ export function useTaskEditState({
         return false;
     }, [onSave, onSaveError]);
 
-    const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' = 'save'): Promise<boolean> => {
+    const saveDraftImpl = React.useCallback(async (mode: 'save' | 'cancel' = 'save'): Promise<boolean> => {
         const currentTask = baseTaskRef.current ?? liveTask;
         if (!currentTask || !taskEditDraft) return Promise.resolve(false);
         if (mode === 'cancel') isDirtyRef.current = true;
@@ -431,8 +429,8 @@ export function useTaskEditState({
                     { id: generateUUID(), title: pendingChecklistTitle, isCompleted: false },
                 ],
             };
-            // Same rule as applyChecklistUpdate: an unfinished item reopens a
-            // list task that had been completed.
+
+
             if (currentTask.taskMode === 'list' && saveDraftState.draft.status === 'done') {
                 saveDraftState = {
                     ...saveDraftState,
@@ -445,13 +443,10 @@ export function useTaskEditState({
             title: titleDraftRef.current,
             description: descriptionDraftRef.current,
         });
-        // A save with a list field (tags, contexts, checklist, attachments) goes over the task as stored when
-        // the write is admitted, not the copy the editor opened: the patch is merged field by field onto the
-        // latest row (base: the task the editor opened or last saved on), so a tag, item, cloudKey or removal
-        // another device synced meanwhile stays. One store command merges and writes, so a sync save admitted
-        // first is merged too. The list Save writes: the file cleanup after Save settles against it.
+
+
         let savedAttachments = saveDraftState.attachments ?? currentTask.attachments;
-        // Only a list save waits for admission; any other save reaches onSave in this tick, so the modal closes at once.
+
         const hasListField = (patch: Partial<Task>) => (
             'tags' in patch || 'contexts' in patch || 'checklist' in patch || 'attachments' in patch
         );
@@ -496,6 +491,7 @@ export function useTaskEditState({
                 focusTaskLimit: limit,
                 sequentialProjectIds: derived.sequentialProjectIds,
                 sectionScopedProjectIds: derived.sequentialWithinSectionProjectIds,
+                sequentialSectionKeys: derived.sequentialSectionKeys,
             });
             if (!action.canToggle) {
                 onSaveError(getFocusStarBlockedText(translate, action, limit) ?? 'Focus unavailable');
@@ -547,9 +543,8 @@ export function useTaskEditState({
                 await flushPendingSave();
             } catch (error) {
                 onSaveError(getUnknownErrorMessage(error));
-                // Keep the guard raised. The store retains a retry snapshot, so
-                // neither the baseline bytes nor newly submitted bytes are yet
-                // safe to classify as orphaned.
+
+
                 return false;
             }
         }
@@ -590,6 +585,11 @@ export function useTaskEditState({
         writePatch,
     ]);
 
+    const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' = 'save') => {
+        pendingSavesRef.current += 1;
+        try { return await saveDraftImpl(mode); }
+        finally { pendingSavesRef.current -= 1; }
+    }, [saveDraftImpl]);
     const cancelDraft = React.useCallback(() => saveDraft('cancel'), [saveDraft]);
 
     const discardDraft = React.useCallback(() => {
@@ -601,6 +601,7 @@ export function useTaskEditState({
     }, [clearPendingTextChanges, clearTaskEditActivitySession, liveTask, onClose, settleCurrentAttachmentDraft]);
 
     const hasPendingChanges = React.useCallback(() => {
+        if (pendingSavesRef.current > 0 || saveAwaitingDurabilityRef.current) return true;
         const currentTask = baseTaskRef.current ?? liveTask;
         if (!currentTask || !taskEditDraft) return false;
         if (checklistDraftRef.current.trim()) return true;
@@ -648,8 +649,8 @@ export function useTaskEditState({
         };
         const applyReference = (saved: boolean) => {
             if (!saved) return false;
-            // The store also ends a relative start for Reference, and so does the draft
-            // below: clearing the dates clears the offset.
+
+
             const nextBaseTask = { ...currentTask, ...referenceUpdate, relativeStartOffset: undefined };
             baseTaskRef.current = nextBaseTask;
             setTaskEditDraftState((current) => {

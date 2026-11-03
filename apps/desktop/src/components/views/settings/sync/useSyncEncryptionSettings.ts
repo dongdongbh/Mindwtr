@@ -21,19 +21,12 @@ import type {
     SyncEncryptionWarningKind,
 } from './types';
 
-// Encryption covers the backends Mindwtr writes whole blobs to. Self-hosted cloud
-// and CloudKit hold structured server-side state instead, so phase 2's API rejects
-// them outright — this predicate keeps the section from ever offering the choice.
+
 export const isEncryptionCapableBackend = (backend: SyncBackend, cloudProvider: CloudProvider): boolean => (
     backend === 'file' || backend === 'webdav' || (backend === 'cloud' && cloudProvider === 'dropbox')
 );
 
-// A mistyped current passphrase is caught by the explicit verify below and
-// carries its own sentinel — by the time the rotation itself fails, the
-// passphrase has already been proven, so blaming it is a lie the reporter of
-// #1056 nearly chased. Rotation failures fall through to the generic message.
-// Disable stays special: it cannot self-heal a folder an interrupted rotation
-// left on two salts, and the only way out is to finish the rotation first.
+
 export const classifyFailure = (error: unknown, terminal: SyncEncryptionErrorKind): SyncEncryptionErrorKind => {
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     if (message.includes('SYNC_ENCRYPTION_WRONG_PASSPHRASE')) return 'wrong-passphrase';
@@ -48,17 +41,13 @@ export function useSyncEncryptionSettings(
     cloudProvider: CloudProvider,
     persistedSyncBackend: SyncBackend,
     persistedCloudProvider: CloudProvider,
-    // True while a sync/test/save transport action runs. On its falling edge the
-    // section re-reads the encryption state: activating a location that already
-    // holds ciphertext persists 'remote-encrypted-no-key' during the probe, and
-    // the section must flip from "set a new passphrase" to "enter the existing
-    // passphrase" without the user first failing an enable (#1001).
+
+
     transportBusy = false,
 ): SyncEncryptionController {
     const supported = isEncryptionCapableBackend(syncBackend, cloudProvider);
-    // The service resolves the DURABLE backend, and a typed-but-unproven config is still
-    // 'off' there — the mismatch that used to fail a pre-first-sync enable with a
-    // misleading generic error (#1001).
+
+
     const pendingFirstSync = !isEncryptionCapableBackend(persistedSyncBackend, persistedCloudProvider);
     const [state, setState] = useState<SyncEncryptionController['state']>(null);
     const [stateUnavailable, setStateUnavailable] = useState(false);
@@ -67,10 +56,7 @@ export function useSyncEncryptionSettings(
     const [error, setError] = useState<SyncEncryptionErrorKind | null>(null);
     const [warning, setWarning] = useState<SyncEncryptionWarningKind | null>(null);
 
-    // A status read that failed says nothing about the folder; reporting 'off'
-    // would offer "Enable encryption" for a folder that may already be encrypted.
-    // null is paired with stateUnavailable so the section can offer a safe retry
-    // without guessing that encryption is off.
+
     const readState = useCallback(async (): Promise<SyncEncryptionController['state']> => {
         try {
             const status = await SyncService.getSyncEncryptionStatus();
@@ -100,7 +86,7 @@ export function useSyncEncryptionSettings(
         };
     }, [readState, supported]);
 
-    // Falling-edge refresh: see the transportBusy parameter comment.
+
     const previousTransportBusy = useRef(transportBusy);
     useEffect(() => {
         const wasBusy = previousTransportBusy.current;
@@ -139,8 +125,8 @@ export function useSyncEncryptionSettings(
                 setError(classifyFailure(failure, terminal));
             }
         }
-        // Whether it finished or not, the device's state may have moved: every
-        // transition is resumable, so a half-done run still has to be reflected.
+
+
         const nextState = await readState();
         setState(nextState);
         setStateUnavailable(nextState === null);
@@ -172,9 +158,8 @@ export function useSyncEncryptionSettings(
         try {
             const outcome = await SyncService.provideSyncEncryptionPassphrase(passphrase);
             accepted = outcome === 'ok';
-            // #1138: nothing encrypted is at this location any more, so the lock described a
-            // location this device has left behind. The service already cleared it; report the
-            // change rather than a wrong passphrase.
+
+
             if (outcome === 'no-encrypted-remote') {
                 accepted = true;
                 setWarning('no-encrypted-remote');

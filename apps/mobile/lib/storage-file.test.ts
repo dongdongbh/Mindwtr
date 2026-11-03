@@ -4,7 +4,9 @@ import { Directory } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 
+import * as Sharing from 'expo-sharing';
 import {
+  exportData,
   FileSyncRetainedGenerationError,
   pickAndParseSyncFolder,
   readSyncFile,
@@ -46,12 +48,11 @@ const fileSystemMock = vi.hoisted(() => {
 
 vi.mock('./file-system', () => fileSystemMock);
 
-// SafDocumentsCore.kt's listing and lookup through the expo SAF mock's folder, so a test that
-// fails expo's listing fails this one too.
+
 vi.mock('./saf-documents', () => ({
   listSafChildren: vi.fn(async (dir: string) => {
     const uris: string[] = await fileSystemMock.StorageAccessFramework.readDirectoryAsync(dir);
-    // A path-like provider's display name: the decoded tail of the document ID.
+
     const nameOf = (uri: string) => {
       const decoded = decodeURIComponent(uri);
       return decoded.slice(Math.max(decoded.lastIndexOf('/'), decoded.lastIndexOf(':')) + 1);
@@ -95,8 +96,8 @@ vi.mock('expo-file-system', () => {
         throw new Error('Unable to open output stream for URI: ' + this.uri);
       }
       expoFilesMock.set(this.uri, content);
-      // content:// writes land in the same store the SAF read mock serves, so
-      // writeSyncFile's read-back verification sees what the stream wrote.
+
+
       if (this.uri.startsWith('content://') && typeof content === 'string') {
         fileSystemMock.__setStoredText(content);
       }
@@ -169,9 +170,7 @@ describe('storage-file sync writes', () => {
     expect(expoFilesMock.size).toBe(0);
   });
 
-  // The RSAF shape from #1001: the provider never declares FLAG_SUPPORTS_WRITE,
-  // so expo's legacy SAF write refuses every attempt and waiting cannot help —
-  // the raw output-stream write must carry the bytes instead.
+
   it('falls back to the output-stream write when the provider pre-check reports not writable', async () => {
     const bytes = new TextEncoder().encode('{"tasks":[],"projects":[]}');
     fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockRejectedValueOnce(
@@ -196,6 +195,11 @@ describe('storage-file sync writes', () => {
     await writeSyncArtifactBytes(syncFileUri, bytes);
 
     expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).toHaveBeenCalledTimes(2);
+
+    const { logWarn } = await import('./app-log');
+    const retry = vi.mocked(logWarn).mock.calls.find(([message]) => message.startsWith('SAF encrypted output-stream write failed'));
+    expect(retry?.[1]).toEqual({ scope: 'sync', extra: { error: 'Error' } });
+    expect(JSON.stringify(vi.mocked(logWarn).mock.calls)).not.toContain('primary%3AMindwtr');
   }, 10_000);
 
   it('fails closed when the encrypted-sibling discovery listing is unavailable', async () => {
@@ -240,7 +244,7 @@ describe('storage-file sync writes', () => {
 
     const result = await pickAndParseSyncFolder();
 
-    // An empty folder is picked as the folder itself; the first sync publishes data.json.
+
     expect(result?.__fileUri).toBe(`${treeUri}/document/remote%3AStaleCheck`);
     expect(dataUri).toContain('data.json');
   });
@@ -280,9 +284,7 @@ describe('iOS sync file bookmarks', () => {
     expect(result?.__fileUri).toBe('file:///gdrive/Mindwtr/backup.json');
   });
 
-  // The fallback sheet looks identical to the folder sheet it follows, so the
-  // caller explains it first; declining must not open an uninvited second
-  // picker (#1068).
+
   it('asks before the file fallback and stops when the user declines', async () => {
     (Directory as unknown as { pickDirectoryAsync: ReturnType<typeof vi.fn> })
       .pickDirectoryAsync.mockRejectedValue(new Error('Operation was canceled'));
@@ -339,5 +341,34 @@ describe('iOS sync file bookmarks', () => {
 
     await expect(readSyncFile('file:///gdrive/Mindwtr/backup.json', { bookmark: 'bm-token' }))
       .resolves.toBeNull();
+  });
+});
+
+describe('backup export logs', () => {
+  const privateTree = 'content://com.android.externalstorage.documents/tree/primary%3Aprivate-folder';
+  const data: AppData = { tasks: [], projects: [], sections: [], areas: [], settings: {} };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fileSystemMock.StorageAccessFramework.requestDirectoryPermissionsAsync.mockResolvedValue({ granted: true, directoryUri: privateTree });
+    fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockResolvedValue(undefined);
+  });
+
+  it('never carry the picked folder\'s URI when the export is saved there', async () => {
+    fileSystemMock.StorageAccessFramework.createFileAsync.mockResolvedValue(`${privateTree}/document/primary%3Aprivate-folder%2Fbackup.json`);
+    await exportData(data);
+    expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).toHaveBeenCalledTimes(1);
+    const { logInfo, logWarn } = await import('./app-log');
+    expect(JSON.stringify([vi.mocked(logInfo).mock.calls, vi.mocked(logWarn).mock.calls])).not.toContain('private-folder');
+  });
+
+  it('log a failed save by the error name and never the cache path, then share', async () => {
+    fileSystemMock.StorageAccessFramework.createFileAsync.mockRejectedValue(new Error(`Location '${privateTree}' isn't writable.`));
+    vi.mocked(Sharing.isAvailableAsync).mockResolvedValue(true);
+    await exportData(data);
+    const { logInfo, logWarn } = await import('./app-log');
+    expect(vi.mocked(logWarn).mock.calls.find(([message]) => message.startsWith('Export SAF unavailable'))?.[1])
+      .toEqual({ scope: 'sync', extra: { error: 'Error' } });
+    expect(JSON.stringify([vi.mocked(logInfo).mock.calls, vi.mocked(logWarn).mock.calls])).not.toMatch(/private-folder|file:\/\/cache/);
   });
 });

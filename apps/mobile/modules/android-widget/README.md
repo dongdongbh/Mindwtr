@@ -79,9 +79,13 @@ of retaining a fixed or semi-transparent accent tint.
 Every Android snapshot includes bounded Focus, Inbox, Next Actions, Waiting,
 Upcoming, and Someday lists, even before a Tasks widget is placed. After the app has
 published once, a newly placed widget can select those cached lists without
-another app opening. All offered saved filters (up to the established 50-filter
-limit), contexts and tags also carry cached lists. The Tasks chooser groups these
-under their existing translated headings and offers search for longer inventories.
+another app opening. The chooser also offers every saved filter (up to the
+established 50-filter limit), context and tag by name, but the payload carries
+their lists only for what placed widgets chose: a list for every label made each
+refresh grow with the labels (#1399). A newly chosen one shows under its name,
+empty, until the app's next publication (unless another widget already shows that
+list). The Tasks chooser groups these under their existing translated headings and
+offers search for longer inventories.
 Rows recycle through a native ListView; searching preserves the pending choice.
 Each widget stores its own selection.
 
@@ -94,23 +98,25 @@ Selected removed labels stay empty under their own heading. IDs are
 `context:<canonical-token>` and `tag:<canonical-token>`; links encode the whole ID
 as one path segment. Android-only chooser metadata does not change iOS snapshots.
 
-Publication indexes task/token memberships once, then verifies indexed candidates
-with shared `applyFilter`. Each list retains the existing 200-row Android cache
-limit, with total count and overflow navigation; every offered list is published.
-There is no aggregate cache-size cutoff. A local Bun measurement with 5,000 tasks,
-100 hierarchical contexts and 50 tags took 35–98 ms including serialization and
-produced 5.0 MB; a stress inventory of 5,000 unique hierarchical contexts and tags
-took 97–127 ms and produced 7.9 MB. These host timings do not establish Android
-publication or launcher latency; snapshot size grows with token memberships.
+When a placed widget chose a context or tag, publication indexes task/token
+memberships once, then verifies indexed candidates with shared `applyFilter`. Each
+list retains the existing 200-row Android cache limit, with total count and
+overflow navigation. Snapshot size grows with the chosen lists, not with the
+number of labels.
 
 Upcoming is a preview of the shared Focus seven-day list. Its rows have no
 completion ring and open their task directly. Each row supplies `upcomingDate`
 (a calendar date, floating local datetime or canonical UTC instant) and `upcomingLabel` (localized Starts
 or Returns). Every render excludes dates outside tomorrow through local day
-seven, and formats absolute dates in the current Android locale and time zone.
+seven, and relabels the day with the payload's `upcomingDays` (Today, Tomorrow,
+a short weekday within six days, else a numeric date, as core's Next Actions
+rows) in the current time zone, with the time in the Android locale's format.
 Empty Upcoming stays selected. Tasks and legacy Tasks providers listen for
-date, clock, and timezone changes and request Android's inexact 30-minute widget
-updates; Compact and Quick Capture keep their existing cadence. Launcher and
+clock and timezone changes and request Android's inexact 30-minute widget
+updates. Android skips DATE_CHANGED for manifest receivers, so every Tasks
+render also sets an inexact alarm (10-minute window) for the next local
+midnight that redraws the Tasks widgets. Compact and Quick Capture keep their
+existing cadence. Launcher and
 power-management delays can postpone redraws. Native refresh only filters the
 cached rows: newly eligible tasks and data/filter changes require the app's
 next payload publication.
@@ -135,6 +141,13 @@ schema core's `packages/core/src/pending-captures.ts` (`parsePendingCapture`) re
 through `PendingCaptureWriter` (temp file + rename), then bumps the stored
 payload's `inboxCount` and redraws every widget. The tile, app shortcut,
 capture notification and all three widgets launch it by explicit class name.
+
+A Tasks widget showing one context or tag opens the dialog with that token typed
+in (`@Todd `), editable like any text; the drain's quick-add parse applies it
+(#1418). `WidgetListStore.captureText` writes simple and hierarchical tokens
+as typed (`@person/todd `) and other names in quoted form (`@"Two words" `), the
+forms quick-add parses without a known-token list (#1428). A name with a quote,
+a backslash, or a space before `@ # + ! % /` opens empty.
 
 After a text **Save** it starts `CaptureSyncHeadlessService` (not exported), which
 wakes the JS task `MindwtrCaptureSync` in `apps/mobile/lib/background-sync-task.ts`:

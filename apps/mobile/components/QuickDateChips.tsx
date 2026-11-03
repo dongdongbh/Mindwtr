@@ -20,9 +20,9 @@ type QuickDateChipsProps = {
   selectedDate?: Date | null;
   selectedPreset?: QuickDatePreset | null;
   onSelect: (date: Date | null, preset: QuickDatePreset) => void;
-  /** Which presets to render. Defaults to the full core set. */
+
   presets?: readonly QuickDatePreset[];
-  /** Optional node rendered as the last item inside the same wrapping row (e.g. a custom-date chip). */
+
   trailing?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
@@ -62,7 +62,7 @@ export function QuickDateChips({
             accessibilityState={{ selected: active, disabled }}
             disabled={disabled}
             accessibilityLabel={accessibilityLabelPrefix ? `${accessibilityLabelPrefix}: ${label}` : label}
-            // Optional dates can be cleared by tapping the active chip.
+
             onPress={() => onSelect(active && allowClear ? null : getQuickDate(preset, now), preset)}
             style={[
               styles.chip,

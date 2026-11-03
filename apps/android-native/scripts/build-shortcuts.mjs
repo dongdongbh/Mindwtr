@@ -1,11 +1,6 @@
-// RN's app shortcuts for the native app, one resource set per build type: the XML and strings of
-// apps/mobile/plugins/android-app-shortcuts.js (its own builder, so the ids, capabilities, labels and Add task's target, RN's quick
-// capture dialog QuickCaptureActivity in the build's package, stay RN's), with one change: RN's mindwtr:/// links use the build's
-// scheme (the development build's mindwtr-native-dev, so RN's app on the same phone keeps mindwtr://). Each build type also gets
-// the manifest entry RN's plugin adds for a shortcut's own target, its detailed capture activity (#1333), as one more manifest, and
-// the build's scheme as RN's widget module's mindwtr_link_scheme, so the links its appIntent opens (that activity's, the widgets'
-// header and row links) are ones this build opens.
-// Usage: node build-shortcuts.mjs <out dir> <build type>=<scheme>@<applicationId> ...
+
+
+
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
@@ -27,7 +22,7 @@ export function buildShortcuts(scheme, applicationId) {
     return { xml, strings: rn.SHORTCUTS_STRINGS_XML };
 }
 
-/** The activities RN's plugin adds beside its MainActivity (ensureManifestAppActions), as a variant's extra manifest. */
+
 export function buildShortcutsManifest() {
     const main = { $: { 'android:name': '.MainActivity' } };
     const manifest = { manifest: { $: { 'xmlns:android': 'http://schemas.android.com/apk/res/android' }, application: [{ activity: [main] }] } };
@@ -38,7 +33,7 @@ export function buildShortcutsManifest() {
     return new Builder({ renderOpts: { pretty: true, indent: '    ' }, xmldec: { version: '1.0', encoding: 'utf-8' } }).buildObject(manifest);
 }
 
-/** The build's [scheme] as the widget module's mindwtr_link_scheme (an app resource overrides the module's RN default). */
+
 export const buildLinkSchemeXml = (scheme) => `<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="mindwtr_link_scheme" translatable="false">${scheme}</string>

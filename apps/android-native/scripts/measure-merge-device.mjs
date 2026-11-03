@@ -1,32 +1,6 @@
-// Native Android sync-merge measurement (ADR 0029 item 3, D9). Measures; changes nothing in the app.
-//
-//   node measure-merge-device.mjs rkstorage <out file> <port>
-//       RN's AsyncStorage file (databases/RKStorage) holding only a WebDAV sync setting for this computer's folder on
-//       127.0.0.1:<port> (no user, no password, plain http allowed). Seed it with the database:
-//       measure-startup-device.mjs seed <serial> <pkg> <seed.apk> <benchmark.apk> <db> <this file>.
-//   node measure-merge-device.mjs run <serial> <pkg> <label> <out dir> [samples=10] [changes=250] [taps=on] [push=off] [start=cold]
-//       Serves an in-memory WebDAV folder (sync-harness.mjs serveWebdav, no auth) on 127.0.0.1:18781 through adb reverse.
-//       A first cold start uploads the library and a second one settles it; neither is measured. Then each sample: the folder's
-//       document gets `changes` tasks edited on this computer (title, a newer rev and updatedAt), the app starts cold under
-//       Perfetto, and its boot sync merges them. With push on, one more task goes back to an older revision in the folder,
-//       so the phone's newer copy wins the merge and the cycle writes the document back (otherwise the merged document
-//       equals the folder's and the remote write is skipped). With start=resume the process lives on between samples: the
-//       folder is edited, HOME, then the app comes back (its resume sync, in a process that has synced and saved before). With taps on, the phone taps the Focus and Inbox tabs in turn every
-//       ~0.6 s from launch: each tap starts a core read, so the trace shows how long a screen command waits while sync runs.
-//       Traces go to <out dir>/<label>-<n>.perfetto-trace, the summary to <out dir>/<label>.json.
-//   node measure-merge-device.mjs analyze <trace>...
-//       Per trace: the sync's engine-thread sections (sync:*, io:*, sql:*), the engine's uninterrupted blocks during sync,
-//       the engine thread's states, and each screen command's wait (core:wait on its own thread) with its queue time and the
-//       tap before it. With --budget=<ms> it exits 1 unless the p90 tap-to-answer of the taps whose wait began inside the
-//       sync's span is at most <ms> (D9's target is 300); no such tap also fails. A tap (its DOWN and UP input events, by
-//       eventTimeNano) is answered by its own tab's read on the read thread (merge-tap-matching.mjs): one sample per tap, a
-//       delayed answer kept with its own tap. The start taps are not measured: two on a cold start, one on a resume
-//       (merge-tap-matching.mjs measuredTaps). A trace whose app did not see all nine taps is an error (the tab order would be
-//       wrong). A series whose share of unanswered taps in the sync's span is above 5% fails the budget too: their answers, if
-//       any, went unmeasured.
-//
-// Every phone command runs inside the coordinator's lock: flock -o -w 14400 /home/dd/scratch/s23.lock node ...
-// Only the benchmark package (its own application id): the dev app's data is never touched.
+
+
+
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { serveWebdav } from './sync-harness.mjs';
 import { assignTapAnswers, measuredTaps, TAPS_PER_SAMPLE } from './merge-tap-matching.mjs';
+import { budgetVerdict } from './merge-budget.mjs';
 
 const ADB = process.env.ADB ?? '/opt/android-sdk/platform-tools/adb';
 const TP = process.env.TRACE_PROCESSOR ?? '/home/dd/.cache/mindwtr-performance-tmp/mindwtr-perfetto/trace_processor';
@@ -58,7 +33,7 @@ const sqlite3 = (file, sql) => execFileSync('sqlite3', [file, sql], { encoding: 
 if (command === 'rkstorage') {
     const [out, port = String(PORT)] = args;
     rmSync(out, { force: true });
-    // RN's AsyncStorage schema at user_version 1 (RnKeyValue.kt), with core's sync keys (sync-storage-keys.ts).
+
     const rows = [
         ['@mindwtr_sync_backend', 'webdav'],
         ['@mindwtr_webdav_url', `http://127.0.0.1:${port}${FOLDER}`],
@@ -70,6 +45,12 @@ if (command === 'rkstorage') {
 } else if (command === 'run') {
     const [serial, pkg, label, outDir, samplesText = '10', changesText = '250', tapsText = 'on', pushText = 'off', startText = 'cold'] = args;
     if (!pkg.endsWith('.benchmark')) throw new Error(`REFUSED: ${pkg} is not a benchmark package`);
+
+
+    process.on('exit', () => {
+        try { execFileSync(ADB, ['-s', serial, 'uninstall', pkg], { stdio: 'ignore' }); } catch {                     }
+    });
+    for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => process.exit(1));
     const samples = Number(samplesText);
     const changes = Number(changesText);
     const taps = tapsText === 'on';
@@ -84,7 +65,28 @@ if (command === 'rkstorage') {
     adb('reverse', `tcp:${PORT}`, `tcp:${PORT}`);
     const documentPath = `${FOLDER}/data.json`;
     let etagVersion = 0;
-    /** The folder's document with [count] tasks edited as another device would: a new title, a newer rev and updatedAt. */
+    const attachmentsPerRound = Number(process.env.MERGE_BENCH_ATTACHMENTS ?? 0);
+    const attachmentBytes = Number(process.env.MERGE_BENCH_ATTACHMENT_KB ?? 512) * 1024;
+    if (attachmentsPerRound > 0) dav.state.files.set(`${FOLDER}/attachments`, { dir: true });
+
+    const addRemoteAttachments = (doc, round, now) => {
+        const owners = doc.tasks.filter((task) => !task.deletedAt).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, attachmentsPerRound);
+        owners.forEach((task, i) => {
+            const id = `bench-attachment-${round}-${i}`;
+            const body = Buffer.alloc(attachmentBytes, `${id} `);
+            const cloudKey = `attachments/${id}.bin`;
+            dav.state.files.set(`${FOLDER}/${cloudKey}`, { body, etag: `"${id}"` });
+            task.attachments = [...(task.attachments ?? []), {
+                id, kind: 'file', title: `${id}.bin`, uri: '', mimeType: 'application/octet-stream', size: body.length, cloudKey,
+                fileHash: createHash('sha256').update(body).digest('hex'), createdAt: now, updatedAt: now,
+            }];
+            task.updatedAt = now;
+            task.rev = (task.rev ?? 0) + 1;
+            task.revBy = 'merge-bench-remote';
+        });
+        return owners.length;
+    };
+
     const editRemote = (round) => {
         const file = dav.state.files.get(documentPath);
         if (!file) throw new Error('the folder holds no sync document yet');
@@ -104,12 +106,13 @@ if (command === 'rkstorage') {
             task.rev = (task.rev ?? 0) + 1;
             task.revBy = 'merge-bench-remote';
         }
+        const attachments = round > 0 && attachmentsPerRound > 0 ? addRemoteAttachments(doc, round, now) : 0;
         const body = Buffer.from(JSON.stringify(doc, null, 2));
         dav.state.files.set(documentPath, { body, etag: `"bench-${++etagVersion}-${createHash('sha1').update(body).digest('hex').slice(0, 12)}"` });
-        return { tasks: doc.tasks.length, edited: live.length, bytes: body.length };
+        return { tasks: doc.tasks.length, edited: live.length, attachments, bytes: body.length };
     };
     const phoneTime = () => sh('date +%s.%3N');
-    /** Core's last line of a sync cycle after [since] (mobile-sync-service.ts: complete, or error). */
+
     const cycleEnded = async (since, timeoutMs = 90_000) => {
         const started = Date.now();
         while (Date.now() - started < timeoutMs) {
@@ -128,12 +131,12 @@ if (command === 'rkstorage') {
         return since;
     };
 
-    // Warm-up: the first start uploads the library (an empty folder), the second merges a first edit; neither is measured.
+
     const warm1 = await cycleEnded(await launchCold());
     if (!warm1 || !dav.state.files.get(documentPath)) throw new Error(`warm-up: no sync document uploaded (${warm1?.line ?? 'no cycle'})`);
     console.log(`warm-up 1: ${warm1.line}`);
 
-    // The tab bar's Focus and Inbox tabs, from one UI dump (core's English labels).
+
     let targets = null;
     if (taps) {
         sh('uiautomator dump /data/local/tmp/merge-bench-ui.xml >/dev/null');
@@ -174,7 +177,7 @@ duration_ms: 16000
     });
     const report = { label, pkg, serial, samples, changes, taps, push, resume, targets, before: conditions(), runs: [] };
     for (let round = 1; round <= samples; round += 1) {
-        // resume: a live process that has finished its own sync (a cold start's, the first time).
+
         if (resume && !sh(`pidof ${pkg} || true`)) {
             if (!await cycleEnded(await launchCold())) throw new Error('resume: the cold start before the sample did not sync');
             await sleep(3000);
@@ -185,10 +188,10 @@ duration_ms: 16000
         const remoteTrace = `/data/misc/perfetto-traces/${pkg}-merge.perfetto-trace`;
         execFileSync(ADB, ['-s', serial, 'shell', `perfetto --txt -c - -o ${remoteTrace} --background`], { input: config });
         await sleep(2000);
-        // resume: leaving asks for a sync that waits while the app is away; coming back runs it.
+
         if (resume) { sh('input keyevent KEYCODE_HOME'); await sleep(1500); }
         const since = phoneTime();
-        // The taps run on the phone, from launch: Focus, Inbox, Focus, ... (each tab's show reads it from core).
+
         let tapper = null;
         if (taps) {
             const steps = [];
@@ -234,21 +237,26 @@ duration_ms: 16000
     const engine = `(SELECT utid FROM thread JOIN process USING (upid) WHERE thread.name = 'mindwtr-core' AND process.name GLOB '${PKG_GLOB}' ORDER BY thread.start_ts DESC LIMIT 1)`;
     const budgetArg = args.find((a) => a.startsWith('--budget='));
     const budgetMs = budgetArg ? Number(budgetArg.slice('--budget='.length)) : null;
+    const repeat = args.includes('--repeat');
+    if (budgetArg && !(Number.isFinite(budgetMs) && budgetMs > 0)) {
+        console.error(`usage: --budget=<ms> takes a positive number, not ${JSON.stringify(budgetArg.slice('--budget='.length))}`);
+        process.exit(2);
+    }
     const results = [];
-    for (const trace of args.filter((a) => a !== budgetArg)) {
-        // The sync's span on the engine: its first and last sync:* section.
+    for (const trace of args.filter((a) => a !== budgetArg && a !== '--repeat')) {
+
         const [span] = query(trace, `
 SELECT MIN(s.ts) AS start, MAX(s.ts + s.dur) AS end FROM slice s JOIN thread_track tt ON s.track_id = tt.id
 WHERE tt.utid = ${engine} AND s.name GLOB 'sync:*';`);
         if (!span || !span.start) { results.push({ trace, error: 'no sync sections' }); continue; }
         const window = `s.ts < ${span.end} AND s.ts + s.dur > ${span.start}`;
-        // Uninterrupted engine work: each top-level slice on the engine thread that overlaps the sync.
+
         const blocks = query(trace, `
 SELECT s.id, s.name, s.ts, round(s.dur / 1e6, 1) AS ms,
   (SELECT group_concat(name, '|') FROM (SELECT DISTINCT d.name FROM descendant_slice(s.id) d WHERE d.name GLOB 'sync:*' OR d.name GLOB 'io:*')) AS inner
 FROM slice s JOIN thread_track tt ON s.track_id = tt.id
 WHERE tt.utid = ${engine} AND s.depth = 0 AND ${window} ORDER BY s.dur DESC;`);
-        // Sections by name, outermost occurrence only (sync:merge inside sync:saveData would count twice otherwise).
+
         const sections = query(trace, `
 SELECT s.name, COUNT(*) AS n, round(SUM(s.dur) / 1e6, 1) AS ms, round(MAX(s.dur) / 1e6, 1) AS maxMs
 FROM slice s JOIN thread_track tt ON s.track_id = tt.id
@@ -257,9 +265,8 @@ GROUP BY s.name ORDER BY SUM(s.dur) DESC;`);
         const states = query(trace, `
 SELECT state, round(SUM(MIN(ts + dur, ${span.end}) - MAX(ts, ${span.start})) / 1e6, 1) AS ms FROM thread_state
 WHERE utid = ${engine} AND ts < ${span.end} AND ts + dur > ${span.start} GROUP BY state ORDER BY ms DESC;`);
-        // Each host call: its caller's core:wait (queue + run), its own engine slice (the last core:* slice to end inside the
-        // wait), the sync work the engine did meanwhile (sync:*/io:* sections, outermost), and the tap before it when one
-        // came within 150 ms (a tab's read: deliverInputEvent on the app's main thread).
+
+
         const syncWork = `(SELECT COALESCE(SUM(MIN(d.ts + d.dur, s.ts + s.dur) - MAX(d.ts, s.ts)), 0) FROM slice d JOIN thread_track dt ON d.track_id = dt.id
      WHERE dt.utid = ${engine} AND (d.name GLOB 'sync:*' OR d.name GLOB 'io:*') AND d.ts < s.ts + s.dur AND d.ts + d.dur > s.ts
      AND NOT EXISTS (SELECT 1 FROM ancestor_slice(d.id) a WHERE a.name GLOB 'sync:*' OR a.name GLOB 'io:*'))`;
@@ -267,7 +274,7 @@ WHERE utid = ${engine} AND ts < ${span.end} AND ts + dur > ${span.start} GROUP B
      AND e.name != 'core:idlePump' AND e.ts >= s.ts AND e.ts + e.dur <= s.ts + s.dur ORDER BY e.ts + e.dur DESC LIMIT 1`;
         const inputs = `FROM slice i JOIN thread_track it ON i.track_id = it.id JOIN thread ti USING (utid) JOIN process pi USING (upid)
      WHERE pi.name GLOB '${PKG_GLOB}' AND ti.tid = pi.pid AND i.name GLOB 'deliverInputEvent*'`;
-        // The steps query turns the line's commas into ';' and drops its quotes: gateWaitMs:12;40.
+
         const gateWaitsOf = (msg) => /gateWaitMs[^\d]{0,6}(\d+(?:[;,]\d+)*)/.exec(String(msg))?.[1].split(/[;,]/).map(Number);
         const tapOf = (name) => /eventTimeNano=(\d+)/.exec(String(name ?? ''))?.[1] ?? null;
         const waits = query(trace, `
@@ -280,7 +287,7 @@ SELECT s.ts, s.dur, round(s.dur / 1e6, 1) AS waitMs, t.name AS thread,
 FROM slice s JOIN thread_track tt ON s.track_id = tt.id JOIN thread t USING (utid) JOIN process p USING (upid)
 WHERE p.name GLOB '${PKG_GLOB}' AND s.name = 'core:wait' AND tt.utid != ${engine} ORDER BY s.ts;`)
             .map((w) => Object.fromEntries(Object.entries(w).map(([k, v]) => [k, v === '[NULL]' ? null : v])));
-        // Every tap's first and last event (DOWN, UP), in time order, matched to its own tab's read on the read thread.
+
         const tapEvents = new Map();
         for (const row of query(trace, `SELECT i.name, i.ts ${inputs} ORDER BY i.ts;`)) {
             const tap = tapOf(row.name);
@@ -294,24 +301,24 @@ WHERE p.name GLOB '${PKG_GLOB}' AND s.name = 'core:wait' AND tt.utid != ${engine
         }
         const reads = waits.filter((w) => w.thread === 'mindwtr-read' && w.op).map((w) => ({ ts: w.ts, end: w.ts + w.dur, op: w.op, wait: w }));
         const answers = assignTapAnswers([...tapEvents.values()].sort((a, b) => a.first - b.first), reads);
-        // The app process starts in a cold trace (its bindApplication); a resume trace's process was already running.
+
         const [{ n: binds } = { n: 0 }] = query(trace, `SELECT COUNT(*) AS n FROM slice s JOIN thread_track tt ON s.track_id = tt.id
      JOIN thread t USING (utid) JOIN process p USING (upid) WHERE p.name GLOB '${PKG_GLOB}' AND s.name GLOB 'bindApplication*';`);
-        // The start taps are no measurement (measuredTaps). In the sync's span: an answered tap whose read began there, an
-        // unanswered tap whose UP fell there.
+
+
         const measured = measuredTaps(answers, binds > 0);
         const inSpan = measured.filter((a) => (a.call ? a.call.ts : a.last) >= span.start && (a.call ? a.call.ts : a.last) <= span.end);
         for (const answer of measured) if (answer.call) answer.call.wait.tapToAnswerMs = answer.answerMs;
         const taps = { inSpan: inSpan.length, answered: inSpan.filter((a) => a.call).length,
             unanswered: inSpan.filter((a) => !a.call).length, answersMs: inSpan.filter((a) => a.call).map((a) => a.answerMs),
-            // Which taps of the run (0 = the first, a Focus tap) went unanswered.
+
             unansweredAt: inSpan.filter((a) => !a.call).map((a) => answers.indexOf(a)),
             startTapsSkipped: answers.length - measured.length, coldStart: binds > 0 };
         const steps = query(trace, `
 SELECT round((ts - ${span.start}) / 1e6, 1) AS atSyncMs, replace(replace(msg, ',', ';'), '"', '') AS msg FROM android_logs WHERE tag = '${TAG}'
   AND (msg GLOB '*Sync step*' OR msg GLOB '*Full sync merge*' OR msg GLOB '*Sync local reconcile*' OR msg GLOB '*sync state*'
     OR msg GLOB '*Sync save published to the store*') ORDER BY ts;`);
-        // Each published line's waits for the store write gate, in save order (core's v1.3.7/sync-write-gate line, once per cycle).
+
         const gateWaitsMs = steps.map((step) => gateWaitsOf(step.msg)).filter(Boolean);
         results.push({
             trace, syncSpanMs: Math.round((span.end - span.start) / 1e5) / 10,
@@ -319,11 +326,11 @@ SELECT round((ts - ${span.start}) / 1e6, 1) AS atSyncMs, replace(replace(msg, ',
             sections, states, waits, steps, taps, gateWaitsMs,
         });
     }
-    // Across traces: the sync's sections (median of each sample's total), its longest block, and the waits behind sync vs idle.
+
     const byName = {};
     for (const r of results.filter((r) => !r.error)) for (const s of r.sections) (byName[s.name] ??= []).push(s.ms);
     const waits = results.flatMap((r) => r.waits ?? []).filter((w) => w.op);
-    // A tap's read (a wait with a tap before it) during sync work (more than 10 ms of it inside the wait) or not.
+
     const tapWaits = (during) => {
         const chosen = waits.filter((w) => w.tapToAnswerMs != null && (w.syncWorkMs > 10) === during);
         return { tapToAnswerMs: stats(chosen.map((w) => w.tapToAnswerMs)), waitMs: stats(chosen.map((w) => w.waitMs)), queueMs: stats(chosen.map((w) => w.queueMs)), runMs: stats(chosen.map((w) => w.runMs)) };
@@ -331,17 +338,17 @@ SELECT round((ts - ${span.start}) / 1e6, 1) AS atSyncMs, replace(replace(msg, ',
     const ok = results.filter((r) => !r.error);
     const summary = {
         traces: results.length,
+        samples: ok.length,
         syncSpanMs: stats(ok.map((r) => r.syncSpanMs)),
         longestBlockMs: stats(ok.map((r) => r.longestBlocks[0]?.ms ?? 0)),
         engineRunningMs: stats(ok.map((r) => r.states.filter((x) => x.state === 'Running').reduce((a, x) => a + x.ms, 0))),
         sections: Object.fromEntries(Object.entries(byName).map(([name, values]) => [name, stats(values)]).sort((a, b) => (b[1].median ?? 0) - (a[1].median ?? 0))),
         tapsDuringSync: tapWaits(true),
         tapsOutsideSync: tapWaits(false),
-        // Every host call that waited while sync work ran on the engine (taps, the screens' own reads, workers).
-        // A tap whose wait began inside the sync's span (its first to last sync section), whatever ran in the wait.
-        // One sample per answered tap in the sync's span (merge-tap-matching.mjs).
+
+
         tapsInSyncSpan: stats(ok.flatMap((r) => r.taps.answersMs)),
-        // Each cycle's first local save's gate wait, and its later saves' (save 2, cleanup), over every published line.
+
         gateWaitMs: { first: stats(ok.flatMap((r) => r.gateWaitsMs.map((line) => line[0]))),
             later: stats(ok.flatMap((r) => r.gateWaitsMs.flatMap((line) => line.slice(1)))) },
         taps: (() => {
@@ -353,13 +360,10 @@ SELECT round((ts - ${span.start}) / 1e6, 1) AS atSyncMs, replace(replace(msg, ',
         callsDuringSync: { n: waits.filter((w) => w.syncWorkMs > 10).length, waitMs: stats(waits.filter((w) => w.syncWorkMs > 10).map((w) => w.waitMs)), syncWorkMs: stats(waits.filter((w) => w.syncWorkMs > 10).map((w) => w.syncWorkMs)) },
     };
     console.log(JSON.stringify({ summary, results }, null, 2));
-    if (budgetMs !== null && !(summary.tapsInSyncSpan.p90 <= budgetMs)) {
-        console.error(`budget failed: tap in sync span p90 ${summary.tapsInSyncSpan.p90 ?? 'none'} ms > ${budgetMs} ms (n ${summary.tapsInSyncSpan.n})`);
-        process.exitCode = 1;
-    }
-    if (budgetMs !== null && !(summary.taps.unansweredShare <= 0.05)) {
-        console.error(`budget failed: ${summary.taps.unanswered} of ${summary.taps.inSpan} taps in the sync span have no read of their own tab, unmeasured (share ${summary.taps.unansweredShare} > 0.05)`);
-        process.exitCode = 1;
+    if (budgetMs !== null) {
+        const { verdict, reasons } = budgetVerdict(summary, { tapP90Ms: budgetMs, repeat });
+        console.error(`budget ${verdict}: ${reasons.join('; ')}`);
+        process.exitCode = { pass: 0, fail: 1, repeat: 3 }[verdict];
     }
 } else {
     console.error('usage: rkstorage | run | analyze (see the header)');

@@ -866,9 +866,7 @@ describe('versioned WebDAV transition byte operations', () => {
         expect(requests).toEqual(['GET']);
     });
 
-    // Reversed for #1113: before 942afdd84 asked for uncompressed responses, these
-    // servers arrived with weak ETags and were silently classed legacy, and plaintext
-    // sync worked. Failing the cycle instead was a 1.2.5 regression for Fastmail.
+
     it('downgrades a strong-ETag server that fails conditional-write enforcement when encryption is off', async () => {
         const documentUrl = 'https://example.com/dav/data.json';
         const { fetcher } = createWebdavCapabilityFetcher(documentUrl, {

@@ -1,5 +1,6 @@
 import type { AppData, Attachment, PendingRemoteAttachmentDelete, Project, Task } from './types';
-import { normalizePendingRemoteDeletes } from './attachment-transfer';
+import { applyAttachmentPatches, normalizePendingRemoteDeletes, type LocalAttachmentPresence } from './attachment-transfer';
+import { logInfo } from './logger';
 import { isFileSyncGenerationCloudKey } from './attachment-paths';
 import { getErrorStatus } from './sync-runtime-utils';
 import { sanitizeAttachmentCloudKeyForSyncMerge } from './sync-normalization';
@@ -7,7 +8,7 @@ import { sanitizeAttachmentCloudKeyForSyncMerge } from './sync-normalization';
 export const PENDING_REMOTE_ATTACHMENT_DELETE_MAX_ATTEMPTS = 12;
 export const PENDING_REMOTE_ATTACHMENT_DELETE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** Queue remote bytes only after every surviving task and project reference is checked. */
+
 export function settingsWithPurgedParentAttachmentDeletes(
     settings: AppData['settings'],
     tasks: readonly Task[],
@@ -85,9 +86,7 @@ export function findOrphanedAttachments<T extends AttachmentCleanupPolicyAttachm
     return Array.from(allAttachments.values()).filter((attachment) => !activeReferenceIds.has(attachment.id));
 }
 
-/** Attachment ids whose parent task/project is purged. These records never
- *  reach a peer (purged tombstones are compacted for the remote payload), so
- *  removing them from the doc is the one removal sync cannot resurrect. */
+
 function findPurgedParentAttachmentIds(appData: AppData): Set<string> {
     const ids = new Set<string>();
     for (const task of appData.tasks) {
@@ -101,24 +100,14 @@ function findPurgedParentAttachmentIds(appData: AppData): Set<string> {
     return ids;
 }
 
-/**
- * Whether cleanup has work it should not wait the daily interval for (#1064).
- *
- * Soft-deleted records STAY in the doc as tombstones — removing them never
- * stuck, because the merge unions attachments by id and the peer's copy
- * resurrected the record next cycle, renewing an attachments conflict forever.
- * "Processed" is therefore marked on the record instead: `localStatus`
- * becomes 'missing' once this device has dealt with its local file (the field
- * never syncs), and `cloudKey` is cleared once the remote copy is gone (that
- * change syncs, so peers do not re-delete). Failed remote deletes move to
- * pendingRemoteDeletes, which deliberately waits for the interval so retries
- * don't burn the attempt budget in minutes.
- */
+
 const attachmentHasFreshCleanupWork = (
     attachment: Attachment,
     parentPurged: boolean,
     pendingCloudKeys: ReadonlySet<string>,
+    held: LiveAttachmentResourceReferences | null,
 ): boolean => {
+    if (isRestoreUndoAttachmentHeld(attachment, held)) return false;
     if (parentPurged) return true;
     if (!attachment.deletedAt) return false;
     if (attachment.kind === 'file' && attachment.localStatus !== 'missing') return true;
@@ -128,19 +117,20 @@ const attachmentHasFreshCleanupWork = (
 
 export function hasFreshAttachmentCleanupWork(appData: AppData): boolean {
     const pendingRemoteDeletes = normalizePendingRemoteDeletes(appData.settings.attachments?.pendingRemoteDeletes);
-    // Drain an attempt-zero digest-qualified entry left by versions that used
-    // pendingRemoteDeletes as a File publication journal. Current File cleanup
-    // retains the shared-folder bytes and clears only local bookkeeping.
+    const held = heldRestoreUndoAttachments();
+
+
     if (
         pendingRemoteDeletes.some(
-            (entry) => isFileSyncGenerationCloudKey(entry.cloudKey) && (entry.attempts ?? 0) === 0,
+            (entry) => isFileSyncGenerationCloudKey(entry.cloudKey) && (entry.attempts ?? 0) === 0
+                && !(held && isAttachmentCloudResourceReferenced(entry, held)),
         )
     ) {
         return true;
     }
     const pendingCloudKeys = new Set(pendingRemoteDeletes.map((entry) => entry.cloudKey));
     const hasWork = (attachments: readonly Attachment[] | undefined, parentPurged: boolean): boolean => (
-        Boolean(attachments?.some((attachment) => attachmentHasFreshCleanupWork(attachment, parentPurged, pendingCloudKeys)))
+        Boolean(attachments?.some((attachment) => attachmentHasFreshCleanupWork(attachment, parentPurged, pendingCloudKeys, held)))
     );
     return appData.tasks.some((task) => hasWork(task.attachments, Boolean(task.purgedAt)))
         || appData.projects.some((project) => hasWork(project.attachments, Boolean(project.purgedAt)));
@@ -185,12 +175,8 @@ export type AttachmentCleanupLifecycleOptions = {
     deleteLocalAttachment: (attachment: Attachment) => Promise<void>;
     deleteRemoteAttachment?: AttachmentCleanupRemoteDelete;
     resolveRemoteDeleteAttachment?: () => Promise<AttachmentCleanupRemoteDelete | undefined>;
-    /**
-     * Treat the remote object as intentionally retained while clearing local
-     * cleanup bookkeeping. File Sync uses this for immutable generations:
-     * without a distributed GC tombstone, a peer can reselect any existing
-     * generation between its existence check and document CAS.
-     */
+
+
     shouldRetainRemoteAttachment?: (target: AttachmentCleanupRemoteTarget) => boolean;
     now?: () => string;
     maxAttachmentTargets?: number;
@@ -214,23 +200,21 @@ const isLocalSyncAbortError = (error: unknown): boolean => (
     error instanceof Error && error.name === 'LocalSyncAbort'
 );
 
-// Both spellings of the same file reach us: percent-encoded (file:// URIs) and
-// decoded (plain paths), plus `\` separators on Windows. Collapsing them keeps a
-// live reference from being missed, which would delete a file still in use.
+
 export function normalizeAttachmentCleanupUri(uri?: string): string | undefined {
     if (!uri) return undefined;
     if (/^https?:\/\//i.test(uri) || uri.startsWith('content://')) return undefined;
     let path = uri.replace(/^file:\/\//i, '').replace(/\\/g, '/');
-    // A canonical Windows file URI spells C:\ as file:///C:/; strip the URI's
-    // extra root slash before applying Windows' case-insensitive identity.
+
+
     if (/^\/[a-z]:\//i.test(path)) path = path.slice(1);
     try {
         path = decodeURIComponent(path);
     } catch {
-        // Keep the undecoded spelling; malformed user paths must not abort GC.
+
     }
-    // KEEP-only equivalence for the fixed iOS data-container alias. Never use
-    // this reference identity to rewrite the URI passed to a file operation.
+
+
     path = path.replace(
         /^\/private(?=\/var\/mobile\/Containers\/Data\/Application\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/)/,
         '',
@@ -248,7 +232,7 @@ export function findLiveAttachmentResourceReferences(appData: AttachmentCleanupP
             if (attachment.deletedAt) continue;
             const localUri = normalizeAttachmentCleanupUri(attachment.uri);
             if (localUri) localUris.add(localUri);
-            // Lookups sanitize before comparing, so the live set must too.
+
             const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey);
             if (cloudKey) cloudKeys.add(cloudKey);
         }
@@ -273,7 +257,7 @@ export function isAttachmentLocalResourceReferenced(
     return Boolean(localUri && references.localUris.has(localUri));
 }
 
-/** Processed tombstones keep their metadata without granting another local delete. */
+
 export function shouldDeleteAttachmentLocalResource(
     attachment: Pick<AttachmentCleanupPolicyAttachment, 'uri' | 'deletedAt' | 'localStatus'>,
     references: LiveAttachmentResourceReferences,
@@ -290,21 +274,71 @@ export function isAttachmentCloudResourceReferenced(
 }
 
 
+let restoreUndoHold: LiveAttachmentResourceReferences | null = null;
+
+
+export function holdRestoreUndoAttachments(references: LiveAttachmentResourceReferences): void {
+    restoreUndoHold = references;
+}
+
+export function resetRestoreUndoAttachmentHold(): void {
+    restoreUndoHold = null;
+}
+
+const heldRestoreUndoAttachments = (): LiveAttachmentResourceReferences | null => restoreUndoHold;
+
+const isRestoreUndoAttachmentHeld = (
+    attachment: Pick<Attachment, 'uri' | 'cloudKey'>,
+    held: LiveAttachmentResourceReferences | null,
+): boolean => Boolean(held) && (
+    isAttachmentLocalResourceReferenced(attachment, held!)
+    || isAttachmentCloudResourceReferenced({ cloudKey: sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey) }, held!)
+);
+
+
+export async function markMissingLocalAttachmentFiles(
+    data: AppData,
+    getLocalAttachmentPresence: (uri: string) => Promise<LocalAttachmentPresence>,
+): Promise<AppData> {
+    const patches = new Map<string, Attachment>();
+    for (const owner of [...data.tasks, ...data.projects]) {
+        if (owner.deletedAt || owner.purgedAt) continue;
+        for (const attachment of owner.attachments ?? []) {
+            if (attachment.kind !== 'file' || attachment.deletedAt || attachment.localStatus === 'missing') continue;
+            const uri = attachment.uri || '';
+            if (!uri || /^https?:\/\//i.test(uri)) continue;
+            const presence = await getLocalAttachmentPresence(uri).catch(() => 'unreadable' as const);
+            if (presence === 'confirmed-not-found') patches.set(attachment.id, { ...attachment, localStatus: 'missing' });
+        }
+    }
+    if (patches.size === 0) return data;
+    try {
+        logInfo('Restore marked attachments without a local file as missing', {
+            scope: 'transfer',
+            category: 'storage',
+            context: { releaseCheck: 'v1.3.7/restore-attachment-presence', count: patches.size },
+        });
+    } catch {
+
+    }
+    return applyAttachmentPatches(data, patches);
+}
+
+
 export type AttachmentCleanupApplyResult = {
     lastCleanupAt: string;
     pendingRemoteDeletes?: readonly PendingRemoteAttachmentDelete[];
     orphanedAttachments?: readonly Attachment[];
     processedOrphanedIds?: Iterable<string>;
     reachedBatchLimit?: boolean;
-    /** Purged-parent record ids to drop from the doc — the only removal the
-     *  merge cannot resurrect (#1064). */
+
+
     removableAttachmentIds?: Iterable<string>;
-    /** File tombstones whose local file this device has dealt with; stamped
-     *  `localStatus: 'missing'` (device-local, never syncs). */
+
+
     processedFileTombstoneIds?: Iterable<string>;
-    /** Cloud keys whose remote copy is confirmed gone (deleted, 404, or still
-     *  referenced by a live record); cleared from tombstones with a fresh
-     *  `updatedAt` so the clear wins the per-attachment merge and syncs. */
+
+
     clearedCloudKeys?: Iterable<string>;
 };
 
@@ -396,11 +430,13 @@ export function applyAttachmentCleanupResult(appData: AppData, result: Attachmen
 export async function runAttachmentCleanupLifecycle(
     options: AttachmentCleanupLifecycleOptions,
 ): Promise<AttachmentCleanupLifecycleResult> {
+    const held = heldRestoreUndoAttachments();
     const orphanedAttachments = findOrphanedAttachments(options.appData);
     const deletedAttachments = findDeletedAttachmentsForFileCleanup(options.appData);
     const cleanupTargets = new Map<string, Attachment>();
-    for (const attachment of orphanedAttachments) cleanupTargets.set(attachment.id, attachment);
-    for (const attachment of deletedAttachments) cleanupTargets.set(attachment.id, attachment);
+
+    for (const attachment of orphanedAttachments) if (!isRestoreUndoAttachmentHeld(attachment, held)) cleanupTargets.set(attachment.id, attachment);
+    for (const attachment of deletedAttachments) if (!isRestoreUndoAttachmentHeld(attachment, held)) cleanupTargets.set(attachment.id, attachment);
 
     const previousPendingRemoteDeletes = normalizePendingRemoteDeletes(
         options.appData.settings.attachments?.pendingRemoteDeletes,
@@ -414,8 +450,13 @@ export async function runAttachmentCleanupLifecycle(
 
     const liveResourceReferences = findLiveAttachmentResourceReferences(options.appData);
     const remoteCleanupTargets = new Map<string, AttachmentCleanupRemoteTarget>();
+    const heldPendingRemoteDeletes: PendingRemoteAttachmentDelete[] = [];
     for (const pending of previousPendingByCloudKey.values()) {
         if (isAttachmentCloudResourceReferenced(pending, liveResourceReferences)) continue;
+        if (held && isAttachmentCloudResourceReferenced(pending, held)) {
+            heldPendingRemoteDeletes.push(pending);
+            continue;
+        }
         remoteCleanupTargets.set(pending.cloudKey, {
             cloudKey: pending.cloudKey,
             title: pending.title || pending.cloudKey,
@@ -429,11 +470,11 @@ export async function runAttachmentCleanupLifecycle(
     let reachedBatchLimit = cleanupTargets.size > maxAttachmentTargets;
     const orphanedIds = new Set(orphanedAttachments.map((attachment) => attachment.id));
     const purgedParentAttachmentIds = findPurgedParentAttachmentIds(options.appData);
-    // Processed tombstones stay in the doc, so a batch taken in doc order would spend
-    // itself on them every cycle and never reach the rest: unprocessed work goes first.
+
+
     const pendingCloudKeys = new Set(previousPendingByCloudKey.keys());
     const hasFreshWork = (attachment: Attachment) => (
-        attachmentHasFreshCleanupWork(attachment, purgedParentAttachmentIds.has(attachment.id), pendingCloudKeys)
+        attachmentHasFreshCleanupWork(attachment, purgedParentAttachmentIds.has(attachment.id), pendingCloudKeys, null)
     );
     const orderedTargets = Array.from(cleanupTargets.values())
         .sort((left, right) => Number(hasFreshWork(right)) - Number(hasFreshWork(left)));
@@ -452,17 +493,16 @@ export async function runAttachmentCleanupLifecycle(
         if (shouldDeleteAttachmentLocalResource(attachment, liveResourceReferences)) {
             await options.deleteLocalAttachment(attachment);
         }
-        // Attempted counts as processed: the pre-#1064 flow dropped the record
-        // outright here, so a failed local delete was never retried either —
-        // the marker keeps that bar while letting the tombstone survive.
+
+
         if (attachment.kind === 'file' && !purgedParentAttachmentIds.has(attachment.id)) {
             processedFileTombstoneIds.add(attachment.id);
         }
         const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey);
         if (!cloudKey) continue;
         if (isAttachmentCloudResourceReferenced({ cloudKey }, liveResourceReferences)) {
-            // A live record shares this remote file; the tombstone must not
-            // keep pointing at it or it would re-trigger cleanup forever.
+
+
             clearedCloudKeys.add(cloudKey);
             continue;
         }
@@ -473,7 +513,9 @@ export async function runAttachmentCleanupLifecycle(
     }
 
     const lastCleanupAt = (options.now ?? (() => new Date().toISOString()))();
-    const nextPendingRemoteDeletesByCloudKey = new Map<string, PendingRemoteAttachmentDelete>();
+    const nextPendingRemoteDeletesByCloudKey = new Map<string, PendingRemoteAttachmentDelete>(
+        heldPendingRemoteDeletes.map((pending) => [pending.cloudKey, pending]),
+    );
     const remoteTargetsInBatch = Array.from(remoteCleanupTargets.values()).slice(0, maxAttachmentTargets);
     const remoteDeleteTargetCount = remoteTargetsInBatch
         .filter((target) => !options.shouldRetainRemoteAttachment?.(target))
@@ -499,8 +541,8 @@ export async function runAttachmentCleanupLifecycle(
         }
         processedRemoteTargetCount += 1;
         if (options.shouldRetainRemoteAttachment?.(target)) {
-            // Clearing the tombstone's cloudKey and any legacy pending entry is
-            // safe; deleting the immutable File Sync object is not.
+
+
             clearedCloudKeys.add(target.cloudKey);
             continue;
         }
@@ -519,9 +561,8 @@ export async function runAttachmentCleanupLifecycle(
             await deleteRemoteAttachment(target);
             clearedCloudKeys.add(target.cloudKey);
         } catch (error) {
-            // Freshness guards deliberately throw this sentinel. It must abort
-            // the whole cycle rather than being converted into a retryable
-            // provider failure/pending delete.
+
+
             if (isLocalSyncAbortError(error)) throw error;
             if (getErrorStatus(error) === 404 || options.isRemoteMissingError?.(error)) {
                 options.onRemoteAttachmentMissing?.(target);
@@ -564,8 +605,8 @@ export async function runAttachmentCleanupLifecycle(
         orphanedAttachments,
         processedOrphanedIds,
         reachedBatchLimit,
-        // Only remote-visible changes need the fast unchanged-check invalidated:
-        // record removals and cloudKey clears travel; localStatus stamps never do.
+
+
         shouldInvalidateFastSyncState: removableAttachmentIds.length > 0 || clearedCloudKeys.size > 0,
     };
 }

@@ -50,6 +50,14 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean) {
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Project Tags edits', () => {
+    it('offers a saved unused tag through the native Project tag options', async () => {
+        const { methods } = await open({ settings: { deviceId: 'test', taxonomy: {
+            tags: [{ token: '#unused', rev: 1, revBy: 'test', updatedAt: now }],
+        } } });
+        expect(methods.getProjectTagsEditOptions({ projectId: 'target' })).toMatchObject({ ok: true,
+            value: { suggestions: ['legacy', '#Work', '#unused'] } });
+    });
+
     it('returns the full RN suggestion order and raw selected tags; preserves rich unrelated rows', async () => {
         const original = project('target', { supportNotes: 'Raw notes', dueDate: '2026-10-01',
             attachments: [{ id: 'a', kind: 'link', title: 'Source', uri: 'https://example.test/',

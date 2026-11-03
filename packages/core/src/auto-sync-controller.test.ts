@@ -65,9 +65,7 @@ const waitForAssertion = async (assertion: () => void, maxAttempts = 200): Promi
     throw lastError ?? new Error('Timed out waiting for expectation');
 };
 
-// Timers alone do not finish a cycle: a request runs several awaits before it
-// reaches performSync, so drain the microtask queue before asserting a count.
-// A "not called" assertion made too early passes for the wrong reason.
+
 const settle = async (times = 40) => {
     for (let index = 0; index < times; index += 1) {
         await Promise.resolve();
@@ -209,9 +207,8 @@ describe('createAutoSyncController', () => {
 
     it('waits exactly as long as CloudKit asked before retrying (#948)', async () => {
         const scheduler = createManualScheduler();
-        // CloudKit answers a throttle with the delay it wants. Retrying on the
-        // fixed 60s cooldown either hammers a limit that wanted longer, or sits
-        // idle when it only wanted a few seconds.
+
+
         const performSync = vi.fn(async () => ({
             success: false,
             error: 'CloudKit error: Request Rate Limited [retryAfter=180]',
@@ -236,8 +233,7 @@ describe('createAutoSyncController', () => {
             expect(performSync).toHaveBeenCalledTimes(1);
         });
 
-        // The failed cycle itself arms the retry; no later edit or lifecycle
-        // event is required.
+
         await scheduler.advanceBy(179_999);
         expect(performSync).toHaveBeenCalledTimes(1);
 
@@ -279,7 +275,7 @@ describe('createAutoSyncController', () => {
             expect(performSync).toHaveBeenCalledTimes(2);
         });
 
-        // The second failure doubles the requested 10s delay to 20s.
+
         await scheduler.advanceBy(19_999);
         expect(performSync).toHaveBeenCalledTimes(2);
 
@@ -617,8 +613,8 @@ describe('createAutoSyncController', () => {
     });
 
     it('names the encryption state that suppressed an automatic run', async () => {
-        // The Dropbox device test logged "the remote is encrypted and unreadable" for a
-        // device that was itself the encrypted side of a remote that had gone plaintext.
+
+
         const cases = [
             ['remote-plaintext', 'Auto sync suppressed while this device is encrypted and the remote is not'],
             ['remote-encrypted-no-key', 'Auto sync suppressed while the remote is encrypted and unreadable'],
@@ -645,7 +641,7 @@ describe('createAutoSyncController', () => {
             });
             expect(performSync).not.toHaveBeenCalled();
 
-            // A manual run still goes through: it is how the user finds out.
+
             await controller.requestSync();
             await waitForAssertion(() => {
                 expect(performSync).toHaveBeenCalledTimes(1);
@@ -679,8 +675,7 @@ describe('createAutoSyncController', () => {
     });
 });
 
-// The switches below exist only because mobile needs them. Desktop leaves every
-// one of them unset and keeps the behaviour asserted in the suite above.
+
 describe('createAutoSyncController platform policy switches', () => {
     afterEach(() => {
         vi.useRealTimers();
@@ -716,8 +711,7 @@ describe('createAutoSyncController platform policy switches', () => {
         void controller.requestAutoSync(undefined, 'test');
         await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(1));
 
-        // The 20s cycle ends at t=30_000 and re-anchors pacing there, so the next
-        // interval is min(20s * 9, 5 min) = 180s measured from 30_000.
+
         await scheduler.advanceBy(20_000);
         await waitForAssertion(() => expect(controller.getLastAutoSyncAt()).toBe(30_000));
 
@@ -752,7 +746,7 @@ describe('createAutoSyncController platform policy switches', () => {
         await controller.requestAutoSync(0, 'test');
         expect(performSync).toHaveBeenCalledTimes(1);
         expect(onSyncFailure).not.toHaveBeenCalled();
-        // No retry was armed, so nothing holds the next automatic request off.
+
         expect(scheduler.getTimerCount()).toBe(0);
 
         await Promise.resolve();
@@ -809,7 +803,7 @@ describe('createAutoSyncController platform policy switches', () => {
         await scheduler.advanceBy(2_000);
         await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(1));
 
-        // The File Sync cadence debounces for 8s, not 2s.
+
         cadence = { minIntervalMs: 0, debounceFirstChangeMs: 8_000, debounceContinuousChangeMs: 15_000 };
         controller.handleDataChange();
         await scheduler.advanceBy(2_000);
@@ -819,7 +813,7 @@ describe('createAutoSyncController platform policy switches', () => {
         await scheduler.advanceBy(6_000);
         await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(2));
 
-        // The continuous-change delay comes from the same live read: 15s, not 5s.
+
         controller.handleDataChange();
         await scheduler.advanceBy(1_000);
         controller.handleDataChange();
@@ -850,7 +844,7 @@ describe('createAutoSyncController platform policy switches', () => {
         await controller.requestAutoSync(undefined, 'test');
         expect(performSync).toHaveBeenCalledTimes(1);
 
-        // File Sync paces at 30s, so the 5s interval this cycle ran under no longer applies.
+
         cadence = { minIntervalMs: 30_000, debounceFirstChangeMs: 8_000, debounceContinuousChangeMs: 15_000 };
         await scheduler.advanceBy(29_999);
         void controller.requestAutoSync(undefined, 'test');
@@ -885,7 +879,7 @@ describe('createAutoSyncController platform policy switches', () => {
         void controller.requestAutoSync(undefined, 'test');
         await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(1));
 
-        // 60s * 9 is 9 minutes; the cap holds the next interval at 5 minutes.
+
         await scheduler.advanceBy(60_000);
         await waitForAssertion(() => expect(controller.getLastAutoSyncAt()).toBe(70_000));
 
@@ -920,7 +914,7 @@ describe('createAutoSyncController platform policy switches', () => {
         await scheduler.advanceBy(2_000);
         await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(1));
 
-        // A later isolated edit is still a continuous change: 5s, not the 2s first-change delay.
+
         controller.handleDataChange();
         await scheduler.advanceBy(2_000);
         await settle();
@@ -929,7 +923,7 @@ describe('createAutoSyncController platform policy switches', () => {
         await scheduler.advanceBy(3_000);
         await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(2));
 
-        // Suspending ends the session, so the next edit is a first change again.
+
         controller.handleSuspend();
         controller.handleDataChange();
         await scheduler.advanceBy(2_000);
@@ -960,13 +954,13 @@ describe('createAutoSyncController platform policy switches', () => {
         finishSync({ success: true });
         await settle();
 
-        // An edit one second later is throttled, arming a retry for t=15_000.
+
         await scheduler.advanceBy(1_000);
         void controller.requestAutoSync(undefined, 'data-change');
         await settle();
         expect(performSync).toHaveBeenCalledTimes(1);
 
-        // A CloudKit notification starts a newer cycle that is still running then.
+
         await scheduler.advanceBy(1_000);
         void controller.requestAutoSync(0, 'cloudkit');
         await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(2));
@@ -975,7 +969,7 @@ describe('createAutoSyncController platform policy switches', () => {
         await settle();
         expect(performSync).toHaveBeenCalledTimes(2);
 
-        // The running cycle satisfied the retry, so nothing follows it.
+
         finishSync({ success: true });
         await settle();
         expect(performSync).toHaveBeenCalledTimes(2);
@@ -1034,8 +1028,8 @@ describe('createAutoSyncController platform policy switches', () => {
         controller.handleDataChange();
         await scheduler.advanceBy(2_000);
         await settle();
-        // The debounce has fired, but the cadence this run should be paced by is
-        // still being read.
+
+
         expect(releaseRefresh).toBeTypeOf('function');
         expect(performSync).not.toHaveBeenCalled();
 
@@ -1086,6 +1080,105 @@ describe('createAutoSyncController platform policy switches', () => {
 });
 
 
+describe('createAutoSyncController local change after a cycle that carried none (#1431)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+
+    const setup = (options: { durations?: number[]; results?: Array<{ success: boolean; error?: string }> } = {}) => {
+        vi.useFakeTimers();
+        const base = Date.now();
+        const runs: number[] = [];
+        let changeSeq = 0;
+        let coveredSeq = 0;
+        const performSync = vi.fn(async () => {
+            runs.push(Date.now() - base);
+            const startSeq = changeSeq;
+            const duration = options.durations?.shift() ?? 0;
+            if (duration > 0) await new Promise((resolve) => setTimeout(resolve, duration));
+            const result = options.results?.shift() ?? { success: true };
+            if (result.success) coveredSeq = Math.max(coveredSeq, startSeq);
+            return result;
+        });
+        const controller = createAutoSyncController({
+            performSync,
+            flushPendingSave: async () => undefined,
+            reportError: vi.fn(),
+            isRuntimeActive: () => true,
+            periodicSyncIntervalMs: null,
+            minIntervalMs: 5_000,
+            debounceFirstChangeMs: 2_000,
+            debounceContinuousChangeMs: 5_000,
+            adaptivePacing: { durationMultiplier: 9, maxIntervalMs: 300_000 },
+            hasPendingLocalChanges: () => changeSeq > coveredSeq,
+        });
+        const edit = () => {
+            changeSeq += 1;
+            controller.handleDataChange();
+        };
+        const advanceTo = (offsetMs: number) => vi.advanceTimersByTimeAsync(Math.max(0, base + offsetMs - Date.now()));
+        return { runs, controller, edit, advanceTo };
+    };
+
+    it('still stretches a request that carries no local change', async () => {
+        const { runs, controller, advanceTo } = setup({ durations: [1_919] });
+        void controller.requestAutoSync(0, 'initial');
+        await advanceTo(9_000);
+        void controller.requestAutoSync(undefined, 'external');
+        await advanceTo(19_189);
+        expect(runs).toEqual([0]);
+        await advanceTo(19_190);
+        expect(runs).toEqual([0, 19_190]);
+        controller.dispose();
+    });
+
+    it('coalesces rapid edits into one upload', async () => {
+        const { runs, controller, edit, advanceTo } = setup({ durations: [1_919] });
+        void controller.requestAutoSync(0, 'initial');
+        await advanceTo(9_000);
+        edit();
+        await advanceTo(9_300);
+        edit();
+        await advanceTo(9_600);
+        edit();
+        await advanceTo(40_000);
+
+        expect(runs).toEqual([0, 14_600]);
+        controller.dispose();
+    });
+
+    it('runs exactly one prompt follow-up for an edit made while a cycle runs', async () => {
+        const { runs, controller, edit, advanceTo } = setup({ durations: [5_000] });
+        void controller.requestAutoSync(0, 'initial');
+        await advanceTo(500);
+        edit();
+
+
+        await advanceTo(10_000);
+        expect(runs).toEqual([0, 10_000]);
+        await advanceTo(130_000);
+        expect(runs).toEqual([0, 10_000]);
+        controller.dispose();
+    });
+
+    it('keeps the failure cooldown in front of a fresh local change', async () => {
+        const { runs, controller, edit, advanceTo } = setup({
+            durations: [1_919],
+            results: [{ success: false, error: 'HTTP 503' }],
+        });
+        void controller.requestAutoSync(0, 'initial');
+        await advanceTo(9_000);
+        edit();
+        await advanceTo(61_918);
+        expect(runs).toEqual([0]);
+
+        await advanceTo(61_919);
+        expect(runs).toEqual([0, 61_919]);
+        controller.dispose();
+    });
+});
+
 describe('createAutoSyncController invocation-owned mode', () => {
     afterEach(() => {
         vi.useRealTimers();
@@ -1110,7 +1203,7 @@ describe('createAutoSyncController invocation-owned mode', () => {
         const refreshCadence = vi.fn(async () => undefined);
         const controller = createAutoSyncController({
             ...ports,
-            periodicSyncIntervalMs: undefined, // Exercise the constructor's default heartbeat.
+            periodicSyncIntervalMs: undefined,
             performSync, flushPendingSave, refreshCadence,
             now: scheduler.now, setTimer, clearTimer: scheduler.clearTimer,
             minIntervalMs: 0, initialSyncDelayMs: 0,

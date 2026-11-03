@@ -20,46 +20,43 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 
-/**
- * RN's task list for Reference (app/(drawer)/reference.tsx) and History's Done (done.tsx), on core's getReferenceView and
- * getDoneView: the "Filters · N" button and the active chips with Clear under the header (whose list menu holds Filters,
- * Sort and Group), core's headings (folding ones fold, kept on the device as RN keeps them), core's rows with RN's status
- * glyph, read-only rows (an archived project's) without a swipe or selection, a long-press that starts selection mode
- * (core's bulk bar), and core's empty state with its Clear.
- */
+
 @Composable
 fun StatusList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
     val view = shown.view
     val clear = view.getJSONObject("filters").getJSONObject("clearEdit")
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        if (view.getBoolean("hasActiveFilters")) item(key = "filters") {
-            Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 6.dp)) {
-                ActiveFiltersButton("${t("filters.label")} · ${view.getInt("filterActiveCount")}", idle) { openDialog("filters") }
-            }
-        }
-        item(key = "chips") { ActiveChips(model, view.menuObjects("chips")) { filterEdit(clear) } }
-        if (shown.items.isEmpty()) item(key = "empty") {
-            val empty = view.getJSONObject("empty")
-            Box(Modifier.padding(12.dp)) {
-                EmptyState(empty.getString("message"), empty.getString("hint").ifEmpty { null }, empty.menuText("actionLabel")) { filterEdit(clear) }
-            }
-        }
-        items(shown.items, key = { it.key }) { item ->
-            Box(Modifier.padding(horizontal = 12.dp)) {
-                val row = item.row
-                if (row == null) GroupHeading(model, item.json)
-                else {
-                    val readOnly = item.json.getJSONObject("row").optBoolean("readOnly")
-                    TaskRowItem(model, row, status = RowStatus.Icon, completable = !readOnly, actions = bulkRow(row, readOnly))
+
+    PullToSync(model, Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+            if (view.getBoolean("hasActiveFilters")) item(key = "filters") {
+                Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 6.dp)) {
+                    ActiveFiltersButton("${t("filters.label")} · ${view.getInt("filterActiveCount")}", idle) { openDialog("filters") }
                 }
             }
+            item(key = "chips") { ActiveChips(model, view.menuObjects("chips")) { filterEdit(clear) } }
+            if (shown.items.isEmpty()) item(key = "empty") {
+                val empty = view.getJSONObject("empty")
+                Box(Modifier.padding(12.dp)) {
+                    EmptyState(empty.getString("message"), empty.getString("hint").ifEmpty { null }, empty.menuText("actionLabel")) { filterEdit(clear) }
+                }
+            }
+            items(shown.items, key = { it.key }) { item ->
+                Box(Modifier.padding(horizontal = 12.dp)) {
+                    val row = item.row
+                    if (row == null) GroupHeading(model, item.json)
+                    else {
+                        val readOnly = item.json.getJSONObject("row").optBoolean("readOnly")
+                        TaskRowItem(model, row, status = RowStatus.Icon, completable = !readOnly, actions = bulkRow(row, readOnly))
+                    }
+                }
+            }
+            if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
         }
-        if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
     }
 }
 
-/** RN's History tab bar: core's two tabs, the selected one in the tint over a 2 underline. */
+
 @Composable
 fun HistoryTabs(model: InboxViewModel) = with(model.menu) {
     val tabs = history?.menuObjects("tabs") ?: return

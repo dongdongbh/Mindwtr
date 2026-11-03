@@ -1,4 +1,3 @@
-//! MCP argument adaptation only; all data operations execute in local_api.
 use crate::local_api::{self, LocalOperation};
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
@@ -31,6 +30,8 @@ const TASK_FIELDS: &[&str] = &[
     "suppressMindwtrReminders",
     "reminderPolicy",
     "repeatReminderMinutes",
+    "dueReminderLeadMinutes",
+    "startReminderLeadMinutes",
     "reviewAt",
     "cancelledAt",
     "order",
@@ -38,7 +39,14 @@ const TASK_FIELDS: &[&str] = &[
     "focusOrder",
     "attachments",
 ];
-const PROJECT_FIELDS: &[&str] = &["title", "color", "status", "areaId", "isSequential"];
+const PROJECT_FIELDS: &[&str] = &[
+    "title",
+    "color",
+    "colorOverride",
+    "status",
+    "areaId",
+    "isSequential",
+];
 const TOOL_NAMES: &[(&str, &str)] = &[
     ("mindwtr_list_tasks", "List tasks with rich search, status, project, dates, focus, sorting and pagination. Availability views are unavailable."),
     ("mindwtr_list_projects", "List live projects."),
@@ -52,7 +60,7 @@ const TOOL_NAMES: &[(&str, &str)] = &[
     ("mindwtr_get_task", "Get a task by ID."),
     ("mindwtr_restore_task", "Restore a soft-deleted task."),
     ("mindwtr_add_project", "Add a project with title, color, status, areaId and isSequential."),
-    ("mindwtr_update_project", "Update a project with title, color, status, areaId and isSequential."),
+    ("mindwtr_update_project", "Update a project with title, color, status, areaId and isSequential. Setting isSequential true makes a Per section project Sequential; perSectionFlow and section flow choices are managed by the apps and are read-only here."),
     ("mindwtr_delete_project", "Soft-delete a project."),
 ];
 
@@ -74,7 +82,7 @@ pub(crate) fn tools() -> Vec<Value> {
             if field == "status" && *name != "mindwtr_list_tasks" && !name.contains("project") {
                 schema["enum"].as_array_mut().unwrap().retain(|status| status != "all" && (*name != "mindwtr_update_task" || (status != "done" && status != "archived")));
             }
-            if (name.contains("project") && field == "areaId") || (name.starts_with("mindwtr_update_") && !matches!(field, "id" | "title" | "status" | "color" | "isSequential" | "showFutureRecurrence" | "isFocusedToday" | "suppressMindwtrReminders")) {
+            if (name.contains("project") && matches!(field, "areaId" | "colorOverride")) || (name.starts_with("mindwtr_update_") && !matches!(field, "id" | "title" | "status" | "color" | "colorOverride" | "isSequential" | "showFutureRecurrence" | "isFocusedToday" | "suppressMindwtrReminders")) {
                 schema = json!({"anyOf":[schema, {"type":"null"}]});
             }
             properties.insert(field.to_string(), schema);
@@ -113,6 +121,8 @@ fn field_schema(field: &str, project: bool) -> Value {
         "offset" => json!({"type":"integer", "minimum":0, "maximum":100000}),
         "order" | "boardOrder" | "focusOrder" => json!({"type":"integer"}),
         "pushCount" | "timeSpentMinutes" => json!({"type":"integer", "minimum":0}),
+        "dueReminderLeadMinutes" => json!({"type":"integer","minimum":0,"maximum":10080}),
+        "startReminderLeadMinutes" => json!({"type":"integer","enum":[0,5,15,30,60]}),
         "repeatReminderMinutes" => json!({"enum":[0,5,10,15,30,60]}),
         "relativeStartOffset" => {
             json!({"type":"object", "properties":{"amount":{"type":"number"}, "unit":{"enum":["minute","hour","day","week"]}}, "required":["amount","unit"], "additionalProperties":false})

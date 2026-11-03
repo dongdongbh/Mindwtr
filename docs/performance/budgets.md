@@ -59,7 +59,7 @@ It takes the best of three attempts and verifies unchanged data, zero task confl
 zero tombstone repairs. `bun run perf:storage` additionally reports unchanged and one-task
 changed merges. These are CPU measurements, not network or end-to-end sync latency.
 
-The suite also runs the real Zustand `updateTask` mutation and incremental persistence path at every dataset size. Its absolute budgets are 100ms at 1k, 250ms at 10k, and 1000ms at 50k, with a maximum 12x growth from 10k to 50k. Like the pure hot-path rows, this path uses the best of three measured runs to reduce runner and garbage-collection noise. Fingerprint cases assert both deterministic no-op behavior for aligned data and sensitivity to a synced revision change.
+The suite also runs the real Zustand `updateTask` mutation and incremental persistence path at every dataset size. Its absolute budgets are 100ms at 1k, 250ms at 10k, and 1000ms at 50k, with a maximum 12x growth from 10k to 50k. This store-mutation path uses the best of three measured runs. Generated pure hot paths use one excluded warm-up followed by five batches of three invocations, reporting the median per-invocation duration to reduce runner and garbage-collection noise. Fingerprint cases assert both deterministic no-op behavior for aligned data and sensitivity to a synced revision change.
 
 The bulk-mutation path (`batchMoveTasks` over every task in the store, what "Select all -> Move" dispatches) is budgeted at 75ms at 1k, 250ms at 10k, and 2000ms at 50k, with a maximum 15x growth from 10k to 50k, taking the best of two runs. It is the largest mutation a user can trigger in one synchronous store write.
 
@@ -106,8 +106,9 @@ node apps/android-native/scripts/check-startup-device.mjs <adb-serial> \
 
 For each database it seeds the app, makes one first start (the recovery checkpoint, then the bytecode cache written after
 first content), and measures 10 cold and 10 warm starts with ART at `verify`, as a sideload leaves it. **TTID** is
-`am start -W` TotalTime (the first frame). **First content** is the system's Fully drawn time, which the Inbox reports on
-the frame that first draws core's rows (`ReportDrawnWhen` in `InboxScreen.kt`). `large-5000` is core's
+`am start -W` TotalTime (the first frame). **First content** is the system's Fully drawn time, which the app reports on
+the frame that first draws the first screen's data (`ReportDrawnWhen` in `MainActivity.kt`, `firstContentReady`): Focus's on a
+fresh start, as RN opens Focus (pass O2b), and the Inbox's rows (`InboxScreen.kt`) when the Inbox is the first screen. `large-5000` is core's
 `scripts/performance/fixture.mjs` store with 5,000 tasks (`mixed-v1-5000`), made once by `measure-startup-device.mjs fixture`.
 
 | Database | Cold TTID median | Cold first content median | Cold first content p90 | Warm first content median |

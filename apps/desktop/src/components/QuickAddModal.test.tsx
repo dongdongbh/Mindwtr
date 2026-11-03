@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import * as core from '@mindwtr/core';
 import { buildEntityMap, useTaskStore, type Task } from '@mindwtr/core';
 import type { ComponentProps } from 'react';
 
@@ -9,8 +10,10 @@ import { QuickAddModal } from './QuickAddModal';
 import { QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT } from '../lib/quick-add-saved-event';
 import { MAX_AUDIO_RECORDING_SECONDS } from '../lib/audio-capture-buffer';
 import { useUiStore } from '../store/ui-store';
-// Not re-exported from the core barrel; see focused-count-selector.test.ts
-// for why the relative path (not a re-export) is used here.
+import { holdSyncSave } from '../test/hold-sync-save';
+import { writeCloudConfig } from '../lib/sync-service-config';
+
+
 import { beginNotifyProfile, endNotifyProfile } from '../../../../packages/core/src/store-notify-profiler';
 
 const sandboxState = vi.hoisted(() => ({ enabled: false }));
@@ -18,6 +21,12 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
     ...await importOriginal<typeof import('@mindwtr/core')>(),
     isSandboxMode: () => sandboxState.enabled,
 }));
+
+vi.mock('../lib/sync-service', () => ({ SyncService: {
+    getSyncBackend: async () => 'cloud', getCloudProvider: async () => 'selfhosted',
+    getSyncEncryptionStatus: async () => ({ state: 'off' }),
+    getCloudConfig: async () => ({ url: 'https://cloud.example.com', token: 'test-token-1234567890' }),
+} }));
 
 const tauriMocks = vi.hoisted(() => ({
     emitTo: vi.fn(async () => undefined),
@@ -28,6 +37,7 @@ const tauriMocks = vi.hoisted(() => ({
 const fsMocks = vi.hoisted(() => ({
     mkdir: vi.fn(async () => undefined),
     readFile: vi.fn(async () => new Uint8Array()),
+    readTextFile: vi.fn(async (_path?: string) => ''),
     remove: vi.fn(async () => undefined),
     writeFile: vi.fn(async () => undefined),
 }));
@@ -58,8 +68,17 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
     BaseDirectory: { Data: 'Data' },
     mkdir: fsMocks.mkdir,
     readFile: fsMocks.readFile,
+    readTextFile: fsMocks.readTextFile,
     remove: fsMocks.remove,
     writeFile: fsMocks.writeFile,
+}));
+
+const dialogMocks = vi.hoisted(() => ({
+    open: vi.fn(async (_options?: unknown) => null as string | null),
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+    open: dialogMocks.open,
 }));
 
 vi.mock('@tauri-apps/api/path', () => ({
@@ -98,7 +117,7 @@ const createImageClipboardData = (file: File) => ({
     items: [{
         kind: 'file',
         type: file.type,
-        getAsFile: () => file,
+        getAsFile: () => new File([file], file.name, { type: file.type }),
     }],
 });
 
@@ -565,7 +584,7 @@ describe('QuickAddModal', () => {
         await waitFor(() => {
             expect(addTask).toHaveBeenCalledWith('Draft launch brief', expect.anything());
         });
-        // The editing session starts only after the async save resolves.
+
         await waitFor(() => {
             expect(useUiStore.getState().editingTaskId).toBe('task-shortcut');
         });
@@ -594,8 +613,8 @@ describe('QuickAddModal', () => {
         await waitFor(() => {
             expect(addTask).toHaveBeenCalledWith('First batch entry', expect.anything());
         });
-        // The dialog stays open with a cleared input, ready for the next task.
-        // The clear happens after the async save resolves, so wait for it.
+
+
         await waitFor(() => {
             expect(screen.getByPlaceholderText('Add Task')).toHaveValue('');
         });
@@ -634,7 +653,157 @@ describe('QuickAddModal', () => {
         expect(document.activeElement).not.toBe(closeButton);
     });
 
+    it('uploads browser images only on Save and retries a failed durable save without another task or PUT', async () => {
+        const addTask = vi.fn(async (title: string, props?: Partial<Task>) => {
+            const timestamp = new Date().toISOString();
+            useTaskStore.setState({ _allTasks: [{ id: 'browser-task', title, status: 'inbox', tags: [], contexts: [], createdAt: timestamp, updatedAt: timestamp, ...props }] });
+            return { success: true, id: 'browser-task' };
+        });
+        const flush = vi.spyOn(core, 'flushPendingSave').mockRejectedValueOnce(new Error('storage unavailable')).mockResolvedValue(undefined);
+        const upload = createDeferred<Response>();
+        const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementationOnce(() => upload.promise);
+        act(() => useTaskStore.setState({ addTask }));
+        renderQuickAddModal();
+        await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Keep text' } })); });
+        const input = screen.getByPlaceholderText('Add Task');
+        fireEvent.paste(input, { clipboardData: createImageClipboardData(new File(['png'], 'image.png', { type: 'image/png' })) });
+        await screen.findByText('1 image attached');
+        expect(fetcher).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+        fireEvent.change(input, { target: { value: 'Keep text and continued typing' } });
+        fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+        expect(addTask).not.toHaveBeenCalled();
+        await act(async () => { upload.resolve(new Response(null, { status: 200 })); });
+        await waitFor(() => expect(flush).toHaveBeenCalledOnce());
+        expect(addTask).toHaveBeenCalledWith('Keep text and continued typing', expect.objectContaining({ attachments: [expect.objectContaining({ uri: '', cloudKey: expect.stringMatching(/^attachments\//) })] }));
+        expect(input).toHaveValue('Keep text and continued typing');
+        expect(screen.getByText(/Retry Save or remove the file/)).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(screen.queryByPlaceholderText('Add Task')).not.toBeInTheDocument());
+        expect(addTask).toHaveBeenCalledOnce();
+        expect(fetcher).toHaveBeenCalledOnce();
+        flush.mockRestore(); fetcher.mockRestore();
+    });
+
+    it('merges browser retry drafts onto peer changes admitted by a held sync writer', async () => {
+        const flush = vi.spyOn(core, 'flushPendingSave')
+            .mockRejectedValueOnce(new Error('storage unavailable'))
+            .mockRejectedValueOnce(new Error('storage unavailable'))
+            .mockResolvedValue(undefined);
+        const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+        const originalAddTask = useTaskStore.getState().addTask;
+        let firstPublish: Promise<void> | undefined;
+        const addTask = vi.spyOn(useTaskStore.getState(), 'addTask').mockImplementation(async (title, props) => {
+            const result = await originalAddTask(title, props);
+            if (result.success && result.id) {
+                const created = useTaskStore.getState()._tasksById.get(result.id)!;
+                const peer = { ...created.attachments![0], id: 'first-peer', cloudKey: 'attachments/first-peer.png' };
+                firstPublish = core.runSyncStoreSave(async () => {
+                    useTaskStore.setState({ _allTasks: [{ ...created, attachments: [...created.attachments!, peer] }] });
+                });
+            }
+            return result;
+        });
+        let finish: (() => Promise<void>) | undefined;
+        try {
+            act(() => useTaskStore.setState({ _allTasks: [], settings: { deviceId: 'browser-device' } }));
+            renderQuickAddModal();
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Keep text' } })); });
+            const input = screen.getByPlaceholderText('Add Task');
+            fireEvent.paste(input, { clipboardData: createImageClipboardData(new File(['png'], 'image.png', { type: 'image/png' })) });
+            await screen.findByText('1 image attached');
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(flush).toHaveBeenCalledOnce());
+            await firstPublish;
+            await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+            const admitted = useTaskStore.getState().tasks[0];
+            const peer = { ...admitted.attachments![0], id: 'peer-image', cloudKey: 'attachments/peer-image.png' };
+            finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{
+                ...admitted, title: 'Peer title', attachments: [...admitted.attachments!, peer], rev: (admitted.rev ?? 0) + 1,
+            }] }));
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+            await act(async () => { await finish!(); });
+            await waitFor(() => expect(flush).toHaveBeenCalledTimes(2));
+            expect(useTaskStore.getState().tasks[0]).toMatchObject({ title: 'Peer title', attachments: [...admitted.attachments!, peer] });
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(screen.queryByPlaceholderText('Add Task')).not.toBeInTheDocument());
+            expect(useTaskStore.getState().tasks[0]).toMatchObject({ title: 'Peer title', attachments: [...admitted.attachments!, peer] });
+            expect(addTask).toHaveBeenCalledOnce();
+            expect(fetcher).toHaveBeenCalledOnce();
+        } finally {
+            await finish?.();
+            flush.mockRestore(); fetcher.mockRestore(); addTask.mockRestore();
+        }
+    });
+
+    it.each([false, true])('checks browser configuration inside a held writer (prior admission: %s)', async (priorAdmission) => {
+        const flush = vi.spyOn(core, 'flushPendingSave').mockRejectedValueOnce(new Error('storage unavailable')).mockResolvedValue(undefined);
+        const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+        let finish: (() => Promise<void>) | undefined;
+        try {
+            act(() => useTaskStore.setState({ _allTasks: [], settings: { deviceId: 'browser-device' } }));
+            renderQuickAddModal();
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Original draft' } })); });
+            const input = screen.getByPlaceholderText('Add Task');
+            fireEvent.paste(input, { clipboardData: createImageClipboardData(new File(['png'], 'image.png', { type: 'image/png' })) });
+            await screen.findByText('1 image attached');
+            if (priorAdmission) {
+                fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+                await waitFor(() => expect(flush).toHaveBeenCalledOnce());
+                await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+            }
+            const before = structuredClone(useTaskStore.getState().tasks);
+            finish = holdSyncSave(() => undefined);
+            fireEvent.change(input, { target: { value: 'Changed live draft' } });
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+            await writeCloudConfig({ url: 'https://cloud.example.com', token: 'test-token-1234567890' }, {
+                isTauriRuntimeEnv: () => false, maybeMigrateLegacyLocalStorageToConfig: async () => undefined,
+                reportError: vi.fn(), invokeNative: async <T,>() => undefined as T,
+            });
+            await act(async () => { await finish!(); });
+            await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+            expect(useTaskStore.getState().tasks).toEqual(before);
+            expect(input).toHaveValue('Changed live draft');
+            expect(screen.getByText(/The draft or sync configuration changed/)).toBeVisible();
+            expect(fetcher).toHaveBeenCalledOnce();
+        } finally {
+            await finish?.();
+            flush.mockRestore(); fetcher.mockRestore();
+        }
+    });
+
+    it('rejects an unmounted browser capture when its writer resumes after another dialog opens', async () => {
+        const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+        const finish = holdSyncSave(() => undefined);
+        try {
+            act(() => useTaskStore.setState({ _allTasks: [], settings: { deviceId: 'browser-device' } }));
+            const first = renderQuickAddModal();
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Old draft' } })); });
+            fireEvent.paste(screen.getByPlaceholderText('Add Task'), { clipboardData: createImageClipboardData(new File(['png'], 'image.png', { type: 'image/png' })) });
+            await screen.findByText('1 image attached');
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+            first.unmount();
+            renderQuickAddModal();
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'New draft' } })); });
+            await act(async () => { await finish(); });
+            expect(useTaskStore.getState().tasks).toEqual([]);
+            expect(screen.getByPlaceholderText('Add Task')).toHaveValue('New draft');
+            expect(screen.queryByText(/The draft or sync configuration changed/)).not.toBeInTheDocument();
+            expect(fetcher.mock.calls.map(([, options]) => options?.method)).toEqual(['PUT']);
+        } finally {
+            await finish();
+            fetcher.mockRestore();
+        }
+    });
+
     it('attaches a pasted image to a text quick-add task', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
         const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
         act(() => {
             useTaskStore.setState((state) => ({
@@ -686,8 +855,9 @@ describe('QuickAddModal', () => {
     });
 
     it('falls back to the async clipboard API when the paste event is empty (WebKitGTK)', async () => {
-        // WebKitGTK delivers no items, no files, and no text for an image paste;
-        // the image is only reachable through navigator.clipboard.read() (#690).
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+
+
         const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
         act(() => {
             useTaskStore.setState((state) => ({
@@ -754,6 +924,7 @@ describe('QuickAddModal', () => {
     });
 
     it('creates a screenshot-titled task for an image-only quick add paste', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
         const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
         act(() => {
             useTaskStore.setState((state) => ({
@@ -916,10 +1087,32 @@ describe('QuickAddModal', () => {
         ]);
     });
 
+    it('imports a .txt file through the native dialog in the desktop app, marking it as Mindwtr\'s own dialog (#1472)', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        dialogMocks.open.mockResolvedValueOnce('/home/me/tasks.txt');
+        fsMocks.readTextFile.mockResolvedValueOnce('First imported task\nSecond imported task\n');
+        renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add'));
+            await Promise.resolve();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Import .txt' }));
+
+        expect(await screen.findByText('Create 2 tasks?')).toBeInTheDocument();
+        expect(dialogMocks.open).toHaveBeenCalledWith(expect.objectContaining({
+            filters: [{ name: 'Text', extensions: ['txt'] }],
+        }));
+        expect(fsMocks.readTextFile).toHaveBeenCalledWith('/home/me/tasks.txt');
+        const commands = tauriMocks.invoke.mock.calls.map(([command]) => command);
+        expect(commands.indexOf('app_lock_dialog_begin')).toBeGreaterThanOrEqual(0);
+        await waitFor(() => expect(tauriMocks.invoke.mock.calls.map(([command]) => command)).toContain('app_lock_dialog_end'));
+    });
+
     it('shows a settings notice and keeps the dialog open when speech-to-text is unconfigured', async () => {
-        // #886: voice capture with no STT model/key configured must surface a translated
-        // notice pointing at Settings instead of showing a recording indicator and then
-        // silently aborting.
+
+
         renderQuickAddModal();
 
         await act(async () => {
@@ -942,17 +1135,15 @@ describe('QuickAddModal', () => {
             ))).toBe(true);
         });
 
-        // Dialog stays open and the recorder never engages.
+
         expect(screen.getByRole('dialog')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Start recording' })).toBeInTheDocument();
         expect(tauriMocks.invoke).not.toHaveBeenCalledWith('start_audio_recording');
     });
 
     it.each(['text', 'audio'] as const)('starts recording with Enter from %s capture when speech-to-text is configured', async (captureMode) => {
-        // The record gate and the transcribe gate both resolve readiness through
-        // resolveSpeechCapture from the same settings snapshot, so a configured
-        // offline provider must let recording proceed rather than showing the
-        // "unconfigured" notice from the test above.
+
+
         (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
         act(() => {
             useUiStore.setState({ toasts: [] });
@@ -1017,7 +1208,7 @@ describe('QuickAddModal', () => {
         expect(recorder).toHaveFocus();
         await userEvent.keyboard('{Enter}');
         await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith('start_audio_recording'));
-        // Native disabled buttons lose browser focus; busy controls must retain it.
+
         expect(recorder).not.toBeDisabled();
         expect(recorder).toHaveAttribute('aria-disabled', 'true');
         await userEvent.keyboard('{Enter}');
@@ -1028,7 +1219,7 @@ describe('QuickAddModal', () => {
         await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith('stop_audio_recording'));
         await userEvent.keyboard('{Enter}');
         expect(tauriMocks.invoke.mock.calls.filter(([name]) => name === 'stop_audio_recording')).toHaveLength(1);
-        // Settle the native operation with an empty capture after checking keyboard behavior.
+
         await act(async () => { stopping.resolve(undefined); });
     });
 
@@ -1330,10 +1521,7 @@ describe('QuickAddModal', () => {
         await waitFor(() => expect(addTask).toHaveBeenCalledTimes(1));
     });
 
-    // #1245 left every stored speech-model path stale, so offline transcription
-    // failed on every recording. With "save audio attachments" off the WAV was
-    // then deleted: no transcript, no file, the words gone for good. A failed
-    // transcription must keep the recording and attach it instead.
+
     it('keeps a voice capture as an attachment when transcription fails', async () => {
         const stoppedCapture = createDeferred<{
             path: string;
@@ -1420,10 +1608,7 @@ describe('QuickAddModal', () => {
         expect(fsMocks.remove).not.toHaveBeenCalledWith('/data/audio-kept.wav');
     });
 
-    // A transcription that resolves without writing anything to the task — an
-    // empty transcript, a refused write, a project that could not be created —
-    // loses the words just as surely as one that throws. "Did not throw" is not
-    // "the words were saved", so the recording is kept in that case too.
+
     it('keeps a voice capture when the transcript never reached the task', async () => {
         const stoppedCapture = createDeferred<{
             path: string;
@@ -1447,8 +1632,8 @@ describe('QuickAddModal', () => {
         tauriMocks.invoke.mockImplementation(async (command?: string) => {
             if (command === 'start_audio_recording') return undefined;
             if (command === 'stop_audio_recording') return stoppedCapture.promise;
-            // Silence, or a recording the model could not make out: it returns
-            // an empty transcript instead of failing.
+
+
             if (command === 'transcribe_whisper') return '';
             return false;
         });
@@ -1625,8 +1810,8 @@ describe('QuickAddModal', () => {
         });
 
         await waitFor(() => expect(addTask).toHaveBeenCalledTimes(1));
-        // The recording is still in the dialog, so the user can retry instead of
-        // losing it to a close that never checked the write.
+
+
         expect(screen.getByRole('dialog')).toBeInTheDocument();
         await waitFor(() => {
             expect(useUiStore.getState().toasts.some((toast) => (
@@ -1771,8 +1956,7 @@ describe('QuickAddModal', () => {
             await Promise.resolve();
         });
 
-        // A per-line write loop still ends with 100 tasks, so counting tasks alone
-        // cannot catch a regression: pin the number of store commits instead.
+
         let commits = 0;
         const unsubscribe = useTaskStore.subscribe((state, prevState) => {
             if (state.lastDataChangeAt !== prevState.lastDataChangeAt) commits += 1;
@@ -1791,14 +1975,7 @@ describe('QuickAddModal', () => {
     });
 });
 
-// PERF-01: the closed Quick Add modal is mounted at the app root and used to
-// call getDerivedState() unconditionally in its render body. QuickAddModal
-// does not itself subscribe to _allTasks, so an ambient re-render of this
-// always-mounted overlay (e.g. its parent, App.tsx, re-rendering for an
-// unrelated reason) is what actually paid the derived-state rebuild in
-// production; the areas write below stands in for that ambient re-render.
-// The gate is `isOpen ? getDerivedState() : EMPTY_QUICK_ADD_DERIVED` in
-// QuickAddModal.tsx.
+
 describe('QuickAddModal closed-overlay derived-state gating (PERF-01)', () => {
     const BASE_ISO = '2026-05-01T09:00:00.000Z';
     const bigTasks: Task[] = Array.from({ length: 7_000 }, (_, index) => ({
@@ -1827,10 +2004,10 @@ describe('QuickAddModal closed-overlay derived-state gating (PERF-01)', () => {
         let profile: ReturnType<typeof endNotifyProfile>;
         try {
             await act(async () => {
-                // Invalidate the derived-state cache the way a task write does…
+
                 await useTaskStore.getState().updateTask('perf-task-3333', { title: 'closed-overlay edit' });
-                // …then re-render this always-mounted overlay while it stays
-                // closed, standing in for an ambient parent re-render.
+
+
                 useTaskStore.setState((state) => ({ areas: [...state.areas] }));
             });
         } finally {
@@ -1839,9 +2016,7 @@ describe('QuickAddModal closed-overlay derived-state gating (PERF-01)', () => {
         expect(profile?.derivedRebuildCount).toBe(0);
     });
 
-    // Canary proving the profiler catches this regression class: reading
-    // getDerivedState() unconditionally on every re-render (the pre-fix
-    // shape) shows up as a rebuild for the same store write (red first).
+
     it('rebuilds when a listener reads getDerivedState() unconditionally (old shape)', async () => {
         const unsubscribe = useTaskStore.subscribe((state) => state.getDerivedState());
         beginNotifyProfile();

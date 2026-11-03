@@ -8,13 +8,13 @@ type AreaColorPickerProps = {
     onChange: (color: string | undefined) => void;
     title: string;
     align?: 'left' | 'right';
-    /** Label for the "no color" option. Defaults to "None". */
+
     noneLabel?: string;
-    /** Label for the free-form color option. Defaults to "Custom color". */
+
     customLabel?: string;
-    /** Label for the button that commits the custom color. Defaults to "OK". */
+
     applyLabel?: string;
-    /** Label for the button that discards the custom color. Defaults to "Cancel". */
+
     cancelLabel?: string;
 };
 
@@ -26,7 +26,7 @@ const HUE_TRACK_GRADIENT =
 
 const HEX_PATTERN = /^#[0-9a-f]{6}$/;
 
-/** The only shape allowed out of this component: 8-digit hex breaks Android widgets. */
+
 const normalizeHex = (input: string): string | null => {
     const candidate = input.trim().toLowerCase().replace(/^#?/, '#');
     return HEX_PATTERN.test(candidate) ? candidate : null;
@@ -66,10 +66,7 @@ const hexToHsv = (hex: string): Hsv => {
     return { h: sector * 60, s: max === 0 ? 0 : delta / max, v: max };
 };
 
-/**
- * Drag on a track, same window-listener idiom as the projects sidebar resizer.
- * Reports the pointer position as a 0..1 fraction of the element it started on.
- */
+
 const trackDrag = (
     event: ReactPointerEvent<HTMLDivElement>,
     update: (x: number, y: number) => void,
@@ -99,7 +96,7 @@ const trackDrag = (
 };
 
 type CustomColorPanelProps = {
-    /** Seeds the panel. It remounts on every open, so this is always current. */
+
     initial: string;
     hexLabel: string;
     applyLabel: string;
@@ -119,7 +116,7 @@ function CustomColorPanel({
     const [hsv, setHsv] = useState(() => hexToHsv(initial));
     const [hexText, setHexText] = useState(initial);
 
-    // Typed text wins over the round-tripped HSV so an exact hex stays exact.
+
     const committableHex = normalizeHex(hexText);
     const previewHex = committableHex ?? hsvToHex(hsv);
 
@@ -137,8 +134,8 @@ function CustomColorPanel({
     return (
         <div className="col-span-7 flex flex-col gap-2 pt-1" data-testid="area-color-picker-panel">
             <div
-                // Pointer affordances only; the hex field below is the keyboard
-                // and screen-reader path to the same value.
+
+
                 aria-hidden="true"
                 className="relative h-24 w-full cursor-crosshair rounded-md border border-border"
                 style={{
@@ -273,9 +270,8 @@ export function AreaColorPicker({
             </button>
             {open ? (
                 <div
-                    // Seven columns keeps the popover exactly as wide as it was
-                    // when the palette was one row of None + six swatches, so
-                    // neither alignment can push it off-screen.
+
+
                     className={`absolute z-50 mt-2 grid w-max grid-cols-7 gap-2 rounded-lg border border-border bg-popover p-2 shadow-lg ${
                         align === 'right' ? 'right-0' : 'left-0'
                     }`}
@@ -333,15 +329,14 @@ export function AreaColorPicker({
                     {panelOpen ? (
                         <CustomColorPanel
                             initial={resolvedValue}
-                            // Distinct from the swatch's own label: two controls
-                            // named "Custom color" would be ambiguous to AT.
+
+
                             hexLabel={`${title}: ${customLabel}`}
                             applyLabel={applyLabel}
                             cancelLabel={cancelLabel}
                             onApply={(color) => {
-                                // Compared against `value`, not the resolved
-                                // default: picking the fallback grey on an
-                                // uncolored area is still a real choice.
+
+
                                 if (color !== value) onChange(color);
                                 close();
                             }}

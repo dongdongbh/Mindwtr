@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Compose draws everything; the platform theme only needs to stay out of
-         the way and let the window go edge to edge. -->
+
+
     <style name="Theme.NativeDev" parent="android:Theme.Material.Light.NoActionBar" />
 
-    <!-- RN's start screen, as expo-splash-screen generates it from apps/mobile/app.json (the logo PNGs are RN's built
-         drawable-*/splashscreen_logo.png): MainActivity holds it until the first screen is ready (installSplashScreen). -->
+
     <style name="Theme.App.SplashScreen" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splashscreen_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splashscreen_logo</item>

@@ -37,6 +37,7 @@ const validSection = (value: unknown, id: string, projectId: string): value is S
         || !iso(row.createdAt) || !iso(row.updatedAt)
         || (row.description !== undefined && typeof row.description !== 'string')
         || (row.isCollapsed !== undefined && typeof row.isCollapsed !== 'boolean')
+        || (row.isSequential !== undefined && typeof row.isSequential !== 'boolean')
         || (row.rev !== undefined && !(typeof row.rev === 'number'
             && Number.isSafeInteger(row.rev) && row.rev >= 0))
         || (row.revBy !== undefined && typeof row.revBy !== 'string')
@@ -75,7 +76,7 @@ const readRequest = (value: unknown): NativeProjectSectionDeleteRequest | null =
     return input as NativeProjectSectionDeleteRequest;
 };
 
-/** Pure cold-journal validation before storage or mutable state inspection. */
+
 const readPrepared = (value: unknown): NativePreparedProjectSectionDelete | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

@@ -19,10 +19,7 @@ import {
 
 const FENCE_MAX_BYTES = 4_096;
 
-// String surgery on purpose, never URL component mutation: React Native's URL
-// implementations accept `pathname = ...` and then serialize the ORIGINAL href,
-// which silently resolved the fence to data.json itself on Android and iOS
-// (#1132; the capability probe already avoids the URL class for the same reason).
+
 export const webdavMutationFenceUrl = (documentUrl: string): string => {
     const suffixStart = documentUrl.search(/[?#]/);
     const withoutSuffix = suffixStart === -1 ? documentUrl : documentUrl.slice(0, suffixStart);
@@ -39,9 +36,8 @@ export const createWebdavSyncRemoteMutationFencePort = (
     options: WebDavOptions = {},
 ): SyncRemoteMutationFencePort => {
     const url = webdavMutationFenceUrl(documentUrl);
-    // A response bigger than a fence record cannot be one. Koofr answers the GET for a
-    // missing file with a large HTML page instead of 404 (#1113); reading it as absent
-    // keeps acquisition safe because the follow-up write is create-only conditional.
+
+
     const readOptions: WebDavOptions = { ...options, maxBytes: FENCE_MAX_BYTES, treatOversizeAsAbsent: true };
     return {
         read: () => webdavGetFileVersionedWithServerTime(url, readOptions),

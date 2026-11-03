@@ -17,8 +17,7 @@ import type { AppData } from './types';
 
 const FAST_KDF = { mKib: 8, t: 1, p: 1 };
 
-/** Minimal in-memory fake of the two Dropbox endpoints these functions call, keyed by
- * `path` from the `Dropbox-API-Arg` header — enough to round-trip upload/download. */
+
 function createFakeDropbox() {
     const files = new Map<string, Uint8Array>();
     const fetcher = async (url: string | URL, init?: RequestInit): Promise<Response> => {
@@ -40,7 +39,7 @@ function createFakeDropbox() {
                 text: async () => new TextDecoder().decode(bytes),
             } as Response;
         }
-        // upload
+
         const bodyBytes = init!.body instanceof ArrayBuffer
             ? new Uint8Array(init!.body)
             : new TextEncoder().encode(init!.body as string);
@@ -130,21 +129,19 @@ describe('dropbox sync-document encryption', () => {
         const { files, fetcher } = createFakeDropbox();
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(2), FAST_KDF);
         await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, null, fetcher, { material });
-        expect(files.has('/data.json')).toBe(false); // plain path genuinely gone
+        expect(files.has('/data.json')).toBe(false);
 
-        const result = await downloadDropboxAppData('token', fetcher); // no material — this device is 'off'
+        const result = await downloadDropboxAppData('token', fetcher);
         expect(result.data).toBeNull();
         expect(result.encryptedNoKey).toBeDefined();
         expect(result.encryptedNoKey!.salt.length).toBe(16);
     });
 
-    // The other direction of the same one-extra-probe rule: a peer disabled encryption, so
-    // `/data.json.enc` is gone and `/data.json` is back. "Empty remote" here would push this
-    // device's whole store into a fresh generation and fork the two silently.
+
     it('an enabled device reports a peer-disabled (plaintext-restored) remote instead of treating it as empty', async () => {
         const { files, fetcher } = createFakeDropbox();
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(4), FAST_KDF);
-        await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, null, fetcher); // the peer's plaintext write
+        await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, null, fetcher);
         expect(files.has('/data.json.enc')).toBe(false);
 
         const result = await downloadDropboxAppData('token', fetcher, { material });

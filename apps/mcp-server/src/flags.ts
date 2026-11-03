@@ -31,12 +31,7 @@ export const parseArgs = (argv: string[]): FlagMap => {
   return flags;
 };
 
-/**
- * A bare `--write` (no value) parses via the `typeof value === 'boolean'` branch below and is
- * unaffected by this. An unrecognized STRING value (SEC-11: `--write=nope` used to silently
- * parse as `true` - the opposite of what a typo'd `--write=disabled` looks like it should do)
- * throws instead of guessing, naming the flag so the error is actionable at startup.
- */
+
 export const parseBooleanFlag = (value: FlagValue | undefined, flagName: string): boolean | undefined => {
   if (value === undefined) return undefined;
   if (typeof value === 'boolean') return value;

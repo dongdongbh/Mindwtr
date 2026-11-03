@@ -129,9 +129,7 @@ describe('computeGlobalSearchResults', () => {
         ]);
     });
 
-    // FTS answers arrive debounced and async, so mid-typing they describe an
-    // older query; merging them first made the visible list reshuffle on every
-    // keystroke.
+
     it('ignores full-text results fetched for a different query', () => {
         const result = run({
             query: 'Needle work',
@@ -407,8 +405,7 @@ describe('computeGlobalSearchResults', () => {
             expect(result.results).toHaveLength(5);
         });
 
-        // Project hiding is independent of the task filters, so these two isolate
-        // the task side by dropping the archived project from the input.
+
         const hiddenTasksOnly = { ...hiddenInput, projects: [project('project-open', 'Needle open project')] };
 
         it('ignores matches that other filters would have excluded anyway', () => {

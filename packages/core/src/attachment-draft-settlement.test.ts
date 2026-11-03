@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Attachment } from './types';
-import { planAttachmentDraftSettlement } from './attachment-draft-settlement';
+import { isAttachmentFileInUse, planAttachmentDraftSettlement } from './attachment-draft-settlement';
 
 const file = (id: string, uri = `file:///managed/${id}.txt`): Attachment => ({
     id,
@@ -88,5 +88,17 @@ describe('planAttachmentDraftSettlement', () => {
             draftAttachments: [baseline],
             committedAttachments: [],
         })).toEqual([]);
+    });
+
+    it('keeps a file another live task still references under an equivalent URI spelling', () => {
+        const root = 'file:///var/mobile/Containers/Data/Application/0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D/Documents/attachments';
+        const plain = `${root}/Field notes.txt`;
+        const encoded = `${root}/Field%20notes.txt`;
+        const removed = { ...file('first', plain), deletedAt: '2026-10-18T01:00:00.000Z' };
+        const owners = [{ attachments: [removed] }, { attachments: [file('second', encoded)] }];
+        expect(isAttachmentFileInUse(plain, owners)).toBe(true);
+        expect(isAttachmentFileInUse(encoded, [{ attachments: [file('first', plain)] }])).toBe(true);
+        expect(isAttachmentFileInUse(plain, [{ attachments: [removed] }, { deletedAt: '2026-10-18T01:00:00.000Z', attachments: [file('second', encoded)] }])).toBe(false);
+        expect(isAttachmentFileInUse('content://media/1', [{ attachments: [file('third', 'content://media/1')] }])).toBe(true);
     });
 });

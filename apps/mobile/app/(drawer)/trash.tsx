@@ -30,13 +30,15 @@ import { assertBulkActionSucceeded } from '@/components/use-task-list-selection'
 import { getBulkActionFailureMessage } from '@/components/task-list-utils';
 import { useToast } from '@/contexts/toast-context';
 import { logError } from '@/lib/app-log';
+import { addHardwareBackPressListener } from '@/lib/hardware-back';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
 
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useThemeColors, ThemeColors } from '@/hooks/use-theme-colors';
 import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
-import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { NavigationContext } from '@react-navigation/native';
 
 function TrashSwipeRow({
   children,
@@ -311,6 +313,18 @@ export default function TrashScreen() {
     setSelectedProjectIds(new Set());
   }, []);
 
+
+  const navigation = useContext(NavigationContext);
+  useEffect(() => {
+    if (!selectionMode) return undefined;
+    const subscription = addHardwareBackPressListener(() => {
+      if (navigation && !navigation.isFocused()) return false;
+      exitSelectionMode();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [exitSelectionMode, navigation, selectionMode]);
+
   const runTrashBulkAction = useCallback(async (
     label: string,
     action: () => Promise<(void | StoreActionResult)[]>,
@@ -424,7 +438,7 @@ export default function TrashScreen() {
     confirmPurge(getTrashPurgeConfirmation({ kind: 'item' }, t), () => purgeProject(projectId));
   };
 
-  // Purge cannot be undone, so a filtered list may only clear what it shows.
+
   const handleClearAll = () => {
     if (trashItems.length === 0) return;
     const scope = resolveTrashClearScope(trashedTasks, trashedProjects, _allTasks, _allProjects);
@@ -443,8 +457,8 @@ export default function TrashScreen() {
           text: confirmation.confirmLabel,
           style: 'destructive',
           onPress: async () => {
-            // Always the ids the alert was opened for, never a fresh whole-store
-            // sweep: an item that arrived meanwhile was never shown to the user.
+
+
             await runTrashBulkAction(confirmation.confirmLabel, () => purgeTrashItems({ purgeTasks, purgeProject }, scope));
           },
         },

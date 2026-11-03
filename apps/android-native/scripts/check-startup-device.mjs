@@ -1,14 +1,6 @@
-// Startup regression check for the native Android app (docs/performance/budgets.md, "Native Android startup").
-//
-//   node apps/android-native/scripts/check-startup-device.mjs <adb-serial> <benchmarkSeed.apk> <benchmark.apk> [runs=10]
-//
-// Build both APKs first (`./gradlew assembleBenchmark assembleBenchmarkSeed`): `benchmark` is minified, profileable and not
-// debuggable, under its own id, so the dev app's data is never touched. For each budget database (an empty one, and core's
-// 5,000-task fixture made once under ~/.mindwtr-harness/startup) it seeds the benchmark app (measure-startup-device.mjs seed),
-// makes one first start (the recovery checkpoint, the bytecode cache written after first content), then measures `runs` cold and
-// warm starts with ART at `verify`, as a sideload leaves it. It fails when a median or p90 goes over its budget, or when a sample
-// is invalid (wrong launch state, or no Fully drawn). Raw samples go to ~/.mindwtr-harness/startup/runs.
-// First: wait for the phone (one run per serial; see device-lock.mjs).
+
+
+
 import './device-lock.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -29,7 +21,7 @@ const work = join(homedir(), '.mindwtr-harness', 'startup');
 mkdirSync(join(work, 'runs'), { recursive: true });
 const node = (...args) => execFileSync(process.execPath, [measure, ...args], { stdio: 'inherit' });
 
-// The budgets table: | Database | Cold TTID median | Cold first content median | Cold first content p90 | Warm first content median |
+
 const doc = readFileSync(resolve(here, '../../../docs/performance/budgets.md'), 'utf8');
 const section = doc.slice(doc.indexOf('## Native Android startup'));
 const budgets = [...section.matchAll(/^\| `(empty|large-5000)` \| (\d+)ms \| (\d+)ms \| (\d+)ms \| (\d+)ms \|$/gm)]

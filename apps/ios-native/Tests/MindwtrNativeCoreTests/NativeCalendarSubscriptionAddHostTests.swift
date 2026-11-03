@@ -364,7 +364,7 @@ final class NativeCalendarSubscriptionAddHostTests: XCTestCase {
         try await replace(writer, library, [b], timestamp: stamp)
         let before = try json(settings(library)), rows = try domain(library), receipts = try receiptCount(library)
         await writer.close(); try frozen.write(to: library.journal)
-        // A missing RN namespace cannot be leased, but the receipt still owns the original result.
+
         try FileManager.default.moveItem(at: library.device, to: library.root.appendingPathComponent("revoked-device"))
         let cold = host(library), startup = try object(await cold.start()), recovery = try XCTUnwrap(startup["recovery"] as? [String: Any])
         XCTAssertEqual(recovery["method"] as? String, "calendarSubscriptionAddCommit"); try result(json(try XCTUnwrap(recovery["result"])))

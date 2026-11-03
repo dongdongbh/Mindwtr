@@ -1,10 +1,5 @@
 #!/usr/bin/env node
 
-// F-Droid/IzzyOnDroid render metadata/<locale>/changelogs/<versionCode>.txt and
-// Google Play renders metadata/<locale>/release_notes.txt with a hard 500
-// CHARACTER limit; longer text is truncated at exactly 500, mid-word
-// (dongdongbh/Mindwtr#897). Counts Unicode code points on the right-trimmed
-// content so accented text is measured the way the stores measure it.
 
 const fs = require('fs');
 const path = require('path');

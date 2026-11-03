@@ -1,35 +1,23 @@
-// React Native's global fetch is the whatwg-fetch polyfill, which hands every
-// result back to JavaScript through setTimeout(..., 0). Android pauses all
-// JavaScript timers while the activity is paused (JavaTimerManager.onHostPause),
-// and a headless instance starts paused. So a request made after the app went
-// to the background completes on the network and then sits unresolved until
-// the app is foregrounded again. A scheduled background sync froze at its first
-// reply this way and held its WorkManager job open until Android killed it
-// (#1001). XMLHttpRequest completes through a native event instead, and its
-// timeout is enforced by OkHttp, so neither depends on a JavaScript timer.
 
-/** Ceiling for one request, enforced natively; foreground code keeps its own
- *  shorter JavaScript timeouts on top. */
+
+
+import { getNativeUtf8TextNative } from '@/modules/native-utf8-text';
+import { logInfo } from './app-log';
+
+
 export const BACKGROUND_SAFE_FETCH_NATIVE_TIMEOUT_MS = 5 * 60 * 1000;
 
 let deadlineAt: number | null = null;
 
-/** While set, no request may start after this time, and every request is cut
- *  short at it. The background sync job uses it as a deadline that holds even
- *  though its own timers do not fire. */
+
 export const setBackgroundSafeFetchDeadline = (at: number | null): void => {
   deadlineAt = at;
 };
 
-/** Read back the deadline set above. CloudKit calls in cloudkit-sync.ts are
- *  not fetch requests, so they cannot share the enforcement above, but they
- *  share this same wall-clock deadline: it is checked before and after every
- *  native CloudKit call so a run resumed from suspension past its deadline
- *  aborts at once instead of starting (or trusting the result of) another one. */
+
 export const getBackgroundSafeFetchDeadline = (): number | null => deadlineAt;
 
-// Only React Native's XMLHttpRequest has the timer-free completion and the
-// native timeout; a browser (the web build, tests) keeps its own fetch.
+
 const hasNativeXhr = (): boolean => (
   typeof XMLHttpRequest === 'function' && typeof document === 'undefined'
 );
@@ -51,10 +39,37 @@ const parseResponseHeaders = (raw: string): Headers => {
     try {
       headers.append(name, value);
     } catch {
-      // A header the platform refuses to represent is not worth failing the request over.
+
     }
   }
   return headers;
+};
+
+type NativeText = { text: string; bytes: number };
+type XhrBody = { buffer: () => ArrayBuffer; nativeText: () => NativeText | null };
+
+let nativeTextLogged = false;
+
+
+const decodeNatively = (base64: string | null): NativeText | null => {
+  if (base64 === null) return null;
+  const native = getNativeUtf8TextNative();
+  if (!native) return null;
+  let text: unknown;
+  try {
+    text = native.decodeBase64Utf8(base64);
+  } catch {
+    return null;
+  }
+  if (typeof text !== 'string') return null;
+  const bytes = (base64.length / 4) * 3 - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
+  if (!nativeTextLogged) {
+    nativeTextLogged = true;
+    void logInfo('Response text decoded natively', {
+      scope: 'sync', force: true, extra: { releaseCheck: 'v1.3.8/ios-native-text-decode', bytes: String(bytes) },
+    }).catch(() => undefined);
+  }
+  return { text, bytes };
 };
 
 class XhrResponse {
@@ -64,7 +79,7 @@ class XhrResponse {
   bodyUsed = false;
 
   constructor(
-    private readonly buffer: ArrayBuffer,
+    private readonly content: XhrBody,
     readonly status: number,
     readonly statusText: string,
     readonly url: string,
@@ -75,9 +90,14 @@ class XhrResponse {
     return this.status >= 200 && this.status < 300;
   }
 
+
+  get mindwtrDecodedTextBytes(): number | undefined {
+    return this.content.nativeText()?.bytes;
+  }
+
   async arrayBuffer(): Promise<ArrayBuffer> {
     this.bodyUsed = true;
-    return this.buffer.slice(0);
+    return this.content.buffer().slice(0);
   }
 
   async bytes(): Promise<Uint8Array> {
@@ -86,7 +106,7 @@ class XhrResponse {
 
   async text(): Promise<string> {
     this.bodyUsed = true;
-    return new TextDecoder().decode(new Uint8Array(this.buffer));
+    return this.content.nativeText()?.text ?? new TextDecoder().decode(new Uint8Array(this.content.buffer()));
   }
 
   async json(): Promise<unknown> {
@@ -94,7 +114,7 @@ class XhrResponse {
   }
 
   clone(): XhrResponse {
-    return new XhrResponse(this.buffer.slice(0), this.status, this.statusText, this.url, this.headers);
+    return new XhrResponse(this.content, this.status, this.statusText, this.url, this.headers);
   }
 }
 
@@ -154,10 +174,26 @@ const xhrFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Respons
   });
 
   xhr.onload = () => {
-    const raw = xhr.response as ArrayBuffer | null;
-    const buffer = raw instanceof ArrayBuffer ? raw : new ArrayBuffer(0);
+
+
+    const nativeBase64 = (xhr as unknown as { _response?: unknown })._response;
+    let buffer: ArrayBuffer | undefined;
+    let nativeText: NativeText | null | undefined;
+    const content: XhrBody = {
+      buffer: () => {
+        if (!buffer) {
+          const raw = xhr.response as ArrayBuffer | null;
+          buffer = raw instanceof ArrayBuffer ? raw : new ArrayBuffer(0);
+        }
+        return buffer;
+      },
+      nativeText: () => {
+        if (nativeText === undefined) nativeText = decodeNatively(typeof nativeBase64 === 'string' ? nativeBase64 : null);
+        return nativeText;
+      },
+    };
     finish(() => resolve(new XhrResponse(
-      buffer,
+      content,
       xhr.status,
       xhr.statusText ?? '',
       xhr.responseURL || url,
@@ -165,8 +201,8 @@ const xhrFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Respons
     ) as unknown as Response));
   };
   xhr.onerror = () => finish(() => reject(new TypeError('Network request failed')));
-  // Worded like a dropped connection so the sync classifies it as offline
-  // (retry later, no failure banner) rather than as a server error.
+
+
   xhr.ontimeout = () => finish(() => reject(new TypeError(
     `Network request failed: no answer within ${Math.round(xhr.timeout / 1000)} s`,
   )));

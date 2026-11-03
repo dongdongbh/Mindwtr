@@ -1,7 +1,7 @@
 import CoreFoundation
 import Foundation
 
-/// A frozen provider witness is not ownership; the caller still requires the exact owner and a successful read.
+
 enum NativeCalendarPushWitness {
     static func markCreateEvent(requestJSON: String, id: UUID) throws -> String {
         do {
@@ -100,7 +100,7 @@ enum NativeCalendarPushWitness {
         return id
     }
 
-    private static func marker(_ id: UUID) -> String {
+    static func marker(_ id: UUID) -> String {
         "\n\n[Mindwtr native calendar operation: \(id.uuidString.lowercased())]"
     }
     private static func containsMarker(_ notes: String, id: UUID) -> Bool {

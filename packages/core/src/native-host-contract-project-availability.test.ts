@@ -36,8 +36,8 @@ async function open(ensure = vi.fn(async (item: Attachment) => ({ status: 'avail
     const attachments = hostFor(ensure);
     const env = await openSqliteHost({ projects: [selected, project('other')], tasks: [task], settings: { deviceId: 'device' } },
         undefined, { attachments }, { rejectConcurrentWrites: true });
-    // Initial activation can save the display codec while installing defaults.
-    // The selected command begins only after that settled startup boundary.
+
+
     await env.client().run('UPDATE projects SET attachments=? WHERE id=?', [JSON.stringify(selected.attachments), 'target']);
     await env.client().run('UPDATE projects SET attachments=? WHERE id=?', [JSON.stringify(project('other').attachments), 'other']);
     return { env, ensure, attachments };
@@ -81,7 +81,7 @@ describe('selected relocated Project availability durable authority', () => {
         try {
             const pending = env.host.downloadRelocatedProjectAttachment(request(env), target);
             await vi.waitFor(() => expect(ensure).toHaveBeenCalledOnce());
-            // The save must not wait for the stalled request.
+
             await expect(runSyncStoreSave(async () => 'saved')).resolves.toBe('saved');
             release();
             expect(await pending).toMatchObject({ ok: true, value: { status: 'available' } });
@@ -115,7 +115,7 @@ describe('selected relocated Project availability durable authority', () => {
             const before = await allRows(env), input = request(env);
             const pending = env.host.downloadRelocatedProjectAttachment(input, target);
             await vi.waitFor(() => expect(ensure).toHaveBeenCalledOnce());
-            expect(await allRows(env)).toEqual(before); // No transient downloading write.
+            expect(await allRows(env)).toEqual(before);
             if (change === 'device') await env.client().run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify({ deviceId: 'different' })]);
             else if (change === 'null') await env.client().run('UPDATE projects SET tagIds=NULL WHERE id=?', ['target']);
             else if (change === 'rawBoolean') await env.client().run('UPDATE projects SET isFocused=NULL WHERE id=?', ['target']);
@@ -268,6 +268,26 @@ const privateMethods = (env: Awaited<ReturnType<typeof openSqliteHost>>,
         revision: () => value(env.host.getProjectAttachmentEditOptions({ projectId: 'target' })).revision, save });
 
 describe('private prepared ordinary Project availability', () => {
+    it('cold-replays a pre-color 26-cell journal and refuses to erase a later override', async () => {
+        const { env } = await open(undefined, project('target', { attachments: [{ ...file, uri: '' }, sibling] }));
+        try {
+            const api = privateMethods(env);
+            const envelope = JSON.parse(JSON.stringify(value(await api.prepareProjectFileAvailability(downloadRequest(env)))));
+
+            expect(envelope.prepared.effect.rawBefore.splice(26)).toEqual([null, null]);
+            expect(envelope.prepared.effect.rawAfter.splice(26)).toEqual([null, null]);
+            expect(api.validatePreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            await env.restart();
+            expect(await privateMethods(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            const committed = await allRows(env);
+            await env.restart();
+            expect(await privateMethods(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            expect(await allRows(env)).toEqual(committed);
+            await useTaskStore.getState().updateProject('target', { colorOverride: '#ef4444' });
+            expect(await privateMethods(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: false });
+            expect((await env.sql('SELECT colorOverride FROM projects WHERE id=?', ['target']))[0]).toEqual({ colorOverride: '#ef4444' });
+        } finally { await env.close(); }
+    });
     it.each(['', target])('freezes missing URI %j without file, domain, queue or save work', async (uri) => {
         const { env, ensure } = await open(undefined, project('target', { attachments: [{ ...file, uri }, sibling] }));
         try {
@@ -540,7 +560,7 @@ describe('private cached Project availability durable authority', () => {
     });
 
     const selected = { ...file, uri: '' };
-    // Each independent real SQLite boot keeps the default timeout and all no-effect checks.
+
     it.each([
         ['foreign URI', project('target', { attachments: [file, sibling] })],
         ['foreign target URI', project('target', { attachments: [{ ...selected, uri: target + '-foreign' }, sibling] })],
@@ -666,7 +686,7 @@ describe('native journal key ordering during prepared availability commit', () =
             const sortedObjects = (input: unknown): unknown => Array.isArray(input) ? input.map(sortedObjects)
                 : input && typeof input === 'object' ? Object.fromEntries(Object.keys(input).sort()
                     .map(key => [key, sortedObjects((input as Record<string, unknown>)[key])])) : input;
-            // NativeJSON sorts structured object keys but leaves every opaque SQL STRING intact.
+
             const wire = sortedObjects(JSON.parse(JSON.stringify(envelope))) as typeof envelope;
             expect(Object.keys(wire.prepared.effect.before.attachments![0]))
                 .not.toEqual(Object.keys(ordered[0]));
@@ -691,7 +711,7 @@ describe('native journal key ordering during prepared availability commit', () =
             const save = vi.fn(async () => ({ ok: true as const, value: null })), replay = privateMethods(env, save);
             expect(await replay.commitPreparedProjectFileAvailability(wire)).toMatchObject({ ok: true, value: { status: 'available' } });
             expect(save).not.toHaveBeenCalled(); expect(await allRows(env)).toEqual(after);
-            // Sorting never permits a changed value, either forged in the effect or saved later.
+
             const forged = JSON.parse(JSON.stringify(wire));
             forged.prepared.effect.after.attachments[0].title = 'Changed real value';
             expect(replay.validatePreparedProjectFileAvailability(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });

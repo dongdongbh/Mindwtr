@@ -81,7 +81,7 @@ describe('useTaskItemEditState', () => {
 
         expect(result.current.draft.title).toBe('Renamed');
         expect(result.current.draft.status).toBe('inbox');
-        // Inbox drops the draft focus star (core cascade).
+
         expect(result.current.draft.focusedToday).toBe(false);
     });
 });

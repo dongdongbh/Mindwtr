@@ -1,4 +1,4 @@
-/** UI-only guidance. Never store tutorial progress in tasks or sync settings. */
+
 import { getDocsGuideUrl, type DocsSection } from './docs-guidance';
 
 export type OnboardingTopic = 'inbox-project' | 'focus' | 'scheduling' | 'details';
@@ -10,8 +10,7 @@ export const ONBOARDING_TOPIC_COPY = {
     details: { title: 'taskEdit.details', body: 'onboarding.detailsHint' },
 } as const;
 
-// These are section links, not another learning center. The English guide is
-// the fallback for app languages without a corresponding documentation locale.
+
 export function getOnboardingGuideUrl(topic: OnboardingTopic, platform: 'desktop' | 'mobile', language?: string): string {
     const sections: Record<OnboardingTopic, DocsSection> = platform === 'mobile'
         ? { 'inbox-project': 'mobile-inbox', focus: 'mobile-focus', scheduling: 'mobile-scheduling', details: 'mobile-details' }

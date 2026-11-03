@@ -1,11 +1,14 @@
 import {
     filterNotDeleted,
     isArchiveRetentionDays,
+    isTaxonomyCatalog,
     isTaskSectionProjectArchiveReference,
     normalizeCancellationTimestamp,
     normalizeRecurrenceForLoad,
     normalizeRelativeStartOffset,
     normalizeRepeatReminderMinutes,
+    normalizeDueReminderLeadMinutes,
+    normalizeStartReminderLeadMinutes,
     normalizeTimeSpentMinutes,
     filterTasksBySearch,
     taskMatchesQuery,
@@ -18,10 +21,8 @@ import {
     type Task,
     type TaskStatus,
 } from '@mindwtr/core';
-// Relative path (not '@mindwtr/core/...'): TASK_RECURRENCE_FIELD_KEYS is the shared home for
-// the recurrence object's field-key allowlist (see that file's header). This file isn't part
-// of the native-schema CI job's zero-install import chain, but the relative path is harmless
-// here and keeps the pattern consistent with task-sync-schema.ts's sibling imports below.
+
+
 import { TASK_RECURRENCE_FIELD_KEYS } from '../../../packages/core/src/task-recurrence-fields';
 import {
     CLOUD_AREA_CREATION_ALLOWED_PROP_KEYS,
@@ -62,6 +63,22 @@ function validateTaskRepeatReminderMinutes(value: Record<string, unknown>): stri
     if (minutes === undefined || minutes === null || minutes === 0) return null;
     if (normalizeRepeatReminderMinutes(minutes) === minutes) return null;
     return 'Invalid task repeatReminderMinutes';
+}
+
+function validateTaskDueReminderLeadMinutes(value: Record<string, unknown>): string | null {
+    if (!hasOwnField(value, 'dueReminderLeadMinutes')) return null;
+    const minutes = value.dueReminderLeadMinutes;
+    if (minutes === undefined || minutes === null || minutes === 0) return null;
+    if (normalizeDueReminderLeadMinutes(minutes) === minutes) return null;
+    return 'Invalid task dueReminderLeadMinutes';
+}
+
+function validateTaskStartReminderLeadMinutes(value: Record<string, unknown>): string | null {
+    if (!hasOwnField(value, 'startReminderLeadMinutes')) return null;
+    const minutes = value.startReminderLeadMinutes;
+    if (minutes === undefined || minutes === null || minutes === 0) return null;
+    if (normalizeStartReminderLeadMinutes(minutes) === minutes) return null;
+    return 'Invalid task startReminderLeadMinutes';
 }
 
 function validateTaskTimeSpentMinutes(value: Record<string, unknown>): string | null {
@@ -183,6 +200,8 @@ function validateTaskPropValues(value: Record<string, unknown>): string | null {
         ?? validateAttachments(value, 'task')
         ?? validateTaskReminderPolicy(value)
         ?? validateTaskRepeatReminderMinutes(value)
+        ?? validateTaskDueReminderLeadMinutes(value)
+        ?? validateTaskStartReminderLeadMinutes(value)
         ?? validateTaskTimeSpentMinutes(value)
         ?? validateTaskRelativeStartOffset(value)
         ?? validateTaskRecurrence(value)
@@ -190,6 +209,12 @@ function validateTaskPropValues(value: Record<string, unknown>): string | null {
 }
 
 function validateProjectPropValues(value: Record<string, unknown>): string | null {
+    if (value.perSectionFlow != null && typeof value.perSectionFlow !== 'boolean') {
+        return 'Invalid project perSectionFlow';
+    }
+    if (value.colorOverride != null && (typeof value.colorOverride !== 'string' || !/^#[0-9a-f]{6}$/i.test(value.colorOverride))) {
+        return 'Invalid project colorOverride';
+    }
     const cancellationError = validateCancellationTimestamp(value, 'project');
     if (cancellationError) return cancellationError;
     const attachmentsError = validateAttachments(value, 'project');
@@ -229,6 +254,8 @@ export function validateAppData(
     if (areas !== undefined && !Array.isArray(areas)) return { ok: false, error: 'Invalid data: areas must be an array' };
     if (people !== undefined && !Array.isArray(people)) return { ok: false, error: 'Invalid data: people must be an array' };
     if (settings !== undefined && !isRecord(settings)) return { ok: false, error: 'Invalid data: settings must be an object' };
+    if (isRecord(settings) && settings.taxonomy !== undefined && !isTaxonomyCatalog(settings.taxonomy))
+        return { ok: false, error: 'Invalid data: settings.taxonomy must contain valid saved contexts and tags' };
     if (tasks.length > MAX_ITEMS_PER_COLLECTION) return { ok: false, error: `Invalid data: tasks exceeds limit (${MAX_ITEMS_PER_COLLECTION})` };
     if (projects.length > MAX_ITEMS_PER_COLLECTION) return { ok: false, error: `Invalid data: projects exceeds limit (${MAX_ITEMS_PER_COLLECTION})` };
     if (Array.isArray(sections) && sections.length > MAX_ITEMS_PER_COLLECTION) {
@@ -317,6 +344,9 @@ export function validateAppData(
             }
             if (section.deletedAt != null && !isValidIsoTimestamp(section.deletedAt)) {
                 return { ok: false, error: 'Invalid data: section deletedAt must be a valid ISO timestamp when present' };
+            }
+            if (section.isSequential != null && typeof section.isSequential !== 'boolean') {
+                return { ok: false, error: 'Invalid data: section isSequential must be a boolean when present' };
             }
             sectionsById.set(section.id, section);
             if (section.deletedAt == null) {
@@ -499,9 +529,7 @@ type EntityPropsConfigEntry = {
     validateValues?: (value: Record<string, unknown>) => string | null;
 };
 
-// One allowlist-plus-value-check config per (entity, create|patch) pair, replacing
-// eight near-identical validate{Task,Project,Section,Area}{Creation,Patch}Props
-// functions that differed only by this data.
+
 const ENTITY_PROPS_CONFIG: Record<EntityPropsKind, EntityPropsConfigEntry> = {
     task: {
         allowedKeys: {
@@ -541,9 +569,8 @@ export function validateEntityProps<K extends EntityPropsKind>(
     const noun = ENTITY_PROPS_NOUN[mode];
     if (!isRecord(value)) return { ok: false, error: `Invalid ${kind} ${noun}` };
     const config = ENTITY_PROPS_CONFIG[kind];
-    // REST mutations must follow Task's single free-text assignee contract.
-    // Keep legacy document reads tolerant so existing malformed data remains
-    // accessible and repairable; do not silently coerce or rewrite it on read.
+
+
     if (kind === 'task' && value.assignedTo != null && typeof value.assignedTo !== 'string') {
         return { ok: false, error: 'Invalid task assignedTo: expected a string or null' };
     }
@@ -574,9 +601,8 @@ export function pickTaskList(
     data: AppData,
     opts: { includeDeleted: boolean; includeCompleted: boolean; status?: TaskStatus | null; query?: string; isFocusedToday?: boolean }
 ): Task[] {
-    // "not completed" means neither done nor archived (isTaskFinished) - expressed here as
-    // the two descriptor fields that together mean the same thing (includeArchived covers
-    // archived, excludeStatuses covers done), rather than a bespoke isTaskFinished filter.
+
+
     let tasks = data.tasks.filter((t) => taskMatchesQuery(t, {
         status: opts.status ?? undefined,
         includeDeleted: opts.includeDeleted,
@@ -585,8 +611,8 @@ export function pickTaskList(
         isFocusedToday: opts.isFocusedToday,
     }));
     if (opts.query && opts.query.trim()) {
-        // filterTasksBySearch, not searchAll: searchAll slices to SEARCH_RESULT_LIMIT (200)
-        // before this route paginates, silently capping totals — same fix as /v1/search.
+
+
         const matchingTaskIds = new Set(filterCloudTasksBySearch(tasks, filterNotDeleted(data.projects), opts.query).map((task) => task.id));
         tasks = tasks.filter((task) => matchingTaskIds.has(task.id));
     }

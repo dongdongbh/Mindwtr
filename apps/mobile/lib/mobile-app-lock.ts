@@ -85,6 +85,17 @@ export function shouldAttemptMobileAppLockAuthentication({
   );
 }
 
+
+export function isWithinMobileAppLockRelockDelay({
+  delayMinutes,
+  leftUnlockedAt,
+  now,
+}: { delayMinutes: number; leftUnlockedAt: number | null; now: number }): boolean {
+  if (delayMinutes <= 0 || leftUnlockedAt === null) return false;
+  const away = now - leftUnlockedAt;
+  return Number.isFinite(away) && away >= 0 && away < delayMinutes * 60_000;
+}
+
 export function getMobileAppLockErrorKey(reason: MobileAppLockAuthFailureReason): string {
   if (reason === 'unavailable') return 'appLock.unavailable';
   if (reason === 'cancelled') return 'appLock.cancelled';

@@ -71,6 +71,30 @@ async function open(start: AppData = initial(), shouldFail: () => boolean = () =
 afterEach(async () => { await flushPendingSave(); resetForTests(); vi.useRealTimers(); });
 
 describe('prepared single Project restore from Trash', () => {
+    it.each([1, 2] as const)('retries v%s restore after Area deletion and cold-replays the original receipt', async (version) => {
+        let failed = false;
+        const env = await open(initial({ projects: [project({ areaId: 'area-live', areaTitle: 'Live Area' })] }), () => failed);
+        await useTaskStore.getState().deleteArea('area-live');
+        await flushPendingSave();
+        const envelope = env.prepare();
+        expect(envelope.prepared.version).toBe(2);
+        envelope.prepared.version = version;
+        if (version === 1) envelope.prepared.effect.project.after.color = envelope.prepared.scope.project.color;
+        const frozen = copy(envelope);
+        expect(value(env.host.validatePreparedTrashProjectRestore(frozen))).toEqual({ id: ID });
+        failed = true;
+        expect(await env.host.commitPreparedTrashProjectRestore(frozen)).toMatchObject({ ok: false,
+            error: { code: 'SAVE_FAILED' } });
+        failed = false;
+        expect(value(await env.host.commitPreparedTrashProjectRestore(frozen))).toEqual({ id: ID });
+        expect(env.data().projects[0].color).toBe(version === 1 ? '#123456' : '#94a3b8');
+        expect(env.data().projects[0].areaId).toBeUndefined();
+        const cold = await env.reopen();
+        expect(value(cold.host.validatePreparedTrashProjectRestore(frozen))).toEqual({ id: ID });
+        expect(value(await cold.host.commitPreparedTrashProjectRestore(frozen))).toEqual({ id: ID });
+        expect(cold.saves()).toBe(0);
+    });
+
     it('restores only cascade-stamped children and retains unrelated saved rows and content', async () => {
         const env = await open();
         const frozen = env.prepare();

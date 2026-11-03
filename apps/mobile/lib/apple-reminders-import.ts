@@ -1,7 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import * as Calendar from 'expo-calendar';
-import type { StoreActionResult, Task } from '@mindwtr/core';
+import {
+  classifyAppleReminderForImport,
+  normalizeAppleRemindersImportSettings,
+  type AppleReminderList,
+  type AppleRemindersImportResult,
+  type AppleRemindersImportSettings,
+  type StoreActionResult,
+  type Task,
+} from '@mindwtr/core';
 
 import { logWarn } from './app-log';
 
@@ -9,30 +17,8 @@ export const APPLE_REMINDERS_IMPORT_SETTINGS_KEY = 'mindwtr-apple-reminders-impo
 
 export type AppleRemindersPermissionStatus = 'unavailable' | 'undetermined' | 'granted' | 'denied';
 
-export type AppleRemindersImportSettings = {
-  selectedListId?: string;
-  selectedListTitle?: string;
-  importedReminderIds: string[];
-  deleteImportedReminders: boolean;
-  /** Run the import each time Mindwtr comes to the foreground (#1238). */
-  autoImportOnOpen: boolean;
-};
-
-export type AppleReminderList = {
-  id: string;
-  title: string;
-  color?: string;
-};
-
-export type AppleRemindersImportResult = {
-  importedCount: number;
-  deletedCount: number;
-  deleteFailedCount: number;
-  skippedDuplicateCount: number;
-  skippedCompletedCount: number;
-  skippedEmptyTitleCount: number;
-  failedCount: number;
-};
+export { normalizeAppleRemindersImportSettings };
+export type { AppleReminderList, AppleRemindersImportResult, AppleRemindersImportSettings };
 
 export type AddInboxTask = (
   title: string,
@@ -40,19 +26,10 @@ export type AddInboxTask = (
   options?: { captureId: string },
 ) => Promise<StoreActionResult>;
 
-// A reminder id in this shape doubles as core's capture id, which makes it the
-// task id: adding the same reminder twice then returns the first task instead
-// of a duplicate. Older ids keep the legacy path. Same rule as pending captures.
+
 const UUID_PATTERN = /^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i;
 
-const DEFAULT_IMPORT_SETTINGS: AppleRemindersImportSettings = {
-  importedReminderIds: [],
-  deleteImportedReminders: false,
-  autoImportOnOpen: false,
-};
 
-// The manual button and the foreground auto-import both read the imported-id
-// list at start; running them at the same time would add a reminder twice.
 let importChain: Promise<unknown> = Promise.resolve();
 const serializeImport = <T>(run: () => Promise<T>): Promise<T> => {
   const next = importChain.then(run, run);
@@ -71,51 +48,13 @@ const normalizePermissionStatus = (status: unknown): AppleRemindersPermissionSta
   return 'denied';
 };
 
-const normalizeDateKey = (value: unknown): string | undefined => {
-  if (value instanceof Date) return value.toISOString();
-  return normalizeString(value);
-};
-
-const getReminderImportKey = (reminder: Calendar.Reminder, listId: string, title: string): string => {
-  const reminderId = normalizeString(reminder.id);
-  if (reminderId) return reminderId;
-
-  return [
-    'fallback',
-    listId,
-    title,
-    normalizeString(reminder.notes) ?? '',
-    normalizeDateKey(reminder.creationDate) ?? '',
-    normalizeDateKey(reminder.startDate) ?? '',
-    normalizeDateKey(reminder.dueDate) ?? '',
-  ].join(':');
-};
-
-export function normalizeAppleRemindersImportSettings(value: unknown): AppleRemindersImportSettings {
-  if (!value || typeof value !== 'object') return { ...DEFAULT_IMPORT_SETTINGS };
-  const raw = value as Partial<AppleRemindersImportSettings>;
-  const selectedListId = normalizeString(raw.selectedListId);
-  const selectedListTitle = normalizeString(raw.selectedListTitle);
-  const importedReminderIds = Array.isArray(raw.importedReminderIds)
-    ? Array.from(new Set(raw.importedReminderIds.map(normalizeString).filter((id): id is string => Boolean(id))))
-    : [];
-
-  return {
-    ...(selectedListId ? { selectedListId } : {}),
-    ...(selectedListTitle ? { selectedListTitle } : {}),
-    importedReminderIds,
-    deleteImportedReminders: raw.deleteImportedReminders === true,
-    autoImportOnOpen: raw.autoImportOnOpen === true,
-  };
-}
-
 export async function loadAppleRemindersImportSettings(): Promise<AppleRemindersImportSettings> {
   const raw = await AsyncStorage.getItem(APPLE_REMINDERS_IMPORT_SETTINGS_KEY);
-  if (!raw) return { ...DEFAULT_IMPORT_SETTINGS };
+  if (!raw) return normalizeAppleRemindersImportSettings(undefined);
   try {
     return normalizeAppleRemindersImportSettings(JSON.parse(raw));
   } catch {
-    return { ...DEFAULT_IMPORT_SETTINGS };
+    return normalizeAppleRemindersImportSettings(undefined);
   }
 }
 
@@ -124,20 +63,13 @@ export async function saveAppleRemindersImportSettings(settings: AppleRemindersI
   await AsyncStorage.setItem(APPLE_REMINDERS_IMPORT_SETTINGS_KEY, JSON.stringify(normalized));
 }
 
-// The imported-id list is the only setting the import owns. It re-reads the
-// rest right before writing, so a list or switch the user changed during the
-// run keeps its new value. One write per imported reminder: imports are rare
-// and bounded by the list, and the id must be durable before the next add.
+
 const persistImportedIds = async (importedIds: Set<string>): Promise<void> => {
   const latest = await loadAppleRemindersImportSettings();
   await saveAppleRemindersImportSettings({ ...latest, importedReminderIds: Array.from(importedIds) });
 };
 
-/**
- * Read, change and write the stored settings in one queued step. Settings
- * writes share the import queue so a switch flipped while an import is running
- * is neither lost nor put back to its old value when the run ends (#1238).
- */
+
 export function updateAppleRemindersImportSettings(
   apply: (current: AppleRemindersImportSettings) => AppleRemindersImportSettings,
 ): Promise<AppleRemindersImportSettings> {
@@ -192,13 +124,10 @@ export async function getAppleReminderLists(): Promise<AppleReminderList[]> {
 export type AppleRemindersImportOptions = {
   addTask: AddInboxTask;
   createRecoverySnapshot: () => Promise<unknown>;
-  /**
-   * Resolves once the store's queued snapshot is on disk. `addTask` only
-   * schedules a debounced save, so without this the import would call a
-   * reminder done while its task lives in memory only.
-   */
+
+
   flushPendingSave: () => Promise<void>;
-  /** Reads the current store after the flush so tombstone replays stay failed. */
+
   getTaskById: (id: string) => Task | undefined;
   listId: string;
   deleteImportedReminders?: boolean;
@@ -208,11 +137,7 @@ export function importAppleRemindersIntoInbox(options: AppleRemindersImportOptio
   return serializeImport(() => runAppleRemindersImport(options));
 }
 
-/**
- * Foreground auto-import (#1238): runs the same import as the settings button
- * when the user turned it on and a list is chosen. Never prompts for
- * permission; returns null when nothing ran.
- */
+
 export async function runAppleRemindersAutoImport({
   addTask,
   createRecoverySnapshot,
@@ -271,24 +196,23 @@ async function runAppleRemindersImport({
   let recoverySnapshotCreated = false;
 
   for (const reminder of reminders) {
-    if (reminder.completed === true) {
+    const classification = classifyAppleReminderForImport(reminder, normalizedListId, importedIds);
+    if (classification.kind === 'completed') {
       result.skippedCompletedCount += 1;
       continue;
     }
 
-    const title = normalizeString(reminder.title);
-    if (!title) {
+    if (classification.kind === 'empty-title') {
       result.skippedEmptyTitleCount += 1;
       continue;
     }
 
-    const reminderKey = getReminderImportKey(reminder, normalizedListId, title);
-    if (importedIds.has(reminderKey)) {
+    if (classification.kind === 'duplicate') {
       result.skippedDuplicateCount += 1;
       continue;
     }
 
-    const description = normalizeString(reminder.notes);
+    const reminderKey = classification.importKey;
     if (!recoverySnapshotCreated) {
       await createRecoverySnapshot();
       recoverySnapshotCreated = true;
@@ -297,24 +221,19 @@ async function runAppleRemindersImport({
     const captureOptions: [{ captureId: string }?] = reminderId && UUID_PATTERN.test(reminderId)
       ? [{ captureId: reminderId.toLowerCase() }]
       : [];
-    const taskResult = await addTask(title, {
-      status: 'inbox',
-      ...(description ? { description } : {}),
-    }, ...captureOptions);
+    const taskResult = await addTask(classification.title, classification.props, ...captureOptions);
 
     if (taskResult.success === false) {
       result.failedCount += 1;
       continue;
     }
 
-    // The task is only in memory until this resolves. Everything that says
-    // "this reminder is done" — the id list and the delete — waits for it, so
-    // a kill in the gap re-imports the reminder instead of losing it.
+
     try {
       await flushPendingSave();
     } catch {
-      // Not recorded and not deleted: the next run picks this reminder up
-      // again. Stop here rather than add tasks that cannot be saved either.
+
+
       result.failedCount += 1;
       break;
     }
@@ -331,8 +250,8 @@ async function runAppleRemindersImport({
 
     result.importedCount += 1;
     importedIds.add(reminderKey);
-    // Written down before the next reminder is touched: if iOS ends the app
-    // mid-run, what was already added is never imported a second time.
+
+
     await persistImportedIds(importedIds);
 
     if (shouldDeleteImported) {

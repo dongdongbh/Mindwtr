@@ -6,13 +6,10 @@ use std::net::{TcpStream, ToSocketAddrs};
 const EMAIL_CAPTURE_STATE_FILE_NAME: &str = "email-capture-state.json";
 const EMAIL_CAPTURE_DEFAULT_PORT: u16 = 993;
 const EMAIL_CAPTURE_DEFAULT_FOLDER: &str = "Mindwtr";
-// Bounded work per poll; the mailbox is the queue, so leftovers are picked up
-// by follow-up polls (`has_more`) instead of one unbounded fetch.
+
 const EMAIL_CAPTURE_BATCH_LIMIT: usize = 25;
 const EMAIL_CAPTURE_BODY_CHAR_LIMIT: usize = 16_000;
-// Only the head of each message is fetched: headers and the text part come first in
-// normal mail, and nothing past EMAIL_CAPTURE_BODY_CHAR_LIMIT characters is kept anyway.
-// A full `BODY.PEEK[]` would download every attachment into memory.
+
 const EMAIL_CAPTURE_FETCH_BYTE_LIMIT: usize = 262_144;
 const EMAIL_CAPTURE_FETCH_QUERY: &str = "(UID BODY.PEEK[]<0.262144>)";
 const EMAIL_CAPTURE_FULL_FETCH_QUERY: &str = "(UID BODY.PEEK[])";
@@ -165,9 +162,7 @@ pub(crate) struct EmailCaptureMessage {
 pub(crate) struct EmailCapturePollResult {
     pub uid_validity: u32,
     pub messages: Vec<EmailCaptureMessage>,
-    /// Highest UID fetched this round, including messages skipped by the
-    /// Message-ID dedupe — the frontend commits this as the new watermark so
-    /// already-seen mail is not refetched every poll. Zero when nothing was fetched.
+
     pub max_fetched_uid: u32,
     pub has_more: bool,
 }
@@ -212,10 +207,6 @@ fn email_capture_state_path(app: &tauri::AppHandle) -> PathBuf {
     get_data_dir(app).join(EMAIL_CAPTURE_STATE_FILE_NAME)
 }
 
-// The state file is a read-modify-write watermark. Its writers used to be plain
-// `#[tauri::command]`s that the main thread serialized for free; now that they
-// run off the UI thread, a settings save landing between a commit's read and
-// its write would drop the advanced watermark and re-import the same mail.
 static EMAIL_CAPTURE_STATE_MUTEX: Mutex<()> = Mutex::new(());
 
 fn lock_email_capture_state() -> Result<std::sync::MutexGuard<'static, ()>, String> {
@@ -248,11 +239,6 @@ fn write_email_capture_state(
     Ok(())
 }
 
-/// Pick which UIDs to fetch, oldest first, bounded by `limit`.
-///
-/// When the mailbox `UIDVALIDITY` matches the stored state, only UIDs above the
-/// last-seen watermark are new. On a validity change (or first run) every UID is
-/// a candidate again and the seen Message-ID set is the only dedupe layer.
 pub(crate) fn select_new_uids(
     candidates: impl IntoIterator<Item = u32>,
     state: &EmailCaptureState,
@@ -271,9 +257,6 @@ pub(crate) fn select_new_uids(
     (uids, has_more)
 }
 
-/// Advance the dedupe state after the frontend confirmed the fetched batch was
-/// durably persisted as tasks. The UID watermark only moves forward within the
-/// same UIDVALIDITY generation; Message-IDs are capped to a recent window.
 pub(crate) fn merge_email_capture_state(
     mut state: EmailCaptureState,
     uid_validity: u32,
@@ -376,11 +359,6 @@ pub(crate) fn build_email_capture_message(
     }
 }
 
-// Did the text part `build_email_capture_message` read finish inside the bytes we were
-// given? A part that closed before the end of the buffer is followed by the next MIME
-// boundary, so its recorded end offset is short of the buffer; a part the fetch cut in
-// half runs to the very end. No text part at all (it sits behind a big attachment)
-// counts as not finished.
 fn text_part_ended_before(raw: &[u8]) -> bool {
     MessageParser::default()
         .parse(raw)
@@ -391,19 +369,12 @@ fn text_part_ended_before(raw: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-// A prefix fetch that came back full may have cut the message anywhere. Trust it only
-// when the text provably ended before the cut, or when we already hold every character
-// capture would keep; otherwise the import would silently lose body text.
 fn prefix_fetch_may_have_cut_text(prefix: &[u8], body_text: &str) -> bool {
     prefix.len() >= EMAIL_CAPTURE_FETCH_BYTE_LIMIT
         && body_text.chars().count() < EMAIL_CAPTURE_BODY_CHAR_LIMIT
         && !text_part_ended_before(prefix)
 }
 
-// `FnOnce` is the bound: at most one full refetch per UID per poll. A refetch that fails,
-// or comes back without a body, is a fetch failure like any other: it aborts the poll, so
-// the message is left in the mailbox for the next one. Falling back to the cut prefix here
-// would import exactly the empty body the refetch exists to prevent.
 fn email_capture_message_from_prefix<F>(
     uid: u32,
     uid_validity: u32,
@@ -479,8 +450,6 @@ fn open_email_session(
         .map_err(|(error, _)| classify_imap_error(error, "auth"))
 }
 
-/// Login + folder round-trip used before persisting an enabled config. Creates
-/// the capture folder when it does not exist yet, so setup stays one step.
 fn verify_email_capture_connection(
     config: &EmailCaptureConfigPayload,
     password: &str,
@@ -510,8 +479,6 @@ fn email_capture_status(
     Ok(status)
 }
 
-// read_bound_credential holds lock_dropbox_credential_state across its whole
-// read (and possible first-binding write) already — safe as-is (B2).
 #[tauri::command(async)]
 pub(crate) fn get_email_capture_config(app: tauri::AppHandle) -> Result<Value, String> {
     let (config, password) = read_bound_credential(&app, CredentialService::Email)?;
@@ -519,21 +486,12 @@ pub(crate) fn get_email_capture_config(app: tauri::AppHandle) -> Result<Value, S
     email_capture_status(&payload, password.is_some())
 }
 
-// Off the UI thread: enabling capture validates the account with a real
-// DNS + TCP + TLS + LOGIN round trip, which blocks for the connect timeout
-// against an unreachable host.
 #[tauri::command(async)]
 pub(crate) fn set_email_capture_config(
     app: tauri::AppHandle,
     config: Value,
     password: Option<String>,
 ) -> Result<Value, EmailCaptureError> {
-    // I1: both branches below write config.toml via update_bound_credential,
-    // which only holds lock_dropbox_credential_state for its own transaction
-    // — an RMW-lock holder's gap could still land here and lose it. Disjoint
-    // from lock_email_capture_state (protects the separate IMAP watermark
-    // file), so ordering between the two doesn't matter; RMW first to match
-    // every other config.toml writer's convention.
     let _config_guard = lock_config_read_modify_write().map_err(EmailCaptureError::other)?;
     let _state_guard = lock_email_capture_state().map_err(EmailCaptureError::other)?;
     let payload = serde_json::from_value::<EmailCaptureConfigPayload>(config)
@@ -552,7 +510,6 @@ pub(crate) fn set_email_capture_config(
         .filter(|value| !value.is_empty());
 
     if payload.host.is_empty() {
-        // Clearing the host removes the account, matching the WebDAV behavior.
         update_bound_credential(
             &app,
             CredentialService::Email,
@@ -575,8 +532,7 @@ pub(crate) fn set_email_capture_config(
                 "An app password is required to enable email capture.",
             ));
         };
-        // Never persist an enabled capture config before one successful
-        // login + folder round-trip.
+
         if let Err(error) = verify_email_capture_connection(&payload, current_password) {
             payload.enabled = false;
             validation_error = Some(error);
@@ -599,9 +555,6 @@ pub(crate) fn set_email_capture_config(
     }
 
     if let Some(error) = validation_error {
-        // A failed connection check is persisted disabled so the form keeps the
-        // attempted values. Keep ownership of the old watermark explicit: a
-        // successful retry can then tell that the configured mailbox changed.
         if mailbox_identity_changed && email_capture_state.mailbox_identity.is_none() {
             email_capture_state.mailbox_identity = Some(previous_identity);
             write_email_capture_state(&app, &email_capture_state)
@@ -616,20 +569,13 @@ pub(crate) fn set_email_capture_config(
     if mailbox_identity_changed || state_owner_changed {
         email_capture_state = EmailCaptureState::default();
     }
-    // Scope the UID watermark to the normalized host/account/folder only after
-    // the new configuration has passed validation and been persisted. Merely
-    // toggling capture or changing its password keeps the existing watermark.
+
     email_capture_state.mailbox_identity = Some(next_identity);
     write_email_capture_state(&app, &email_capture_state).map_err(EmailCaptureError::other)?;
     let has_password = effective_password.is_some();
     email_capture_status(&payload, has_password).map_err(EmailCaptureError::other)
 }
 
-// Off the UI thread: this opens an IMAP session (DNS + TCP + TLS + LOGIN) and
-// then EXAMINE + FETCH on a five-minute timer, up to ten rounds back to back.
-// A plain `#[tauri::command]` runs that on the main thread and freezes the
-// window for the whole round trip — and until the socket times out when the
-// host is unreachable.
 #[tauri::command(async)]
 pub(crate) fn email_capture_poll(
     app: tauri::AppHandle,
@@ -657,8 +603,6 @@ fn poll_mailbox(
     payload: &EmailCaptureConfigPayload,
     state: &EmailCaptureState,
 ) -> Result<EmailCapturePollResult, EmailCaptureError> {
-    // EXAMINE opens the folder read-only, so polling can never mutate flags
-    // or move the user's mail.
     let mailbox = session
         .examine(payload.folder.as_str())
         .map_err(|error| classify_imap_error(error, "folder"))?;
@@ -716,8 +660,6 @@ fn poll_mailbox(
     })
 }
 
-// Off the UI thread for the same reason as `email_capture_poll`; the state
-// lock keeps its read-modify-write atomic against a concurrent settings save.
 #[tauri::command(async)]
 pub(crate) fn email_capture_commit(
     app: tauri::AppHandle,
@@ -740,9 +682,6 @@ pub(crate) fn email_capture_commit(
 mod tests {
     use super::*;
 
-    // Exercises the real DNS + TCP + TLS + greeting + LOGIN stack against a
-    // public server. Ignored by default because it needs network access:
-    // `cargo test --lib email_capture -- --ignored`
     #[test]
     #[ignore = "hits the public network"]
     fn live_imap_login_failure_classifies_as_auth() {
@@ -966,6 +905,31 @@ mod tests {
     }
 
     #[test]
+    fn build_message_decodes_japanese_legacy_charsets() {
+        let iso_2022_jp = concat!(
+            "Subject: =?ISO-2022-JP?B?GyRCMnE1RCROO3FOQRsoQg==?=\r\n",
+            "Content-Type: text/plain; charset=ISO-2022-JP\r\n",
+            "Content-Transfer-Encoding: 7bit\r\n",
+            "\r\n",
+            "\x1b$BL@F|$^$G$KAw$k\x1b(B\r\n",
+        );
+        let message = build_email_capture_message(1, 7, iso_2022_jp.as_bytes());
+        assert_eq!(message.subject, "会議の資料");
+        assert_eq!(message.body_text, "明日までに送る");
+
+        let shift_jis = concat!(
+            "Subject: =?Shift_JIS?B?ie+LY4LMjpGXvw==?=\r\n",
+            "Content-Type: text/plain; charset=Shift_JIS\r\n",
+            "Content-Transfer-Encoding: base64\r\n",
+            "\r\n",
+            "lr6T+oLcgsWCyZGXguk=\r\n",
+        );
+        let message = build_email_capture_message(2, 7, shift_jis.as_bytes());
+        assert_eq!(message.subject, "会議の資料");
+        assert_eq!(message.body_text, "明日までに送る");
+    }
+
+    #[test]
     fn build_message_converts_html_only_mail_to_text() {
         let raw = concat!(
             "From: sender@example.com\r\n",
@@ -978,7 +942,7 @@ mod tests {
         assert_eq!(message.subject, "Weekly report");
         assert!(message.body_text.contains("Numbers are up"));
         assert!(!message.body_text.contains('<'));
-        // No Message-ID header: falls back to a UID-scoped synthetic id.
+
         assert_eq!(message.message_id, "uid:7:3");
     }
 
@@ -1012,9 +976,6 @@ mod tests {
         )
     }
 
-    /// Runs the prefix-fetch path over `raw` the way `poll_mailbox` does: the first
-    /// EMAIL_CAPTURE_FETCH_BYTE_LIMIT bytes are what the server returned. Reports which
-    /// UIDs the code asked to refetch in full.
     fn message_from_prefix(raw: &str) -> (EmailCaptureMessage, Vec<u32>) {
         let cut = raw.len().min(EMAIL_CAPTURE_FETCH_BYTE_LIMIT);
         let mut refetched = Vec::new();
@@ -1099,9 +1060,6 @@ mod tests {
         assert!(message.body_text.ends_with('…'));
     }
 
-    // A long plain-text mail is cut by the fetch too, but capture keeps only the first
-    // 16 000 characters, and the prefix already holds them. Refetching it would undo the
-    // whole point of the partial fetch.
     #[test]
     fn prefix_fetch_keeps_text_that_already_reached_the_kept_character_cap() {
         let raw = format!(

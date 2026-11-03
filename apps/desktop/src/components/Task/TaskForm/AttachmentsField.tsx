@@ -1,5 +1,5 @@
 import { BookOpen, Folder, FolderOpen, Link2, Paperclip, Pencil, Trash2 } from 'lucide-react';
-import { tFallback, type Attachment } from '@mindwtr/core';
+import { isAttachmentKeptWithoutFile, tFallback, type Attachment } from '@mindwtr/core';
 import { isFolderLinkAttachment, useBareFileReferenceCheck, useExternalFileReferenceCheck } from '../../../lib/attachment-reference';
 import { getAttachmentDisplayTitle } from '../../../lib/attachment-utils';
 import { isTauriRuntime } from '../../../lib/runtime';
@@ -8,8 +8,7 @@ import { AttachmentImage } from '../AttachmentImage';
 import { QUICK_ADD_FIELD_TOKENS, QuickAddTokenBadge, TaskEditorFieldLabel } from '../task-editor-label';
 import { AttachmentProgressIndicator } from '../../AttachmentProgressIndicator';
 
-// Secondary add actions share one bordered blue shape with the checklist's
-// "Add item" control so every way to grow a task reads the same.
+
 const taskEditorAddButtonClassName = 'inline-flex h-7 items-center gap-1.5 rounded-md border border-primary/30 px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10';
 
 type AttachmentsFieldProps = {
@@ -18,7 +17,7 @@ type AttachmentsFieldProps = {
     visibleEditAttachments: Attachment[];
     addFileAttachment: () => void;
     addLinkAttachment: () => void;
-    // Desktop shell only: the folder picker is a native dialog.
+
     addFolderLinkAttachment?: () => void;
     addObsidianNoteAttachment: () => void;
     showObsidianNoteAttachment: boolean;
@@ -41,9 +40,8 @@ export function AttachmentsField({
     removeAttachment,
 }: AttachmentsFieldProps) {
     const isBareFileReference = useBareFileReferenceCheck();
-    // Edit shows for real links and for file attachments pointing outside the
-    // managed dir — the pre-#1001-fix "Add link" shape; re-saving one converts
-    // it to a true pointer.
+
+
     const isExternalFileReference = useExternalFileReferenceCheck();
     const canEditAsLink = (attachment: Attachment) =>
         attachment.kind === 'link' || isExternalFileReference(attachment);
@@ -181,15 +179,15 @@ export function AttachmentsField({
                         const displayTitle = getAttachmentDisplayTitle(attachment);
                         const isPointer = attachment.kind === 'link' || isBareFileReference(attachment);
                         const fullTitle = isPointer ? attachment.uri : attachment.title;
-                        // Same three states the mobile editor and the desktop
-                        // list rows already show, so a synced-but-not-downloaded
-                        // file no longer reads as a dead link.
+
+
+                        const stagedInBrowser = !isTauriRuntime() && attachment.localStatus === 'available';
                         const isMissing = attachment.kind === 'file'
-                            && (!attachment.uri || attachment.localStatus === 'missing');
+                            && ((!attachment.uri && !stagedInBrowser) || attachment.localStatus === 'missing');
                         const isDownloading = attachment.localStatus === 'downloading';
                         const statusLabel = isDownloading
                             ? t('common.loading')
-                            : isMissing && attachment.cloudKey
+                            : isMissing && attachment.cloudKey && !isAttachmentKeptWithoutFile(attachment)
                                 ? t('attachments.download')
                                 : isMissing
                                     ? t('attachments.missing')

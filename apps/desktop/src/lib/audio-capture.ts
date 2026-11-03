@@ -10,11 +10,11 @@ import { getManagedPath } from './managed-paths';
 import { isFlatpakRuntime, isTauriRuntime } from './runtime';
 import { invokeNative } from './tauri-invoke';
 
-// Relative to the managed data dir (portable-aware, #855).
+
 const AUDIO_CAPTURE_DIR = 'audio-captures';
 const TARGET_SAMPLE_RATE = 16_000;
 
-/** Mirrors the Rust `AudioCaptureResult` returned by `stop_audio_recording`. */
+
 type NativeAudioCaptureResult = {
     path: string;
     sampleRate: number;
@@ -23,11 +23,11 @@ type NativeAudioCaptureResult = {
 };
 
 export type AudioCaptureFailureReason =
-    /** No recorder is available at all (no getUserMedia, no AudioContext). */
+
     | 'unsupported'
-    /** A recorder exists but the machine has no audio input device. */
+
     | 'no-microphone'
-    /** Permission denied, device busy, or any other start failure. */
+
     | 'failed';
 
 export class AudioCaptureError extends Error {
@@ -41,25 +41,22 @@ export class AudioCaptureError extends Error {
 }
 
 export type AudioCapture = {
-    /** Absolute path of the captured WAV on disk. */
+
     path: string;
     name: string;
     mimeType: 'audio/wav';
-    /** Byte length, when the backend reported one. */
+
     size?: number;
-    /**
-     * Reads the captured audio. Memoised — callers that both attach and
-     * transcribe do not pay for a second read, and callers that only attach
-     * never read at all.
-     */
+
+
     bytes: () => Promise<Uint8Array>;
 };
 
 export type AudioCaptureSession = {
     backend: DesktopAudioCaptureBackend;
-    /** Ends the recording and materialises the WAV. */
+
     stop: () => Promise<AudioCapture>;
-    /** Ends the recording and deletes anything it wrote. Never rejects. */
+
     cancel: () => Promise<void>;
 };
 
@@ -182,7 +179,7 @@ const startWebCapture = async (
 
     const teardown = async (): Promise<Float32Array[]> => {
         if (context.state === 'running') {
-            // Suspending the graph gives ScriptProcessorNode one stable stop point before teardown.
+
             await context.suspend();
         }
         processor.disconnect();
@@ -228,18 +225,14 @@ const startWebCapture = async (
                 bytes: async () => wavBytes,
             };
         },
-        // Nothing has been written yet on the web path, so dropping the buffer is the whole cleanup.
+
         cancel: async () => {
             await teardown();
         },
     };
 };
 
-/**
- * Starts a desktop audio capture, preferring the native recorder and falling
- * back to the in-page MediaRecorder graph when it is unavailable — the same
- * fallback both capture surfaces need, so neither hard-fails outside Tauri.
- */
+
 export async function startAudioCapture(
     options: { defaultName?: () => string; isCurrent?: () => boolean } = {},
 ): Promise<AudioCaptureSession> {

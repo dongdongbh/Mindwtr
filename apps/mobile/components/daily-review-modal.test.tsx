@@ -131,7 +131,7 @@ vi.mock('../contexts/toast-context', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-    // One object, like the real hook: rows compare `tc` by identity (#766).
+
     const themeColors = {
         bg: '#101214',
         border: '#334155',
@@ -425,8 +425,7 @@ describe('DailyReviewScreen', () => {
         expect(style.borderWidth).toBeUndefined();
     });
 
-    // Rows here carry the #766 memo boundary too, so the review flow must hand
-    // every row the same action object rather than a fresh set of arrows.
+
     it('hands rows one stable action object across re-renders', async () => {
         storeState.tasks = [
             makeTask({ id: 'due-1', title: 'Due one', dueDate: '2026-07-15' }),
@@ -455,8 +454,7 @@ describe('DailyReviewScreen', () => {
         expect(rowProps()[1].actions).toBe(before[1].actions);
     });
 
-    // The waiting step is the only one that gives rows a footer; a fresh element
-    // per render there would defeat the same memo boundary (#766).
+
     it('keeps the waiting-step footer element stable across re-renders', async () => {
         storeState.tasks = [
             makeTask({ id: 'waiting-1', title: 'Waiting one', status: 'waiting', dueDate: undefined }),

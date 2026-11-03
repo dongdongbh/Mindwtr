@@ -30,6 +30,7 @@ import {
   getQuickCaptureBulkConfirm,
   getQuickCaptureBulkFailedNotice,
   getQuickCaptureContextChoices,
+  getSavedTaxonomyTokens,
   getQuickCaptureContextPicker,
   getQuickCaptureLabels,
   isSelectableProjectForTaskAssignment,
@@ -151,11 +152,7 @@ const hasFailedActivitySubmission = (ownerId: string) => {
   ));
 };
 
-/**
- * Watches for a durable capture failure that settled after the Activity which
- * submitted it was destroyed. The replacement opens an editor, then the sheet
- * consumes the failed draft without replaying the write.
- */
+
 export const subscribeQuickCaptureSubmissionFailure = (
   ownerId: string,
   listener: () => void,
@@ -289,22 +286,19 @@ const logCaptureError = (message: string, error?: unknown) => {
   void logError(err, { scope: 'capture', extra: buildCaptureExtra(message, error) });
 };
 
-// Settings come off the store too, so refreshing takes no component state and
-// cannot re-identify the callbacks that call it.
+
 const readQuickAddParseOptions = () => {
   const state = useTaskStore.getState();
   return buildQuickAddParseOptions(state.settings, state);
 };
 
 const toInstant = (value: string | null) => (value ? safeParseDate(value)?.toISOString() ?? null : null);
-// A native picker's pick as core's due date edits take it: the local day, or the local time of day.
+
 const pad = (value: number) => String(value).padStart(2, '0');
 const toLocalDay = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 const toLocalTime = (date: Date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 
-// Rendered in the sheet's own overlay layer, alongside the pickers, so the
-// confirm is plain React inside the already-presented modal rather than a
-// second native presentation stacked on top of it (#940).
+
 function BulkQuickAddConfirm({
   cancelLabel,
   confirmLabel,
@@ -386,9 +380,8 @@ export function QuickCaptureSheet({
   const { t } = useLanguage();
   const tc = useThemeColors();
   const tokens = useThemeTokens();
-  // Two-tier M3 emphasis: the capture FAB owns the high-emphasis `primary` role
-  // (see tab _layout.tsx); secondary primary actions like Save sit one step below
-  // it on the canonical `primaryContainer`, preserving the action hierarchy.
+
+
   const saveButtonBackgroundColor = tokens.isMaterial && tokens.roles
     ? tokens.roles.primaryContainer
     : tc.tint;
@@ -409,7 +402,7 @@ export function QuickCaptureSheet({
 
   const updateSpeechSettings = useCallback(
     (next: Partial<NonNullable<NonNullable<typeof settings.ai>['speechToText']>>) => {
-      // Built from the latest stored settings, so an ai key another device changed stays.
+
       updateSettingsFromLatest((latest) => ({
         ai: {
           ...(latest.ai ?? {}),
@@ -425,16 +418,11 @@ export function QuickCaptureSheet({
 
   const [value, setValue] = useState('');
   const [saving, setSaving] = useState(false);
-  // Refreshed by resetDraftState — which runs on open AND after each capture in
-  // an "Add another" burst, so a context/tag/person created by one capture is
-  // known to the next one's parse. Not subscribed and not rebuilt per render:
-  // the bag is an O(tasks) scan and this sheet stays mounted for the whole
-  // session (see loadContextOptions). The preview and the save read this one
-  // object, so they cannot disagree. A background sync landing mid-draft leaves
-  // it one capture stale — accepted, to keep the scan off the keystroke path.
+
+
   const [quickAddParseOptions, setQuickAddParseOptions] = useState(readQuickAddParseOptions);
-  // Every chosen option (core's QuickCaptureOptions), including the description.
-  // Changes go through editOptions below.
+
+
   const [options, setOptions] = useState<QuickCaptureOptions>(() => createQuickCaptureOptions({ projects: [], defaultAreaId: null }));
   const {
     note: noteValue,
@@ -465,15 +453,16 @@ export function QuickCaptureSheet({
   const [showPriorityPicker, setShowPriorityPicker] = useState(false);
   const [optionsExpanded, setOptionsExpanded] = useState(false);
   const [androidKeyboardAvoidingEnabled, setAndroidKeyboardAvoidingEnabled] = useState(true);
-  const androidKeyboardInset = useAndroidKeyboardInset(visible);
+  const androidKeyboardInset = useAndroidKeyboardInset(visible, inputRef);
   const { onModalShow, onAutoFocusRequest, onInputFocus, onInputBlur } = useQuickCaptureKeyboardDiagnostics({
     visible, openRequestId, inputRef,
     appliedInset: androidKeyboardAvoidingEnabled ? androidKeyboardInset : 0,
     avoidanceEnabled: androidKeyboardAvoidingEnabled, expanded: optionsExpanded, autoRecord: Boolean(autoRecord),
   });
-  // The picker overlays render outside the KeyboardAvoidingView, so iOS needs
-  // the measured inset too — only the sheet body is keyboard-avoided (#891).
-  const overlayKeyboardInset = useKeyboardInset(visible);
+
+
+  const iosOverlayKeyboardInset = useKeyboardInset(visible && Platform.OS !== 'android');
+  const overlayKeyboardInset = Platform.OS === 'android' ? androidKeyboardInset : iosOverlayKeyboardInset;
   const projectsRef = useRef(projects);
   const restoredActivitySessionRef = useRef(false);
   const contextOptionsLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -486,8 +475,8 @@ export function QuickCaptureSheet({
   const focusedCount = getFocusedCount();
   const labels = getQuickCaptureLabels(options, { projects, areas, settings, focusedCount, t, formatDate: safeFormatDate });
   const { prioritiesEnabled, canFocus: canFocusNewTask, focusDisabledReason: focusNewTaskDisabledReason } = labels;
-  // Every option change is core's edit. A refused edit (focus at the limit)
-  // shows its notice, decided on the options this render shows.
+
+
   const editOptions = useCallback((edit: QuickCaptureEdit) => {
     const context = { settings, focusedCount, defaultAreaId, contextChoices: contextOptions, t, now: new Date() };
     const checked = applyQuickCaptureEdit(options, edit, context);
@@ -647,8 +636,8 @@ export function QuickCaptureSheet({
     );
     if (options.sessionCurrent && options.keepEditing) {
       if (options.durableSucceeded) {
-        // Add-another has already committed the previous draft. Wait until the
-        // reset state renders so the hook cannot retain the stale saved value.
+
+
         rearmAfterDraftResetRef.current = true;
       } else {
         if (!value.trim() && settled?.draft.value) {
@@ -735,8 +724,9 @@ export function QuickCaptureSheet({
       contextOptionsLoadTimerRef.current = null;
       try {
         const state = useTaskStore.getState();
-        const nextOptions = getQuickCaptureContextChoices(state.tasks, initialProps?.contexts);
-        const nextHistory = getQuickCaptureContextChoices(state._allTasks);
+        const savedContexts = getSavedTaxonomyTokens(state.settings, 'context');
+        const nextOptions = Array.from(new Set([...getQuickCaptureContextChoices(state.tasks, initialProps?.contexts), ...savedContexts]));
+        const nextHistory = Array.from(new Set([...getQuickCaptureContextChoices(state._allTasks), ...savedContexts]));
         if (contextOptionsRequestRef.current === requestId) {
           setContextOptions(nextOptions);
           setContextHistory(nextHistory);
@@ -885,15 +875,14 @@ export function QuickCaptureSheet({
     } else {
       resetDraftState();
     }
-    // The "Add another" switch is a sticky device preference: capture bursts
-    // (Enter chains into the next task) should survive closing the sheet
-    // instead of resetting to one-shot mode every open (#819).
+
+
     void readQuickCaptureAddAnother().then((stored) => {
       if (stored) setOptions((current) => (current.addAnother ? current : { ...current, addAnother: true }));
     });
     if (autoRecord) return;
     clearInitialFocusTimer();
-    // Android can accept JS focus before its modal window is ready for the IME.
+
     initialFocusPendingRef.current = true;
     if (Platform.OS !== 'android' || modalShownRef.current) scheduleInitialFocus();
     return clearInitialFocusTimer;
@@ -905,16 +894,15 @@ export function QuickCaptureSheet({
     setShowPriorityPicker(false);
   }, [prioritiesEnabled]);
 
-  // The options the preview reads: only what the popup's own controls force
-  // onto the saved task, so typing a note does not re-parse the title.
+
   const previewOptions = useMemo(() => ({
     projectId,
     dueDate: options.dueDate,
     dueDateHasTime,
     startTime: options.startTime,
   }), [dueDateHasTime, options.dueDate, options.startTime, projectId]);
-  // The preview and the save read the same parse-options bag, so the strip
-  // cannot promise what the save would not write.
+
+
   const previewEntries = useMemo(() => buildQuickCapturePreview(value, previewOptions, {
     projects,
     areas,
@@ -975,7 +963,7 @@ export function QuickCaptureSheet({
     clearContextOptionsLoad();
     contextOptionsRequestRef.current += 1;
     setValue('');
-    // No preset: empty options in the default area.
+
     setOptions(createQuickCaptureOptions({ projects: projectsRef.current, defaultAreaId }));
     setContextOptions([]);
     setContextOptionsLoading(false);
@@ -1094,12 +1082,7 @@ export function QuickCaptureSheet({
     }
   }, [addProject, addTasks, beginActivitySubmission, captureContext, finalizeClose, options, settleActivitySubmission, showToast, t]);
 
-  // Confirm inside this sheet rather than through Alert. The sheet is a native
-  // Modal, and an alert raised while it is presented is a second native
-  // presentation stacked on the first — on iOS the confirm never became
-  // visible, so a .txt import looked like it silently did nothing (#940).
-  // Rendering it in the sheet's own overlay layer, next to the pickers, removes
-  // the second presentation entirely instead of trying to time around it.
+
   const confirmBulkQuickAdd = useCallback((lines: string[]) => {
     setPendingBulkLines(lines);
   }, []);
@@ -1135,8 +1118,8 @@ export function QuickCaptureSheet({
         actions: { addProject, addTask },
         openAfterSave,
       });
-      // The sheet has no error banner, so a refused capture says why in a toast
-      // (capture-modal already says so on its own screen).
+
+
       if (outcome.kind === 'refused') showToast(outcome.notice);
       durableSucceeded = outcome.kind === 'saved';
       if (!submissionCoordinatorRef.current.isCurrent(session) || outcome.kind !== 'saved') return;
@@ -1156,9 +1139,7 @@ export function QuickCaptureSheet({
         return;
       }
 
-      // Project/section-preset capture (opened from ProjectDetailModal's add
-      // button): flash + scroll the new row in the project list once the sheet
-      // closes (#916); core decides when (saveQuickCapture's highlightTaskId).
+
       if (outcome.highlightTaskId) {
         setHighlightTask(outcome.highlightTaskId);
       }
@@ -1456,7 +1437,7 @@ export function QuickCaptureSheet({
           editOptions({ type: 'setAddAnother', value: next });
           void writeQuickCaptureAddAnother(next);
         }}
-        // At the focus limit core refuses the star and explains why (a toast).
+
         onToggleFocusNewTask={() => editOptions({ type: 'toggleFocus' })}
         onToggleRecording={handleToggleRecording}
         onValueChange={setValue}

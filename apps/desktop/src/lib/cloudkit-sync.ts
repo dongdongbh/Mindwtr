@@ -1,10 +1,6 @@
-/**
- * CloudKit sync orchestrator for macOS desktop (Tauri).
- *
- * Mirrors the mobile's cloudkit-sync.ts but uses Tauri `invoke` instead of
- * Expo native modules. Provides readRemote/writeRemote functions that plug
- * into the existing SyncService sync cycle.
- */
+
+
+
 import { CLOUDKIT_ATTACHMENT_RECORD_TYPE, parseCloudKitRetryAfterMs, type AppData } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { logInfo, logWarn, logError } from './app-log';
@@ -26,9 +22,6 @@ const invokeNative = async <T>(command: string, args?: Record<string, unknown>):
     }
 };
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 type ChangeResult = {
     records: Record<string, Array<Record<string, unknown>>>;
@@ -85,7 +78,7 @@ export type CloudKitAttachmentMetadata = {
     filePath?: string;
 };
 
-// Record type names (must match the ObjC bridge / CloudKitRecordMapper)
+
 const RECORD_TYPES = {
     task: 'MindwtrTask',
     project: 'MindwtrProject',
@@ -95,18 +88,11 @@ const RECORD_TYPES = {
     settings: 'MindwtrSettings',
 } as const;
 
-// LocalStorage keys (same semantics as mobile's AsyncStorage keys)
+
 const CLOUDKIT_CHANGE_TOKEN_KEY = '@mindwtr_cloudkit_change_token';
 const CLOUDKIT_SEEDED_KEY = '@mindwtr_cloudkit_seeded';
 const CLOUDKIT_ZONE_CREATED_KEY = '@mindwtr_cloudkit_zone_created';
 
-// ---------------------------------------------------------------------------
-// Tauri invoke helper
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Platform detection
-// ---------------------------------------------------------------------------
 
 const isMacOS = (): boolean => {
     if (typeof navigator === 'undefined') return false;
@@ -118,9 +104,6 @@ export const isCloudKitAvailable = (): boolean => {
     return isTauriRuntime() && isMacOS();
 };
 
-// ---------------------------------------------------------------------------
-// Account check
-// ---------------------------------------------------------------------------
 
 export const getCloudKitAccountStatus = async (): Promise<AccountStatus> => {
     if (!isCloudKitAvailable()) return 'unsupported';
@@ -131,9 +114,6 @@ export const getCloudKitAccountStatus = async (): Promise<AccountStatus> => {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Setup
-// ---------------------------------------------------------------------------
 
 export const ensureCloudKitReady = async (): Promise<void> => {
     if (!isCloudKitAvailable()) {
@@ -151,7 +131,7 @@ export const ensureCloudKitReady = async (): Promise<void> => {
         await invokeNative('cloudkit_ensure_subscription');
         await invokeNative('cloudkit_register_for_notifications');
     } catch (error) {
-        // Subscription failures are non-fatal — timer-based sync still works
+
         void logWarn('CloudKit subscription setup failed (non-fatal)', {
             scope: 'cloudkit',
             extra: { error: error instanceof Error ? error.message : String(error) },
@@ -159,9 +139,6 @@ export const ensureCloudKitReady = async (): Promise<void> => {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Read Remote (for SyncCycleIO.readRemote)
-// ---------------------------------------------------------------------------
 
 export const readRemoteCloudKit = async (): Promise<AppData | null> => {
     if (!isCloudKitAvailable()) return null;
@@ -170,7 +147,7 @@ export const readRemoteCloudKit = async (): Promise<AppData | null> => {
     try {
         const changeToken = localStorage.getItem(CLOUDKIT_CHANGE_TOKEN_KEY);
 
-        // Try incremental fetch first
+
         if (changeToken) {
             const result = await invokeNative<ChangeResult>('cloudkit_fetch_changes', {
                 changeToken,
@@ -184,23 +161,23 @@ export const readRemoteCloudKit = async (): Promise<AppData | null> => {
                 return await fullFetch();
             }
 
-            // Save new token
+
             if (result.changeToken) {
                 localStorage.setItem(CLOUDKIT_CHANGE_TOKEN_KEY, result.changeToken);
             }
 
-            // If no changes, return null to skip merge
+
             const hasChanges =
                 Object.values(result.records).some((arr) => arr.length > 0) ||
                 Object.values(result.deletedIDs).some((arr) => arr.length > 0);
 
             if (!hasChanges) return null;
 
-            // For incremental changes we still need full remote state for three-way merge
+
             return await fullFetch();
         }
 
-        // No token — first sync, do full fetch
+
         return await fullFetch();
     } catch (error) {
         void logError(error instanceof Error ? error : new Error(String(error)), {
@@ -211,14 +188,7 @@ export const readRemoteCloudKit = async (): Promise<AppData | null> => {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Write Remote (for SyncCycleIO.writeRemote)
-// ---------------------------------------------------------------------------
 
-// Record types the last full read found empty. The next save of such a type
-// skips its fetch-by-ID step (every lookup would answer "unknown item" and
-// only spend request budget, #1278). Used once: after that save, records
-// may exist, so later saves fetch them again.
 const remoteEmptyRecordTypes = new Set<string>();
 
 const saveRecordsOfType = async (
@@ -271,7 +241,7 @@ export const writeRemoteCloudKit = async (data: AppData): Promise<void> => {
             );
         }
 
-        // Save settings as a single record
+
         if (data.settings && Object.keys(data.settings).length > 0) {
             const settingsRecord = [
                 {
@@ -302,10 +272,10 @@ export const writeRemoteCloudKit = async (data: AppData): Promise<void> => {
             });
         }
 
-        // Delete purged records from CloudKit
+
         await deletePurgedRecords(data);
 
-        // Advance change token only if no conflicts
+
         if (allConflicts.length === 0) {
             const changeResult = await invokeNative<ChangeResult>('cloudkit_fetch_changes', {
                 changeToken: localStorage.getItem(CLOUDKIT_CHANGE_TOKEN_KEY) ?? null,
@@ -328,9 +298,6 @@ export const writeRemoteCloudKit = async (data: AppData): Promise<void> => {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Seed (first-time upload from local data)
-// ---------------------------------------------------------------------------
 
 export const saveCloudKitAttachmentAsset = async (
     recordName: string,
@@ -396,9 +363,6 @@ export const seedCloudKitFromLocal = async (data: AppData): Promise<void> => {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Push notification polling
-// ---------------------------------------------------------------------------
 
 export const consumePendingRemoteChange = async (): Promise<boolean> => {
     if (!isCloudKitAvailable()) return false;
@@ -409,9 +373,6 @@ export const consumePendingRemoteChange = async (): Promise<boolean> => {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 async function fullFetch(): Promise<AppData> {
     const [tasks, projects, sections, areas, people, settingsRecords] = await Promise.all([
@@ -433,7 +394,7 @@ async function fullFetch(): Promise<AppData> {
         if (Array.isArray(records) && records.length === 0) remoteEmptyRecordTypes.add(recordType);
     }
 
-    // Extract settings from the single settings record
+
     let settings: Record<string, unknown> = {};
     if (Array.isArray(settingsRecords) && settingsRecords.length > 0) {
         const settingsRecord = settingsRecords[0];
@@ -442,7 +403,7 @@ async function fullFetch(): Promise<AppData> {
         }
     }
 
-    // After a full fetch, get the current token for future incremental fetches
+
     const changeToken = localStorage.getItem(CLOUDKIT_CHANGE_TOKEN_KEY);
     if (!changeToken) {
         try {
@@ -453,7 +414,7 @@ async function fullFetch(): Promise<AppData> {
                 localStorage.setItem(CLOUDKIT_CHANGE_TOKEN_KEY, result.changeToken);
             }
         } catch {
-            // Non-fatal — we'll get the token on next sync
+
         }
     }
 

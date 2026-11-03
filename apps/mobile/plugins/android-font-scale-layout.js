@@ -1,19 +1,6 @@
 const { createRunOncePlugin, withMainApplication } = require('@expo/config-plugins');
 
-// React Native 0.81 keeps the Android text layout from the moment a surface was
-// laid out. When the system font scale changes while the app process is alive
-// (Settings > Display, or an OEM ROM re-applying its font setting to a process
-// the background sync worker kept around), MainActivity is recreated on the same
-// ReactHost: the new TextViews draw at the new scale while Yoga still holds the
-// old measurements, so the last glyph of short labels hard-clips and longer
-// labels wrap onto a hidden second line (facebook/react-native#52895, #1161).
-// The `enableFontScaleChangesUpdatingLayout` feature flag makes ReactHost
-// refresh DisplayMetricsHolder on configuration changes and pass the real
-// fontScale to the surface layout constraints. RN only lets `override` run
-// once and `loadReactNative` already spent that call, so the app applies its
-// flag through `dangerouslyForceOverride` right after it. The returned string
-// lists flags that were read before the override (null on RN 0.81) and is
-// logged so a logcat capture proves the override landed first.
+
 const IMPORTS = [
   'import com.facebook.react.internal.featureflags.ReactNativeFeatureFlags',
   'import com.facebook.react.internal.featureflags.ReactNativeFeatureFlagsOverrides_RNOSS_Stable_Android',

@@ -79,9 +79,8 @@ describe('AreaColorPicker', () => {
         fireEvent.click(getByLabelText('Area color'));
 
         const menu = getByTestId('area-color-picker-menu');
-        // None + one button per preset. jsdom cannot measure, so the wrap is
-        // pinned as a declaration: a single flex row overflows past six colors.
-        // None + one button per preset + the custom swatch.
+
+
         expect(menu.querySelectorAll('button')).toHaveLength(AREA_PRESET_COLORS.length + 2);
         expect(menu.className).toContain('grid-cols-7');
         expect(menu.className).not.toContain('flex gap-2');
@@ -97,12 +96,12 @@ describe('AreaColorPicker', () => {
         const custom = getByTestId('area-color-picker-custom');
         expect(custom.className).toContain('border-foreground');
         expect(custom.getAttribute('style')).toContain('rgb(18, 52, 86)');
-        // No preset may claim the selection at the same time.
+
         expect(getByLabelText('Area color: #3b82f6').className).not.toContain('border-foreground');
     });
 
     describe('custom color panel', () => {
-        // jsdom serializes inline colors as rgb().
+
         const rgb = (hex: string) =>
             `rgb(${[1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(', ')})`;
 
@@ -126,7 +125,7 @@ describe('AreaColorPicker', () => {
 
             expect(getByTestId('area-color-picker-panel')).toBeTruthy();
             expect(getByLabelText('Custom color').getAttribute('aria-expanded')).toBe('true');
-            // Seeded from the current color.
+
             expect((getByLabelText('Area color: Custom color') as HTMLInputElement).value).toBe(
                 '#3b82f6',
             );
@@ -142,7 +141,7 @@ describe('AreaColorPicker', () => {
             const surface = getByTestId('area-color-picker-surface');
             surface.getBoundingClientRect = () =>
                 ({ left: 0, top: 0, width: 100, height: 100 }) as DOMRect;
-            // Full saturation, full value at the current hue (blue).
+
             fireEvent.pointerDown(surface, { button: 0, clientX: 100, clientY: 0 });
 
             const hex = (getByLabelText('Area color: Custom color') as HTMLInputElement).value;
@@ -159,7 +158,7 @@ describe('AreaColorPicker', () => {
             hue.getBoundingClientRect = () => ({ left: 0, top: 0, width: 360, height: 12 }) as DOMRect;
             fireEvent.pointerDown(hue, { button: 0, clientX: 0, clientY: 6 });
 
-            // Hue 0 keeps the saturation/value of #3b82f6, so it lands on a red.
+
             const hexField = getByLabelText('Area color: Custom color') as HTMLInputElement;
             expect(hexField.value).toBe('#f63b3b');
         });

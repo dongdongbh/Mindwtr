@@ -657,7 +657,7 @@ struct HistoryScreen: View {
     }
 
     private func inlineMarkdown(_ source: String) -> AttributedString {
-        // This is core's already-shortened inline preview, never task/date policy.
+
         (try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(source)
     }

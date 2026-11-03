@@ -1,11 +1,11 @@
-// TZ=America/New_York bun scripts/generate-native-task-search-fixtures.ts [--check]
+
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { filterTasksBySearch } from '../packages/core/src/search';
 import type { Project, Task } from '../packages/core/src/types';
 
 assert.equal(process.env.TZ, 'America/New_York', 'Run with TZ=America/New_York');
-const now = '2026-10-05T16:00:00.000Z'; // Noon EDT; relative comparisons retain noon.
+const now = '2026-10-05T16:00:00.000Z';
 assert.equal(new Date(now).getTimezoneOffset(), 240);
 const stamp = '2026-10-01T12:00:00.000Z';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;

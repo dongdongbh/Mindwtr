@@ -38,20 +38,24 @@ import { WEBDAV_CAPABILITY_PROOF_STORAGE_KEY } from './webdav-capability-proof';
 const markLocalWriteMock = vi.hoisted(() => vi.fn());
 const markLocalSqliteWriteMock = vi.hoisted(() => vi.fn());
 
-// #1119 follow-up: `hasAttachmentSyncWork` asks `attachment-reference` where the managed
-// attachments dir is, which is one Tauri IPC and resolves to null outside the desktop shell.
-// Only that lookup is stubbed — `isExternalFileReference`, the rule being tested, is the real
-// one.
+
 const MANAGED_ATTACHMENTS_DIR = '/app-data/mindwtr/attachments/';
 vi.mock('./attachment-reference', async (importOriginal) => ({
     ...await importOriginal<typeof import('./attachment-reference')>(),
     loadManagedAttachmentsDirPrefix: vi.fn(async () => '/app-data/mindwtr/attachments/'),
 }));
 
+
+vi.mock('./sync-attachment-backends', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('./sync-attachment-backends')>();
+    return { ...actual, isAttachmentDownloadBackedOff: vi.fn(actual.isAttachmentDownloadBackedOff) };
+});
+
 import {
     clearAttachmentPresenceStamp,
     markAttachmentPresenceReconciled,
 } from './attachment-presence-scope';
+import { isAttachmentDownloadBackedOff } from './sync-attachment-backends';
 import { SyncService, __syncServiceTestUtils } from './sync-service';
 
 const waitForAssertion = async (assertion: () => void, maxAttempts = 200): Promise<void> => {
@@ -385,7 +389,7 @@ describe('sync-service test utils', () => {
             if (command === 'get_data') return localData;
             if (command === 'read_sync_file') return emptyAppData();
             if (command === 'release_file_sync_lease') return undefined;
-            // Native refuses: an MCP capture landed while the external file was read.
+
             if (command === 'save_data') throw new Error('Local data changed during restore. Please try again.');
             throw new Error(`unexpected command: ${command}`);
         });
@@ -1463,9 +1467,8 @@ describe('SyncService testability hooks', () => {
         expect(events[0]).toBe('dropbox:recover-before-configuration');
         expect(events).toContain('snapshot:strict-cloud');
         expect(events.indexOf('provider:selfhosted')).toBeLessThan(events.lastIndexOf('backend:cloud'));
-        // The Sync page seed is refreshed from the committed configuration in
-        // the same queue slot, so a reopened page does not show the old backend
-        // until a queued sync cycle finishes.
+
+
         expect(events.lastIndexOf('snapshot:tolerant')).toBeGreaterThan(events.lastIndexOf('backend:cloud'));
         expect(SyncService.getLastKnownSyncSelection()).toMatchObject({
             backend: 'cloud',
@@ -3148,7 +3151,7 @@ describe('SyncService testability hooks', () => {
     it('holds the store write gate through manual cleanup\'s save and publication, then refreshes after it', async () => {
         const events: string[] = [];
         const data = { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} } satisfies AppData;
-        // Native answers the rows it holds after the save, which differ from the document sent.
+
         const canonical = { ...data, settings: { deviceId: 'canonical-device' } } satisfies AppData;
         let command: Promise<unknown> | null = null;
         const invoke = vi.fn(async (command_: string) => {
@@ -3158,7 +3161,7 @@ describe('SyncService testability hooks', () => {
             if (command_ === 'get_data') return data;
             if (command_ === 'save_data') {
                 events.push('save');
-                // A command arriving at the commit must act on the published cleanup, not the store before it.
+
                 command ??= runStoreCommand(async () => { events.push('command'); });
                 return canonical;
             }
@@ -3213,7 +3216,7 @@ describe('SyncService testability hooks', () => {
             markLocalSqliteWrite: vi.fn(),
             markLocalWrite: vi.fn(),
         });
-        // A store command is running when the cleanup reaches the gate; it edits before it ends.
+
         const command = runStoreCommand(async () => { await commandHeld; stamp += 1; });
 
         const cleanup = SyncService.cleanupAttachmentsNow().then(() => null, (error: unknown) => error);
@@ -3294,9 +3297,7 @@ describe('SyncService testability hooks', () => {
         expect(__syncServiceTestUtils.isLegacyWebdavPlaintextPostureAllowed(status)).toBe(expected);
     });
 
-    // fresh-join-attachment-posture packet -10: closes #1138 result §8 risk 2. Desktop has no
-    // pre-read no-key gate, so this predicate is the ONLY thing standing between an unresolved
-    // encryption posture and sealAttachmentBytes' plaintext fallback.
+
     describe('shouldDeferAttachmentPrepareUntilRead (fresh-join-attachment-posture packet -10)', () => {
         const base = {
             backend: 'webdav' as const,
@@ -3348,11 +3349,8 @@ describe('SyncService testability hooks', () => {
         });
 
         it.each([
-            // Keyed states (enabled/remote-plaintext) are ALWAYS established, with no scope
-            // comparison — material present means every write is encrypted from the first
-            // byte. Review packet -10 finding B1: `discoveredScopeLabel` is `undefined` for
-            // every production 'enabled' state (both writers clear it on purpose), so the row
-            // that matters most is the `undefined` one below — it must NOT defer.
+
+
             ['enabled', 'webdav#aaaaaaaa', false],
             ['enabled', 'webdav#bbbbbbbb', false],
             ['enabled', undefined, false],
@@ -3372,9 +3370,6 @@ describe('SyncService testability hooks', () => {
     });
 
 
-    // #1119 follow-up (audit F3), desktop port of mobile commit 06ebf5b41. The gate used to
-    // return true for ANY live file attachment, so a user with one synced attachment paid the
-    // whole phase — MKCOL plus one HEAD per attachment — on every cycle including idle ones.
     describe('hasAttachmentSyncWork (#1119 follow-up)', () => {
         const SCOPE = JSON.stringify(['webdav', 'https://dav.example/mindwtr', 'alice']);
 
@@ -3424,18 +3419,32 @@ describe('SyncService testability hooks', () => {
             ['localStatus downloading', { localStatus: 'downloading' as const }],
             ['localStatus not yet known', { localStatus: undefined }],
             ['a pending content upload', { pendingContentUpload: true }],
-            // An incoming content winner is merged in with NO recorded stat, on purpose, so the
-            // receiving device re-checks and re-downloads (resolveContentIdentity in core).
+
+
             ['no recorded content mtime', { contentMtimeMs: undefined }],
             ['no recorded content size', { contentSize: undefined }],
-            // Desktop-only: a linked file outside the managed dir can be edited in an external
-            // editor, which is exactly what #1057 check-on-touch exists to catch.
+
+
             ['an external file reference', { uri: '/home/user/Documents/spec.pdf' }],
         ])('still reports work with %s, even with a fresh stamp', async (_label, overrides) => {
             markAttachmentPresenceReconciled(SCOPE);
             await expect(
                 __syncServiceTestUtils.hasAttachmentSyncWork(dataWith(overrides), SCOPE),
             ).resolves.toBe(true);
+        });
+
+        it('leaves a file that answered not-found out of the work while its backoff holds', async () => {
+
+            markAttachmentPresenceReconciled(SCOPE);
+            const missing = dataWith({ uri: '', localStatus: 'missing' });
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(missing, SCOPE)).resolves.toBe(true);
+            vi.mocked(isAttachmentDownloadBackedOff).mockImplementation((id) => id === 'attachment-1');
+            try {
+                await expect(__syncServiceTestUtils.hasAttachmentSyncWork(missing, SCOPE)).resolves.toBe(false);
+            } finally {
+                vi.mocked(isAttachmentDownloadBackedOff).mockReset();
+                vi.mocked(isAttachmentDownloadBackedOff).mockReturnValue(false);
+            }
         });
 
         it('reports work for a pending remote delete regardless of the stamp', async () => {
@@ -3453,11 +3462,7 @@ describe('SyncService testability hooks', () => {
         });
     });
 
-    // fresh-join-attachment-posture packet -10, added item A: the presence stamp is the file
-    // backend's only durable "seen this location" fact, since buildFastSyncScope returns null
-    // there. Before this, `file` was hard-coded established, so a genuinely fresh file-backend
-    // device ran its attachment prepare phase — and `sealAttachmentBytes`' plaintext fallback —
-    // before the document read could discover the folder is encrypted.
+
     describe('hasCompletedCycleAgainstLocation (#1119 stamp feeding the #1138 posture gate)', () => {
         const FILE_SCOPE = JSON.stringify(['file', '/sync']);
 
@@ -3569,8 +3574,7 @@ describe('SyncService testability hooks', () => {
             isTauriRuntime: () => true,
         });
 
-        // The settings form sends password: '' with hasPassword: true after a
-        // restart; the empty string must not shadow the keyring secret.
+
         await SyncService.testWebDavConnection({
             url: 'https://example.com/remote.php/dav/files/user/mindwtr',
             username: 'alice',
@@ -3661,12 +3665,7 @@ describe('SyncService testability hooks', () => {
         getMonotonicNowSpy.mockRestore();
     });
 
-    // The 401-triggered token-refresh-and-retry-once policy moved to
-    // `createSyncBackendIO` (packages/core/src/sync-backend-io.test.ts,
-    // "retries exactly once on an unauthorized token" / "gives up after
-    // exactly one retry") as part of ADR 0014's completion — it is shared
-    // with mobile now instead of hand-copied here. What remains desktop's own
-    // policy is the transient-retry wrap around one Dropbox transport call.
+
     it('retries a transient Dropbox request failure before giving up', async () => {
         const operation = vi.fn()
             .mockRejectedValueOnce(new TypeError('Network request failed'))
@@ -4214,11 +4213,8 @@ describe('SyncService orchestration', () => {
     });
 
     it('waits for the active cycle and then proves a transient configuration on its own run', async () => {
-        // An activation probe must be proven by the call that will commit it, so
-        // it can neither ride the active cycle nor be queued behind it as a
-        // follow-up. It used to bounce with `requeued` at once, which dropped the
-        // backend switch every time an auto sync happened to be running when the
-        // user pressed Save (dd's own desktop, 2026-09-02). It now waits.
+
+
         const firstRun = createDeferred();
         const backendSpy = vi.spyOn(SyncService as any, 'getSyncBackend');
         backendSpy.mockImplementation(async () => {
@@ -4239,7 +4235,7 @@ describe('SyncService orchestration', () => {
             proofSettled = true;
             return result;
         });
-        // Still waiting: nothing queued behind the active cycle, nothing answered.
+
         await new Promise((resolve) => setTimeout(resolve, 20));
         expect(proofSettled).toBe(false);
         expect(SyncService.getSyncStatus().queued).toBe(false);
@@ -4254,8 +4250,8 @@ describe('SyncService orchestration', () => {
                 queued: false,
             });
         });
-        // The probe carried its own configOverride, so it never re-read the
-        // persisted backend; the active cycle's single read is all there is.
+
+
         expect(backendSpy).toHaveBeenCalledTimes(1);
     });
 
@@ -4538,8 +4534,8 @@ describe('SyncService orchestration', () => {
                 status: 'next',
                 tags: [],
                 contexts: [],
-                // The attachment phases are gated on there being attachment work at
-                // all, so the payload-mutating pass below needs something to act on.
+
+
                 attachments: [{
                     id: 'attachment-1',
                     kind: 'file',
@@ -4564,8 +4560,8 @@ describe('SyncService orchestration', () => {
             setError: vi.fn(),
         };
         const readRemoteFingerprint = vi.fn(async () => 'remote-fp-1');
-        // Post-merge attachment pass changes the payload; recording fast-sync
-        // state afterwards would cache a stale local fingerprint.
+
+
         const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async () => ({
             kind: 'ready',
             backend: 'file',
@@ -4623,9 +4619,7 @@ describe('SyncService orchestration', () => {
     });
 });
 
-// #1060: the connection-status probe reruns on every settings visit and
-// auto-sync tick; a persistently broken keyring must not re-report the same
-// failure each time, but a new failure (or a break after recovery) stays loud.
+
 describe('Dropbox connection status probe reporting', () => {
     it('reports each distinct probe failure once, re-arming after success', async () => {
         const reportError = vi.fn();

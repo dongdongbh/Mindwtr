@@ -101,7 +101,7 @@ const pickTransferDocument = async (
     }
 ): Promise<DesktopTransferDocument | null> => {
     if (isTauriRuntime()) {
-        const { open } = await import('@tauri-apps/plugin-dialog');
+        const { open } = await import('./native-dialog');
         const selected = await open({
             filters: [{ name: options.title, extensions: options.extensions }],
             multiple: false,
@@ -148,7 +148,7 @@ const downloadTextFile = async (
     format: { name: string; extension: string; mimeType: string } = { name: 'JSON', extension: 'json', mimeType: 'application/json' },
 ): Promise<boolean> => {
     if (isTauriRuntime()) {
-        const { save } = await import('@tauri-apps/plugin-dialog');
+        const { save } = await import('./native-dialog');
         const selected = await save({
             defaultPath: fileName,
             filters: [{ name: format.name, extensions: [format.extension] }],
@@ -240,11 +240,7 @@ export const exportDesktopBackup = async (data: AppData): Promise<void> => {
     }
 };
 
-/**
- * `tasks` narrows the export to a view's current result set (#1096) — `data`
- * stays the full dataset because that is where the serializer looks up project,
- * section and area titles.
- */
+
 export const exportDesktopCsv = async (data: AppData, tasks?: readonly Task[]): Promise<boolean> => {
     addBreadcrumb('transfer:export');
     void logInfo('CSV export started', {
@@ -276,7 +272,7 @@ const downloadBinaryFile = async (
     format: { name: string; extension: string; mimeType: string },
 ): Promise<void> => {
     if (isTauriRuntime()) {
-        const { save } = await import('@tauri-apps/plugin-dialog');
+        const { save } = await import('./native-dialog');
         const selected = await save({
             defaultPath: fileName,
             filters: [{ name: format.name, extensions: [format.extension] }],
@@ -346,7 +342,7 @@ export const inspectDesktopBackup = async (
     });
 };
 
-// Core owns parser dispatch; only desktop file-picker metadata stays here.
+
 type ImportPickerDescriptor = {
     accept: string;
     extensions: string[];

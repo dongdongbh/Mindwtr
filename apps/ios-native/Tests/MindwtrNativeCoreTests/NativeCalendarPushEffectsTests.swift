@@ -707,7 +707,7 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
                 try saveCalendar(effects, requestJSON: calendarRequest("deleteCalendar", calendar: owned))
                 try reopen()
                 let cold = try coordinator(); XCTAssertEqual(try cold.current()?.phase, .saved)
-                // The caller must freshly prove provider absence under its exact owner before this cold call.
+
                 try cold.acknowledgeCalendar(id: id)
                 var expected = before; expected[1] = nil; expected[4] = nil
                 if Data(selected.utf8) == Data(owned.utf8) { expected[2] = nil }

@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Actual bundled JSC policy, SQLite and descriptor-owned retirement/recovery.
+
 final class AttachmentDiscardFinishHostTests: XCTestCase {
     private var root: URL!
     private var bundle: URL!
@@ -129,7 +129,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             try await host.checkpointEditorDraft(.init(sessionID: before.sessionID, taskID: before.taskID,
                 generation: before.generation + 7, payloadJSON: before.payloadJSON))
         }
-        // Large enough that a real streaming cancellation leaves a partial stage.
+
         try Data(repeating: 0x73, count: 256 * 1024).write(to: cache.appendingPathComponent("borrowed.txt"))
         let before = try latest()
         let request = try json(["version": 1, "requestId": UUID().uuidString.lowercased(), "sessionID": before.sessionID,
@@ -200,7 +200,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
         XCTAssertEqual(FileManager.default.fileExists(atPath: target.path), published)
         return host
     }
-    // Fixture observation only; production never reconstructs intent ownership.
+
     private func unclaimedNamespace(_ op: NativeAttachmentDraftStore.Operation) -> URL {
         managed.appendingPathComponent(".mindwtr-install-" + op.requestId.replacingOccurrences(of: "-", with: "") + ".candidate", isDirectory: true)
     }
@@ -271,9 +271,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
         return operations
     }
 
-    // Private fixture source only: exactly one host insertion and exactly one
-    // settled-readiness pattern must match the actual minified bundle. No
-    // production evaluator or extra CoreHost command is exposed.
+
     private func probeBundle(_ suffix: String, exposeState: Bool = false) throws {
         var source = try String(contentsOf: originalBundle, encoding: .utf8)
         if exposeState {
@@ -321,7 +319,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             }
             await host.close(); let cold = core(noDomainWrites()); _ = try await cold.start()
             try released(); XCTAssertEqual(try domain(), saved); try sameFiles(files)
-            // There is no completed receipt/new UUID generator in this API.
+
             await failure { _ = try await self.finish(cold, retained) }
             let raw = try json(["version": 2, "taskID": taskID, "attachmentsOwned": true, "attachmentsBase": [], "attachments": []])
             let next = EditorDraftSnapshot(sessionID: UUID().uuidString.lowercased(), taskID: taskID, generation: 1, payloadJSON: raw)
@@ -384,8 +382,8 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
         XCTAssertTrue(fired); XCTAssertFalse(FileManager.default.fileExists(atPath: ownedTarget.path)); XCTAssertNil(try journalObject()["terminal"])
         let evidence = try Data(contentsOf: store.url)
         await host.close(); let cold = core(noDomainWrites())
-        // Stop after native missing proof so its actual outcome can be observed
-        // in the success terminal, before any sidecar release.
+
+
         await boundary(.afterDiscardTerminal, on: cold)
         await failure { _ = try await cold.start() }
         let command = try journalObject(), terminal = try XCTUnwrap(command["terminal"] as? [String: Any])
@@ -400,7 +398,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
         let host = try await seed(), retained = try await detach(host), files = try protectedBytes(), saved = try domain()
         let op = try XCTUnwrap(retained.operations.first), target = try XCTUnwrap(URL(string: op.targetURI))
         let namespace = try XCTUnwrap(URL(string: XCTUnwrap(op.stage?.uri))).deletingLastPathComponent()
-        // Immutable publication already consumed the recorded private namespace.
+
         var info = stat(); XCTAssertEqual(lstat(namespace.path, &info), -1); XCTAssertEqual(errno, ENOENT)
         try FileManager.default.removeItem(at: target)
         let operations = try resultOperations(await finish(host, retained), record: retained)
@@ -1052,8 +1050,8 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
         let faults = HostIOFaults(), cold = core(faults); _ = try await cold.start()
         var afterReference: String?
         await boundary(.beforeDiscardTarget(0), on: cold) {
-            // This is the real shared ordinary Save, fully acknowledged before
-            // the final live callback. Only subsequent Discard SQL is forbidden.
+
+
             let rows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(self.sql("SELECT attachments FROM tasks WHERE id=?", [self.referenceID]).utf8)) as? [[String: Any]])
             let attachments = try self.object("{\"value\":" + XCTUnwrap(rows.first?["attachments"] as? String) + "}")
             let values = try XCTUnwrap(attachments["value"] as? [[String: Any]])
@@ -1110,7 +1108,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             XCTAssertNotEqual(targetIdentity, proof.identity)
             try FileManager.default.removeItem(at: cache.appendingPathComponent("borrowed.txt"))
             await host.close()
-            // A stage-only entry must not use even the trusted public-target callback.
+
             try probeBundle("const h=MindwtrHost,f=h.attachmentDraftDiscardRetire;h.attachmentDraftDiscardRetire=function(j,k,r){if(JSON.parse(j).requestId==='\(last.requestId)')throw new Error('Unexpected stage target query');return f.call(h,j,k,r)}")
             let cold = core(noDomainWrites()); _ = try await cold.start()
             let hooks = AttachmentDraftHostHooks()
@@ -1202,8 +1200,8 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: store.url), evidence); XCTAssertNil(try journalObject()["terminal"])
             let pendingEvidence = try journalEvidence()
             if mode == "extra" {
-                // Retirement is not rollback: the exact owned stage was unlinked
-                // before rmdir refused the unknown child. No full result is owed.
+
+
                 var info = stat(); XCTAssertEqual(lstat(keptStage.path, &info), -1); XCTAssertEqual(errno, ENOENT)
                 XCTAssertEqual(try inode(namespace), op.stage?.privateDirectoryIdentity)
                 XCTAssertEqual(try Data(contentsOf: unknown), unknownBytes); XCTAssertEqual(try inode(unknown), unknownIdentity)
@@ -1332,8 +1330,8 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
                 XCTAssertEqual(try record().operations.last?.phase, .stagePrepared)
                 XCTAssertEqual(try Data(contentsOf: stage), try Data(contentsOf: cache.appendingPathComponent("borrowed.txt")))
                 await host.close()
-                // External historical rollback is not a Store-authorized downgrade.
-                // Logical Discard neither claims nor deletes these actual filled bytes.
+
+
                 try oldIntent.write(to: store.url)
                 host = core(noDomainWrites()); _ = try await host.start()
             } else {
@@ -1419,8 +1417,8 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
                 else { jobs.beforeWork = { id, installer in hold(id, installer) } }
             }
             let host = try await seed(version: version, adds: 0, jobs: jobs), before = try latest(), files = try protectedBytes(), saved = try domain()
-            // The completed prepare may win cancellation. A real pre-proof crash
-            // separately retains intent; cancellation is never claimed rollback.
+
+
             if completed { await boundary(.beforeStageProof, on: host) }
             let request = try json(["version": 1, "requestId": UUID().uuidString.lowercased(), "sessionID": before.sessionID,
                 "generation": before.generation, "picked": ["uri": cache.appendingPathComponent("borrowed.txt").absoluteString,
@@ -1498,8 +1496,8 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
     }
 
     func testUnstartedMaximumFixedJournalEnvelopeRemainsIndependentOfSidecarCapacity() throws {
-        // Production never embeds the opaque sidecar in this journal. This uses
-        // its exact bounded field/enum shape and the real JSONEncoder escaping.
+
+
         enum Terminal: Codable { case success(String) }
         struct Command: Encodable { let version: Int; let method: String; let argumentsJSON: String; let terminal: Terminal? }
         let session = UUID().uuidString.lowercased(), id = UUID().uuidString.lowercased(), ids = (0..<128).map { _ in UUID().uuidString.lowercased() }

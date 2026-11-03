@@ -20,6 +20,6 @@ export async function writeAppleClarificationBackend(backend: AppleClarification
       await AsyncStorage.removeItem(STORAGE_KEY);
     }
   } catch {
-    // Device-local preference durability is optional; the safe default remains configured.
+
   }
 }

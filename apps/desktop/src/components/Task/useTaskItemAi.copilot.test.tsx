@@ -18,9 +18,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     return { ...actual, createAIProvider: () => ({ predictMetadata, breakDownTask }) };
 });
 
-// Wraps the real hook (calls through) so TaskItem-level tests can assert on
-// the exact `copilotEnabled` argument TaskItem passes, independent of the
-// hook's internal debounce timing.
+
 vi.mock('./useTaskItemAi', async (importOriginal) => {
     const actual = await importOriginal<typeof import('./useTaskItemAi')>();
     return { ...actual, useTaskItemAi: vi.fn(actual.useTaskItemAi) };
@@ -56,7 +54,7 @@ const renderAi = (setField: TaskDraftSetter, overrides: Record<string, unknown> 
     ...overrides,
 }));
 
-/** The debounced copilot request plus the promise it awaits. */
+
 const settleSuggestion = async () => {
     await act(async () => {
         await vi.advanceTimersByTimeAsync(900);
@@ -301,10 +299,10 @@ describe('useTaskItemAi copilot parts', () => {
         await settleSuggestion();
         expect(predictMetadata).toHaveBeenCalledTimes(1);
 
-        // Row closes (e.g. editor collapses): copilotEnabled goes false.
+
         rerender({ copilotEnabled: false });
 
-        // Row reopens with the same, unchanged text.
+
         rerender({ copilotEnabled: true });
         await settleSuggestion();
 
@@ -336,13 +334,12 @@ describe('useTaskItemAi copilot parts', () => {
         await settleSuggestion();
         expect(predictMetadata).toHaveBeenCalledTimes(1);
 
-        // Title shrinks below the 4-char floor: no suggestion, but the
-        // dispatched signature must not linger.
+
         rerender({ editTitle: 'Boo' });
         await settleSuggestion();
         expect(predictMetadata).toHaveBeenCalledTimes(1);
 
-        // Retyped back to the exact same text as the original suggestion.
+
         rerender({ editTitle: 'Book the dentist' });
         await settleSuggestion();
 
@@ -352,7 +349,7 @@ describe('useTaskItemAi copilot parts', () => {
 
 describe('useTaskItemAi breakdown steps', () => {
     const initialTaskState = useTaskStore.getState();
-    // The copilot tests above leave fake timers on.
+
     beforeEach(() => { vi.useRealTimers(); });
     afterEach(() => {
         act(() => useTaskStore.setState(initialTaskState, true));
@@ -439,9 +436,7 @@ describe('TaskItem copilot wiring', () => {
             </LanguageProvider>
         );
 
-        // Entering edit mode on mount re-renders TaskItem (loadTokenOptions
-        // flips on) before the 800ms debounce fires; predictMetadata must
-        // still land once things settle (N1).
+
         await settleSuggestion();
         expect(predictMetadata).toHaveBeenCalledTimes(1);
 

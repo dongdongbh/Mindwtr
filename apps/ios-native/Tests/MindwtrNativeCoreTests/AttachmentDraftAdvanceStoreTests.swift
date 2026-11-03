@@ -560,8 +560,8 @@ final class AttachmentDraftAdvanceStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: editor.url), editorBytes); XCTAssertEqual(try bytes(), sidecarBytes)
         XCTAssertEqual(try identity(editor.url), editorInode); XCTAssertEqual(try identity(store.url), sidecarInode)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).sorted(), names)
-        // The current valid-JSON/raw-1M bound does not reach the distinct 3M
-        // encoded file limit. Record an actual accepted large file separately.
+
+
         let accepted = EditorDraftStore(databaseURL: root.appendingPathComponent("accepted-large.sqlite"))
         try accepted.checkpoint(large)
         XCTAssertLessThan(try Data(contentsOf: accepted.url).count, 3_000_000)

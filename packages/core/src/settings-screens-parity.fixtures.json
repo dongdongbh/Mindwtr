@@ -21,6 +21,21 @@
      "manage: every scenario that shows Areas, Contexts or Tags open (stored open sections, unreadable stored sections, toggling sections, unassigned color and new areas, editing areas, deleting an area, contexts and tags, empty lists, in German): only the accessibility labels changed. The pencil and trash buttons now name their item, 'Edit: <name>' and 'Delete: <name>' ('Bearbeiten: …' and 'Löschen: …' in German), and the unassigned row's pencil reads 'Edit: Unassigned'. Texts, writes, device writes and alerts are unchanged.",
      "The section headers now carry a button role and their open state, and the General pickers' options a radio role and their chosen state; this fixture records neither, so no other observation changed."
     ]
+   },
+   {
+    "base": "b54b88ee4d29572676d9ff2e330ec3f9d219cf09",
+    "command": "MINDWTR_DUMP_SETTINGS_SCREENS=<task-log>/settings-observations.json rtk bun run --cwd apps/mobile test components/settings/settings.parity.test.tsx; replaced only Manage texts and labels for the new explicit context/tag create affordances",
+    "observations": [
+     "Manage sections for Contexts and Tags append a New context/New tag label and Add button when open (localized in German). Frozen inputs, actions, writes, alerts, device writes and editor fields are unchanged."
+    ]
+   },
+   {
+    "base": "4f5ac3c79",
+    "command": "cd apps/mobile && MINDWTR_DUMP_SETTINGS_SCREENS=<file> TZ=UTC bunx vitest run components/settings/settings.parity.test.tsx, with the App Lock relock delay row in place (#1423); only the observations below were replaced, and every other observation matched the frozen one",
+    "observations": [
+     "general: stored values, task age and quick access, in German, and app lock after the successful enable: while App Lock is on, a 'Require unlock' row ('Entsperren verlangen' in German) showing 'Immediately' ('Sofort') follows the App lock row. Only texts changed.",
+     "general: app lock relock delay is a new scenario: the picker offers Immediately, After 1 minute, After 5 minutes and After 15 minutes; picking 5 minutes writes security.mobileAppLockRelockDelayMinutes 5 with App Lock kept on, and picking it again writes nothing."
+    ]
    }
   ]
  },
@@ -584,6 +599,39 @@
     [
      "toggle",
      "appLock"
+    ]
+   ]
+  },
+  {
+   "name": "general: app lock relock delay",
+   "data": "none",
+   "settings": "stored",
+   "device": {
+    "themeMode": "nord"
+   },
+   "actions": [
+    [
+     "open",
+     "appLockRelock"
+    ],
+    [
+     "pick",
+     2
+    ],
+    [
+     "open",
+     "appLockRelock"
+    ],
+    [
+     "pick",
+     2
+    ],
+    [
+     "open",
+     "appLockRelock"
+    ],
+    [
+     "dismiss"
     ]
    ]
   },
@@ -2818,6 +2866,16 @@
         "wine-outline"
        ],
        [
+        "Gruvbox Light",
+        false,
+        "sunny-outline"
+       ],
+       [
+        "Gruvbox Dark",
+        false,
+        "moon-outline"
+       ],
+       [
         "Sepia",
         false,
         "book-outline"
@@ -2972,6 +3030,16 @@
         "Dracula",
         true,
         "wine-outline"
+       ],
+       [
+        "Gruvbox Light",
+        false,
+        "sunny-outline"
+       ],
+       [
+        "Gruvbox Dark",
+        false,
+        "moon-outline"
        ],
        [
         "Sepia",
@@ -3130,6 +3198,16 @@
         "wine-outline"
        ],
        [
+        "Gruvbox Light",
+        false,
+        "sunny-outline"
+       ],
+       [
+        "Gruvbox Dark",
+        false,
+        "moon-outline"
+       ],
+       [
         "Sepia",
         false,
         "book-outline"
@@ -3274,6 +3352,16 @@
         "wine-outline"
        ],
        [
+        "Gruvbox Light",
+        false,
+        "sunny-outline"
+       ],
+       [
+        "Gruvbox Dark",
+        false,
+        "moon-outline"
+       ],
+       [
         "Sepia",
         false,
         "book-outline"
@@ -3350,6 +3438,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -3388,6 +3478,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -3432,6 +3524,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -3617,6 +3711,16 @@
         "wine-outline"
        ],
        [
+        "Gruvbox Light",
+        false,
+        "sunny-outline"
+       ],
+       [
+        "Gruvbox Dark",
+        false,
+        "moon-outline"
+       ],
+       [
         "Sepia",
         false,
         "book-outline"
@@ -3763,6 +3867,16 @@
         "wine-outline"
        ],
        [
+        "Gruvbox Light",
+        false,
+        "sunny-outline"
+       ],
+       [
+        "Gruvbox Dark",
+        false,
+        "moon-outline"
+       ],
+       [
         "Sepia",
         false,
         "book-outline"
@@ -3796,6 +3910,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -3834,6 +3950,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -3883,6 +4001,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -3932,6 +4052,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -3996,6 +4118,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -4045,6 +4169,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -4109,6 +4235,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -4198,6 +4326,8 @@
      "Privacy",
      "App lock",
      "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
      "Language",
      "Select your preferred language",
      "Language",
@@ -4428,6 +4558,376 @@
       }
      ]
     ],
+    "alerts": [],
+    "navigations": [],
+    "links": []
+   }
+  ],
+  "general: app lock relock delay": [
+   {
+    "texts": [
+     "General",
+     "Appearance",
+     "Theme",
+     "Nord",
+     "Show task age",
+     "Display how long ago a task was created in task metadata.",
+     "Quick access view",
+     "Calendar",
+     "Privacy",
+     "App lock",
+     "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
+     "Language",
+     "Select your preferred language",
+     "Language",
+     "English",
+     "Regional formats",
+     "Monday · Year / Month / Day · 24-hour"
+    ],
+    "switches": [
+     [
+      true,
+      false
+     ],
+     [
+      true,
+      false
+     ]
+    ],
+    "expanded": false,
+    "picker": null,
+    "writes": [],
+    "device": [],
+    "alerts": [],
+    "navigations": [],
+    "links": []
+   },
+   {
+    "texts": [
+     "General",
+     "Appearance",
+     "Theme",
+     "Nord",
+     "Show task age",
+     "Display how long ago a task was created in task metadata.",
+     "Quick access view",
+     "Calendar",
+     "Privacy",
+     "App lock",
+     "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "Immediately",
+     "Language",
+     "Select your preferred language",
+     "Language",
+     "English",
+     "Regional formats",
+     "Monday · Year / Month / Day · 24-hour"
+    ],
+    "switches": [
+     [
+      true,
+      false
+     ],
+     [
+      true,
+      false
+     ]
+    ],
+    "expanded": false,
+    "picker": {
+     "title": "Require unlock",
+     "groups": [
+      [
+       [
+        "Immediately",
+        true,
+        null
+       ],
+       [
+        "After 1 minute",
+        false,
+        null
+       ],
+       [
+        "After 5 minutes",
+        false,
+        null
+       ],
+       [
+        "After 15 minutes",
+        false,
+        null
+       ]
+      ]
+     ]
+    },
+    "writes": [],
+    "device": [],
+    "alerts": [],
+    "navigations": [],
+    "links": []
+   },
+   {
+    "texts": [
+     "General",
+     "Appearance",
+     "Theme",
+     "Nord",
+     "Show task age",
+     "Display how long ago a task was created in task metadata.",
+     "Quick access view",
+     "Calendar",
+     "Privacy",
+     "App lock",
+     "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "After 5 minutes",
+     "Language",
+     "Select your preferred language",
+     "Language",
+     "English",
+     "Regional formats",
+     "Monday · Year / Month / Day · 24-hour"
+    ],
+    "switches": [
+     [
+      true,
+      false
+     ],
+     [
+      true,
+      false
+     ]
+    ],
+    "expanded": false,
+    "picker": null,
+    "writes": [
+     [
+      "updateSettings",
+      {
+       "security": {
+        "mobileAppLockEnabled": true,
+        "mobileAppLockRelockDelayMinutes": 5
+       }
+      }
+     ]
+    ],
+    "device": [],
+    "alerts": [],
+    "navigations": [],
+    "links": []
+   },
+   {
+    "texts": [
+     "General",
+     "Appearance",
+     "Theme",
+     "Nord",
+     "Show task age",
+     "Display how long ago a task was created in task metadata.",
+     "Quick access view",
+     "Calendar",
+     "Privacy",
+     "App lock",
+     "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "After 5 minutes",
+     "Language",
+     "Select your preferred language",
+     "Language",
+     "English",
+     "Regional formats",
+     "Monday · Year / Month / Day · 24-hour"
+    ],
+    "switches": [
+     [
+      true,
+      false
+     ],
+     [
+      true,
+      false
+     ]
+    ],
+    "expanded": false,
+    "picker": {
+     "title": "Require unlock",
+     "groups": [
+      [
+       [
+        "Immediately",
+        false,
+        null
+       ],
+       [
+        "After 1 minute",
+        false,
+        null
+       ],
+       [
+        "After 5 minutes",
+        true,
+        null
+       ],
+       [
+        "After 15 minutes",
+        false,
+        null
+       ]
+      ]
+     ]
+    },
+    "writes": [],
+    "device": [],
+    "alerts": [],
+    "navigations": [],
+    "links": []
+   },
+   {
+    "texts": [
+     "General",
+     "Appearance",
+     "Theme",
+     "Nord",
+     "Show task age",
+     "Display how long ago a task was created in task metadata.",
+     "Quick access view",
+     "Calendar",
+     "Privacy",
+     "App lock",
+     "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "After 5 minutes",
+     "Language",
+     "Select your preferred language",
+     "Language",
+     "English",
+     "Regional formats",
+     "Monday · Year / Month / Day · 24-hour"
+    ],
+    "switches": [
+     [
+      true,
+      false
+     ],
+     [
+      true,
+      false
+     ]
+    ],
+    "expanded": false,
+    "picker": null,
+    "writes": [],
+    "device": [],
+    "alerts": [],
+    "navigations": [],
+    "links": []
+   },
+   {
+    "texts": [
+     "General",
+     "Appearance",
+     "Theme",
+     "Nord",
+     "Show task age",
+     "Display how long ago a task was created in task metadata.",
+     "Quick access view",
+     "Calendar",
+     "Privacy",
+     "App lock",
+     "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "After 5 minutes",
+     "Language",
+     "Select your preferred language",
+     "Language",
+     "English",
+     "Regional formats",
+     "Monday · Year / Month / Day · 24-hour"
+    ],
+    "switches": [
+     [
+      true,
+      false
+     ],
+     [
+      true,
+      false
+     ]
+    ],
+    "expanded": false,
+    "picker": {
+     "title": "Require unlock",
+     "groups": [
+      [
+       [
+        "Immediately",
+        false,
+        null
+       ],
+       [
+        "After 1 minute",
+        false,
+        null
+       ],
+       [
+        "After 5 minutes",
+        true,
+        null
+       ],
+       [
+        "After 15 minutes",
+        false,
+        null
+       ]
+      ]
+     ]
+    },
+    "writes": [],
+    "device": [],
+    "alerts": [],
+    "navigations": [],
+    "links": []
+   },
+   {
+    "texts": [
+     "General",
+     "Appearance",
+     "Theme",
+     "Nord",
+     "Show task age",
+     "Display how long ago a task was created in task metadata.",
+     "Quick access view",
+     "Calendar",
+     "Privacy",
+     "App lock",
+     "Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.",
+     "Require unlock",
+     "After 5 minutes",
+     "Language",
+     "Select your preferred language",
+     "Language",
+     "English",
+     "Regional formats",
+     "Monday · Year / Month / Day · 24-hour"
+    ],
+    "switches": [
+     [
+      true,
+      false
+     ],
+     [
+      true,
+      false
+     ]
+    ],
+    "expanded": false,
+    "picker": null,
+    "writes": [],
+    "device": [],
     "alerts": [],
     "navigations": [],
     "links": []
@@ -6277,6 +6777,8 @@
      "Datenschutz",
      "App-Sperre",
      "Gerätesperre beim Öffnen von Mindwtr oder beim Zurückkehren zur App verlangen. Das schützt die App-Ansicht, nicht die Datenbank auf dem Gerät.",
+     "Entsperren verlangen",
+     "Sofort",
      "Sprache",
      "Bevorzugte Sprache auswählen",
      "Sprache",
@@ -6315,6 +6817,8 @@
      "Datenschutz",
      "App-Sperre",
      "Gerätesperre beim Öffnen von Mindwtr oder beim Zurückkehren zur App verlangen. Das schützt die App-Ansicht, nicht die Datenbank auf dem Gerät.",
+     "Entsperren verlangen",
+     "Sofort",
      "Sprache",
      "Bevorzugte Sprache auswählen",
      "Sprache",
@@ -6359,6 +6863,8 @@
      "Datenschutz",
      "App-Sperre",
      "Gerätesperre beim Öffnen von Mindwtr oder beim Zurückkehren zur App verlangen. Das schützt die App-Ansicht, nicht die Datenbank auf dem Gerät.",
+     "Entsperren verlangen",
+     "Sofort",
      "Sprache",
      "Bevorzugte Sprache auswählen",
      "Sprache",
@@ -6647,11 +7153,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -6839,6 +7349,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -6860,6 +7374,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -6928,7 +7446,9 @@
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -6957,6 +7477,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -7389,11 +7913,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -7581,6 +8109,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -7602,6 +8134,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -7664,11 +8200,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -7856,6 +8396,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -7877,6 +8421,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -7993,11 +8541,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -8185,6 +8737,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -8206,6 +8762,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -8322,11 +8882,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -8514,6 +9078,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -8535,6 +9103,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -8601,11 +9173,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -8793,6 +9369,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -8814,6 +9394,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -8936,11 +9520,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -9128,6 +9716,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -9149,6 +9741,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -9271,11 +9867,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -9463,6 +10063,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -9484,6 +10088,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -9606,11 +10214,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -9798,6 +10410,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -9819,6 +10435,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -9942,11 +10562,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -10142,6 +10766,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -10163,6 +10791,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -10228,11 +10860,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -10428,6 +11064,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -10449,6 +11089,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -10572,11 +11216,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -10772,6 +11420,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -10793,6 +11445,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -10916,11 +11572,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -11116,6 +11776,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -11137,6 +11801,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -11194,11 +11862,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -11394,6 +12066,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -11415,6 +12091,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -11538,11 +12218,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -11738,6 +12422,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -11759,6 +12447,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -11882,11 +12574,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -12082,6 +12778,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -12103,6 +12803,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -12227,11 +12931,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -12419,6 +13127,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -12440,6 +13152,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -12502,11 +13218,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -12694,6 +13414,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -12715,6 +13439,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -12837,11 +13565,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -13029,6 +13761,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -13050,6 +13786,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -13172,11 +13912,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -13364,6 +14108,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -13385,6 +14133,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -13507,11 +14259,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -13699,6 +14455,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -13720,6 +14480,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -13785,11 +14549,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -13977,6 +14745,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -13998,6 +14770,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -14120,11 +14896,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -14312,6 +15092,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -14333,6 +15117,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -14389,11 +15177,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -14581,6 +15373,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -14602,6 +15398,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -14724,11 +15524,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -14916,6 +15720,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -14937,6 +15745,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -15059,11 +15871,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -15251,6 +16067,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -15272,6 +16092,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -15336,11 +16160,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -15528,6 +16356,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -15549,6 +16381,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -15671,11 +16507,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -15863,6 +16703,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -15884,6 +16728,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -16005,11 +16853,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -16189,6 +17041,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -16210,6 +17066,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -16276,11 +17136,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -16468,6 +17332,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -16489,6 +17357,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -16551,11 +17423,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -16743,6 +17619,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -16764,6 +17644,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -16835,11 +17719,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -17027,6 +17915,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -17048,6 +17940,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -17104,11 +18000,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -17296,6 +18196,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -17317,6 +18221,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -17387,11 +18295,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -17571,6 +18483,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -17592,6 +18508,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -20860,11 +21780,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -20912,6 +21836,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -20933,6 +21861,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -20966,11 +21898,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21018,6 +21954,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21039,6 +21979,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -21083,11 +22027,15 @@
      "@office",
      "@phone",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21135,6 +22083,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21156,6 +22108,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -21199,11 +22155,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21243,6 +22203,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21264,6 +22228,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -21296,11 +22264,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21340,6 +22312,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21361,6 +22337,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -21404,11 +22384,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21448,6 +22432,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21469,6 +22457,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -21495,11 +22487,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21539,6 +22535,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21560,6 +22560,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -21603,11 +22607,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21647,6 +22655,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21668,6 +22680,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -21711,11 +22727,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#Later",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21755,6 +22775,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21776,6 +22800,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -21808,11 +22836,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#Later",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21852,6 +22884,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21873,6 +22909,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -21916,11 +22956,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#Later",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -21960,6 +23004,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -21981,6 +23029,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -22024,11 +23076,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#Later",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -22068,6 +23124,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -22089,6 +23149,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -22132,11 +23196,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#Later",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -22176,6 +23244,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -22197,6 +23269,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -22223,11 +23299,15 @@
      "@home",
      "@office",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#Later",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -22267,6 +23347,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -22288,6 +23372,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -22328,11 +23416,15 @@
      "@Alex",
      "@home",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#Later",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -22364,6 +23456,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -22385,6 +23481,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -22415,11 +23515,15 @@
      "@Alex",
      "@home",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "3",
      "#garden",
      "#Later",
-     "#web"
+     "#web",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -22451,6 +23555,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -22472,6 +23580,10 @@
      ],
      [
       "Delete: #web",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -22512,10 +23624,14 @@
      "@Alex",
      "@home",
      "@town",
+     "New context",
+     "Add",
      "Tags",
      "2",
      "#garden",
-     "#Later"
+     "#Later",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -22547,6 +23663,10 @@
       false
      ],
      [
+      "New context",
+      false
+     ],
+     [
       "Edit: #garden",
       false
      ],
@@ -22560,6 +23680,10 @@
      ],
      [
       "Delete: #Later",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -23280,9 +24404,13 @@
      "Contexts",
      "0",
      "No contexts",
+     "New context",
+     "Add",
      "Tags",
      "0",
-     "No tags"
+     "No tags",
+     "New tag",
+     "Add"
     ],
     "labels": [
      [
@@ -23299,6 +24427,14 @@
      ],
      [
       "New Person",
+      false
+     ],
+     [
+      "New context",
+      false
+     ],
+     [
+      "New tag",
       false
      ]
     ],
@@ -23363,11 +24499,15 @@
      "@office",
      "@phone",
      "@town",
+     "Neuer Kontext",
+     "Hinzufügen",
      "Etiketten",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "Neues Tag",
+     "Hinzufügen"
     ],
     "labels": [
      [
@@ -23555,6 +24695,10 @@
       false
      ],
      [
+      "Neuer Kontext",
+      false
+     ],
+     [
       "Bearbeiten: #garden",
       false
      ],
@@ -23576,6 +24720,10 @@
      ],
      [
       "Löschen: #web",
+      false
+     ],
+     [
+      "Neues Tag",
       false
      ]
     ],
@@ -23638,11 +24786,15 @@
      "@office",
      "@phone",
      "@town",
+     "Neuer Kontext",
+     "Hinzufügen",
      "Etiketten",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "Neues Tag",
+     "Hinzufügen"
     ],
     "labels": [
      [
@@ -23830,6 +24982,10 @@
       false
      ],
      [
+      "Neuer Kontext",
+      false
+     ],
+     [
       "Bearbeiten: #garden",
       false
      ],
@@ -23851,6 +25007,10 @@
      ],
      [
       "Löschen: #web",
+      false
+     ],
+     [
+      "Neues Tag",
       false
      ]
     ],
@@ -23922,11 +25082,15 @@
      "@office",
      "@phone",
      "@town",
+     "Neuer Kontext",
+     "Hinzufügen",
      "Etiketten",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "Neues Tag",
+     "Hinzufügen"
     ],
     "labels": [
      [
@@ -24114,6 +25278,10 @@
       false
      ],
      [
+      "Neuer Kontext",
+      false
+     ],
+     [
       "Bearbeiten: #garden",
       false
      ],
@@ -24135,6 +25303,10 @@
      ],
      [
       "Löschen: #web",
+      false
+     ],
+     [
+      "Neues Tag",
       false
      ]
     ],
@@ -24191,11 +25363,15 @@
      "@office",
      "@phone",
      "@town",
+     "Neuer Kontext",
+     "Hinzufügen",
      "Etiketten",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "Neues Tag",
+     "Hinzufügen"
     ],
     "labels": [
      [
@@ -24383,6 +25559,10 @@
       false
      ],
      [
+      "Neuer Kontext",
+      false
+     ],
+     [
       "Bearbeiten: #garden",
       false
      ],
@@ -24404,6 +25584,10 @@
      ],
      [
       "Löschen: #web",
+      false
+     ],
+     [
+      "Neues Tag",
       false
      ]
     ],
@@ -24487,11 +25671,15 @@
      "@office",
      "@phone",
      "@town",
+     "Neuer Kontext",
+     "Hinzufügen",
      "Etiketten",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "Neues Tag",
+     "Hinzufügen"
     ],
     "labels": [
      [
@@ -24679,6 +25867,10 @@
       false
      ],
      [
+      "Neuer Kontext",
+      false
+     ],
+     [
       "Bearbeiten: #garden",
       false
      ],
@@ -24700,6 +25892,10 @@
      ],
      [
       "Löschen: #web",
+      false
+     ],
+     [
+      "Neues Tag",
       false
      ]
     ],
@@ -24756,11 +25952,15 @@
      "@office",
      "@phone",
      "@town",
+     "Neuer Kontext",
+     "Hinzufügen",
      "Etiketten",
      "3",
      "#garden",
      "#urgent",
-     "#web"
+     "#web",
+     "Neues Tag",
+     "Hinzufügen"
     ],
     "labels": [
      [
@@ -24948,6 +26148,10 @@
       false
      ],
      [
+      "Neuer Kontext",
+      false
+     ],
+     [
       "Bearbeiten: #garden",
       false
      ],
@@ -24969,6 +26173,10 @@
      ],
      [
       "Löschen: #web",
+      false
+     ],
+     [
+      "Neues Tag",
       false
      ]
     ],

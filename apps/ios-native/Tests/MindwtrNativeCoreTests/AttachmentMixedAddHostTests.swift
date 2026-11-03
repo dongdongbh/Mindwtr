@@ -3,8 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Actual mixed AddV3 producer, bundled JSC, SQLite and typed descriptor jobs.
-/// Old fixture suites are unchanged; these histories begin with real V3 calls.
+
 final class AttachmentMixedAddHostTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private var root: URL!
@@ -634,8 +633,8 @@ final class AttachmentMixedAddHostTests: XCTestCase {
         XCTAssertLessThanOrEqual(try encoded(intent).count, Store.maximumBytes)
         XCTAssertGreaterThan(try encoded(decided).count, Store.maximumBytes)
         try store.preflightMixed(intent)
-        // A retained exact intent needs its actual owed encodings, independent
-        // of today's unused future Discard reservation. Not fresh admission.
+
+
         await fresh.close(); _ = try store.writeMixedAcknowledged(intent); bundle = originalBundle
         let cold = core(); _ = try await cold.start()
         _ = try await cold.recoverAttachmentDraftV3(expectedSession: before.sessionID)
@@ -669,8 +668,8 @@ final class AttachmentMixedAddHostTests: XCTestCase {
             payloadJSON: try compact(["version": 2, "taskID": taskID, "attachmentsOwned": true, "attachmentsBase": [], "attachments": [],
                 "raw": ["note": "retained 文"]] as [String: Any]))
         var history: [Store.MixedOperation] = []
-        // Efficient capacity fixture: one actual V3 metadata template, 64 actual
-        // descriptor publications, and one full shared validation at admission.
+
+
         for index in 0..<64 {
             let id = index == 0 ? template.requestId : UUID().uuidString.lowercased()
             let uri = managed.appendingPathComponent(id + ".txt").absoluteString

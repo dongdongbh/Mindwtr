@@ -1,5 +1,34 @@
 # Performance and stability handoff
 
+## Native Android (Kotlin + QuickJS host), October 26-27
+
+Full evidence: [native Android startup and interactions, 2026-10-26](native-android-startup-2026-10-26.md). Galaxy S23, Benchmark builds,
+large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
+
+- **Result:** cold first content at 5k went from 1012 to 823 ms. That is −19%, below the 10-01 budget run (874 ms), and 37% under RN
+  (1312 ms). The fixes: Focus builds derived summaries only for review projects (−52 ms); the load normalizer builds each task once
+  (−139 ms; shared core, so RN and desktop load faster too); the widget build no longer runs twice and waits for a quiet core (first tap
+  right after first content: 348 → 121 ms); after a command, the screen on show is read first (save's row about 40 ms sooner).
+- **Head to head with RN:** native leads on cold and warm start, tab switch, editor open, capture open (keyboard shown), and scroll frame
+  time. The 10-27 first-save warm cut `core:captureSubmit` at 5k from about 245 to 52–88 ms.
+- **Save (S2, [2026-11-01 report](native-android-save-2026-11-01.md)):** native shows the saved row sooner than RN: 124 vs 189 ms
+  (medians, 5k, n = 18 each). Native's "settled" (338 ms) is the system keyboard's hide animation, which the app follows frame by
+  frame; RN's keyboard vanishes in two frames at about 170 ms. No save change can move it. So save, like capture open, compares the
+  row, not settled. The exact incremental save was not built: the full-snapshot walk it would remove is about 12.5 ms.
+  The next tap after a save is not held up either: tapping the new row about 0.3 s after Save opens its editor in 80 ms on
+  native vs 159 ms on RN (n = 18 each); native's core is done with the save's reads by about 209 ms.
+- **Limits:** one phone; n = 8–20 per cell; the save and tab metrics end on animation frames. The H2H RN build carried a local scheme patch,
+  now committed as `eb1782e1f`. RN's row time is inferred from its Fabric mount frame.
+- **Next, if save matters again:** the store update and its listeners (7–17 ms), the parse options rebuild inside the save (about
+  7 ms), `addTasks`' full-list copies (about 5 ms), and `core:menuRead` (22–35 ms) before the row's frame. None is persistence.
+  Whether native should snap the keyboard away like RN is a UI decision for dd, not a performance fix.
+- **Rejected or withdrawn:** skipping hidden-list reads after a write (a stale tap target); merging Pomodoro reads (stale presentation);
+  "rawReadRow bypasses #766" (wrong: raw rows exist only for `getData({ rawTasks: true })`, and the recheck is pinned).
+- **Reminder plan (H3c follow-up, 10-29):** [evidence](native-android-reminder-plan-2026-10-29.md). Lazy lookup maps (T1) and skipping
+  undated tasks (T2a) cut `core:remindersCycle` on a hot return from 34.3 to 5.2 ms with no dated task and from 67.1 to 43.2 ms with 20%
+  dated (S23, n = 6 per cell). Shared core, so RN and iOS plan faster too; a frozen corpus proves byte-identical output. First frame and
+  settled do not move: the cycle runs 365–447 ms after the return, after the screen settles. A plan cache stays closed.
+
 September 15 shared-core update: [archive reactivation candidate validation](archive-reactivation-2026-09-15.md) removes repeated full-section projections. This is synthetic core work-count evidence; native desktop and mobile latency remain unmeasured for this change.
 
 Updated September 13, 2026. Engineering handoff for future desktop and mobile

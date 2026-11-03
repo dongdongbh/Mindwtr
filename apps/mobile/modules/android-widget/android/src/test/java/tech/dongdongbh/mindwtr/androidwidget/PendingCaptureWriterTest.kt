@@ -13,6 +13,20 @@ import org.junit.Test
 class PendingCaptureWriterTest {
   private fun tempFilesDir(): File = Files.createTempDirectory("mindwtr-files").toFile()
 
+  @Test fun writesOnlyAllowedDestinationMetadataAndPreservesExplicitInbox() {
+    for (status in PendingCaptureWriter.CREATION_STATUSES) {
+      val json = JSONObject(PendingCaptureWriter.write(tempFilesDir(), "Capture /next", defaultStatus = status, status = "inbox")!!.readText())
+      assertEquals(status, json.getString("defaultStatus"))
+      assertEquals("inbox", json.getString("status"))
+    }
+    for (invalid in listOf("done", "archived", "reference", "NEXT", " next ")) {
+      val json = JSONObject(PendingCaptureWriter.write(tempFilesDir(), "Keep", note = "Keep note", defaultStatus = invalid, status = invalid)!!.readText())
+      assertTrue(!json.has("defaultStatus"))
+      assertTrue(!json.has("status"))
+      assertEquals("Keep note", json.getString("note"))
+    }
+  }
+
   @Test
   fun writesOneJsonItemInTheParsePendingCaptureSchema() {
     val filesDir = tempFilesDir()

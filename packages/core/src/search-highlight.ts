@@ -69,11 +69,7 @@ const findMatchRanges = (text: string, matchers: RegExp[]): MatchRange[] => {
     return merged;
 };
 
-/**
- * Compiles a global-search query into a reusable text segmenter. Structured
- * field queries deliberately produce no highlights, matching the existing
- * desktop behavior and avoiding misleading emphasis for filter syntax.
- */
+
 export const createSearchHighlighter = (query: string): SearchHighlighter => {
     const terms = getHighlightTerms(query);
     const matchers = terms.map(

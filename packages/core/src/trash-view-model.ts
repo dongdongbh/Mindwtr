@@ -6,18 +6,10 @@ import type { StoreActionResult, TaskStore } from './store-types';
 import { DEFAULT_TOMBSTONE_RETENTION_DAYS } from './sync-tombstones';
 import type { Area, Project, Task } from './types';
 
-/**
- * The React Native Trash screen: which trashed tasks and projects it shows, its
- * counts and hint, and the confirmations its permanent deletes show. The timeline
- * order and the Clear Trash scope are core's buildTrashTimeline and
- * resolveTrashClearScope. Deleting forever goes through the store's purge
- * actions, which keep each purged entity as a tombstone for sync.
- */
 
-/** A confirmation: Cancel, then one destructive button. */
 export type ListConfirmation = { title: string; message: string; cancelLabel: string; confirmLabel: string };
 
-/** Trashed tasks in the area filter; a purged task is a tombstone, not a Trash row. */
+
 export function selectTrashedTasks(
     allTasks: Task[],
     selection: AreaFilterSelection,
@@ -39,7 +31,7 @@ export function selectTrashedProjects(
     ));
 }
 
-/** "4 tasks · 2 projects". */
+
 export function formatTrashCounts(taskCount: number, projectCount: number, t: (key: string) => string): string {
     return `${formatListItemCount(taskCount, 'task', t)} · ${formatListItemCount(projectCount, 'project', t)}`;
 }
@@ -51,7 +43,7 @@ export function getTrashRetentionHint(t: (key: string) => string): string {
     );
 }
 
-/** A Trash row's deleted date: the short date in the app's date format; `notSetLabel` names a missing one. */
+
 export function formatTrashDeletedDate(deletedAt: string | undefined, formatDate: DateFormatter, notSetLabel: string): string {
     return formatDate(deletedAt, 'P', notSetLabel);
 }
@@ -75,10 +67,7 @@ export function getTrashEmptyState(t: (key: string) => string): { title: string;
     };
 }
 
-/**
- * What a permanent delete asks. One row, the selection, or Clear Trash; Clear
- * Trash on a list the area filter narrows names its counts instead of "all".
- */
+
 export function getTrashPurgeConfirmation(
     target: { kind: 'item' } | { kind: 'selection' } | { kind: 'clear'; narrowed: boolean; taskCount: number; projectCount: number },
     t: (key: string) => string,
@@ -97,8 +86,8 @@ export function getTrashPurgeConfirmation(
         title: target.narrowed
             ? tFallback(t, 'trash.deleteConfirm', 'Delete permanently?')
             : tFallback(t, 'trash.clearAllConfirm', 'Clear trash?'),
-        // Two lines, not one sentence: a hard-coded ". " join would be user-visible
-        // text no locale file controls (zh and ja end a sentence with 。).
+
+
         message: target.narrowed
             ? `${formatTrashCounts(target.taskCount, target.projectCount, t)}\n${body}`
             : tFallback(t, 'trash.clearAllConfirmBodyWithProjects', 'This will permanently delete all trashed tasks and projects.'),
@@ -107,10 +96,7 @@ export function getTrashPurgeConfirmation(
     };
 }
 
-/**
- * What moving the selected tasks to Trash asks, as mobile's shared list selection
- * (use-task-list-selection.ts) shows it for Contexts and Archive.
- */
+
 export function getBulkTrashConfirmation(t: (key: string) => string): ListConfirmation {
     return {
         title: tFallback(t, 'bulk.confirmDeleteTitle', t('common.delete')),
@@ -120,12 +106,12 @@ export function getBulkTrashConfirmation(t: (key: string) => string): ListConfir
     };
 }
 
-/** Deleting a task can be undone to its previous status. */
+
 export const getTrashUndoLabel = (t: (key: string) => string): string => tFallback(t, 'common.undo', 'Undo');
 
 type TrashItemIds = { taskIds: string[]; projectIds: string[] };
 
-/** Trash's Restore for several items: the tasks in one store write, then each project. */
+
 export function restoreTrashItems(
     store: Pick<TaskStore, 'restoreTasks' | 'restoreProject'>,
     { taskIds, projectIds }: TrashItemIds,
@@ -136,11 +122,7 @@ export function restoreTrashItems(
     ]);
 }
 
-/**
- * Delete forever, for a selection or Clear Trash: the tasks in one store write, then
- * each project. The store purges only items still in Trash and keeps each one as a
- * tombstone for sync. Clear Trash passes the ids its confirmation showed.
- */
+
 export function purgeTrashItems(
     store: Pick<TaskStore, 'purgeTasks' | 'purgeProject'>,
     { taskIds, projectIds }: TrashItemIds,

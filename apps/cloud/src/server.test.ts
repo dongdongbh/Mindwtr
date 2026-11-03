@@ -206,8 +206,8 @@ describe('cloud server utils', () => {
     });
 
     test('BEARER_TOKEN_PATTERN stays identical to core CLOUD_SYNC_TOKEN_PATTERN', () => {
-        // server-config.ts keeps a literal copy because the dependency-free
-        // schema:check CI job imports it without workspace deps installed.
+
+
         expect(BEARER_TOKEN_PATTERN.source).toBe(CLOUD_SYNC_TOKEN_PATTERN.source);
         expect(BEARER_TOKEN_PATTERN.flags).toBe(CLOUD_SYNC_TOKEN_PATTERN.flags);
     });
@@ -651,12 +651,7 @@ describe('cloud server utils', () => {
         expect(asStatus('in-progress')).toBeNull();
     });
 
-    // Table test for the validateEntityProps() consolidation: covers all 8
-    // (kind, mode) pairs that used to be eight near-identical
-    // validate{Task,Project,Section,Area}{Creation,Patch}Props functions. Each
-    // pair is checked against a real allowlisted key (pulled from the same
-    // CLOUD_*_ALLOWED_PROP_KEYS the server enforces, so this can't drift out of
-    // sync with the allowlist) and a key no kind/mode ever allows.
+
     const ENTITY_PROPS_ALLOWED_KEYS: Record<'task' | 'project' | 'section' | 'area', Record<'create' | 'patch', ReadonlySet<string>>> = {
         task: { create: CLOUD_TASK_CREATION_ALLOWED_PROP_KEYS, patch: CLOUD_TASK_PATCH_ALLOWED_PROP_KEYS },
         project: { create: CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS, patch: CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS },
@@ -682,7 +677,7 @@ describe('cloud server utils', () => {
             }
         }
 
-        // Non-object input is rejected for every pair too.
+
         for (const kind of ['task', 'project', 'section', 'area'] as const) {
             for (const mode of ['create', 'patch'] as const) {
                 const result = validateEntityProps(kind, mode, 'not-an-object');
@@ -847,6 +842,9 @@ describe('cloud server utils', () => {
         if (invalidOffset.ok) throw new Error('Expected invalid relativeStartOffset');
         expect(invalidOffset.error).toContain('relativeStartOffset');
 
+        expect(validateEntityProps('task', 'patch', { recurrence: { rule: 'weekly', preserveChecklistOnRepeat: true } }).ok).toBe(true);
+        expect(validateEntityProps('task', 'patch', { recurrence: { rule: 'weekly', preserveChecklistOnRepeat: false } }).ok).toBe(true);
+        expect(validateEntityProps('task', 'patch', { recurrence: { rule: 'weekly', preserveChecklistOnRepeat: 'true' } }).ok).toBe(false);
         const invalidRecurrence = validateEntityProps('task', 'patch', { recurrence: { rule: 'daily', arbitrary: true } });
         expect(invalidRecurrence.ok).toBe(false);
         if (invalidRecurrence.ok) throw new Error('Expected invalid recurrence');
@@ -936,6 +934,33 @@ describe('cloud server utils', () => {
         expect(invalid.ok).toBe(false);
         if (invalid.ok) throw new Error('Expected invalid viewSectionIds');
         expect(invalid.error).toContain('viewSectionIds');
+    });
+
+    test('validates the Per section flow fields and keeps them off REST writes (#1429)', () => {
+        const iso = '2024-01-01T00:00:00.000Z';
+        const project = {
+            id: 'trip', title: 'Camping Trip', status: 'active' as const, color: '#6B7280',
+            order: 0, tagIds: [], createdAt: iso, updatedAt: iso,
+        };
+        const section = { id: 'book', projectId: 'trip', title: 'Book campsite', order: 0, createdAt: iso, updatedAt: iso };
+        expect(validateAppData({ tasks: [], projects: [{ ...project, perSectionFlow: true }],
+            sections: [{ ...section, isSequential: true }, { ...section, id: 'prep', isSequential: false }, { ...section, id: 'later' }] }).ok).toBe(true);
+        expect(validateAppData({ tasks: [], projects: [{ ...project, perSectionFlow: null }], sections: [{ ...section, isSequential: null }] }).ok).toBe(true);
+        const badProject = validateAppData({ tasks: [], projects: [{ ...project, perSectionFlow: 'yes' }] });
+        expect(badProject.ok).toBe(false);
+        if (badProject.ok) throw new Error('Expected invalid project perSectionFlow');
+        expect(badProject.error).toContain('perSectionFlow');
+        const badSection = validateAppData({ tasks: [], projects: [project], sections: [{ ...section, isSequential: 1 }] });
+        expect(badSection.ok).toBe(false);
+        if (badSection.ok) throw new Error('Expected invalid section isSequential');
+        expect(badSection.error).toContain('isSequential');
+
+        for (const keys of [CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS, CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS]) {
+            expect((keys as ReadonlySet<string>).has('perSectionFlow')).toBe(false);
+        }
+        for (const keys of [CLOUD_SECTION_CREATION_ALLOWED_PROP_KEYS, CLOUD_SECTION_PATCH_ALLOWED_PROP_KEYS]) {
+            expect((keys as ReadonlySet<string>).has('isSequential')).toBe(false);
+        }
     });
 
     test('validates Project.viewSectionIds like the task field (#1319)', () => {
@@ -1096,11 +1121,7 @@ describe('cloud server utils', () => {
         rmSync(sandbox, { recursive: true, force: true });
     });
 
-    // Regression for the read-triggered namespace-cap bypass: resolveAttachmentPath
-    // used to mkdir `<dataDir>/<key>/attachments` unconditionally, so a plain GET (or
-    // DELETE) from a token that had never written anything permanently planted its
-    // namespace directory — which both exempted it from ensureNamespaceWriteAllowed
-    // and consumed a maxAnyTokenNamespaces slot, without ever storing data.
+
     test('resolves a read-only attachment path without creating the namespace directory', () => {
         const sandbox = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-attachment-readonly-resolve-'));
         const dataDirForTest = join(sandbox, 'data');
@@ -1672,13 +1693,13 @@ describe('cloud server namespace mode', () => {
                 const splitAt = Math.floor(payload.length / 2);
                 controller.enqueue(new TextEncoder().encode(payload.slice(0, splitAt)));
                 void bodyGate.then(() => {
-                    // A refused write's body is cancelled by the server (its read starts before admission),
-                    // which closes this stream first; the rest has nowhere to go then.
+
+
                     try {
                         controller.enqueue(new TextEncoder().encode(payload.slice(splitAt)));
                         controller.close();
                     } catch {
-                        // Already closed by the server's cancel.
+
                     }
                 });
             },
@@ -1739,13 +1760,13 @@ describe('cloud server namespace mode', () => {
                 const splitAt = Math.floor(payload.length / 2);
                 controller.enqueue(new TextEncoder().encode(payload.slice(0, splitAt)));
                 void bodyGate.then(() => {
-                    // A refused write's body is cancelled by the server (its read starts before admission),
-                    // which closes this stream first; the rest has nowhere to go then.
+
+
                     try {
                         controller.enqueue(new TextEncoder().encode(payload.slice(splitAt)));
                         controller.close();
                     } catch {
-                        // Already closed by the server's cancel.
+
                     }
                 });
             },
@@ -1782,8 +1803,8 @@ describe('cloud server namespace mode', () => {
             await Promise.all(workers.map((worker) => waitForChildExit(worker, 5_000)));
             rmSync(tempDataDir, { recursive: true, force: true });
         }
-    // Two spawned server processes on a loaded CI runner need more than bun's
-    // 5 s default (flaked 2026-08-31 and 2026-09-02).
+
+
     }, 20_000);
 
     test('caps new namespace creation when any-token mode is enabled', async () => {
@@ -1830,13 +1851,7 @@ describe('cloud server namespace mode', () => {
         }
     });
 
-    // Table test for the withNamespace() extraction: every namespaced write route
-    // must consult the namespace cap through the same shared guard, so a route
-    // added later can't silently skip it the way /v1/attachments/orphans did
-    // (it copied the auth/rate-limit preamble by hand and dropped the guard call).
-    // Regression coverage: this test fails against the pre-refactor server.ts for
-    // the two /v1/attachments/orphans cases (verified manually: they returned 200
-    // instead of 403 before withNamespace existed).
+
     const NAMESPACED_WRITE_ROUTES: Array<{ name: string; method: string; path: string; body?: unknown }> = [
         { name: 'POST /v1/tasks', method: 'POST', path: '/v1/tasks', body: { title: 'Namespace probe' } },
         { name: 'PATCH /v1/tasks/:id', method: 'PATCH', path: '/v1/tasks/00000000-0000-4000-8000-000000000000', body: { title: 'x' } },
@@ -1873,8 +1888,8 @@ describe('cloud server namespace mode', () => {
             port: 0,
             dataDir: tempDataDir,
             allowedAuthTokens: null,
-            // Disabling namespace creation outright means ANY brand-new token's first
-            // write must be rejected by the guard, regardless of which route it hits.
+
+
             maxAnyTokenNamespaces: 0,
         });
         const url = `http://127.0.0.1:${server.port}`;
@@ -1901,10 +1916,7 @@ describe('cloud server namespace mode', () => {
         }
     });
 
-    // Integration-level regression for the same bug: before the fix, a read or
-    // cleanup request from a stranger token who had never written data would silently
-    // consume the any-token namespace cap by planting an attachments directory as a
-    // side effect of path resolution, starving a legitimate first writer.
+
     test('attachment reads and cleanup never consume the any-token namespace cap', async () => {
         const tempDataDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-attachment-cap-bypass-'));
         const server = await startCloudServer({
@@ -1923,8 +1935,7 @@ describe('cloud server namespace mode', () => {
             await fetch(`${url}/v1/attachments/orphans`, { method: 'POST', headers: strangerHeaders });
             await fetch(`${url}/v1/attachments/orphans`, { method: 'DELETE', headers: strangerHeaders });
 
-            // Neither read consumed the (single) namespace slot, so a different
-            // token's first real write must still succeed.
+
             const writerToken = 'attachment-cap-bypass-writer-token-0001';
             const putResponse = await fetch(`${url}/v1/data`, {
                 method: 'PUT',
@@ -2046,8 +2057,10 @@ describe('cloud server api', () => {
         const body = JSON.stringify({ tasks, projects: [], sections: [], areas: [], people: [], settings: {} });
         expect(body.length).toBeGreaterThan(3_000_000);
 
+
         const dataResponse = await fetch(`${baseUrl}/v1/data`, {
             method: 'PUT',
+            keepalive: false,
             headers: { ...authHeaders, 'content-type': 'application/json' },
             body,
         });
@@ -2055,6 +2068,7 @@ describe('cloud server api', () => {
 
         const taskResponse = await fetch(`${baseUrl}/v1/tasks`, {
             method: 'POST',
+            keepalive: false,
             headers: { ...authHeaders, 'content-type': 'application/json' },
             body: JSON.stringify({ title: 'Too big', description: 'x'.repeat(3_000_000) }),
         });
@@ -2063,12 +2077,36 @@ describe('cloud server api', () => {
 
         const captureResponse = await fetch(`${baseUrl}/v1/capture`, {
             method: 'POST',
+            keepalive: false,
             headers: { ...authHeaders, 'content-type': 'application/json' },
-            // A short transcription: only the small JSON cap refuses this, not the attachment cap.
+
             body: JSON.stringify({ transcription: 'Short note', pad: 'x'.repeat(3_000_000) }),
         });
         expect(captureResponse.status).toBe(413);
         expect(await captureResponse.json()).toEqual({ error: 'Payload too large: the limit is 2000000 bytes' });
+    });
+
+    test('a refusal that leaves the body unread tells the client to close the connection', async () => {
+
+
+        const { hostname, port } = new URL(baseUrl);
+        const body = JSON.stringify({ title: 'Too big', description: 'x'.repeat(3_000_000) });
+        const head = await new Promise<string>((resolve, reject) => {
+            const socket = connect(Number(port), hostname);
+            let received = '';
+            const timer = setTimeout(() => { socket.destroy(); reject(new Error('no response')); }, 3_000);
+            socket.on('data', (chunk) => {
+                received += chunk.toString('latin1');
+                const end = received.indexOf('\r\n\r\n');
+                if (end >= 0) { clearTimeout(timer); socket.destroy(); resolve(received.slice(0, end)); }
+            });
+            socket.on('error', reject);
+            socket.write(`POST /v1/tasks HTTP/1.1\r\nHost: ${hostname}\r\nAuthorization: ${authHeaders.Authorization}\r\n`
+                + `Content-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n`);
+            socket.write(body);
+        });
+        expect(head.split('\r\n')[0]).toBe('HTTP/1.1 413 Payload Too Large');
+        expect(head.toLowerCase().split('\r\n')).toContain('connection: close');
     });
 
     test('uses the configured sync document limit for the data write only', async () => {
@@ -2098,7 +2136,7 @@ describe('cloud server api', () => {
         });
     });
 
-    /** Sends only the headers and one byte of a large POST /v1/tasks; returns the raw reply. */
+
     const postOversizedTaskHeaders = async (serverPort: number, contentLength: number): Promise<string> => {
         const socket = connect({ host: '127.0.0.1', port: serverPort });
         let rawResponse = '';
@@ -2145,8 +2183,8 @@ describe('cloud server api', () => {
     };
 
     test('lets the app answer a body above the Bun default transport limit with JSON', async () => {
-        // 139 MB is above Bun's 128 MiB default but inside the largest configured
-        // limit, so the small-endpoint check must be the one that refuses it.
+
+
         const port = await restartWithLimits({ maxDataBodyBytes: 140_000_000 });
         const rawResponse = await postOversizedTaskHeaders(port, 139_000_000);
         expect(rawResponse.startsWith('HTTP/1.1 413')).toBe(true);
@@ -2379,7 +2417,7 @@ describe('cloud server api', () => {
             }
             expect(opens).toBe(1);
 
-            // A cached failure must not stick: the entry expires and is probed again.
+
             rmSync(probeDir, { recursive: true, force: true });
             expect(probeExistingWritableDirCached(probeDir, { probeFileSystem, nowMs: 1_000 })).toBe(true);
             expect(opens).toBe(1);
@@ -2387,7 +2425,7 @@ describe('cloud server api', () => {
                 probeFileSystem,
                 nowMs: 1_000 + READINESS_PROBE_TTL_MS,
             })).toBe(false);
-            // A missing directory fails before any probe file is opened.
+
             expect(opens).toBe(1);
 
             mkdirSync(probeDir, { recursive: true });
@@ -3685,17 +3723,16 @@ describe('cloud server api', () => {
 
         expect(await listTitles('?isFocusedToday=true')).toContain(starredId);
         expect(await listTitles('?isFocusedToday=true')).not.toContain(plainId);
-        // `1` is the convention `all` and `deleted` already use, so both spellings must work.
+
         expect(await listTitles('?isFocusedToday=1')).toContain(starredId);
         expect(await listTitles('?isFocusedToday=false')).toContain(plainId);
         expect(await listTitles('?isFocusedToday=false')).not.toContain(starredId);
-        // Omitting the param must not filter anything out.
+
         const unfiltered = await listTitles('');
         expect(unfiltered).toContain(starredId);
         expect(unfiltered).toContain(plainId);
 
-        // A garbage value is rejected rather than silently treated as false, which would
-        // return the whole list and read as "no tasks are focused".
+
         const invalid = await fetch(`${baseUrl}/v1/tasks?isFocusedToday=yes`, { headers: authHeaders });
         expect(invalid.status).toBe(400);
     });
@@ -4149,6 +4186,30 @@ describe('cloud server api', () => {
         expect((await areasList.json()).total).toBe(1);
     });
 
+    test('persists Project color override intent and null reset while rejecting invalid colors', async () => {
+        const headers = { ...authHeaders, 'content-type': 'application/json' };
+        const create = await fetch(`${baseUrl}/v1/projects`, { method: 'POST', headers,
+            body: JSON.stringify({ title: 'Project color', props: { colorOverride: '#94a3b8' } }) });
+        expect(create.status).toBe(201);
+        const initial = (await create.json()).project;
+        expect(initial.colorOverride).toBe('#94a3b8');
+        const url = `${baseUrl}/v1/projects/${initial.id}`;
+        const unrelated = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ title: 'Renamed' }) });
+        expect((await unrelated.json()).project.colorOverride).toBe('#94a3b8');
+        const reset = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ colorOverride: null }) });
+        expect(reset.status).toBe(200);
+        const cleared = (await reset.json()).project;
+        expect(cleared.colorOverride ?? null).toBeNull();
+        expect(cleared.color).toBe('#94a3b8');
+        expect(cleared.rev).toBeGreaterThan(initial.rev);
+        for (const colorOverride of [false, '', '#fff', '#abcdef00', 'url(private)']) {
+            const invalid = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ colorOverride }) });
+            expect(invalid.status).toBe(400);
+        }
+        const loaded = await fetch(url, { headers: authHeaders });
+        expect((await loaded.json()).project.colorOverride ?? null).toBeNull();
+    });
+
     test('creates REST projects with core defaults while honoring explicit props', async () => {
         const seedResponse = await fetch(`${baseUrl}/v1/data`, {
             method: 'PUT',
@@ -4195,8 +4256,7 @@ describe('cloud server api', () => {
         expect(explicitProject.color).toBe('#123456');
         expect(explicitProject.isSequential).toBe(false);
 
-        // The factory's lifecycle normalization must win over raw props: a someday
-        // project cannot be focused, exactly as in-app addProject would refuse it.
+
         const somedayResponse = await fetch(`${baseUrl}/v1/projects`, {
             method: 'POST',
             headers: { ...authHeaders, 'content-type': 'application/json' },
@@ -4364,13 +4424,8 @@ describe('cloud server api', () => {
     });
 
     test('/v1/search reports the true total and pages correctly past 200 matches', async () => {
-        // searchAll() (packages/core/src/search.ts) internally truncates its returned tasks/
-        // projects arrays to SEARCH_RESULT_LIMIT (200) before returning. /v1/search used to
-        // read taskTotal off that already-truncated array and slice it again for offset/limit,
-        // so a query with more than 200 true matches reported taskTotal capped at 200, and any
-        // offset past 200 always returned an empty page. This seeds 250 matching tasks to prove
-        // both are fixed: taskTotal reflects the true count, and offset=200 returns the
-        // remaining 50 rather than nothing.
+
+
         const iso = '2026-01-01T00:00:00.000Z';
         const tasks = Array.from({ length: 250 }, (_, index) => ({
             id: `search-total-task-${String(index).padStart(3, '0')}`,
@@ -4406,9 +4461,8 @@ describe('cloud server api', () => {
     });
 
     test('/v1/tasks?query= reports the true total and pages correctly past 200 matches', async () => {
-        // Same truncation class as /v1/search above: pickTaskList used to intersect against
-        // searchAll()'s 200-capped result, so a query with more than 200 matches lost the
-        // tail before the route ever paginated. It now uses filterTasksBySearch (unsliced).
+
+
         const iso = '2026-01-01T00:00:00.000Z';
         const tasks = Array.from({ length: 250 }, (_, index) => ({
             id: `tasks-query-total-${String(index).padStart(3, '0')}`,
@@ -4833,8 +4887,8 @@ describe('cloud server api', () => {
         const listJson = await listResponse.json();
         const followUp = (listJson.tasks as Task[]).find((task) => task.projectId === projectId && task.id !== taskId);
         expect(followUp).toBeTruthy();
-        // REST-created tasks carry no order, so this exercises the reservation
-        // fallback; the inheritance path is covered against seeded data below.
+
+
         expect(Number.isFinite(followUp?.order)).toBe(true);
         expect(followUp?.orderNum).toBe(followUp?.order);
         expect(followUp?.pushCount).toBe(0);
@@ -4876,8 +4930,8 @@ describe('cloud server api', () => {
         const listJson = await listResponse.json();
         const followUp = (listJson.tasks as Task[]).find((task) => task.projectId === projectId && task.id !== taskId);
         expect(followUp).toBeTruthy();
-        // REST-created tasks carry no order, so this exercises the reservation
-        // fallback; the inheritance path is covered against seeded data below.
+
+
         expect(Number.isFinite(followUp?.order)).toBe(true);
         expect(followUp?.orderNum).toBe(followUp?.order);
         expect(followUp?.pushCount).toBe(0);
@@ -4968,9 +5022,7 @@ describe('cloud server api', () => {
         expect(task.orderNum).toBe(1);
     });
 
-    // Documents synced from the apps do carry an order, and there the next
-    // occurrence must hold the completed task's place rather than sort below
-    // every sibling -- matching core's stampNewRecurringFollowUp.
+
     test('gives a recurring follow-up the completed task place when the document carries an order', async () => {
         const projectId = '11111111-2222-4333-8444-555555555555';
         const recurringId = '11111111-2222-4333-8444-666666666666';
@@ -5305,7 +5357,7 @@ describe('cloud server api', () => {
         const downloaded = new Uint8Array(await getResponse.arrayBuffer());
         expect(Array.from(downloaded)).toEqual(Array.from(payload));
 
-        // #1119 presence pass: HEAD answers the same question without the bytes.
+
         const headResponse = await fetch(`${baseUrl}/v1/attachments/folder/file.bin`, {
             method: 'HEAD',
             headers: authHeaders,
@@ -5480,9 +5532,8 @@ describe('cloud server api', () => {
             const serializedLogs = captured.join('');
             expect(serializedLogs).toContain('"failureClass":"filesystem"');
             expect(serializedLogs).toContain('"failureCode":"attachment_io_failed"');
-            // S10: the durability failure log carries the bare errno (renaming a
-            // published file onto an existing directory fails with EISDIR) so an
-            // operator can diagnose without the log ever holding a path or message.
+
+
             expect(serializedLogs).toContain('"failureErrno":"EISDIR"');
             expect(serializedLogs).not.toContain(key);
             expect(serializedLogs).not.toContain(dataDir);
@@ -5608,7 +5659,7 @@ describe('cloud server api', () => {
                 method: 'POST',
                 headers: authHeaders,
             });
-            // S8: a GC pass with errors must not answer 200.
+
             expect(gcResponse.status).toBe(500);
             const gcBody = await gcResponse.json();
             expect(gcBody.ok).toBe(false);
@@ -6247,8 +6298,8 @@ describe('cloud server api', () => {
 
             expect(response.status).toBe(500);
             const body = await response.json();
-            // The body names the failing field so an operator can find the
-            // record, and still carries no stored content.
+
+
             expect(body.error).toBe(
                 'Stored data failed validation: Invalid data: project createdAt/updatedAt must be valid ISO timestamps',
             );
@@ -6426,11 +6477,11 @@ describe('cloud server calendar feed', () => {
             expect(feed.token).toMatch(/^[a-f0-9]{64}$/);
             expect(feed.path).toBe(`/v1/calendar/${feed.token}.ics`);
 
-            // The stored token round-trips, so the URL survives a client reinstall.
+
             expect(((await (await fetch(`${url}/v1/calendar/feed`, { headers: authHeaders })).json()).feed as { token: string }).token)
                 .toBe(feed.token);
 
-            // No Authorization header: the URL is the only credential.
+
             const feedResponse = await fetch(`${url}${feed.path}`);
             expect(feedResponse.status).toBe(200);
             expect(feedResponse.headers.get('content-type')).toBe('text/calendar; charset=utf-8');
@@ -6481,7 +6532,7 @@ describe('cloud server calendar feed', () => {
         };
 
         expect(await readFeed({})).toContain('DTEND:20260506T110000Z');
-        // Feature off: the stored estimate is kept but stops sizing the event.
+
         expect(await readFeed({ features: { timeEstimates: false } })).toContain('DTEND:20260506T093000Z');
     });
 
@@ -6555,9 +6606,7 @@ describe('cloud server calendar feed', () => {
         }
     });
 
-    // R-03: revoking a token (the documented rotation flow) must also stop the
-    // calendar feed it published - the feed URL has no auth of its own, so an
-    // unrevoked feed would keep serving that namespace's data forever.
+
     test('404s a published feed and prunes its sidecar once the token leaves the allowlist', async () => {
         const dataDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-calendar-feed-'));
         try {
@@ -6571,7 +6620,7 @@ describe('cloud server calendar feed', () => {
             expect((await fetch(`${url}${feed.path}`)).status).toBe(200);
             server.stop();
 
-            // Rotation: the next allowlist no longer contains FEED_TOKEN.
+
             const restarted = await startCloudServer({
                 host: '127.0.0.1', port: 0, dataDir,
                 allowedAuthTokens: ['rotated-replacement-token-1234567890'],
@@ -6641,11 +6690,7 @@ describe('cloud server calendar feed', () => {
         }
     });
 
-    // I4: an unlinkSync failure (permission error, a race with another
-    // process, an unexpected filesystem entry) must never crash startup - a
-    // directory can never be removed with unlinkSync regardless of
-    // permissions or the running user, so it's a deterministic way to force
-    // that failure without relying on file permissions (which root ignores).
+
     test('pruneOrphanedCalendarFeeds counts an undeletable entry as a failure instead of throwing', () => {
         const dataDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-calendar-feed-'));
         try {
@@ -6667,11 +6712,7 @@ describe('cloud server calendar feed', () => {
         }
     });
 
-    // SEC-15a: a bare unlinkSync (no parent-directory fsync) can leave a revoked
-    // feed's removal un-published — a crash between the unlink and the next fsync
-    // resurrects the revoked token on restart. Route through the shared
-    // durablyRemoveFile helper instead, and confirm it publishes the removal by
-    // recording every directory it fsyncs.
+
     test('revokeCalendarFeed durably removes the feed file and tolerates an already-removed feed', () => {
         const dataDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-calendar-feed-'));
         try {
@@ -6695,9 +6736,7 @@ describe('cloud server calendar feed', () => {
             expect(existsSync(feedPath)).toBe(false);
             expect(fsyncedDirs).toContain(dataDir);
 
-            // A second revoke races an already-removed feed (e.g. a retry after a
-            // dropped response) — durablyRemoveFile tolerates ENOENT instead of the
-            // bare unlinkSync this replaces throwing and becoming an uncaught 500.
+
             expect(revokeCalendarFeed(dataDir, key, trackingFileSystem)).toBe(false);
         } finally {
             rmSync(dataDir, { recursive: true, force: true });

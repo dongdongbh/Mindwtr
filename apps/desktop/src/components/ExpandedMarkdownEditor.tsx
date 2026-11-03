@@ -6,7 +6,7 @@ import { MarkdownFormatToolbar } from './MarkdownFormatToolbar';
 import { MarkdownReferenceAutocompleteMenu, useMarkdownReferenceAutocomplete } from './MarkdownReferenceAutocomplete';
 import { RichMarkdown } from './RichMarkdown';
 import { Dialog, DialogHeader } from './ui/Dialog';
-import type { MarkdownSelection, MarkdownToolbarActionId, MarkdownToolbarResult } from '@mindwtr/core';
+import type { Attachment, MarkdownSelection, MarkdownToolbarActionId, MarkdownToolbarResult } from '@mindwtr/core';
 
 type ExpandedMarkdownEditorProps = {
     isOpen: boolean;
@@ -28,6 +28,7 @@ type ExpandedMarkdownEditorProps = {
     onEditorKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
     onEditorPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
     currentTaskId?: string;
+    attachments?: Attachment[];
 };
 
 export function ExpandedMarkdownEditor({
@@ -50,6 +51,7 @@ export function ExpandedMarkdownEditor({
     onEditorKeyDown,
     onEditorPaste,
     currentTaskId,
+    attachments,
 }: ExpandedMarkdownEditorProps) {
     const [mode, setMode] = useState<'edit' | 'preview'>(initialMode);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -98,8 +100,8 @@ export function ExpandedMarkdownEditor({
             onClose={handleClose}
             labelledBy={titleId}
             overlayClassName="z-[70] p-4"
-            // Sized rather than capped: the editor deliberately fills the window
-            // and its edit/preview region owns the scrolling.
+
+
             panelClassName="h-[min(92vh,960px)] w-[min(1200px,96vw)] max-w-none max-h-[none] rounded-2xl border-border bg-card"
         >
             <DialogHeader className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
@@ -194,7 +196,7 @@ export function ExpandedMarkdownEditor({
                             isRtl && 'text-right',
                         )}
                     >
-                        <RichMarkdown markdown={value} />
+                        <RichMarkdown markdown={value} attachments={attachments} />
                     </div>
                 )}
             </div>

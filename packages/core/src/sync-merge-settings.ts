@@ -1,4 +1,5 @@
 import type { AiSettings, AppData, GtdSettings, SavedFilter, SettingsSyncGroup, SettingsSyncPreferences, SupportPromptSettings } from './types';
+import { mergeTaxonomyCatalog } from './taxonomy-catalog';
 import {
     AI_PROVIDER_VALUE_SET,
     AI_REASONING_EFFORT_VALUE_SET,
@@ -48,9 +49,7 @@ const isIncomingNewer = (localAt?: string, incomingAt?: string): boolean => {
     return incomingTime > localTime;
 };
 
-// The load migration materializes this exact shape without a user edit. Both
-// editors save an order when customizing visibility, including a reset back to
-// default visibility. Extra fields may carry newer-client intent: keep them.
+
 const isMigrationTaskEditorDefault = (value: Record<string, unknown>): boolean => {
     const hidden = value.hidden;
     return typeof value.defaultsVersion === 'number'
@@ -75,26 +74,41 @@ const chooseDeletedSavedFilter = (localFilter: SavedFilter, incomingFilter: Save
     return chooseDeterministicWinner(localFilter, incomingFilter);
 };
 
-// v1.3.2's saved-filter reader, kept to recognize its copies (never to store
-// one): every v1.3.2 load, merge and upload rewrote each filter this way —
-// an unknown view became 'focus', unknown fields and values were dropped, a
-// missing createdAt became its load time (`inventedAt`) — and kept updatedAt.
+
 const legacySavedFilterProjection = (filter: SavedFilter, inventedAt: string | undefined): SavedFilter | null => {
     const value = filter as unknown as Record<string, unknown>;
+    const criteria = isObjectRecord(value.criteria) ? { ...value.criteria } : {};
+
+    delete criteria.anyDateRange;
+    delete criteria.excludedProjects;
+    for (const field of ['dueDateRange', 'startDateRange']) {
+        const range = criteria[field];
+        if (isObjectRecord(range) && typeof range.preset === 'string'
+            && !['today', 'this_week', 'this_month', 'overdue', 'no_date'].includes(range.preset)) {
+            const { preset: _preset, ...bounds } = range;
+            criteria[field] = bounds;
+        }
+    }
     const legacy = {
         ...value,
+        criteria,
         id: typeof value.id === 'string' ? value.id.trim() : value.id,
         createdAt: typeof value.createdAt === 'string' && value.createdAt.trim() ? value.createdAt : inventedAt,
     };
     return normalizeSavedFilter(legacy) ?? normalizeSavedFilter({ ...legacy, view: 'focus' });
 };
 
-// Two copies tied on time: when one is only v1.3.2's rewrite of the other,
-// the other (the full copy) wins; otherwise one deterministic winner.
+
 const chooseTiedSavedFilter = (localFilter: SavedFilter, incomingFilter: SavedFilter): SavedFilter => {
     const incomingIsLegacy = isDeepJsonEqual(legacySavedFilterProjection(localFilter, incomingFilter.createdAt), incomingFilter);
     const localIsLegacy = isDeepJsonEqual(legacySavedFilterProjection(incomingFilter, localFilter.createdAt), localFilter);
-    if (incomingIsLegacy !== localIsLegacy) return incomingIsLegacy ? localFilter : incomingFilter;
+    if (incomingIsLegacy !== localIsLegacy) {
+        logInfo('Saved filter retained over legacy rewrite', {
+            scope: 'saved-filters', category: 'sync', force: true,
+            context: { releaseCheck: 'v1.3.8/saved-filter-date-preserved', count: 1, outcome: 'kept-full' },
+        });
+        return incomingIsLegacy ? localFilter : incomingFilter;
+    }
     return chooseDeterministicWinner(localFilter, incomingFilter);
 };
 
@@ -129,21 +143,14 @@ const chooseSavedFilter = (
         if (updatedAtDiff < 0) return localFilter;
         return chooseTiedSavedFilter(localFilter, incomingFilter);
     }
-    // Neither copy has a time: a strictly newer group timestamp decides, then
-    // one deterministic winner, so both peers keep the same copy.
+
+
     if (incomingWins) return incomingFilter;
     if (localNewer) return localFilter;
     return chooseTiedSavedFilter(localFilter, incomingFilter);
 };
 
-/**
- * Merge saved filters by id. A filter on both sides is the copy
- * chooseSavedFilter picks, kept whole (fields this build does not know
- * included). The list keeps the remote copy's order unless this device
- * changed its saved filters later (a newer group timestamp); filters only the
- * other side holds join at the end. Every device so settles on one order, and
- * a merge never reorders filters it did not change.
- */
+
 const mergeSavedFiltersById = (
     localValue: AppData['settings']['savedFilters'],
     incomingValue: AppData['settings']['savedFilters'],
@@ -189,8 +196,8 @@ const sanitizeAiForSync = (
     const sanitized: AiSettings = {
         ...ai,
         apiKey: undefined,
-        // Device-local, like apiKey: the sync document must never choose where
-        // this device sends its key or what the request body carries.
+
+
         baseUrl: localAi?.baseUrl,
         openAIExtraBodyParams: localAi?.openAIExtraBodyParams
             ? cloneSettingValue(localAi.openAIExtraBodyParams)
@@ -212,24 +219,7 @@ const sanitizeAiForSync = (
     return sanitized;
 };
 
-/**
- * Put this device's own AI endpoint, extra request body and offline speech model
- * path back onto a merged document.
- *
- * `sanitizeAiForSync` takes those fields from the merge's FIRST argument, because
- * against a remote document the local side is the only safe source. The sync run
- * also uses the same merge to join the copy it read from disk with the live
- * in-memory store, and there the disk copy comes first — so an endpoint edited
- * while a cycle was running would be put back to the value on disk. The in-memory
- * store is this device's newest truth, so that one caller restores it here.
- *
- * `apiKey` is deliberately not in this list: it is stripped from every document,
- * local storage included (`sanitizeAppDataForStorage`), and the runtime reads the
- * key from its own store instead.
- *
- * Returns `merged` itself when nothing has to change, so a caller can tell by
- * identity whether its document still matches the one on disk.
- */
+
 export const restoreDeviceLocalAiSettings = (merged: AppData, deviceLocal: AppData): AppData => {
     const source = deviceLocal.settings.ai;
     const mergedAi = merged.settings.ai;
@@ -269,7 +259,7 @@ const cloneSettingValue = <T>(value: T): T => {
         try {
             return globalThis.structuredClone(value);
         } catch {
-            // Fallback to manual deep clone for environments/values unsupported by structuredClone.
+
         }
     }
     if (Array.isArray(value)) {
@@ -794,11 +784,8 @@ export const sanitizeMergedSettingsForSync = (
         }
 
         if (next.gtd.taskEditor !== undefined) {
-            // Structural guard only: unknown field ids and extra keys pass
-            // through so an older device never strips (and then re-uploads
-            // without) layout values a newer client wrote — that asymmetry
-            // would churn forever. Wrong-typed sub-values are dropped because
-            // the load-time defaults migration calls .filter on order/hidden.
+
+
             const rawTaskEditor = next.gtd.taskEditor;
             if (!isObjectRecord(rawTaskEditor)) {
                 next.gtd = { ...next.gtd, taskEditor: localSettings.gtd?.taskEditor };
@@ -892,7 +879,7 @@ const latestTimestamp = (left?: string, right?: string): string | undefined => {
     return leftValid ? left : rightValid ? right : undefined;
 };
 
-/** Cooldowns take the latest timestamp on either side, so the prompt shown on one device silences the rest. */
+
 export const mergeSupportPromptSettings = (
     local: SupportPromptSettings | undefined,
     incoming: SupportPromptSettings | undefined,
@@ -909,11 +896,11 @@ export const mergeSettingsForSync = (
     incomingSettings: AppData['settings']
 ): AppData['settings'] => {
     const merged: AppData['settings'] = { ...localSettings };
+    const taxonomy = mergeTaxonomyCatalog(localSettings.taxonomy, incomingSettings.taxonomy);
+    if (taxonomy !== undefined) merged.taxonomy = taxonomy;
     const nextSyncUpdatedAt: NonNullable<AppData['settings']['syncPreferencesUpdatedAt']> = {};
 
-    // One logical dataset = one profile id. The remote document's id always
-    // wins so every device on the same sync target converges; a device only
-    // keeps its own when the remote has none (older client or first upload).
+
     if (isNonEmptyString(incomingSettings.analyticsProfileId)) {
         merged.analyticsProfileId = incomingSettings.analyticsProfileId;
     }
@@ -981,10 +968,8 @@ export const mergeSettingsForSync = (
                 resolvedLayout = localDefault ? incomingLayout : localLayout;
                 reason = 'explicit-layout';
             } else if (!isIncomingNewer(localAt, incomingAt) && !isIncomingNewer(incomingAt, localAt)) {
-                // Legacy layouts predate GTD sync clocks. Local-wins on a tie
-                // made every client re-upload its own layout forever. Keep one
-                // whole layout deterministically without inventing a fresh clock
-                // that could outrank a real edit made on another device.
+
+
                 resolvedLayout = chooseDeterministicWinner(localLayout, incomingLayout);
                 reason = 'tied-clock';
             }

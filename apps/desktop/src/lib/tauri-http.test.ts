@@ -92,11 +92,7 @@ describe('tauri http proxy helpers', () => {
     });
 });
 
-/**
- * Mirrors how `@tauri-apps/plugin-http` builds a response: a `ReadableStream` fed by an
- * IPC channel that calls `controller.close()` when the terminator message arrives, with
- * `url`/`headers` bolted on afterwards. `deliverTerminator` plays that late message.
- */
+
 const createPluginResponse = (chunks: string[] = [], status = 200) => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     let pulled = false;
@@ -112,8 +108,8 @@ const createPluginResponse = (chunks: string[] = [], status = 200) => {
         cancel: sourceCancel,
     });
     const res = new Response(body, { status: 200, statusText: 'OK' });
-    // The constructor refuses a body for a null-body status, so shadow the getter the same
-    // way the plugin shadows `url` and `headers`.
+
+
     if (status !== 200) Object.defineProperty(res, 'status', { value: status });
     Object.defineProperty(res, 'url', { value: 'https://dav.example.com/attachments/a.bin' });
     Object.defineProperty(res, 'headers', { value: new Headers({ etag: '"abc"' }) });

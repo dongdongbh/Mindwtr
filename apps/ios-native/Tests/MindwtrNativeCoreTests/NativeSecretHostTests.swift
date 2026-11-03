@@ -14,7 +14,7 @@ private final class SecretFixtureState: @unchecked Sendable {
     var slots: Int { lock.lock(); let value = jobs; lock.unlock(); return value?.counters.jobs ?? -1 }
 }
 
-/// No fixture request is allowed to fall through to a real endpoint.
+
 private final class SecretHTTPFixtureProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var calls = 0
@@ -51,7 +51,7 @@ final class NativeSecretHostTests: XCTestCase {
         #endif
     }
     override func tearDownWithError() throws {
-        // Exact synthetic account/alias ownership only: never enumerate a service.
+
         if service != nil {
             for account in accounts { for alias in ["no-auth", "auth", "legacy"] {
                 let result = SecItemDelete(query(account, alias: alias) as CFDictionary)
@@ -96,8 +96,8 @@ final class NativeSecretHostTests: XCTestCase {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [SecretHTTPFixtureProtocol.self]; value.httpConfiguration = config
         return value
     }
-    // Temporary actual production-bundle suffix, reusing existing entry points.
-    // Original cancellation remains active; no evaluator/test API ships.
+
+
     private func probeBundle(_ expression: String) throws -> URL {
         let suffix = """
         ;(() => {
@@ -242,7 +242,7 @@ final class NativeSecretHostTests: XCTestCase {
         await Promise.all([one,two]);void s.setSecret('after','trailing');return {capacity};
         """,faults:faults())
         try await start(host); let result = try await probe(host); XCTAssertEqual(result["capacity"] as? Bool,true)
-        try await drained() // No subsequent host call settles the trailing operation.
+        try await drained()
         XCTAssertEqual(try stored("after"),Data("trailing".utf8))
     }
 
@@ -262,7 +262,7 @@ final class NativeSecretHostTests: XCTestCase {
         let input=try json(["owner":["kind":"task","taskId":"secret-fixture","attachments":[]] as [String:Any],"attachmentId":"probe"])
         let request=Task{try await host.localAttachmentRequest(name:"openAttachment",requestJSON:input)}
         XCTAssertEqual(entered.wait(timeout:.now()+5),.success);request.cancel()
-        // Give the Engine a turn to observe caller cancellation before release.
+
         try await Task.sleep(nanoseconds:50_000_000);release.signal()
         do{_=try await request.value;XCTFail("Cancelled caller must refuse")}catch is CancellationError{}catch{XCTFail("Expected cancellation")}
         try await drained();XCTAssertEqual(try stored("fixture"),Data("started".utf8));XCTAssertEqual(try stored("after"),Data("finally-3".utf8))
@@ -333,9 +333,8 @@ final class NativeSecretHostTests: XCTestCase {
         var result: [String: String] = [:]
         for row in names { let name = try XCTUnwrap(row["name"] as? String), quoted = name.replacingOccurrences(of: "\"", with: "\"\"")
             let columns = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute("PRAGMA table_info(\"\(quoted)\")").utf8)) as? [[String: Any]])
-            // SQLiteBridge intentionally refuses BLOB JSON cells. Capture every
-            // table (including FTS shadow BLOBs), with type and exact byte hex
-            // for both text/BLOB; scalar quote preserves NULL/integer/real.
+
+
             let projection = try columns.enumerated().map { index, column -> String in
                 let columnName = try XCTUnwrap(column["name"] as? String).replacingOccurrences(of: "\"", with: "\"\"")
                 let cell = "\"\(columnName)\""

@@ -2,9 +2,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const FOSS_AUTOLINKING_EXCLUDES = ['play-store-updates', 'expo-store-review'];
+const FOSS_AUTOLINKING_EXCLUDES = ['play-store-updates', 'expo-store-review', 'gmail-authorization'];
 const REMOVE_DEPS = ['expo-dev-client'];
-const REMOVE_PATHS = ['modules/play-store-updates'];
+const REMOVE_PATHS = ['modules/play-store-updates', 'modules/gmail-authorization'];
 
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 

@@ -5,6 +5,7 @@ import { planTaskMutations, sanitizeRestoredTaskContainerReferences } from './st
 import { compactPurgedTaskForLocalStorage } from './tombstone-compaction';
 import { mapSqliteTaskRow, TASK_SQLITE_COLUMNS, taskToSqliteRow } from './sqlite-adapter';
 import { normalizeTaskForLoad } from './task-status';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
 import type { AppData, Project, Section, Task } from './types';
 
 const CREATED = '2026-09-01T12:00:00.000Z';
@@ -43,7 +44,7 @@ const load = (initial: AppData): void => {
 };
 const snapshot = () => clone(buildSaveSnapshot(useTaskStore.getState()));
 
-// Exact pre-extraction changed-row formula, independent of the new helper.
+
 const legacyRows = <TState>(tasks: readonly Task[], state: TState,
     buildUpdates: (task: Task, context: { now: string; state: TState }) => Partial<Task>, now: string, deviceId = DEVICE): Task[] =>
     tasks.map((source) => compactPurgedTaskForLocalStorage({
@@ -52,7 +53,11 @@ const legacyRows = <TState>(tasks: readonly Task[], state: TState,
     }));
 const overlay = (initial: AppData, changed: Task[]): AppData => {
     const byId = new Map(changed.map((row) => [row.id, row]));
-    return { ...initial, tasks: initial.tasks.map((row) => byId.get(row.id) ?? row) };
+
+    return { ...initial, tasks: initial.tasks.map((row) => byId.get(row.id) ?? row),
+        settings: retainTaxonomyEffects(initial.settings, changed.map(after => ({
+            before: initial.tasks.find(row => row.id === after.id), after,
+        }))) };
 };
 const restoreContext = (initial: AppData) => ({
     _allProjects: initial.projects, _allSections: initial.sections, _allAreas: initial.areas,
@@ -233,7 +238,7 @@ describe('shared task mutation row planner', () => {
         const loadedAfter = planTaskMutations({ tasks: [loaded], state: {}, buildUpdates, now: DELETE_AT, deviceId: DEVICE })[0];
         expect(loadedAfter.focusOrder).toBeUndefined(); expect(loadedAfter.pushCount).toBe(0);
         expect(loadedAfter.attachments?.[0].updatedAt).toBe('');
-        expect(rawAfter).not.toEqual(loadedAfter); // Distinct raw and normal-load inputs, no field waiver.
+        expect(rawAfter).not.toEqual(loadedAfter);
         expect(raw.focusOrder).toBe(2); expect(raw.attachments?.[0].updatedAt).toBeUndefined();
     });
 

@@ -69,6 +69,12 @@ struct ReviewScreen: View {
                                 }
                             }
                             .disabled(!model.reviewActionsEnabled).padding(.leading, 20)
+                        } else if item.text("type") == "later" {
+                            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: model.reviewActionsEnabled,
+                                palette: palette, id: "review-later-" + item.text("id")) {
+                                Task { await model.toggleReviewLater(item.text("id"), weekly: false) }
+                            }
+                            .accessibilityValue(model.label(item.flag("expanded") ? "markdown.collapse" : "markdown.expand"))
                         } else { group(item) }
                     }
                     if items.count < view.number("total") {
@@ -225,7 +231,10 @@ struct ReviewGuideScreen: View {
                     if !daily && content.text("step") == "calendar" { calendarTasks }
                     let items = view.objects("items")
                     let visibleItems = scheduledGroup ? items.filter { !$0.flag("scheduled") } : items
-                    ForEach(visibleItems.indices, id: \.self) { index in guideItem(visibleItems[index]) }
+                    ForEach(visibleItems.indices, id: \.self) { index in
+                        guideItem(visibleItems[index])
+                        openProjectLink(after: index, in: visibleItems)
+                    }
                     if scheduledGroup {
                         scheduledToggle
                         if scheduledExpanded {
@@ -233,7 +242,7 @@ struct ReviewGuideScreen: View {
                             ForEach(scheduledItems.indices, id: \.self) { index in guideItem(scheduledItems[index]) }
                         }
                     }
-                    // A folded group should not offer pages containing only its hidden rows.
+
                     let visibleTotal = view.number("total") - (scheduledGroup && !scheduledExpanded ? content.object("scheduled").number("count") : 0)
                     if items.count < visibleTotal {
                         ReviewAction(title: model.label("common.more"), enabled: model.reviewActionsEnabled, palette: palette, id: "review-guide-more") {
@@ -372,6 +381,12 @@ struct ReviewGuideScreen: View {
                 footer: daily ? item.object("followUp").text("label") : "", hideStatusBadge: item.flag("hideStatusBadge"),
                 showFocusToggle: daily && content.text("step") == "focus", onProject: { project in Task { await model.openProject(project) } })
                 .disabled(!model.reviewActionsEnabled)
+        } else if item.text("type") == "later" {
+            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: model.reviewActionsEnabled,
+                palette: palette, id: "weekly-later-" + item.text("id")) {
+                Task { await model.toggleReviewLater(item.text("id"), weekly: true) }
+            }
+            .accessibilityValue(model.label(item.flag("expanded") ? "markdown.collapse" : "markdown.expand"))
         } else if item.text("type") == "project" {
             Button { Task { await model.expandWeeklyReviewProject(item.text("id")) } } label: {
                 VStack(alignment: .leading, spacing: 8) {
@@ -420,6 +435,25 @@ struct ReviewGuideScreen: View {
             }
             .padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1))
+        }
+    }
+
+
+    @ViewBuilder private func openProjectLink(after index: Int, in items: [CoreObject]) -> some View {
+        let item = items[index]
+        let projectID = item.text("type") == "project" ? item.text("id") : item.text("projectId")
+        let nextProjectID = index + 1 < items.count ? items[index + 1].text("projectId") : ""
+        if !daily, !projectID.isEmpty, nextProjectID != projectID,
+           let card = items[...index].last(where: { $0.text("type") == "project" }), card.text("id") == projectID, card.flag("expanded") {
+            Button { Task { await model.openProject(card) } } label: {
+                HStack(spacing: 6) {
+                    AppIcon(name: "folder", size: 14)
+                    Text(card.text("openLabel")).rnFont(13, .semibold).lineLimit(1)
+                }
+                .foregroundStyle(palette.tint).frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(!model.reviewActionsEnabled)
+            .accessibilityLabel(card.text("openLabel")).accessibilityIdentifier("review-guide-open-project-" + projectID)
         }
     }
 

@@ -7,7 +7,7 @@ import { getAttachmentDownloadFileName } from './mobile-attachment-availability'
 import { getStorageAdapter, getPersistenceStatus, useTaskStore } from './store';
 import { gateStoreCommands, runOutsideStoreGate } from './store-write-gate';
 import { rawReadProjectSnapshot, rawReadRow, rememberRawReadRow } from './sqlite-raw-snapshot';
-import { PROJECT_SQLITE_COLUMNS, projectFromSqliteRow, projectToSqliteRow } from './project-sync-schema';
+import { PROJECT_SQLITE_COLUMNS, padProjectSqliteCells, projectFromSqliteRow, projectToSqliteRow } from './project-sync-schema';
 import { ensureDeviceId } from './store-helpers';
 import { taskEditValuesEqual as same } from './json-value-equality';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
@@ -53,8 +53,8 @@ const selectedProject = (projects: Project[], id: string): Project | undefined =
 export function createProjectAvailabilityMethods(deps: Deps, mode: 'relocated' | 'cached' | 'cached-webdav' = 'relocated') {
     const saves = createAreaSaveGuard(deps.save);
     const webdav = mode === 'cached-webdav', cached = mode !== 'relocated';
-    // The filename derivation is pure; this selection reads settled durable rows,
-    // preserving metadata the display codec omits (for example explicit false).
+
+
     const preflight = async (input: Request) => {
         const ready = deps.readiness();
         if (!ready.ok) return ready;
@@ -86,7 +86,7 @@ export function createProjectAvailabilityMethods(deps: Deps, mode: 'relocated' |
         const value = { revision: input.revision, project: { id: before.id, ...projectAttachmentWriteToken(before) }, targetURI };
         return isNativeJsonWithinBytes(value) ? { ok: true as const, value: { read: read.value, before, attachment, value } } : invalid();
     };
-    // The bridge calls these outside the contract: each async method is a store command (store-write-gate.ts).
+
     return gateStoreCommands({
         async getProjectAttachmentAvailabilityPreflight(raw: Request) {
             const input = readRequest(raw);
@@ -107,7 +107,7 @@ export function createProjectAvailabilityMethods(deps: Deps, mode: 'relocated' |
                 projectToSqliteRow(selectedProject(initial.read.authority.snapshot.projects, input.projectId)!)).row];
             const deviceIdBefore = initial.read.authority.snapshot.settings.deviceId ?? null;
             let outcome;
-            // Outside the write gate while it downloads; the fresh durable read below checks what it found.
+
             try { outcome = await runOutsideStoreGate(() => host.ensureAttachmentAvailableDetailed({ ...initial.attachment, uri: currentTargetURI })); }
             catch { return fail('ACTION_FAILED', 'Project availability is unavailable'); }
             if (outcome.status !== 'available') return { ok: true, value: { status: 'generation-conflict', message: null, update: null } };
@@ -200,20 +200,20 @@ const fileAvailabilityTarget = (attachment: Attachment, directory: string, webda
     return fileURI(target) && !target.slice(directory.length).includes('/')
         && (webdav || attachment.uri !== target || attachment.localStatus !== 'available') ? target : null;
 };
-// Rebuild only from exact SQL cells. Object-key ordering in a native journal
-// never rewrites the opaque raw attachment string or changes its frozen plan.
+
+
 const fileAvailabilityRawBefore = (value: unknown): Project | null => {
-    if (!Array.isArray(value) || value.length !== PROJECT_SQLITE_COLUMNS.length
-        || !value.every(cell => cell === null || typeof cell === 'string' || typeof cell === 'number' && Number.isFinite(cell))) return null;
+    const cells = Array.isArray(value) ? padProjectSqliteCells(value) : null;
+    if (!cells || !cells.every(cell => cell === null || typeof cell === 'string' || typeof cell === 'number' && Number.isFinite(cell))) return null;
     try {
-        const row = Object.fromEntries(PROJECT_SQLITE_COLUMNS.map((column, index) => [column, value[index]]));
+        const row = Object.fromEntries(PROJECT_SQLITE_COLUMNS.map((column, index) => [column, cells[index]]));
         const project = projectFromSqliteRow(row);
         rememberRawReadRow(project, row, PROJECT_SQLITE_COLUMNS, projectToSqliteRow(project));
         return projectFileAddScalarCellsMatchWriter(project) && iso(project.createdAt) && iso(project.updatedAt)
             ? rawReadProjectSnapshot(project) : null;
     } catch { return null; }
 };
-/** Pure cold-journal validation; no readiness, clock, mutable store or byte authority. */
+
 const readPreparedFileAvailability = (value: unknown, webdav = false): NativeProjectFileAvailabilityEnvelope | null => {
     const envelope = detach<NativeProjectFileAvailabilityEnvelope>(value);
     if (!envelope || !record(envelope) || !exact(envelope, ['request', 'prepared'])) return null;
@@ -241,13 +241,13 @@ const readPreparedFileAvailability = (value: unknown, webdav = false): NativePro
         target, effect.deviceIdBefore, effect.deviceIdToInitialize, effect.updateAt, 'available')
         : projectFileAvailabilityWritePlan(before, effect.rawBefore, request.attachmentId,
             target, effect.deviceIdBefore, effect.deviceIdToInitialize, effect.updateAt));
-    // Keep the proven raw-cell reconstruction for commit; native object-key sorting
-    // must not change the later attachment STRING serialization.
+
+
     return planned && prepared.targetURI === target && same(effect, planned)
         ? { ...envelope, prepared: { ...prepared, effect: planned } } : null;
 };
 
-/** Source-free404 validation has no file/publication authority. */
+
 const readPreparedUnrecoverable = (raw: unknown): NativeProjectFileUnrecoverableEnvelope | null => {
     const envelope = detach<NativeProjectFileUnrecoverableEnvelope>(raw);
     if (!envelope || !record(envelope) || !exact(envelope, ['request', 'prepared'])) return null;
@@ -274,8 +274,7 @@ const readPreparedUnrecoverable = (raw: unknown): NativeProjectFileUnrecoverable
         ? { ...envelope, prepared: { ...prepared, effect: planned } } : null;
 };
 
-/** Private native prerequisite, deliberately not installed on the public contract.
- * Preparation grants metadata intent only; native must prove absence/publication. */
+
 export function createPreparedProjectAvailabilityMethods(deps: Pick<Deps, 'readiness' | 'revision' | 'save'> & { translate?: (key: string) => string }, mode: 'strict' | 'webdav' = 'strict') {
     const webdav = mode === 'webdav';
     const readEnvelope = (raw: unknown) => webdav && record(raw) && record(raw.prepared) && raw.prepared.version === 2
@@ -307,7 +306,7 @@ export function createPreparedProjectAvailabilityMethods(deps: Pick<Deps, 'readi
         return { ok: true as const, value: { before, rawBefore, attachment, targetURI, deviceIdBefore,
             settings: read.value.authority.snapshot.settings } };
     };
-    // The bridge calls these outside the contract: each async method is a store command (store-write-gate.ts).
+
     return gateStoreCommands({
         async getProjectFileAvailabilityPreflight(raw: unknown): Promise<NativeHostResult<NativeProjectFileAvailabilityPreflight>> {
             const input = readFileAvailabilityRequest(raw, false); if (!input) return invalidFileAvailability();

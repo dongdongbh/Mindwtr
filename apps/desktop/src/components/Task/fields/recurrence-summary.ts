@@ -50,10 +50,7 @@ const splitByDay = (token: RecurrenceByDay): { ordinal?: string; weekday: Recurr
     return { ordinal: match[1], weekday: match[2] as RecurrenceWeekday };
 };
 
-/**
- * One-sentence resting-state description of a recurrence rule, built from the
- * parsed rule values rather than the RRULE string.
- */
+
 export function formatRecurrenceSummary(
     input: RecurrenceSummaryInput,
     t: (key: string) => string,
@@ -90,8 +87,8 @@ export function formatRecurrenceSummary(
         })).join(', '));
     } else if ((input.byMonthDay ?? []).length > 0) {
         const monthDays = input.byMonthDay ?? [];
-        // A list of plain days reads better collapsed ("on 1, 16") than repeated
-        // ("Day 1, Day 16"); -1 keeps its own phrasing.
+
+
         segments.push(monthDays.length > 1 && !monthDays.includes(-1)
             ? formatI18nTemplate(t('recurrence.summaryOnDays'), { days: monthDays.join(', ') })
             : monthDays

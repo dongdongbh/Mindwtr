@@ -8,22 +8,27 @@ import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import java.util.Collections
 
-/**
- * Every core i18n key this app shows (packages/core/src/i18n/locales/en.ts), the
- * one mobile uses for the same control where mobile has one. Kotlin holds no text
- * of its own: core's getStrings fills these at boot, in the language core chose.
- */
+
 val LABEL_KEYS = listOf(
     "tab.inbox", "tab.next", "nav.projects",
+    "savedFilters.saveTitle", "savedFilters.namePlaceholder",
     "nav.addTask", "quickAdd.inputLabel", "quickAdd.bulkImportTextFile", "quickAdd.bulkImportTextFileLabel", "common.more", "common.retry", "common.done", "common.edit", "common.back",
     "agenda.laterToday",
+
+    "settings.lastSyncError",
     "common.cancel", "common.close", "common.save", "common.ok", "common.clear", "common.discard",
-    // RN's capture screen's failure line (its other words are core's view).
+
+    "projects.actionsLabel", "projects.duplicate", "projects.complete", "projects.reactivate", "projects.cancel", "projects.archiveHelp",
+    "projects.cancelConfirmTitle", "projects.cancelConfirmBody", "projects.deleteConfirm", "common.notice",
+    "projects.cancelFailed", "projects.duplicateFailed", "projects.deleteFailed", "projects.restoreFailed",
+
+    "projects.reorderTasks", "projects.reorderNeedsDefaultSort", "projects.projectOrder", "projects.taskOrder", "board.dragTask", "projects.moveSectionUp", "projects.moveSectionDown",
+
     "task.addFailed",
     "common.none", "common.notSet", "taskEdit.titleLabel", "taskEdit.descriptionLabel", "taskEdit.statusLabel",
     "taskEdit.priorityLabel", "taskEdit.noProjectOption", "taskEdit.startDateLabel",
     "taskEdit.dueDateLabel", "taskEdit.discardChanges", "taskEdit.discardChangesDesc", "projects.archivedReadOnlyHint",
-    // The task editor (RN's Form tab); recurrence.* are the label keys core's editor model sends.
+
     "taskEdit.scheduling", "taskEdit.organization", "taskEdit.details", "taskEdit.editorLayoutHelpLabel", "taskEdit.editorLayoutHelpText",
     "task.destination", "taskEdit.areaLabel", "taskEdit.noAreaOption", "taskEdit.sectionLabel", "taskEdit.noSectionOption",
     "taskEdit.contextsLabel", "taskEdit.contextsPlaceholder", "taskEdit.tagsLabel", "taskEdit.tagsPlaceholder",
@@ -33,6 +38,7 @@ val LABEL_KEYS = listOf(
     "taskEdit.recurrenceLabel", "recurrence.none", "recurrence.daily", "recurrence.weekly", "recurrence.monthly", "recurrence.yearly",
     "recurrence.custom", "recurrence.monthlyOnDay", "recurrence.repeatEvery", "recurrence.dayUnit", "recurrence.afterCompletion",
     "recurrence.showFutureInCalendar", "recurrence.showFutureInCalendarHint",
+    "taskEdit.resetChecklistOnRepeat", "taskEdit.resetChecklistOnRepeatHint",
     "taskEdit.suppressMindwtrReminders", "taskEdit.suppressMindwtrRemindersHint",
     "taskEdit.startModeAbsolute", "taskEdit.startModeRelative", "taskEdit.relativeStartAmount", "taskEdit.relativeStartBeforeDue",
     "taskEdit.dateOnly", "taskEdit.timeSpentLabel", "recurrence.weekUnit", "recurrence.monthUnit", "recurrence.yearUnit",
@@ -50,49 +56,79 @@ val LABEL_KEYS = listOf(
     "taskStatus.changeStatus", "task.aria.changeStatus", "task.aria.changeStatusHint",
     "projects.addPlaceholder", "projects.add", "projects.areaFilter", "agenda.reviewDueProjects", "common.open",
     "agenda.collapseOtherSections", "agenda.expandOtherSections", "status.active", "status.archived",
-    // Global search (RN's global-search.tsx); the filter sheet's words are core's filterOptions.
+
     "search.title", "search.placeholder", "filters.label", "search.saveSearch", "search.saveSearchPrompt", "search.helpOperators",
     "search.showingFirst", "search.hiddenCompletedMatches", "search.noResults", "search.resultTask", "search.resultProject",
     "search.inProjectSuffix", "review.markDone",
-    // Process Inbox: the Inbox button and scope line; the steps' words are core's view.
+
     "inbox.processButton", "projects.allAreas", "common.loading", "taskEdit.projectLabel", "task.aria.action",
-    // The Menu tab: the tab, RN's stack titles, the list menu and filter sheet, and the Someday name prompt; the lists' words are core's views.
+
     "tab.menu", "waiting.title", "someday.title", "nav.reference", "nav.history", "taskEdit.moreOptions", "common.search",
     "filters.excluded", "filters.remove", "filters.clear", "filters.active", "filters.contexts", "filters.projects", "filters.timeEstimate",
     "filters.more", "filters.priority", "bulk.selected", "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "common.all",
-    // Contexts, Trash, Review and the reviews, and RN's quick-access tab; the screens' words are core's views.
+
     "contexts.title", "trash.title", "nav.review", "projects.title", "tab.review", "nav.contexts", "nav.done", "common.delete", "task.aria.delete",
     "common.noMatches", "review.markReviewed", "review.markReviewedDone", "review.advanceWeek", "task.select", "task.deselect",
-    // The Calendar and the Board: their stack titles and the Board filter sheet's match control; the screens' words are core's views.
+
     "nav.calendar", "nav.board", "filters.contextMatchMode", "filters.tagMatchMode", "filters.matchAny", "bulk.moveTo",
-    // Settings and the editor's View tab: RN's editor tabs and Settings' header; the screens' words are core's views.
+
     "markdown.edit", "markdown.preview", "settings.title",
-    // Mind Sweep's screen name (its words are core's view).
+
     "mindSweep.title",
-    // RN's app lock screen (AppLock.kt); General's switch and its failure lines are core's view.
+
     "appLock.title", "appLock.description", "appLock.prompt", "appLock.unlock", "appLock.authenticating",
     "appLock.unavailable", "appLock.cancelled", "appLock.failed",
-    // Attachments (Attachments.kt): the editor's field and the project card, the link sheet, the preview and the player; the rows are core's.
+
     "attachments.addFile", "attachments.addPhoto", "attachments.addLink", "attachments.download", "attachments.missing", "attachments.remove",
     "attachments.linkPlaceholder", "attachments.linkInputHint", "attachments.linkBatchHint", "common.validationRequired", "common.share",
     "share.unavailable", "common.play", "common.pause", "audio.loading", "quickAdd.audioNoteTitle", "quickAdd.audioErrorBody",
-    // Project details (ProjectDetails.kt): the panel's labels and help, its pickers and the section manager; the values are core's.
+
     "projects.statusLabel", "projects.projectTypeLabel", "projects.projectTypeHelpLabel", "projects.projectTypeHelpText", "projects.sequentialScope",
     "projects.sequentialAcrossSections", "projects.sequentialWithinSections", "projects.sequentialScopeHelpLabel", "projects.sequentialScopeHelpText",
     "projects.sectionsLabel", "settings.manage", "projects.addSection", "projects.areaLabel", "project.notes", "projects.notesPlaceholder",
     "projects.reviewAt", "projects.sectionPlaceholder", "projects.moveUp", "projects.moveDown", "projects.deleteSectionConfirm", "common.add",
+    "projects.parallel", "projects.sequential", "projects.perSection", "projects.perSectionTooltip", "projects.sequenceMode",
+
+    "projects.moveProjectFailed", "areas.manage", "projects.sortByName", "projects.sortByColor", "projects.colorNone", "projects.color",
+
+    "settings.gettingStartedContentContinueTitle", "settings.gettingStartedContentContinueDesc", "onboarding.startFreshTitle",
+
+    "task.copyTaskLink", "task.copyTaskId", "task.moveToProjectOrArea", "list.taskCopied", "list.taskCopyFailed", "taskEdit.duplicateTask", "task.duplicateFailed",
+    "task.createProjectFromTask", "task.promoteToProjectCreated", "task.promoteToProjectMoved", "task.promoteToProjectFailed",
+    "projects.projectName", "task.keepChecklistDescription", "task.expandChecklist", "task.expandChecklistDescription",
+    "reference.convertToAction", "task.convertToSection",
+    "task.convertToSectionCreated", "task.skipOccurrence", "task.cancelledWithRestore", "list.taskDeleted", "common.undo", "common.success",
+
+    "settings.gmailCapture", "settings.gmailCaptureDesc", "settings.gmailCaptureDisclosure", "settings.gmailCaptureUnavailable",
+    "settings.gmailCaptureAccount", "settings.gmailCaptureLabel", "settings.gmailCaptureChooseLabel", "settings.gmailCaptureLabelHint",
+    "settings.gmailCaptureActive", "settings.gmailCapturePaused", "settings.gmailCaptureConnect", "settings.gmailCaptureConnecting",
+    "settings.gmailCaptureReconnect", "settings.gmailCaptureCancel", "settings.gmailCaptureDisconnect", "settings.gmailCaptureCheckNow",
+    "settings.gmailCaptureChecking", "settings.gmailCaptureSave", "settings.gmailCaptureSaving", "settings.gmailCaptureLastChecked",
+    "settings.gmailCaptureImportedCount", "settings.gmailCaptureReceiptsReset", "settings.gmailCaptureCancelled",
+    "settings.gmailCaptureDisconnected", "settings.gmailCaptureRevokeManually", "settings.gmailCaptureAuthFailed",
+    "settings.gmailCaptureNetworkFailed", "settings.gmailCaptureConfigFailed", "settings.gmailCaptureStorageFailed", "settings.gmailCaptureFailed",
+
+    "task.completeBackdateHintMobile", "task.editCompletedAt",
+
+    "quickAdd.audioRecord", "quickAdd.audioStop", "quickAdd.audioRecording", "quickAdd.audioProcessing", "quickAdd.speechNotConfigured",
+    "quickAdd.audioPermissionTitle", "quickAdd.audioPermissionBody", "quickAdd.audioErrorTitle", "sandbox.unavailable",
+    "quickAdd.audioCaptureLabel",
 )
 
-/** The label map: core's text for each of [LABEL_KEYS]. It has no fallback text; a key core lacks shows as the key. */
+
 object Labels {
-    /** Snapshot state: a language chosen in Settings reloads it, and every screen redraws in that language. */
+
     private var strings by mutableStateOf<Map<String, String>>(emptyMap())
     private val logged: MutableSet<String> = Collections.synchronizedSet(HashSet())
 
-    /** Replaces the map with a getStrings reply. Core already put English in for a key the language lacks. */
+    @Volatile var language: String? = null
+        private set
+
+
     fun load(reply: JSONObject, reportLoaded: (String) -> Unit = { Log.i(CoreHost.TAG, it) }) {
         val values = reply.getJSONObject("strings")
         strings = LABEL_KEYS.filter(values::has).associateWith(values::getString)
+        language = reply.getString("language")
         val missing = reply.getJSONArray("missing")
         for (index in 0 until missing.length()) missing(missing.getString(index))
         reportLoaded("Native Android labels language=${reply.getString("language")} missing=${missing.length()}")
@@ -105,5 +141,5 @@ object Labels {
     }
 }
 
-/** Core's text for one of [LABEL_KEYS]. */
+
 fun t(name: String): String = Labels[name]

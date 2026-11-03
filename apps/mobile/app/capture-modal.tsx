@@ -22,8 +22,9 @@ import {
   buildQuickAddPreviewEntries,
   createAIProvider,
   getUsedTaskTokens,
+  getSavedTaxonomyTokens,
   parseQuickAdd,
-  resolveDefaultNewTaskAreaId,
+  resolveQuickCaptureDefaultAreaId,
   formatQuickAddHelp,
   resolveFeatureFlags,
   shallow,
@@ -70,7 +71,7 @@ import { QuickAddPreview } from '@/components/QuickAddPreview';
 import { openTaskScreen, stashPendingCaptureTaskOpen } from '@/lib/task-meta-navigation';
 import { markCaptureRouteMounted } from '@/lib/capture-route-presence';
 
-// The route params, and every rule about them, are core's (capture-modal-model.ts).
+
 export { sanitizeCaptureReturnToParam };
 
 const filterManagedAttachments = async (attachments: Attachment[]): Promise<Attachment[]> => {
@@ -102,7 +103,8 @@ export default function CaptureScreen() {
     () => readCaptureModalInitialProps(params.initialProps, projects, areas),
     [areas, params.initialProps, projects]
   );
-  const defaultNewTaskAreaId = resolveDefaultNewTaskAreaId(settings, areas);
+
+  const defaultNewTaskAreaId = resolveQuickCaptureDefaultAreaId(settings, areas) ?? undefined;
   const returnTo = React.useMemo(
     () => sanitizeCaptureReturnToParam(params.returnTo),
     [params.returnTo]
@@ -129,7 +131,7 @@ export default function CaptureScreen() {
   const copilotMountedRef = useRef(true);
   const copilotAbortRef = useRef<AbortController | null>(null);
 
-  // Screens under capture wait for this before presenting a modal (iOS, see capture-route-presence).
+
   useEffect(() => markCaptureRouteMounted(), []);
 
   useEffect(() => {
@@ -194,18 +196,17 @@ export default function CaptureScreen() {
   }, [aiProvider, showToast, t]);
 
   const contextOptions = React.useMemo(() => {
-    return getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' });
-  }, [tasks]);
+    return Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' }), ...getSavedTaxonomyTokens(settings, 'context')]));
+  }, [tasks, settings]);
   const tagOptions = React.useMemo(() => {
-    return getUsedTaskTokens(tasks, (task) => task.tags, { prefix: '#' });
-  }, [tasks]);
+    return Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.tags, { prefix: '#' }), ...getSavedTaxonomyTokens(settings, 'tag')]));
+  }, [tasks, settings]);
   const quickAddParseOptions = React.useMemo(
     () => buildQuickAddParseOptions(settings, { tasks, _allTasks: allTasks, people }),
     [allTasks, people, settings, tasks]
   );
 
-  // The parse the save path runs, one keystroke early. Same options object, so
-  // the strip and the saved task can never disagree.
+
   const previewEntries = React.useMemo(() => {
     if (!value.trim()) return [];
     return buildQuickAddPreviewEntries(
@@ -283,8 +284,7 @@ export default function CaptureScreen() {
     setCopilotTags([]);
   };
 
-  // Same per-part apply as the task editor (#1022); here the parts are stashed
-  // for task creation instead of written into a draft.
+
   const appliedCopilot = { context: copilotContext, timeEstimate: copilotEstimate, tags: copilotTags };
   const pendingCopilotParts = getCaptureModalCopilotParts(visibleCopilotSuggestion, appliedCopilot, timeEstimatesEnabled);
   const appliedCopilotText = formatCaptureModalCopilotApplied(t, appliedCopilot, timeEstimatesEnabled);
@@ -309,12 +309,8 @@ export default function CaptureScreen() {
 
   const closeCapture = React.useCallback(() => {
     if (!screenMountedRef.current) return;
-    // A real back entry always wins: the screen underneath is the one that
-    // opened capture, still holding the open project. Replacing capture with
-    // returnTo instead left a duplicate screen on the stack after every save,
-    // so leaving a project took one back tap per task added (#938). returnTo
-    // stays as the fallback for a capture with nothing behind it (a restored
-    // session that reopened straight into the capture route).
+
+
     const target = getCaptureModalCloseTarget(router.canGoBack(), returnTo);
     if (target === 'back') {
       router.back();
@@ -323,9 +319,7 @@ export default function CaptureScreen() {
     router.replace(target as never);
   }, [returnTo, router]);
 
-  // A capture that a widget, tile, shortcut or notification opened ends back
-  // on the screen the user came from, not on Mindwtr (#1169). Save & edit is
-  // the one exception: the user asked to stay in the editor.
+
   const finishCapture = React.useCallback(() => {
     if (!screenMountedRef.current) return;
     closeCapture();
@@ -354,9 +348,8 @@ export default function CaptureScreen() {
 
   const endSubmission = () => {
     submissionInFlightRef.current = false;
-    // A native-stack removal triggered by success can reach the hook after the
-    // write promise settles. Keep that one removal authorized until unmount or
-    // until beginSubmission takes ownership of a new capture attempt.
+
+
     if (screenMountedRef.current) setIsSubmitting(false);
   };
 
@@ -372,11 +365,10 @@ export default function CaptureScreen() {
     currentProjects: readonly Project[] = projects,
   ): Promise<ReturnType<typeof buildCaptureModalRequest> | null> => {
     if (!inputValue.trim()) return null;
-    // Invalid date commands are not checked here: prepareCaptureTask rejects
-    // them with a typed reason, so the warning is raised once, where the write
-    // actually fails.
+
+
     const parsed = parseQuickAdd(inputValue, currentProjects as Project[], new Date(), areas, quickAddParseOptions);
-    // Shared files are saved only from the app's own attachments folder.
+
     const surfaceProps = { ...initialProps };
     if (surfaceProps.attachments?.length) {
       const managed = await filterManagedAttachments(surfaceProps.attachments);
@@ -461,16 +453,12 @@ export default function CaptureScreen() {
       origin,
     });
     if (after.kind === 'close') return true;
-    // Leave this route, don't push over it: the capture screen must not
-    // stay on the stack holding the saved text, or backing out of the
-    // editor reopens it pre-filled (#1029).
+
+
     allowCaptureRemovalRef.current = true;
     if (after.kind === 'openInProject') {
-      // Opened from this project's own + button, so the project screen is
-      // what capture closes back to. Navigating to it would stack a
-      // duplicate of it (#938 trap — an extra back tap through an
-      // identical page); stash the editor request for the screen's focus
-      // effect and close exactly like a plain save.
+
+
       stashPendingCaptureTaskOpen({ taskId: after.taskId, projectId: after.projectId, taskTab: 'task' });
       closeCapture();
     } else {
@@ -517,10 +505,7 @@ export default function CaptureScreen() {
     }
   };
 
-  // Confirm on this screen rather than through Alert. This route is presented
-  // modally, and an alert raised over it is a second native presentation on top
-  // of the first — on iOS it never became visible, so saving a multi-line paste
-  // did nothing and left the screen blocked by an invisible dialog (#941).
+
   const handleSave = async ({ openAfterSave = false }: { openAfterSave?: boolean } = {}) => {
     if (!value.trim()) return;
     const bulkLines = splitQuickAddBulkLines(value);
@@ -564,9 +549,8 @@ export default function CaptureScreen() {
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: tc.bg }]}
-      // Android draws edge to edge, so the window no longer shrinks for the keyboard and it covered Cancel and Save.
-      // 'height' keeps the card above it, as the task editor's form does; its frame math is relative, so a window that
-      // still resizes gains nothing twice.
+
+
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
@@ -776,8 +760,8 @@ export default function CaptureScreen() {
           </View>
         </View>
       ) : null}
-      {/* This route is presented modally, so a root-level alert never reaches
-          the screen on iOS (#940). */}
+      {
+                                      }
       <ThemedAlertHost />
     </KeyboardAvoidingView>
   );

@@ -1,17 +1,31 @@
 import { createPortal } from 'react-dom';
 import { ViewSidebarContext } from '../../contexts/view-sidebar-context';
-import { useState, useContext, useEffect, useMemo, useCallback, useRef, type DragEvent } from 'react';
+import { useState, useContext, useEffect, useMemo, useCallback, useRef, type DragEvent, type KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     useTaskStore,
+    selectContextsFilterTasks,
+    countActiveFilterCriteria,
+    getContextsSaveCriteria,
+    CONTEXTS_FILTER_STATUSES,
+    getFocusProjectFilterOptions,
+    getTaskMetadataFilterVisibility,
+    resolveFeatureFlags,
+    normalizeSavedFilters,
+    generateUUID,
+    updateSettingsFromLatest,
+    formatTimeEstimateLabel,
+    SAVED_FILTER_NO_PROJECT_ID,
+    TIME_ESTIMATE_OPTIONS,
+    type SavedFilter,
     taskMatchesContextOrTagSelection,
     shallow,
     sortTasksBy,
     TaskStatus,
-    getFrequentTaskTokens,
-    getUsedTaskTokens,
+    getContextsAddTokenOptions,
     buildContextsTokenIndex,
     buildContextsViewFilterSections,
+    getContextsChipLabels,
     getContextsTokenCount,
     collectBulkTaskTokens,
     normalizeBulkTaskTokenInput,
@@ -19,11 +33,17 @@ import {
     formatI18nTemplate,
     tFallback,
     updateTaskFromLatest,
+    selectContextsToken,
+    toggleContextsToken,
     type Task,
     type ContextOrTagMatchMode,
+    type ContextsChipLabel,
 } from '@mindwtr/core';
 import { AtSign, CheckSquare, ChevronDown, ChevronRight, Filter, Hash, List, Tag, type LucideIcon } from 'lucide-react';
 import { TokenPickerModal } from '../TokenPickerModal';
+import { PromptModal } from '../PromptModal';
+import { AgendaFiltersPanel } from './agenda/AgendaFiltersPanel';
+import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
 import { BulkSelectionToolbar } from './list/BulkSelectionToolbar';
 import { ListBulkActions } from './list/ListBulkActions';
 import { cn } from '../../lib/utils';
@@ -67,9 +87,7 @@ type BulkTokenPickerState = {
 
 const hasContext = (task: Task) => (task.contexts?.length || 0) > 0 || (task.tags?.length || 0) > 0;
 
-// Its own key, not a field on the contexts view state: persistContextsViewSelection
-// rewrites that key from a fixed three-field shape, so any fold stored there would be
-// dropped the next time another view navigated to a token.
+
 const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
 const CLEAR_SELECTION_OPTION = '__clear__';
 
@@ -141,12 +159,27 @@ export function ContextsView() {
     }, [setPersistedViewState]);
     const toggleSelectedContext = useCallback((value: string) => {
         setPersistedViewState((current) => {
-            const next = current.selectedContexts.includes(value)
-                ? current.selectedContexts.filter((token) => token !== value)
-                : [...current.selectedContexts.filter((token) => token !== NO_CONTEXT_TOKEN), value];
+            const next = toggleContextsToken(current.selectedContexts, value);
             return { ...current, selectedContexts: next, matchMode: next.length === 0 ? 'all' : current.matchMode };
         });
     }, [setPersistedViewState]);
+
+    const pressContextToken = useCallback((value: string, additive: boolean) => {
+        if (additive) {
+            toggleSelectedContext(value);
+            return;
+        }
+        setPersistedViewState((current) => ({
+            ...current,
+            selectedContexts: selectContextsToken(current.selectedContexts, value),
+            matchMode: 'all',
+        }));
+    }, [setPersistedViewState, toggleSelectedContext]);
+    const onContextTokenKeyDown = (value: string) => (event: KeyboardEvent<HTMLButtonElement>) => {
+        if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
+        event.preventDefault();
+        pressContextToken(value, true);
+    };
     const setMatchMode = useCallback((value: ContextOrTagMatchMode) => {
         setPersistedViewState((current) => ({ ...current, matchMode: value }));
     }, [setPersistedViewState]);
@@ -159,20 +192,50 @@ export function ContextsView() {
     const clearStatusFilters = useCallback(() => {
         setStatusFilters(() => []);
     }, [setStatusFilters]);
-    const toggleStatusFilter = useCallback((value: TaskStatus) => {
-        setStatusFilters((current) => (
-            current.includes(value)
-                ? current.filter((status) => status !== value)
-                : [...current, value]
-        ));
-    }, [setStatusFilters]);
     useEffect(() => subscribeContextsTokenSelection(({ selectedContext: nextSelectedContext }) => {
         setSelectedContext(nextSelectedContext);
         setSearchQuery('');
     }), [setSelectedContext]);
-    // Deleted, parked-project and out-of-area tasks are all gone from
-    // `activeTasks` — one core predicate, shared with every other list.
+
+
     const { projectById: projectMap, visibleTasks: activeTasks } = useVisibleTaskContext();
+    const [filtersOpen, setFiltersOpen] = useState(false);
+    const [saveFilterOpen, setSaveFilterOpen] = useState(false);
+    const features = resolveFeatureFlags(settings);
+    const filterVisibility = useMemo(() => getTaskMetadataFilterVisibility(activeTasks, {
+        prioritiesEnabled: features.priorities, timeEstimatesEnabled: features.timeEstimates,
+    }), [activeTasks, features.priorities, features.timeEstimates]);
+    const savedContextFilters = useMemo(() => normalizeSavedFilters(settings?.savedFilters).filter((filter) =>
+        !filter.deletedAt && (filter.view === 'contexts' || filter.view === 'all')), [settings?.savedFilters]);
+    const filterSelections = useTaskFilterSelections({ view: 'list', t, visibility: filterVisibility,
+        savedFilters: savedContextFilters, rawSavedFilters: settings?.savedFilters,
+        getProjectLabel: (id) => id === SAVED_FILTER_NO_PROJECT_ID ? t('taskEdit.noProjectOption') : projectMap.get(id)?.title });
+    const projectFilterOptions = useMemo(() => getFocusProjectFilterOptions(activeTasks, projects, t), [activeTasks, projects, t]);
+    const contextCriteria = useMemo(() => ({ ...filterSelections.criteria,
+        statuses: statusFilters.length ? statusFilters : undefined }), [filterSelections.criteria, statusFilters]);
+    const saveCriteria = getContextsSaveCriteria({ ...filterSelections.currentCriteria,
+        statuses: statusFilters.length ? statusFilters : undefined }, selectedContexts, matchMode, [searchQuery]);
+    const canSaveContextFilter = saveCriteria !== null && (selectedContexts.length > 0 || Boolean(filterSelections.currentCriteria.contexts?.length || filterSelections.currentCriteria.tags?.length)) && !filterSelections.activeSavedFilter && !searchQuery.trim();
+    const changeContextStatus = (status: TaskStatus | 'all') => {
+        const next = status === 'all' ? [] : statusFilters.includes(status) ? statusFilters.filter((value) => value !== status) : [...statusFilters, status];
+        filterSelections.setStatusSelection(next);
+        setStatusFilters(() => next);
+    };
+    const applyContextSavedFilter = (filter: SavedFilter) => {
+        filterSelections.applySaved(filter);
+        setPersistedViewState((current) => ({ ...current, selectedContexts: [], statusFilters: filter.criteria.statuses ?? [], matchMode: 'all' }));
+        setSearchQuery('');
+    };
+    const saveContextFilter = (name: string) => {
+        if (!canSaveContextFilter || !saveCriteria || !name.trim()) return;
+        const stamp = new Date().toISOString();
+        const filter: SavedFilter = { id: generateUUID(), name: name.trim(), view: 'contexts', criteria: saveCriteria,
+            ...(sortBy !== 'default' ? { sortBy } : {}), createdAt: stamp, updatedAt: stamp };
+        void updateSettingsFromLatest((latest) => ({ savedFilters: [...(latest.savedFilters ?? []), filter] })).then(() => {
+            applyContextSavedFilter(filter); setSaveFilterOpen(false);
+        }).catch(() => undefined);
+    };
+
 
     useEffect(() => {
         if (!perf.enabled) return;
@@ -182,19 +245,10 @@ export function ContextsView() {
         return () => window.clearTimeout(timer);
     }, [perf.enabled]);
 
-    const hasExplicitStatusFilter = statusFilters.length > 0;
-    // One memoized chain from here to sortedTasks: every step feeds a downstream
-    // useMemo, the virtualizer's count and getItemKey, and the array handed to
-    // useTaskSelection, so a fresh array anywhere invalidates all of them (#856).
+
     const scopedTasks = useMemo(() => {
-        const baseTasks = activeTasks.filter(t =>
-            t.status !== 'archived'
-            && (selectedStatusSet.has('done') || t.status !== 'done')
-        );
-        return hasExplicitStatusFilter
-            ? baseTasks.filter(t => selectedStatusSet.has(t.status))
-            : baseTasks;
-    }, [activeTasks, hasExplicitStatusFilter, selectedStatusSet]);
+        return selectContextsFilterTasks(activeTasks, contextCriteria, projects);
+    }, [activeTasks, contextCriteria, projects]);
 
     const tokenIndex = useMemo(() => buildContextsTokenIndex(scopedTasks, { includeFinished: true }), [scopedTasks]);
     const filterSections = useMemo(() => buildContextsViewFilterSections({
@@ -234,9 +288,8 @@ export function ContextsView() {
         getSectionDomId,
         toggleGroup,
         virtualRows: groupedVirtualRows,
-        // Grouping reorders the rows, so the keyboard walk and "Select all" walk
-        // the grouped order. A collapsed group renders no rows, so it contributes
-        // no tasks either.
+
+
         visibleTasks,
     } = useTaskGroupCollapse({
         axis: groupBy,
@@ -274,8 +327,8 @@ export function ContextsView() {
         tasksById,
         undoNotificationsEnabled,
     });
-    // One engine for both shapes, as in ListView and ArchiveView: grouped rows
-    // carry headers, flat rows are the sorted tasks.
+
+
     const virtualRowCount = groupedVirtualRows?.length ?? sortedTasks.length;
     const shouldVirtualize = virtualRowCount > LIST_VIRTUALIZATION_THRESHOLD;
     const rowVirtualizer = useVirtualizer({
@@ -296,18 +349,12 @@ export function ContextsView() {
         },
     });
     const addTagOptions = useMemo(
-        () => Array.from(new Set([
-            ...getFrequentTaskTokens(activeTasks, (task) => task.tags, 12, { prefix: '#' }),
-            ...getUsedTaskTokens(activeTasks, (task) => task.tags, { prefix: '#' }),
-        ])),
-        [activeTasks]
+        () => getContextsAddTokenOptions(activeTasks, 'tags', settings),
+        [activeTasks, settings]
     );
     const addContextOptions = useMemo(
-        () => Array.from(new Set([
-            ...getFrequentTaskTokens(activeTasks, (task) => task.contexts, 12, { prefix: '@' }),
-            ...getUsedTaskTokens(activeTasks, (task) => task.contexts, { prefix: '@' }),
-        ])),
-        [activeTasks]
+        () => getContextsAddTokenOptions(activeTasks, 'contexts', settings),
+        [activeTasks, settings]
     );
 
     const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
@@ -422,7 +469,7 @@ export function ContextsView() {
     const acceptsContextDrop = (event: DragEvent<HTMLButtonElement>, context: string) => {
         if (!Array.from(event.dataTransfer.types).includes(CALENDAR_TASK_DRAG_MIME)) return false;
         const id = getCalendarTaskDragTaskId(event.dataTransfer);
-        // Native dragover protects the payload until drop; the MIME still identifies our task drag.
+
         if (!id) return true;
         const task = useTaskStore.getState()._tasksById.get(id);
         return !!task && !task.deletedAt && !pendingContextDrops.current.has(id)
@@ -438,7 +485,7 @@ export function ContextsView() {
         if (!task || task.deletedAt) return;
         pendingContextDrops.current.add(id);
         try {
-            // Add and remove the context on the latest row, so a context a sync save added meanwhile is kept.
+
             const hasContext = (contexts: string[]) => contexts.some((token) => normalizeBulkTaskTokenInput(token, 'contexts') === context);
             const result = await updateTaskFromLatest(id, (latest) => (
                 hasContext(latest.contexts) ? null : { contexts: [...latest.contexts, context] }
@@ -481,7 +528,7 @@ export function ContextsView() {
         }
     };
 
-    const renderTokenRow = (token: string, marker: '@' | '#') => {
+    const renderTokenRow = (token: string, marker: '@' | '#', { label, depth }: ContextsChipLabel) => {
         const taskCount = getContextsTokenCount(tokenIndex, token);
         const context = normalizeBulkTaskTokenInput(token, 'contexts');
         const isHovered = marker === '@' && hoveredContext === token;
@@ -489,7 +536,8 @@ export function ContextsView() {
             <button
                 key={token}
                 type="button"
-                onClick={() => toggleSelectedContext(token)}
+                onClick={(event) => pressContextToken(token, event.ctrlKey || event.metaKey)}
+                onKeyDown={onContextTokenKeyDown(token)}
                 onDragOver={marker === '@' ? (event) => {
                     if (!acceptsContextDrop(event, context)) {
                         setHoveredContext(null);
@@ -505,6 +553,7 @@ export function ContextsView() {
                 onDrop={marker === '@' ? (event) => { void handleContextDrop(event, context); } : undefined}
                 aria-label={`${token} (${taskCount})`}
                 aria-pressed={selectedContexts.includes(token)}
+                title={depth > 0 ? token : undefined}
                 className={cn(
                     "flex w-full items-center gap-2 rounded-lg p-2 text-left text-sm transition-colors",
                     selectedContexts.includes(token) || isHovered ? "bg-primary/10 text-primary font-medium" : "hover:bg-muted/40 text-foreground",
@@ -512,7 +561,7 @@ export function ContextsView() {
                 )}
             >
                 <span className="w-4 text-center text-muted-foreground">{marker}</span>
-                <span className="flex-1 truncate">{isHovered ? contextDropLabel('contexts.dropAdd', context) : token.replace(marker === '@' ? /^@/ : /^#/, '')}</span>
+                <span className="flex-1 truncate" style={depth > 0 ? { paddingLeft: `${depth * 0.75}rem` } : undefined}>{isHovered ? contextDropLabel('contexts.dropAdd', context) : label.replace(marker === '@' ? /^@/ : /^#/, '')}</span>
                 <span className="text-xs text-muted-foreground">
                     {taskCount}
                 </span>
@@ -552,7 +601,7 @@ export function ContextsView() {
                 </button>
                 {!collapsed && (
                     <div className="mt-1 space-y-1">
-                        {tokens.map((token) => renderTokenRow(token, marker))}
+                        {getContextsChipLabels(tokens).map((chipLabel, index) => renderTokenRow(tokens[index], marker, chipLabel))}
                     </div>
                 )}
             </div>
@@ -598,7 +647,7 @@ export function ContextsView() {
 
                             <button
                                 type="button"
-                                onClick={() => setSelectedContext(NO_CONTEXT_TOKEN)}
+                                onClick={() => pressContextToken(NO_CONTEXT_TOKEN, false)}
                                 aria-label={`${t('contexts.none')} (${scopedTasks.filter((t) => !hasContext(t)).length})`}
                                 className={cn(
                                     "flex w-full items-center gap-2 rounded-lg p-2 text-left text-sm transition-colors",
@@ -643,11 +692,14 @@ export function ContextsView() {
 
     return (
         <>
+            <PromptModal isOpen={saveFilterOpen} title={t('savedFilters.saveTitle')} placeholder={t('savedFilters.namePlaceholder')}
+                defaultValue={selectedContexts.join(' + ')} confirmLabel={t('common.save')} cancelLabel={t('common.cancel')}
+                onConfirm={saveContextFilter} onCancel={() => setSaveFilterOpen(false)} />
             <div className={sidebarSlot ? "h-full px-5 pt-6 lg:px-8" : "h-full px-4 pt-3"}>
                 <div className="mx-auto flex h-full w-full max-w-[84rem] min-w-0 gap-0 lg:gap-5 xl:gap-6 2xl:max-w-[88rem]">
                     {sidebarSlot ? createPortal(contextNavigation, sidebarSlot) : contextNavigation}
 
-                    {/* Context Tasks */}
+                    {                   }
                     <div className="min-w-0 flex-1 flex flex-col h-full overflow-hidden">
                         <header className="mb-6 flex flex-wrap items-center gap-3">
                             <div className="p-2 bg-primary/10 rounded-lg">
@@ -721,6 +773,13 @@ export function ContextsView() {
                             )}
                             <div className="order-4 w-full lg:order-none lg:ml-auto lg:w-auto">
                                 <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+                                    <ToolbarButton active={filtersOpen} icon={<Filter className="h-3.5 w-3.5" />} onClick={() => {
+                                        if (!filtersOpen && statusFilters.length === 0 && !filterSelections.activeSavedFilter) {
+                                            filterSelections.setStatusSelection([...CONTEXTS_FILTER_STATUSES]);
+                                            setStatusFilters(() => [...CONTEXTS_FILTER_STATUSES]);
+                                        }
+                                        setFiltersOpen((open) => !open);
+                                    }}>{t('filters.label')}</ToolbarButton>
                                     <ToolbarButton
                                         active={selectionMode}
                                         data-task-selection-toggle
@@ -755,6 +814,40 @@ export function ContextsView() {
                                 </div>
                             </div>
                         </header>
+                        {savedContextFilters.length > 0 && <div className="mb-3 flex flex-wrap gap-2">
+                            {savedContextFilters.map((filter) => <button key={filter.id} type="button" aria-pressed={filterSelections.activeSavedFilterId === filter.id}
+                                className={cn('rounded-full border px-3 py-1.5 text-sm', filterSelections.activeSavedFilterId === filter.id ? 'bg-primary text-primary-foreground' : 'bg-muted')}
+                                onClick={() => {
+                                    if (filterSelections.activeSavedFilterId === filter.id) {
+                                        filterSelections.clear(); clearStatusFilters(); setSelectedContext(null);
+                                    } else applyContextSavedFilter(filter);
+                                }}>{filter.name}</button>)}
+                        </div>}
+                        {filtersOpen && <AgendaFiltersPanel t={t} showFiltersPanel={filtersOpen} onToggleFiltersOpen={() => setFiltersOpen(false)}
+                            activeFilterChips={[
+                                ...filterSelections.chips.filter((chip) => !chip.id.startsWith('status:')).map((chip) => ({ ...chip, onRemove: chip.onPress })),
+                                ...statusFilters.map((status) => ({ id: `status:${status}`, label: t(`status.${status}`),
+                                    onRemove: () => changeContextStatus(status) })),
+                            ]}
+                            hasFilters={countActiveFilterCriteria(contextCriteria) > 0} onClearFilters={() => { filterSelections.clear(); clearStatusFilters(); }}
+                            allTokens={[]} showTokenFilters={false} selectedTokens={[]} excludedTokens={[]} onToggleToken={filterSelections.toggleToken}
+                            contextMatchMode={filterSelections.contextMatchMode} tagMatchMode={filterSelections.tagMatchMode}
+                            contextMatchModeLabels={{ title: '', any: '', all: '' }} tagMatchModeLabels={{ title: '', any: '', all: '' }}
+                            onContextMatchModeChange={(mode) => filterSelections.setMatchMode('context', mode)} onTagMatchModeChange={(mode) => filterSelections.setMatchMode('tag', mode)}
+                            projectOptions={projectFilterOptions.filter((project) => project.id !== SAVED_FILTER_NO_PROJECT_ID)}
+                            showNoProjectOption={projectFilterOptions.some((project) => project.id === SAVED_FILTER_NO_PROJECT_ID)}
+                            selectedProjects={filterSelections.projects} excludedProjects={filterSelections.excludedProjects} onToggleProject={filterSelections.cycleProject}
+                            showPriorityFilters={filterVisibility.priority} priorityOptions={['low', 'medium', 'high', 'urgent']}
+                            selectedPriorities={filterSelections.priorities} onTogglePriority={filterSelections.togglePriority}
+                            showEnergyLevelFilters={filterVisibility.energyLevel} energyLevelOptions={['low', 'medium', 'high']}
+                            selectedEnergyLevels={filterSelections.energyLevels} onToggleEnergy={filterSelections.toggleEnergyLevel}
+                            showTimeEstimateFilters={filterVisibility.timeEstimate} timeEstimateOptions={TIME_ESTIMATE_OPTIONS}
+                            selectedTimeEstimates={filterSelections.timeEstimates} onToggleTime={filterSelections.toggleTimeEstimate}
+                            formatEstimate={(value) => formatTimeEstimateLabel(value, { t })}
+                            showLocationFilter={filterVisibility.location} locationFilter={filterSelections.locationQuery} onLocationChange={filterSelections.setLocation}
+                            searchQuery={searchQuery} onSearchChange={setSearchQuery} excludedStateLabel={t('filters.excluded')}
+                            anyDateRange={filterSelections.anyDateRange} onAnyDateRangeChange={filterSelections.setAnyDateRange}
+                            canSaveFilter={canSaveContextFilter} onSaveFilter={() => setSaveFilterOpen(true)} saveFilterLabel={t('common.save')} />}
                         <div className="mb-4 flex flex-wrap gap-2">
                             {statusOptions.map((option) => {
                                 const isActive = option.value === 'all'
@@ -764,11 +857,7 @@ export function ContextsView() {
                                     <button
                                         key={option.value}
                                         onClick={() => {
-                                            if (option.value === 'all') {
-                                                clearStatusFilters();
-                                                return;
-                                            }
-                                            toggleStatusFilter(option.value);
+                                            changeContextStatus(option.value);
                                         }}
                                         className={cn(
                                             'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
@@ -783,7 +872,7 @@ export function ContextsView() {
                                 );
                             })}
                         </div>
-                        <div className="mb-4">
+                        {!filtersOpen && <div className="mb-4">
                             <input
                                 type="text"
                                 data-view-filter-input
@@ -793,7 +882,7 @@ export function ContextsView() {
                                 onChange={(event) => setSearchQuery(event.target.value)}
                                 className={VIEW_FILTER_INPUT}
                             />
-                        </div>
+                        </div>}
 
                         {selectionMode && (
                             <div className="mb-4">

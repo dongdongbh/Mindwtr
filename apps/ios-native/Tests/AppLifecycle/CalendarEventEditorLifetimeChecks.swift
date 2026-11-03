@@ -1,6 +1,6 @@
 import Foundation
 
-/// Compile with the actual App source; the UIKit adapter is excluded on macOS.
+
 @main
 enum NativeCalendarEditorLifetimeChecks {
     private struct Failure: Error, CustomStringConvertible {

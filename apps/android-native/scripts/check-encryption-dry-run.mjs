@@ -1,14 +1,6 @@
-// Sync encryption without a phone: the real native bundle (core-host.js) as two devices in Node VMs (sync-harness.mjs
-// hostDevice, bound as the Android host binds it, its crypto calls on @noble/hashes and node:crypto), against local WebDAV
-// folders on 127.0.0.1. It runs check-encryption-device.mjs's story device to device, through the Sync screen's encryption card:
-// enable on A (the folder then holds only MWENC1 ciphertext), B joins and is locked out, B's wrong passphrase is refused with
-// RN's words and changes nothing, B unlocks and both converge encrypted, B changes the passphrase and A asks for the new one
-// (the old one refused), A disables (plaintext again), and a server with weak ETags refuses enabling with RN's words.
-//
-//   node apps/android-native/scripts/build-bundle.mjs
-//   node apps/android-native/scripts/check-encryption-dry-run.mjs
-//
-// Exit 0 = pass, 1 = fail.
+
+
+
 import { randomInt } from 'node:crypto';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -53,7 +45,7 @@ try {
     await a.configure('webdav', webdav(WEBDAV_PORT));
     check(remoteArtifacts(dav, FOLDER).plain.some((file) => file.text.includes(titles.a)), 'the first sync uploaded the task in plaintext');
 
-    // Enable on A.
+
     const off = encryptionCard(await a.view());
     check(off?.rows.some((row) => row.text === en['settings.syncEncryptionDesc']), 'the card reads RN\'s description while off');
     const enabled = await runEncryption(a, 'enable', { next: PASSPHRASE, confirm: PASSPHRASE });
@@ -66,7 +58,7 @@ try {
     check(![...a.keyValue.values(), ...a.lines].some((value) => value.includes(PASSPHRASE)), 'the passphrase is in no key-value entry and no log line');
     check(![...a.secrets.values()].some((value) => value.includes(PASSPHRASE)), 'the passphrase is not stored, only the derived key');
 
-    // B joins the encrypted folder: locked out until it has the passphrase.
+
     await b.configure('webdav', webdav(WEBDAV_PORT)).catch((error) => console.log(`note - B's Save: ${error.message.slice(0, 160)}`));
     await until('B to see the locked card', async () => encryptionCard(await b.view())?.rows.some((row) => row.text === en['settings.syncEncryptionLockedTitle']), 30_000);
     check(!(await b.titles()).includes(titles.a), 'B reads nothing from the encrypted folder without the passphrase');
@@ -80,14 +72,14 @@ try {
     await b.syncNow('webdav', webdav(WEBDAV_PORT));
     check((await b.titles()).includes(titles.a), 'B reads A\'s emoji title after unlocking');
 
-    // Both write encrypted.
+
     await b.capture(titles.b);
     await b.syncNow('webdav', webdav(WEBDAV_PORT));
     await a.syncNow('webdav', webdav(WEBDAV_PORT));
     check((await a.titles()).includes(titles.b), 'A reads B\'s title through the encrypted folder');
     check(remoteArtifacts(dav, FOLDER).plain.length === 0, 'the folder still holds no plaintext');
 
-    // B changes the passphrase: A's key no longer opens the folder, so A asks for the new one; the old one is refused.
+
     const NEXT = `${PASSPHRASE}n`;
     const changed = await runEncryption(b, 'change', { current: PASSPHRASE, next: NEXT, confirm: NEXT });
     check(!changed.error && remoteArtifacts(dav, FOLDER).plain.length === 0, `B changed the passphrase (${JSON.stringify(changed).slice(0, 120)})`);
@@ -101,7 +93,7 @@ try {
     await a.syncNow('webdav', webdav(WEBDAV_PORT));
     check(encryptionCard(await a.view())?.rows.some((row) => row.text === en['settings.syncEncryptionStatusOn']), 'the new passphrase unlocks A');
 
-    // Disable on A: plaintext again; B follows.
+
     await runEncryption(a, 'disable', {});
     const plain = remoteArtifacts(dav, FOLDER);
     check(plain.encrypted.length === 0 && plain.plain.some((file) => file.path.endsWith('/data.json') && file.text.includes(titles.b)),
@@ -111,7 +103,7 @@ try {
     await b.syncNow('webdav', webdav(WEBDAV_PORT)).catch((error) => console.log(`note - B after disable: ${error.message.slice(0, 160)}`));
     console.log(`note - B's card after A disabled: ${JSON.stringify(encryptionCard(await b.view())?.rows.map((row) => row.text ?? row.label))}`);
 
-    // A server with weak ETags: enabling is refused with RN's words, and nothing on it is encrypted.
+
     await c.capture(`weak ${run}`);
     const weakSave = await c.configure('webdav', webdav(WEAK_PORT)).catch((error) => ({ error: error.message }));
     console.log(`note - weak-ETag Save: ${JSON.stringify(weakSave).slice(0, 300)}`);

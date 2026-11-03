@@ -11,13 +11,7 @@ import java.util.TimeZone
 import java.util.UUID
 import org.json.JSONObject
 
-/**
- * Appends one item to the pending-captures queue (#845 contract): native code
- * never writes the app database. Core's `packages/core/src/pending-captures.ts`
- * (`parsePendingCapture`) reads `<filesDir>/pending-captures/<uuid>.json` on
- * the next app start or foreground and creates the Inbox task through the
- * normal store path.
- */
+
 object PendingCaptureWriter {
   const val DIRECTORY = "pending-captures"
   const val AUDIO_DIRECTORY = "quick-capture-audio"
@@ -25,21 +19,25 @@ object PendingCaptureWriter {
   const val CAPTURE_INTENT_SOURCE = "android-capture-intent"
   const val CHECKOFF_SOURCE = "android-widget"
   const val MAX_TITLE_LENGTH = 2000
+  val CREATION_STATUSES = listOf("inbox", "next", "waiting", "someday")
 
-  /** Returns the queued file, or null when the trimmed title is empty. */
+  fun creationStatus(value: String?): String? = value?.takeIf { it in CREATION_STATUSES }
+
+  private fun JSONObject.putDestination(defaultStatus: String?, status: String?) {
+    creationStatus(defaultStatus)?.let { put("defaultStatus", it) }
+    creationStatus(status)?.let { put("status", it) }
+  }
+
+
   @Throws(IOException::class)
-  fun write(filesDir: File, rawTitle: String, now: Date = Date(), note: String = ""): File? {
+  fun write(filesDir: File, rawTitle: String, now: Date = Date(), note: String = "", defaultStatus: String? = null, status: String? = null): File? {
     val title = rawTitle.trim().take(MAX_TITLE_LENGTH).trim()
     if (title.isEmpty()) return null
 
-    return writeCapture(filesDir, title, SOURCE, now, note)
+    return writeCapture(filesDir, title, SOURCE, now, note, defaultStatus, status)
   }
 
-  /**
-   * Queues an automation capture without truncating it. Losing the end of a
-   * dictated note is worse than rejecting an invalid request, so callers get
-   * null for blank or over-limit text.
-   */
+
   @Throws(IOException::class)
   fun writeCaptureIntent(filesDir: File, rawTitle: String, now: Date = Date()): File? {
     if (rawTitle.length > MAX_TITLE_LENGTH) return null
@@ -49,7 +47,7 @@ object PendingCaptureWriter {
     return writeCapture(filesDir, title, CAPTURE_INTENT_SOURCE, now)
   }
 
-  private fun writeCapture(filesDir: File, title: String, source: String, now: Date, note: String = ""): File {
+  private fun writeCapture(filesDir: File, title: String, source: String, now: Date, note: String = "", defaultStatus: String? = null, status: String? = null): File {
     val id = UUID.randomUUID().toString()
     val json = JSONObject()
       .put("id", id)
@@ -57,29 +55,26 @@ object PendingCaptureWriter {
       .put("createdAt", isoTimestamp(now))
       .put("source", source)
       .apply { if (note.isNotBlank()) put("note", note) }
+      .apply { putDestination(defaultStatus, status) }
       .toString()
     return publish(filesDir, id, json)
   }
 
-  /** A widget check-off: `{ kind: "complete", taskId }`, applied through the store when the app next runs. */
+
   @Throws(IOException::class)
   fun writeCompletion(filesDir: File, taskId: String, now: Date = Date()): File {
     val id = UUID.randomUUID().toString()
     return writeCompletion(filesDir, taskId, id, now)
   }
 
-  /**
-   * Retry-safe widget completion derived from the original tap. A process that
-   * dies between queue publication and preference reconciliation republishes
-   * the exact same file and JSON rather than creating a second command.
-   */
+
   @Throws(IOException::class)
   fun writeCompletion(filesDir: File, taskId: String, tappedAt: Long): File {
     val id = completionId(taskId, tappedAt)
     return writeCompletion(filesDir, taskId, id, Date(tappedAt + CheckoffStore.UNDO_WINDOW_MS))
   }
 
-  /** Whether the exact retry-safe completion from this pending tap is already durable. */
+
   fun hasQueuedCompletion(filesDir: File, taskId: String, tappedAt: Long): Boolean =
     File(File(filesDir, DIRECTORY), "${completionId(taskId, tappedAt)}.json").isFile
 
@@ -97,14 +92,9 @@ object PendingCaptureWriter {
     return publish(filesDir, id, json)
   }
 
-  /**
-   * Publishes an audio capture in two durable phases: the validated WAV first,
-   * then the matching queue JSON that makes it visible to React Native.
-   * Repeating the call for the exact same UUID and JSON is safe after a partial
-   * failure; an existing distinct WAV or JSON is never overwritten.
-   */
+
   @Throws(IOException::class)
-  fun publishAudio(filesDir: File, draft: QuickCaptureAudioDraft, rawTitle: String, note: String = ""): File {
+  fun publishAudio(filesDir: File, draft: QuickCaptureAudioDraft, rawTitle: String, note: String = "", defaultStatus: String? = null, status: String? = null): File {
     val paths = ownedAudioPaths(filesDir, draft) ?: throw IOException("Invalid audio capture path")
     val staged = paths.first
     val target = paths.second
@@ -114,8 +104,8 @@ object PendingCaptureWriter {
       }
       if (target.exists()) throw IOException("Audio capture already exists")
       if (!staged.renameTo(target)) throw IOException("Could not publish audio capture")
-      // The recorder synced the staging file; sync its final name before making
-      // the JSON discoverable by the queue reader.
+
+
       FileOutputStream(target, true).use { it.fd.sync() }
     } else if (!target.isFile || target.length() != QuickCaptureWave.HEADER_SIZE + draft.dataBytes.toLong() || !QuickCaptureWave.isValid(target)) {
       throw IOException("Audio capture is unavailable")
@@ -125,12 +115,12 @@ object PendingCaptureWriter {
     val json = JSONObject()
       .put("kind", "audio")
       .put("id", draft.id)
-      // Match Expo's Uri.fromFile(context.filesDir) identity. Canonical paths
-      // remain mandatory above for ownership validation only: Android may
-      // expose /data/user/0 while its canonical alias is /data/data.
+
+
       .put("audioPath", absoluteFileUri(target))
       .put("source", SOURCE)
       .put("createdAt", isoTimestamp(draft.createdAt))
+      .apply { putDestination(defaultStatus, status) }
       .apply {
         if (title.isNotEmpty()) put("title", title)
         if (note.isNotBlank()) put("note", note)
@@ -139,7 +129,7 @@ object PendingCaptureWriter {
     return publish(filesDir, draft.id, json)
   }
 
-  /** Deletes only an owned, not-yet-queued draft. */
+
   fun discardAudioDraft(filesDir: File, draft: QuickCaptureAudioDraft): Boolean {
     val paths = try {
       ownedAudioPaths(filesDir, draft)
@@ -170,7 +160,7 @@ object PendingCaptureWriter {
     if (!directory.isDirectory && !directory.mkdirs()) {
       throw IOException("Could not create ${directory.absolutePath}")
     }
-    // Ingest only picks up `*.json`, so a half-written `.tmp` is never read.
+
     val temp = File(directory, "$id.tmp")
     val target = File(directory, "$id.json")
     if (target.exists()) {

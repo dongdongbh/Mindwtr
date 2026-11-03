@@ -11,9 +11,11 @@ import { createMobileAttachmentCommon, type MobileAttachmentUploadTask } from '.
 import { createMobileAttachmentBackends, type MobileAttachmentBackendsCoreFunctions } from './mobile-attachment-backends';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
+import { SyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import {
   decryptSyncArtifact,
   defaultSyncCryptoPrimitives,
+  encryptSyncArtifact,
   encryptedSyncArtifactByteLength,
   inspectSyncArtifact,
   SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
@@ -68,6 +70,7 @@ const setup = (options: {
   createUploadTask?: () => MobileAttachmentUploadTask | null;
   maxWebdavBufferedUploadBytes?: number;
   maxCloudBufferedUploadBytes?: number;
+  boundedWebdavResponses?: boolean;
   crypto?: SyncCryptoPrimitives;
 } = {}) => {
   const memory = createMemoryFileSystem({ saf: options.saf });
@@ -114,7 +117,7 @@ const setup = (options: {
     encryption: { logSyncEncryptionEvent: async () => undefined },
     installer,
     installerMayBeMissing: () => false,
-    // Skips the WebDAV request spacing; no test here waits on a timer.
+
     timersPaused: () => true,
     uploads: { createUploadTask: options.createUploadTask ?? (() => null) },
   });
@@ -126,6 +129,7 @@ const setup = (options: {
     log,
     maxWebdavBufferedUploadBytes: options.maxWebdavBufferedUploadBytes,
     maxCloudBufferedUploadBytes: options.maxCloudBufferedUploadBytes,
+    boundedWebdavResponses: options.boundedWebdavResponses,
     core: { withRetry: (operation) => operation(), ...options.core },
   });
   return { backends, memory, lines, installer, order, files, common };
@@ -133,7 +137,7 @@ const setup = (options: {
 
 const webdavConfig = { url: `${BASE_URL}/data.json`, username: 'user', password: 'pw' };
 
-/** The host's native file hash (design D9b W7 hashes in native code, never bytes read into JS), over the memory files. */
+
 const nativeHash = (env: ReturnType<typeof setup>) => env.installer.hashAttachmentFileGeneration.mockImplementation(
   async (path: string) => ({ sha256: (await computeSha256Hex(env.memory.read(path)!))!, size: env.memory.read(path)!.byteLength, modificationTimeMs: 1 }),
 );
@@ -360,7 +364,7 @@ describe('WebDAV attachment pass', () => {
     const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
     const { backends, memory, lines, files } = setup({
       maxWebdavBufferedUploadBytes: 8 * 1024 * 1024,
-      // Keep the remote generation selected so prepare really reaches content hashing.
+
       core: { webdavFileExists: async () => true },
     });
     memory.put(LOCAL_URI, LOCAL);
@@ -566,27 +570,146 @@ describe('WebDAV attachment pass', () => {
     }));
   });
 
-  it('refuses to overwrite a remote copy that has no strong ETag', async () => {
-    const webdavPutFileVersioned = vi.fn(async () => undefined);
-    const { backends, memory } = setup({
-      core: {
+  describe('a remote copy that has no strong ETag (a PUT landed, then the save recording it was refused)', () => {
+    const REFUSAL = 'WebDAV attachment version is unavailable; refusing an unconditional overwrite';
+    const unversionedServer = (etag: string | null, remote: Uint8Array | null, contentLength?: string | null) => {
+      const webdavPutFileVersioned = vi.fn(async () => undefined);
+      const webdavGetFile = vi.fn(async () => {
+        if (!remote) throw httpError(404);
+        return toArrayBuffer(remote);
+      });
+      const core = {
         webdavMakeDirectory: vi.fn(async () => undefined),
         webdavHeadFile: vi.fn(async () => ({
-          exists: true,
-          fingerprint: null,
-          etag: 'W/"weak"',
-          lastModified: null,
-          contentLength: null,
+          exists: true, fingerprint: null, etag, lastModified: null,
+          contentLength: contentLength === undefined ? (remote ? String(remote.byteLength) : null) : contentLength,
         })),
         webdavPutFileVersioned,
+        webdavGetFile,
+      };
+      return { core, webdavPutFileVersioned, webdavGetFile };
+    };
+
+    const setupBounded = (options: Parameters<typeof setup>[0] = {}) => setup({ boundedWebdavResponses: true, ...options });
+    const adoptionLine = (lines: ReturnType<typeof setup>['lines']) => (
+      lines.find((line) => line.extra?.releaseCheck === 'v1.3.7/webdav-weak-etag-adopt')
+    );
+
+    it.each([['weak', 'W/"weak"'], ['missing', null]])(
+      'with a %s ETag, records the cloud key without a PUT when the remote holds the local bytes',
+      async (_kind, etag) => {
+        const server = unversionedServer(etag, LOCAL);
+        const { backends, memory, lines } = setupBounded({ core: server.core });
+        memory.put(LOCAL_URI, LOCAL);
+
+        const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL);
+
+        expect(server.webdavGetFile).toHaveBeenCalledTimes(1);
+        expect(server.webdavGetFile).toHaveBeenCalledWith(
+          `${BASE_URL}/attachments/att-1.txt`, expect.objectContaining({ maxBytes: LOCAL.byteLength }),
+        );
+        expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+        expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
+        expect(adoptionLine(lines)?.extra).toEqual({ releaseCheck: 'v1.3.7/webdav-weak-etag-adopt', adopted: '1', refused: '0' });
       },
+    );
+
+    it('records an encrypted remote copy whose plaintext equals the local bytes', async () => {
+      const { common } = setupBounded({ crypto: defaultSyncCryptoPrimitives });
+      const sealed = await common.sealAttachmentBytesForUpload(LOCAL, material);
+      const server = unversionedServer('W/"weak"', sealed);
+      const { backends, memory } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, LOCAL);
+
+      const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL, undefined, { material });
+
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
     });
-    memory.put(LOCAL_URI, LOCAL);
 
-    const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL);
+    it.each([
+      ['other bytes', REMOTE, undefined],
+      ['the local bytes, unencrypted, while encryption is on', LOCAL, null],
+      ['nothing any more (404)', null, '4'],
+    ] as const)('keeps refusing, with the same error, when the remote holds %s', async (name, remote, contentLength) => {
+      const encrypted = name.includes('encryption');
+      const server = unversionedServer('W/"weak"', remote, contentLength);
+      const { backends, memory, lines } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, LOCAL);
 
-    expect(webdavPutFileVersioned).not.toHaveBeenCalled();
-    expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+      const result = await backends.syncWebdavAttachments(
+        withAttachment(fileAttachment()), webdavConfig, BASE_URL, undefined, encrypted ? { material } : {},
+      );
+
+      expect(server.webdavGetFile).toHaveBeenCalledTimes(1);
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+      expect(lines).toContainEqual(expect.objectContaining({
+        level: 'warn', message: 'Failed to upload attachment att-1', extra: { error: REFUSAL },
+      }));
+      expect(adoptionLine(lines)?.extra).toMatchObject({ adopted: '0', refused: '1' });
+    });
+
+    it('does not download a remote copy whose stated size differs from the local file', async () => {
+      const server = unversionedServer(null, LOCAL, String(LOCAL.byteLength + 1));
+      const { backends, memory } = setupBounded({ core: server.core });
+      memory.put(LOCAL_URI, LOCAL);
+
+      const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL);
+
+      expect(server.webdavGetFile).not.toHaveBeenCalled();
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+    });
+    it('keeps refusing, without a GET, on a host whose transport cannot bound a response while receiving it (React Native)', async () => {
+      const server = unversionedServer('W/"weak"', LOCAL);
+      const { backends, memory, lines } = setup({ core: server.core });
+      memory.put(LOCAL_URI, LOCAL);
+
+      const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL);
+
+      expect(server.webdavGetFile).not.toHaveBeenCalled();
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+      expect(lines).toContainEqual(expect.objectContaining({
+        level: 'warn', message: 'Failed to upload attachment att-1', extra: { error: REFUSAL },
+      }));
+    });
+
+    it('with encryption on and a stale recorded size, never records a plaintext remote copy', async () => {
+
+
+      const plaintext = new Uint8Array(encryptedSyncArtifactByteLength(LOCAL.byteLength)).fill(5);
+      const server = unversionedServer('W/"weak"', plaintext);
+      const { backends, memory, lines } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, plaintext);
+
+      const result = await backends.syncWebdavAttachments(
+        withAttachment(fileAttachment({ size: LOCAL.byteLength })), webdavConfig, BASE_URL, undefined, { material },
+      );
+
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+      expect(adoptionLine(lines)?.extra).toMatchObject({ adopted: '0', refused: '1' });
+    });
+
+    it('measures the local file, not its recorded size: an encrypted copy of it is recorded', async () => {
+      const { common } = setup({ crypto: defaultSyncCryptoPrimitives });
+      const sealed = await common.sealAttachmentBytesForUpload(LOCAL, material);
+      const server = unversionedServer('W/"weak"', sealed);
+      const { backends, memory } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, LOCAL);
+
+      const result = await backends.syncWebdavAttachments(
+        withAttachment(fileAttachment({ size: 1 })), webdavConfig, BASE_URL, undefined, { material },
+      );
+
+      expect(server.webdavGetFile).toHaveBeenCalledWith(
+        `${BASE_URL}/attachments/att-1.txt`, expect.objectContaining({ maxBytes: sealed.byteLength }),
+      );
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
+    });
   });
 
   it('streams a new upload but sends an overwrite through the checked byte PUT', async () => {
@@ -630,8 +753,8 @@ describe('WebDAV attachment pass', () => {
   });
 
   it('records a streamed upload only once a HEAD at the same URL finds its size', async () => {
-    // The native uploader follows a redirect by itself: a 307 stores the file elsewhere and a
-    // 303 stores nothing, yet the task answers 2xx.
+
+
     const task = { uploadAsync: vi.fn(async () => ({ status: 201 })), cancelAsync: vi.fn(async () => undefined) };
     const { backends, memory, lines } = setup({
       createUploadTask: () => task,
@@ -739,7 +862,7 @@ describe('WebDAV attachment pass', () => {
       ['the HEAD finds another size (another writer created it)', { confirmed: false, redirected: false, status: 200 }],
       ['the HEAD finds no file', { confirmed: false, redirected: false, status: 404 }],
     ])('keeps a 412 unsynced for a retry when %s', async (_case, proof) => {
-      // A 412 proves only that some file exists there, not that it holds these bytes.
+
       const { result, lines, logs } = await run(conflict, proof);
 
       expect(attachmentOf(result)?.cloudKey).toBeUndefined();
@@ -908,9 +1031,9 @@ describe('WebDAV attachment pass', () => {
         nativeHash(env);
         env.memory.put(LOCAL_URI, local);
         await env.backends.syncWebdavAttachments(withAttachment(await remoteOnly(bytes)), webdavConfig, BASE_URL);
-        // The file at the target is not adopted: the GET runs and the installer decides (a different file is kept, never named).
+
         expect(webdavGetFile).toHaveBeenCalledTimes(1);
-        // A hashless attachment has nothing to compare: its target is never hashed.
+
         if (bytes === null) expect(env.installer.hashAttachmentFileGeneration).not.toHaveBeenCalled();
       }
     });
@@ -922,18 +1045,18 @@ describe('WebDAV attachment pass', () => {
       env.memory.put(LOCAL_URI, LOCAL);
       const data = withAttachment(fileAttachment({ fileHash: (await computeSha256Hex(LOCAL))! }));
       const puts = () => requests.filter((request) => request.method === 'PUT').length;
-      // One cycle: the final pending-upload flush and the post-merge pass share the cycle's admission. The PUT reached the
-      // server, but its answer was lost (500): the second phase does not send it again.
+
+
       const cycle = createAttachmentTransferAdmission();
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: cycle });
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: cycle });
       expect(puts()).toBe(1);
-      // The next cycle tries once more.
+
       const next = createAttachmentTransferAdmission();
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
       expect(puts()).toBe(2);
-      // New content is a new key in the same cycle: it transfers once.
+
       env.memory.put(LOCAL_URI, REMOTE);
       const edited = withAttachment(fileAttachment({ fileHash: (await computeSha256Hex(REMOTE))! }));
       await env.backends.syncWebdavAttachments(edited, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
@@ -942,21 +1065,58 @@ describe('WebDAV attachment pass', () => {
     });
   });
 
-  it('marks the attachment unrecoverable when the remote answers 404', async () => {
+  it('leaves the row live and keyed when the remote answers 404; only a probe marks its trial copy unrecoverable', async () => {
+
     const { backends } = setup({
       core: { webdavGetFile: vi.fn(async () => { throw httpError(404); }) },
     });
+    const data = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
 
-    const result = await backends.syncWebdavAttachments(
-      withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' })),
-      webdavConfig,
-      BASE_URL,
-    );
+    expect(await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL)).toBe(false);
 
-    const attachment = attachmentOf(result);
-    expect(attachment?.cloudKey).toBeUndefined();
-    expect(attachment?.localStatus).toBe('missing');
-    expect(attachment?.deletedAt).toBeTruthy();
+    const probed = attachmentOf(await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { activationProbe: true, phase: 'post-merge' }));
+    expect(probed?.cloudKey).toBeUndefined();
+    expect(probed?.deletedAt).toBeTruthy();
+  });
+
+  it('backs off a download that answered 404, so the next pass does not ask again', async () => {
+
+
+    const webdavGetFile = vi.fn(async (): Promise<ArrayBuffer> => { throw httpError(404); });
+    const { backends } = setup({ core: { webdavGetFile } });
+    const data = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
+
+    await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL);
+    await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL);
+
+    expect(webdavGetFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('sets no 404 backoff from an activation probe', async () => {
+    const webdavGetFile = vi.fn(async (): Promise<ArrayBuffer> => { throw httpError(404); });
+    const { backends } = setup({ core: { webdavGetFile } });
+    const data = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
+
+    await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { activationProbe: true, phase: 'post-merge' });
+    await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL);
+
+    expect(webdavGetFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('backs off a Dropbox download that answered not-found, so the next pass does not ask again', async () => {
+    const downloadDropboxFile = vi.fn(async (): Promise<ArrayBuffer> => { throw new DropboxFileNotFoundError(); });
+    const { backends } = setup({ core: { downloadDropboxFile } });
+    const data = withAttachment(fileAttachment({ uri: '', cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    const resolveAccessToken = async () => 'token';
+
+    await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken, activationProbe: true });
+    await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken });
+    expect(downloadDropboxFile).toHaveBeenCalledTimes(2);
+    await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken });
+    expect(downloadDropboxFile).toHaveBeenCalledTimes(2);
+    await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken, activationProbe: true });
+    expect(downloadDropboxFile).toHaveBeenCalledTimes(3);
   });
 
   it('keeps the local bytes when a remote-winner download fails', async () => {
@@ -1303,8 +1463,8 @@ describe('self-hosted cloud attachment pass', () => {
   });
 
   it('sends every upload through the checked byte PUT, never the native uploader', async () => {
-    // The native uploader follows a redirect by itself (a 303 to /health answers the same
-    // {"ok":true}), and servers before 1.2.7 have no HEAD to prove where the file landed.
+
+
     const task = { uploadAsync: vi.fn(async () => ({ status: 200, body: '{"ok":true}' })), cancelAsync: vi.fn(async () => undefined) };
     const createUploadTask = vi.fn(() => task);
     const cloudPutFile = vi.fn(async () => undefined);
@@ -1411,15 +1571,17 @@ describe('Dropbox attachment pass', () => {
     )).rejects.toBeInstanceOf(DropboxConflictError);
   });
 
-  it('marks a missing remote file unrecoverable but only flags other download failures', async () => {
+  it('leaves a row whose remote file is not found live and keyed, and only flags other download failures', async () => {
     const downloadDropboxFile = vi.fn(async (): Promise<ArrayBuffer> => { throw new DropboxFileNotFoundError(); });
     const { backends } = setup({ core: { downloadDropboxFile } });
     const data = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'available' }));
     const fetcher = vi.fn() as unknown as typeof fetch;
 
     const missing = attachmentOf(await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken }));
-    expect(missing).toMatchObject({ cloudKey: undefined, localStatus: 'missing' });
-    expect(missing?.deletedAt).toBeTruthy();
+    expect(missing).toMatchObject({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' });
+    expect(missing?.deletedAt).toBeUndefined();
+    const probed = attachmentOf(await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken, activationProbe: true }));
+    expect(probed?.deletedAt).toBeTruthy();
 
     downloadDropboxFile.mockImplementation(async () => { throw httpError(500); });
     const failed = attachmentOf(await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken }));
@@ -1496,6 +1658,167 @@ describe('File Sync attachment pass', () => {
     });
   });
 
+
+  describe('in a folder an interrupted encryption enable left partly encrypted', () => {
+    const sealedPeer = () => encryptSyncArtifact(new TextEncoder().encode('peer attachment'), material, defaultSyncCryptoPrimitives);
+
+    it('a device with encryption off uploads nothing into a path folder and stops the pass', async () => {
+      const { backends, memory, installer, lines } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}peer.txt`, await sealedPeer());
+
+      await expect(backends.syncFileAttachments(withAttachment(fileAttachment()), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+
+      expect(installer.reserveFileSyncAttachmentPublication).not.toHaveBeenCalled();
+      expect([...memory.files.keys()].filter((uri) => uri.startsWith(SYNC_DIR))).toEqual([`${SYNC_DIR}peer.txt`]);
+      expect(lines).toContainEqual(expect.objectContaining({
+        level: 'warn',
+        extra: expect.objectContaining({ releaseCheck: 'v1.3.8/file-partly-encrypted-upload' }),
+      }));
+    });
+
+    it('a device with the key still uploads its sealed generation there', async () => {
+      const { backends, memory } = setup({ crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}peer.txt`, await sealedPeer());
+
+      const result = await backends.syncFileAttachments(withAttachment(fileAttachment()), 'file:///sdcard/Mindwtr/data.json', undefined, { material });
+
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+    });
+
+
+    const plain = (index: number) => new TextEncoder().encode(`referenced attachment ${index}`);
+    const referenced = (index: number, fields: Partial<Attachment> = {}): Attachment => fileAttachment({
+      id: `r${index}`, title: `r${index}.txt`, uri: '', localStatus: 'missing', cloudKey: `attachments/r${index}.txt`, size: plain(index).length, ...fields,
+    });
+    const withRecords = (...records: Attachment[]): AppData => {
+      const data = withAttachment(fileAttachment());
+      data.tasks[0].attachments!.push(...records);
+      return data;
+    };
+    const headReads = (memory: ReturnType<typeof setup>['memory']) => memory.calls.filter((call) => call.startsWith(`readBytesRange ${SYNC_DIR}`));
+
+    it('judges a plaintext folder of referenced entries by size alone, with no header read', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      for (let index = 0; index < 5; index += 1) memory.put(`${SYNC_DIR}r${index}.txt`, plain(index));
+
+      const result = await backends.syncFileAttachments(withRecords(...[0, 1, 2, 3, 4].map((index) => referenced(index))), 'file:///sdcard/Mindwtr/data.json');
+
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+      expect(headReads(memory)).toEqual([]);
+    });
+
+    it('refuses an entry an interrupted enable sealed under its known name', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}r0.txt`, await encryptSyncArtifact(plain(0), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}r1.txt`, plain(1));
+
+      await expect(backends.syncFileAttachments(withRecords(referenced(0), referenced(1)), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+    });
+
+    it('reads and judges a referenced entry whose record has no size', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}r0.txt`, plain(0));
+      memory.put(`${SYNC_DIR}r1.txt`, await encryptSyncArtifact(plain(1), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}r2.txt`, plain(2));
+
+      await expect(backends.syncFileAttachments(withRecords(referenced(0), referenced(1, { size: undefined }), referenced(2)), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+      expect(headReads(memory)).toEqual([`readBytesRange ${SYNC_DIR}r1.txt`]);
+    });
+
+    it('picks the first entry in code-unit order, the order Enable seals in, not localeCompare', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}a.txt`, plain(0));
+      memory.put(`${SYNC_DIR}B.txt`, await encryptSyncArtifact(plain(1), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}c.txt`, plain(2));
+      const records = [referenced(0, { id: 'a', title: 'a.txt', cloudKey: 'attachments/a.txt' }), referenced(2, { id: 'c', title: 'c.txt', cloudKey: 'attachments/c.txt' })];
+
+      await expect(backends.syncFileAttachments(withRecords(...records), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+    });
+
+
+    it('judges the first real entry, not the installer lock file that sorts before it', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}.mindwtr-attachment-installer.lock`, new Uint8Array(0));
+      memory.put(`${SYNC_DIR}a.txt`, await encryptSyncArtifact(plain(0), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}c.txt`, plain(2));
+
+      await expect(backends.syncFileAttachments(withRecords(referenced(2, { id: 'c', title: 'c.txt', cloudKey: 'attachments/c.txt' })), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+    });
+
+
+    it('does not refuse a plaintext folder for a sealed transition scratch copy left in attachments/', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}.mindwtr-et-q-0001-r0.txt`, await encryptSyncArtifact(plain(0), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}r0.txt`, plain(0));
+      memory.put(`${SYNC_DIR}r1.txt`, plain(1));
+
+      const result = await backends.syncFileAttachments(withRecords(referenced(0), referenced(1)), 'file:///sdcard/Mindwtr/data.json');
+
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+    });
+
+
+    it('fails closed when a present entry cannot be read, and passes an entry gone since the listing', async () => {
+      const unreadable = setup();
+      unreadable.memory.put(LOCAL_URI, LOCAL);
+      unreadable.memory.put(`${SYNC_DIR}a.txt`, plain(0));
+      unreadable.memory.put(`${SYNC_DIR}c.txt`, plain(2));
+      unreadable.memory.fail('readBytesRange', new Error('The provider could not open the document'), `${SYNC_DIR}a.txt`);
+      const waited = await unreadable.backends.syncFileAttachments(withRecords(), 'file:///sdcard/Mindwtr/data.json');
+
+      expect(waited === false || !attachmentOf(waited)?.cloudKey).toBe(true);
+      expect(unreadable.memory.calls.some((call) => call.startsWith(`writeBytes ${SYNC_DIR}`) || call.startsWith(`copy `) && call.includes(`-> ${SYNC_DIR}`))).toBe(false);
+
+      const gone = setup();
+      gone.memory.put(LOCAL_URI, LOCAL);
+      gone.memory.put(`${SYNC_DIR}c.txt`, plain(2));
+      gone.memory.fail('readBytesRange', Object.assign(new Error(`ENOENT: no such file or directory ${SYNC_DIR}a.txt`), { code: 'ENOENT' }), `${SYNC_DIR}c.txt`);
+      const result = await gone.backends.syncFileAttachments(withRecords(), 'file:///sdcard/Mindwtr/data.json');
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+    });
+
+
+    it('judges the first file of a subfolder that sorts before every other entry', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}r0.txt`, plain(0));
+      memory.put(`${SYNC_DIR}r1.txt`, plain(1));
+      await memory.fs.makeDirectory(`${SYNC_DIR}Archive`);
+      memory.put(`${SYNC_DIR}Archive/x.txt`, await encryptSyncArtifact(plain(9), material, defaultSyncCryptoPrimitives));
+
+      await expect(backends.syncFileAttachments(withRecords(referenced(0), referenced(1)), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+      expect(headReads(memory)).toEqual([`readBytesRange ${SYNC_DIR}Archive/x.txt`]);
+    });
+
+
+    it('does not refuse an unreferenced sealed entry between plaintext first and last entries', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}r0.txt`, plain(0));
+      memory.put(`${SYNC_DIR}r1.txt`, await encryptSyncArtifact(plain(1), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}r2.txt`, plain(2));
+
+      const result = await backends.syncFileAttachments(withRecords(referenced(0), referenced(2)), 'file:///sdcard/Mindwtr/data.json');
+
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+      expect(headReads(memory)).toEqual([]);
+    });
+  });
+
   describe('in a Storage Access Framework folder', () => {
     const TREE = 'content://com.example.docs/tree/primary%3AMindwtr';
     const FOLDER = `${TREE}/document/primary%3AMindwtr`;
@@ -1545,6 +1868,89 @@ describe('File Sync attachment pass', () => {
         message: 'Failed to copy attachment att-1 to sync folder',
         extra: { error: 'SAF attachment writes are unavailable' },
       }));
+    });
+
+    it('takes sizes from the one listing: a plaintext folder is judged with no header read, an entry with no listed size is read', async () => {
+      const plain = (name: string) => new TextEncoder().encode(`referenced ${name}`);
+      const unsized = new Set<string>();
+      let put: (uri: string, bytes: Uint8Array) => void = () => undefined;
+      const saf = createSaf((uri, bytes) => put(uri, bytes), true);
+      const { backends, memory } = setup({ saf });
+      put = memory.put;
+      saf.listChildren = vi.fn(async (uri: string) => (await saf.readDirectory(uri)).map((child) => {
+        const name = decodeURIComponent(child.slice(child.lastIndexOf('%2F') + 3));
+        return { uri: child, name, size: unsized.has(name) ? null : memory.read(child)?.length ?? null };
+      }));
+      memory.put(LOCAL_URI, LOCAL);
+      const records: Attachment[] = [];
+      for (const name of ['r0.txt', 'r1.txt', 'r2.txt']) {
+        memory.put(await saf.createFile!(ATTACHMENTS, name, 'application/octet-stream'), plain(name));
+        records.push(fileAttachment({ id: name, title: name, uri: '', localStatus: 'missing', cloudKey: `attachments/${name}`, size: plain(name).length }));
+      }
+      const data = withAttachment(fileAttachment({ size: LOCAL.length }));
+      data.tasks[0].attachments!.push(...records);
+      const reads = () => memory.calls.filter((call) => call.startsWith(`readBytesRange ${ATTACHMENTS}`));
+
+      const synced = await backends.syncFileAttachments(data, TREE);
+      expect(attachmentOf(synced)?.cloudKey).toBeDefined();
+      expect(reads()).toEqual([]);
+
+      memory.put(`${ATTACHMENTS}%2Fr1.txt`, await encryptSyncArtifact(plain('r1.txt'), material, defaultSyncCryptoPrimitives));
+      unsized.add('r1.txt');
+
+      const next = synced as AppData;
+      memory.put(`${MANAGED}att-2.txt`, LOCAL);
+      next.tasks[0].attachments!.push(fileAttachment({ id: 'att-2', title: 'att-2.txt', uri: `${MANAGED}att-2.txt` }));
+      await expect(backends.syncFileAttachments(next, TREE)).rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+      expect(reads()).toEqual([`readBytesRange ${ATTACHMENTS}%2Fr1.txt`]);
+    });
+
+    it('enters a first-sorting subfolder the listing marks as a folder, as desktop\'s Enable does', async () => {
+      const ARCHIVE = `${ATTACHMENTS}%2FArchive`;
+      const SEALED = `${ARCHIVE}%2Fx.txt`;
+      const R0 = `${ATTACHMENTS}%2Fr0.txt`;
+      const rows: Record<string, { uri: string; name: string; size: number | null; mime: string | null }[]> = {
+        [FOLDER]: [{ uri: ATTACHMENTS, name: 'attachments', size: null, mime: 'vnd.android.document/directory' }],
+        [ATTACHMENTS]: [
+          { uri: ARCHIVE, name: 'Archive', size: null, mime: 'vnd.android.document/directory' },
+          { uri: R0, name: 'r0.txt', size: 3, mime: 'text/plain' },
+        ],
+        [ARCHIVE]: [{ uri: SEALED, name: 'x.txt', size: null, mime: 'text/plain' }],
+      };
+      const saf: MobileAttachmentSafPort = {
+        readDirectory: async (uri) => (rows[uri] ?? []).map((row) => row.uri),
+        listChildren: async (uri) => rows[uri] ?? [],
+        makeDirectory: async () => ATTACHMENTS,
+        createFile: vi.fn(async () => { throw new Error('no create expected'); }),
+        writeBytes: vi.fn(async () => undefined),
+      };
+      const { backends, memory } = setup({ saf });
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(R0, new Uint8Array([1, 2, 3]));
+      memory.put(SEALED, await encryptSyncArtifact(new TextEncoder().encode('desktop sealed this'), material, defaultSyncCryptoPrimitives));
+      const data = withAttachment(fileAttachment());
+      data.tasks[0].attachments!.push(fileAttachment({ id: 'r0', title: 'r0.txt', uri: '', localStatus: 'missing', cloudKey: 'attachments/r0.txt', size: 3 }));
+
+      await expect(backends.syncFileAttachments(data, TREE)).rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+      expect(saf.createFile).not.toHaveBeenCalled();
+      expect(memory.calls.filter((call) => call.startsWith('readBytesRange'))).toEqual([`readBytesRange ${SEALED}`]);
+    });
+
+    it('a device with encryption off uploads nothing beside an attachment an interrupted enable sealed', async () => {
+      let put: (uri: string, bytes: Uint8Array) => void = () => undefined;
+      const saf = createSaf((uri, bytes) => put(uri, bytes), true);
+      const { backends, memory } = setup({ saf });
+      put = memory.put;
+      memory.put(LOCAL_URI, LOCAL);
+      const peer = await saf.createFile!(ATTACHMENTS, 'peer.txt', 'application/octet-stream');
+      memory.put(peer, await encryptSyncArtifact(new TextEncoder().encode('peer attachment'), material, defaultSyncCryptoPrimitives));
+      vi.mocked(saf.createFile!).mockClear();
+
+      await expect(backends.syncFileAttachments(withAttachment(fileAttachment()), TREE))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+
+      expect(saf.createFile).not.toHaveBeenCalled();
+      expect(saf.writeBytes).not.toHaveBeenCalled();
     });
   });
 });

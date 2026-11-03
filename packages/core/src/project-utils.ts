@@ -1,33 +1,31 @@
-import type { Project, Section, Task, TaskSortBy } from './types';
+import type { Area, Project, ProjectFlowMode, Section, Task, TaskSortBy } from './types';
 import { isTaskActionable } from './task-status';
-// task-utils imports this file too; both only call across at run time, so the cycle is safe.
-import { getSequentialFirstTaskIds, isSequentialChainStatus } from './task-utils';
+
+import { compareAreasByOrder, compareProjectsByOrder, getProjectFlowMode, getSequentialFirstTaskIds, getTaskSequencing, getTaskSequenceKey, isSequentialChainStatus } from './task-utils';
 
 export function normalizeProjectSequentialScope(value: unknown): Project['sequentialScope'] {
     if (value === 'section' || value === 'project') return value;
     return undefined;
 }
 
-/** Every task sort mode, including 'default' (= manual project order).
- *  Wire-level allowlist: the cloud server validates against this, so it must
- *  stay a superset of what any client can persist. */
+
 export const TASK_SORT_BY_VALUES = [
     'default', 'due', 'start', 'review', 'title', 'timeEstimate', 'created', 'created-desc', 'completed',
 ] as const;
 
+
+type SharedListOnlyTaskSortBy = 'priority';
+
 export const TASK_SORT_BY_VALUE_SET: ReadonlySet<TaskSortBy> =
     new Set<TaskSortBy>(TASK_SORT_BY_VALUES);
 
-// Compile-time exhaustiveness assertion: adding a member to the TaskSortBy
-// union in types.ts without updating TASK_SORT_BY_VALUES is a typecheck error.
+
 type _TaskSortByValuesAreExhaustive =
-    Exclude<TaskSortBy, (typeof TASK_SORT_BY_VALUES)[number]> extends never ? true : never;
+    Exclude<TaskSortBy, (typeof TASK_SORT_BY_VALUES)[number] | SharedListOnlyTaskSortBy> extends never ? true : never;
 const _assertTaskSortByValuesAreExhaustive: _TaskSortByValuesAreExhaustive = true;
 void _assertTaskSortByValuesAreExhaustive;
 
-// 'default' means "no explicit sort" — normalizing it to undefined is what
-// keeps sync signatures stable between a client that writes 'default' and
-// one that omits the field (sync-signatures.ts:158).
+
 const PROJECT_TASK_SORT_BY_VALUES = new Set<TaskSortBy>(
     TASK_SORT_BY_VALUES.filter((value) => value !== 'default'),
 );
@@ -46,15 +44,7 @@ const compareProjectSections = (a: Section, b: Section): number => {
     return a.title.localeCompare(b.title);
 };
 
-/**
- * Sections shown inside one project workspace.
- *
- * Active projects use the normal visible projection. Archiving a project
- * intentionally tombstones its then-visible sections so sync and Reactivate
- * remain reversible; an archived historical workspace may read those marked
- * tombstones from the all-entity collection without changing their state.
- * Sections deleted before the project archive remain omitted.
- */
+
 export function getProjectSectionsForView(
     project: Pick<Project, 'id' | 'status'> | null | undefined,
     visibleSections: readonly Section[],
@@ -74,39 +64,62 @@ export function getProjectSectionsForView(
         .sort(compareProjectSections);
 }
 
+export type ProjectFlowModeChange = {
+    project: Pick<Project, 'isSequential'> & Partial<Pick<Project, 'perSectionFlow'>>;
+
+    sections: Array<{ id: string; isSequential: boolean }>;
+};
+
+
+export function planProjectFlowModeChange(
+    project: Pick<Project, 'id' | 'isSequential' | 'perSectionFlow' | 'sequentialScope'>,
+    sections: readonly Section[],
+    mode: ProjectFlowMode,
+): ProjectFlowModeChange | null {
+    const current = getProjectFlowMode(project);
+    if (current === mode) return null;
+    if (mode !== 'perSection') {
+        return {
+            project: { isSequential: mode === 'sequential', ...(project.perSectionFlow === true ? { perSectionFlow: false } : {}) },
+            sections: [],
+        };
+    }
+    const fromWithinSections = current === 'sequential'
+        && normalizeProjectSequentialScope(project.sequentialScope) === 'section';
+    return {
+        project: { isSequential: false, perSectionFlow: true },
+        sections: sections
+            .filter((section) => section.projectId === project.id && !section.deletedAt && section.isSequential === undefined)
+            .map((section) => ({ id: section.id, isSequential: fromWithinSections })),
+    };
+}
+
 export type ProjectSequenceTaskCue = 'available' | 'later';
 
-/**
- * The "available next" / "later in sequence" cue on a sequential project's
- * Next tasks: the task's turn in the sequence. The available task is the one
- * getSequentialFirstTaskIds picks (the Next list's rule, also used by Review:
- * manual order within section order, and a waiting step holds its slot), so
- * the cue never depends on the order the caller lists the tasks in. Pass the
- * project's sections so section order ranks as it does there.
- *
- * Focus is different on purpose: getFocusSequentialFirstTaskIds lets a task
- * due today or starred take the project's Focus slot out of turn, so Focus
- * may show a task this cue marks "later".
- */
+
 export function getSequentialProjectTaskCues(
-    project: Pick<Project, 'id' | 'isSequential' | 'sequentialScope'> | null | undefined,
+    project: Pick<Project, 'id' | 'isSequential' | 'sequentialScope' | 'perSectionFlow'> | null | undefined,
     tasks: readonly Task[],
     sections: readonly Section[],
 ): Map<string, ProjectSequenceTaskCue> {
     const cues = new Map<string, ProjectSequenceTaskCue>();
-    if (!project?.isSequential) return cues;
+    if (!project || getProjectFlowMode(project) === 'parallel') return cues;
 
-    const projectIds = new Set([project.id]);
+
+    const sequencing = getTaskSequencing([{ ...project, deletedAt: undefined,
+        sequentialScope: normalizeProjectSequentialScope(project.sequentialScope) }], sections);
     const firstTaskIds = getSequentialFirstTaskIds(
         tasks.filter((task) => !task.deletedAt && isSequentialChainStatus(task.status)),
-        projectIds,
+        sequencing.sequentialProjectIds,
         {
-            sectionScopedProjectIds: normalizeProjectSequentialScope(project.sequentialScope) === 'section' ? projectIds : undefined,
+            sectionScopedProjectIds: sequencing.sectionScopedProjectIds,
+            sequentialSectionKeys: sequencing.sequentialSectionKeys,
             sections,
         },
     );
     tasks.forEach((task) => {
         if (task.deletedAt || task.status !== 'next' || task.projectId !== project.id) return;
+        if (getTaskSequenceKey(task, sequencing) === null) return;
         cues.set(task.id, firstTaskIds.has(task.id) ? 'available' : 'later');
     });
 
@@ -158,14 +171,7 @@ export function isTaskInActiveProject(
     return project.status === 'active' || project.isFocused === true;
 }
 
-/**
- * Project visibility for the Calendar's completed look-back (#955).
- *
- * Historical tasks from an archived project still describe work that happened,
- * while tasks in deferred projects do not belong on the active calendar.
- * Missing projects retain the existing loose-task behavior; deleted projects
- * remain hidden.
- */
+
 export function isTaskInCalendarHistoryProject(
     task: Task,
     projectLookup: Map<string, Project> | Record<string, Project>
@@ -217,7 +223,9 @@ export function getProjectNextActionCandidates(
 export function getProjectNextActionPromptData(
     completedTask: Task,
     tasks: Task[],
-    projects: Project[]
+    projects: Project[],
+
+    sections?: readonly Section[],
 ): { project: Project; candidates: Task[]; scope: 'project' | 'section' } | null {
     if (!completedTask.projectId || completedTask.deletedAt || completedTask.status !== 'done') {
         return null;
@@ -236,10 +244,13 @@ export function getProjectNextActionPromptData(
         };
     }
 
-    // Section-scoped sequential projects run one sequence per section, so a
-    // section left without a next action is stalled even while other sections
-    // still have live next actions (#911).
-    if (project.isSequential && normalizeProjectSequentialScope(project.sequentialScope) === 'section') {
+
+    const completedSection = completedTask.sectionId
+        ? sections?.find((section) => section.id === completedTask.sectionId && section.projectId === project.id)
+        : undefined;
+    if ((project.isSequential && normalizeProjectSequentialScope(project.sequentialScope) === 'section')
+        || (getProjectFlowMode(project) === 'perSection' && completedSection?.isSequential === true
+            && !completedSection.deletedAt)) {
         const sectionKey = completedTask.sectionId ?? undefined;
         const inSameSection = (task: Task) => (task.sectionId ?? undefined) === sectionKey;
         const sectionHasNext = tasks.some((task) =>
@@ -264,9 +275,10 @@ export function getProjectNextActionPromptData(
 export function shouldPromptForProjectNextAction(
     completedTask: Task,
     tasks: Task[],
-    projects: Project[]
+    projects: Project[],
+    sections?: readonly Section[],
 ): boolean {
-    return getProjectNextActionPromptData(completedTask, tasks, projects) !== null;
+    return getProjectNextActionPromptData(completedTask, tasks, projects, sections) !== null;
 }
 
 export function getProjectsByArea(projects: Project[], areaId: string): Project[] {
@@ -289,10 +301,6 @@ export type ProjectChoiceState = {
     canCreate: boolean;
 };
 
-/** The mobile project pickers' order: each project's `order` (0 when unset); ties keep the order they came in. */
-export const compareProjectsByPickerOrder = (a: Project, b: Project): number =>
-    (Number.isFinite(a.order) ? a.order : 0) - (Number.isFinite(b.order) ? b.order : 0);
-
 export function getProjectChoiceState(
     browseProjects: readonly Project[],
     query: string,
@@ -312,6 +320,30 @@ export function getProjectChoiceState(
         exactMatch,
         canCreate: !exactMatch,
     };
+}
+
+
+type PickerProject = Pick<Project, 'title'> & Partial<Pick<Project, 'status' | 'areaId' | 'order'>>;
+
+export function groupProjectsForPicker<T extends PickerProject>(
+    projects: readonly T[],
+    areas: readonly Area[],
+): { active: T[]; deferred: T[] } {
+    const areaRank = new Map(areas.filter((area) => !area.deletedAt).sort(compareAreasByOrder).map((area, index) => [area.id, index]));
+    const rankOf = (project: PickerProject) => (project.areaId ? areaRank.get(project.areaId) : undefined) ?? areaRank.size;
+    const sorted = [...projects].sort((a, b) => rankOf(a) - rankOf(b) || compareProjectsByOrder(a, b));
+    const active: T[] = [];
+    const deferred: T[] = [];
+    for (const project of sorted) {
+        (project.status === 'someday' || project.status === 'waiting' ? deferred : active).push(project);
+    }
+    return { active, deferred };
+}
+
+
+export function sortProjectsForPicker<T extends PickerProject>(projects: readonly T[], areas: readonly Area[]): T[] {
+    const { active, deferred } = groupProjectsForPicker(projects, areas);
+    return [...active, ...deferred];
 }
 
 export const getProjectsByTag = (projects: Project[], tagId: string): Project[] => {

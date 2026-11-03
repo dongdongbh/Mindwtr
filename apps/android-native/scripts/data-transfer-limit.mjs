@@ -1,25 +1,17 @@
-// Pass D1c step 0 (design §8, code review P2): the transfer limit from check-data-device.mjs's measured rows. Pure, so its
-// rule is tested apart from the phone (data-transfer-limit.test.mjs).
 
-/**
- * Every Data workload the limit must hold for, each measured in every shape. A TaskNotes export is measured but has its own
- * 12 MiB bound (step 0 run 4), so it does not set the limit.
- */
+
+
 export const MEASURE_WORKLOADS = ['restore-fresh', 'merge-over', 'restore-over', 'undo', 'export-json', 'export-csv',
     'capture', 'import-todoist', 'import-ticktick', 'import-dgt', 'import-omnifocus', 'import-mindwtr-csv', 'cold-start', 'recovery-boot'];
 export const MEASURE_SHAPES = ['rows', 'notes'];
 
-/**
- * A row's size in MiB. An import counts the library it left, alone (its file is compressed and expands, and a duplicate adds
- * nothing: code review 2); an export, a capture or a start the library it read; a restore, merge or Undo the file and the
- * library it went over, or the library it left, whichever is larger.
- */
+
 export const rowBound = (row) => row.workload?.startsWith('import-') ? row.libraryAfterMiB ?? 0
     : Math.max((row.sourceMiB ?? 0) + (row.libraryBeforeMiB ?? 0), row.libraryAfterMiB ?? 0);
 
-/** The largest size below a workload's first failure: a failing smaller row caps it, whatever larger rows passed. */
+
 const workloadBound = (rows) => {
-    // At one size, a failure sorts first, so it caps that size too.
+
     const sorted = [...rows].sort((left, right) => rowBound(left) - rowBound(right) || Number(left.pass) - Number(right.pass));
     let bound = 0;
     for (const row of sorted) {
@@ -29,13 +21,11 @@ const workloadBound = (rows) => {
     return bound;
 };
 
-const key = (row) => `${row.shape}/${row.workload}`;
-const cells = (shapes, workloads) => shapes.flatMap((shape) => workloads.map((workload) => `${shape}/${workload}`));
 
-/**
- * Half of the smallest workload bound over the whole matrix (D1a's margin), or null while any workload or shape has no row.
- * Boundary reruns ([row.boundary]) are not part of the proposal.
- */
+const key = (row) => (row.workload?.startsWith('import-') ? `*/${row.workload}` : `${row.shape}/${row.workload}`);
+const cells = (shapes, workloads) => [...new Set(shapes.flatMap((shape) => workloads.map((workload) => key({ shape, workload }))))];
+
+
 export function proposeTransferLimit(rows, { shapes = MEASURE_SHAPES, workloads = MEASURE_WORKLOADS } = {}) {
     const measured = rows.filter((row) => !row.boundary);
     const bounds = Object.fromEntries(cells(shapes, workloads).map((cell) => [cell, measured.filter((row) => key(row) === cell)]));
@@ -46,26 +36,71 @@ export function proposeTransferLimit(rows, { shapes = MEASURE_SHAPES, workloads 
     return { limitMiB: Math.floor(smallestMiB / 2), smallestMiB, missing: [], bounds: sizes };
 }
 
-/** How close a boundary row must come: within 15 % of the limit, or of a refused attempt just above it. */
+
 export const BOUNDARY_SLACK = 0.15;
 
-/**
- * Whether a boundary row ran at its admitted boundary, by its bytes (code review 2): its size is within [BOUNDARY_SLACK] of
- * the limit, or the app refused an attempt ([row.refusedAboveMiB]) at most that much larger, so nothing larger is admitted.
- */
-export const atBoundary = (row, limitMiB) => {
+
+export const atBoundary = (row, limitMiB, above = null) => {
     const bound = rowBound(row);
     if (bound >= limitMiB * (1 - BOUNDARY_SLACK)) return true;
-    return typeof row.refusedAboveMiB === 'number' && row.refusedAboveMiB > bound && row.refusedAboveMiB <= bound * (1 + BOUNDARY_SLACK) + 0.5;
+    if (!above) return false;
+    const imported = row.workload?.startsWith('import-');
+    const admitted = imported ? bound : (row.sourceMiB ?? 0) + (row.libraryBeforeMiB ?? 0);
+    const refused = imported ? (row.libraryAfterMiB ?? 0) * (above.expandedMiB ?? 0) / (row.expandedMiB || Infinity)
+        : (above.sourceMiB ?? 0) + (above.libraryBeforeMiB ?? 0);
+    return refused > admitted && refused <= admitted * (1 + BOUNDARY_SLACK) + 0.5;
 };
 
-/** Whether every workload and shape passed again at the proposed limit's admitted boundary ([row.boundary] rows). */
+
+export const MEASURE_JAVA_MIB = 128;
+
+export const MEASURE_NATIVE_MIB = 512;
+
+
+export const javaPeakOf = (run) => run.appJavaMiB ?? run.javaMiB;
+
+export const nativePasses = (row) => row.outcome === 'done' && Math.max(row.nativeMiB ?? 0, row.appNativeMiB ?? 0) <= MEASURE_NATIVE_MIB;
+
+
+export const rowPasses = (row) => {
+    if (!nativePasses(row)) return false;
+    const runs = row.javaRuns ?? [javaPeakOf(row)];
+    const crossed = runs.filter((java) => java > MEASURE_JAVA_MIB).length;
+
+    return crossed === 0 || (runs.length >= 3 && crossed < 2);
+};
+
+export const rowPassesFor = (row) => !row.rerunFailed && (row.boundary ? rowPasses(row) : nativePasses(row));
+
+
 export function boundaryVerdict(rows, limitMiB, { shapes = MEASURE_SHAPES, workloads = MEASURE_WORKLOADS } = {}) {
-    // An attempt the app refused for its size is the boundary's evidence (refusedAboveMiB), not a failure.
+    const atLimit = new Set();
+    const restoreAtLimit = {};
+    let above = null;
+    for (const row of rows.filter((item) => item.boundary)) {
+
+        if (row.refused) { above = row; continue; }
+        const at = row.workload === 'undo' ? restoreAtLimit[row.shape] === true
+            : atBoundary(row, limitMiB, above && key(above) === key(row) ? above : null);
+        if (row.workload === 'restore-over') restoreAtLimit[row.shape] = at && row.pass;
+        if (at) atLimit.add(row);
+        above = null;
+    }
     const boundary = rows.filter((row) => row.boundary && !row.refused);
     const missing = cells(shapes, workloads).filter((cell) => !boundary.some((row) => key(row) === cell));
     const failed = cells(shapes, workloads).filter((cell) => boundary.some((row) => key(row) === cell && !row.pass));
     const belowBoundary = cells(shapes, workloads).filter((cell) => boundary.some((row) => key(row) === cell && row.pass)
-        && !boundary.some((row) => key(row) === cell && row.pass && atBoundary(row, limitMiB)));
+        && !boundary.some((row) => key(row) === cell && row.pass && atLimit.has(row)));
     return { established: missing.length === 0 && failed.length === 0 && belowBoundary.length === 0, limitMiB, missing, failed, belowBoundary };
+}
+
+
+if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+    const { readFileSync } = await import('node:fs');
+    const rows = readFileSync(process.argv[2], 'utf8').split('\n').filter((line) => line.startsWith('measure {'))
+        .map((line) => JSON.parse(line.slice('measure '.length))).map((row) => ({ ...row, pass: rowPassesFor(row) }));
+    const limitMiB = Number(process.argv[3]);
+    const shapes = [...new Set(rows.map((row) => row.shape))];
+    const verdict = boundaryVerdict(rows, limitMiB, { shapes });
+    console.log(verdict.established ? `T established: ${limitMiB} MiB` : `T not established at ${limitMiB} MiB: ${JSON.stringify(verdict)}`);
 }

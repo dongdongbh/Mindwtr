@@ -18,7 +18,7 @@ for target in arm64-apple-ios16.4-simulator x86_64-apple-ios16.4-simulator arm64
   if [[ "$target" == *-simulator ]]; then sdk=iphonesimulator; fi
   sdk_path="$(xcrun --sdk "$sdk" --show-sdk-path)"
   echo "SDK API preflight: $sdk ($target)"
-  # Cross-import overlays expose APIs shared by CoreSpotlight/FoundationModels.
+
   xcrun swiftc -typecheck -parse-as-library -swift-version 5 \
     -Xfrontend -enable-cross-import-overlays \
     -sdk "$sdk_path" -target "$target" \
@@ -30,9 +30,8 @@ for target in arm64-apple-ios16.4-simulator x86_64-apple-ios16.4-simulator arm64
     apps/mobile/modules/apple-image-capture/ios/AppleImageCaptureModule.swift \
     apps/mobile/modules/apple-image-capture/ios/AppleImageCaptureBounds.swift \
     apps/mobile/modules/apple-image-capture/ios/AppleImageAnalysisCoordinator.swift || status=1
-  # Compile the real standalone PCC/on-device comparison engine. The Intel
-  # simulator must retain its guarded unavailable path; ARM64 targets typecheck
-  # the actual Xcode 27 PrivateCloudComputeLanguageModel API surface.
+
+
   xcrun swiftc -typecheck -parse-as-library -swift-version 5 \
     -sdk "$sdk_path" -target "$target" \
     apps/mobile/modules/apple-foundation-models/ios/ApplePccEvaluationEngine.swift || status=1

@@ -1,4 +1,4 @@
-// https://docs.expo.dev/guides/using-eslint/
+
 const { defineConfig } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
 
@@ -9,16 +9,13 @@ module.exports = defineConfig([
   },
   {
     rules: {
-      // Stale-closure bugs shipped as mere warnings (#768); keep the tree at zero.
+
       'react-hooks/exhaustive-deps': 'error',
     },
   },
   {
-    // React Native's global fetch resolves through setTimeout(0), and Android
-    // never fires JavaScript timers while the app is off screen, so a request
-    // made from a background sync froze until the next foreground (#1001).
-    // Library code goes through backgroundSafeFetch; the files below are
-    // foreground-only and opt out on purpose.
+
+
     files: ['lib/**/*.ts', 'lib/**/*.tsx'],
     ignores: [
       'lib/**/*.test.ts',
@@ -34,4 +31,5 @@ module.exports = defineConfig([
       }],
     },
   },
+  { rules: { 'no-empty': ['error', { allowEmptyCatch: true }] } },
 ]);

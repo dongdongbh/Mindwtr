@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import React from 'react';
 import {
     DndContext,
@@ -25,7 +26,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { TaskItem } from '../TaskItem';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { shallow, useTaskStore, sortTasksBy, sortTasksByBoardOrder, buildProjectOrderMap, compareTasksByProjectThenOrder, getSequentialFirstTaskIds, isSequentialChainStatus, translateWithFallback, createTaskFilterPredicate, hasActiveFilterCriteria, getUsedTaskTokens, tFallback } from '@mindwtr/core';
+import { shallow, useTaskStore, sortTasksBy, sortTasksByBoardOrder, buildProjectOrderMap, compareTasksByProjectThenOrder, getSequentialFirstTaskIds, getTaskSequencing, hasTaskSequences, isSequentialChainStatus, isTaskSequenceBlocked, translateWithFallback, createTaskFilterPredicate, hasActiveFilterCriteria, getUsedTaskTokens, tFallback } from '@mindwtr/core';
 import { buildActiveFilterChips, removeFilterChipFromCriteria } from './list/active-filter-chips';
 import { resolveBoardDragEnd } from './board-view-dnd';
 import type { Task, TaskStatus, FilterCriteria } from '@mindwtr/core';
@@ -104,9 +105,8 @@ function DroppableColumn({
     compact?: boolean;
 }) {
     const { setNodeRef } = useDroppable({ id });
-    // No bottom padding on the card: it sits outside the column's scroller, so
-    // it reads as a strip the list can never reach. The gap lives on the
-    // scrolled content instead (#977).
+
+
     const columnPadding = compact ? 'px-2 pt-2' : 'px-3 pt-3';
     const headerMargin = compact ? 'mb-3' : 'mb-4';
     const listSpacing = compact ? 'space-y-2' : 'space-y-3';
@@ -256,7 +256,7 @@ export function BoardView() {
         ? criteria.dueDateRange.preset
         : undefined;
     const visibility = useAreaVisibility();
-    const { areaById, projectById: projectMap, resolvedAreaFilter } = visibility;
+    const { areaById, resolvedAreaFilter } = visibility;
     const sortedProjects = React.useMemo(
         () =>
             projects
@@ -318,9 +318,8 @@ export function BoardView() {
         const excludeKey = isTag ? 'excludedTags' : 'excludedContexts';
         const included = criteria[includeKey] ?? [];
         const excluded = criteria[excludeKey] ?? [];
-        // Tri-state cycle: neutral → included → excluded → neutral, same as
-        // Focus, the shared list panel and mobile. A token is only ever on one
-        // side, so each transition clears the other.
+
+
         const next = included.includes(token)
             ? { include: included.filter((item) => item !== token), exclude: [...excluded, token] }
             : excluded.includes(token)
@@ -354,7 +353,7 @@ export function BoardView() {
         setActiveTask(event.active.data.current?.task || null);
     };
 
-    // Sort tasks for consistency, filter out deleted
+
     const sortedTasks = React.useMemo(
         () => sortTasksBy(tasks.filter(t => !t.deletedAt), sortBy),
         [tasks, sortBy],
@@ -378,30 +377,24 @@ export function BoardView() {
         if (!normalizedSearchQuery) return criteriaFilteredTasks;
         return criteriaFilteredTasks.filter((task) => task.title.toLowerCase().includes(normalizedSearchQuery));
     }, [criteriaFilteredTasks, normalizedSearchQuery]);
-    const sequentialProjectIds = React.useMemo(() => {
-        return new Set(projects.filter((p) => p.isSequential && !p.deletedAt).map((p) => p.id));
-    }, [projects]);
-    const sequentialWithinSectionProjectIds = React.useMemo(() => new Set(
-        projects
-            .filter((project) => project.isSequential && project.sequentialScope === 'section' && !project.deletedAt)
-            .map((project) => project.id),
-    ), [projects]);
+
+    const sequencing = React.useMemo(() => getTaskSequencing(projects, sections), [projects, sections]);
 
     const sequentialProjectFirstTasks = React.useMemo(() => {
         perf.trackUseMemo();
         return perf.measure('sequentialProjectFirstTasks', () => {
             if (!computeSequential) return new Set<string>();
-            if (sequentialProjectIds.size === 0) return new Set<string>();
-            // Waiting tasks hold their chain slot too (a waiting first step
-            // blocks the later ones), so they join the slot computation even
-            // though the board never renders them in the Next column.
-            const chainTasks = filteredTasks.filter((task) => !task.deletedAt && isSequentialChainStatus(task.status));
-            return getSequentialFirstTaskIds(chainTasks, sequentialProjectIds, {
-                sectionScopedProjectIds: sequentialWithinSectionProjectIds,
+            if (!hasTaskSequences(sequencing)) return new Set<string>();
+
+
+            const chainTasks = areaFilteredTasks.filter((task) => !task.deletedAt && isSequentialChainStatus(task.status));
+            return getSequentialFirstTaskIds(chainTasks, sequencing.sequentialProjectIds, {
+                sectionScopedProjectIds: sequencing.sectionScopedProjectIds,
+                sequentialSectionKeys: sequencing.sequentialSectionKeys,
                 sections,
             });
         });
-    }, [computeSequential, filteredTasks, sections, sequentialProjectIds, sequentialWithinSectionProjectIds]);
+    }, [areaFilteredTasks, computeSequential, sections, sequencing]);
 
     const sortByProjectOrder = React.useCallback(
         (items: Task[]) => [...items].sort(compareTasksByProjectThenOrder(projectOrderMap)),
@@ -411,26 +404,22 @@ export function BoardView() {
     const getColumnTasks = React.useCallback((status: TaskStatus) => {
         let list = filteredTasks.filter((task) => task.status === status);
         if (status === 'next') {
-            list = list.filter((task) => {
-                if (!task.projectId) return true;
-                const project = projectMap.get(task.projectId);
-                if (!project?.isSequential) return true;
-                return !computeSequential || sequentialProjectFirstTasks.has(task.id);
-            });
+            list = list.filter((task) => (
+                !computeSequential || !isTaskSequenceBlocked(task, sequencing, sequentialProjectFirstTasks)
+            ));
             if (sortBy === 'default') {
                 list = sortByProjectOrder(list);
             }
         }
         return sortBy === 'default' ? sortTasksByBoardOrder(list) : list;
-    }, [computeSequential, filteredTasks, projectMap, sequentialProjectFirstTasks, sortBy, sortByProjectOrder]);
+    }, [computeSequential, filteredTasks, sequencing, sequentialProjectFirstTasks, sortBy, sortByProjectOrder]);
 
     const columnIdSet = React.useMemo(
         () => new Set<string>(getColumns(t).map((column) => column.id)),
         [t]
     );
 
-    // Keyboard order matches the reading order of the board: column by column,
-    // card by card.
+
     const visibleTasks = React.useMemo(
         () => COLUMN_STATUSES.flatMap((status) => getColumnTasks(status)),
         [getColumnTasks],
@@ -440,9 +429,10 @@ export function BoardView() {
         sequentialPhase.current = 'committed';
         recordRendererActivity(sequentialActivity.current, 'committed', {
             filteredCount: filteredTasks.length, visibleCount: visibleTasks.length,
-            sequentialProjectCount: sequentialProjectIds.size, sequentialResultCount: sequentialProjectFirstTasks.size,
+            sequentialProjectCount: sequencing.sequentialProjectIds.size + sequencing.sequentialSectionKeys.size,
+            sequentialResultCount: sequentialProjectFirstTasks.size,
         });
-    }, [computeSequential, filteredTasks, visibleTasks, sequentialProjectIds, sequentialProjectFirstTasks]);
+    }, [computeSequential, filteredTasks, visibleTasks, sequencing, sequentialProjectFirstTasks]);
     const [selectedTaskIndex, setSelectedTaskIndex] = React.useState(0);
     useTaskListScope({
         getTasks: () => visibleTasks,
@@ -450,10 +440,8 @@ export function BoardView() {
         setSelectedIndex: setSelectedTaskIndex,
         t,
     });
-    // Lock onto the column the drag is over, then snap to the closest card *within* that
-    // column (by the dragged item's rect, not the raw pointer). Without this, releasing in
-    // the gap between cards falls through to the column droppable and lands at the bottom,
-    // which made cross-column placement feel inconsistent (#791).
+
+
     const collisionDetection = React.useCallback<CollisionDetection>((args) => {
         const pointerHits = pointerWithin(args);
         const intersections = pointerHits.length > 0 ? pointerHits : rectIntersection(args);
@@ -495,7 +483,7 @@ export function BoardView() {
         } else if (action.type === 'reorder') {
             void reorderBoardTasks(action.status, action.orderedIds);
         } else if (action.type === 'moveAndReorder') {
-            // Change status first (keeps recurrence handling), then place at the dropped index.
+
             void (async () => {
                 await moveTask(action.taskId, action.status);
                 await reorderBoardTasks(action.status, action.orderedIds);
@@ -620,9 +608,8 @@ export function BoardView() {
                         <BoardFiltersPanel
                             activeFilterChips={activeFilterChips}
                             allTokens={allTokens}
-                            // The board filter passes no tokenMatchMode, so core
-                            // matches with "any" — the control shows that, unlike
-                            // the List and Focus panels which filter with "all".
+
+
                             contextMatchMode={criteria.contextMatchMode ?? 'any'}
                             duePresets={DUE_DATE_PRESETS}
                             excludedTokens={excludedTokens}
@@ -637,7 +624,7 @@ export function BoardView() {
                             projectOptions={sortedProjects.map((project) => ({
                                 id: project.id,
                                 title: project.title,
-                                dotColor: (project.areaId ? areaById.get(project.areaId)?.color : undefined) || project.color || undefined,
+                                dotColor: getProjectAccentColor(project, areaById),
                             }))}
                             selectedDuePreset={selectedDuePreset}
                             selectedProjectIds={selectedProjectIds}

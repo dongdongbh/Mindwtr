@@ -403,8 +403,8 @@ describe('fetchWithTimeout', () => {
             const calls: string[] = [];
             const fetcher: typeof fetch = async (input, init) => {
                 calls.push(String(input));
-                // Mirrors undici/browser fetch: redirect:'error' rejects instead of
-                // re-issuing the request (with its body) at the Location target.
+
+
                 if (init?.redirect === 'error') throw new TypeError('unexpected redirect');
                 return new Response(null, {
                     status: 307,
@@ -426,8 +426,8 @@ describe('fetchWithTimeout', () => {
     it.each([301, 302, 303, 307, 308])(
         'refuses a %s a fetcher handed back unfollowed on a write, like undici does',
         async (status) => {
-            // React Native ignores `redirect`; its Android client returns the redirect
-            // unfollowed instead of turning the PUT into a GET.
+
+
             const logs: LogPayload[] = [];
             setLogger((payload) => { logs.push(payload); });
             try {
@@ -474,8 +474,8 @@ describe('fetchWithTimeout', () => {
         ['https://%62ucher.example/dav/data.json', 'https://cucher.example/dav/data.json'],
         ['https://cloud.example.com/v1/data?a=%5C', 'https://cloud.example.com/v1/data?a=/'],
     ])('refuses a write to %s that iOS followed to %s', async (requested, answered) => {
-        // React Native on iOS follows a write redirect (a 303 as a GET) and hands back
-        // the final answer; only the URL it came from tells.
+
+
         const logs: LogPayload[] = [];
         setLogger((payload) => { logs.push(payload); });
         try {
@@ -529,8 +529,8 @@ describe('fetchWithTimeout', () => {
         ['https://dav.example.com\\dav/data.json', 'https://dav.example.com/dav/data.json'],
         ['https://dav.example.com/dav/data.json', ''],
     ])('accepts a write to %s answered from %s, the same URL', async (requested, answered) => {
-        // OkHttp (Android) and NSURL (iOS) report a URL they did not redirect in their
-        // own spelling; that must never read as a redirect.
+
+
         await expect(fetchWithTimeoutAndConsume(
             requested,
             { method: 'PUT', body: '{"tasks":[]}' },
@@ -541,7 +541,7 @@ describe('fetchWithTimeout', () => {
         )).resolves.toBe('written');
     });
 
-    // RFC 3492 section 7.1 samples B, C, D, K and L, as lowercase host labels.
+
     it.each([
         ['他们为什么不说中文', 'ihqwcrb4cv8a8dqg056pqjye'],
         ['他們爲什麽不說中文', 'ihqwctvzc91f659drss3x8bo0yb'],
@@ -567,7 +567,7 @@ describe('fetchWithTimeout', () => {
         ['a lone surrogate the client replaced', 'https://dav.example.com/dav/\uD800.json', 'https://dav.example.com/dav/%EF%BF%BD.json'],
         ['a lone surrogate in the host', 'https://dav\uDC00.example.com/dav/data.json', 'https://dav\uFFFD.example.com/dav/data.json'],
     ])('lets a write through when %s leaves the URLs impossible to compare', async (_case, requested, answered) => {
-        // The check must never throw and never refuse on a URL it cannot read.
+
         const logs: LogPayload[] = [];
         setLogger((payload) => { logs.push(payload); });
         try {
@@ -590,8 +590,8 @@ describe('fetchWithTimeout', () => {
     });
 
     it('refuses an Android redirect once, with its own line', async () => {
-        // Android's interceptor hands the 3xx back from the URL asked for; the answering
-        // URL check must neither refuse it a second time nor claim it was followed.
+
+
         const logs: LogPayload[] = [];
         setLogger((payload) => { logs.push(payload); });
         try {
@@ -675,7 +675,7 @@ describe('fetchWithTimeout', () => {
 });
 
 describe('readResponseText with a host-decoded body', () => {
-    // The native hosts' Response (host-polyfills.js): the text already decoded off the engine thread, its size in bytes beside it.
+
     const decoded = (text: string) => {
         const arrayBuffer = vi.fn(async () => new TextEncoder().encode(text).buffer as ArrayBuffer);
         const res = {
@@ -694,7 +694,7 @@ describe('readResponseText with a host-decoded body', () => {
     });
 
     it('applies a smaller caller limit to the bytes, not the characters', async () => {
-        // 40 characters, 80 bytes: a limit of 50 refuses it, as reading its bytes would.
+
         const { res } = decoded('é'.repeat(40));
         await expect(readResponseText(res, 50)).rejects.toBeInstanceOf(ResponseTooLargeError);
         await expect(readResponseText(res, 80)).resolves.toBe('é'.repeat(40));
@@ -794,8 +794,8 @@ describe('fetchWithTimeoutAndConsume suspension detection', () => {
     });
 
     it('marks a timer that fired hours late as an interruption while the app was suspended', async () => {
-        // Android froze the process with the request in flight (#1139): the
-        // timer fired 62 minutes later, when the app was thawed.
+
+
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-09-02T07:00:15.000Z'));
         const pending = fetchWithTimeoutAndConsume('https://example.com/x', {}, 1_000, neverResolving, 'Cloud request timed out', async () => 'ok');

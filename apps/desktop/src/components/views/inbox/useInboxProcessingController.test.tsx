@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isProcessInboxReturningTask, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
+import { isProcessInboxReturningTask, useTaskStore, type AppData, type Area, type Project, type Task } from '@mindwtr/core';
 import { useUiStore } from '../../../store/ui-store';
 import { useInboxProcessingController } from './useInboxProcessingController';
 import { holdSyncSave } from '../../../test/hold-sync-save';
@@ -163,8 +163,8 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         updateTask: UpdateTask,
         controllerSettings: Parameters<typeof useInboxProcessingController>[0]['settings'] = settings,
     ) => renderHook(() => {
-        // The session closes itself once the queue drains, so isProcessing has
-        // to be real state or the reconciliation effect never settles.
+
+
         const [isProcessing, setIsProcessing] = useState(true);
         return useInboxProcessingController({
             t: (key) => key,
@@ -195,7 +195,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         });
         const remote = { id: 'att-remote', kind: 'link' as const, title: 'Remote', uri: 'https://remote.example',
             createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' };
-        // Another device's attachment, published by a sync save that holds the gate while the decision is written.
+
         const finish = holdSyncSave(() => useTaskStore.setState({
             _allTasks: useTaskStore.getState()._allTasks.map((task) => (task.id === 'one' ? { ...task, rev: 5, attachments: [remote] } : task)),
         }));
@@ -223,7 +223,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         });
         const remote = { id: 'att-remote', kind: 'link' as const, title: 'Remote', uri: 'https://remote.example',
             createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' };
-        // Another device's tag and attachment, published by a sync save that holds the gate while the decision is written.
+
         const finish = holdSyncSave(() => useTaskStore.setState({
             _allTasks: useTaskStore.getState()._allTasks.map((task) => (task.id === 'one'
                 ? { ...task, rev: 5, tags: ['#remote'], attachments: [remote] }
@@ -241,8 +241,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         expect(stored?.attachments?.map((attachment) => attachment.uri)).toEqual(['https://remote.example', 'https://notes.example']);
     });
 
-    // #958: picking a project and then sending the item to Reference/Someday
-    // used to write only the status, silently dropping the project.
+
     it.each([
         ['reference', (wizard: ReturnType<typeof renderController>['result']['current']['wizardProps']) => wizard.handleConfirmReference()],
         ['someday', (wizard: ReturnType<typeof renderController>['result']['current']['wizardProps']) => wizard.handleConfirmSomeday()],
@@ -282,8 +281,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         expect(updateTask).not.toHaveBeenCalled();
     });
 
-    // #1155: Reference has to reach its organization step on the project/area
-    // pickers alone, or hiding the context step makes them unreachable.
+
     it('routes guided Reference through organization controls when only containers are shown', async () => {
         const updateTask = vi.fn(async () => ({ success: true }));
         const { result } = renderController(updateTask, {
@@ -491,8 +489,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
     });
 });
 
-// An incubated item comes back when its review date arrives. Filing it to
-// Someday again must drop that overdue date, or it returns on every run.
+
 describe('useInboxProcessingController overdue review date on Someday', () => {
     const returning = { ...makeTask('back', 'someday'), reviewAt: '2026-01-05' } as Task;
 
@@ -547,14 +544,17 @@ describe('useInboxProcessingController draft writes', () => {
         { id: 'p2', title: 'Work Project', status: 'active', areaId: 'area-1' } as Project,
     ];
 
-    const renderController = () => renderHook(() => {
+    const renderController = (
+        areas: Area[] = [],
+        settings: AppData['settings'] = {},
+    ) => renderHook(() => {
         const [isProcessing, setIsProcessing] = useState(true);
         return useInboxProcessingController({
             t: (key) => key,
             tasks,
             projects,
-            areas: [],
-            settings: {},
+            areas,
+            settings,
             addProject: async () => null,
             addTask: async () => ({ success: true }),
             updateTask: async () => ({ success: true }),
@@ -582,12 +582,20 @@ describe('useInboxProcessingController draft writes', () => {
         const draft = result.current.wizardProps.draft;
         expect(draft.title).toBe('Clarified');
 
-        // The reducer hands back the same draft when the value is unchanged; a
-        // hand-rolled spread would allocate a new one on every keystroke.
+
         act(() => {
             result.current.wizardProps.setField('title', 'Clarified');
         });
         expect(result.current.wizardProps.draft).toBe(draft);
+    });
+
+    it('starts a capture with no project or area in the default area (#1445)', async () => {
+        const { result } = renderController(
+            [{ id: 'area-1', name: 'Work' } as Area],
+            { gtd: { defaultAreaMode: 'fixed', defaultAreaId: 'area-1' } } as AppData['settings'],
+        );
+        await openFirstTask(result);
+        expect(result.current.wizardProps.draft.areaId).toBe('area-1');
     });
 
     it('drops a project that lives outside a newly picked area, and keeps one inside it', async () => {
@@ -795,8 +803,7 @@ describe('useInboxProcessingController project conversion persistence', () => {
     });
 });
 
-// #1088: the clarify title used to run a date-only parser, so it was the one
-// editable task title in the app with a smaller grammar than quick add.
+
 describe('useInboxProcessingController title grammar', () => {
     const tasks = [makeTask('one')];
     const projects = [{ id: 'p1', title: 'Vacation', status: 'active' } as Project];
@@ -848,7 +855,7 @@ describe('useInboxProcessingController title grammar', () => {
         expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
             status: 'next',
             title: estimate ? 'Call Alice' : `Call Alice ${token}`,
-            // The typed context joins the chip the user toggled; it never wins alone.
+
             contexts: ['@office', '@phone'],
             tags: ['#urgent'],
             areaId: 'a1',
@@ -859,7 +866,7 @@ describe('useInboxProcessingController title grammar', () => {
         }));
     });
 
-    // The priority, energy, and person controls are hidden by default.
+
     it('saves typed priority, energy, and person while their controls are hidden', async () => {
         const updateTask = vi.fn<UpdateTask>(async () => ({ success: true }));
         const { result } = renderController(updateTask);
@@ -885,9 +892,7 @@ describe('useInboxProcessingController title grammar', () => {
     });
 });
 
-// The inline person create awaited `addPerson` and threw the `Person | null`
-// result away, so a refused write left the Waiting step with no person and no
-// message — the step's other writes all toast.
+
 describe('useInboxProcessingController inline person create', () => {
     it('reports a refused person create', async () => {
         useUiStore.setState({ toasts: [] });
@@ -914,5 +919,68 @@ describe('useInboxProcessingController inline person create', () => {
         });
 
         expect(useUiStore.getState().toasts.map((toast) => toast.message)).toContain('Failed to add task');
+    });
+});
+
+
+describe('useInboxProcessingController project section', () => {
+    afterEach(() => {
+        useTaskStore.setState({ sections: [], _allSections: [] } as never);
+    });
+
+    it('writes the picked section and clears it when the project changes', async () => {
+        const sections = [
+            { id: 's-design', projectId: 'p-work', title: 'Design', order: 0, createdAt: '', updatedAt: '' },
+        ];
+        useTaskStore.setState({ sections, _allSections: sections } as never);
+        const projects = [
+            { id: 'p-work', title: 'Work', status: 'active', color: '#000', order: 0, tagIds: [], createdAt: '', updatedAt: '' },
+            { id: 'p-home', title: 'Home', status: 'active', color: '#000', order: 1, tagIds: [], createdAt: '', updatedAt: '' },
+        ] as Project[];
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderHook(() => {
+            const [isProcessing, setIsProcessing] = useState(true);
+            return useInboxProcessingController({
+                t: (key) => key,
+                tasks: [makeTask('one')],
+                projects,
+                areas: [],
+                settings: {},
+                addProject: async () => null,
+                addTask: async () => ({ success: true }),
+                updateTask,
+                deleteTask: async () => ({ success: true }),
+                allContexts: [],
+                allTags: [],
+                isProcessing,
+                setIsProcessing,
+            });
+        });
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+        expect(result.current.wizardProps.options.sections).toEqual(sections);
+
+        act(() => {
+            result.current.wizardProps.setField('projectId', 'p-work');
+            result.current.wizardProps.setField('sectionId', 's-design');
+        });
+        act(() => {
+            result.current.wizardProps.setField('projectId', 'p-home');
+        });
+        expect(result.current.wizardProps.draft.sectionId).toBe('');
+
+        act(() => {
+            result.current.wizardProps.setField('projectId', 'p-work');
+            result.current.wizardProps.setField('sectionId', 's-design');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleSetProject('p-work');
+        });
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'next',
+            projectId: 'p-work',
+            sectionId: 's-design',
+        }));
     });
 });

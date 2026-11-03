@@ -12,6 +12,7 @@ import {
 import { loadTranslations } from './i18n/i18n-loader';
 import {
     addProcessInboxToken,
+    answerProcessInboxStep,
     applyProcessInboxDraftEdit,
     createProcessInboxDraft,
     getProcessInboxNotePreview,
@@ -23,6 +24,7 @@ import {
     buildProcessInboxScheduleUpdates,
     prepareProcessInboxCommit,
     prepareProcessInboxDraftDecision,
+    reloadProcessInboxDraft,
     formatProcessInboxScheduleValue,
     getProcessInboxStepPrompt,
     INITIAL_PROCESS_INBOX_ANSWERS,
@@ -45,8 +47,8 @@ it('retains progress when new work arrives and resets for a fresh session', () =
     const grown = getProcessInboxProgress(converted, 5, session);
     expect(grown).toEqual({ total: 7, processed: 2 });
     expect(getProcessInboxProgress(grown, 5, session)).toEqual(grown);
-    // Work removed by another writer counted as progress under the RN policy;
-    // a later capture must not erase that count either.
+
+
     const removed = getProcessInboxProgress(grown, 3, session);
     expect(removed).toEqual({ total: 7, processed: 4 });
     expect(getProcessInboxProgress(removed, 5, session)).toEqual({ total: 9, processed: 4 });
@@ -84,7 +86,7 @@ describe('Process Inbox model parity with the mobile modal', () => {
         expect(observed).toEqual(fixture.observations[scenario.name].map((observation) => frozenObservation(observation)));
     });
 
-    // Mobile used to clear these after the next item had opened, so filing that item erased them.
+
     it('records the next item keeping its dates after Start later, Next, Incubate and Waiting', () => {
         const observations = fixture.observations['the next item keeps its dates after Start later, Next, Incubate and Waiting'];
         const dates = (taskId: string) => {
@@ -121,12 +123,56 @@ describe('Process Inbox steps', () => {
         expect(resolveProcessInboxStep(answers({ actionability: 'incubate' }), 'quick', base)).toBe('incubate');
     });
 
-    it('steps back one question and drops a project split only from the file step', () => {
+    it('opens the file step for quick "I\'ll do it" instead of filing to Next at once (#1445)', () => {
+        const base = plan({});
+        const task = { id: 't1', title: 'Call bank', status: 'inbox', createdAt: '', updatedAt: '' } as Task;
+        const outcome = answerProcessInboxStep({ choice: 'next', answers: INITIAL_PROCESS_INBOX_ANSWERS,
+            draft: createProcessInboxDraft(task), mode: 'quick', plan: base, task,
+            parseTitle: (title) => ({ title }) as never });
+        expect(outcome.type).toBe('flow');
+        if (outcome.type !== 'flow') return;
+        expect(resolveProcessInboxStep(outcome.answers, 'quick', base)).toBe('file');
+    });
+
+    it('opens the project setup for quick Project without asking "More than one step?" (#1445)', () => {
+        const base = plan({});
+        const task = { id: 't1', title: 'Plan trip', status: 'inbox', createdAt: '', updatedAt: '' } as Task;
+        const draft = createProcessInboxDraft(task);
+        const outcome = answerProcessInboxStep({ choice: 'project', answers: INITIAL_PROCESS_INBOX_ANSWERS,
+            draft, mode: 'quick', plan: base, task, parseTitle: (title) => ({ title }) as never });
+        expect(outcome.type).toBe('flow');
+        if (outcome.type !== 'flow') return;
+        expect(resolveProcessInboxStep(outcome.answers, 'quick', base)).toBe('file');
+        expect(outcome.draft).toMatchObject({ convertToProject: true, nextAction: 'Plan trip', projectId: null });
+
+        const back = answerProcessInboxStep({ choice: 'back', answers: outcome.answers,
+            draft: outcome.draft, mode: 'quick', plan: base, task, parseTitle: (title) => ({ title }) as never });
+        expect(back).toMatchObject({ type: 'flow', answers: INITIAL_PROCESS_INBOX_ANSWERS, draft: { convertToProject: false, nextAction: '' } });
+    });
+
+    it('takes the saved task again after the full editor, keeping the step\'s own drafts, as RN\'s reloadEditedTask (#1445)', () => {
+        const task = { id: 't1', title: 'Call bank', status: 'inbox', createdAt: '', updatedAt: '' } as Task;
+        const typed = { ...createProcessInboxDraft(task), title: 'typed', delegateWho: 'Sam', followUp: { date: '2026-10-30', dateOnly: true },
+            convertToProject: true, nextAction: 'First step', extraActions: ['Second step'] };
+        const saved = { ...task, title: 'Call the bank', contexts: ['@phone'], updatedAt: '2026-10-26T10:00:00.000Z' } as Task;
+        const reloaded = reloadProcessInboxDraft(typed, saved, null);
+        expect(reloaded).toMatchObject({ title: 'Call the bank', contexts: ['@phone'], delegateWho: 'Sam', followUp: { date: '2026-10-30', dateOnly: true },
+            convertToProject: true, nextAction: 'First step', extraActions: ['Second step'] });
+    });
+
+    it('starts a capture with no project or area in the default area (#1445)', () => {
+        const task = { id: 't1', title: 'Call bank', status: 'inbox', createdAt: '', updatedAt: '' } as Task;
+        expect(createProcessInboxDraft(task, 'a-work').areaId).toBe('a-work');
+        expect(createProcessInboxDraft({ ...task, areaId: 'a-home' }, 'a-work').areaId).toBe('a-home');
+        expect(createProcessInboxDraft({ ...task, projectId: 'p1' }, 'a-work').areaId).toBeNull();
+    });
+
+    it('steps back one question and drops a project split from the file step', () => {
         const base = plan({});
         const file = answers({ actionability: 'actionable', twoMinute: 'no', execution: 'defer', oneActionAnswered: true });
         expect(backProcessInboxStep(file, 'guided', base)).toEqual({ answers: { ...file, oneActionAnswered: false }, cancelProjectConversion: true });
-        // Quick mode returns to its entry screen and keeps a started split, as mobile does.
-        expect(backProcessInboxStep(file, 'quick', base)).toEqual({ answers: INITIAL_PROCESS_INBOX_ANSWERS, cancelProjectConversion: false });
+
+        expect(backProcessInboxStep(file, 'quick', base)).toEqual({ answers: INITIAL_PROCESS_INBOX_ANSWERS, cancelProjectConversion: true });
     });
 
     it('keeps only the calendar day of a picked date, then adds the default time unless date-only', () => {
@@ -214,6 +260,19 @@ describe('Process Inbox steps', () => {
             formatDate: () => '', now: new Date(2026, 8, 23),
         });
         expect(view.moreOptions.organization?.timeEstimates.map(({ label }) => label)).toContain('5 min.');
+    });
+
+    it('offers contexts before the project on Start later, as React Native does (#1445)', () => {
+        const task = { id: 'inbox', title: 'Inbox', status: 'inbox' } as Task;
+        const view = buildProcessInboxStepView({ task, draft: createProcessInboxDraft(task),
+            answers: { ...INITIAL_PROCESS_INBOX_ANSWERS, actionability: 'later' },
+            mode: 'guided', plan: resolveProcessInboxPlan({ gtd: { inboxProcessing: { projectFirst: true }, taskEditor: { hidden: [] } } } as never),
+            settings: undefined, tasks: [task], projects: [], areas: [], people: [], similarityIndex: null,
+            t: (key) => key, formatDate: () => '', now: new Date(2026, 8, 23),
+        });
+        expect(view.step).toBe('later');
+        expect(view.contexts).not.toBeNull();
+        expect(view.projectFirst).toBe(false);
     });
 
     it('clears an overdue review date when filing to Someday, but keeps a future date', () => {
@@ -313,8 +372,7 @@ describe('captured RN note and date controls', () => {
     });
 });
 
-// Priority, energy, and person controls are hidden by default, so the typed
-// tokens are the only way the user said anything. They must reach the write.
+
 describe('typed single-value tokens with hidden controls', () => {
     const title = 'Call bank /priority:high /energy:low %Alice';
     const commit = (settings: Parameters<typeof resolveProcessInboxPlan>[0], decision: 'next' | 'someday') => {
@@ -342,5 +400,83 @@ describe('typed single-value tokens with hidden controls', () => {
         const written = write(commit({ features: { priorities: false } } as never, 'next'));
         expect(written).not.toHaveProperty('priority');
         expect(written).toMatchObject({ energyLevel: 'low', assignedTo: 'Alice' });
+    });
+});
+
+
+describe('project section in Inbox processing', () => {
+    const plan = resolveProcessInboxPlan({});
+    const selection = (projectId: string | null, sectionId?: string | null) => ({
+        projectId, ...(sectionId !== undefined ? { sectionId } : {}), areaId: null, contexts: [], tags: [],
+        priority: undefined, energyLevel: undefined, assignedTo: '', timeEstimate: undefined,
+    });
+    const commit = (task: Task, sel: ReturnType<typeof selection>, options = {}, title = task.title) => {
+        const prepared = prepareProcessInboxCommit({ task, plan, decision: { type: 'next' }, title, description: '',
+            parseTitle: (input) => (input.includes('+Other')
+                ? { title: task.title, props: { projectId: 'p-other' } }
+                : { title: input, props: {} }),
+            selection: sel, scheduleUpdates: {}, dirtyScheduleFields: new Set(), options });
+        if (!prepared.ok || prepared.event.type === 'discard') throw new Error('Expected an update');
+        return prepared.event.fields;
+    };
+    const inbox = { id: 'inbox', title: 'Draft the brief', status: 'inbox' } as Task;
+
+    it('writes the picked section with its project', () => {
+        expect(commit(inbox, selection('p-work', 's-design'))).toMatchObject({ projectId: 'p-work', sectionId: 's-design' });
+    });
+
+    it('drops the section when the decision or a typed +Project files the task elsewhere', () => {
+        const moved = commit(inbox, selection('p-work', 's-design'), { fields: { projectId: 'p-other' } });
+        expect(moved.projectId).toBe('p-other');
+        expect(Object.hasOwn(moved, 'sectionId') && moved.sectionId).toBeUndefined();
+        const typed = commit(inbox, selection('p-work', 's-design'), {}, 'Draft the brief +Other');
+        expect(typed.projectId).toBe('p-other');
+        expect(typed.sectionId).toBeUndefined();
+    });
+
+    it('clears a section the task had when No section is picked, and writes nothing when there is no section either way', () => {
+        const sectioned = { ...inbox, projectId: 'p-work', sectionId: 's-design' } as Task;
+        const cleared = commit(sectioned, selection('p-work', null));
+        expect(Object.hasOwn(cleared, 'sectionId')).toBe(true);
+        expect(cleared.sectionId).toBeUndefined();
+        expect(Object.hasOwn(commit(inbox, selection('p-work', null)), 'sectionId')).toBe(false);
+
+        expect(Object.hasOwn(commit(sectioned, selection('p-work')), 'sectionId')).toBe(false);
+    });
+
+    it('keeps the section in the draft only inside its project', () => {
+        const draft = createProcessInboxDraft({ ...inbox, projectId: 'p-work', sectionId: 's-design' } as Task);
+        expect(draft.sectionId).toBe('s-design');
+        expect(createProcessInboxDraft(inbox)).not.toHaveProperty('sectionId');
+        expect(applyProcessInboxDraftEdit(draft, { type: 'selectProject', value: 'p-work' }, plan).sectionId).toBe('s-design');
+        expect(applyProcessInboxDraftEdit(draft, { type: 'selectProject', value: 'p-other' }, plan).sectionId).toBeNull();
+        const noProject = createProcessInboxDraft(inbox);
+        expect(applyProcessInboxDraftEdit(noProject, { type: 'setSection', value: 's-design' }, plan)).toBe(noProject);
+        expect(prepareProcessInboxDraftDecision({ task: inbox, draft: { ...draft, sectionId: 's-review' }, plan,
+            settings: undefined, parseTitle: (title) => ({ title, props: {} }) }, { type: 'next' }))
+            .toMatchObject({ ok: true, event: { fields: { projectId: 'p-work', sectionId: 's-review' } } });
+    });
+
+    it("offers the chosen project's sections in the step view, No section first", () => {
+        const task = { ...inbox, projectId: 'p-work' } as Task;
+        const projects = [{ id: 'p-work', title: 'Work', status: 'active', color: '#000', order: 0, tagIds: [], createdAt: '', updatedAt: '' }] as never[];
+        const sections = [
+            { id: 's-review', projectId: 'p-work', title: 'Review', order: 1, createdAt: '', updatedAt: '' },
+            { id: 's-design', projectId: 'p-work', title: 'Design', order: 0, createdAt: '', updatedAt: '' },
+            { id: 's-elsewhere', projectId: 'p-home', title: 'Garden', order: 0, createdAt: '', updatedAt: '' },
+        ] as never[];
+        const view = (draft: ReturnType<typeof createProcessInboxDraft>, sectionList = sections) => buildProcessInboxStepView({
+            task, draft, answers: { actionability: 'actionable', twoMinute: 'no', execution: 'defer', oneActionAnswered: true },
+            mode: 'guided', plan, settings: undefined, tasks: [task], projects, sections: sectionList, areas: [], people: [],
+            similarityIndex: null, t: (key) => key, formatDate: ((value: unknown) => String(value)) as never, now: new Date(2026, 9, 26),
+        });
+        const draft = { ...createProcessInboxDraft(task), sectionId: 's-review' };
+        const offered = view(draft).project?.sections;
+        expect(offered?.label).toBe('taskEdit.sectionLabel');
+        expect(offered?.options.map((option) => [option.label, option.selected])).toEqual([
+            ['taskEdit.noSectionOption', false], ['Design', false], ['Review', true],
+        ]);
+        expect(offered?.options[1].edit).toEqual({ type: 'setSection', value: 's-design' });
+        expect(view(draft, []).project).not.toHaveProperty('sections');
     });
 });

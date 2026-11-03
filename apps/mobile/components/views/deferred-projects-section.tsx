@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react-native';
@@ -16,7 +17,7 @@ export interface DeferredProjectsSectionProps {
   onOpenProject: (projectId: string) => void;
 }
 
-/** Renders nothing when there is nothing deferred, so callers can pass it straight to a list header. */
+
 export function DeferredProjectsSection({
   projects,
   areaById,
@@ -64,11 +65,11 @@ export interface DeferredProjectRowProps {
   t: (key: string) => string;
   onActivateProject: (projectId: string) => void;
   onOpenProject: (projectId: string) => void;
-  /** Long press (and the accessibility action) offers "Move to section…" when given. */
+
   onMoveToSection?: (project: Project) => void;
 }
 
-/** One parked project: tap opens it, swipe right reactivates it. */
+
 export function DeferredProjectRow({
   project,
   areaById,
@@ -98,7 +99,7 @@ export function DeferredProjectRow({
           ? (event) => { if (event.nativeEvent.actionName === 'moveToSection') onMoveToSection(project); }
           : undefined}
       >
-        <Folder size={18} color={project.color || tc.secondaryText} />
+        <Folder size={18} color={getProjectAccentColor(project, areaById) || tc.secondaryText} />
         <View style={styles.projectText}>
           <Text style={[styles.projectTitle, { color: tc.text }]} numberOfLines={1}>
             {project.title}

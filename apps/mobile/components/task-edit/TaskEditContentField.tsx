@@ -1,6 +1,7 @@
 import React from 'react';
 import {
     Text,
+    Switch,
     TextInput,
     TouchableOpacity,
     View,
@@ -24,6 +25,7 @@ import {
     buildTaskChecklistFieldModel,
     generateUUID,
     getAttachmentDisplayTitle,
+    isAttachmentKeptWithoutFile,
     isMarkdownEditorAssistEnabled,
     resolveAutoTextDirection,
     useTaskStore,
@@ -43,6 +45,8 @@ import {
     type IgnoredNativePairChange,
     isRangeSelection,
 } from '../markdown-selection-utils';
+import { ChecklistEditorRows } from './checklist-editor-rows';
+import { useChecklistHandleDrag } from './use-checklist-handle-drag';
 import type { TaskEditFieldRendererProps } from './TaskEditFieldRenderer.types';
 
 type ContentFieldId = 'description' | 'location' | 'attachments' | 'checklist';
@@ -51,7 +55,6 @@ type TaskEditContentFieldProps = TaskEditFieldRendererProps & {
     fieldId: ContentFieldId;
 };
 
-const getChecklistItemKey = (item: { id?: string }, index: number) => item.id || `index:${index}`;
 const selectionsEqual = (left: MarkdownSelection, right: MarkdownSelection) => (
     left.start === right.start && left.end === right.end
 );
@@ -95,12 +98,10 @@ export function TaskEditContentField({
 }: TaskEditContentFieldProps) {
     const inputStyle = { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text };
     const [checklistOrderMode, setChecklistOrderMode] = React.useState(false);
+    const rowSession = React.useMemo(() => new ChecklistEditorRows(task?.id), [task?.id]);
+    const checklistRows = rowSession.sync(checklist ?? []);
+    const [checklistMenuRow, setChecklistMenuRow] = React.useState<string | null>(null);
     const isReference = (draft?.status ?? task?.status) === 'reference';
-    const editChecklist = React.useCallback((edit: TaskChecklistEdit) => {
-        const result = applyTaskChecklistEdit(checklist, edit, { isReference, newId: generateUUID });
-        if (result) applyChecklistUpdate(result.checklist);
-        return result;
-    }, [applyChecklistUpdate, checklist, isReference]);
     const combinedText = `${titleDraft ?? ''}\n${descriptionDraft ?? ''}`.trim();
     const resolvedDirection = resolveAutoTextDirection(combinedText, language);
     const textDirectionStyle = {
@@ -143,6 +144,18 @@ export function TaskEditContentField({
         };
         return checklistInputRefCallbacks.current[key];
     }, [cancelPendingChecklistFocus]);
+    const editChecklist = React.useCallback((edit: TaskChecklistEdit) => {
+        const result = applyTaskChecklistEdit(checklist, edit, { newId: generateUUID });
+        if (result) {
+            const rows = rowSession.apply(result.checklist, edit);
+            if (result.focusId) {
+                const row = rows.find((candidate) => candidate.item.id === result.focusId);
+                if (row) requestChecklistInsertionFocus(row.identity);
+            }
+            applyChecklistUpdate(result.checklist);
+        }
+        return result;
+    }, [applyChecklistUpdate, checklist, requestChecklistInsertionFocus, rowSession]);
     const checklistLength = checklist?.length ?? 0;
     React.useEffect(() => {
         if (fieldId !== 'checklist' || checklistLength < 2) {
@@ -152,8 +165,9 @@ export function TaskEditContentField({
 
     React.useEffect(() => {
         const activeKeys = new Set<string>();
+        const currentRows = rowSession.sync(checklist ?? []);
         (checklist || []).forEach((item, index) => {
-            const key = getChecklistItemKey(item, index);
+            const key = currentRows[index].identity;
             activeKeys.add(key);
             checklistTitleRefs.current[key] = item.title;
         });
@@ -171,16 +185,14 @@ export function TaskEditContentField({
         if (pendingFocusKey && !activeKeys.has(pendingFocusKey)) {
             cancelPendingChecklistFocus();
         }
-    }, [cancelPendingChecklistFocus, checklist]);
+    }, [cancelPendingChecklistFocus, checklist, rowSession]);
 
     React.useEffect(
         () => cancelPendingChecklistFocus,
         [cancelPendingChecklistFocus, fieldId, task?.id],
     );
 
-    // A just-added row is focused from its first onLayout, not the mount commit:
-    // focusing before native layout makes Android's ScrollView scroll-to-focused-
-    // child measure the unpositioned row and jump to the top of the checklist.
+
     const handleChecklistRowLayout = React.useCallback((key: string) => {
         if (pendingChecklistFocusKeyRef.current !== key) return;
         const target = checklistInputRefs.current[key];
@@ -260,23 +272,15 @@ export function TaskEditContentField({
         }, 300);
     }, []);
 
-    // Return key on a filled checklist item inserts an empty item right after it
-    // and moves focus there, so a list can be typed without tapping "+ Add item"
-    // between entries (matching the desktop editor's Enter). On an empty item the
-    // return key just ends editing.
+
     const handleChecklistSubmit = React.useCallback((index: number, key: string) => {
         if (!(checklist || [])[index]) return;
-        const result = applyTaskChecklistEdit(checklist, { kind: 'insertAfter', index, text: checklistTitleRefs.current[key] }, {
-            isReference,
-            newId: generateUUID,
-        });
+        const result = editChecklist({ kind: 'insertAfter', index, text: checklistTitleRefs.current[key] });
         if (!result) {
             checklistInputRefs.current[key]?.blur();
             return;
         }
-        if (result.focusId) requestChecklistInsertionFocus(result.focusId);
-        applyChecklistUpdate(result.checklist);
-    }, [applyChecklistUpdate, checklist, isReference, requestChecklistInsertionFocus]);
+    }, [checklist, editChecklist]);
 
     const updateChecklistTitle = React.useCallback((index: number, key: string, title: string) => {
         checklistTitleRefs.current[key] = title;
@@ -307,9 +311,8 @@ export function TaskEditContentField({
 
     const getDescriptionFocusScrollTarget = React.useCallback((nativeTarget?: number) => {
         if (Platform.OS === 'android') {
-            // Scroll to the input itself, not the label header above it, so the field (not just
-            // the "DESCRIPTION" label) lands above the keyboard. The reveal cap in
-            // scrollHandleIntoView keeps a tall description from over-scrolling (#921).
+
+
             return findNodeHandle(descriptionInputRef.current) ?? undefined;
         }
         return nativeTarget || undefined;
@@ -331,9 +334,9 @@ export function TaskEditContentField({
 
     const handleChecklistTitleChange = React.useCallback((index: number, key: string, text: string) => {
         if (/[\r\n]/.test(text)) {
-            // Multi-line paste: split into one checklist item per line. The
-            // first line replaces this item's title; the rest insert after it.
-            const result = applyTaskChecklistEdit(checklist, { kind: 'rename', index, text }, { isReference, newId: generateUUID });
+
+
+            const result = editChecklist({ kind: 'rename', index, text });
             if (!result) return;
             const updatedTitle = result.checklist[index].title;
             checklistTitleRefs.current[key] = updatedTitle;
@@ -342,7 +345,6 @@ export function TaskEditContentField({
                 end: updatedTitle.length,
             };
             lastChecklistRangeRefs.current[key] = null;
-            applyChecklistUpdate(result.checklist);
             return;
         }
         const previousValue = checklistTitleRefs.current[key] ?? '';
@@ -386,15 +388,64 @@ export function TaskEditContentField({
 
         lastChecklistRangeRefs.current[key] = null;
         updateChecklistTitle(index, key, text);
-    }, [applyChecklistUpdate, checklist, getChecklistSelection, isReference, restoreChecklistSelection, updateChecklistTitle]);
+    }, [editChecklist, getChecklistSelection, restoreChecklistSelection, updateChecklistTitle]);
 
-    // Checklist auto-pairing intentionally lives only in handleChecklistTitleChange. On
-    // Android the keyPress event is synthesized from the same native edit as the text
-    // change (and preventDefault cannot cancel it), so a keyPress pairing path processes
-    // one keystroke twice — IME-specific echo orders then double the pair (#565).
+
     const handleChecklistMove = React.useCallback((from: number, to: number) => {
         editChecklist({ kind: 'move', from, to });
     }, [editChecklist]);
+
+    React.useEffect(() => setChecklistMenuRow(null), [task?.id]);
+    const checklistDrag = useChecklistHandleDrag({
+        sessionId: task?.id,
+        rows: checklistRows.map((row) => row.identity),
+        onMove: (from, to) => {
+            handleChecklistMove(from, to);
+            void logInfo('Checklist handle drag applied to draft', {
+                scope: 'task-edit', extra: { releaseCheck: 'v1.3.8/checklist-handle-drag', stage: 'draft-moved' },
+            });
+        },
+        onStart: () => {
+            cancelPendingChecklistFocus();
+            setChecklistMenuRow(null);
+            for (const input of Object.values(checklistInputRefs.current)) input?.blur?.();
+        },
+        onMenu: (row) => setChecklistMenuRow((previous) => previous === row ? null : row),
+    });
+    const renderChecklistHandle = (identity: string) => (
+        <View
+            {...checklistDrag.handleProps(identity)}
+            accessibilityRole="button"
+            accessibilityLabel={t('taskEdit.dragChecklistItem')}
+            accessibilityHint={t('taskEdit.checklistItemActions')}
+            accessibilityActions={[{ name: 'activate', label: t('taskEdit.checklistItemActions') }]}
+            onAccessibilityAction={(event) => {
+                if (event.nativeEvent.actionName === 'activate') setChecklistMenuRow((previous) => previous === identity ? null : identity);
+            }}
+            style={{ width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+            testID={`mobile-checklist-drag-${identity}`}
+        >
+            <Ionicons name="reorder-two" size={22} color={tc.secondaryText} />
+        </View>
+    );
+    const renderChecklistActions = (identity: string, index: number) => checklistMenuRow === identity ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            {[
+                { label: t('projects.moveUp'), disabled: index === 0, run: () => handleChecklistMove(index, index - 1) },
+                { label: t('projects.moveDown'), disabled: index === checklistLength - 1, run: () => handleChecklistMove(index, index + 1) },
+                { label: t('taskEdit.moveChecklistTop'), disabled: index === 0, run: () => handleChecklistMove(index, 0) },
+                { label: t('taskEdit.moveChecklistBottom'), disabled: index === checklistLength - 1, run: () => handleChecklistMove(index, checklistLength - 1) },
+                { label: t('taskEdit.addChecklistBelow'), disabled: !checklist?.[index]?.title.trim(), run: () => handleChecklistSubmit(index, identity) },
+            ].map((action) => (
+                <TouchableOpacity key={action.label} accessibilityRole="button" disabled={action.disabled}
+                    accessibilityState={{ disabled: action.disabled }}
+                    onPress={() => { setChecklistMenuRow(null); action.run(); }}
+                    style={{ minHeight: 44, paddingHorizontal: 10, justifyContent: 'center', opacity: action.disabled ? 0.4 : 1 }}>
+                    <Text style={{ color: tc.tint }}>{action.label}</Text>
+                </TouchableOpacity>
+            ))}
+        </View>
+    ) : null;
 
     switch (fieldId) {
         case 'description':
@@ -574,7 +625,7 @@ export function TaskEditContentField({
                                 const displayTitle = getAttachmentDisplayTitle(attachment);
                                 const isMissing = attachment.kind === 'file'
                                     && (!attachment.uri || attachment.localStatus === 'missing');
-                                const canDownload = isMissing && Boolean(attachment.cloudKey);
+                                const canDownload = isMissing && Boolean(attachment.cloudKey) && !isAttachmentKeptWithoutFile(attachment);
                                 const isDownloading = attachment.localStatus === 'downloading';
                                 return (
                                     <View key={attachment.id} style={[styles.attachmentRow, { borderBottomColor: tc.border }]}>
@@ -670,12 +721,23 @@ export function TaskEditContentField({
                             </TouchableOpacity>
                         ) : null}
                     </View>
-                    <View style={[styles.checklistContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+                    {draft?.recurrence && task?.taskMode !== 'list' && !isReference && Boolean(checklist?.length) && (
+                        <View>
+                            <View style={styles.checklistHeader}>
+                                <Text style={[styles.label, { color: tc.text, flex: 1 }]}>{t('taskEdit.resetChecklistOnRepeat')}</Text>
+                                <Switch value={!draft.preserveChecklistOnRepeat}
+                                    accessibilityLabel={t('taskEdit.resetChecklistOnRepeat')}
+                                    onValueChange={(reset) => setDraftField('preserveChecklistOnRepeat', !reset)} />
+                            </View>
+                            <Text style={[styles.helperText, { color: tc.secondaryText }]}>{t('taskEdit.resetChecklistOnRepeatHint')}</Text>
+                        </View>
+                    )}
+                    <View ref={checklistDrag.listRef} style={[styles.checklistContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                         {checklistOrderMode ? (
                             <View style={styles.checklistOrderPanel} testID="mobile-checklist-order-panel">
                                 {field.items.map((item) => {
                                     const { index, orderTitle: itemTitle, canMoveUp, canMoveDown } = item;
-                                    const checklistItemKey = getChecklistItemKey(item, index);
+                                    const checklistItemKey = checklistRows[index].identity;
 
                                     return (
                                         <View
@@ -702,7 +764,7 @@ export function TaskEditContentField({
                                                         { borderColor: tc.border, backgroundColor: tc.filterBg },
                                                         !canMoveUp && styles.checklistOrderButtonDisabled,
                                                     ]}
-                                                    testID={`mobile-checklist-move-up-${checklistItemKey}`}
+                                                    testID={`mobile-checklist-move-up-${item.id}`}
                                                 >
                                                     <Ionicons name="chevron-up" size={18} color={canMoveUp ? tc.tint : tc.secondaryText} />
                                                 </TouchableOpacity>
@@ -716,7 +778,7 @@ export function TaskEditContentField({
                                                         { borderColor: tc.border, backgroundColor: tc.filterBg },
                                                         !canMoveDown && styles.checklistOrderButtonDisabled,
                                                     ]}
-                                                    testID={`mobile-checklist-move-down-${checklistItemKey}`}
+                                                    testID={`mobile-checklist-move-down-${item.id}`}
                                                 >
                                                     <Ionicons name="chevron-down" size={18} color={canMoveDown ? tc.tint : tc.secondaryText} />
                                                 </TouchableOpacity>
@@ -729,45 +791,33 @@ export function TaskEditContentField({
                             <>
                                 {field.items.map((item) => {
                                     const { index } = item;
-                                    const checklistItemKey = getChecklistItemKey(item, index);
+                                    const checklistItemKey = checklistRows[index].identity;
                                     return (
+                                        <View key={checklistItemKey} testID={`mobile-checklist-row-${checklistItemKey}`} onLayout={(event) => checklistDrag.rowLayout(checklistItemKey, event)}>
                                         <View
-                                            key={checklistItemKey}
                                             style={[
                                                 styles.checklistItem,
-                                                { borderBottomColor: tc.border },
+                                                { borderBottomColor: checklistDrag.indicator?.target === checklistItemKey ? tc.tint : tc.border,
+                                                    ...(checklistDrag.indicator?.target === checklistItemKey ? { borderTopWidth: 2 } : {}),
+                                                    ...(checklistDrag.indicator?.row === checklistItemKey ? { opacity: 0.6 } : {}) },
                                             ]}
                                         >
-                                            {field.bullets ? (
-                                                <Text
-                                                    style={{
-                                                        width: 28,
-                                                        color: tc.secondaryText,
-                                                        fontSize: 18,
-                                                        lineHeight: 24,
-                                                        textAlign: 'center',
-                                                    }}
-                                                    accessible={false}
-                                                >
-                                                    •
-                                                </Text>
-                                            ) : (
-                                                <TouchableOpacity
-                                                    accessibilityRole="checkbox"
-                                                    accessibilityLabel={item.checkboxLabel}
-                                                    accessibilityState={{ checked: item.completed }}
-                                                    onPress={() => editChecklist({ kind: 'toggle', index })}
-                                                    style={styles.checkboxTouch}
-                                                >
-                                                    <View style={[
-                                                        styles.checkbox,
-                                                        { borderColor: tc.tint },
-                                                        item.completed && { backgroundColor: tc.tint },
-                                                    ]}>
-                                                        {item.completed && <Check size={12} color={tc.onTint} strokeWidth={3} />}
-                                                    </View>
-                                                </TouchableOpacity>
-                                            )}
+                                            {renderChecklistHandle(checklistItemKey)}
+                                            <TouchableOpacity
+                                                accessibilityRole="checkbox"
+                                                accessibilityLabel={item.checkboxLabel}
+                                                accessibilityState={{ checked: item.completed }}
+                                                onPress={() => editChecklist({ kind: 'toggle', index })}
+                                                style={styles.checkboxTouch}
+                                            >
+                                                <View style={[
+                                                    styles.checkbox,
+                                                    { borderColor: tc.tint },
+                                                    item.completed && { backgroundColor: tc.tint },
+                                                ]}>
+                                                    {item.completed && <Check size={12} color={tc.onTint} strokeWidth={3} />}
+                                                </View>
+                                            </TouchableOpacity>
                                             <TextInput
                                                 ref={getChecklistInputRef(checklistItemKey)}
                                                 onLayout={() => handleChecklistRowLayout(checklistItemKey)}
@@ -784,11 +834,16 @@ export function TaskEditContentField({
                                                     }
                                                 }}
                                                 onChangeText={(text) => handleChecklistTitleChange(index, checklistItemKey, text)}
+                                                onKeyPress={(event) => {
+                                                    if (event.nativeEvent.key === 'Backspace') {
+                                                        delete ignoredNativePairChangeRefs.current[checklistItemKey];
+                                                    }
+                                                }}
                                                 onSelectionChange={(event) => handleChecklistSelectionChange(
                                                     checklistItemKey,
                                                     event.nativeEvent.selection,
                                                 )}
-                                                // Native caret movement must not be overwritten by a stale ref on iOS.
+
                                                 selection={checklistSelectionRestorePending[checklistItemKey] ? getControlledTextInputSelection(
                                                     checklistSelectionRefs.current[checklistItemKey] ?? {
                                                         start: item.title.length,
@@ -811,15 +866,14 @@ export function TaskEditContentField({
                                                 <Text style={[styles.deleteBtnText, { color: tc.secondaryText }]}>×</Text>
                                             </TouchableOpacity>
                                         </View>
+                                        {renderChecklistActions(checklistItemKey, index)}
+                                        </View>
                                     );
                                 })}
                                 <TouchableOpacity
                                     style={[styles.addChecklistBtn, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
                                     onPress={() => {
-                                        const result = applyTaskChecklistEdit(checklist, { kind: 'add' }, { isReference, newId: generateUUID });
-                                        if (!result) return;
-                                        if (result.focusId) requestChecklistInsertionFocus(result.focusId);
-                                        applyChecklistUpdate(result.checklist);
+                                        editChecklist({ kind: 'add' });
                                     }}
                                     testID="mobile-checklist-add-item"
                                 >

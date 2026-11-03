@@ -61,9 +61,8 @@ export function useSettingsAboutPage({
     const [appVersion, setAppVersion] = useState('0.1.0');
     const [logPath, setLogPath] = useState('');
     const [installSource, setInstallSource] = useState<InstallSource>('unknown');
-    // The background update check must not run before detection settles: the
-    // initial 'unknown' would pass the quiet-channel gate and phone GitHub even
-    // on installs (e.g. Scoop) that must stay offline unless asked.
+
+
     const [installSourceResolved, setInstallSourceResolved] = useState(false);
     const [installChannel, setInstallChannel] = useState<string | null>(null);
     const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
@@ -129,9 +128,8 @@ export function useSettingsAboutPage({
 
     useEffect(() => {
         if (!isTauri) {
-            // Web/PWA build: no Tauri getVersion(). Use the release env when the
-            // build pipeline provides one, else the package version baked in by
-            // vite define. 'web' only as a last resort (used to render "vweb").
+
+
             const releaseVersion = String(import.meta.env.VITE_RELEASE_VERSION || '').trim().replace(/^v/i, '');
             setAppVersion(releaseVersion || pkgVersion || 'web');
             return;
@@ -194,9 +192,8 @@ export function useSettingsAboutPage({
 
     useEffect(() => {
         if (!isTauri || !appVersion || appVersion === 'web') return;
-        // Quiet channels (e.g. Scoop) never phone home on their own; updates
-        // are only checked when the user clicks the button. Wait for install
-        // source detection so a quiet channel is never checked as 'unknown'.
+
+
         if (!installSourceResolved) return;
         if (!isAutoUpdateCheckAllowed(installSource)) return;
         let lastCheck = 0;
@@ -463,9 +460,8 @@ export function useSettingsAboutPage({
     return {
         aboutPageProps: {
             appVersion,
-            // The updater flow (GitHub/store lookups, installer downloads) only
-            // makes sense in the native desktop app; the web/PWA build updates
-            // with its Docker image, so the row is hidden there.
+
+
             updatesSupported: isTauri,
             installChannel: installChannelDisplay,
             isCheckingUpdate,

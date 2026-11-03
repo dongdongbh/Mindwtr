@@ -1,3 +1,4 @@
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './schedule-utils';
 import { normalizeTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
 import type { ProjectTaskSummary } from './project-row-meta';
 import { buildNextRecurringTask, canonicalRecurringFollowUp, createNextRecurringTask, normalizeRecurrenceForLoad, type RecurrenceProjection } from './recurrence';
@@ -8,7 +9,7 @@ import {
     getUsedTaskTokensFromUsage,
 } from './task-token-usage';
 import { resolveRelativeStartUpdates } from './task-relative-start';
-import { compareTasksByProjectOrder, isTaskFocusedNow, isTaskFutureFocusCandidate, isTaskFutureFocusCandidateBeforeBoundary, isTaskFutureStart, isTaskFutureStartBeforeBoundary, rescheduleTask, shouldAutoArchiveCompletedTask, baseTextCollator } from './task-utils';
+import { compareTasksByProjectOrder, getTaskSequencing, isTaskFocusedNow, isTaskFutureFocusCandidate, isTaskFutureFocusCandidateBeforeBoundary, isTaskFutureStart, isTaskFutureStartBeforeBoundary, rescheduleTask, shouldAutoArchiveCompletedTask, baseTextCollator } from './task-utils';
 import {
     isTaskActionable,
     isTaskFinished,
@@ -61,7 +62,7 @@ export const ensureAnalyticsProfileId = (settings: AppData['settings']): { setti
     return { settings: { ...settings, analyticsProfileId: uuidv4() }, updated: true };
 };
 
-/** Conservative replay check: a copy edited since creation cannot acknowledge a lost reply. */
+
 export const matchesDuplicateSource = (source: Task, copy: Task, asNextAction = false): boolean => {
     if (source.id === copy.id || source.deletedAt || copy.deletedAt || copy.purgedAt
         || copy.rev !== 1 || copy.createdAt !== copy.updatedAt
@@ -80,7 +81,7 @@ export const matchesDuplicateSource = (source: Task, copy: Task, asNextAction = 
     const recurrence = typeof source.recurrence === 'object' && source.recurrence
         ? normalizeRecurrenceForLoad({ ...source.recurrence, seriesId: copy.id }) : source.recurrence;
     if (JSON.stringify(recurrence) !== JSON.stringify(copy.recurrence)) return false;
-    const checklist = (source.checklist ?? []).map((item) => ({ ...item, id: '', isCompleted: false }));
+    const checklist = (source.checklist ?? []).map((item) => ({ ...item, id: '' }));
     if (JSON.stringify(checklist) !== JSON.stringify((copy.checklist ?? []).map((item) => ({ ...item, id: '' })))) return false;
     const links = (source.attachments ?? []).filter((item) => item.kind !== 'file').map((item) => ({
         ...item, id: '', createdAt: copy.createdAt, updatedAt: copy.createdAt,
@@ -89,7 +90,7 @@ export const matchesDuplicateSource = (source: Task, copy: Task, asNextAction = 
     return JSON.stringify(links) === JSON.stringify((copy.attachments ?? []).map((item) => ({ ...item, id: '' })));
 };
 
-export const getReferenceTaskFieldClears = (): Partial<Task> => ({
+export const getReferenceTaskFieldClears = (dueReminderLeadMinutes?: number, startReminderLeadMinutes?: number): Partial<Task> => ({
     status: 'reference',
     startTime: undefined,
     dueDate: undefined,
@@ -100,6 +101,8 @@ export const getReferenceTaskFieldClears = (): Partial<Task> => ({
     timeEstimate: undefined,
     suppressMindwtrReminders: undefined,
     repeatReminderMinutes: undefined,
+    dueReminderLeadMinutes: dueReminderLeadMinutes === undefined ? undefined : 0,
+    startReminderLeadMinutes: startReminderLeadMinutes === undefined ? undefined : 0,
     showFutureRecurrence: undefined,
     isFocusedToday: false,
     focusOrder: undefined,
@@ -114,7 +117,7 @@ export function applyTaskUpdates(
     createId?: () => string,
     recurrenceProjection?: RecurrenceProjection | null,
 ): { updatedTask: Task; nextRecurringTask: Task | null } {
-    // Archive entry is a lifecycle clock, never an editable task field.
+
     let normalizedUpdates = { ...updates };
     delete normalizedUpdates.archivedAt;
     if (Object.prototype.hasOwnProperty.call(updates, 'textDirection') && updates.textDirection === undefined) {
@@ -127,19 +130,13 @@ export function applyTaskUpdates(
     let finalUpdates: Partial<Task> = updatesToApply;
     let nextRecurringTask: Task | null = null;
 
-    // A caller-supplied completedAt backdates the completion (e.g. "I actually
-    // finished this yesterday") and must also anchor after-completion recurrence,
-    // because the next instance is spawned here and never recomputed later.
+
     const explicitCompletedAt = typeof updates.completedAt === 'string' && safeParseDate(updates.completedAt)
         ? updates.completedAt
         : undefined;
     const explicitCancelledAt = normalizeCancellationTimestamp(updates.cancelledAt);
 
-    // A manual Focus position only means something while the task is in Today's
-    // Focus (types.ts: focusOrder is "cleared when the task leaves Today's
-    // Focus"). Completing or archiving unstars the task below, so focusOrder
-    // must go with it too, unless the same patch sets focusOrder itself
-    // (mirrors the guard in normalizeTaskUpdate).
+
     const clearsFocusOrder = oldTask.focusOrder !== undefined && !hasOwnField(updates, 'focusOrder')
         ? { focusOrder: undefined }
         : {};
@@ -155,14 +152,20 @@ export function applyTaskUpdates(
             isFocusedToday: false,
             ...clearsFocusOrder,
         };
-        // Moving an already-completed task back from Archived is a lifecycle
-        // correction, not another completion event. Preserve its completion
-        // timestamp and do not create a duplicate recurring occurrence.
+
+
+        const recurrenceSource = { ...oldTask, ...(hasOwnField(updates, 'checklist') ? { checklist: updates.checklist } : {}) };
+        if (recurrenceSource.recurrence && updates.recurrence && typeof updates.recurrence === 'object') {
+            recurrenceSource.recurrence = {
+                ...(typeof recurrenceSource.recurrence === 'string' ? { rule: recurrenceSource.recurrence } : recurrenceSource.recurrence),
+                preserveChecklistOnRepeat: updates.recurrence.preserveChecklistOnRepeat,
+            };
+        }
         nextRecurringTask = isReturningFromArchive
             ? null
             : recurrenceProjection === undefined
-                ? createNextRecurringTask(oldTask, completedAt, oldTask.status, createId ? { createId } : undefined)
-                : buildNextRecurringTask(oldTask, completedAt, oldTask.status, recurrenceProjection, createId);
+                ? createNextRecurringTask(recurrenceSource, completedAt, oldTask.status, createId ? { createId } : undefined)
+                : buildNextRecurringTask(recurrenceSource, completedAt, oldTask.status, recurrenceProjection, createId);
     } else if (statusChanged && incomingStatus === 'archived') {
         finalUpdates = {
             ...updatesToApply,
@@ -203,11 +206,13 @@ export function applyTaskUpdates(
         };
     }
 
-    // Reference tasks should be non-actionable; clear scheduling/priority fields.
+
     if (incomingStatus === 'reference') {
         finalUpdates = {
             ...finalUpdates,
-            ...getReferenceTaskFieldClears(),
+            ...getReferenceTaskFieldClears(finalUpdates.dueReminderLeadMinutes ?? oldTask.dueReminderLeadMinutes,
+                finalUpdates.startReminderLeadMinutes ?? oldTask.startReminderLeadMinutes),
+            ...(statusChanged ? { dueReminderLeadMinutes: 0, startReminderLeadMinutes: 0 } : {}),
         };
     }
 
@@ -242,11 +247,7 @@ const isExistingRecurringFollowUp = (existing: Task, candidate: Task): boolean =
     return recurrenceKeyForDuplicateCheck(existing) === recurrenceKeyForDuplicateCheck(candidate);
 };
 
-// excludeId is the task being completed in this same update. The snapshot being
-// scanned is taken before the update lands, so that task still reads as live and
-// would match its own follow-up: completing an occurrence and then the one it just
-// spawned, on the same day, made the second candidate look like a duplicate of the
-// first and silently ended the series (#867).
+
 export const findExistingRecurringFollowUp = (
     tasks: readonly Task[],
     candidate: Task | null,
@@ -256,13 +257,7 @@ export const findExistingRecurringFollowUp = (
     return tasks.find((task) => task.id !== excludeId && isExistingRecurringFollowUp(task, candidate)) ?? null;
 };
 
-// The follow-up is a fresh task, so it needs what every other creation path
-// stamps: a project order (missing sorts as +Infinity in
-// compareTasksByProjectOrder, dumping the next occurrence below its siblings)
-// and a zeroed push count. It inherits the completed instance's place — that
-// instance leaves the active list and a series only ever has one active
-// instance, so there is nothing to collide with — and only falls back to a
-// fresh reservation when the completed task had no order to inherit.
+
 export const stampNewRecurringFollowUp = (
     task: Task | null,
     deviceId: string,
@@ -279,24 +274,26 @@ export const stampNewRecurringFollowUp = (
     };
 };
 
-/**
- * Applies the store's task-update invariants (schedule-edit unstar, star/status
- * promotion and demotion, boardOrder reset on status change, focusOrder clear on
- * unstar) to a raw patch before it reaches {@link applyTaskUpdates}. Pure and
- * side-effect free so both the desktop/mobile store and the cloud REST API can
- * share the exact same write-path rules (P9, single write path).
- */
+
 export const normalizeTaskUpdate = (
     task: Task,
     updates: Partial<Task>,
-    /**
-     * Settings enable the rules that depend on them; without them the update is
-     * normalized exactly as before (the cloud PATCH path passes none).
-     */
+
+
     context?: { settings?: AppData['settings']; nowMs?: number; futureBoundary?: string;
         futureDates?: import('./task-utils').FocusDateLookup },
 ): Partial<Task> => {
     let adjustedUpdates = updates;
+    if (hasOwnField(updates, 'dueReminderLeadMinutes')) {
+        adjustedUpdates = { ...adjustedUpdates, dueReminderLeadMinutes: updates.dueReminderLeadMinutes === undefined
+            && task.dueReminderLeadMinutes === undefined ? undefined
+            : updates.dueReminderLeadMinutes == null ? 0 : normalizeDueReminderLeadMinutes(updates.dueReminderLeadMinutes) };
+    }
+    if (hasOwnField(updates, 'startReminderLeadMinutes')) {
+        adjustedUpdates = { ...adjustedUpdates, startReminderLeadMinutes: updates.startReminderLeadMinutes === undefined
+            && task.startReminderLeadMinutes === undefined ? undefined
+            : updates.startReminderLeadMinutes == null ? 0 : normalizeStartReminderLeadMinutes(updates.startReminderLeadMinutes) };
+    }
     if (hasOwnField(updates, 'reminderPolicy')) {
         const policy = normalizeTaskReminderPolicy(updates.reminderPolicy);
         if (policy) {
@@ -307,7 +304,7 @@ export const normalizeTaskUpdate = (
             delete adjustedUpdates.reminderPolicy;
         }
     } else if (hasOwnField(updates, 'suppressMindwtrReminders')) {
-        // A legacy client/API changing this boolean still expresses an explicit choice.
+
         adjustedUpdates = { ...adjustedUpdates,
             reminderPolicy: updates.suppressMindwtrReminders === true ? 'skip' : 'send' };
     }
@@ -340,9 +337,8 @@ export const normalizeTaskUpdate = (
                 : undefined);
         adjustedUpdates = {
             ...adjustedUpdates,
-            // Normalize again once seriesId is final, so the rrule carries the
-            // series stamp: the shape the sync pass writes (as in sync.ts's
-            // repairTaskRecurrenceSeriesIdentity).
+
+
             recurrence: recurrence
                 ? normalizeRecurrenceForLoad({
                     ...recurrence,
@@ -366,23 +362,8 @@ export const normalizeTaskUpdate = (
         || hasOwnField(updates, 'dueDate')
         || hasOwnField(updates, 'reviewAt')
         || hasOwnField(updates, 'recurrence');
-    // Star ↔ status invariant: starring an unprocessed inbox task promotes it
-    // to next (committing to do it today is a clarify decision), and demoting a
-    // starred task to inbox takes the star with it. When one patch does both,
-    // the star (the more deliberate action) wins. Review-due waiting/someday
-    // tasks deliberately KEEP their status when starred — "chase this today"
-    // does not stop the task being waiting-for. Creation-side promotion lives
-    // in resolveCaptureStatusForStart, where focus eligibility is evaluated
-    // before the star commits.
-    // Setting a start date on an Inbox task is itself a clarify decision ("I
-    // decided when I can act on this") and promotes it to next, mirroring the
-    // star promotion below. An Inbox task with a start date is invisible in
-    // Focus/Next and reads as a bug. Unlike the star, an explicit status in the
-    // SAME patch always wins (a start date is a weaker signal than a star), so
-    // this only fires when the patch carries no status of its own; a same-value
-    // re-save or a clear (undefined/null/'') never promotes; Someday/Waiting
-    // keep their status (a dated someday is a tickler, a dated waiting a
-    // follow-up reminder — only Inbox means "unclarified").
+
+
     const startPromotingInbox = hasOwnField(updates, 'startTime')
         && !hasOwnField(updates, 'status')
         && updates.startTime != null
@@ -407,8 +388,8 @@ export const normalizeTaskUpdate = (
             status: 'next',
         };
     }
-    // Resolve Inbox promotion first: adding a start and star together queues
-    // a Next action. Other deferred statuses still lose their stars.
+
+
     const scheduledTask = { ...task, ...adjustedUpdates };
     const futureStart = (candidate: Task) => context?.futureBoundary
         ? isTaskFutureStartBeforeBoundary(candidate, context.futureBoundary, context.futureDates) : isTaskFutureStart(candidate);
@@ -429,9 +410,8 @@ export const normalizeTaskUpdate = (
             boardOrder: undefined,
         };
     }
-    // A manual Focus position only means something while the task is in
-    // Today's Focus: unstar and future-start queue both drop focusOrder,
-    // unless this patch explicitly sets it.
+
+
     const resolvedIsFocusedToday = hasOwnField(adjustedUpdates, 'isFocusedToday')
         ? adjustedUpdates.isFocusedToday
         : task.isFocusedToday;
@@ -445,15 +425,8 @@ export const normalizeTaskUpdate = (
             focusOrder: undefined,
         };
     }
-    // Correcting a completion time to something older than the auto-archive
-    // window files the task away now, instead of leaving it in Done until the
-    // twice-daily sweep runs — which read as the setting being broken (#959).
-    // Only an edit that carries no status *change* of its own: an absent
-    // status field, or the same status resent by a full-editor patch (the
-    // desktop editor's submit always includes `status: draft.status`). A
-    // genuine status transition — e.g. moving a task back to Done from
-    // Archive — deliberately keeps its old completion time, and re-archiving
-    // it in the same write would make that action a no-op.
+
+
     const archiveEditNowMs = context?.nowMs ?? Date.now();
     if (
         context?.settings
@@ -461,11 +434,8 @@ export const normalizeTaskUpdate = (
         && (!hasOwnField(updates, 'status') || updates.status === task.status)
         && task.status === 'done'
         && shouldAutoArchiveCompletedTask(
-            // Evaluated against the post-stamp updatedAt (applyTaskUpdates
-            // hasn't run yet here), so a patch that clears/invalidates
-            // completedAt falls back to "now" instead of the task's pre-edit
-            // updatedAt — matching what the load-time sweep would conclude
-            // after the write, instead of archiving a task the user just touched.
+
+
             { ...task, ...adjustedUpdates, updatedAt: new Date(archiveEditNowMs).toISOString() },
             context.settings,
             archiveEditNowMs,
@@ -487,9 +457,8 @@ export const normalizeTaskUpdate = (
             ...(!hasOwnField(updates, 'focusOrder') ? { focusOrder: undefined } : {}),
         };
     }
-    // Any direct edit breaks the reversible project-archive operation marker.
-    // Project restoration calls its pure child helper directly, so only an
-    // independent task writer reaches this normalization path.
+
+
     if (task.projectArchivedAt) {
         adjustedUpdates = {
             ...adjustedUpdates,
@@ -502,16 +471,7 @@ export const normalizeTaskUpdate = (
     return adjustedUpdates;
 };
 
-/**
- * A start date at capture is a clarify decision, so a task created with a
- * start date and no explicit status enters as Next rather than Inbox (mirrors
- * the update-path promotion in {@link normalizeTaskUpdate}). An explicit
- * status always wins — importers and API writers that state status
- * deliberately are honoured, including an explicit 'inbox'. Unlike the star
- * creation path there is no focus cap or eligibility gate: nothing is being
- * starred. Shared by the store's addTasks and the cloud REST API's task
- * creation handler so the rule cannot drift between them.
- */
+
 export const resolveCaptureStatusForStart = (
     initialProps: Partial<Task>,
     resolvedStatus: TaskStatus,
@@ -578,7 +538,7 @@ export const completeTaskForProjectArchive = (task: Task, archivedAt: string, de
     revBy: deviceId,
 });
 
-/** Cancel one actionable child as part of a reversible project cancellation. */
+
 export const cancelTaskForProjectArchive = (
     task: Task,
     cancelledAt: string,
@@ -713,11 +673,7 @@ export const archiveSectionForProjectArchive = (section: Section, archivedAt: st
     revBy: deviceId,
 });
 
-/**
- * A project-archive section remains a valid container for a child changed by
- * that operation, plus completed/reference children the cascade deliberately
- * left untouched, while the owning project is still archived.
- */
+
 export const isTaskSectionProjectArchiveReference = (
     task: Task,
     section: Section | undefined,
@@ -736,8 +692,8 @@ export const isRestorableProjectArchiveSection = (section: Section): boolean => 
         Boolean(archivedAt) &&
         section.updatedAt === archivedAt &&
         section.deletedAt === archivedAt &&
-        // `== null`: a live section archived by an older client carries `null`, a
-        // current one absent, and SQLite reads both back as absent (#1156).
+
+
         section.deletedAtBeforeProjectArchive == null
     );
 };
@@ -831,11 +787,7 @@ const mapChanged = <T>(items: T[], mapper: (item: T) => T): T[] => {
     return changed ? next : items;
 };
 
-/**
- * Pure project lifecycle transition shared by the store and external writers.
- * Child helpers stamp their own revisions because they are independent synced
- * entities; the caller stamps the returned project patch on the project itself.
- */
+
 export const applyProjectLifecycleTransition = (
     project: Project,
     updates: Partial<Project>,
@@ -956,11 +908,7 @@ export const reuseArrayIfShallowEqual = <T>(previous: T[], next: T[]): T[] => (
         : next
 );
 
-// Attachments carry their own per-record LWW (deletedAt, cloudKey, localStatus,
-// contentRev) and a merge can change them WITHOUT touching the owner's revision
-// tuple. Reusing the existing owner object on that tuple alone kept a task's
-// pre-merge attachments alive in the store; the post-load persist then wrote
-// them back over what the sync cycle had just stored, every cycle (#1136).
+
 const haveSameAttachments = (left?: Attachment[], right?: Attachment[]): boolean => {
     if (left === right) return true;
     const leftItems = left ?? [];
@@ -989,10 +937,7 @@ export const hasSameEntityIdentity = <T extends EntityWithRevision>(existing: T,
     )
 );
 
-// True only for the #1136 case: every revision/tombstone field matches (so
-// nothing else changed) and attachments are the only reason the entity was
-// replaced instead of reused. Used solely to size the releaseCheck line below
-// — never to change which branch reconcileEntityCollection takes.
+
 const isAttachmentOnlyDivergence = <T extends EntityWithRevision>(existing: T, incoming: T): boolean => (
     withoutAttachmentEquality(existing, incoming)
     && !haveSameAttachments(
@@ -1009,7 +954,7 @@ export const reconcileEntityCollection = <T extends EntityWithRevision>(
     incomingItems: readonly T[]
 ): ReconciledCollection<T> => runToEnd(reconcileEntityCollectionPass(previousItems, previousById, incomingItems));
 
-/** reconcileEntityCollection as a cooperative pass: a sliced sync cycle reconciles its store publish before the gate (D9b W6). */
+
 export function* reconcileEntityCollectionPass<T extends EntityWithRevision>(
     previousItems: readonly T[],
     previousById: Map<string, T>,
@@ -1051,9 +996,7 @@ export function* reconcileEntityCollectionPass<T extends EntityWithRevision>(
     };
 }
 
-// Device-local sync status stamps; they change every sync cycle and are
-// overlaid from local storage on each platform, so a settings object that
-// differs only in these keys is behaviorally identical for every subscriber.
+
 const VOLATILE_SYNC_STATUS_SETTINGS_KEYS = [
     'lastSyncAt',
     'lastSyncStatus',
@@ -1070,15 +1013,7 @@ const withoutVolatileSyncStatus = (settings: AppData['settings']): Record<string
     return copy;
 };
 
-/**
- * Reuse the previous settings object identity when the incoming settings are
- * content-equal apart from the device-local `lastSync*` status keys. A fresh
- * identity per fetch re-renders every settings subscriber and re-arms the
- * mobile reminder rescheduler after every sync cycle (#766); keeping the old
- * identity also keeps its fresher local sync-status overlay, which the next
- * persistSyncStatus patch refreshes anyway. Comparison failures fall back to
- * the incoming object (no reuse), never the other way around.
- */
+
 export const reuseSettingsIfEquivalent = (
     previous: AppData['settings'] | undefined,
     next: AppData['settings']
@@ -1100,8 +1035,8 @@ const assertCollectionSnapshotIncludesExistingItems = <T extends EntityWithId>(
     previousItems: T[]
 ): void => {
     if (nextItems === previousItems) return;
-    // Length tells nothing: a snapshot that drops N rows while adding N others
-    // is exactly as partial as one that just drops them.
+
+
     const nextIds = new Set(nextItems.map((item) => item.id));
     const missingIds = previousItems
         .filter((item) => !nextIds.has(item.id))
@@ -1147,23 +1082,7 @@ export const buildSaveSnapshot = (state: SaveBaseState, overrides?: Partial<AppD
 type PersistSet = (partial: Partial<TaskStore> | ((state: TaskStore) => Partial<TaskStore> | TaskStore)) => void;
 type PersistDebouncedSave = (data: AppData, onError?: (msg: string) => void) => void;
 
-/**
- * The store-write enqueue ritual, in one call: build the full-document
- * snapshot via {@link buildSaveSnapshot} (so the partial-snapshot guard always
- * runs) and hand it to the caller's debounced save with the store's standard
- * error write. Call it from inside the `set()` producer that computed
- * `overrides`, using that producer's own `state` argument.
- *
- * `debouncedSave` CAN call `set` synchronously here: a full pending-save queue
- * makes `enforcePendingSaveCap` write `error` (via `setError`, and via every
- * dropped save's `onError`) before `debouncedSave` returns. That nested write
- * still lands correctly because zustand's merge re-reads its module-level
- * state — but only if the *outer* producer's own return value is a partial,
- * not the `state` identity it was given. Callers must never `return state`
- * after calling `persist` in the same branch — return a fresh partial/object
- * instead — or the outer merge's last-write-wins `Object.assign` clobbers the
- * nested error write with the pre-nested state.
- */
+
 export const persist = (
     set: PersistSet,
     debouncedSave: PersistDebouncedSave,
@@ -1174,8 +1093,8 @@ export const persist = (
     debouncedSave(snapshot, (msg) => set({ error: msg }));
 };
 
-export const computeDerivedState = (tasks: Task[], projects: Project[]): DerivedState => {
-    const projectDerived = computeProjectDerivedState(projects);
+export const computeDerivedState = (tasks: Task[], projects: Project[], sections?: readonly Section[]): DerivedState => {
+    const projectDerived = computeProjectDerivedState(projects, undefined, sections);
     const taskDerived = computeTaskDerivedState(tasks);
 
     return {
@@ -1186,11 +1105,11 @@ export const computeDerivedState = (tasks: Task[], projects: Project[]): Derived
 
 export const computeProjectDerivedState = (
     projects: Iterable<Project>,
-    projectMap?: Map<string, Project>
-): Pick<DerivedState, 'projectMap' | 'sequentialProjectIds' | 'sequentialWithinSectionProjectIds' | 'focusedProjectCount'> => {
+    projectMap?: Map<string, Project>,
+    sections?: readonly Section[],
+): Pick<DerivedState, 'projectMap' | 'sequentialProjectIds' | 'sequentialWithinSectionProjectIds' | 'sequentialSectionKeys' | 'focusedProjectCount'> => {
     const resolvedProjectMap = projectMap ?? new Map<string, Project>();
-    const sequentialProjectIds = new Set<string>();
-    const sequentialWithinSectionProjectIds = new Set<string>();
+    const liveProjects: Project[] = [];
     let focusedProjectCount = 0;
 
     for (const project of projects) {
@@ -1198,32 +1117,23 @@ export const computeProjectDerivedState = (
             resolvedProjectMap.set(project.id, project);
         }
         if (project.deletedAt) continue;
-        if (project.isSequential) {
-            sequentialProjectIds.add(project.id);
-            if (project.sequentialScope === 'section') {
-                sequentialWithinSectionProjectIds.add(project.id);
-            }
-        }
+        liveProjects.push(project);
         if (project.isFocused) {
             focusedProjectCount += 1;
         }
     }
+    const sequencing = getTaskSequencing(liveProjects, sections);
 
     return {
         projectMap: resolvedProjectMap,
-        sequentialProjectIds,
-        sequentialWithinSectionProjectIds,
+        sequentialProjectIds: sequencing.sequentialProjectIds as Set<string>,
+        sequentialWithinSectionProjectIds: sequencing.sectionScopedProjectIds as Set<string>,
+        sequentialSectionKeys: sequencing.sequentialSectionKeys as Set<string>,
         focusedProjectCount,
     };
 };
 
-// Shared by computeTaskDerivedState's focusedCount tally and selectFocusedCount
-// below so the two can never drift. Mirrors computeTaskDerivedState's early
-// `if (task.deletedAt) return` (a deleted task never counts, even if fed an
-// unfiltered array) plus its focus rule: done/reference/archived tasks keep
-// their historical focus flag but should not consume today's focus limit —
-// the Focus views never show them, so a counted-but-invisible star would eat
-// a slot the user cannot free.
+
 export const isTaskCountedAsFocused = (task: Task, now: Date): boolean => (
     !task.deletedAt
     && isTaskFocusedNow(task, now)
@@ -1232,13 +1142,7 @@ export const isTaskCountedAsFocused = (task: Task, now: Date): boolean => (
 
 let focusedCountCache: { tasks: Task[]; day: string; count: number } | null = null;
 
-// Cheap alternative to getDerivedState().focusedCount for callers that only
-// need the count: a single linear scan, cached by array identity so repeat
-// reads against the same `tasks` array (the common case within one render/
-// notify) are free. Unlike getDerivedState's cache, this never misses on a
-// task write that leaves the focus set alone — it only recomputes when the
-// `tasks` array identity itself changes. Must read the SAME collection
-// (visible tasks) with the SAME predicate as computeTaskDerivedState.
+
 export const selectFocusedCount = (tasks: Task[]): number => {
     const now = new Date();
     const day = now.toDateString();
@@ -1266,9 +1170,8 @@ export const computeTaskDerivedState = (
     const focusedTasks: Task[] = [];
     const projectTaskSummaryById = new Map<string, ProjectTaskSummary>();
     const dateCoherenceIssuesByTaskId = new Map<string, ReturnType<typeof getTaskDateCoherenceIssues>>();
-    // Accumulated in the main loop below rather than in two extra full passes over `tasks`
-    // (A-04). The accumulator carries collectTaskTokenUsage's own inclusion rule, so the
-    // deleted-task handling and first-seen ordering stay identical.
+
+
     const contextTokens = createTaskTokenUsageAccumulator({ prefix: '@' });
     const tagTokens = createTaskTokenUsageAccumulator({ prefix: '#' });
     let focusedCount = 0;
@@ -1375,8 +1278,8 @@ export const stripSensitiveSettings = (settings: AppData['settings']): AppData['
 
 export const normalizeAiSettingsForSync = (ai?: AiSettings): AiSettings | undefined => {
     if (!ai) return ai;
-    // Device-local fields are dropped here so that editing one of them does not
-    // bump the `ai` group's sync timestamp: they never reach the sync document.
+
+
     const { apiKey: _apiKey, baseUrl: _baseUrl, openAIExtraBodyParams: _extraBody, ...rest } = ai;
     if (!rest.speechToText) return rest;
     return {
@@ -1395,7 +1298,7 @@ export const cloneSettings = (settings: AppData['settings']): AppData['settings'
             return structuredClone(settings);
         }
     } catch {
-        // Fallback below
+
     }
     return JSON.parse(JSON.stringify(settings)) as AppData['settings'];
 };

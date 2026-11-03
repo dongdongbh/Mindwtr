@@ -19,7 +19,7 @@ type CopilotSuggestion = {
     tags?: string[];
 };
 
-/** One separately applicable piece of a copilot suggestion. */
+
 export type CopilotPart = TaskCopilotPart;
 
 type UseTaskEditCopilotArgs = {
@@ -160,16 +160,14 @@ export function useTaskEditCopilot({
         setCopilotTags([]);
     }, []);
 
-    // The suggestion splits into parts the user applies one at a time (#1022);
-    // a part leaves the pending list once it is in the applied markers below.
+
     const pendingCopilotParts = useMemo<CopilotPart[]>(() => getTaskCopilotParts(
         visibleCopilotSuggestion,
         { context: copilotContext, timeEstimate: copilotEstimate, tags: copilotTags },
         timeEstimatesEnabled,
     ), [copilotContext, copilotEstimate, copilotTags, timeEstimatesEnabled, visibleCopilotSuggestion]);
 
-    // Batched on purpose: applying several tags one call at a time would each
-    // re-read the same stale draft string and drop all but the last.
+
     const applyCopilotParts = useCallback((parts: CopilotPart[]) => {
         if (parts.length === 0) return;
         const applied = applyTaskCopilotParts({ contexts: draft?.contexts, tags: draft?.tags }, parts, timeEstimatesEnabled);

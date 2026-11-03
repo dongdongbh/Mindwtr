@@ -1,0 +1,73 @@
+--- a/apps/mobile/app.config.ts
++++ b/apps/mobile/app.config.ts
+@@ -1,4 +1,5 @@
+ import type { ConfigContext, ExpoConfig } from 'expo/config';
++import { withAndroidManifest } from 'expo/config-plugins';
+ import { readFileSync } from 'fs';
+ import { join } from 'path';
+ 
+@@ -44,6 +45,10 @@
+ // hits CloudKit's Development environment anyway, only widget payloads collide.
+ const isDevVariant = (process.env.APP_VARIANT ?? '').trim() === 'development';
+ const isBenchmarkVariant = (process.env.APP_VARIANT ?? '').trim() === 'benchmark';
++// UPGRADE HARNESS ONLY (apps/android-native/scripts/build-upgrade-harness.mjs applies
++// this patch to a throwaway checkout; never committed). A throwaway package id, its own
++// scheme, no analytics or feedback endpoint, and a debuggable manifest for adb run-as.
++const isUpgradeTestVariant = (process.env.APP_VARIANT ?? '').trim() === 'upgradetest';
+ const gmailEnabled = !isFossBuild && !isBenchmarkVariant && (isDevVariant
+   ? process.env.MINDWTR_GMAIL_DEV_ENABLED === '1'
+   : process.env.MINDWTR_GMAIL_PRODUCTION_VERIFIED === '1');
+@@ -86,7 +91,40 @@
+   return withoutScenePlugin;
+ };
+ 
++// run-as needs android:debuggable; the build type stays release, so BuildConfig.DEBUG and
++// the embedded Hermes bundle are unchanged. The store-scheme VIEW filter that
++// plugins/android-app-shortcuts.js adds is removed so this app never catches mindwtr:// links.
++// Registered here, before the plugins list, so it runs after every plugin's manifest mod.
++const withUpgradeTestManifest = (config: ExpoConfig): ExpoConfig => withAndroidManifest(config, (mod) => {
++  const application = mod.modResults.manifest.application?.[0];
++  if (!application) throw new Error('[app.config] upgradetest: no <application> in the manifest');
++  application.$['android:debuggable'] = 'true';
++  application.$['tools:ignore'] = 'HardcodedDebugMode';
++  for (const activity of application.activity ?? []) {
++    activity['intent-filter'] = (activity['intent-filter'] ?? []).filter((filter) => (
++      !(filter.data ?? []).some((data) => data.$?.['android:scheme'] === 'mindwtr')
++    ));
++  }
++  return mod;
++});
++
+ const withAppVariant = (base: ExpoConfig): ExpoConfig => {
++  if (isUpgradeTestVariant) {
++    return withUpgradeTestManifest({
++      ...base,
++      name: `${base.name} Upgrade Test`,
++      platforms: ['android' as const],
++      scheme: 'mindwtr-upgradetest',
++      android: { ...base.android, package: `${base.android?.package}.upgradetest` },
++      // Android-only, but expo-share-intent still checks iOS's URL schemes, which this config built from the store scheme.
++      ios: { ...base.ios, infoPlist: { ...base.ios?.infoPlist, CFBundleURLTypes: [{ CFBundleURLSchemes: ['mindwtr-upgradetest'] }] } },
++      plugins: (base.plugins ?? []).map((entry) => {
++        if (!Array.isArray(entry) || entry[0] !== './plugins/android-widget') return entry;
++        const props = (entry[1] ?? {}) as { label?: string };
++        return [entry[0], { ...props, label: `${props.label ?? base.name} Upgrade Test` }] as typeof entry;
++      }),
++    });
++  }
+   if (!isDevVariant && !isBenchmarkVariant) return base;
+   // Benchmark builds are Android-only: iOS extensions still share the store App Group.
+   const idSuffix = isBenchmarkVariant ? '.benchmark' : DEV_VARIANT_ID_SUFFIX;
+@@ -136,10 +174,10 @@
+   const extra = {
+     ...(base.extra ?? {}),
+     isFossBuild,
+-    analyticsHeartbeatUrl: isBenchmarkVariant ? '' : analyticsHeartbeatUrl,
++    analyticsHeartbeatUrl: (isBenchmarkVariant || isUpgradeTestVariant) ? '' : analyticsHeartbeatUrl,
+     analyticsHeartbeatChannel,
+     analyticsReleaseVersion,
+-    feedbackEndpointUrl,
++    feedbackEndpointUrl: isUpgradeTestVariant ? '' : feedbackEndpointUrl,
+     dropboxAppKey,
+     donationPromptEnabled,
+     promptTestControlsEnabled,

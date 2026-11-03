@@ -4,19 +4,6 @@ import { tFallback } from './i18n';
 import { baseTextCollator } from './task-utils';
 import type { Area, Project, Task } from './types';
 
-/**
- * Grouping for the mobile task lists that group by a task attribute rather than
- * by project section. TaskList (Inbox, Done, Reference), Someday and Archive all
- * need the same axes over the same row/section shape, so the axis logic lives
- * here instead of inside whichever screen grew it first — a group rule fixed in
- * one place is otherwise a group rule still wrong in the other. Moved from
- * apps/mobile/lib/task-group-sections.ts unchanged, so the native host serves
- * the same groups.
- *
- * Project-section grouping stays in task-list.tsx: it is the one arrangement
- * that is about a project's own structure rather than a task attribute, and no
- * other screen has sections to group by.
- */
 
 export type TaskGroupBy = 'none' | 'context' | 'area' | 'project' | 'tag' | 'completedDate';
 
@@ -26,7 +13,7 @@ export type TaskGroupSectionItem = {
   title: string;
   count: number;
   muted?: boolean;
-  /** Set when the caller passes `collapsedGroupIds`, so the header draws a chevron. */
+
   collapsible?: boolean;
   collapsed?: boolean;
 };
@@ -108,7 +95,7 @@ export function groupTasksByTag({
   return groupTasksByToken(tasks, (task) => task.tags, 'tag', noTagLabel);
 }
 
-/** Label for a grouping axis. Lives with the axis logic so the two cannot drift apart. */
+
 export function getTaskGroupByLabel(groupBy: TaskGroupBy, t: (key: string) => string): string {
   switch (groupBy) {
     case 'none':
@@ -130,45 +117,30 @@ export function getTaskGroupByLabel(groupBy: TaskGroupBy, t: (key: string) => st
 
 export type BuildTaskGroupSectionsParams = {
   groupBy: TaskGroupBy;
-  /** Already filtered and sorted; grouping preserves the order within each group. */
+
   tasks: Task[];
   areas: Area[];
   projectById: Map<string, Project>;
   t: (key: string) => string;
-  /**
-   * Clock for the completedDate axis. Passed in so callers that re-derive on a
-   * local-day change control the boundary rather than each call inventing its own.
-   */
+
+
   now?: Date;
-  /**
-   * Groups the caller has folded. Passing the set (even empty) is what makes the
-   * headers collapsible; a folded group keeps its header and its count but
-   * contributes no task rows, so the rows also leave the id list the screens
-   * feed to selection and range select (#970).
-   */
+
+
   collapsedGroupIds?: ReadonlySet<string>;
-  /**
-   * Formats the completedDate axis's month titles. Mobile leaves it out and
-   * uses the app's configured formatting; the native host passes the user's own
-   * formatter (createDateFormatter), which reads the same settings.
-   */
+
+
   formatDate?: DateFormatter;
 };
 
-// completion-grouping.ts titles an older month `LLLL yyyy`, falling back to its yyyy-MM key.
+
 const COMPLETION_MONTH_ID = /^completedDate:(\d{4})-(\d{2})$/;
 const completionMonthTitle = (id: string, title: string, formatDate: DateFormatter | undefined): string => {
   const month = formatDate ? COMPLETION_MONTH_ID.exec(id) : null;
   return month ? formatDate!(new Date(Number(month[1]), Number(month[2]) - 1, 1), 'LLLL yyyy', `${month[1]}-${month[2]}`) : title;
 };
 
-/**
- * Flattens tasks into an alternating section-header / task-row list for a
- * FlatList. Empty groups are dropped, so a section header always has rows
- * under it, and the muted catch-all section ("No project", "General", …) is
- * always last — leading with the ungrouped pile pushed every real group below
- * a scroll (#963).
- */
+
 export function buildTaskGroupSections({
   groupBy,
   tasks,
@@ -229,8 +201,8 @@ export function buildTaskGroupSections({
   }
 
   if (groupBy === 'completedDate') {
-    // Buckets and labels live in core so Done/Archive read the same on both
-    // platforms (#959).
+
+
     const items: TaskGroupItem[] = [];
     buildCompletionDateSections({ tasks, t, now }).forEach((section) => {
       appendSection(items, section.id, completionMonthTitle(section.id, section.title, formatDate), section.tasks, section.muted);

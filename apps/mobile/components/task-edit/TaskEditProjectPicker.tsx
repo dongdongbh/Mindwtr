@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { compareProjectsByPickerOrder, getProjectChoiceState, tFallback, type Project } from '@mindwtr/core';
+import { getProjectChoiceState, groupProjectsForPicker, tFallback, useTaskStore, type Project } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { styles } from './task-edit-modal.styles';
 import { logError } from '../../lib/app-log';
@@ -71,13 +71,12 @@ export function TaskEditProjectPicker({
 
     const normalizedProjectQuery = projectQuery.trim().toLowerCase();
     const { filteredProjects, exactMatch, canCreate } = useMemo(
-        () => getProjectChoiceState(
-            [...projects].sort(compareProjectsByPickerOrder),
-            projectQuery,
-            [...(allProjects ?? projects)].sort(compareProjectsByPickerOrder),
-        ),
+        () => getProjectChoiceState(projects, projectQuery, allProjects ?? projects),
         [allProjects, projectQuery, projects],
     );
+
+    const areas = useTaskStore((state) => state.areas);
+    const projectGroups = useMemo(() => groupProjectsForPicker(filteredProjects, areas), [areas, filteredProjects]);
 
     const handleCreateProject = async () => {
         if (!allowCreate || creatingRef.current) return;
@@ -216,21 +215,33 @@ export function TaskEditProjectPicker({
                         >
                             <Text style={[styles.pickerItemText, { color: tc.text }]}>{t('taskEdit.noProjectOption')}</Text>
                         </Pressable>
-                        {filteredProjects.map((project) => (
-                            <Pressable
-                                key={project.id}
-                                onPress={() => {
-                                    onSelectProject(project.id);
-                                    closePicker();
-                                }}
-                                disabled={isCreating}
-                                style={styles.pickerItem}
-                                accessibilityRole="button"
-                                accessibilityLabel={project.title}
-                                accessibilityState={{ selected: selectedProjectId === project.id, disabled: isCreating }}
-                            >
-                                <Text style={[styles.pickerItemText, { color: tc.text }]}>{project.title}</Text>
-                            </Pressable>
+                        {[projectGroups.active, projectGroups.deferred].map((group, groupIndex) => (
+                            <React.Fragment key={groupIndex === 0 ? 'active' : 'deferred'}>
+                                {groupIndex === 1 && group.length > 0 ? (
+                                    <Text
+                                        style={[styles.pickerItemText, { color: tc.secondaryText, fontWeight: '700' }]}
+                                        accessibilityRole="header"
+                                    >
+                                        {tFallback(t, 'projects.deferredSection', 'Someday / Waiting')}
+                                    </Text>
+                                ) : null}
+                                {group.map((project) => (
+                                    <Pressable
+                                        key={project.id}
+                                        onPress={() => {
+                                            onSelectProject(project.id);
+                                            closePicker();
+                                        }}
+                                        disabled={isCreating}
+                                        style={styles.pickerItem}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={project.title}
+                                        accessibilityState={{ selected: selectedProjectId === project.id, disabled: isCreating }}
+                                    >
+                                        <Text style={[styles.pickerItemText, { color: tc.text }]}>{project.title}</Text>
+                                    </Pressable>
+                                ))}
+                            </React.Fragment>
                         ))}
                         {filteredProjects.length === 0 && (
                             <View style={styles.pickerItem}>

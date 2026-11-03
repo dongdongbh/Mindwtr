@@ -17,9 +17,8 @@ export function tokenToKey(token: string): string {
 
 export type AllowedAuthTokens = {
     readonly digests: readonly Buffer[];
-    // Same SHA-256 as `digests`, hex-encoded to match tokenToKey/namespace keys
-    // (server-request.ts's `key = tokenToKey(token)`) - lets a route check "is
-    // this namespace still allowlisted" without re-deriving from a token.
+
+
     readonly keys: ReadonlySet<string>;
     readonly size: number;
 };
@@ -34,9 +33,7 @@ function isAllowedAuthTokens(value: AllowedAuthTokenInput): value is AllowedAuth
     return Boolean(value && typeof value === 'object' && 'digests' in value);
 }
 
-// Intentionally unvalidated: callers of the programmatic serve({ allowedAuthTokens })
-// path (including tests) may pass arbitrary tokens. Only the string-parsing path
-// (env/CLI/config, via parseAllowedAuthTokens) enforces BEARER_TOKEN_PATTERN.
+
 export function createAllowedAuthTokens(tokens: Iterable<string>): AllowedAuthTokens {
     const uniqueTokens = Array.from(new Set(tokens));
     const digests = uniqueTokens.map((token) => tokenToDigest(token));

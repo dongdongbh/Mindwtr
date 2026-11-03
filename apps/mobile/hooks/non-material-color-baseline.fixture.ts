@@ -3,9 +3,7 @@ import type { ThemeContextType } from '../contexts/theme-context';
 
 type Resolvable = Pick<ThemeContextType, 'isDark' | 'themeStyle' | 'themePreset' | 'themeMode'>;
 
-// Frozen snapshot of TODAY's resolved colors for every non-Material theme.
-// Altering any value here is a regression unless it is an intentional,
-// separately-reviewed change to a non-Material theme.
+
 export const DEFAULT_LIGHT = {
   bg: '#F6F7FB', cardBg: '#FFFFFF', taskItemBg: '#F1F5F9',
   text: '#0F172A', secondaryText: '#4B5563', icon: '#4B5563',
@@ -30,6 +28,8 @@ export const NON_MATERIAL_CASES: { name: string; theme: Resolvable; expected: Re
   { name: 'nord', theme: { isDark: true, themeStyle: 'default', themePreset: 'nord', themeMode: 'nord' }, expected: THEME_PRESETS.nord },
   { name: 'catppuccin-macchiato', theme: { isDark: true, themeStyle: 'default', themePreset: 'catppuccin-macchiato', themeMode: 'catppuccin-macchiato' }, expected: THEME_PRESETS['catppuccin-macchiato'] },
   { name: 'dracula', theme: { isDark: true, themeStyle: 'default', themePreset: 'dracula', themeMode: 'dracula' }, expected: THEME_PRESETS.dracula },
+  { name: 'gruvbox-light', theme: { isDark: false, themeStyle: 'default', themePreset: 'gruvbox-light', themeMode: 'gruvbox-light' }, expected: THEME_PRESETS['gruvbox-light'] },
+  { name: 'gruvbox-dark', theme: { isDark: true, themeStyle: 'default', themePreset: 'gruvbox-dark', themeMode: 'gruvbox-dark' }, expected: THEME_PRESETS['gruvbox-dark'] },
   { name: 'sepia', theme: { isDark: false, themeStyle: 'default', themePreset: 'sepia', themeMode: 'sepia' }, expected: THEME_PRESETS.sepia },
   { name: 'oled', theme: { isDark: true, themeStyle: 'default', themePreset: 'oled', themeMode: 'oled' }, expected: THEME_PRESETS.oled },
 ];

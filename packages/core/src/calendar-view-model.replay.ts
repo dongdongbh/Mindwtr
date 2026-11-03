@@ -1,12 +1,6 @@
-/**
- * Test support only (imported by the calendar tests; not exported). Replays the
- * frozen React Native Calendar scenarios (calendar-views-parity.fixtures.json,
- * captured by apps/mobile/components/views/calendar-view.parity.test.tsx)
- * through the native host contract. The replay plays the native screen: it keeps
- * the screen's own state (the view state, the search text, the open composer,
- * the external calendar it fetched), reads views, sends actions, and lays the
- * view's text out in the order the React Native screen draws it.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import type { createNativeHostContract, NativeHostResult } from './native-host-contract';
 import type {
@@ -52,7 +46,7 @@ export const loadCalendarViewsFixture = (): CalendarViewsFixture => JSON.parse(
     readFileSync(new URL('./calendar-views-parity.fixtures.json', import.meta.url), 'utf8'),
 );
 
-/** The store writes a scenario asks for, as the mobile harness records them. */
+
 export function createCalendarRecorder() {
     const log: unknown[][] = [];
     const createdIds = new Map<string, string>();
@@ -73,7 +67,7 @@ export const scenarioTasks = (fixture: CalendarViewsFixture, scenario: CalendarS
         : fixture.tasks.filter((task) => task.id !== 't-booked')
 );
 
-/** Loads a scenario's data through the store and records the writes, as the harness does. */
+
 export async function seedCalendarStore(
     fixture: CalendarViewsFixture,
     scenario: CalendarScenario,
@@ -114,8 +108,8 @@ export async function seedCalendarStore(
             return result;
         },
         addProject: async (title, color, props) => {
-            // The contract names a composer's new project from the request (an `id` prop); React Native
-            // lets the store draw one, so the log leaves that id out, as the harness records the call.
+
+
             const { id: _id, ...rest } = props ?? {};
             const shown = props && 'id' in props ? (Object.keys(rest).length > 0 ? rest : undefined) : props;
             record('addProject', [title, color, shown]);
@@ -138,13 +132,7 @@ const requestId = () => {
     return `00000000-0000-4000-8000-${requestCount.toString(16).padStart(12, '0')}`;
 };
 
-/**
- * What the comparison reads. Colors and positions are the host's to draw from
- * the view's tones and minutes, so the drawn-style hash stays out. The screen
- * saves its view mode on every switch, even to the mode it shows, while the
- * contract writes a setting only when it changes, so settings are compared as
- * the calendar settings they leave after each step.
- */
+
 export function projectCalendarObservations(observations: Observation[], initialCalendar: unknown): Observation[] {
     let calendar = initialCalendar ?? null;
     return observations.map(({ styles: _styles, writes, ...rest }) => {
@@ -157,14 +145,11 @@ export function projectCalendarObservations(observations: Observation[], initial
     });
 }
 
-// ---------------------------------------------------------------------------
-// The native screen.
 
-/** A pressable control: its label, the text inside it in order, and what pressing does. */
 type Press = { label?: string; texts: string[]; disabled?: boolean; press: () => Promise<void> };
 type Drawn = { texts: string[]; presses: Press[]; inputs: [string | null, string | null, string | null][]; blocks: { title: string; item: NativeCalendarItem }[] };
 
-// The mobile harness's screen: 390pt wide, a 56pt week gutter, 1.4pt per minute.
+
 const SCREEN_WIDTH = 390;
 const WEEK_GUTTER = 56;
 const PIXELS_PER_MINUTE = 1.4;
@@ -182,6 +167,7 @@ export async function replayCalendarScenario(options: {
     let query = '';
     let composer: NativeCalendarComposerView | null = null;
     let editor: string | null = null;
+    let allDayExpanded = false;
     let feed: NativeCalendarFeed | undefined;
     let fetchedRange = '';
     let calendars: ExternalCalendarSubscription[] = [];
@@ -200,7 +186,7 @@ export async function replayCalendarScenario(options: {
         }
         return { view: first, entries };
     };
-    /** The view, after fetching its range when it moved, as the screen's effect does. */
+
     const read = () => {
         let current = readAll();
         state = current.view.state;
@@ -241,7 +227,7 @@ export async function replayCalendarScenario(options: {
     );
     const openTask = (item: NativeCalendarItem) => {
         const answer = contract.getCalendarItemSheet({ taskId: item.taskId!, state, calendar: feed });
-        // Mobile's press on a completed item finds no open task and does nothing.
+
         if (!answer.ok && answer.error.code === 'TASK_NOT_FOUND') return;
         const sheet = ok(answer);
         if (sheet.kind === 'projected') {
@@ -274,7 +260,7 @@ export async function replayCalendarScenario(options: {
                     if (result.next) state = result.next;
                     if (result.toast) toasts.push([result.toast.tone, result.toast.title, result.toast.message, result.toast.durationMs]);
                 },
-                // The harness's calendar app cannot open events.
+
                 openInCalendar: async () => {
                     opened.push(event.id);
                     const toast = view.text.toasts.cannotOpenEvent;
@@ -381,7 +367,7 @@ export async function replayCalendarScenario(options: {
                 if (details.empty) text(details.empty);
             }
         } else if (content.mode === 'week') {
-            // Deadline weeks use scrollable, readable columns (at least 260pt).
+
             const hasDeadlineMarkers = entries.some((entry) => entry.type === 'item' && entry.lane === 'deadlineMarker');
             const compact = !hasDeadlineMarkers && weekColumnsCompact(content.visibleDays);
             for (const day of days) {
@@ -390,6 +376,7 @@ export async function replayCalendarScenario(options: {
             text(view.text.allDay);
             for (const day of days) {
                 for (const item of byDay(day.key, 'allDay')) press({ disabled: !item.pressable, press: itemPress(item) }, [item.title]);
+                if (day.allDayMore) press({ press: async () => { state = day.opens!; await setViewMode('day'); } }, [day.allDayMore]);
             }
             content.hourLabels.forEach(text);
             for (const day of days) {
@@ -406,7 +393,10 @@ export async function replayCalendarScenario(options: {
             const allDay = byDay(content.dayKey, 'allDay');
             if (allDay.length > 0) {
                 text(view.text.allDay);
-                for (const item of allDay) press({ press: itemPress(item) }, [item.title]);
+                for (const item of allDayExpanded || !content.allDayMore ? allDay : allDay.slice(0, content.allDayLimit)) press({ press: itemPress(item) }, [item.title]);
+                if (content.allDayMore) {
+                    press({ press: async () => { allDayExpanded = !allDayExpanded; } }, [allDayExpanded ? view.text.allDayLess : content.allDayMore]);
+                }
             }
             drawn.presses.push({ press: async () => undefined, texts: [] });
             content.hourLabels.forEach(text);
@@ -532,7 +522,7 @@ export async function replayCalendarScenario(options: {
                 await need(drawn.presses.find((entry) => entry.texts[0] === '' && entry.texts.length > 1), 'untitled event').press();
                 return;
             case 'doneButton': {
-                // The first row with that title, and the Done button that follows it.
+
                 const index = drawn.presses.findIndex((entry) => entry.texts[0] === target);
                 need(drawn.presses[index], `done ${String(target)}`);
                 const button = drawn.presses.slice(index + 1).find((entry) => entry.texts.join('') === view.text.done);

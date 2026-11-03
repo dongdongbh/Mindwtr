@@ -27,10 +27,7 @@ const legacyFileName = (attachment: Attachment, legacyPrefix: string): string | 
     return name;
 };
 
-// Portable installs before v1.1.0 wrote attachment files to the OS data dir
-// (#855). Re-home the files this store references into the portable profile
-// and point the stored URIs at the new location. Idempotent: once no URI
-// matches the legacy dir, every run is a no-op.
+
 export async function migratePortableAttachments(): Promise<void> {
     if (!isTauriRuntime()) return;
     try {
@@ -81,7 +78,7 @@ export async function migratePortableAttachments(): Promise<void> {
         };
 
         let rewritten = 0;
-        // Each list is rewritten on the row as stored when its write is admitted (a sync save may publish first).
+
         for (const taskId of taskTargets.keys()) {
             const wrote = await runStoreCommand(async () => {
                 const task = useTaskStore.getState()._allTasks.find((item) => item.id === taskId);

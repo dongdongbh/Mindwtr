@@ -1,22 +1,5 @@
-/**
- * Identity preservation for the merge-input normalizers (#766).
- *
- * The normalizers at the head of `mergeAppDataWithStats` used to rebuild every
- * entity on every cycle, which threw away the object identity the signature
- * caches (sync-signatures.ts) and the SQLite identity-keyed row cache key on.
- * The fix is to build the candidate exactly as before and hand back the INPUT
- * object when the candidate carries the same values, so an unchanged entity
- * keeps one identity from the store all the way through the merge.
- *
- * Comparison rules, all load-bearing for value parity:
- * - Both key sets are compared. A key the normalizer strips, and a key it adds
- *   as an explicit `undefined`, are both real changes to the emitted shape.
- * - Array values compare element-wise (elements by `Object.is`) so a nested
- *   normalizer returning a fresh-but-equal array does not force a fresh parent.
- * - Nested objects compare by reference, so a nested normalizer must cascade
- *   identity the same way or its parent simply allocates as before — slower,
- *   never wrong.
- */
+
+
 
 const sameShallowValue = (left: unknown, right: unknown): boolean => {
     if (Object.is(left, right)) return true;
@@ -41,7 +24,7 @@ export const sameShallowRecord = (input: object, candidate: object): boolean => 
     return true;
 };
 
-/** Returns `input` when the freshly normalized `candidate` is value-identical to it. */
+
 export const preserveShallowIdentity = <T>(input: unknown, candidate: T): T => (
     candidate !== null
     && typeof candidate === 'object'

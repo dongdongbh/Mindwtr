@@ -331,7 +331,7 @@ lines[env_line_index + 1:block_end_index] = [
 manifest_path.write_text("\n".join(lines) + "\n")
 PY
 
-# Remove blocks generated for the former bundled MCP subprocess.
+
 python3 - "${manifest_path}" <<'PYTHON'
 from pathlib import Path
 import re
@@ -446,8 +446,7 @@ python3 "${tools_dir}/cargo/flatpak-cargo-generator.py" \
   "${worktree_dir}/apps/desktop/src-tauri/Cargo.lock" \
   -o "${cargo_sources_path}"
 
-# Recursive mode walks base.parent, so this synthetic root path makes the
-# generator scan both workspace lockfiles from the checkout root.
+
 "${node_generator}" npm \
   "${worktree_dir}/package-lock.json" \
   -r \

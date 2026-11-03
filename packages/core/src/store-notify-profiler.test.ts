@@ -188,8 +188,8 @@ describe('fetchData notify profiling log fields', () => {
             notifyMaxMs: expect.any(String),
             notifyTop5Ms: expect.any(String),
             notifyTop5Names: expect.any(String),
-            // Splits the setNotifyMs remainder: rebuilds reached through a
-            // subscriber's selector vs genuine React render time (#766).
+
+
             notifyDerivedRebuilds: expect.any(String),
             notifyDerivedRebuildMs: expect.any(String),
         });
@@ -204,7 +204,7 @@ describe('fetchData notify profiling log fields', () => {
         expect(profile?.derivedRebuildCount).toBe(2);
         expect(profile?.derivedRebuildMs).toBeCloseTo(16, 5);
 
-        // Outside a profiling window the recorder is a no-op.
+
         recordDerivedStateRebuild(50);
         beginNotifyProfile();
         const empty = endNotifyProfile();

@@ -10,9 +10,7 @@ export type WebdavSyncRateLimitController = {
     getBlockedUntil: () => number;
 };
 
-/** A WebDAV server that answered 429/503 (or a rate-limit message) is left alone for one
- *  cooldown: every sync attempt inside it fails fast with a 429 instead of hitting the server
- *  again. Other backends pass straight through. */
+
 export const createWebdavSyncRateLimitController = (
     options?: { now?: () => number; cooldownMs?: number }
 ): WebdavSyncRateLimitController => {

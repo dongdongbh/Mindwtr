@@ -250,8 +250,7 @@ describe('todoist import', () => {
     });
 });
 
-// A date with no clock time must stay date-only: any stored time schedules a
-// reminder and makes the task due at that minute instead of end of day.
+
 describe('todoist import > relative and text dates stay date-only', () => {
     const parseDateCell = (cell: string) => parseTodoistImportSource({
         fileName: 'Dates.csv',
@@ -267,7 +266,7 @@ describe('todoist import > relative and text dates stay date-only', () => {
 
     const freeze = () => {
         vi.useFakeTimers();
-        // Local Tuesday 15 Sep 2026, 14:37.
+
         vi.setSystemTime(new Date(2026, 8, 15, 14, 37, 0));
     };
 

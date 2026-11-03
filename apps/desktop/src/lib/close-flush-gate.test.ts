@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { beginCloseFlush, resetCloseFlushGate } from './close-flush-gate';
 
-// #913 follow-up: quitApp() must never let two overlapping close paths each
-// start their own flush, and a cancelled close must not leave a later close
-// reusing a stale settled result. Assertions here count actual flush
-// invocations (not just resolved values) so a regression that silently
-// re-runs — or silently stops running — the flush is caught.
+
 describe('close-flush-gate', () => {
     beforeEach(() => {
         resetCloseFlushGate();

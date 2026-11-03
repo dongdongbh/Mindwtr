@@ -10,15 +10,11 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
-/** Durable, app-private state for the widget's short check-off Undo window. */
+
 internal class PendingCheckoffStore(private val context: Context) {
   private val file = AtomicFile(File(context.filesDir, FILE_NAME))
 
-  /**
-   * Reads the atomic state, or migrates the legacy preferences exactly once.
-   * A present atomic file is authoritative even when legacy preferences remain
-   * after their best-effort cleanup.
-   */
+
   @Throws(IOException::class)
   fun read(): Map<String, Long> {
     val atomic = try {
@@ -28,8 +24,8 @@ internal class PendingCheckoffStore(private val context: Context) {
     }
     return resolveInitialState(atomic, legacyPending(context)) { legacy ->
       write(legacy)
-      // The atomic file already wins all subsequent reads. A failed cleanup
-      // cannot make the migrated state ambiguous or roll it back.
+
+
       val cleared = context.getSharedPreferences(CheckoffStore.PREFS_NAME, Context.MODE_PRIVATE)
         .edit()
         .clear()
@@ -48,8 +44,8 @@ internal class PendingCheckoffStore(private val context: Context) {
     try {
       val encoded = encode(pending).toByteArray(Charsets.UTF_8)
       stream.write(encoded)
-      // AtomicFile logs some sync/rename failures instead of throwing. Do not
-      // acknowledge Undo until the new durable contents are readable.
+
+
       stream.fd.sync()
       file.finishWrite(stream)
       if (!file.readFully().contentEquals(encoded)) throw IOException("Pending check-off write did not publish")

@@ -17,7 +17,7 @@ const getLoggingReason = (loggingEnabled: boolean): string => {
     return loggingEnabled ? 'user-enabled' : 'startup-force';
 };
 
-/** Logs startup metadata after the store has hydrated its diagnostics setting. */
+
 export async function logDesktopStartupContext(loggingEnabled: boolean): Promise<void> {
     if (startupContextLogged) return;
     startupContextLogged = true;

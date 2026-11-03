@@ -1,7 +1,8 @@
+import { TaskDateFilter } from './TaskDateFilter';
 import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Filter } from 'lucide-react';
 import { tFallback } from '@mindwtr/core';
-import type { MultiValueFilterMatchMode, TaskPriority, TimeEstimate } from '@mindwtr/core';
+import type { DateRange, MultiValueFilterMatchMode, TaskPriority, TimeEstimate } from '@mindwtr/core';
 
 import { cn } from '../../../lib/utils';
 import { PriorityFlag } from '../../Task/PriorityFlag';
@@ -16,7 +17,7 @@ import {
     type DesktopActiveFilterChip,
 } from './FilterDisclosure';
 
-type FilterCategoryId = 'tokens' | 'priority' | 'time';
+type FilterCategoryId = 'dates' | 'tokens' | 'priority' | 'time';
 
 interface ListFiltersPanelProps {
     t: (key: string) => string;
@@ -25,6 +26,8 @@ interface ListFiltersPanelProps {
     showFiltersPanel: boolean;
     onClose: () => void;
     onClearFilters: () => void;
+    anyDateRange?: DateRange;
+    onAnyDateRangeChange?: (value: DateRange | undefined) => void;
     allTokens: string[];
     selectedTokens: string[];
     excludedTokens: string[];
@@ -61,6 +64,8 @@ export function ListFiltersPanel({
     showFiltersPanel,
     onClose,
     onClearFilters,
+    anyDateRange,
+    onAnyDateRangeChange,
     allTokens,
     selectedTokens,
     excludedTokens,
@@ -130,9 +135,7 @@ export function ListFiltersPanel({
         setTokenQuery('');
     }, [showFiltersPanel]);
 
-    // Only Escape raised inside the panel folds it. A window listener also ate
-    // the Escape that closed a dialog or cancelled an edit, and stole focus to
-    // the Filters button one frame later.
+
     const handlePanelKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
         if (event.key !== 'Escape' || !showFiltersPanel) return;
         event.preventDefault();
@@ -186,6 +189,10 @@ export function ListFiltersPanel({
                         </label>
                     )}
                     <div className="rounded-md border border-border/60 px-2">
+                    {onAnyDateRangeChange && (
+                        <TaskDateFilter id="list-date-filters" value={anyDateRange} onChange={onAnyDateRangeChange}
+                            expanded={expandedCategory === 'dates'} onToggle={() => toggleCategory('dates')} t={t} />
+                    )}
                         <FilterCategory
                             id="list-token-filters"
                             label={t('filters.contexts')}

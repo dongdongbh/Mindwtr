@@ -1,16 +1,9 @@
-/**
- * The Review screens' logic, shared by the React Native screens and the native
- * host contract: the Review overview (areas, projects and tasks), the Weekly
- * Review wizard and the Daily Review. Candidate lists and step flags come from
- * review-utils.ts; this module adds what each screen shows for them (titles,
- * summaries, counts, colors, empty states, previews), the step rail, the saved
- * session (pause and resume) and each action's write.
- *
- * Colors a screen takes from its theme are `null` here: the platform fills in
- * its own tint.
- */
+
+
+
 import type { ReviewSnapshotItem, ReviewSuggestion } from './ai/types';
 import { filterReviewSuggestionsToKnownIds } from './ai/utils';
+import { getProjectAccentColor } from './task-accent-color';
 import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
 import { createDateFormatter, hasTimeComponent, isDueForReview, safeParseDate, type DateFormatter } from './date';
 import { formatFocusTaskLimitText, normalizeFocusTaskLimit } from './focus-utils';
@@ -41,10 +34,7 @@ import type { AppSettings, Area, Person, Project, Task, TaskStatus } from './typ
 
 type Translate = (key: string) => string;
 
-// ---------------------------------------------------------------------------
-// Review overview (the Review screen).
 
-/** The statuses Review's bulk "Move to" offers, in order. */
 export const REVIEW_BULK_STATUSES: readonly TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done', 'reference'];
 
 export function getReviewOverviewText(t: Translate) {
@@ -64,6 +54,8 @@ export function getReviewOverviewText(t: Translate) {
         collapseEverything: tFallback(t, 'review.collapseEverything', 'Collapse all'),
         hasNextAction: t('review.hasNextAction'),
         waiting: t('status.waiting'),
+        projectDeferred: t('review.projectDeferred'),
+        laterInSequence: t('projects.laterInSequence'),
         needsAction: t('review.needsAction'),
         empty: t('review.noTasks'),
         dueEmpty: t('review.dueEmpty'),
@@ -94,31 +86,33 @@ export type ReviewOverviewText = ReturnType<typeof getReviewOverviewText>;
 export type ReviewTone = 'success' | 'warning' | 'danger';
 
 export type ReviewProjectSection = {
-    /** `project:<id>`, or `single:<area group id>` for the area's tasks without a project. */
+
     id: string;
     projectId: string | null;
     isSingleActions: boolean;
     title: string;
     nextActionState: ProjectNextActionState;
     tasks: Task[];
-    /** "2 active tasks · Has Next Action", or "8 tasks" for single actions. */
+    currentTasks: Task[];
+    laterTasks: Task[];
+
     summary: string;
-    /** What the header shows: single actions add " · Single actions". */
+
     summaryText: string;
     accessibilityLabel: string;
-    /** The status dot; single actions have none. */
+
     statusTone: ReviewTone | null;
-    /** The summary turns amber for a project with nothing to do next. */
+
     summaryTone: 'warning' | 'secondary';
 };
 
 export type ReviewAreaSection = {
-    /** `area:<id>`, or `area:none`. */
+
     id: string;
     areaId: string | null;
     isUnassigned: boolean;
     title: string;
-    /** The area dot; null means the theme tint. */
+
     color: string | null;
     taskCount: number;
     projectCount: number;
@@ -128,15 +122,12 @@ export type ReviewAreaSection = {
     projectGroups: ReviewProjectSection[];
 };
 
-/**
- * Review's area groups as the screen shows them, from core's overview groups
- * (visibility, sort and counts: getReviewOverviewGroups).
- */
+
 export function decorateReviewOverviewGroups(
     groups: readonly ReviewOverviewAreaGroup[],
     options: {
         areaById: ReadonlyMap<string, Area>;
-        /** settings.appearance.unassignedAreaColor */
+
         unassignedAreaColor: string | undefined;
         text: ReviewOverviewText;
         scope?: ReviewOverviewScope;
@@ -173,7 +164,7 @@ export function decorateReviewOverviewGroups(
                 const isSingleActions = !projectGroup.project;
                 const groupTitle = projectGroup.project?.title || text.singleActions;
                 const state = projectGroup.nextActionState;
-                const stateLabel = state === 'next' ? text.hasNextAction : state === 'waiting' ? text.waiting : text.needsAction;
+                const stateLabel = state === 'next' ? text.hasNextAction : state === 'waiting' ? text.waiting : state === 'deferred' ? text.projectDeferred : text.needsAction;
                 const projectSummary = scope === 'due'
                     ? text.countTask(projectGroup.tasks.length)
                     : isSingleActions
@@ -186,11 +177,13 @@ export function decorateReviewOverviewGroups(
                     title: groupTitle,
                     nextActionState: state,
                     tasks: projectGroup.tasks,
+                    currentTasks: projectGroup.currentTasks,
+                    laterTasks: projectGroup.laterTasks,
                     summary: projectSummary,
                     summaryText: isSingleActions ? `${projectSummary} · ${text.singleActions}` : projectSummary,
                     accessibilityLabel: `${groupTitle}, ${projectSummary}`,
-                    // Delegated (waiting) stays amber; truly stuck turns red (#1086).
-                    statusTone: scope === 'due' || isSingleActions ? null : state === 'next' ? 'success' : state === 'waiting' ? 'warning' : 'danger',
+
+                    statusTone: scope === 'due' || isSingleActions ? null : state === 'next' ? 'success' : state === 'waiting' || state === 'deferred' ? 'warning' : 'danger',
                     summaryTone: scope === 'all' && !isSingleActions && state === 'none' ? 'warning' : 'secondary',
                 };
             }),
@@ -198,15 +191,12 @@ export function decorateReviewOverviewGroups(
     });
 }
 
-/** The task sort Review applies. */
+
 export const getReviewOverviewSortBy = (settings: AppSettings | undefined) => resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
 
 export type ReviewExpansion = { areaIds: string[]; projectIds: string[] };
 
-/**
- * The expand button: it opens every area, then every project, then folds all.
- * `next` is the expansion after pressing it (null: nothing to expand).
- */
+
 export function getReviewExpansionControl(
     groups: readonly ReviewAreaSection[],
     expanded: { areaIds: ReadonlySet<string>; projectIds: ReadonlySet<string> },
@@ -224,13 +214,13 @@ export function getReviewExpansionControl(
     return {
         label: !allAreasExpanded ? text.expandAreas : allProjectsExpanded ? text.collapseEverything : text.expandEverything,
         disabled: areaIds.length === 0,
-        /** Everything is open: the button shows "collapse". */
+
         allExpanded: allAreasExpanded && allProjectsExpanded,
         next,
     };
 }
 
-/** One area or project header tapped: open it, or fold it again. */
+
 export function toggleReviewExpandedId(ids: ReadonlySet<string>, id: string): Set<string> {
     const next = new Set(ids);
     if (next.has(id)) next.delete(id);
@@ -238,7 +228,7 @@ export function toggleReviewExpandedId(ids: ReadonlySet<string>, id: string): Se
     return next;
 }
 
-/** What Review's Share sends for the selected tasks: titles and checklists. */
+
 export function buildReviewShareText(tasks: readonly Task[]): string {
     const lines: string[] = [];
     tasks.forEach((task) => {
@@ -251,8 +241,6 @@ export function buildReviewShareText(tasks: readonly Task[]): string {
     return lines.join('\n').trim();
 }
 
-// ---------------------------------------------------------------------------
-// Pause and resume, shared by both review wizards.
 
 export type WeeklyReviewStepId = 'inbox' | 'stale' | 'calendar' | 'waiting' | 'contexts' | 'projects' | 'someday' | 'completed';
 export type DailyReviewStepId = 'today' | 'focus' | 'inbox' | 'waiting' | 'completed';
@@ -262,15 +250,12 @@ const WEEKLY_REVIEW_STEP_IDS: ReadonlySet<WeeklyReviewStepId> = new Set<WeeklyRe
 ]);
 const DAILY_REVIEW_STEP_IDS: ReadonlySet<DailyReviewStepId> = new Set<DailyReviewStepId>(['today', 'focus', 'inbox', 'waiting', 'completed']);
 
-/** Device-local storage keys: where a paused review and the last finished Weekly Review are kept. */
+
 export const WEEKLY_REVIEW_SESSION_STORAGE_KEY = 'mindwtr:weeklyReview:currentStep';
 export const DAILY_REVIEW_SESSION_STORAGE_KEY = 'mindwtr:dailyReview:currentStep';
 export const LAST_WEEKLY_REVIEW_STORAGE_KEY = 'lastWeeklyReview';
 
-/**
- * The review a wizard opens with: the stored one when it is from this week (weekly)
- * or today (daily), else a new one on the first step.
- */
+
 export function restoreReviewSession<Step extends WeeklyReviewStepId | DailyReviewStepId>(
     cadence: ReviewSessionCadence,
     stored: string | null | undefined,
@@ -283,14 +268,14 @@ export function restoreReviewSession<Step extends WeeklyReviewStepId | DailyRevi
     return { session: { step: (cadence === 'weekly' ? 'inbox' : 'today') as Step, startedAt: options.now.toISOString() }, resumed: false };
 }
 
-/** What a wizard stores after every step change. */
+
 export const serializeReviewSession = (session: StoredReviewStepSession<WeeklyReviewStepId | DailyReviewStepId>): string => (
     JSON.stringify({ step: session.step, startedAt: session.startedAt })
 );
 
 export type ReviewStepRailItem = { id: string; title: string; number: number; state: 'current' | 'complete' | 'pending' };
 
-/** The Weekly Review's step rail: steps without work count as done. */
+
 export function getReviewStepRail(
     steps: readonly (ReviewStepFlags & { title: string })[],
     displayedStep: string,
@@ -307,7 +292,7 @@ export function getReviewStepRail(
     });
 }
 
-/** The calendar window a review fetches: `days` days from the start of `day`. */
+
 export function getReviewCalendarRange(day: Date, days: number): { start: Date; end: Date } {
     const start = new Date(day.getFullYear(), day.getMonth(), day.getDate());
     const end = new Date(start);
@@ -316,11 +301,9 @@ export function getReviewCalendarRange(day: Date, days: number): { start: Date; 
     return { start, end };
 }
 
-/** "+3 More" under a folded list. */
+
 const formatReviewMoreLabel = (hidden: number, more: string) => `+${hidden} ${more}`;
 
-// ---------------------------------------------------------------------------
-// Weekly Review.
 
 const defaultWeeklyReviewLabels = {
     weeklyReview: 'Weekly Review',
@@ -397,6 +380,8 @@ const defaultWeeklyReviewLabels = {
     back: 'Back',
     hasNext: '✓ Has Next',
     waitingStatus: 'Waiting',
+    projectDeferred: 'Scheduled',
+    laterInSequence: 'Later in sequence',
     needsAction: '! Needs Action',
     activeTask: 'active task',
     activeTasks: 'active tasks',
@@ -480,13 +465,15 @@ const weeklyReviewLabelKeys: WeeklyReviewLabels = {
     back: 'review.back',
     hasNext: 'review.hasNextAction',
     waitingStatus: 'status.waiting',
+    projectDeferred: 'review.projectDeferred',
+    laterInSequence: 'projects.laterInSequence',
     needsAction: 'review.needsAction',
     activeTask: 'review.activeTask',
     activeTasks: 'review.activeTasks',
     moreItems: 'review.moreItems',
 };
 
-/** Every Weekly Review label in the current language, with English where a key is missing. */
+
 export function getWeeklyReviewLabels(t?: Translate): WeeklyReviewLabels {
     return Object.fromEntries(
         (Object.keys(defaultWeeklyReviewLabels) as (keyof WeeklyReviewLabels)[]).map((key) => [
@@ -496,7 +483,7 @@ export function getWeeklyReviewLabels(t?: Translate): WeeklyReviewLabels {
     ) as WeeklyReviewLabels;
 }
 
-/** The settings the Weekly Review reads. */
+
 export function getWeeklyReviewSettings(settings: AppSettings | undefined) {
     return {
         aiEnabled: settings?.ai?.enabled === true,
@@ -507,7 +494,7 @@ export function getWeeklyReviewSettings(settings: AppSettings | undefined) {
 
 export type WeeklyReviewStep = ReviewStepFlags & { id: WeeklyReviewStepId; title: string };
 
-/** The steps in order with their titles; which have work comes from buildReviewSteps. */
+
 export function titleWeeklyReviewSteps(flags: readonly ReviewStepFlags[], labels: WeeklyReviewLabels): WeeklyReviewStep[] {
     const titles: Record<WeeklyReviewStepId, string> = {
         inbox: labels.inbox,
@@ -522,7 +509,7 @@ export function titleWeeklyReviewSteps(flags: readonly ReviewStepFlags[], labels
     return flags.map((flag) => ({ ...flag, id: flag.id as WeeklyReviewStepId, title: titles[flag.id as WeeklyReviewStepId] }));
 }
 
-/** The stale step: tasks (in the order found, among the tasks on screen) and projects. */
+
 export function getWeeklyReviewStale(staleItems: readonly ReviewSnapshotItem[], tasks: readonly Task[], labels: WeeklyReviewLabels) {
     const taskById = new Map(tasks.map((task) => [task.id, task]));
     return {
@@ -539,7 +526,7 @@ export function getWeeklyReviewStale(staleItems: readonly ReviewSnapshotItem[], 
     };
 }
 
-/** How many of a folded list the Weekly Review shows. */
+
 export const WEEKLY_REVIEW_PREVIEW = { contextTasks: 4, dayEvents: 2, calendarTasks: 12 } as const;
 
 export type WeeklyReviewCalendarDay = {
@@ -548,11 +535,11 @@ export type WeeklyReviewCalendarDay = {
     title: string;
     totalCount: number;
     events: { key: string; title: string; timeLabel: string }[];
-    /** "+1 More" while folded; null when every event already shows. */
+
     moreLabel: string | null;
 };
 
-/** The calendar step's external days (non-empty, 7 days) and its first 12 task dates. */
+
 export function getWeeklyReviewCalendar(
     days: readonly ExternalCalendarDaySummary[],
     items: readonly CalendarReviewEntry[],
@@ -586,7 +573,7 @@ export function getWeeklyReviewCalendar(
     };
 }
 
-/** What the upcoming column shows instead of days: loading, the fetch error, or its empty text. */
+
 export function getWeeklyReviewCalendarNotice(
     state: { loading: boolean; error: string | null; dayCount: number },
     labels: WeeklyReviewLabels,
@@ -596,7 +583,7 @@ export function getWeeklyReviewCalendarNotice(
     return state.dayCount === 0 ? labels.calendarEmpty : null;
 }
 
-/** Waiting or Someday: due and unscheduled show; "Not due yet" folds the rest. */
+
 export function getWeeklyReviewScheduledList(groups: ReviewSchedulePartition<Task>, labels: WeeklyReviewLabels) {
     return {
         visible: [...groups.due, ...groups.unscheduled],
@@ -606,7 +593,7 @@ export function getWeeklyReviewScheduledList(groups: ReviewSchedulePartition<Tas
     };
 }
 
-/** A context's card: its first four tasks until unfolded. */
+
 export function getWeeklyReviewContextMoreLabel(taskCount: number, labels: WeeklyReviewLabels): string | null {
     return taskCount > WEEKLY_REVIEW_PREVIEW.contextTasks
         ? formatReviewMoreLabel(taskCount - WEEKLY_REVIEW_PREVIEW.contextTasks, labels.more)
@@ -615,13 +602,14 @@ export function getWeeklyReviewContextMoreLabel(taskCount: number, labels: Weekl
 
 const PROJECT_BADGES: Record<ProjectNextActionState, { label: keyof WeeklyReviewLabels; color: string; background: string }> = {
     next: { label: 'hasNext', color: '#10B981', background: '#10B98120' },
-    // Delegated (waiting) is amber, not the red alarm (#1086).
+
     waiting: { label: 'waitingStatus', color: '#F59E0B', background: '#F59E0B20' },
+    deferred: { label: 'projectDeferred', color: '#F59E0B', background: '#F59E0B20' },
     none: { label: 'needsAction', color: '#EF4444', background: '#EF444420' },
 };
 
 export type WeeklyReviewProject = WeeklyReviewProjectEntry & {
-    /** The area's color; null means the theme tint. */
+
     areaColor: string | null;
     badge: { label: string; color: string; background: string };
     countLabel: string;
@@ -636,14 +624,14 @@ export function getWeeklyReviewProjects(
         const badge = PROJECT_BADGES[entry.nextActionState];
         return {
             ...entry,
-            areaColor: (entry.project.areaId ? areaById.get(entry.project.areaId)?.color : undefined) || null,
+            areaColor: getProjectAccentColor(entry.project, areaById) || null,
             badge: { label: labels[badge.label], color: badge.color, background: badge.background },
             countLabel: `${entry.tasks.length} ${entry.tasks.length === 1 ? labels.activeTask : labels.activeTasks}`,
         };
     });
 }
 
-/** The last step: this week's look-back (when anything was completed) and the system check. */
+
 export function getWeeklyReviewCompletion(
     buckets: Pick<WeeklyReviewBuckets, 'lookBack' | 'summary'>,
     settings: AppSettings | undefined,
@@ -652,7 +640,7 @@ export function getWeeklyReviewCompletion(
     const { lookBack, summary } = buckets;
     const estimated = formatTimeSpentLabel(lookBack.estimatedMinutes);
     const tracked = formatTimeSpentLabel(lookBack.trackedMinutes);
-    // Time estimates default ON; both flags go through resolveFeatureFlags.
+
     const features = resolveFeatureFlags(settings);
     const showEstimates = lookBack.estimatedTaskCount > 0 && features.timeEstimates;
     const showTracked = showEstimates && tracked !== null && features.pomodoro && settings?.gtd?.pomodoro?.linkTask === true;
@@ -686,7 +674,7 @@ export function getWeeklyReviewCompletion(
     return { week, checks };
 }
 
-/** AI suggestions the review can apply: someday or archive, for tasks only. */
+
 export const isActionableReviewSuggestion = (suggestion: Pick<ReviewSuggestion, 'id' | 'action'>) => (
     !suggestion.id.startsWith('project:') && (suggestion.action === 'someday' || suggestion.action === 'archive')
 );
@@ -698,7 +686,7 @@ export function getReviewSuggestionActionLabel(action: ReviewSuggestion['action'
     return labels.aiActionKeep;
 }
 
-/** Suggestions for items the review offered, as shown (and so as applied). */
+
 export type TitledReviewSuggestion = ReviewSuggestion & { title: string };
 export const filterReviewSuggestions = (suggestions: readonly ReviewSuggestion[], staleItems: readonly ReviewSnapshotItem[]): TitledReviewSuggestion[] => {
     const titleById = new Map(staleItems.map((item) => [item.id, item.title]));
@@ -706,7 +694,7 @@ export const filterReviewSuggestions = (suggestions: readonly ReviewSuggestion[]
         .map((suggestion) => ({ ...suggestion, title: titleById.get(suggestion.id) ?? suggestion.id }));
 };
 
-/** Apply selected: someday, or archived and completed now. */
+
 export function buildReviewSuggestionUpdates(
     suggestions: readonly ReviewSuggestion[],
     selectedIds: ReadonlySet<string>,
@@ -720,10 +708,7 @@ export function buildReviewSuggestionUpdates(
             : { id: suggestion.id, updates: { status: 'archived' as TaskStatus, completedAt: now.toISOString() } }));
 }
 
-/**
- * The project step's Add task: the quick-add grammar, as in the project next-action
- * prompt (#859). Null for a blank title.
- */
+
 export function planReviewProjectTask(input: {
     title: string;
     projectId: string;
@@ -746,10 +731,7 @@ export function planReviewProjectTask(input: {
     return { title, props };
 }
 
-// ---------------------------------------------------------------------------
-// Daily Review.
 
-/** The settings the Daily Review reads. */
 export function getDailyReviewSettings(settings: AppSettings | undefined) {
     return {
         sortBy: resolveNonDoneTaskSortBy(settings?.taskSortBy, settings),
@@ -760,7 +742,7 @@ export function getDailyReviewSettings(settings: AppSettings | undefined) {
 
 export type DailyReviewStep = ReviewStepFlags & { id: DailyReviewStepId; title: string; description: string };
 
-/** The steps in order with titles and descriptions; which have work comes from buildReviewSteps. */
+
 export function titleDailyReviewSteps(flags: readonly ReviewStepFlags[], t: Translate): DailyReviewStep[] {
     const text: Record<DailyReviewStepId, [string, string]> = {
         today: ['dailyReview.todayStep', 'dailyReview.todayDesc'],
@@ -800,15 +782,15 @@ export function getDailyReviewText(t: Translate, focusTaskLimit: number) {
 }
 export type DailyReviewText = ReturnType<typeof getDailyReviewText>;
 
-/** "Step 2 of 5". */
+
 export const formatDailyReviewStepLabel = (t: Translate, index: number, count: number) => (
     `${t('review.step')} ${index + 1} ${t('review.of')} ${count}`
 );
 
-/** The Daily Review shows five events a day. */
+
 const DAILY_REVIEW_EVENT_PREVIEW = 5;
 
-/** One day's calendar card, with a five-event preview by default. */
+
 export function getDailyReviewCalendarDay(
     events: readonly ExternalCalendarEvent[],
     day: Date,
@@ -832,13 +814,13 @@ export function getDailyReviewCalendarDay(
     };
 }
 
-/** The Today step's list: overdue first, then due today. */
+
 export const getDailyReviewTodayTasks = (buckets: Pick<DailyReviewBuckets, 'overdue' | 'dueToday'>) => [...buckets.overdue, ...buckets.dueToday];
 
-/** The day a review stands on: local midnight. */
+
 export const getReviewDay = (now: Date) => new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-/** A waiting row's "Follow up today": off once the item is due for review. */
+
 export function getDailyReviewFollowUp(task: Task, today: Date, text: Pick<DailyReviewText, 'followUpToday' | 'reviewDue'>) {
     const due = isDueForReview(task.reviewAt, today);
     return {
@@ -848,7 +830,7 @@ export function getDailyReviewFollowUp(task: Task, today: Date, text: Pick<Daily
     };
 }
 
-/** Follow up today sets the review date to the start of today; nothing once it is due. */
+
 export function planDailyReviewFollowUp(task: Task, today: Date): { reviewAt: string } | null {
     if (isDueForReview(task.reviewAt, today)) return null;
     return { reviewAt: createDateFormatter({ calendarSystem: 'gregorian' })(getReviewDay(today), 'yyyy-MM-dd') };

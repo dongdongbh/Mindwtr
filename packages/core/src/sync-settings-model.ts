@@ -1,16 +1,6 @@
-/**
- * Settings › Sync: the screen's rules, shared by React Native's screen
- * (apps/mobile/components/settings/sync-settings-*.tsx) and the native host
- * contract (native-host-contract-settings-sync.ts). They moved here from the
- * screen, its panels and its cards: which backends the screen offers and which
- * one shows as chosen, the form checks, the failure messages, the last-sync card
- * and its history, the CloudKit account texts and the settings sync options.
- *
- * The transport actions (choose, test, save, Sync now, Dropbox) are
- * sync-settings-transport.ts; the encryption card is sync-encryption-card.ts.
- * Dates come from the host's `formatDateTime`: React Native keeps
- * `toLocaleString`, the contract builds the same English text from a pattern.
- */
+
+
+
 import { decodeUriSafe } from './async-utils';
 import { resolveI18nText, translateWithFallback, type I18nTemplateValues } from './i18n';
 import { sanitizeLogMessage } from './log-sanitize';
@@ -25,11 +15,11 @@ export type SyncSettingsTranslator = (key: string, values?: I18nTemplateValues) 
 
 export type SyncSettingsBackend = 'file' | 'webdav' | 'cloud' | 'cloudkit' | 'off';
 export type SyncSettingsCloudProvider = 'selfhosted' | 'dropbox' | 'cloudkit';
-/** A choice on the backend card; `dropbox` and `selfhosted` are the `cloud` backend's providers. */
+
 export type SyncSettingsBackendOption = 'off' | 'file' | 'dropbox' | 'webdav' | 'selfhosted' | 'cloudkit';
 export type CloudKitAccountStatus = 'available' | 'noAccount' | 'restricted' | 'temporarilyUnavailable' | 'unknown';
 
-/** React Native's `tr`: the translation, else the English text, with `{{values}}` filled in. */
+
 export const createSyncSettingsTranslator = (t: Translate): SyncSettingsTranslator => (
     (key, values) => resolveI18nText(t, key, { values })
 );
@@ -38,8 +28,8 @@ export const isValidSyncHttpUrl = (value: string): boolean => {
     if (!value.trim()) return false;
     try {
         const url = new URL(value);
-        // The native engine's URL is a small parser that accepts an empty or spaced
-        // host; the platform's URL refuses both, so this changes nothing on React Native.
+
+
         return (url.protocol === 'http:' || url.protocol === 'https:') && /^[^\s]+$/.test(url.hostname);
     } catch {
         return false;
@@ -50,13 +40,7 @@ const URL_USERINFO_PATTERN = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]*@/gi;
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/**
- * Text shown anywhere but a form's own URL field (a status, the history, a toast, a
- * log line): the log sanitizer's redactions, no credentials in a URL, and none of
- * `secrets` (the configured password and token). A secret shorter than 4 characters
- * is redacted only as a whole word (letters, marks and digits of any script), never
- * inside a longer one.
- */
+
 export const redactSyncText = (text: string, secrets: readonly (string | null | undefined)[] = []): string => {
     let result = sanitizeLogMessage(text).replace(URL_USERINFO_PATTERN, '$1');
     for (const secret of [...secrets].sort((left, right) => (right?.length ?? 0) - (left?.length ?? 0))) {
@@ -82,7 +66,7 @@ export const formatSyncClockSkew = (ms: number): string => {
 
 export type SyncBackendGroup = { title: string; description: string; options: SyncSettingsBackendOption[] };
 
-/** The backend card's groups: Dropbox only on builds that are not FOSS, iCloud only where CloudKit runs. */
+
 export const getSyncBackendGroups = (input: { t: Translate; isFossBuild: boolean; supportsCloudKit: boolean }): SyncBackendGroup[] => [
     {
         title: input.t('settings.syncBackendGroupCloud'),
@@ -104,7 +88,7 @@ export const getSyncBackendGroups = (input: { t: Translate; isFossBuild: boolean
     },
 ];
 
-/** Every choice on the backend card, in order: Off first, then each group's. */
+
 export const getSyncBackendOptions = (groups: readonly SyncBackendGroup[]): SyncSettingsBackendOption[] => [
     'off',
     ...groups.flatMap((group) => group.options),
@@ -117,7 +101,7 @@ export type SyncBackendSelectionInput = {
     supportsCloudKit: boolean;
 };
 
-/** What the chosen backend and provider mean on screen. */
+
 export const resolveSyncBackendSelection = (input: SyncBackendSelectionInput) => {
     const { syncBackend, cloudProvider, isFossBuild, supportsCloudKit } = input;
     return {
@@ -125,8 +109,8 @@ export const resolveSyncBackendSelection = (input: SyncBackendSelectionInput) =>
         isSelfHostedSyncSelected: syncBackend === 'cloud' && (cloudProvider === 'selfhosted' || isFossBuild),
         isDropboxSyncSelected: syncBackend === 'cloud' && cloudProvider === 'dropbox' && !isFossBuild,
         isCloudKitSyncSelected: syncBackend === 'cloudkit' && cloudProvider === 'cloudkit' && supportsCloudKit,
-        // Encryption covers the backends Mindwtr writes whole blobs to; the self-hosted
-        // cloud and CloudKit keep structured server-side state and are out of scope.
+
+
         isEncryptionCapableBackend: syncBackend === 'file'
             || syncBackend === 'webdav'
             || (syncBackend === 'cloud' && cloudProvider === 'dropbox' && !isFossBuild),
@@ -170,7 +154,7 @@ export const getSyncBackendOptionLabel = (option: SyncSettingsBackendOption, t: 
     }
 };
 
-/** The backend card's description line: the backend in use. */
+
 export const getSyncBackendCurrentLabel = (syncBackend: SyncSettingsBackend, selection: SyncBackendSelection, t: Translate): string => (
     syncBackend === 'off'
         ? t('settings.syncBackendOff')
@@ -185,7 +169,7 @@ export const getSyncBackendCurrentLabel = (syncBackend: SyncSettingsBackend, sel
                         : t('settings.cloudProviderSelfHosted')
 );
 
-/** The toast message for a failed sync or activation. */
+
 export const getSyncFailureMessage = (error: unknown, t: Translate): string => {
     switch (classifySyncFailure(error)) {
         case 'offline':
@@ -209,20 +193,17 @@ export const getSyncFailureMessage = (error: unknown, t: Translate): string => {
         case 'fileGenerationCorrupt':
             return t('settings.syncFileGenerationCorrupt');
         default: {
-            // An unclassified failure used to show only "Review Settings → Sync and
-            // try again", which hid the one line that named the cause (#1151).
+
+
             const raw = (error instanceof Error ? error.message : String(error ?? '')).trim();
-            // File Sync's internal read codes are for the log, not the toast.
+
             const detail = /SAF_DOCUMENTS?_[A-Z_]+/.test(raw) ? '' : redactSyncText(raw);
             return detail ? `${t('settings.syncFailureGeneric')}\n${detail}` : t('settings.syncFailureGeneric');
         }
     }
 };
 
-/**
- * The last-sync card's error line: File Sync's lock and generation failures read as
- * their guidance. `redact` is the transport's (the configured secrets too).
- */
+
 export const getSyncLastErrorText = (lastSyncError: string | undefined, t: Translate, redact: Redact = redactUrlText): string | undefined => (
     classifySyncFailure(lastSyncError) === 'fileLockUnavailable'
         ? t('settings.syncFileLockUnavailable')
@@ -278,7 +259,7 @@ export type SyncConflictEntities = {
     people: readonly NamedEntity[];
 };
 
-/** A conflict's row title (or name), else its ID. */
+
 const findConflictTitle = (sample: EntityConflictSample, entities: SyncConflictEntities): string => {
     const { id } = sample;
     const list = sample.entity === 'task'
@@ -295,7 +276,7 @@ const findConflictTitle = (sample: EntityConflictSample, entities: SyncConflictE
     return ('title' in entity ? entity.title : entity.name) || id;
 };
 
-/** The last sync's resolved conflicts, up to six, and how many more there were. */
+
 export const buildSyncConflictLines = (stats: MergeStats | null | undefined, entities: SyncConflictEntities, t: Translate): string[] => {
     const samples = listMergeConflictSamples(stats).slice(0, 6);
     if (samples.length === 0) return [];
@@ -321,7 +302,7 @@ export const buildSyncConflictLines = (stats: MergeStats | null | undefined, ent
     return lines;
 };
 
-/** What the last-sync card counts: the stats show after a success or a conflict. */
+
 export const getSyncLastStatusSummary = (settings: Pick<AppSettings, 'lastSyncStats' | 'lastSyncStatus'>) => {
     const lastSyncStats = settings.lastSyncStats ?? null;
     const summary = summarizeMergeStats(lastSyncStats);
@@ -335,7 +316,7 @@ export const getSyncLastStatusSummary = (settings: Pick<AppSettings, 'lastSyncSt
     };
 };
 
-/** The card's first line: when the last sync ran, and whether it failed or had conflicts. */
+
 export const getSyncLastStatusLine = (
     settings: Pick<AppSettings, 'lastSyncAt' | 'lastSyncStatus'>,
     t: Translate,
@@ -346,7 +327,7 @@ export const getSyncLastStatusLine = (
     settings.lastSyncStatus === 'conflict' ? t('settings.syncStatusConflictsSuffix') : '',
 ].join('');
 
-/** The five newest history entries, one line each; `redact` as for getSyncLastErrorText. */
+
 export const buildSyncHistoryLines = (
     history: readonly SyncHistoryEntry[] | undefined,
     t: Translate,
@@ -374,7 +355,7 @@ export const buildSyncHistoryLines = (
 export const SYNC_PREFERENCE_KEYS = ['appearance', 'language', 'gtd', 'savedFilters', 'externalCalendars', 'ai'] as const;
 export type SyncPreferenceKey = (typeof SYNC_PREFERENCE_KEYS)[number];
 
-/** Which settings groups sync: GTD syncs unless turned off, the others only when turned on. */
+
 export const getSyncPreferenceValues = (syncPreferences: AppSettings['syncPreferences']): Record<SyncPreferenceKey, boolean> => {
     const preferences = syncPreferences ?? {};
     return {
@@ -387,13 +368,13 @@ export const getSyncPreferenceValues = (syncPreferences: AppSettings['syncPrefer
     };
 };
 
-/** The settings write for one sync option; the other stored options keep their values. */
+
 export const buildSyncPreferencesUpdate = (
     syncPreferences: AppSettings['syncPreferences'],
     partial: Partial<Record<SyncPreferenceKey, boolean>>,
 ): Pick<AppSettings, 'syncPreferences'> => ({ syncPreferences: { ...(syncPreferences ?? {}), ...partial } });
 
-/** The settings sync options card's rows, in screen order. */
+
 export const buildSyncPreferenceRows = (syncPreferences: AppSettings['syncPreferences'], t: Translate) => {
     const values = getSyncPreferenceValues(syncPreferences);
     const label: Record<SyncPreferenceKey, string> = {
@@ -412,27 +393,20 @@ export const buildSyncPreferenceRows = (syncPreferences: AppSettings['syncPrefer
     }));
 };
 
-/** The WebDAV form as typed: a URL that is not http(s) shows the error, and the actions need a valid URL. */
+
 export const getSyncWebDavFormState = (url: string) => {
     const urlError = url.trim() ? !isValidSyncHttpUrl(url.trim()) : false;
     return { urlError, canUseActions: url.trim().length > 0 && !urlError };
 };
 
-/**
- * The self-hosted form as typed. An empty token is valid (a server may run without
- * auth); only a non-empty token that fails the shape check is refused.
- */
+
 export const getSyncSelfHostedFormState = (url: string, token: string, isValidToken: (token: string) => boolean) => {
     const urlError = url.trim() ? !isValidSyncHttpUrl(url.trim()) : false;
     const tokenError = token.trim() ? !isValidToken(token.trim()) : false;
     return { urlError, tokenError, canUseActions: url.trim().length > 0 && !urlError && !tokenError };
 };
 
-/**
- * The File Sync panel's folder line: the name of the stored location's last part.
- * An Android document URI ends in its percent-encoded document ID
- * ("primary%3ASync%2Fdata.json"); its name is the ID's last path part.
- */
+
 export const getSyncFolderLabel = (syncPath: string | null, t: Translate): string | undefined => {
     if (!syncPath) return t('common.notSet');
     const leaf = syncPath.split('/').pop() ?? '';
@@ -440,13 +414,15 @@ export const getSyncFolderLabel = (syncPath: string | null, t: Translate): strin
     return (syncPath.startsWith('content://') ? name.slice(name.lastIndexOf(':') + 1) : name) || leaf;
 };
 
-/** The sync badge's state: the Menu tab's dot and the Settings menu's Sync row (moved from React Native's lib/sync-badge.ts). */
+
 export type SyncBadgeState = 'hidden' | 'syncing' | 'healthy' | 'attention';
 
 export function resolveSyncBadgeState(params: {
     configured: boolean;
     activityState: 'idle' | 'syncing';
     pendingRemoteWriteAt?: AppSettings['pendingRemoteWriteAt'];
+
+    localChangePending?: boolean;
     lastSyncStatus?: AppSettings['lastSyncStatus'];
     lastSyncAt?: AppSettings['lastSyncAt'];
 }): SyncBadgeState {
@@ -454,6 +430,7 @@ export function resolveSyncBadgeState(params: {
         configured,
         activityState,
         pendingRemoteWriteAt,
+        localChangePending,
         lastSyncStatus,
         lastSyncAt,
     } = params;
@@ -461,7 +438,7 @@ export function resolveSyncBadgeState(params: {
     if (!configured) return 'hidden';
     if (activityState === 'syncing') return 'syncing';
     if (lastSyncStatus === 'error') return 'attention';
-    if (pendingRemoteWriteAt) return 'syncing';
+    if (pendingRemoteWriteAt || localChangePending) return 'syncing';
     if (lastSyncStatus === 'success' || lastSyncStatus === 'conflict') return 'healthy';
     if (lastSyncAt) return 'healthy';
 

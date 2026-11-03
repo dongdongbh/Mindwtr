@@ -140,7 +140,7 @@ describe('markdown selection replacement fallbacks', () => {
             baseSelection: { start: 0, end: 9 },
         });
 
-        // The wrapped range stays selected, so the next backtick replaces it natively.
+
         const twice = applyMarkdownPairInsertionWithSelectionFallback(
             once!.result.value,
             '```',
@@ -183,7 +183,7 @@ describe('markdown selection replacement fallbacks', () => {
             baseSelection: { start: 0, end: 0 },
         });
 
-        // Typing the second backtick before the auto-inserted closer types over it.
+
         const twice = applyMarkdownPairInsertionWithSelectionFallback(
             once!.result.value,
             '```',

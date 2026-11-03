@@ -12,8 +12,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 type CapturedRequest = { url: string; init: RequestInit };
 
-// Takes a factory, not a Response instance: a Response body can only be read
-// once, and several tests here reuse the same mock across multiple fetches.
+
 function captureFetch(makeResponse: () => Response) {
     const calls: CapturedRequest[] = [];
     const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -308,13 +307,12 @@ describe('fetchProviderModelsCached', () => {
         const { fetchImpl } = captureFetch(() => jsonResponse({ data: [{ id: 'claude-sonnet-5' }] }));
 
         await fetchProviderModelsCached('anthropic', { apiKey: 'account-a', fetchImpl });
-        await fetchProviderModelsCached('anthropic', { apiKey: 'account-a', fetchImpl }); // cached
-        // Switching accounts must NOT serve account A's cached list.
+        await fetchProviderModelsCached('anthropic', { apiKey: 'account-a', fetchImpl });
+
         await fetchProviderModelsCached('anthropic', { apiKey: 'account-b', fetchImpl });
         await fetchProviderModelsCached('anthropic', { apiKey: 'account-a', fetchImpl, kind: 'transcription' });
 
-        // anthropic transcription short-circuits before fetch, so only the
-        // two distinct chat-kind keys hit the network.
+
         expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
 });
@@ -335,8 +333,8 @@ describe('mergeModelOptions', () => {
     });
 
     it('prepends a custom selected model on the fallback path too', () => {
-        // The degraded path is exactly where a typed custom model (self-hosted
-        // id, still-working retired id) must not vanish from its own picker.
+
+
         expect(mergeModelOptions(null, ['a', 'b'], 'llama3.2:latest')).toEqual(['llama3.2:latest', 'a', 'b']);
     });
 

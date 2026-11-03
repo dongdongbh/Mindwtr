@@ -12,7 +12,7 @@ import type { Area } from './types';
 export type NativeAreaCreateRequest = { requestId: string; name: string; color: string; expectedAreaId: string };
 export type NativeAreaCreateResult = { id: string; created: boolean };
 export type NativePreparedAreaCreate = PreparedAreaCreate & {
-    version: 1;
+    version: 1 | 2;
     request: NativeAreaCreateRequest;
     result: { id: string; created: true };
 };
@@ -28,7 +28,7 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message:
     ({ ok: false, error: { code, message } });
 const same = taskEditValuesEqual;
 
-/** Refuse non-JSON inputs and oversized UTF-8 envelopes before a store or SQL write. */
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number): boolean => {
         if (depth > 24) return false;
@@ -63,7 +63,7 @@ const readRequest = (value: unknown): NativeAreaCreateRequest | null => {
         ? input as NativeAreaCreateRequest : null;
 };
 
-/** Pure and usable to validate a cold-start journal before opening SQLite. */
+
 const readPrepared = (value: unknown): NativePreparedAreaCreate | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -71,7 +71,7 @@ const readPrepared = (value: unknown): NativePreparedAreaCreate | null => {
     const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'request', 'kind', 'scope', 'effect', 'deviceIdBefore',
         'deviceIdToInitialize', 'orderMax', 'restoreAt', 'updateAt', 'result'])
-        || raw.version !== 1 || !same(raw.request, request)
+        || (raw.version !== 1 && raw.version !== 2) || !same(raw.request, request)
         || (raw.kind !== 'fresh' && raw.kind !== 'restored')
         || !record(raw.scope) || !exact(raw.scope, ['area', 'projects', 'sections', 'tasks'])
         || !Array.isArray(raw.scope.projects) || !Array.isArray(raw.scope.sections) || !Array.isArray(raw.scope.tasks)
@@ -101,7 +101,7 @@ const readPrepared = (value: unknown): NativePreparedAreaCreate | null => {
         const planned = planAreaAddition({ areas: scope.area ? [scope.area] : witness,
             projects: scope.projects, sections: scope.sections, tasks: scope.tasks }, request.name,
         { color: request.color }, request.requestId, prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!,
-        prepared.restoreAt, prepared.updateAt);
+        prepared.restoreAt, prepared.updateAt, prepared.version);
         if (!planned || planned.kind !== prepared.kind || planned.area.id !== request.expectedAreaId) return null;
         const expected = areaAdditionEffect(scope, planned.rows, request.expectedAreaId);
         return same(prepared.effect, expected) ? prepared : null;
@@ -141,7 +141,7 @@ export function createAreaCreateMethods(deps: {
                 taken: Boolean(found && !found.deletedAt), normalizedName: normalized(value.name) } };
         },
 
-        /** Used only after retryPending() found no journal; this cannot create or restore an Area. */
+
         probeAreaCreateOutcome(input: NativeAreaCreateRequest): NativeHostResult<NativeAreaCreateResult> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -180,7 +180,7 @@ export function createAreaCreateMethods(deps: {
                 device.deviceId, restoreAt, updateAt);
             if (!planned || planned.kind === 'live' || planned.area.id !== request.expectedAreaId)
                 return fail('STALE_REVISION', 'Area name resolution changed');
-            const prepared: NativePreparedAreaCreate = { version: 1, request, kind: planned.kind,
+            const prepared: NativePreparedAreaCreate = { version: 2, request, kind: planned.kind,
                 scope, effect: areaAdditionEffect(scope, planned.rows, request.expectedAreaId),
                 deviceIdBefore: state.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null,

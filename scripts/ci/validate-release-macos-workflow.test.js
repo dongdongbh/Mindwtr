@@ -17,9 +17,7 @@ test("Intel macOS release builds and helper smoke checks run on Intel hardware",
   expect(intel.platform).toBe("macos-15-intel");
 });
 
-// Strips shell comment lines so assertions check actual invocations, not
-// prose explaining why a command is deliberately absent (e.g. a comment
-// that mentions `tauri bundle` while explaining that it must not run).
+
 const withoutShellComments = (run) =>
   (run || "")
     .split("\n")
@@ -56,8 +54,8 @@ test("the DMG is verified to contain the widget before notarization", () => {
   expect(notarizeIndex).toBeGreaterThan(verifyIndex);
 
   const verifyStep = steps[verifyIndex];
-  // Gated the same way as the widget embed step: unsigned builds never embed
-  // a widget, so there is nothing for this step to verify either.
+
+
   expect(verifyStep.if).toBe("env.APPLE_SIGNING_IDENTITY != ''");
   expect(verifyStep.run).toContain(
     "Contents/PlugIns/MindwtrWidgets.appex/Contents/MacOS/MindwtrWidgets",
@@ -89,11 +87,6 @@ test("the temporary keychain password is masked before it reaches GITHUB_ENV", (
   expect(exportIndex).toBeGreaterThan(maskIndex);
 });
 
-// --- Mac App Store workflow (#1054) ----------------------------------------
-// The App Store .pkg only carries the widget when the optional
-// MAS_WIDGET_PROVISIONING_PROFILE secret is present; these tests pin the step
-// order and gating so the widget can neither be dropped by a later Tauri
-// re-bundle nor break a build that has no profile configured.
 
 const APPSTORE_WORKFLOW_PATH = ".github/workflows/release-macos-appstore.yml";
 const WIDGET_GATE = "env.HAS_MAS_WIDGET_PROFILE == '1'";
@@ -110,7 +103,7 @@ test("App Store: all bundled Mach-O imports are checked immediately before packa
   expect(run).toContain('python3 scripts/ci/validate-macos-private-apis.py "$APP_PATH"\n\nxcrun productbuild');
   expect(run).toContain('--component "$APP_PATH" /Applications');
   expect(run).toContain('set -euo pipefail');
-  // The CI governance job runs scripts/ci/governance.sh.
+
   expect(readFileSync("scripts/ci/governance.sh", "utf8")).toContain(
     "python3 scripts/ci/validate-macos-private-apis.test.py",
   );

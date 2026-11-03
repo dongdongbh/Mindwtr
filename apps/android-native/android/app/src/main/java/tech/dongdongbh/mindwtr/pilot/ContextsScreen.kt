@@ -1,8 +1,10 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -37,13 +39,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -51,12 +53,8 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * RN's Contexts (components/views/contexts-view.tsx), as a stack screen or the quick-access tab, on core's getContextsView and
- * runContextsAction: the chip search, core's chips (All, No context, each context and tag, with core's counts), core's All/Any
- * switch, the bulk bar while rows are selected (core's statuses, token actions and Delete), core's rows, and core's empty
- * state. A row swipes right to core's status action, left to Delete with core's Undo, and a long-press selects it.
- */
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ContextsList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
@@ -65,25 +63,51 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
     val theme = LocalTheme.current
     val bulk = view.optJSONObject("bulk")
     val selected = view.optJSONArray("selectedIds").ids()
+
+    BackHandler(enabled = bulk != null && dialog == null && model.failedAction == null) { endSelection(); reload() }
     LazyColumn(Modifier.fillMaxSize().testTag("contexts-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         item(key = "search") {
-            Box(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(12.dp)) {
-                ListSearchField(own("contexts").optString("searchQuery"), view.getString("searchPlaceholder"), Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ListSearchField(own("contexts").optString("searchQuery"), view.getString("searchPlaceholder"), Modifier.weight(1f)) {
                     typeSearch("contexts", "searchQuery", it)
+                }
+
+                view.optJSONObject("sort")?.let { sort ->
+                    DirectControl(Lucide.ArrowUpDown, sort.getString("accessibilityLabel"), null, null, idle) { openDialog("sort") }
+                }
+                DirectControl(Lucide.Filter, t("filters.label"), null, null, idle) { openDialog("filters"); reload() }
+                if (view.optBoolean("canSave")) {
+                    DirectControl(Lucide.Plus, t("common.save"), null, null, idle) { openContextsSave() }
+                }
+            }
+        }
+        val savedFilters = view.optJSONObject("savedFilters")?.menuObjects("items").orEmpty()
+        if (savedFilters.isNotEmpty()) item(key = "saved-filters") {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (filter in savedFilters) {
+                    val on = filter.optBoolean("selected")
+                    SheetChip(filter.getString("name"), on, excluded = false, enabled = idle) {
+                        selectContextsSavedFilter(if (on) null else filter.getString("id"))
+                    }
                 }
             }
         }
         item(key = "chips") {
-            Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(top = 4.dp, bottom = 6.dp)) {
+            Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(top = 4.dp, bottom = 6.dp)) {
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     for (chip in view.menuObjects("chips")) {
                         val on = chip.getBoolean("selected")
                         val count = chip.getInt("count")
                         val shape = RoundedCornerShape(16.dp)
-                        Row(Modifier.heightIn(min = 44.dp).clip(shape).background(if (on) c.tint else c.filterBg).border(1.dp, c.border, shape)
-                            .selectable(selected = on, enabled = idle, role = Role.Button) { contextsChip(chip.getJSONObject("next")) }
-                            .semantics { contentDescription = chip.getString("accessibilityLabel") }.padding(horizontal = 12.dp, vertical = 6.dp),
+
+
+                        val additive = chip.optJSONObject("additive")
+                        Row(Modifier.heightIn(min = 44.dp).clip(shape).background(if (on) c.tint else c.filterBg).rnBorder(1.dp, c.border, shape)
+                            .combinedClickable(enabled = idle, role = Role.Button, onLongClickLabel = additive?.optString("label"),
+                                onLongClick = additive?.let { { contextsChip(it.getJSONObject("next")) } }) { contextsChip(chip.getJSONObject("next")) }
+                            .semantics { contentDescription = chip.getString("accessibilityLabel"); this.selected = on }.padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(chip.getString("label"), style = rnText(13, 500), color = if (on) c.onTint else c.text)
                             Box(Modifier.widthIn(min = 18.dp).clip(RoundedCornerShape(8.dp)).background(if (on) c.cardBg else theme.chipBadge)
@@ -98,7 +122,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
                         horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(mode.getString("label"), style = rnText(11, 600), color = c.secondaryText)
                         val control = RoundedCornerShape(8.dp)
-                        Row(Modifier.clip(control).background(c.filterBg).border(1.dp, c.border, control).padding(2.dp)) {
+                        Row(Modifier.clip(control).background(c.filterBg).rnBorder(1.dp, c.border, control).padding(2.dp)) {
                             for (option in mode.menuObjects("options")) {
                                 val on = option.getBoolean("selected")
                                 val label = option.getString("label")
@@ -132,47 +156,38 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/**
- * RN's Contexts bulk bar: core's count and Done, core's statuses, then core's token actions and Delete (core's question first). Each
- * sends the selection with [revisions], the view's taskRevisions for it.
- */
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ContextsBulkBar(model: InboxViewModel, bulk: JSONObject, selected: List<String>, revisions: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(bulk.getString("countLabel"), style = rnText(13, 600), color = c.secondaryText)
-            PillChip(bulk.getString("exitLabel"), c.text, idle) { endSelection(); reload() }
+    val any = idle && selected.isNotEmpty()
+    Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(bulk.getString("countLabel"), style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.weight(1f))
+            BulkExitButton(bulk.getString("exitLabel"), idle) { endSelection(); reload() }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (status in bulk.menuObjects("statuses")) {
-                PillChip(status.getString("label"), c.text, idle && selected.isNotEmpty()) { act("contextsAction", moveTasks(selected, status.getString("status"), revisions)) }
+                BarButton(status.getString("label"), any, c.filterBg, c.text, weight = 500) { act("contextsAction", moveTasks(selected, status.getString("status"), revisions)) }
             }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             for (token in bulk.menuObjects("tokenActions")) {
-                PillChip(token.getString("title"), c.text, idle && token.getBoolean("enabled")) {
+                BarButton(token.getString("title"), any && token.getBoolean("enabled"), c.filterBg, c.text) {
                     keepDialog(JSONObject().put("kind", "tokens").put("list", "contexts").put("field", token.getString("field"))
                         .put("mode", token.getString("mode")).put("text", "").put("picked", JSONArray()))
                 }
             }
-            PillChip(bulk.getString("deleteLabel"), c.text, idle && selected.isNotEmpty()) {
+            BarButton(bulk.getString("deleteLabel"), any, c.filterBg, c.text) {
                 confirm(bulk.getJSONObject("deleteConfirmation"), trashTasks(selected, revisions), "contextsAction")
             }
         }
     }
 }
 
-/** RN's round bulk button (Contexts): bordered, the filter background, 13/600, dimmed while disabled. */
-@Composable
-fun PillChip(label: String, color: Color, enabled: Boolean, onClick: () -> Unit) {
-    val c = LocalTheme.current.colors
-    Text(label, style = rnText(13, 600), color = color, modifier = Modifier.fade(if (enabled) 1f else 0.5f).clip(CircleShape).background(c.filterBg).border(1.dp, c.border, CircleShape)
-        .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp))
-}
 
-/** RN's search input on a list (Contexts): 40 high, radius 8, the input background, core's placeholder; the text as typed. */
 @Composable
 fun ListSearchField(value: String, placeholder: String, modifier: Modifier, onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -187,30 +202,26 @@ fun ListSearchField(value: String, placeholder: String, modifier: Modifier, onCh
         })
 }
 
-/** Contexts' chip: the selection core put on it (its `next`), read at once. */
+
 internal fun MenuModel.contextsChip(next: JSONObject) {
     editOwn("contexts") { put("tokens", next.getJSONArray("tokens")).put("matchMode", next.getString("matchMode")) }
     reload()
 }
 
-/** Contexts' All/Any switch: core's mode, read at once. */
+
 internal fun MenuModel.contextsMatchMode(mode: String) {
     editOwn("contexts") { put("matchMode", mode) }
     reload()
 }
 
-/** RN's toggleMultiSelect: one row in or out of the list's selection; core prunes it to the rows on screen and counts it. */
+
 internal fun MenuModel.toggleRow(list: String, id: String) {
     val picked = own(list).optJSONArray("selected").ids()
     editOwn(list) { put("selected", JSONArray(if (id in picked) picked - id else picked + id)) }
     reload()
 }
 
-/**
- * The picker the open dialog names: a Contexts token action (core's picker), Review's Remove tag (core's tags), or a list's Remove
- * tag (core's bulk picker). While text is typed, its tokens are core's search answer (the view's `bulk.picker`; a list's bar picker
- * is read with the query already); before core's first answer, the whole list shows.
- */
+
 private fun MenuModel.tokenPicker(open: JSONObject): JSONObject? {
     if (open.optString("list") == "bulk") {
         val bar = page?.bulk ?: return null
@@ -221,7 +232,7 @@ private fun MenuModel.tokenPicker(open: JSONObject): JSONObject? {
     }
     val bulk = page?.view?.optJSONObject("bulk") ?: return null
     val review = open.optString("list") == "review"
-    // ponytail: a typed search shows core's first window of matches (100 tokens, no More); page `picker.offset` if a query ever matches more.
+
     val found = bulk.optJSONObject("picker")?.takeIf { picker ->
         tokenQuery(open) != null && if (review) picker.optString("kind") == "removeTag"
             else picker.optString("field") == open.optString("field") && picker.optString("mode") == open.optString("mode")
@@ -235,12 +246,7 @@ private fun MenuModel.tokenPicker(open: JSONObject): JSONObject? {
         ?.let { action -> found?.let { JSONObject(action.toString()).put("tokens", it) } ?: action }
 }
 
-/**
- * RN's TokenPickerModal: a card over a dimmed screen with core's title (RN repeats it as the description), the field (RN's query:
- * core's matching tokens show, and it is a new token's text where core allows a custom value), core's tokens as chips, and Cancel
- * and Save. Adding takes the tapped token or the typed text; removing takes every tapped token. Save sends core's editTaskTokens
- * (Contexts) or removeTags (Review).
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
@@ -255,13 +261,13 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     val canSave = values.isNotEmpty() && idle
     val review = open.optString("list") == "review"
     val save = {
-        // The selection and its revisions as core's view showed them: Contexts' top-level ones, or Review's bar's.
+
         val selection = page?.view?.takeIf { it.has("selectedIds") } ?: page?.view?.optJSONObject("bulk")
         val ids = selection?.optJSONArray("selectedIds").ids()
         val revisions = selection?.optJSONObject("taskRevisions") ?: JSONObject()
         keepDialog(null)
         when {
-            // A list's Remove tag: core's editTaskTokens on its selection (or Select all).
+
             open.optString("list") == "bulk" -> bulkAction(JSONObject().put("type", "editTaskTokens").put("field", "tags").put("mode", "remove").put("values", JSONArray(values)), "removeTag")
             review -> act("reviewAction", removeTags(ids, values, revisions))
             else -> act("contextsAction", editTaskTokens(ids, open.getString("field"), open.getString("mode"), values, revisions))
@@ -270,12 +276,12 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button) { keepDialog(null) }.imePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(18.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
             .padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val title = picker.getString("title")
             Text(title, style = rnText(18, 700), color = c.text, modifier = Modifier.semantics { heading() })
             Text(title, style = rnText(13, 400, 18), color = c.secondaryText)
-            // RN's query field in both modes: typing asks core for the matching tokens; a single pick also names the typed token.
+
             run {
                 val focus = remember { FocusRequester() }
                 LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -285,7 +291,7 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = picker.getString("placeholder") }.testTag("menu-dialog-field"),
                     decorationBox = { inner ->
-                        Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.inputBg).border(1.dp, c.border, field).padding(horizontal = 14.dp, vertical = 10.dp),
+                        Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.inputBg).rnBorder(1.dp, c.border, field).padding(horizontal = 14.dp, vertical = 10.dp),
                             contentAlignment = Alignment.CenterStart) {
                             if (text.isEmpty()) Text(picker.getString("placeholder"), style = rnText(15, 400), color = c.secondaryText)
                             inner()
@@ -294,7 +300,7 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
             }
             val list = RoundedCornerShape(14.dp)
             val tokens = picker.optJSONArray("tokens").ids()
-            Box(Modifier.testTag("token-picker-list").fillMaxWidth().heightIn(max = 240.dp).clip(list).background(c.bg).border(1.dp, c.border, list)
+            Box(Modifier.testTag("token-picker-list").fillMaxWidth().heightIn(max = 240.dp).clip(list).background(c.bg).rnBorder(1.dp, c.border, list)
                 .verticalScroll(rememberScrollState()).padding(12.dp)) {
                 if (tokens.isEmpty()) Text(t("common.noMatches"), style = rnText(14, 400), color = c.secondaryText, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp))
@@ -302,9 +308,9 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     for (token in tokens) {
                         val on = token in picked
                         Text(token, style = rnText(13, 600), color = if (on) c.onTint else c.text, modifier = Modifier.clip(CircleShape)
-                            .background(if (on) c.tint else c.filterBg).border(1.dp, if (on) c.tint else c.border, CircleShape)
+                            .background(if (on) c.tint else c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                             .selectable(selected = on, role = Role.Button) {
-                                // A single pick fills the field (RN's setQuery), so core's search narrows to it; a multi pick leaves the search.
+
                                 if (multi) keepDialog(JSONObject(open.toString()).put("picked", JSONArray(if (on) picked - token else picked + token)))
                                 else typeToken(JSONObject(open.toString()).put("picked", JSONArray(listOf(token))).put("text", token))
                             }.padding(horizontal = 12.dp, vertical = 8.dp))

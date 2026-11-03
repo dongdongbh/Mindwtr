@@ -26,7 +26,7 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message:
 const result = (request: NativeProjectSectionRenameRequest): NativeProjectSectionRenameResult =>
     ({ id: request.sectionId, projectId: request.projectId });
 const validParent = (value: unknown, id: string): value is Project => record(value)
-    // Legacy optional nulls are validated as absent; the frozen parent stays byte-for-byte raw.
+
     && validProject(Object.fromEntries(Object.entries(value).map(([key, part]) =>
         [key, part === null ? undefined : part])), id);
 export const validSection = (value: unknown, id: string, projectId: string): value is Section => {
@@ -38,6 +38,7 @@ export const validSection = (value: unknown, id: string, projectId: string): val
         || !iso(row.createdAt) || !iso(row.updatedAt)
         || (row.description !== undefined && typeof row.description !== 'string')
         || (row.isCollapsed !== undefined && typeof row.isCollapsed !== 'boolean')
+        || (row.isSequential !== undefined && typeof row.isSequential !== 'boolean')
         || (row.rev !== undefined && !(typeof row.rev === 'number'
             && Number.isSafeInteger(row.rev) && row.rev >= 0))
         || (row.revBy !== undefined && typeof row.revBy !== 'string')
@@ -59,7 +60,7 @@ const readRequest = (value: unknown): NativeProjectSectionRenameRequest | null =
     return input as NativeProjectSectionRenameRequest;
 };
 
-/** Pure cold-journal validation before SQLite or a mutable store check. */
+
 const readPrepared = (value: unknown): NativePreparedProjectSectionRename | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

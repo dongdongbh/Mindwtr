@@ -1,17 +1,10 @@
-// On-demand attachment fetch: what runs when a user opens an attachment whose bytes exist
-// only on the sync remote. One branch per backend (File Sync, CloudKit, self-hosted cloud,
-// Dropbox, WebDAV); each downloads into scratch and publishes through the native installer
-// only while the managed target is still absent. It moved here from React Native's
-// `apps/mobile/lib/attachment-sync-availability.ts` so the native apps run the same rules.
-//
-// Data safety: a failed download never deletes local bytes, a target already on disk is used
-// only when its bytes prove they are the current remote generation, and a CloudKit not-found, a
-// WebDAV or self-hosted cloud 404, or a Dropbox path-not-found is terminal (the attachment is marked unrecoverable).
+
+
+
 import type { Attachment } from './types';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
 import { extractExtension, getBaseSyncUrl, getCloudBaseUrl } from './attachment-paths';
 import { reportProgress, validateAttachmentHash } from './attachment-transfer';
-import { markAttachmentUnrecoverable } from './attachment-validation';
 import { cloudGetFile } from './cloud';
 import { parseCloudKitAttachmentKey } from './cloudkit-attachments';
 import { DropboxFileNotFoundError, downloadDropboxFile } from './dropbox';
@@ -31,11 +24,11 @@ export type AttachmentAvailabilityOutcome =
   | { status: 'unrecoverable'; attachment: Attachment }
   | { status: 'unavailable' };
 
-/** Remote download naming; unlike managed copies, only the title supplies a fallback extension. */
+
 export const getAttachmentDownloadFileName = (attachment: Attachment): string =>
   attachment.cloudKey?.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
 
-/** Private candidate only. Its source is not installed or checkpointed availability. */
+
 export type PreparedAttachmentAvailabilityOutcome = AttachmentAvailabilityOutcome | {
   status: 'prepared';
   attachment: Attachment;
@@ -60,7 +53,7 @@ type InternalPreparedOutcome = PreparedAttachmentDownloadBytes & {
 };
 type InternalPreparationOutcome = InternalAvailabilityOutcome | InternalPreparedOutcome;
 
-/** A download may only be shared while it represents the same immutable remote bytes. */
+
 export const getAttachmentDownloadIdentity = (attachment: Attachment): string => JSON.stringify([
   attachment.id,
   attachment.cloudKey ?? null,
@@ -73,8 +66,7 @@ export const hasAttachmentDownloadIdentity = (
   identity: string,
 ): attachment is Attachment => Boolean(attachment && getAttachmentDownloadIdentity(attachment) === identity);
 
-/** Descriptive metadata belongs to the current document. A completed download may
- * only publish device-local availability and fill a previously absent verified hash. */
+
 export const getAttachmentAvailabilityPatch = (
   current: Attachment,
   resolved: Attachment,
@@ -84,8 +76,7 @@ export const getAttachmentAvailabilityPatch = (
   ...(!current.fileHash && resolved.fileHash ? { fileHash: resolved.fileHash } : {}),
 });
 
-/** Terminal remote absence may clear only lifecycle fields. Descriptive metadata remains
- * owned by the latest document selected by the caller's download-identity guard. */
+
 export const getAttachmentUnrecoverablePatch = (
   resolved: Attachment,
 ): Partial<Attachment> => ({
@@ -96,21 +87,20 @@ export const getAttachmentUnrecoverablePatch = (
   updatedAt: resolved.updatedAt,
 });
 
-/** Core functions called through here so a host's tests can replace them the way they
- *  replace `@mindwtr/core`. A host that passes nothing gets core's own. */
+
 export type MobileAttachmentAvailabilityCoreFunctions = {
   isSandboxMode: typeof isSandboxMode;
   withRetry: typeof withRetry;
   cloudGetFile: typeof cloudGetFile;
   webdavGetFile: typeof webdavGetFile;
   downloadDropboxFile: (accessToken: string, path: string) => Promise<ArrayBuffer>;
-  /** Dropbox's path-not-found refusal (a host whose Dropbox client throws its own error class says which). */
+
   isDropboxFileNotFoundError: (error: unknown) => boolean;
 };
 
-/** iCloud attachment assets (iOS only). */
+
 export type MobileAttachmentCloudKitPort = {
-  /** Downloads the record's asset into `stagedUri`. */
+
   fetchAttachmentAsset(recordName: string, stagedUri: string): Promise<unknown>;
   isAttachmentNotFoundError(error: unknown): boolean;
 };
@@ -118,12 +108,12 @@ export type MobileAttachmentCloudKitPort = {
 export type MobileAttachmentAvailabilityHost = {
   files: MobileAttachmentFiles;
   common: MobileAttachmentCommon;
-  /** The device key-value store (React Native: AsyncStorage). */
+
   storage: Pick<SyncKeyValueStoragePort, 'getItem'>;
   encryption: Pick<MobileSyncEncryptionPort, 'getSyncEncryptionMaterial'>;
-  /** The build's Dropbox app key, or '' when none is configured. */
+
   getDropboxClientId(): Promise<string>;
-  /** A host without CloudKit reports every `cloudkit` attachment as unavailable. */
+
   cloudKit?: MobileAttachmentCloudKitPort;
   core?: Partial<MobileAttachmentAvailabilityCoreFunctions>;
 };
@@ -142,11 +132,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
   const prepareAttachmentDownloadBytes = common.prepareAttachmentDownloadBytes;
   const downloadLocks = new Map<string, Promise<AttachmentAvailabilityOutcome>>();
 
-  /**
-   * A failed on-demand download: progress fails, and a remote that answers the file is gone ([notFound]) is terminal, as the
-   * sync pass treats it: the attachment is marked unrecoverable (on a copy; local bytes are never deleted), so a retry asks
-   * the server nothing. Any other failure stays retryable.
-   */
+
   const downloadFailed = (
     attachment: Attachment,
     error: unknown,
@@ -162,17 +148,14 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       notFound ? 'Attachment is no longer available' : error instanceof Error ? error.message : String(error)
     );
     if (notFound) {
-      markAttachmentUnrecoverable(attachment);
       files.logAttachmentWarn(terminalLog.message, error, { releaseCheck: terminalLog.releaseCheck });
-      return { availabilityStatus: 'unrecoverable', attachment };
+      return null;
     }
     files.logAttachmentWarn(`Failed to download attachment ${attachment.id}`, error);
     return null;
   };
 
-  /** A managed target left by a prior attempt is usable only when its bytes prove
-   * they are the current remote generation. Without a remote hash there is no safe
-   * way to distinguish a crash retry from a stale generation that won the absent CAS. */
+
   const resolveMatchingManagedTarget = async (
     attachment: Attachment,
     targetUri: string,
@@ -193,11 +176,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     }
   };
 
-  /**
-   * Publish an on-demand download only while the managed target is still absent.
-   * The native installer owns the scratch generation once invoked; a false result
-   * is a late local create and already records centralized failed progress.
-   */
+
   const installMissingAttachmentBytes = async (
     attachment: Attachment,
     attachmentsDir: string,
@@ -286,12 +265,8 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     let stagedPath: string | null = null;
     let installerOwnsStage = false;
     try {
-      // #1056: the local attachments directory always holds plaintext, so an encrypted
-      // sync folder's bytes are opened on the way in. `null` material keeps the
-      // byte-for-byte pre-feature behavior. Inside the try: S3 — an enabled-but-no-key
-      // device throws instead of returning `null`, and that must fail this fetch closed
-      // (logged, `null` result), never fall through to a plaintext path as if encryption
-      // were off.
+
+
       const material = await host.encryption.getSyncEncryptionMaterial();
       let sourceUri: string;
       if (syncDir.type === 'file') {
@@ -368,9 +343,8 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
           : error instanceof Error ? error.message : String(error),
       );
       if (terminalNotFound) {
-        markAttachmentUnrecoverable(attachment);
         files.logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);
-        return { availabilityStatus: 'unrecoverable', attachment };
+        return null;
       }
       files.logAttachmentWarn(`Failed to download CloudKit attachment ${attachment.id}`, error);
       return null;
@@ -416,8 +390,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       }
     }
 
-    // A selected existing generation needs its stored hash, not a remote key.
-    // A missing selection still cannot acquire bytes without remote identity.
+
     if (preparing && !localAttachment.cloudKey) return null;
     const backend = preparing ? preparedBackend : await host.storage.getItem(SYNC_BACKEND_KEY);
     if (backend === 'file') {
@@ -608,7 +581,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     }
   };
 
-  /** Compatibility wrapper for existing non-UI callers. Detailed callers retain conflicts. */
+
   const ensureAttachmentAvailable = async (attachment: Attachment): Promise<Attachment | null> => {
     const outcome = await ensureAttachmentAvailableDetailed(attachment);
     return outcome.status === 'available' ? outcome.attachment : null;
@@ -620,7 +593,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
   ): Promise<PreparedAttachmentAvailabilityOutcome> => {
     assertAttachmentSyncNotAborted(signal);
     if (core.isSandboxMode()) return { status: 'unavailable' };
-    // A source token belongs to this invocation; never use ordinary downloadLocks.
+
     const result = await ensureAttachmentAvailableInternal(attachment, 'prepare', signal);
     assertAttachmentSyncNotAborted(signal);
     if (result === GENERATION_CONFLICT) return { status: 'generation-conflict' };

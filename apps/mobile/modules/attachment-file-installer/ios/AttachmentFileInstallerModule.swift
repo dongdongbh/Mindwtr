@@ -10,10 +10,6 @@ private let installerPreservedPrefix = ".mindwtr-preserved-"
 private let installerLockName = ".mindwtr-attachment-installer.lock"
 private let sha256Pattern = try! NSRegularExpression(pattern: "^[a-f0-9]{64}$")
 
-// Immutable publication protects against crashes and cooperating Mindwtr
-// writers by retaining a private namespace and exact descriptors. A malicious
-// same-UID process that can bypass that private directory is outside the model;
-// ambiguous provider or identity behavior remains fail-closed.
 
 private enum InstallerNodeKind {
   case missing
@@ -62,8 +58,7 @@ public struct AttachmentFileHashSnapshot {
   public let modificationTimeMs: Double
 }
 
-/// Typed entry point for clients using the same managed-file installer as RN.
-/// Roots come from the host's private storage owner, never an install request.
+
 public final class AttachmentFileInstaller {
   private let installer: AttachmentFileInstallerEngine
   private let hasher: AttachmentFileHashingEngine
@@ -102,9 +97,7 @@ public final class AttachmentFileInstaller {
     return try hasher.hash(input)
   }
 
-  /// Reserves an exclusive private stage using the existing RN installer.
-  /// This facade is transport, not a durable reservation record: the caller must
-  /// persist its operation/intent and every returned identity token across crashes.
+
   public func prepareImmutableStage(
     targetInput: URL,
     operationId: String
@@ -113,8 +106,7 @@ public final class AttachmentFileInstaller {
     return try installer.prepareImmutableStage(targetInput: targetInput, operationId: operationId)
   }
 
-  /// Records the written stage's proof. Atomic replacement invalidates the
-  /// prepared stage token; snapshot the actual bytes before publication.
+
   public func snapshotImmutableStage(
     stagedInput: URL,
     targetInput: URL,
@@ -129,8 +121,7 @@ public final class AttachmentFileInstaller {
     )
   }
 
-  /// Publishes without adopting or overwriting an existing target. All expected
-  /// identity tokens are required; the engine owns path and no-replace semantics.
+
   public func publishImmutable(
     stagedInput: URL,
     targetInput: URL,
@@ -151,10 +142,7 @@ public final class AttachmentFileInstaller {
     )
   }
 
-  /// Retires only a stage proved owned under the engine's existing contract.
-  /// Private-stage cleanup uses identity tokens and can remove partial bytes;
-  /// legacy-stage cleanup also verifies the digest and may retain uncertain bytes
-  /// in quarantine. No orphan sweep or cleanup of an existing target is performed.
+
   public func cleanupImmutableStage(
     stagedInput: URL,
     targetInput: URL,
@@ -180,9 +168,7 @@ public final class AttachmentFileInstaller {
     )
   }
 
-  /// Durably retires only the recorded private stage, including partial bytes.
-  /// Unlike legacy cleanup, missing requires the exact recorded managed root.
-  /// The caller separately owns the durable decision and current keep policy.
+
   public func retireOwnedPrivateStage(
     stagedInput: URL,
     targetInput: URL,
@@ -209,8 +195,8 @@ public final class AttachmentFileInstaller {
 
   private static func validateRoot(_ input: URL) throws {
     try validateFileURL(input)
-    // Check the injected root before the engine resolves it. System ancestor
-    // aliases (for example /var on Apple platforms) retain existing semantics.
+
+
     var path = input.path
     while path.count > 1 && path.hasSuffix("/") { path.removeLast() }
     var value = stat()
@@ -224,9 +210,7 @@ public final class AttachmentFileInstaller {
   }
 }
 
-/** Native streaming verifier for the managed canonical attachment generation.
- * It shares the installer lock and binds the digest to the same named inode
- * before and after consumption. */
+
 final class AttachmentFileHashingEngine {
   private let targetRoot: URL
 
@@ -371,8 +355,7 @@ private func parseInstallerSha256(_ value: String, label: String) throws -> Stri
   return digest
 }
 
-// Deterministic crash boundaries for the native recovery test target. The app
-// always uses the default no-op injector.
+
 enum AttachmentFileInstallerFaultPoint: Equatable {
   case afterInitialJournal
   case afterExclusiveLink
@@ -475,9 +458,7 @@ final class AttachmentFileInstallerEngine {
     }
   }
 
-  /** File Sync create-no-replace publication without putting the managed-local
-   * installer's journal/candidate/quarantine artifacts in the shared folder.
-   * Exact scratch ownership and restart recovery are device-local in JS. */
+
   func publishImmutable(
     stagedInput: URL,
     targetInput: URL,
@@ -874,8 +855,7 @@ final class AttachmentFileInstallerEngine {
     }
   }
 
-  /// One private cleanup sequence serves both the unchanged legacy contract
-  /// and the stronger owned entry. Only owned mode retains descriptor proofs.
+
   private func cleanupPrivateStage(
     privateDirectory: URL,
     privateStage: URL,
@@ -1269,8 +1249,8 @@ final class AttachmentFileInstallerEngine {
           guard try sha256(artifacts.quarantine) == expectedLocal else {
             return .conflict(preservedUrl: artifacts.quarantine)
           }
-          // Equal bytes do not prove both names reference the same inode.
-          // Preserve the active quarantine independently before retrying.
+
+
           _ = try preserveActiveQuarantine(artifacts)
         }
         try deleteInternalIfRegular(artifacts.candidate)
@@ -1352,8 +1332,8 @@ final class AttachmentFileInstallerEngine {
         guard try sha256(artifacts.quarantine) == sha256(preservedUrl) else {
           throw installerError("Attachment preservation generations diverged")
         }
-        // Equal bytes are not an inode-identity proof. Retain the active
-        // quarantine under a fresh name before clearing its installer slot.
+
+
         _ = try preserveActiveQuarantine(artifacts)
       }
     case .directory:
@@ -1696,8 +1676,8 @@ final class AttachmentFileInstallerEngine {
       try delete(staged)
       try syncDirectory(staged.deletingLastPathComponent())
     } catch {
-      // The target generation is already durable. Preserve a private duplicate
-      // rather than turning a completed install into an ambiguous retry.
+
+
     }
   }
 

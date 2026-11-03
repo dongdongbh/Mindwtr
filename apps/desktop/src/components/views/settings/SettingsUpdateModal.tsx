@@ -43,7 +43,7 @@ export function SettingsUpdateModal({
         <Dialog
             onClose={() => { if (!isDownloading) onClose(); }}
             labelledBy={titleId}
-            // The download can already be running: only Later dismisses it.
+
             closeOnBackdrop={false}
             panelClassName="max-w-lg mx-4 max-h-[80vh] bg-card rounded-lg border-border shadow-xl"
         >

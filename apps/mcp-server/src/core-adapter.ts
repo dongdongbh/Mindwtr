@@ -45,6 +45,7 @@ type CoreActionResult = {
 
 type CoreModule = {
   setStorageAdapter: (adapter: unknown) => void;
+  markNextLoadAsDocumentReplacement: () => void;
   flushPendingSave: () => Promise<void>;
   runWithImmediateSaveTracking: <T>(operation: () => Promise<T>) => Promise<{ result: T; saveCount: number }>;
   createSerializedAsyncQueue: () => SerializedAsyncQueue;
@@ -61,7 +62,7 @@ type SerializedAsyncQueue = {
 };
 
 type TaskWriteResult = Task & { storageWarning?: string };
-/** `existing`: a live area already had the name; nothing was created and the props were not applied. */
+
 export type AreaWriteResult = Area & { existing?: true };
 
 export type CoreEntityPatch<T> = Partial<T> | ((current: T) => Partial<T>);
@@ -100,11 +101,12 @@ let coreService: CoreService | null = null;
 let coreDbPath: string | undefined;
 let coreReadonly = false;
 let coreReady: Promise<void> | null = null;
+
+
+let coreLoadedDbPath: string | undefined;
 let coreQueue: SerializedAsyncQueue | null = null;
-// The write client's close, kept at module scope (unlike the ensureCoreReady-local
-// `closeClient`, which is only for closing on an init failure) so closeCoreAdapter can
-// actually close it later - this client otherwise stays open for the process's whole
-// lifetime with no close path at all (BUG-15).
+
+
 let coreClientClose: (() => void) | null = null;
 
 const CORE_SQLITE_BUSY_TIMEOUT_MS = 5000;
@@ -159,24 +161,13 @@ const loadCoreModules = async (): Promise<CoreModule> => {
 };
 
 const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-// The exact, closed set of messages packages/core's update/delete/rename store actions
-// (store-tasks.ts:524, store-projects/*'s mutateEntities/update*/delete* helpers) emit ONLY
-// when the id being acted on doesn't exist — a genuine lookup miss. Update actions can also
-// fail for OTHER reasons on an id that DOES exist (store-tasks.ts's updateTask: a focus-cap
-// hit -> "Focus limit of N reached", or preparedUpdates.error for a bad patch) —
-// those are user-input mistakes, not not-found, and must not match this set.
-//
-// The identical strings ('Area not found' etc.) are ALSO produced by task-container-rules.ts
-// when addTask references a nonexistent projectId/sectionId/areaId at CREATE time — that's a
-// bad-input problem too (nothing exists yet to "not find"), which is why ensureActionSucceeded
-// below never checks this set for the 'create task' action regardless of message text.
+
+
 const LOOKUP_MISS_MESSAGES = new Set([
   'Task not found', 'Project not found', 'Section not found', 'Area not found', 'Person not found',
 ]);
 
-// isLookupContext defaults to true because every non-writeTask caller below acts on an id that
-// must already exist (update/delete/rename — never add*, which uses throwCreateFailed
-// instead). writeTask passes false for its 'create task' action explicitly (see below).
+
 const ensureActionSucceeded = (action: string, result: CoreActionResult, isLookupContext = true) => {
   if (result.success) return;
   const message = result.error || `Failed to ${action}.`;
@@ -185,10 +176,8 @@ const ensureActionSucceeded = (action: string, result: CoreActionResult, isLooku
   }
   throw new ValidationError(message);
 };
-// add* actions return null/undefined for a validation failure (empty title/name, or a
-// reference to a missing parent id) — a user mistake, not a "not found" lookup failure.
-// A `function` declaration, not a `const` arrow: only the former's `never` return type is
-// recognized by TS's control-flow analysis for narrowing the caller's `if (!created)` check.
+
+
 function throwCreateFailed(message: string): never {
   throw new ValidationError(message);
 }
@@ -293,8 +282,8 @@ export const createCorePersistenceService = (
       'update task',
       (state) => {
         if (typeof updates !== 'function') return state.updateTask(id, updates);
-        // This callback runs only after fetchData, while runWriteTransaction holds the
-        // cross-process lock, so attachment patches cannot close over a stale pre-lock row.
+
+
         const current = state._allTasks.find((task) => task.id === id);
         return state.updateTask(id, current ? updates(current) : {});
       },
@@ -375,13 +364,17 @@ const ensureCoreReady = async (options: DbOptions) => {
           throw new Error(`Failed to add ${tableName}.orderNum during MCP preflight: ${getErrorMessage(error)}`);
         }
       };
-      // Preflight for older DBs missing orderNum column.
+
       await ensureOrderNumColumn('tasks');
       await ensureOrderNumColumn('projects');
       const sqliteAdapter = new core.SqliteAdapter(client, { rejectConcurrentWrites: !coreReadonly });
       await sqliteAdapter.ensureSchema();
       core.setStorageAdapter(sqliteAdapter);
+
+
+      if (coreLoadedDbPath !== undefined && coreLoadedDbPath !== resolvedPath) core.markNextLoadAsDocumentReplacement();
       await core.useTaskStore.getState().fetchData();
+      coreLoadedDbPath = resolvedPath;
       const runWriteTransaction: WriteTransactionRunner = coreReadonly
         ? runDirectly
         : (operation) => withMcpWriteLock(resolvedPath, operation);
@@ -546,12 +539,7 @@ export const runCoreService = async <T>(options: DbOptions, fn: (service: CoreSe
   return coreQueue.run(() => fn(service));
 };
 
-/**
- * Closes the module-level write client (BUG-15: it otherwise never closes, so its WAL
- * checkpoint never runs and its -wal/-shm files linger - locked open on Windows). Waits for
- * any in-flight write to finish first so a shutdown can't close out from under one. Safe to
- * call when the adapter was never initialized (e.g. a cloud-backend process).
- */
+
 export const closeCoreAdapter = async (): Promise<void> => {
   if (coreReady) {
     await coreReady.catch(() => undefined);

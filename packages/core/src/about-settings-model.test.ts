@@ -21,7 +21,7 @@ describe('the feedback modal\'s rules', () => {
         const room = getFeedbackMessageMaxLength(where, tr);
         expect(room).toBe(FEEDBACK_MESSAGE_MAX_LENGTH - `${tr('settings.feedbackWhereMessagePrefix')}: ${tr('settings.feedbackWhereSync')}\n\n`.length);
         expect(getFeedbackMessageMaxLength(draft, tr)).toBe(FEEDBACK_MESSAGE_MAX_LENGTH);
-        // A full message, then a place picked: what goes still fits, and the endpoint accepts it.
+
         const plan = planFeedbackSubmit({ ...where, message: 'x'.repeat(FEEDBACK_MESSAGE_MAX_LENGTH) }, tr);
         if ('error' in plan) throw new Error(plan.error);
         expect(plan.input.message.length).toBe(FEEDBACK_MESSAGE_MAX_LENGTH);

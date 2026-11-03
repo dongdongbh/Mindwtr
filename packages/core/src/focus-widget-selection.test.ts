@@ -41,9 +41,8 @@ describe('computeTodayFocusTasks — sequential projects', () => {
     ]);
 
     it('gives the slot to a later step that is due today', () => {
-        // The Focus screens' rule (getFocusSequentialFirstTaskIds): a due-today
-        // step outranks an earlier plain step. The order-only helper the widget
-        // builders used before this module picked step-1 here.
+
+
         const { focusTasks } = select(steps({ dueDate: iso('2026-03-10T17:00:00') }), [sequential]);
         expect(ids(focusTasks)).toEqual(['step-3']);
     });
@@ -73,8 +72,8 @@ describe('computeTodayFocusTasks — sequential projects', () => {
     });
 
     it('lets an earlier step deferred to a future date keep holding the slot', () => {
-        // The Focus screens feed the helper their unfiltered active pool, so a
-        // step hidden by its own start date still blocks the ones after it.
+
+
         const [first, second, third] = steps();
         const deferred = { ...first, startTime: iso('2026-03-20T09:00:00') };
         const { focusTasks } = select([deferred, second, third], [sequential]);

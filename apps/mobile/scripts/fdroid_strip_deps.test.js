@@ -34,7 +34,7 @@ describe('fdroid_strip_deps', () => {
     expect(pkg.devDependencies).not.toHaveProperty('expo-dev-client');
     expect(pkg.dependencies['@mindwtr/core']).toBe('file:../../packages/core');
     expect(pkg.expo.doctor).toEqual({ reactNativeDirectoryCheck: {} });
-    expect(pkg.expo.autolinking.exclude).toEqual(['play-store-updates', 'expo-store-review']);
+    expect(pkg.expo.autolinking.exclude).toEqual(['play-store-updates', 'expo-store-review', 'gmail-authorization']);
     expect(changes).toContain('removed dependency expo-dev-client');
     expect(changes).toContain('rewrote @mindwtr/core to file:../../packages/core for npm compatibility');
   });
@@ -55,10 +55,11 @@ describe('fdroid_strip_deps', () => {
       'existing-native-module',
       'play-store-updates',
       'expo-store-review',
+      'gmail-authorization',
     ]);
     expect(appJson.expo.autolinking.android.buildFromSource).toEqual(['.*']);
     expect(changes).toEqual([
-      'excluded play-store-updates, expo-store-review from Expo autolinking for F-Droid builds',
+      'excluded play-store-updates, expo-store-review, gmail-authorization from Expo autolinking for F-Droid builds',
       'enabled expo.autolinking.android.buildFromSource=[".*"]',
     ]);
   });
@@ -71,11 +72,15 @@ describe('fdroid_strip_deps', () => {
       path.join(moduleDir, 'build.gradle'),
       'dependencies { implementation("com.google.android.play:app-update:2.1.0") }\n'
     );
+    const gmailDir = path.join(rootDir, 'modules', 'gmail-authorization', 'android');
+    fs.mkdirSync(gmailDir, { recursive: true });
+    fs.writeFileSync(path.join(gmailDir, 'build.gradle'), 'implementation "com.google.android.gms:play-services-auth:22.0.0"');
 
     const changes = removeFossOnlyPaths(rootDir);
 
     expect(fs.existsSync(path.join(rootDir, 'modules', 'play-store-updates'))).toBe(false);
-    expect(changes).toEqual(['removed modules/play-store-updates']);
+    expect(fs.existsSync(path.join(rootDir, 'modules', 'gmail-authorization'))).toBe(false);
+    expect(changes).toEqual(['removed modules/play-store-updates', 'removed modules/gmail-authorization']);
 
     fs.rmSync(rootDir, { recursive: true, force: true });
   });

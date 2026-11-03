@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { DICEWARE_WORDLIST, generateDicewarePassphrase } from './diceware';
+import { dicewareWordlist, generateDicewarePassphrase } from './diceware';
 
-// A randomBytes stub that replays a fixed queue of 32-bit values, so the tests
-// can steer which word each draw lands on (and force a rejected draw).
+const DICEWARE_WORDLIST = dicewareWordlist();
+
+
 const bytesFrom = (values: number[]) => {
     let index = 0;
     return vi.fn((n: number) => {
@@ -20,6 +21,21 @@ const bytesFrom = (values: number[]) => {
 };
 
 describe('diceware wordlist', () => {
+    it('is split on first use, not when the module loads (about 12 ms of the native start)', async () => {
+        vi.resetModules();
+        const split = vi.spyOn(String.prototype, 'split');
+        const splitsOfTheList = () => split.mock.contexts.filter((text) => String(text).includes('abacus abdomen')).length;
+        try {
+            const fresh = await import('./diceware');
+            expect(splitsOfTheList()).toBe(0);
+            fresh.generateDicewarePassphrase(2, bytesFrom([0, 1]));
+            fresh.generateDicewarePassphrase(2, bytesFrom([0, 1]));
+            expect(splitsOfTheList()).toBe(1);
+        } finally {
+            split.mockRestore();
+        }
+    }, 30_000);
+
     it('is the EFF long list: 7776 unique lowercase words', () => {
         expect(DICEWARE_WORDLIST).toHaveLength(7776);
         expect(new Set(DICEWARE_WORDLIST).size).toBe(7776);
@@ -47,8 +63,8 @@ describe('generateDicewarePassphrase', () => {
     });
 
     it('rejects draws in the biased tail instead of folding them with a modulo', () => {
-        // 2^32 - 1 is inside the discarded tail (2^32 is not a multiple of 7776);
-        // a modulo would have folded it onto word 2559.
+
+
         const randomBytes = bytesFrom([0xffffffff, 7776 + 41]);
         const phrase = generateDicewarePassphrase(1, randomBytes);
 
@@ -65,8 +81,8 @@ describe('generateDicewarePassphrase', () => {
         const words = generateDicewarePassphrase(200).split(' ');
         expect(words).toHaveLength(200);
         expect(words.every((word) => DICEWARE_WORDLIST.includes(word))).toBe(true);
-        // 200 draws from 7776 words repeating even once is already improbable;
-        // a collapsed RNG (all-zero bytes, Math.random misuse) fails loudly here.
+
+
         expect(new Set(words).size).toBeGreaterThan(190);
     });
 });

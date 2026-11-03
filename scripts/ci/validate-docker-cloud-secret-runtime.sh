@@ -21,8 +21,7 @@ docker build \
   --tag "$image" \
   .
 
-# Create the owner-only host secret as a UID that is deliberately neither root
-# nor the container's bun UID. No host chmod or ownership weakening is allowed.
+
 docker run --rm \
   --user 0:0 \
   --entrypoint sh \
@@ -32,8 +31,7 @@ docker run --rm \
     chown 23456:23456 /fixture/cloud-tokens.txt
     chmod 0600 /fixture/cloud-tokens.txt'
 
-# The overlay starts only the handoff as root. The image entrypoint must make a
-# private bun-owned copy, then exec the requested process as UID/GID 1000.
+
 docker run --rm \
   --user 0:0 \
   --env MINDWTR_CLOUD_AUTH_TOKENS_FILE=/run/secrets/mindwtr_cloud_tokens \

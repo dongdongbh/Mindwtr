@@ -1,9 +1,6 @@
 import { test } from 'bun:test';
 
-// Some release tests run script blocks from the Windows workflows through
-// PowerShell. GitHub's hosted runners ship `pwsh`, so CI always runs them. A
-// contributor machine without it skips them with a notice instead of failing
-// `bun run verify`; in CI a missing `pwsh` is an error, never a silent skip.
+
 const hasPwsh = Bun.which('pwsh') !== null;
 
 if (!hasPwsh && process.env.CI) {

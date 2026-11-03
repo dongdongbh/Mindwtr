@@ -46,8 +46,8 @@ const attachmentSyncMocks = vi.hoisted(() => ({
   syncWebdavAttachments: vi.fn(),
   cleanupAttachmentTempFiles: vi.fn(),
   hasPendingAttachmentSyncWork: vi.fn(),
-  // `hasCompletedAttachmentPresenceReconciliation` is deliberately NOT mocked (review finding
-  // B2) — see `vi.mock('./attachment-sync', ...)` below.
+
+
 }));
 
 const externalCalendarMocks = vi.hoisted(() => ({
@@ -126,8 +126,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
-// Non-FOSS build so the Dropbox cloud provider path is reachable (the runtime
-// suite pins isFossBuild: true and can only assert Dropbox is unavailable).
+
 vi.mock('expo-constants', () => ({
   default: {
     expoConfig: {
@@ -158,8 +157,7 @@ vi.mock('./storage-adapter', () => ({
   },
 }));
 
-// `hasCompletedAttachmentPresenceReconciliation` is spread from the real module (review
-// finding B2): it reads the mocked AsyncStorage directly rather than being stubbed out.
+
 vi.mock('./attachment-sync', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./attachment-sync')>()),
   getBaseSyncUrl: attachmentSyncMocks.getBaseSyncUrl,
@@ -206,7 +204,7 @@ vi.mock('./sync-path-bookmarks', () => ({
   isSyncPathBookmarksAvailable: syncPathBookmarkMocks.isSyncPathBookmarksAvailable,
 }));
 
-// What the location holds when a keyless attachment pass asks (core's partly-encrypted rule): plain here.
+
 vi.mock('./sync-encryption-service', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync-encryption-service')>()),
   probeSyncLocationCiphertext: vi.fn(async () => 'plaintext'),
@@ -295,10 +293,7 @@ describe('mobile Dropbox sync transient retry', () => {
     attachmentSyncMocks.syncWebdavAttachments.mockResolvedValue(false);
     attachmentSyncMocks.cleanupAttachmentTempFiles.mockResolvedValue(undefined);
     attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(false);
-    // fresh-join-attachment-posture packet -10: `hasCompletedAttachmentPresenceReconciliation`
-    // is unmocked and reads AsyncStorage for real; the default `getItem` map above has no
-    // entry for the presence-reconciliation key, so it naturally resolves to "no stamp",
-    // matching a real device's AsyncStorage before any full attachment pass has completed.
+
 
     externalCalendarMocks.getExternalCalendars.mockResolvedValue([]);
     externalCalendarMocks.saveExternalCalendars.mockResolvedValue(undefined);
@@ -335,8 +330,8 @@ describe('mobile Dropbox sync transient retry', () => {
       renew: vi.fn().mockResolvedValue(undefined),
       release: vi.fn().mockResolvedValue(undefined),
     });
-    // Delay-free withRetry that honors maxAttempts/shouldRetry/onRetry, so the
-    // tests exercise the real retry policy without sleeping through backoff.
+
+
     coreMocks.withRetry.mockImplementation(async (
       operation: () => Promise<unknown>,
       options: {
@@ -365,7 +360,7 @@ describe('mobile Dropbox sync transient retry', () => {
       const remote = await io.readRemote();
       let data = remote ?? local;
       const prepared = await io.prepareRemoteWrite?.(data);
-      // Core's PREPARED_UNCHANGED (a symbol) keeps the document as it is.
+
       data = prepared && typeof prepared === 'object' ? prepared : data;
       await io.writeLocal(data);
       await io.writeRemote(data);
@@ -392,9 +387,8 @@ describe('mobile Dropbox sync transient retry', () => {
   });
 
   it('enables steady-state attachment content checks for Dropbox', async () => {
-    // fresh-join-attachment-posture packet -10: this test is about steady-state content
-    // checks, not about a fresh device's posture gate — establish this location's fast-sync
-    // record so the prepare phase runs as it always has.
+
+
     const establishedScope = computeStableValueFingerprint({
       backend: 'cloud',
       provider: 'dropbox',
@@ -510,8 +504,8 @@ describe('mobile Dropbox sync transient retry', () => {
     });
 
     expect(result.success).toBe(true);
-    // The fence port must not ride the cycle's abort signal: a lifecycle abort
-    // would cancel the release in `run()`'s finally and leave a stale lease.
+
+
     expect(coreMocks.createDropboxSyncRemoteMutationFencePort).toHaveBeenCalledWith(
       'candidate-access-token',
       backgroundSafeFetch,
@@ -583,9 +577,8 @@ describe('mobile Dropbox sync transient retry', () => {
     storageMocks.getData.mockResolvedValue(attachedData);
     coreMocks.getInMemoryAppDataSnapshot.mockReturnValue(attachedData);
     dropboxAuthMocks.getValidDropboxAccessToken.mockResolvedValue('old-account-token');
-    // This suite's lightweight performSyncCycle fake selects `remote ?? local`
-    // instead of running the real merge. Keep the attachment in that remote
-    // fixture so the assertion reaches the candidate attachment-proof seam.
+
+
     dropboxSyncMocks.downloadDropboxAppData.mockResolvedValue({ data: attachedData, rev: 'candidate-rev' });
     attachmentSyncMocks.syncDropboxAttachments.mockImplementation(async (data) => {
       const attachment = data.tasks[0]?.attachments?.[0];

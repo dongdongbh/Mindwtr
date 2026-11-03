@@ -35,7 +35,7 @@ private final class CachedProjectHTTPProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Existing managed bytes are borrowed read-only; only selected metadata may change.
+
 final class NativeCachedProjectAvailabilityTests: XCTestCase {
     private var root: URL!, bundle: URL!, hostname: String!, namespace: String!, remote: CachedProjectHTTPState!
     private var unknownBefore = 0
@@ -79,8 +79,8 @@ final class NativeCachedProjectAvailabilityTests: XCTestCase {
                          after: ((String, Bool) -> Void)? = nil) async throws -> CoreHost {
         let core = host(faults: faults), hooks = NativeAttachmentHostHooks()
         hooks.configureJobs = { $0.beforeWork = before; $0.afterWork = after }
-        // Jobs receive hooks during start; changing attachmentHooks afterwards
-        // does not reconfigure an already-created worker.
+
+
         try await core.configureAttachmentHost(hooks); _ = try await core.start(); return core
     }
     private func sql(_ text: String, _ args: [Any] = []) throws -> String {
@@ -312,8 +312,8 @@ final class NativeCachedProjectAvailabilityTests: XCTestCase {
                 } } catch { failed = true }
             } })
             let input = try await request(core), baseline = try domainRows(); armed = true
-            // A synthetic external manifest replacement exercises the owner
-            // fence. It is not a second admitted NativeDeviceKV writer.
+
+
             await refused(core, input: input); armed = false
             XCTAssertTrue(fired, field); XCTAssertFalse(failed, field); let expected = try XCTUnwrap(external)
             XCTAssertEqual(try domainRows(), baseline, field); XCTAssertEqual(try Data(contentsOf: manifest), expected, field)
@@ -372,9 +372,8 @@ final class NativeCachedProjectAvailabilityTests: XCTestCase {
             XCTAssertTrue(fired, mode); XCTAssertFalse(failed, mode); XCTAssertEqual(try fileState(target), try XCTUnwrap(external), mode)
             XCTAssertEqual(try Data(contentsOf: target), bytes, mode); XCTAssertEqual(try Data(contentsOf: manifest), configuration, mode)
             XCTAssertEqual(remote.counts, [0, 0], mode); try noOwnedArtifacts(); XCTAssertEqual(try cachedMarkers(), 0, mode)
-            // The reused pipeline can have durably saved the exact metadata
-            // effect before the final generation proof rejects acknowledgment.
-            // It never rolls back that save or claims a confirmed file receipt.
+
+
             if try project()["rev"] as? Int == 4 { try assertSelectedUpdate(initialRow, item: item) }
             else { XCTAssertEqual(try json(project()), try json(initialRow), mode) }
             let durable = try domainRows(); await core.close(); let cold = host(); _ = try await cold.start()
@@ -402,8 +401,8 @@ final class NativeCachedProjectAvailabilityTests: XCTestCase {
         var armed = false, work = 0, held = false
         let core = try await started(before: { _, installer in if armed && !installer {
             work += 1
-            // First work is typed baseline; second is shared getInfo under the
-            // admitted selected-JSC read ticket, as in old relocation controls.
+
+
             if work == 2 { held = true; reached.fulfill(); release.wait() }
         } })
         let input = try await request(core), baseline = try domainRows(), physical = try fileState(target); armed = true

@@ -11,6 +11,7 @@ import {
     buildCaptureTaskProps,
     buildHttpRemoteFileFingerprint,
     buildNewProject,
+    projectAreaSelection,
     canonicalRecurringFollowUp,
     compactPurgedProjectSectionTombstone,
     compactPurgedProjectTombstone,
@@ -231,9 +232,8 @@ const validateStoredAppData = (
     const parsed = parseSyncDocument(rawData, 'local');
     const validated = parsed.ok ? validateAppData(parsed.data) : parsed;
     if (!validated.ok) {
-        // Field paths plus the entity ids the validator names (opaque UUIDs, no
-        // titles or bodies), so an operator can find the offending record
-        // instead of bisecting the whole namespace.
+
+
         const sample = 'errors' in validated ? validated.errors.slice(0, 3).join('; ') : validated.error;
         logFailureWarn('Stored cloud data failed validation', {
             failureClass: 'validation',
@@ -242,8 +242,8 @@ const validateStoredAppData = (
         return { error: errorResponse(`Stored data failed validation: ${sample}`, 500) };
     }
     const legacyAttachmentsChanged = parsed.ok && parsed.legacyAttachmentsChanged;
-    // Repaired in-memory records do not prove that the bytes on disk are safe
-    // to serve. A failed/aborted later write must leave the old inode untrusted.
+
+
     if (!legacyAttachmentsChanged) rememberValidatedDataFile(filePath);
     return {
         data: normalizeStoredAppData(validated.data),
@@ -341,11 +341,7 @@ function parseSearchPaginationValue(searchParams: URLSearchParams, name: string,
     return name.toLowerCase().includes('limit') ? Math.min(LIST_MAX_LIMIT, value) : value;
 }
 
-/**
- * Parses an optional boolean query param. Accepts `1`/`0` (the convention `all` and `deleted`
- * already use) and `true`/`false`, and reports anything else as an error rather than silently
- * treating it as false — `?isFocusedToday=yes` should not quietly return the whole list.
- */
+
 function parseBooleanQueryParam(searchParams: URLSearchParams, name: string): boolean | undefined | { error: string } {
     const raw = searchParams.get(name);
     if (raw == null) return undefined;
@@ -382,9 +378,7 @@ function finalizeCloudDataForWrite(
     return repaired;
 }
 
-// The next occurrence inherits the completed instance's place (that instance leaves the
-// active list, and a series has one active instance); it reserves a fresh order only when
-// the completed task had none. Its shape comes from core's canonicalRecurringFollowUp.
+
 const stampRecurringFollowUp = (task: Task, completedTask: Task, existingTasks: Task[]): Task => {
     const order = getTaskOrder(completedTask) ?? getNextProjectOrder(task.projectId, existingTasks);
     return { ...canonicalRecurringFollowUp(task), order, orderNum: order };
@@ -413,9 +407,9 @@ type EntityRouteDefinition<T extends CloudEntity> = {
     listKey: EntityCollectionKey;
     label: string;
     invalidIdMessage: string;
-    /** Defaults to parseEntityRouteId. Tasks override it to keep requiring a UUID. */
+
     parseId?: (rawValue: string) => string | null;
-    /** Defaults to {} (repair-then-validate). Tasks pass FINALIZE_REJECT_INVALID_REST_WRITE. */
+
     finalizeOptions?: FinalizeCloudDataForWriteOptions;
     listItems: (data: AppData, url: URL) => T[] | Response;
     createEntity: (body: Record<string, unknown>, data: AppData, nowIso: string) => T | Response;
@@ -717,10 +711,8 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
                 data.projects.push(project);
                 props = applyCapturedProject(props, project.id);
             }
-            // Mirrors the store's create-side promotion (addTasks): a
-            // start date at capture is a clarify decision, so a task
-            // created with a start date and no explicit status enters
-            // as Next rather than Inbox.
+
+
             const status = resolveCaptureStatusForStart(explicitProps, parsedStatus || 'inbox');
             const effectiveStatus = props.cancelledAt && rawStatus === undefined ? 'archived' : status;
             const tags = Array.isArray(props.tags) ? props.tags : [];
@@ -735,9 +727,8 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
                 contexts: _contexts,
                 ...restProps
             } = props;
-            // Mirrors core's addTasks: an explicit order/orderNum in props wins, otherwise a
-            // task landing in a project reserves the next slot instead of sorting below every
-            // sibling (missing order is +Infinity in compareTasksByProjectOrder).
+
+
             const hasExplicitOrder = Object.prototype.hasOwnProperty.call(props, 'order')
                 || Object.prototype.hasOwnProperty.call(props, 'orderNum');
             const reminderPolicy = restProps.reminderPolicy ?? (typeof restProps.suppressMindwtrReminders === 'boolean'
@@ -798,11 +789,8 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
             if (rawStatus !== undefined && asStatus(rawStatus) === null) {
                 return errorResponse('Invalid task status', 400);
             }
-            // Applies the same store invariants the apps get (inbox
-            // start-date promotion, star/status promotion+demotion,
-            // boardOrder/focusOrder clearing) before the shared core
-            // completion/recurrence logic in applyTaskUpdates runs, so
-            // REST writes obey the same rules as the desktop/mobile store.
+
+
             const normalizedUpdates = normalizeTaskUpdate(existing, updates, { settings: data.settings });
             const focusedCount = selectFocusedCount([...data.tasks]);
             const focusDecision = resolveTaskFocusUpdate(existing, { ...existing, ...normalizedUpdates }, {
@@ -811,7 +799,7 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
                 now: new Date(),
             });
             if (focusDecision.outcome === 'refused-limit' && existing.isFocusedToday === true) {
-                // The star was already on but queued for a later day; this write made it current.
+
                 logInfo('Cloud refused a queued Focus star on activation', {
                     releaseCheck: 'v1.3.5/cloud-focus-queued-activation',
                     operation: 'patch',
@@ -959,9 +947,13 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
             );
             data.tasks = lifecycle.tasks;
             data.sections = lifecycle.sections;
+            const areaSelection = projectAreaSelection(existing, {
+                ...updates, ...(areaId !== undefined ? { areaId: areaId ?? undefined } : {}),
+            } as Partial<Project>, data.projects, data.areas);
             const updatedProject = {
                 ...existing,
                 ...lifecycle.projectUpdates,
+                ...areaSelection.fields,
                 title: typeof updates.title === 'string' ? updates.title.trim() : existing.title,
                 areaId: areaId !== undefined ? areaId ?? undefined : existing.areaId,
                 updatedAt: nowIso,
@@ -1249,9 +1241,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
             withWriteLock(NAMESPACE_ADMISSION_LOCK_KEY, handler, signal)
         ),
     };
-    // GET creates the initial empty document when the token has no namespace, so
-    // it needs the same atomic admission section as PUT. Existing namespaces skip
-    // the global admission lock in withNamespace.
+
+
     const dataServerConfig: ServerConfig = {
         ...baseServerConfig,
         guardMethods: (method) => method === 'PUT' || method === 'GET',
@@ -1261,28 +1252,22 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     };
     const calendarFeedServerConfig: ServerConfig = {
         ...baseServerConfig,
-        // Feed rotation is valid only after a real sync document exists. It
-        // checks quota under admission but must not reserve an empty namespace.
+
+
         initializeNamespace: () => undefined,
     };
     const attachmentServerConfig: ServerConfig = { ...baseServerConfig, maxPerWindow: maxAttachmentPerWindow };
-    // The one route a capture-only token (#1178) may use.
+
     const captureServerConfig: ServerConfig = { ...baseServerConfig, acceptsCaptureTokens: true };
-    // /v1/attachments/orphans previously checked "is this POST or DELETE" *before*
-    // ever consulting the namespace guard, so an unsupported method (e.g. PATCH)
-    // fell straight through to 405 regardless of cap state; only guard POST/DELETE
-    // here so that stays true and the guard-response fix stays scoped to the two
-    // write methods this route actually supports.
+
+
     const orphansServerConfig: ServerConfig = {
         ...attachmentServerConfig,
         guardMethods: (method) => method === 'POST' || method === 'DELETE',
         initializeNamespace: () => undefined,
     };
-    // /v1/attachments/:path only ever guarded PUT (the only method that can create a
-    // new file). DELETE was never guarded pre-refactor; kept that way here rather
-    // than folding it into the default non-GET guard, since extending the cap to
-    // DELETE is a real behavior change this task did not ask for and isn't flagged
-    // as one of the routes with a missing-guard bug.
+
+
     const attachmentPathServerConfig: ServerConfig = { ...attachmentServerConfig, guardMethods: (method) => method === 'PUT' };
 
     const cleanupTimer = setInterval(() => {
@@ -1335,11 +1320,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                 && currentRealPath === initialDataDirRealPath
                 && currentStat.dev === initialDataDirStat.dev
                 && currentStat.ino === initialDataDirStat.ino
-                // ext4 hands the freed inode straight back to the next directory
-                // created, so a data dir removed and recreated between checks can
-                // return with the original dev+ino. The birth timestamp only
-                // survives on the original directory; skip it on filesystems
-                // that do not report one.
+
+
                 && (initialDataDirStat.birthtimeMs <= 0
                     || currentStat.birthtimeMs === initialDataDirStat.birthtimeMs);
         } catch {
@@ -1358,8 +1340,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
             allowedAuthTokens.keys
         );
         if (prunedFeedCount > 0) {
-            // Count only, no paths - the namespace key is a token digest (#952's
-            // privacy ratchet already treats it as sensitive elsewhere).
+
+
             logInfo('pruned orphaned calendar feed sidecars', { count: String(prunedFeedCount) });
         }
         if (failedFeedCount > 0) {
@@ -1376,9 +1358,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     const server = bunRuntime.serve({
         hostname: host,
         port,
-        // Bun refuses a larger Content-Length with an empty 413 before the handler
-        // runs. Keep Bun's own 128 MiB default as the floor and sit just above the
-        // largest app limit, so the app's capped reads answer with JSON naming the limit.
+
+
         maxRequestBodySize: Math.max(
             BUN_DEFAULT_MAX_REQUEST_BODY_BYTES,
             Math.max(maxBodyBytes, maxDataBodyBytes, maxAttachmentBytes) + 1_048_576,
@@ -1413,8 +1394,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                 }
 
                 if (req.method === 'GET' && pathname === '/ready') {
-                    // Unauthenticated like the calendar feed, and the probe below is a
-                    // synchronous write + fsync on the data volume: throttle it the same way.
+
+
                     const readyRateLimitResponse = rateLimiter.check(
                         `ready-client:${getAuthFailureRateKey(req, {
                             trustProxyHeaders,
@@ -1430,9 +1411,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     return jsonResponse({ ok: ready }, ready ? {} : { status: 503 });
                 }
 
-                // Every route below can read or mutate the configured storage
-                // tree. Refuse the request before auth, admission, lock, or path
-                // helpers can observe a missing or same-path replacement root.
+
                 if (!isOriginalDataDirectory()) {
                     return errorResponse('Cloud storage unavailable', 503);
                 }
@@ -1516,15 +1495,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                             const data = dataResult;
                             const tasks = filterNotDeleted(data.tasks);
                             const projects = filterNotDeleted(data.projects);
-                            // filterTasksBySearch/filterProjectsBySearch are the same matchers
-                            // searchAll() composes, called directly here (rather than through
-                            // searchAll) because searchAll internally slices its result to
-                            // core's SEARCH_RESULT_LIMIT (200) before returning — computing
-                            // taskTotal/projectTotal from that sliced array reported at most
-                            // 200 even when there were more true matches, and made
-                            // taskOffset/projectOffset past 200 always return empty. This
-                            // endpoint does its own offset/limit slicing below (bounded by
-                            // LIST_MAX_LIMIT), so it doesn't need searchAll's fixed 200 cap.
+
+
                             const matchedTasks = filterCloudTasksBySearch(tasks, projects, query);
                             const matchedProjects = filterProjectsBySearch(projects, query);
                             const taskTotal = matchedTasks.length;
@@ -1548,9 +1520,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     if (groupResponse) return groupResponse;
                 }
 
-                // Generic capture webhook (#1148). Same auth, namespace, rate limit and
-                // per-token write lock as POST /v1/tasks; the whole-request byte cap is
-                // the attachment one, because the posted audio rides inside the body.
+
                 if (pathname === CAPTURE_ROUTE_PATH) {
                     const captureResponse = await withNamespace(req, url, captureServerConfig, async (ctx) => (
                         handleCaptureRequest(req, {
@@ -1573,8 +1543,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     if (captureResponse) return captureResponse;
                 }
 
-                // Capture-token management (#1178): full token only; withNamespace
-                // refuses a capture token here with 403.
+
                 if (pathname === CAPTURE_TOKENS_ROUTE_PATH || pathname.startsWith(`${CAPTURE_TOKENS_ROUTE_PATH}/`)) {
                     const captureTokensResponse = await withNamespace(req, url, baseServerConfig, async (ctx) => (
                         handleCaptureTokensRequest(req, pathname, {
@@ -1636,9 +1605,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                             const validated = validateStoredAppData(filePath, data);
                             if ('error' in validated) return validated.error;
                             if (validated.legacyAttachmentsChanged) {
-                                // This GET already owns the namespace write lock.
-                                // Publish through the same atomic path as a sync
-                                // write, then serve the exact new file bytes.
+
+
                                 throwIfRequestAborted(requestAbortController.signal);
                                 assertStorageRoot();
                                 writeCloudData(filePath, validated.data, { assertStorageRoot });
@@ -1654,14 +1622,13 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     }
 
                     if (req.method === 'PUT') {
-                        // The capped read started before namespace admission
-                        // (readBodyBeforeAdmission), so validation never holds the
-                        // global admission lock.
+
+
                         const body = await ctx.body;
                         if (isBodyReadError(body)) {
                             const err = body.__mindwtrError;
                             const status = Number(err?.status) || 413;
-                            // limitBytes lets a client name the server's limit without parsing the message.
+
                             return jsonResponse(
                                 status === 413
                                     ? { error: String(err?.message), limitBytes: maxDataBodyBytes }
@@ -1710,14 +1677,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                                     lastModified: metadata.lastModified,
                                     contentLength,
                                 });
-                                // Deliberate second merge: serverMergedRemoteData must be true
-                                // whenever the SERVER's stored data contributed anything to the
-                                // merged result — including settings-level and normalization-level
-                                // contributions that per-entity MergeStats cannot express. Merging
-                                // the incoming payload against an empty base yields the exact
-                                // "client-only" normal form to compare against. Do not replace this
-                                // with a stats-derived heuristic: a false negative makes clients
-                                // skip a needed re-read and diverge silently.
+
+
                                 const incomingOnlyMerge = mergeAppDataWithStats({
                                     tasks: [],
                                     projects: [],
@@ -1753,8 +1714,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         });
                     }
 
-                    // Unmatched method (only HEAD/GET/PUT are handled): fall through to
-                    // later routes exactly as before, instead of a route-specific 405.
+
                     return null;
                     }, requestAbortController.signal);
                     if (dataResponse) return dataResponse;
@@ -1766,9 +1726,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                             return jsonResponse({ feed: describeCalendarFeed(readCalendarFeed(dataDir, ctx.key)) });
                         }
                         if (req.method === 'POST') {
-                            // A feed for a namespace that has never synced would publish
-                            // nothing, and letting one be created would let unknown tokens
-                            // plant sidecar files past the namespace cap.
+
+
                             if (!existsSync(ctx.filePath)) return errorResponse('No synced data to publish', 404);
                             return await withRequestWriteLock(ctx.key, async () => {
                                 throwIfRequestAborted(requestAbortController.signal);
@@ -1790,10 +1749,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     if (feedResponse) return feedResponse;
                 }
 
-                // The published feed authenticates with the token in its own URL, so it
-                // never reaches withNamespace. An unknown token is a 404, not a 401: the
-                // URL is the only credential, and 401 would invite an Authorization
-                // header that this route does not read.
+
                 const calendarFeedToken = parseCalendarFeedPathToken(pathname);
                 if (calendarFeedToken) {
                     if (req.method !== 'GET') return errorResponse('Method not allowed', 405);
@@ -1808,14 +1764,10 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     );
                     if (feedClientRateLimitResponse) return feedClientRateLimitResponse;
 
-                    // Unknown tokens share only the stable client bucket above, so
-                    // rotating token strings cannot allocate limiter keys while
-                    // forcing namespace sidecar scans.
+
                     const feedNamespaceKey = findCalendarFeedNamespace(dataDir, calendarFeedToken);
-                    // A namespace whose token left the allowlist gets the same 404 as an
-                    // unknown feed token - revoking sync access must also stop the feed
-                    // (R-03), not just the authenticated API. Any-token mode has no
-                    // allowlist to fall out of, so every feed stays valid there, unchanged.
+
+
                     if (!feedNamespaceKey || (allowedAuthTokens && !allowedAuthTokens.keys.has(feedNamespaceKey))) {
                         return errorResponse('Not found', 404);
                     }
@@ -1843,8 +1795,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
 
                 if (pathname.startsWith('/v1/attachments/')) {
                     const attachmentPathResponse = await withNamespace(req, url, attachmentPathServerConfig, async (ctx) => {
-                        // Only PUT may create the namespace's attachment directory; GET and
-                        // DELETE must never plant it (see resolveAttachmentPath's doc comment).
+
+
                         const resolvedAttachmentPath = attachmentPathResolver(dataDir, ctx.key, pathname.slice('/v1/attachments/'.length), { create: req.method === 'PUT' });
                         if (!isOriginalDataDirectory()) {
                             return errorResponse('Cloud storage unavailable', 503);
@@ -1898,6 +1850,9 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     }
                 })();
                 attachRequestId(response, requestId);
+
+
+                if (req.body && (!req.bodyUsed || response.status === 413)) response.headers.set('Connection', 'close');
                 const completion: CloudRequestCompletion = {
                     requestId,
                     method: req.method,
@@ -1923,7 +1878,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         try {
             await Promise.resolve((server as { stop?: (closeIdleConnections?: boolean) => void | Promise<void> }).stop?.(true));
         } catch {
-            // Ignore stop errors during teardown.
+
         }
     };
     const signalHandlers: Array<[NodeJS.Signals, () => void]> = [];

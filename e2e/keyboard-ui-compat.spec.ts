@@ -83,8 +83,8 @@ for (const keys of keyboardStyles) {
         await main.focus();
         for (const key of keys.navigateInbox) await page.keyboard.press(key);
         await expect(page.locator('[data-sidebar-item][data-view="inbox"]')).toHaveAttribute('aria-current', 'page');
-        // The sidebar updates before the view transition finishes. Wait for
-        // the Inbox-owned input so `a` cannot fall through to global Quick Add.
+
+
         const inboxAddInput = main.getByRole('combobox', { name: 'Add Task', exact: true });
         await expect(inboxAddInput).toBeVisible();
 

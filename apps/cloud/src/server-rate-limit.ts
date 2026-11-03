@@ -1,15 +1,10 @@
 import { jsonResponse } from './server-config';
 
-/**
- * Fixed-window rate limiting behind one small interface: counting, the 429
- * response with Retry-After, expired-window pruning, and LRU key eviction at
- * capacity all live here. The server owns one limiter instance and shares it
- * across request and auth-failure keys.
- */
+
 export type RateLimiter = {
-    /** Count a hit; returns the 429 response once the key exceeds maxAllowed in the window. */
+
     check: (rateKey: string, maxAllowed: number) => Response | null;
-    /** Drop expired windows (driven by the server's periodic cleanup timer). */
+
     prune: (now: number) => void;
 };
 
@@ -26,7 +21,7 @@ export function createRateLimiter({
 }: {
     windowMs: number;
     maxKeys: number;
-    /** Clock override for tests; production uses Date.now. */
+
     now?: () => number;
 }): RateLimiter {
     const states = new Map<string, RateLimitState>();

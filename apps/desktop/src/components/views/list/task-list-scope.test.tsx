@@ -19,9 +19,7 @@ const makeTask = (id: string, overrides: Partial<Task> = {}): Task => ({
     ...overrides,
 } as Task);
 
-// The row markup every registered view renders through TaskItem: a done button
-// first in document order, then the title toggle, the edit trigger and the
-// quick-actions trigger.
+
 const mountRows = (tasks: Task[]) => {
     const main = document.createElement('div');
     main.setAttribute('data-main-content', '');
@@ -45,8 +43,7 @@ const mountRows = (tasks: Task[]) => {
 const rowControl = (taskId: string, selector: string) =>
     document.querySelector<HTMLElement>(`[data-task-id="${taskId}"] ${selector}`);
 
-// A stand-in non-English locale: every user-visible string the scope produces
-// must come out of it, so an untranslated copy fails loudly.
+
 const LOCALE: Record<string, string> = {
     'task.markedDone': '{title} ERLEDIGT',
     'task.movedToStatus': '{{title}} nach {{status}}',
@@ -57,10 +54,7 @@ const LOCALE: Record<string, string> = {
 };
 const translate = (key: string) => LOCALE[key] ?? key;
 
-// Every registered view supplies one of these two dependency shapes: the views
-// that let the scope own scroll/focus (Focus, Board, Projects, Search,
-// Contexts, Review) and ListView, which keeps its virtualization-aware scroll
-// and its own #890 focus hook. Both must behave identically.
+
 type ScopeCase = {
     name: string;
     extraDeps: (state: { tasks: Task[]; index: () => number }) => Partial<TaskListScopeDeps>;
@@ -251,8 +245,8 @@ describe.each(SCOPE_CASES)('createTaskListScope — $name', ({ extraDeps }) => {
             'Task 1 ERLEDIGT',
             'info',
             5000,
-            // The "Undo" label resolves through the caller's translator, so the
-            // injected stand-in locale governs it like every other string here.
+
+
             expect.objectContaining({ label: 'RUECKGAENGIG' }),
         );
         expect(takeUndoableAction()).toEqual(expect.any(Function));
@@ -344,8 +338,7 @@ describe.each(SCOPE_CASES)('createTaskListScope — $name', ({ extraDeps }) => {
         expect(restoreTask).toHaveBeenCalledWith('1');
     });
 
-    // Disabling undo toasts hides the toast, not Ctrl/Cmd+Z: registration is
-    // unconditional, so the shortcut still has something to undo.
+
     it('registers the undo even when undo toasts are disabled', async () => {
         const deleteTask = vi.fn(async () => ({ success: true }));
         const restoreTask = vi.fn(async () => ({ success: true }));

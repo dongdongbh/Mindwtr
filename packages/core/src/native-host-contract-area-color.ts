@@ -1,5 +1,5 @@
 import type { NativeHostResult } from './native-host-contract';
-import { AREA_PRESET_COLORS } from './color-constants';
+import { AREA_PRESET_COLORS, isValidProjectColorOverride } from './color-constants';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
@@ -13,7 +13,7 @@ export type NativeAreaColorToken = { name: string; color: string | null; rev: nu
 export type NativeAreaColorRequest = { requestId: string; areaId: string; color: string | null;
     expected: NativeAreaColorToken };
 export type NativeAreaColorResult = { id: string; color: string | null };
-export type NativePreparedAreaColor = PreparedAreaColor & { version: 1; request: NativeAreaColorRequest;
+export type NativePreparedAreaColor = PreparedAreaColor & { version: 1 | 2; request: NativeAreaColorRequest;
     result: NativeAreaColorResult };
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -64,14 +64,14 @@ const hasObservableChange = (effect: PreparedAreaColor['effect']): boolean =>
     !sameAreaAdditionRow.area(effect.area.before, effect.area.after)
     || effect.projects.some(({ before, after }) => !sameAreaAdditionRow.project(before, after));
 
-/** Pure cold-journal validation. Swift may call this before opening SQLite. */
+
 const readPrepared = (value: unknown): NativePreparedAreaColor | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
     const request = readRequest(envelope.request);
     const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'request', 'scope', 'effect', 'deviceIdBefore',
-        'deviceIdToInitialize', 'updateAt', 'result']) || raw.version !== 1 || !same(raw.request, request)
+        'deviceIdToInitialize', 'updateAt', 'result']) || (raw.version !== 1 && raw.version !== 2) || !same(raw.request, request)
         || !record(raw.scope) || !exact(raw.scope, ['area', 'projects']) || !record(raw.scope.area)
         || !Array.isArray(raw.scope.projects) || !record(raw.effect)
         || !exact(raw.effect, ['area', 'projects']) || !record(raw.effect.area)
@@ -91,12 +91,13 @@ const readPrepared = (value: unknown): NativePreparedAreaColor | null => {
             || scope.projects.some((project) => !record(project) || project.areaId !== request.areaId
                 || typeof project.id !== 'string' || !project.id || typeof project.title !== 'string'
                 || !['active', 'someday', 'waiting', 'archived'].includes(project.status)
+                || !isValidProjectColorOverride(project.colorOverride)
                 || typeof project.color !== 'string' || typeof project.order !== 'number'
                 || !Array.isArray(project.tagIds) || !project.tagIds.every((tag) => typeof tag === 'string')
                 || typeof project.createdAt !== 'string' || typeof project.updatedAt !== 'string')
             || new Set(scope.projects.map((project) => project.id)).size !== scope.projects.length) return null;
         const deviceId = prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!;
-        const effect = areaColorEffect(scope, request.color ?? undefined, deviceId, prepared.updateAt);
+        const effect = areaColorEffect(scope, request.color ?? undefined, deviceId, prepared.updateAt, prepared.version);
         return hasObservableChange(effect) && same(effect, prepared.effect) ? prepared : null;
     } catch { return null; }
 };
@@ -107,7 +108,7 @@ export function createAreaColorMethods(deps: {
     revision: () => string;
     sortedAreas: () => Area[];
 }) {
-    return {
+    const methods = {
         getAreaColorOptions(): NativeHostResult<{ revision: string; colors: string[];
             areas: Array<{ id: string } & NativeAreaColorToken> }> {
             const ready = deps.readiness();
@@ -119,7 +120,7 @@ export function createAreaColorMethods(deps: {
                 : fail('INVALID_INPUT', 'Area list exceeds the bounded native response');
         },
 
-        /** A cleaned journal cannot prove the old color write; observe only and require refresh. */
+
         probeAreaColorOutcome(input: NativeAreaColorRequest): NativeHostResult<NativeAreaColorResult> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -138,12 +139,12 @@ export function createAreaColorMethods(deps: {
                 return fail('STALE_REVISION', 'Area changed; refresh before changing its color');
             const device = ensureDeviceId(state.settings);
             const updateAt = new Date().toISOString();
-            const prepared: NativePreparedAreaColor = { version: 1, request, scope,
+            const prepared: NativePreparedAreaColor = { version: 2, request, scope,
                 effect: areaColorEffect(scope, request.color ?? undefined, device.deviceId, updateAt),
                 deviceIdBefore: state.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null,
                 updateAt, result: { id: request.areaId, color: request.color } };
-            // A receipt identical to its before state cannot prove that the write happened.
+
             if (!hasObservableChange(prepared.effect))
                 return fail('STALE_REVISION', 'Area color revision did not advance; refresh before saving again');
             const frozen = detach<NativePreparedAreaColor>(JSON.parse(JSON.stringify(prepared)));
@@ -170,5 +171,39 @@ export function createAreaColorMethods(deps: {
             const saved = await deps.save();
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
+
+
+        async runAreaColor(input: { requestId: string; areaId: string; color: string | null }): Promise<NativeHostResult<{ outcome: 'saved' | 'unchanged' } & NativeAreaColorResult>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!record(input) || !exact(input, ['requestId', 'areaId', 'color'])
+                || !readRequest({ ...input, expected: { name: '', color: null, rev: null, revBy: null, updatedAt: '' } }))
+                return fail('INVALID_INPUT', 'A bounded Area color request is required');
+            try {
+                if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
+            } catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
+            let stale = 'Area changed; refresh before changing its color';
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+                const current = useTaskStore.getState()._allAreas.find((area) => area.id === input.areaId && !area.deletedAt);
+                if (!current) return fail('STALE_REVISION', 'The Area is no longer there');
+                if ((current.color ?? null) === input.color) {
+                    const saved = await deps.save();
+                    return saved.ok ? { ok: true, value: { outcome: 'unchanged', id: current.id, color: input.color } } : saved;
+                }
+                const request = { ...input, expected: token(current) };
+                const prepared = methods.prepareAreaColor(request);
+                if (!prepared.ok) {
+                    if (prepared.error.code !== 'STALE_REVISION') return prepared;
+                    stale = prepared.error.message;
+                    continue;
+                }
+                const committed = await methods.commitPreparedAreaColor({ request, prepared: prepared.value.prepared });
+                if (committed.ok) return { ok: true, value: { outcome: 'saved', ...committed.value } };
+                if (committed.error.code !== 'STALE_REVISION') return committed;
+                stale = committed.error.message;
+            }
+            return fail('STALE_REVISION', stale);
+        },
     };
+    return methods;
 }

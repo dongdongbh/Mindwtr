@@ -7,6 +7,7 @@ import { en } from './i18n/locales/en';
 import { createNextRecurringTask } from './recurrence';
 import { openSqliteHost } from './screen-parity.replay';
 import { samePreparedTask } from './store-tasks';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 
 const clock = '2026-09-27T15:00:00.000Z';
 const item = (id: string, title: string, isCompleted = false) => ({ id, title, isCompleted });
@@ -59,6 +60,22 @@ describe('prepared recurring occurrence Skip', () => {
         expect(unwrap(await cold.commitPreparedTaskChecklistWrite({ request, prepared }))).toEqual({ id: original.id });
         expect(useTaskStore.getState()._allTasks).toHaveLength(2);
         expect(useTaskStore.getState()._tasksById.get(child.id)).toEqual(child);
+    });
+
+    it('writes the same saved contexts and tags as RN Skip (#828)', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(clock));
+        const original = recurring({ tags: ['#Legacy'], contexts: ['@Legacy'] });
+        const savedTokens = (settings: AppData['settings']) =>
+            [getSavedTaxonomyTokens(settings, 'context'), getSavedTaxonomyTokens(settings, 'tag')];
+        const rn = await open(original);
+        expect((await useTaskStore.getState().skipRecurringTaskOccurrence(original.id)).success).toBe(true);
+        await flushPendingSave();
+        const native = await open(original);
+        const request = skipRequest(original);
+        unwrap(await native.host.commitPreparedTaskChecklistWrite({ request, prepared: preparedSkip(native.host, request) }));
+        expect(savedTokens(rn.saved().settings)).toEqual([['@Legacy'], ['#Legacy']]);
+        expect(savedTokens(native.saved().settings)).toEqual(savedTokens(rn.saved().settings));
     });
 
     it('saves the draft into the skipped source and bases the next occurrence on that draft', async () => {
@@ -750,7 +767,7 @@ describe('prepared native checklist Save and Reset', () => {
         }
     });
 
-    it('keeps a manual final status override and Reference bullets', async () => {
+    it('keeps a manual final status override and a Reference list', async () => {
         const { host } = await open(source({ status: 'reference', checklist: [item('one', 'Bullet')] }));
         const request = { id: 'checklist-task', requestId: id, base: {}, patch: {}, scheduleBase,
             checklist: { base: savedTask().checklist!, value: [item('one', 'Edited bullet')] } };
@@ -771,6 +788,20 @@ describe('prepared native checklist Save and Reset', () => {
         if (planned.kind !== 'prepared') return;
         unwrap(await normal.host.commitPreparedTaskChecklistWrite({ request: override, prepared: planned.prepared }));
         expect(savedTask().status).toBe('next');
+    });
+
+    it('saves a Reference list task with every entry ticked as a reference, never Done (#1416)', async () => {
+        const { host } = await open(source({ status: 'reference', taskMode: 'list', checklist: [item('one', 'Alien', true), item('two', 'Brazil')] }));
+        const value = [item('one', 'Alien', true), item('two', 'Brazil', true)];
+        const request = { id: 'checklist-task', requestId: id, base: {}, patch: {}, scheduleBase,
+            checklist: { base: savedTask().checklist!, value } };
+        const prepared = unwrap(host.prepareTaskChecklistSave(request));
+        expect(prepared.kind).toBe('prepared');
+        if (prepared.kind !== 'prepared') return;
+        expect(unwrap(await host.commitPreparedTaskChecklistWrite({ request, prepared: prepared.prepared }))).toEqual({ id: request.id });
+        expect(savedTask()).toMatchObject({ status: 'reference', checklist: value });
+        expect(savedTask().completedAt).toBeUndefined();
+        expect(savedTask().isFocusedToday).toBeFalsy();
     });
 
     it('refuses a coherently rebound Reference priority even when status is omitted', async () => {
@@ -1160,7 +1191,7 @@ describe('prepared task completion and Undo', () => {
             await sqlite.restart();
             expect(unwrap(sqlite.host.taskCompletionOutcome({ request, prepared }))).toEqual(prepared.result);
         } finally { await sqlite.close(); }
-    }, 30_000); // The injected failure exercises real exponential persistence backoff before cold recovery.
+    }, 30_000);
 
     it('cold-retries a failed SQLite completion Undo COMMIT without a partial child tombstone', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });

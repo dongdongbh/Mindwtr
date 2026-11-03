@@ -21,8 +21,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     return {
         ...actual,
         useTaskStore: useTaskStoreMock,
-        // The real helper just tags the listener for the notify profiler; identity
-        // passthrough is all this suite needs.
+
+
         nameNotifyListener: (_name: string, listener: Listener) => listener,
     };
 });
@@ -38,9 +38,15 @@ vi.mock('@/modules/app-search', () => ({
 
 const isAppSearchSupported = vi.hoisted(() => vi.fn(() => true));
 const readAppSearchIndexingEnabled = vi.hoisted(() => vi.fn(async () => true));
+const readAppSearchWipeOwed = vi.hoisted(() => vi.fn(async () => false));
+const clearAppSearchWipeOwed = vi.hoisted(() => vi.fn(async () => undefined));
+const markAppSearchWipeOwed = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('./app-search-preference', () => ({
     isAppSearchSupported,
     readAppSearchIndexingEnabled,
+    readAppSearchWipeOwed,
+    clearAppSearchWipeOwed,
+    markAppSearchWipeOwed,
 }));
 
 import {
@@ -73,6 +79,7 @@ describe('app-search-service', () => {
         storeState.areas = [];
         isAppSearchSupported.mockReturnValue(true);
         readAppSearchIndexingEnabled.mockResolvedValue(true);
+        readAppSearchWipeOwed.mockResolvedValue(false);
         disarmAppSearchIndexing();
     });
 
@@ -166,7 +173,7 @@ describe('app-search-service', () => {
         readAppSearchIndexingEnabled.mockResolvedValue(true);
         await syncAppSearchIndexingWithPreference();
         expect(isAppSearchIndexingArmed()).toBe(true);
-        expect(wipeAppSearchIndexNative).toHaveBeenCalledTimes(1); // seeding full reindex
+        expect(wipeAppSearchIndexNative).toHaveBeenCalledTimes(1);
     });
 
     it('enableAppSearchIndexing arms normally when the preference is still on', async () => {
@@ -182,17 +189,46 @@ describe('app-search-service', () => {
         }));
 
         const enabling = enableAppSearchIndexing();
-        await flush(); // let runFullAppSearchReindex's wipe resolve and reach the upsert call
-        // The toggle-off handler flips the persisted preference while the
-        // reindex's upsert is still in flight.
+        await flush();
+
+
         readAppSearchIndexingEnabled.mockResolvedValue(false);
         resolveUpsert();
         await enabling;
 
         expect(isAppSearchIndexingArmed()).toBe(false);
-        // Once from runFullAppSearchReindex's own wipe, once more from the
-        // post-reindex re-check that undoes the upserts it just sent.
+
+
         expect(wipeAppSearchIndexNative).toHaveBeenCalledTimes(2);
+    });
+
+
+    it('finishes an owed wipe at the next start, and keeps it owed until a wipe lands', async () => {
+        wipeAppSearchIndexNative.mockRejectedValueOnce(new Error('boom'));
+        await wipeAppSearchIndex();
+        expect(clearAppSearchWipeOwed).not.toHaveBeenCalled();
+
+        readAppSearchIndexingEnabled.mockResolvedValue(false);
+        readAppSearchWipeOwed.mockResolvedValue(true);
+        wipeAppSearchIndexNative.mockClear();
+        await syncAppSearchIndexingWithPreference();
+        expect(wipeAppSearchIndexNative).toHaveBeenCalledTimes(1);
+        expect(clearAppSearchWipeOwed).toHaveBeenCalledTimes(1);
+        expect(isAppSearchIndexingArmed()).toBe(false);
+
+
+        readAppSearchWipeOwed.mockResolvedValue(false);
+        wipeAppSearchIndexNative.mockClear();
+        await syncAppSearchIndexingWithPreference();
+        expect(wipeAppSearchIndexNative).not.toHaveBeenCalled();
+    });
+
+
+    it('a full reindex (switch on) leaves an owed wipe owed', async () => {
+        readAppSearchWipeOwed.mockResolvedValue(true);
+        await syncAppSearchIndexingWithPreference();
+        expect(isAppSearchIndexingArmed()).toBe(true);
+        expect(clearAppSearchWipeOwed).not.toHaveBeenCalled();
     });
 
     it('a native failure is logged and swallowed, never thrown', async () => {
@@ -207,8 +243,8 @@ describe('app-search-service', () => {
 
     it('still runs removals when the upsert in the same batch fails (#1017 correction)', async () => {
         armAppSearchIndexing();
-        // Seed with two tasks so the next batch carries one upsert (title
-        // change) and one removal (task disappeared) together.
+
+
         storeState.tasks = [task(), task({ id: 't2', title: 'Other' })];
         listeners[0](storeState, { ...storeState, tasks: [] });
         await vi.advanceTimersByTimeAsync(2_000);
@@ -218,7 +254,7 @@ describe('app-search-service', () => {
 
         upsertAppSearchDocuments.mockRejectedValueOnce(new Error('boom'));
         const prevState = { ...storeState };
-        storeState.tasks = [task({ title: 'Buy oat milk' })]; // t1 changes, t2 disappears
+        storeState.tasks = [task({ title: 'Buy oat milk' })];
         listeners[0](storeState, prevState);
         await vi.advanceTimersByTimeAsync(2_000);
         await flush();

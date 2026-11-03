@@ -23,7 +23,7 @@ export type SpeechToTextConfig = SpeechToTaskCaptureConfig & {
     model: string;
     parseModel?: string;
     modelPath?: string;
-    // Only meaningful for provider 'openai' — see resolveOpenAITranscribeEndpoint.
+
     baseUrl?: string;
 };
 
@@ -35,13 +35,7 @@ export type ResolvedSpeechCapture = {
     config: SpeechToTextConfig;
 };
 
-/**
- * Resolves the desktop speech-to-text settings into a fully-usable capture
- * config, plus whether recording/transcription is actually ready to run.
- * This is the single source both the "can I record?" gate and the
- * "can I transcribe?" gate must derive from — deriving them separately from
- * `settings.ai?.speechToText` is exactly how they can silently disagree.
- */
+
 export async function resolveSpeechCapture(settings: AiSettings | undefined): Promise<ResolvedSpeechCapture> {
     const speech = settings?.speechToText;
     const provider = speech?.provider ?? 'gemini';
@@ -53,8 +47,8 @@ export async function resolveSpeechCapture(settings: AiSettings | undefined): Pr
     );
     const apiSpeechProvider = provider === 'openai' || provider === 'gemini' ? provider : null;
     const modelPath = apiSpeechProvider ? undefined : speech?.offlineModelPath;
-    // A self-hosted OpenAI-compatible server (#930) usually has no key; Gemini
-    // has no such escape hatch and keeps requiring one.
+
+
     const baseUrl = provider === 'openai' ? (speech?.baseUrl?.trim() || undefined) : undefined;
     const baseConfig = {
         provider,
@@ -67,8 +61,8 @@ export async function resolveSpeechCapture(settings: AiSettings | undefined): Pr
         parseModel: provider === 'openai' && settings?.provider === 'openai' ? settings?.model : undefined,
     };
     if (!speech?.enabled) {
-        // Skip the key lookup entirely when the feature is off — no reason to
-        // touch the keychain/Tauri IPC on every record-button press.
+
+
         return { ready: false, reason: 'disabled', config: { ...baseConfig, apiKey: '' } };
     }
     const apiKey = apiSpeechProvider ? await loadAIKey(apiSpeechProvider).catch(() => '') : '';
@@ -161,12 +155,12 @@ const transcribeParakeet = async (audio: AudioInput, config: SpeechToTextConfig)
     return normalizeLocalAsrTranscript(text);
 };
 
-/** Downloads a Whisper model and resolves to its on-disk path. */
+
 export const downloadWhisperModel = (model: string): Promise<string> => (
     invokeNative<string>('download_whisper_model', { model })
 );
 
-/** Downloads a Parakeet model directory and resolves to its on-disk path. */
+
 export const downloadParakeetModel = (model: string): Promise<string> => (
     invokeNative<string>('download_parakeet_model', { model })
 );

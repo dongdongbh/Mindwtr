@@ -1,7 +1,6 @@
 import { writeFileSync } from 'node:fs';
 
-// This is opt-in diagnostic sampling, never part of ordinary timing runs.
-// A null output avoids even opening a DevTools session.
+
 export async function profileBrowserWork(context, page, output, work) {
   if (!output) return work();
   const session = await context.newCDPSession(page);

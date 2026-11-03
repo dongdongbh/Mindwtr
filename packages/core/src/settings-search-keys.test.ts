@@ -20,8 +20,8 @@ const ALL_KEYS = SETTINGS_SEARCH_INDEX.map((entry) => entry.key);
 
 describe('settings search key roster', () => {
     it('resolves every page key (excluded or not) to a real English string', () => {
-        // This is the original bug: a key that exists in the roster but has no
-        // translation is worse than a missing key — search looks broken.
+
+
         const unresolved = ALL_KEYS.filter((key) => {
             const value = getEnglishI18nValue(resolveSettingsSearchI18nKey(key));
             return !value || !value.trim();
@@ -58,12 +58,7 @@ describe('settings search key roster', () => {
         }
     });
 
-    // The coverage-direction invariant this task exists for: every key is
-    // either accounted for (excluded with a reason) or actually contributes
-    // text to its page — never silently neither. Demonstrated below with a
-    // synthetic fixture, since the real roster is expected to hold (that's
-    // the whole point of the exclusion list) and can't itself exercise the
-    // failure path.
+
     function findUnaccountedKeys(
         keys: readonly string[],
         exclusions: Record<string, string>,
@@ -84,28 +79,25 @@ describe('settings search key roster', () => {
     });
 
     it('the coverage check actually fails on a key that is neither indexed nor excluded', () => {
-        // Mutation test of the checker itself: an unresolvable, non-excluded
-        // key must be flagged.
+
+
         const fixtureKeys = ['knownGood', 'orphanKey'];
         const fixtureExclusions = {};
         const resolve = (key: string) => (key === 'knownGood' ? 'Known Good' : undefined);
         expect(findUnaccountedKeys(fixtureKeys, fixtureExclusions, resolve)).toEqual(['orphanKey']);
 
-        // Excluding it clears the failure, proving exclusion is the intended escape hatch.
+
         expect(findUnaccountedKeys(fixtureKeys, { orphanKey: 'test fixture' }, resolve)).toEqual([]);
     });
 
     it('getSettingsSearchPageEnglishText drops excluded keys and returns real text', () => {
         const gtdText = getSettingsSearchPageEnglishText('gtd');
         expect(gtdText).toContain('Pomodoro timer');
-        // 'keybindings' is excluded on the main page; must not leak into its text list.
+
         expect(getSettingsSearchPageEnglishText('main')).not.toContain('Keyboard shortcuts');
     });
 
-    // The settings the #884 reporter named as missing before this task: rows
-    // that exist on a desktop page but were absent from the roster, and rows
-    // that were present but gave no clue where to find them. Pinned by the
-    // exact query the reporter typed.
+
     const english = buildSettingsSearchResults((key) => getEnglishI18nValue(key));
 
     function search(query: string): Array<{ title: string; page: SettingsSearchPageId; path: string }> {

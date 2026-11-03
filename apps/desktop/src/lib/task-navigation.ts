@@ -15,10 +15,8 @@ export function resolveTaskNavigationView(task: TaskNavigationInput, now: Date =
     };
     const primaryView = statusViewMap[task.status] || 'next';
     const hidesDeferredTasks = primaryView === 'next';
-    // Deferral belongs to core shouldShowTaskForStart and nowhere else. The local
-    // copy this replaced read task.startTime alone, so a recurring task deferred
-    // by its due date looked visible here: opening it from search or an internal
-    // link navigated to Next, where it is hidden and therefore unreachable (#867).
+
+
     if (hidesDeferredTasks && !shouldShowTaskForStart(task, { now, granularity: 'time' })) {
         return 'review';
     }

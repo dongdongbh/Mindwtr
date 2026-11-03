@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Settings › Calendar's visits (C3 review): an open that ends after Back counts for nothing, and the next visit opens afresh. */
+
 class CalendarVisitTest {
     @Test fun anOpenThatEndsAfterTheScreenLeftCountsForNothing() {
         val visits = CalendarVisit()
@@ -27,5 +27,14 @@ class CalendarVisitTest {
         assertEquals(first + 1, second)
         assertTrue(visits.opened(second))
         assertTrue(visits.isCurrent(second))
+    }
+
+
+    @Test fun aPickedCalendarFileKeepsAPersistedReadGrant() {
+        val taken = mutableListOf<Int>()
+        assertEquals(null, keepPickedFileReadable { flags -> taken += flags })
+        assertEquals(listOf(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION), taken)
+        val refused = SecurityException("No persistable permission grants found")
+        assertEquals(refused, keepPickedFileReadable { throw refused })
     }
 }

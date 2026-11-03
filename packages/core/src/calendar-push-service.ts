@@ -1,25 +1,6 @@
-/**
- * Calendar push on a phone: one-way push of scheduled tasks and tasks with due
- * dates into a device calendar. Moved from React Native's
- * `apps/mobile/lib/calendar-push-sync.ts` (now a binding) so the native apps run
- * the same rules; each host binds its device through `CalendarPushServiceHost`.
- * The runs themselves are calendar-push-run.ts, serialized by
- * calendar-push-scheduler.ts; this module owns the device side: the push
- * options, the calendars a user may push to, the app's own "Mindwtr" calendar,
- * each event's fields, and watching the store for changed tasks.
- *
- * Device keys (React Native's AsyncStorage names, `mindwtr:calendar-push-sync:*`):
- * `enabled` ('1' or '0'), `calendar-id` (the Mindwtr calendar the app made),
- * `target-calendar-id` (the calendar the user chose; absent: the Mindwtr
- * calendar), `color`, and iOS `creation-intent`. The saved Mindwtr calendar is
- * reused while the provider reports it; unfinished iOS creation retains its
- * unique temporary title and then its exact ID across restarts.
- * deleting touches only calendars the app made (the saved ID or a calendar
- * identified by its durable creation marker). The pushed-event map is the
- * calendar_sync table (`syncEntries`). The sandbox touches none of this.
- *
- * Logs carry IDs and counts only: never a task or event title.
- */
+
+
+
 import { CALENDAR_PUSH_SYNC_CONCURRENCY, createCalendarPushScheduler } from './calendar-push-scheduler';
 import { runCalendarPushFullSync, runCalendarPushPartialSync, type CalendarPushRunPorts } from './calendar-push-run';
 import { buildCalendarPushEventFields, timeEstimateToMinutes } from './calendar-scheduling';
@@ -38,11 +19,8 @@ export const CALENDAR_PUSH_ENABLED_KEY = 'mindwtr:calendar-push-sync:enabled';
 export const CALENDAR_PUSH_CALENDAR_ID_KEY = 'mindwtr:calendar-push-sync:calendar-id';
 export const CALENDAR_PUSH_TARGET_ID_KEY = 'mindwtr:calendar-push-sync:target-calendar-id';
 export const CALENDAR_PUSH_COLOR_KEY = 'mindwtr:calendar-push-sync:color';
-/**
- * Android: the marker of a Mindwtr calendar being created, written before the create.
- * The calendar's internal name carries it (`mindwtr:<marker>`), so a creation cut short
- * between the create and saving the ID is found and adopted, never made twice.
- */
+
+
 export const CALENDAR_PUSH_PENDING_KEY = 'mindwtr:calendar-push-sync:pending-calendar';
 export const CALENDAR_PUSH_CREATION_INTENT_KEY = 'mindwtr:calendar-push-sync:creation-intent';
 export type CalendarPushDeleteExpectation = { calendarId: string | null; creationIntentRevision?: string | null };
@@ -65,7 +43,7 @@ function parseCalendarCreationIntent(raw: string): CalendarCreationIntent {
     return intent;
 }
 
-/** Deletion binding retains the original confirmation revision across provider/local cleanup cuts. */
+
 export function matchesCalendarPushCreationIntentRevision(raw: string | null, expected: string | null | undefined): boolean {
     if (raw === null || deterministicHash128Hex(raw) === expected) return true;
     try {
@@ -75,7 +53,7 @@ export function matchesCalendarPushCreationIntentRevision(raw: string | null, ex
 }
 export const DEFAULT_CALENDAR_PUSH_COLOR = '#3B82F6';
 const PROJECTED_RECURRENCE_EVENT_DATE_FORMAT = 'PP';
-// expo-calendar's values (Android's CalendarContract access levels as text; iOS reports none).
+
 const ENTITY_EVENT = 'event';
 const ACCESS_OWNER = 'owner';
 const READ_ONLY_ACCESS_LEVELS = new Set(['freebusy', 'none', 'read', 'respond', 'unknown']);
@@ -109,7 +87,7 @@ type CalendarPushTarget = {
 
 export type DeviceCalendarSource = { id?: string; name?: string; type?: string; isLocalAccount?: boolean };
 
-/** A calendar the app creates (expo-calendar's createCalendarAsync details). */
+
 export type DeviceCalendarDetails = {
     title: string;
     color: string;
@@ -123,7 +101,7 @@ export type DeviceCalendarDetails = {
     isSynced?: boolean;
 };
 
-/** A pushed event's fields (expo-calendar's event details). */
+
 export type CalendarPushEventDetails = {
     title: string;
     startDate: Date;
@@ -136,15 +114,15 @@ export type CalendarPushEventDetails = {
     endTimeZone?: string;
 };
 
-/** Exact task/calendar identity for hosts that fence pushed-event writes. */
+
 export type CalendarPushEventIdentity = { taskId: string; calendarId: string };
 
-/** The device calendar writes the push needs, besides the reads (expo-calendar on React Native). */
+
 export type DeviceCalendarWriter = DeviceCalendarReader & {
-    /** The calendar accounts (iOS: where a new calendar goes). */
+
     getSources(): Promise<DeviceCalendarSource[]>;
     createCalendar(details: DeviceCalendarDetails): Promise<string>;
-    /** Absent where the platform cannot recolor a calendar. */
+
     updateCalendar?: (calendarId: string, details: { color: string; title?: string }) => Promise<unknown>;
     deleteCalendar(calendarId: string): Promise<unknown>;
     createEvent(calendarId: string, details: CalendarPushEventDetails & { calendarId: string }, context?: CalendarPushEventIdentity): Promise<string>;
@@ -153,18 +131,18 @@ export type DeviceCalendarWriter = DeviceCalendarReader & {
 };
 
 export type CalendarPushServiceHost = {
-    /** The platform the calendar_sync rows are kept under (React Native reads it once, at startup). */
+
     platform: string;
-    /** 'android' or 'ios', read on each call. */
+
     os(): string;
-    /** The device key-value store (React Native's AsyncStorage keys). */
+
     storage: {
         getItem(key: string): Promise<string | null>;
         setItem(key: string, value: string): Promise<void>;
         removeItem(key: string): Promise<void>;
     };
     calendars: DeviceCalendarWriter;
-    /** The pushed-event map (the calendar_sync table). */
+
     syncEntries: {
         ensureReady(): Promise<unknown>;
         get(taskId: string, platform: string): Promise<CalendarSyncEntry | null>;
@@ -177,9 +155,9 @@ export type CalendarPushServiceHost = {
         warn(message: string, context: { scope: string; extra?: Record<string, string> }): unknown;
         error(error: unknown, context: CalendarLogContext): unknown;
     };
-    /** The task store the push reads and watches (React Native passes its own import, so its tests can replace it). */
+
     store: Pick<typeof useTaskStore, 'getState' | 'subscribe'>;
-    /** Synchronous, nonthrowing admission notification; the owner later calls runPartialCalendarSync. */
+
     requestPartialSync?: (taskIds: string[]) => void;
 };
 
@@ -262,14 +240,10 @@ function isStoredMindwtrManagedCalendar(calendar: DeviceCalendar, storedCalendar
     return Boolean(storedCalendarId && calendar.id === storedCalendarId);
 }
 
-/** The internal name of a Mindwtr calendar this install made (Android): its ownership marker. */
+
 const managedCalendarName = (marker: string): string => `${MANAGED_CALENDAR_NAME}:${marker}`;
 
-/**
- * The diagnostics line (docs/release-notes/diagnostics-ledger.md) proving the app acts only
- * on its own calendar: a marked calendar adopted, a delete finished or refused, a color
- * kept for the next calendar. Never a title or a URL.
- */
+
 const OWNED_ONLY_CHECK = 'v1.3.4/calendar-push-owned-only';
 
 function getAndroidManagedCalendarSeed(
@@ -375,7 +349,6 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
     const PLATFORM = host.platform;
     const { storage, calendars: device, syncEntries, log } = host;
 
-    // MARK: - Settings
 
     const getCalendarPushEnabled = async (): Promise<boolean> => {
         if (isSandboxMode()) return false;
@@ -418,7 +391,6 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         return normalized;
     };
 
-    // MARK: - Permission
 
     const requestCalendarWritePermission = async (): Promise<boolean> => {
         if (isSandboxMode()) return false;
@@ -442,7 +414,6 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         }
     };
 
-    // MARK: - Managed Calendar
 
     const getStoredCalendarId = (): Promise<string | null> =>
         storage.getItem(CALENDAR_PUSH_CALENDAR_ID_KEY);
@@ -479,10 +450,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
     let pendingDeleteExpectation: string | null = null;
     let pendingColor: Promise<boolean> | null = null;
 
-    /**
-     * A creation cut short after the create (Android): the calendar carrying this install's
-     * pending marker is the app's own; its ID is saved now. Null when there is none.
-     */
+
     const adoptPendingCalendar = async (calendars: DeviceCalendar[]): Promise<string | null> => {
         const marker = await storage.getItem(CALENDAR_PUSH_PENDING_KEY);
         if (!marker) return null;
@@ -497,11 +465,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         return made.id;
     };
 
-    /**
-     * The calendar this install owns, in a list the device answered (never a failed
-     * read taken as empty): the saved one while it exists, else the one a creation cut
-     * short made (adopted now), even when a stale saved ID points elsewhere.
-     */
+
     const resolveOwnedCalendar = async (calendars: DeviceCalendar[], savedId: string | null): Promise<string | null> => (
         savedId && calendars.some((calendar) => calendar.id === savedId) ? savedId : adoptPendingCalendar(calendars)
     );
@@ -542,10 +506,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         }
     };
 
-    /**
-     * Returns the ID of the managed "Mindwtr" calendar, creating it if needed.
-     * Returns null if the calendar cannot be created (e.g. no permission, no source).
-     */
+
     const ensureMindwtrCalendarUnsafe = async (withColor?: string): Promise<string | null> => {
         if (isSandboxMode()) return null;
         try {
@@ -573,17 +534,17 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
                     return recovered.id;
                 }
                 if (intent.calendarId) return null;
-                // ponytail: delayed provider visibility can duplicate this same pending title;
-                // native idempotent creation would be needed to eliminate that ambiguity.
+
+
             } else if (storedId && allCalendars.some((c) => c.id === storedId)) {
-                // A death after saving the ID left the marker: the creation is done.
+
                 if (host.os() === 'android' && await storage.getItem(CALENDAR_PUSH_PENDING_KEY)) {
                     await storage.removeItem(CALENDAR_PUSH_PENDING_KEY);
                 }
                 return storedId;
             }
-            // The saved calendar was deleted externally (or none was saved): a calendar a
-            // creation cut short made is adopted, else a new one is made.
+
+
             const adoptedId = host.os() === 'android' ? await resolveOwnedCalendar(allCalendars, null) : null;
             if (adoptedId) return adoptedId;
 
@@ -591,8 +552,8 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
             let calendarDetails: DeviceCalendarDetails;
 
             if (host.os() === 'android') {
-                // Android calendars need to be attached to a real device account/source
-                // or some calendar providers will keep them hidden from the OS calendar app.
+
+
                 const androidSeed = getAndroidManagedCalendarSeed(allCalendars, color);
                 if (!androidSeed) {
                     void log.warn('No owned Android calendar source available; cannot create Mindwtr calendar', {
@@ -603,7 +564,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
                 }
                 calendarDetails = androidSeed;
             } else {
-                // iOS requires a source
+
                 const sources = await device.getSources();
                 const source =
                     sources.find((s) => s.type === SOURCE_LOCAL) ??
@@ -626,8 +587,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
                 };
             }
 
-            // Persist a unique visible title on iOS before native create. A provider may
-            // delay listing a new calendar; retry then uses this same title.
+
             const marked = host.os() === 'android';
             if (marked) {
                 const marker = await storage.getItem(CALENDAR_PUSH_PENDING_KEY) ?? generateUUID();
@@ -666,8 +626,8 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         if (pendingDelete) return Promise.resolve(null);
         if (pendingEnsure) return pendingEnsure;
         const run = (async () => {
-            // iOS recolor may be finishing a creation intent. Android recolor
-            // recreates through the full-sync queue, which itself calls ensure.
+
+
             if (host.os() === 'ios' && pendingColor) await pendingColor.catch(() => undefined);
             if (pendingDelete) return null;
             return ensureMindwtrCalendarUnsafe(withColor);
@@ -700,18 +660,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         return managedId ? { id: managedId } : null;
     };
 
-    /**
-     * Deletes the managed Mindwtr calendar and removes the stored ID.
-     * Called when the user disables calendar push sync and chooses to clean up.
-     * The app owns only the calendar whose ID it saved: another install (another
-     * phone on the account, or a second Mindwtr app) may have a calendar with the
-     * same title and name, and it is never deleted.
-     *
-     * The device calendar goes first; its pushed-event map, the chosen calendar and
-     * the saved ID are cleared only once it is gone, the saved ID last. A failed
-     * delete keeps them all and rejects (retry later), and a run cut short at any
-     * step finishes when it runs again.
-     */
+
     const deleteMindwtrCalendarUnsafe = async (expected?: CalendarPushDeleteExpectation): Promise<void> => {
         if (isSandboxMode()) return;
         const savedId = await getStoredCalendarId();
@@ -724,7 +673,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         }
         const intent = rawIntent === null ? null : parseCalendarCreationIntent(rawIntent);
         const selectedTargetId = await getCalendarPushTargetCalendarId();
-        // A list the device could not give is an error, never an empty list: nothing is cleared.
+
         const calendars = await device.getCalendars();
         const ownedId = intent
             ? findIntentCalendar(calendars, intent, savedId)?.id ?? null
@@ -738,8 +687,8 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
             try {
                 await device.deleteCalendar(ownedId);
             } catch (error) {
-                // A provider may answer a calendar that is already gone with an error: gone is gone,
-                // but only a list the device gives proves it.
+
+
                 const stillThere = await device.getCalendars()
                     .then((list) => list.some((calendar) => calendar.id === ownedId), () => true);
                 if (stillThere) {
@@ -752,7 +701,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
             }
         }
 
-        // Gone now (a list proved it): the deleted calendar, and a stale saved one.
+
         const goneIds = new Set([ownedId, savedId, intent?.calendarId].filter((id): id is string => Boolean(id)));
         try {
             const syncedEntries = await syncEntries.getAll(PLATFORM);
@@ -760,7 +709,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
                 await syncEntries.delete(entry.taskId, PLATFORM);
             }
         } catch (error) {
-            // Stale rows for a deleted calendar are harmless: the next push finds their events missing.
+
             void log.warn('Failed to clear deleted Mindwtr calendar sync entries', {
                 scope: 'calendar-push',
                 extra: { error: String(error) },
@@ -786,7 +735,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         });
     };
 
-    /** A confirmed native Delete rechecks its identity after any creation or recoloring finishes. */
+
     const deleteMindwtrCalendar = (expected?: CalendarPushDeleteExpectation): Promise<void> => {
         const expectation = JSON.stringify(expected ?? null);
         if (pendingDelete) return expectation === pendingDeleteExpectation
@@ -803,11 +752,10 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         return run;
     };
 
-    // MARK: - Per-task sync
 
     const buildEventDetails = (task: Task): CalendarPushEventDetails => {
-        // safeParseDate parses YYYY-MM-DD as local midnight, avoiding the UTC
-        // shift that `new Date(dateString)` produces for date-only strings.
+
+
         const dateValue = task.startTime ?? task.dueDate;
         const parsed = safeParseDate(dateValue);
         const startDate = parsed ?? new Date();
@@ -827,10 +775,8 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         const { notes, url } = buildCalendarPushEventFields(task, { projectName, sectionName, leadingNote });
 
         if (hasTimeComponent(dateValue)) {
-            // The pushed event's length comes from the estimate, so it must honour
-            // the feature the same way the in-app calendar does — an estimate
-            // written before the feature was switched off must not keep stretching
-            // events.
+
+
             const estimateMinutes = timeEstimateToMinutes(task.timeEstimate, {
                 enabled: resolveFeatureFlags(settings).timeEstimates,
             });
@@ -848,10 +794,8 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
 
         const os = host.os();
         const startDateOnly = buildAllDayBoundary(startDate, os);
-        // Android's CalendarContract wants an EXCLUSIVE end at the next UTC
-        // midnight; EventKit counts every day the range touches, so on iOS that
-        // same end reads as a second day and Google Calendar (synced through the
-        // iOS account) shows a two-day event (#1065). iOS ends inside the day.
+
+
         const endDate = os === 'android'
             ? buildAllDayBoundary(startDate, os, 1)
             : buildAllDayEndOfDay(startDate);
@@ -935,7 +879,6 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         }
     };
 
-    // MARK: - Full sync
 
     const runFullCalendarSyncUnsafe = async (): Promise<void> => {
         const enabled = await getCalendarPushEnabled();
@@ -963,7 +906,6 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         });
     };
 
-    // MARK: - Debounced partial sync
 
     const runPartialCalendarSyncUnsafe = async (taskIds: string[]): Promise<void> => {
         const enabled = await getCalendarPushEnabled();
@@ -983,8 +925,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         });
     };
 
-    // Serializes every calendar write and coalesces store changes; the runs above
-    // stay unqueued so the scheduler owns ordering (#743).
+
     const calendarPushScheduler = createCalendarPushScheduler({
         runFull: () => runFullCalendarSyncUnsafe(),
         runPartial: (taskIds) => runPartialCalendarSyncUnsafe(taskIds),
@@ -1006,15 +947,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         calendarPushScheduler.scheduleDebounced(taskIds);
     };
 
-    /**
-     * Deletes and recreates the managed "Mindwtr" calendar so a color change takes
-     * effect on Android. The provider ignores post-creation color updates, so the
-     * only way to change the color third-party calendar apps render is to drop the
-     * calendar and create a fresh one with the new color, then re-push its events.
-     * Serialized on the calendar sync queue so it cannot race a concurrent push and
-     * duplicate events (#743). The color is stored once the new calendar exists.
-     * Returns true when a new managed calendar was created.
-     */
+
     const recreateManagedMindwtrCalendar = async (color: string): Promise<boolean> => {
         let recreatedId: string | null = null;
         await enqueueCalendarSync(async () => {
@@ -1027,14 +960,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         return recreatedId !== null;
     };
 
-    /**
-     * Gives the Mindwtr calendar a new color. The device calendar changes first and
-     * the color is stored after it, so a change cut short at any step is finished by
-     * a retry: one whose device calendar already has the color only stores it.
-     * Without a calendar yet the color is stored for the calendar the app makes next
-     * (false). When the device refuses, nothing is stored and it rejects, so the same
-     * pick retries it.
-     */
+
     const updateMindwtrCalendarColorUnsafe = async (color: string): Promise<boolean> => {
         if (isSandboxMode()) return false;
         const normalized = normalizeCalendarPushColor(color);
@@ -1052,20 +978,17 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
             if (host.os() === 'ios' && await getCreationIntent() && !await ensureMindwtrCalendarUnsafe()) return false;
             const storedCalendarId = await getStoredCalendarId();
             const calendars = await device.getCalendars();
-            // Only the calendar the app saved (or one it made with its marker) is its own, never one found by its title.
+
             const ownId = await resolveOwnedCalendar(calendars, storedCalendarId);
             const target = calendars.find((calendar) => ownId && calendar.id === ownId);
             if (!target) return await stored('deferred');
             if ((target.color ?? '').trim().toUpperCase() === normalized) return await stored('already');
             if (!isWritableCalendar(target)) throw new Error('The Mindwtr calendar cannot be changed on this device');
 
-            // Android's CalendarProvider only stores a calendar's color at creation
-            // time, and expo-calendar's update path never writes CALENDAR_COLOR, so
-            // updating it in place never reaches third-party calendar apps (#726).
-            // Recreate the managed calendar with the new color instead.
+
             if (host.os() === 'android') {
                 if (await recreateManagedMindwtrCalendar(normalized)) return true;
-                // Deleted, but the new one could not be made: the next calendar takes the color.
+
                 return await stored('deferred');
             }
 
@@ -1094,7 +1017,6 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         return run;
     };
 
-    // MARK: - Store subscription
 
     let unsubscribeStore: (() => void) | null = null;
 
@@ -1104,10 +1026,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         calendarPushScheduler.cancelPending();
     };
 
-    /**
-     * Starts watching the task store for changes and syncing due-date tasks to
-     * the device calendar. Returns an unsubscribe function.
-     */
+
     const startCalendarPushSync = (): (() => void) => {
         if (isSandboxMode()) return () => {};
         if (unsubscribeStore) return unsubscribeStore;
@@ -1120,7 +1039,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
                 const changedIds: string[] = [];
                 const currentMap = buildCalendarSyncTaskMap(currentTasks);
 
-                // Changed or new tasks
+
                 for (const task of currentTasks) {
                     const prev = previousTaskMap.get(task.id);
                     if (
@@ -1142,7 +1061,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
                     }
                 }
 
-                // Tasks removed from store entirely
+
                 for (const id of previousTaskMap.keys()) {
                     if (!currentMap.has(id)) {
                         changedIds.push(id);

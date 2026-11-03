@@ -6,6 +6,7 @@ import {
     addBreadcrumb,
     CLOCK_SKEW_THRESHOLD_MS,
     cloudGetJson,
+    formatActivationMissingAttachments,
     isConnectionAllowed,
     isSyncEncryptionRemoteVersionUnavailableError,
     isValidCloudSyncToken,
@@ -61,15 +62,33 @@ import { testDropboxAccess } from '@/lib/dropbox-sync';
 import { formatClockSkew, formatError, isDropboxUnauthorizedError, logSettingsError } from '@/lib/settings-utils';
 import { deleteSecureConfigValue, getSecureConfigValue, setSecureConfigValue } from '@/lib/secure-config';
 
-// The transport rules live in core (sync-settings-transport.ts) so the native app runs them
-// too; this hook binds them to AsyncStorage, the secure config, the sync service, the folder
-// picker, CloudKit and Dropbox, and hands React the controller's state.
+
 export type { SyncSettingsBackend as SyncBackend, CloudKitAccountStatus } from '@mindwtr/core/sync-settings-model';
 
 type UseSyncSettingsTransportActionsParams = SyncSettingsTransportParams;
 
+
+const confirmActivationWithoutFiles = (
+    tr: UseSyncSettingsTransportActionsParams['tr'],
+): NonNullable<SyncSettingsTransportParams['confirmActivationWithoutFiles']> => (files) => new Promise<boolean>((resolve) => {
+    Alert.alert(
+        tr('settings.syncMissingFilesTitle'),
+        tr('settings.syncMissingFilesBody', {
+            files: formatActivationMissingAttachments(files, (count) => tr('settings.syncMissingFilesMore', { count })),
+        }),
+        [
+            { text: tr('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+            { text: tr('settings.syncMissingFilesContinue'), onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+    );
+});
+
 const createTransport = (params: () => UseSyncSettingsTransportActionsParams): SyncSettingsTransport => createSyncSettingsTransport({
-    params,
+    params: () => {
+        const current = params();
+        return { ...current, confirmActivationWithoutFiles: confirmActivationWithoutFiles(current.tr) };
+    },
     storage: {
         multiGet: (keys) => AsyncStorage.multiGet(keys),
         setItem: (key, value) => AsyncStorage.setItem(key, value),
@@ -89,10 +108,8 @@ const createTransport = (params: () => UseSyncSettingsTransportActionsParams): S
     reconcileBackgroundSync: () => syncMobileBackgroundSyncRegistration(),
     pickSyncFolder: () => {
         const { tr } = params();
-        // iOS: providers whose Files app integration can't offer folders
-        // (Google Drive, OneDrive, ownCloud…) still work through a backup
-        // JSON picked in place — but only if the user knows the second
-        // sheet exists and what to put in it (#1068).
+
+
         const confirmFileFallback = () => new Promise<boolean>((resolve) => {
             Alert.alert(
                 tr('settings.syncMobile.iosFolderFallbackTitle'),
@@ -127,7 +144,7 @@ const createTransport = (params: () => UseSyncSettingsTransportActionsParams): S
         forceRefreshAccessTokenForTokens: (clientId, tokens) => forceRefreshDropboxAccessTokenForTokens(clientId, tokens),
         testAccess: (accessToken) => testDropboxAccess(accessToken),
     },
-    // This app's imports, so a test that replaces them replaces what the controller calls.
+
     core: {
         addBreadcrumb: (message) => addBreadcrumb(message),
         CLOCK_SKEW_THRESHOLD_MS,
@@ -155,7 +172,7 @@ const createTransport = (params: () => UseSyncSettingsTransportActionsParams): S
 export function useSyncSettingsTransportActions(params: UseSyncSettingsTransportActionsParams) {
     const paramsRef = useRef(params);
     paramsRef.current = params;
-    // One controller per screen visit, created on first use.
+
     const [transport] = useState(() => createTransport(() => paramsRef.current));
     const state = useSyncExternalStore(transport.subscribe, transport.getState);
     const { dropboxConfigured, supportsNativeICloudSync } = params;

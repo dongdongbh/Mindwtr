@@ -1,26 +1,35 @@
 import Foundation
 
-// Shared by the WidgetKit templates and the Foundation-only widget tests.
+
 struct MindwtrWidgetTaskItem: Decodable {
     let id: String
     let title: String
     let statusLabel: String?
-    let dueLabel: String?
+    let showStatus: Bool?
+    var dueLabel: String?
     let dueTone: String?
     let openUri: String?
     let priorityColor: String?
     let contextLabel: String?
     let identityColor: String?
     let completionToken: String?
-    // Optional so cached payloads from older app versions still decode.
+
     let contexts: [String]?
     let upcomingDate: String?
     let upcomingLabel: String?
 
     var isUpcomingPreview: Bool { upcomingDate != nil }
 
-    var displayDueLabel: String? {
-        MindwtrWidgetUpcomingProjection.label(date: upcomingDate, prefix: upcomingLabel) ?? dueLabel
+
+    func relabeled(
+        days: MindwtrWidgetUpcomingDays?, now: Date, calendar: Calendar = .current, locale: Locale = .current
+    ) -> MindwtrWidgetTaskItem {
+        guard let days, let label = MindwtrWidgetUpcomingProjection.label(
+            date: upcomingDate, prefix: upcomingLabel, days: days, now: now, calendar: calendar, locale: locale
+        ) else { return self }
+        var copy = self
+        copy.dueLabel = label
+        return copy
     }
 
     var contextsLabel: String? {
@@ -29,7 +38,7 @@ struct MindwtrWidgetTaskItem: Decodable {
     }
 
     var detailLabel: String? {
-        let labels = [contextsLabel, Self.nonEmpty(contextLabel)].compactMap { $0 }
+        let labels = [showStatus == true ? Self.nonEmpty(statusLabel) : nil, contextsLabel, Self.nonEmpty(contextLabel)].compactMap { $0 }
         return labels.isEmpty ? nil : labels.joined(separator: " · ")
     }
 
@@ -41,32 +50,44 @@ struct MindwtrWidgetTaskItem: Decodable {
     }
 }
 
-// Cached previews expire by local day even when the app has not republished.
+
+struct MindwtrWidgetUpcomingDays: Decodable {
+    let today: String
+    let tomorrow: String
+    let weekdays: [String]
+    let dayFirst: Bool
+}
+
+
 enum MindwtrWidgetUpcomingProjection {
-    static func isVisible(_ value: String?, at now: Date, calendar: Calendar = .current) -> Bool {
-        guard let value, let date = parsedDate(value, calendar: calendar),
-              let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)),
-              let windowEnd = calendar.date(byAdding: .day, value: 8, to: calendar.startOfDay(for: now))
-        else { return false }
-        return date >= tomorrow && date < windowEnd
-    }
-
-    static func timelineDates(now: Date, calendar: Calendar = .current) -> [Date] {
-        (1...7).compactMap { calendar.date(byAdding: .day, value: $0, to: calendar.startOfDay(for: now)) }
-    }
-
     static func label(
-        date value: String?, prefix: String?, calendar: Calendar = .current, locale: Locale = .current
+        date value: String?, prefix: String?, days: MindwtrWidgetUpcomingDays, now: Date,
+        calendar: Calendar = .current, locale: Locale = .current
     ) -> String? {
-        guard let value, let prefix, let date = parsedDate(value, calendar: calendar) else { return nil }
+        guard let value, let prefix, days.weekdays.count == 7,
+              let date = parsedDate(value, calendar: calendar) else { return nil }
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        guard let ahead = gregorian.dateComponents(
+            [.day], from: gregorian.startOfDay(for: now), to: gregorian.startOfDay(for: date)
+        ).day else { return nil }
+        let parts = gregorian.dateComponents([.month, .day, .weekday], from: date)
+        let day: String
+        switch ahead {
+        case 0: day = days.today
+        case 1: day = days.tomorrow
+        case 2...6: day = days.weekdays[(parts.weekday ?? 1) - 1]
+        default:
+            let month = parts.month ?? 0, dayOfMonth = parts.day ?? 0
+            day = days.dayFirst ? "\(dayOfMonth)/\(month)" : "\(month)/\(dayOfMonth)"
+        }
+        guard value.contains("T") else { return "\(prefix) \(day)" }
         let formatter = DateFormatter()
         formatter.locale = locale
-        formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
-        formatter.dateStyle = .medium
-        formatter.timeStyle = value.contains("T") ? .short : .none
-        formatter.doesRelativeDateFormatting = false
-        return "\(prefix) \(formatter.string(from: date))"
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return "\(prefix) \(day) \(formatter.string(from: date))"
     }
 
     private static func parsedDate(_ value: String, calendar: Calendar) -> Date? {
@@ -108,8 +129,8 @@ enum MindwtrWidgetUpcomingProjection {
 }
 
 enum MindwtrCompactTaskLayout {
-    // Context-bearing rows have one extra line. Budget those rows individually
-    // so bare tasks keep the compact widget's existing density at every size.
+
+
     static func visibleTaskCount(
         items: [MindwtrWidgetTaskItem],
         availableHeight: Double,

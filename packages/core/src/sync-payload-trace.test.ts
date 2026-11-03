@@ -147,8 +147,7 @@ describe('buildSyncPayloadDiffTraceExtra', () => {
         expect(extra.syncedTasksSig).toBeTruthy();
     });
 
-    // The diff runs on the sanitized payload, so an opted-out surface reads as
-    // unchanged no matter what the local value is.
+
     it('reports settings differences as field paths, not samples', () => {
         const extra = buildSyncPayloadDiffTraceExtra(
             appData({ settings: { syncPreferences: { appearance: true }, theme: 'dark' } }),
@@ -192,9 +191,8 @@ describe('sync payload trace signature memo (#766)', () => {
     });
 
     it('reuses the signatures it already computed for a document', () => {
-        // Documents are replaced, never mutated in place, so an in-place edit is
-        // only a way to observe that the second trace did not recompute. If this
-        // ever fails the memo is dead and every trace pays full price again.
+
+
         const data = appData({ tasks: [task('a')] });
         const first = buildSyncPayloadTraceExtra(data);
         data.tasks.push(task('b'));
@@ -219,8 +217,8 @@ describe('large-document trace budget (#766)', () => {
         const extra = buildSyncPayloadTraceExtra(bigData(2001));
         expect(extra.fingerprint).toBeUndefined();
         expect(extra.fingerprintSkipped).toBe('large-document');
-        // The surface signatures are what actually identify the document; the
-        // dropped fingerprint hashed ~98% of the same bytes as tasksSig.
+
+
         expect(extra.tasksSig).toBeDefined();
         expect(extra.projectsSig).toBeDefined();
         expect(extra.settingsSig).toBeDefined();

@@ -3,6 +3,7 @@ import { Text, View } from 'react-native';
 
 import { styles } from '../inbox-processing-modal.styles';
 import { InboxDateSelectorRow } from './InboxDateSelectorRow';
+import type { ProcessInboxDateField } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 type Props = {
@@ -28,6 +29,8 @@ type Props = {
   pendingReviewDateOnly: boolean;
   setPendingReviewDateOnly: (v: boolean) => void;
   setShowReviewDatePicker: (v: boolean) => void;
+  pendingTimes: Partial<Record<ProcessInboxDateField, string>>;
+  openTimePicker: (field: ProcessInboxDateField) => void;
   defaultScheduleTime?: string | null;
   dateOnlyLabel: string;
 };
@@ -55,6 +58,8 @@ export function InboxSchedulingSection({
   pendingReviewDateOnly,
   setPendingReviewDateOnly,
   setShowReviewDatePicker,
+  pendingTimes,
+  openTimePicker,
   defaultScheduleTime,
   dateOnlyLabel,
 }: Props) {
@@ -85,6 +90,8 @@ export function InboxSchedulingSection({
           dateOnly={pendingStartDateOnly}
           onDateOnly={() => setPendingStartDateOnly(true)}
           onUseDefaultTime={useDefaultStartTime}
+          time={pendingTimes.startTime}
+          onOpenTime={() => openTimePicker('startTime')}
         />
       )}
       {showDueDateField && (
@@ -98,6 +105,8 @@ export function InboxSchedulingSection({
           dateOnly={pendingDueDateOnly}
           onDateOnly={() => setPendingDueDateOnly(true)}
           onUseDefaultTime={() => setPendingDueDateOnly(false)}
+          time={pendingTimes.dueDate}
+          onOpenTime={() => openTimePicker('dueDate')}
         />
       )}
       {showReviewDateField && (
@@ -111,6 +120,8 @@ export function InboxSchedulingSection({
           dateOnly={pendingReviewDateOnly}
           onDateOnly={() => setPendingReviewDateOnly(true)}
           onUseDefaultTime={() => setPendingReviewDateOnly(false)}
+          time={pendingTimes.reviewAt}
+          onOpenTime={() => openTimePicker('reviewAt')}
         />
       )}
     </View>

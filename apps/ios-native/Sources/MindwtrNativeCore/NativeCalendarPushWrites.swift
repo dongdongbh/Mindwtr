@@ -1,6 +1,6 @@
 import Foundation
 
-/// Engine-serialized facade over the existing worker and journal; the caller retains the library/KV lease.
+
 final class NativeCalendarPushWrites {
     static let maximumTickets = 32
     private enum Stage: Equatable { case queued, prepared, started, running, saved, blocked, finished }
@@ -42,7 +42,7 @@ final class NativeCalendarPushWrites {
     private let failure = "Calendar write failed"
     private let cancelled = "Calendar request cancelled"
     #if DEBUG
-    // Exact synchronous admission cut only; never a release-build owner or provider override.
+
     var beforeFirstSubmission: (() -> Void)?
     #endif
 
@@ -76,7 +76,7 @@ final class NativeCalendarPushWrites {
         return entry.ticket
     }
 
-    /// Nonblocking polling only. Reads and mapping acknowledgements can keep the head waiting.
+
     func next() -> String? {
         if active == nil, !closing, !blocked, !waiting.isEmpty { active = waiting.removeFirst() }
         advance()
@@ -110,11 +110,19 @@ final class NativeCalendarPushWrites {
                 try confirm(.mappingAck, entry: entry)
                 guard entry.acknowledgement?.confirmed == true else { throw NativeCalendarWriteError.unavailable }
             }
+            clearCreateMarker(entry, mapping: mapping)
             finish(entry)
         } catch {
             blocked = true; rejectWaiting()
             throw NativeCalendarWriteError.failed
         }
+    }
+
+
+    private func clearCreateMarker(_ entry: Entry, mapping: NativeCalendarPushMapping?) {
+        guard mapping != nil, !closing, case .createEvent(let calendarID, _)? = entry.request,
+              case .identifier(let eventID)? = entry.effect?.result else { return }
+        jobs.clearNotesSuffix(eventID: eventID, calendarID: calendarID, suffix: NativeCalendarPushWitness.marker(entry.operationID))
     }
 
     func cancel(_ ticket: String) {
@@ -128,7 +136,7 @@ final class NativeCalendarPushWrites {
         }
     }
 
-    /// Drain cannot replace a real provider result. A failed publication keeps the caller's lease alive.
+
     func cancelAndDrain() throws {
         closing = true
         for entry in waiting { entry.cancelled = true; entry.stage = .finished; reply(entry, error: cancelled) }
@@ -161,7 +169,7 @@ final class NativeCalendarPushWrites {
             try sameEffect(effect, expected)
             try retire(entry)
         }
-        // Saved/uncertain durable records deliberately remain for the root's cold-recovery gate.
+
     }
 
     private func snapshot() throws -> NativeCalendarPushEffect? {
@@ -241,7 +249,7 @@ final class NativeCalendarPushWrites {
             try jobs.submitWrite(request, operationID: entry.operationID)
             entry.accepted = true; entry.stage = .running
         } catch {
-            // Every submitWrite throw precedes enqueue; this exact first attempt has never been accepted.
+
             if entry.requestJSON != nil {
                 entry.outcome = .failedBeforeMutation(.unavailable)
                 rejectWaiting(); try publishCompletion(entry)
@@ -259,7 +267,7 @@ final class NativeCalendarPushWrites {
         try confirm(.completion, entry: entry)
     }
 
-    /// Only retry the retained pair before inspecting phase; never replay a provider or guessed transition.
+
     private func confirm(_ publication: Publication, entry: Entry) throws {
         let current = try snapshot()
         if let current, current.id != entry.operationID { throw NativeCalendarWriteError.unavailable }
@@ -322,7 +330,7 @@ final class NativeCalendarPushWrites {
             }
         case .calendarAck:
             if let current {
-                // No pending pair remains after retry; a saved record here means local acknowledgment refused.
+
                 guard current.phase == .saved, let frozen = entry.effect else { throw NativeCalendarWriteError.unavailable }
                 try sameEffect(current, frozen)
                 entry.publication = nil; entry.stage = .blocked; blocked = true

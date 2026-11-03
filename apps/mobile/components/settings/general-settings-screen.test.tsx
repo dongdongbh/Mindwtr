@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { GeneralSettingsScreen } from './general-settings-screen';
 
-// Core's General model runs for real; only the store is the test's.
+
 vi.mock('@mindwtr/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@mindwtr/core')>()),
   shallow: Object.is,
@@ -45,7 +45,7 @@ vi.mock('react-native-safe-area-context', () => ({
   SafeAreaView: (props: any) => React.createElement('SafeAreaView', props, props.children),
 }));
 
-// Persian shows the calendar system picker too.
+
 vi.mock('./settings.hooks', () => ({
   useSettingsLocalization: () => ({ language: 'fa', tr: (key: string) => key, t: (key: string) => key, setLanguage: vi.fn() }),
   useSettingsScrollContent: () => ({}),
@@ -71,9 +71,9 @@ describe('GeneralSettingsScreen pickers', () => {
       tree = renderer.create(<GeneralSettingsScreen />);
     });
 
-    // Closed modals still render their options in the test shim.
+
     const pickers = tree.root.findAllByType(Modal).map((modal) => modal.findByType(ScrollView).findAllByType(TouchableOpacity));
-    // Theme, quick access, language, week start, date format, calendar system, time format.
+
     expect(pickers).toHaveLength(7);
     for (const options of pickers) {
       for (const option of options) {

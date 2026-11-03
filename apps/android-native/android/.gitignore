@@ -5,3 +5,4 @@ local.properties
 build/
 app/build/
 app/src/main/assets/*.tmp
+app/.cxx/

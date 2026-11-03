@@ -18,6 +18,9 @@ permissions:
   contents: read
 
 env:
+  MINDWTR_GMAIL_PRODUCTION_VERIFIED: ${{ vars.MINDWTR_GMAIL_PRODUCTION_VERIFIED }}
+  MINDWTR_GMAIL_CLIENT_ID: ${{ secrets.MINDWTR_GMAIL_CLIENT_ID }}
+  MINDWTR_GMAIL_CLIENT_SECRET: ${{ secrets.MINDWTR_GMAIL_CLIENT_SECRET }}
   APPIMAGETOOL_VERSION: "1.9.1"
   APPIMAGETOOL_X86_64_SHA256: "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
   APPIMAGE_RUNTIME_VERSION: "20251108"
@@ -41,15 +44,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
 
-      # D3: fail fast, before the ~90min build, when the AppStream metainfo's top
-      # <release> entry wasn't bumped for this release (rc.2 once shipped with the
-      # rc.1 entry still in place). Only enforced when a real release tag resolved;
-      # an ad-hoc workflow_dispatch with no tag falls back to the unsuffixed base
-      # version and must not be held to the tag's version.
+
       - name: Validate AppStream metainfo version for tagged releases
         run: |
           set -euo pipefail
@@ -80,16 +79,16 @@ jobs:
         shell: bash
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           workspaces: apps/desktop/src-tauri
 
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: ".bun-version"
 
@@ -162,8 +161,8 @@ jobs:
               ./original.AppImage --appimage-extract >/dev/null
               mv squashfs-root appdir
 
-              # Some Tauri builds emit .DirIcon as an absolute symlink into the CI workspace.
-              # That symlink is broken for downstream users and AppImageHub lint.
+
+
               if [ -L appdir/.DirIcon ]; then
                 DIRICON_TARGET="$(readlink appdir/.DirIcon || true)"
                 if [[ "$DIRICON_TARGET" = /* ]] || [ ! -e appdir/.DirIcon ]; then
@@ -180,19 +179,19 @@ jobs:
                 echo ".DirIcon already present"
               fi
 
-              # Keep AppStream metadata under usr/share/metainfo (not AppDir root),
-              # and ensure filenames match the component id to satisfy appstreamcli.
+
+
               if [ -f "$METAINFO_SOURCE" ]; then
                 mkdir -p appdir/usr/share/metainfo
                 rm -f appdir/usr/share/metainfo/*.xml
                 cp "$METAINFO_SOURCE" appdir/usr/share/metainfo/tech.dongdongbh.mindwtr.metainfo.xml
-                # appdir-lint in AppImageHub looks for *.appdata.xml specifically.
+
                 cp "$METAINFO_SOURCE" appdir/usr/share/metainfo/tech.dongdongbh.mindwtr.appdata.xml
                 rm -f appdir/*.metainfo.xml appdir/*.appdata.xml || true
                 echo "Injected AppStream metainfo/appdata in usr/share/metainfo"
               fi
 
-              # Tauri can emit an empty Categories= entry, which fails AppStream checks.
+
               if [ -d appdir/usr/share/applications ]; then
                 for DESKTOP_FILE in appdir/usr/share/applications/*.desktop; do
                   [ -f "$DESKTOP_FILE" ] || continue
@@ -203,17 +202,17 @@ jobs:
                 done
               fi
 
-              # libwayland-client must come from the host Mesa/EGL stack. If the
-              # AppImage bundles the build host copy, newer distros can fail on
-              # startup with EGL_BAD_PARAMETER before the webview is created.
+
+
+
               while IFS= read -r WAYLAND_CLIENT_LIB; do
                 rm -f "$WAYLAND_CLIENT_LIB"
                 echo "Removed bundled Wayland client library: $WAYLAND_CLIENT_LIB"
               done < <(find appdir \( -type f -o -type l \) -name 'libwayland-client.so*' | sort)
 
-              # Some Tauri/linuxdeploy builds can leave AppRun.wrapped as 770.
-              # AppImageHub runs the app as an unprivileged user and fails with:
-              # "AppRun.wrapped: Permission denied". Normalize to world-executable.
+
+
+
               if [ -e appdir/AppRun ]; then
                 chmod 0755 appdir/AppRun
               fi
@@ -331,7 +330,7 @@ jobs:
         run: bash scripts/ci/publish-snap.sh "${{ steps.snap_build.outputs.snap }}" stable
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: release-linux
           path: release-artifacts/*

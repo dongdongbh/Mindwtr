@@ -26,7 +26,7 @@ const emptyPreview = (): ArchiveRetentionPreview => ({
     taskIds: [], projectIds: [], sectionIds: [], legacyTaskIds: [], legacyProjectIds: [],
 });
 
-/** IDs are only a preview. The store recomputes this selection inside its write. */
+
 export const getArchiveRetentionPreview = (
     data: { tasks: Task[]; projects: Project[]; sections: Section[] },
     days: number,
@@ -87,7 +87,7 @@ export const getArchiveRetentionPreview = (
             || !['archived', 'done', 'reference'].includes(child.status) || !oldEnough(child)
         )) continue;
         result.projectIds.push(project.id);
-        // One push per id: QuickJS (native Android) refuses a call with more than 65535 arguments.
+
         for (const section of sections) result.sectionIds.push(section.id);
         for (const child of children) result.taskIds.push(child.id);
     }

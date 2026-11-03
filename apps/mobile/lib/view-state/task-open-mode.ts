@@ -9,7 +9,7 @@ import {
 
 import { workspaceSessionStorage } from '@/lib/workspace-session-storage';
 
-// The key, the modes and the read rule live in core (gtd-settings-model.ts), shared with the native host.
+
 export const TASK_OPEN_MODE_STORAGE_KEY = MOBILE_TASK_OPEN_MODE_STORAGE_KEY;
 
 export const TASK_OPEN_MODES = GTD_TASK_OPEN_MODES;
@@ -88,9 +88,7 @@ export function setTaskOpenMode(mode: TaskOpenMode): void {
   state.revision += 1;
   publish(state, { hydrated: true, mode });
 
-  // Serialize writes so a slow earlier selection can never land after the
-  // user's final choice. A failed write is deliberately nonfatal and does not
-  // block later selections from reaching storage.
+
   state.persistence = state.persistence
     .catch(() => undefined)
     .then(() => workspaceSessionStorage.setItem(TASK_OPEN_MODE_STORAGE_KEY, mode))
@@ -113,7 +111,7 @@ export function useTaskOpenMode(): TaskOpenModeSnapshot & { setMode: (mode: Task
   return { ...snapshot, setMode };
 }
 
-/** Clears module state between isolated store tests. */
+
 export function __resetTaskOpenModeStoreForTests(): void {
   resetEpoch += 1;
   scopedStates.clear();

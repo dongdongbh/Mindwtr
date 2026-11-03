@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Internal V3 metadata ownership using the actual bundled JSC and SQLite.
+
 final class AttachmentMixedRemoveHostTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private var root: URL!
@@ -426,8 +426,8 @@ final class AttachmentMixedRemoveHostTests: XCTestCase {
         let target = managed.appendingPathComponent("historical-original.txt"), bytes = try Data(contentsOf: target)
         let entries = try FileManager.default.contentsOfDirectory(atPath: managed.path), acknowledgments = try acknowledgmentCount()
         let id = UUID().uuidString.lowercased(), selected = attachmentID + ":3", raw = try request(before, id: id, attachment: selected)
-        // Fixed canonical timestamp has the same encoded width as the actual
-        // JSC timestamp. These shapes measure capacity only; none is persisted.
+
+
         var payload = try object(before.payloadJSON), rows = try XCTUnwrap(payload["attachments"] as? [[String: Any]])
         let position = try XCTUnwrap(rows.firstIndex { ($0["id"] as? String) == selected })
         rows[position]["deletedAt"] = at; rows[position]["updatedAt"] = at; payload["attachments"] = rows

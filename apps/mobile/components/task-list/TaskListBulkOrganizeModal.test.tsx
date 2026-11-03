@@ -8,9 +8,7 @@ import { resetForTests, setStorageAdapter, useTaskStore } from '../../../../pack
 import { TaskListBulkOrganizeModal } from './TaskListBulkOrganizeModal';
 import { TaskEditProjectPicker } from '../task-edit/TaskEditProjectPicker';
 
-// The lightweight Vitest React Native shim only implements StyleSheet.create.
-// Supply the real API shape locally so touch-target assertions flatten arrays
-// the same way React Native does without widening the global test shim.
+
 if (typeof StyleSheet.flatten !== 'function') {
   const flattenStyle = (style: unknown): Record<string, unknown> => {
     if (!Array.isArray(style)) return (style ?? {}) as Record<string, unknown>;
@@ -342,7 +340,7 @@ describe('TaskListBulkOrganizeModal', () => {
       });
       expect(useTaskStore.getState().persistenceFailure).not.toBeNull();
       expect(kind === 'project' ? useTaskStore.getState().projects : useTaskStore.getState().areas).toHaveLength(1);
-      // Exact-match keyboard submission now sees the failed entity in live props.
+
       await act(async () => {
         void search().props.onSubmitEditing();
         buttonWithText(tree, 'Apply to selected').props.onPress();
@@ -353,7 +351,7 @@ describe('TaskListBulkOrganizeModal', () => {
       expect(tree.root.findByProps({ testID: `bulk-organize-${kind}-picker-row` }).props.accessibilityLabel)
         .toBe(`${kind === 'project' ? 'Project: Keep project' : 'Area: Keep area'}`);
       expect(tree.root.findAllByProps({ accessibilityRole: 'alert' }).length).toBeGreaterThan(0);
-      // Closing/reopening the picker must not bypass the same save barrier.
+
       saveData.mockResolvedValue(undefined);
       act(() => { openPicker(); });
       await act(async () => { buttonWithText(tree, 'Draft').props.onPress(); });
@@ -397,7 +395,7 @@ describe('TaskListBulkOrganizeModal', () => {
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
       projectId: 'project-trip',
     }));
-    // Status defaults to "Keep status": untouched statuses must not be rewritten.
+
     expect(onApply.mock.calls[0][0]).not.toHaveProperty('status');
   });
 

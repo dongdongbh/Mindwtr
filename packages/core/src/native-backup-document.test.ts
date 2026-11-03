@@ -16,7 +16,7 @@ import { formatI18nTemplate, getTranslator } from './i18n';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
 import { applyImportSource, parseImportSource } from './import-runner';
 import {
-    buildNativeBackupDocumentFailure, buildNativeBackupDocumentResult, buildNativeBackupSnapshotRestoreConfirmation, commitNativeBackupDocument,
+    buildNativeBackupDocumentFailure, buildNativeBackupDocumentResult, buildNativeBackupNoUndoConfirmation, buildNativeBackupSnapshotRestoreConfirmation, commitNativeBackupDocument,
     inspectNativeBackupDocument, nativeBackupDocumentWarningsHeld, prepareNativeBackupDocument, readNativeBackupDocumentOutcome,
     type NativeBackupDocumentPrepareInput, type NativeBackupOperationReference,
 } from './native-backup-document';
@@ -32,7 +32,7 @@ const NAME = 'data.2026-10-04T12-00-00.000.snapshot.json';
 const metadata = { fileName: 'owned.json', lastModified: Date.parse(AT), appVersion: '1.3.4' };
 const reference: NativeBackupOperationReference = { id: ID, sha256: 'a'.repeat(64), byteCount: 420 };
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-/** An import's warnings as its reply stores them: `<code>:<count>`, never the file's words (D1b review P2). */
+
 const stored = (warnings: readonly string[]) => createImportDiagnostics(warnings, 'warning')
     .map((diagnostic) => `${diagnostic.code}:${typeof diagnostic.params.count === 'number' ? diagnostic.params.count : 1}`);
 const small = (reply: unknown) => { const json = JSON.stringify(reply); expect(json.length).toBeLessThan(4096); expect(json).not.toContain('AAAA'); };
@@ -100,7 +100,7 @@ describe('native immutable backup inspection and models', () => {
     });
     it('enforces actual UTF-8 bytes including multibyte and surrogate pairs', () => {
         const ascii = ' '.repeat(MAX_BACKUP_SOURCE_BYTES - 2) + '{}';
-        // At the exact cap parsing reaches ordinary JSON diagnostics, rather than size refusal.
+
         expect(inspectNativeBackupDocument(ascii, metadata, t).errorMessage).not.toBe(t('settings.backupDiagnostics.tooLarge', { maxSizeMb: 128 }));
         expect(inspectNativeBackupDocument('🦉'.repeat(MAX_BACKUP_SOURCE_BYTES / 4 + 1), metadata, t).errorMessage)
             .toBe(t('settings.backupDiagnostics.tooLarge', { maxSizeMb: 128 }));
@@ -182,7 +182,7 @@ describe('native frozen backup plan over actual SQLite', () => {
         const before = await env.state(); resetNativeRequestReceipts();
         await loadNativeRequestReceipts(env.sql.client, { durableCommands: ['backupDocument'] });
         const cold = new NativeReceiptSqliteAdapter(env.client, { rejectConcurrentWrites: true });
-        await cold.ensureSchema(); // Native boot establishes schema before journal replay.
+        await cold.ensureSchema();
         setStorageAdapter(cold); env.writes.length = 0;
         expect(await commitNativeBackupDocument(cold, reference, prepared.planJSON, NAME)).toEqual(first);
         expect(env.writes).toEqual([]); expect(await env.state()).toEqual(before);
@@ -199,7 +199,7 @@ describe('native frozen backup plan over actual SQLite', () => {
         const env = await open(); const current = await env.adapter.getData();
         const prepared = await prepareNativeBackupDocument(env.adapter, input(serializeBackupData(current)));
         const plan = JSON.parse(prepared.planJSON);
-        // Exercise a frozen exact no-op independently of merge's tie-resolution counts.
+
         plan.data = clone(plan.expectedCurrent); plan.reply.added = 0; plan.reply.updated = 0;
         const noOpPlan = JSON.stringify(plan);
         const before = await env.adapter.getData();
@@ -241,7 +241,7 @@ describe('native frozen backup plan over actual SQLite', () => {
         expect(restored.recoveryJSON).toBeNull();
         const plan = JSON.parse(restored.planJSON);
         const expected = applyImportSource('backup', plan.expectedCurrent, parseImportSource('backup', { text: merged.recoveryJSON!, ...metadata }).data!).data;
-        // Restore revisions/timestamps are clock-derived; compare at a fixed clock below through final assertions.
+
         expect(plan.data.tasks.find((item: Task) => item.id === 'after-merge').deletedAt).toBeTruthy();
         expect(plan.data.tasks.find((item: Task) => item.id === later.tasks[0].id).rev).toBeGreaterThan(30);
         expect(plan.data.tasks.find((item: Task) => item.id === 'visible').title).toBe(expected.tasks.find((item) => item.id === 'visible')?.title);
@@ -308,8 +308,8 @@ const csvInput = (text = 'Title,Project,Section,Area,Checklist,ID\n日本語 �
     ({ ...input(), mode: 'csv', text: bytesToBase64(strToU8(text)), metadata: { ...metadata, fileName: 'owned.csv' } });
 
 describe('native backup commit replayed after process death (pass D1a, gate G-B1)', () => {
-    // A task scheduled to start yesterday (still in Inbox) and no tombstone cleanup yet: a normal load promotes the task and bumps
-    // the cleanup stamp, and saves both. Dates are relative to now, so the fixture never ages out.
+
+
     const due = (): AppData => ({ ...clone(original), tasks: [...clone(original).tasks,
         task('scheduled', { status: 'inbox', startTime: new Date(Date.now() - 86_400_000).toISOString() })] });
     const restart = async (adapter: NativeReceiptSqliteAdapter, recoveryLoad: boolean) => {
@@ -357,9 +357,9 @@ describe('an import whose Undo could not be admitted is refused before COMMIT (D
             ...Array.from({ length: 200 }, (_, index) => task(`grown-${index}`, { description: 'g'.repeat(2048) }))] };
         let release!: () => void;
         const gate = new Promise<void>((resolve) => { release = resolve; });
-        // A writer that entered the lane first, and grows the library only after the early check has run.
+
         const queued = runSerializedSyncDocumentWriteOperation(async () => { await gate; await env.adapter.saveData(grown); });
-        // A snapshot restore makes no recovery snapshot, so no Undo bound stands in for the lane's own check.
+
         const source = input(serializeBackupData(incoming), 'restore');
         const sourceBytes = strToU8(source.text).length;
         const maxTransferBytes = await env.adapter.libraryBytes() + sourceBytes + 64 * 1024;
@@ -371,7 +371,7 @@ describe('an import whose Undo could not be admitted is refused before COMMIT (D
     });
 
     it('a snapshot restore freezes the limit as its result library\'s bound: a restore whose library would pass it is refused, data and receipt rolled back (D1c change 1)', async () => {
-        // SQLite keeps rows plus their full-text index, so a restored library can take more pages than its JSON's bytes.
+
         const snapshotData: AppData = { ...clone(original), tasks: Array.from({ length: 300 }, (_, index) =>
             task(`snapshot-${index}`, { title: `alpha beta gamma ${index}`, description: Array.from({ length: 120 }, (_, word) => `w${index}x${word}`).join(' ') })) };
         const text = serializeBackupData(snapshotData);
@@ -384,27 +384,134 @@ describe('an import whose Undo could not be admitted is refused before COMMIT (D
         const before = await env.state();
         await expect(commitNativeBackupDocument(env.adapter, reference, prepared.planJSON, NAME)).rejects.toThrow('TOO_LARGE:');
         expect(await env.state()).toEqual(before);
-        // The same restore under a roomy limit lands.
+
         const roomy = await open();
         const fits = await prepareNativeBackupDocument(roomy.adapter, { ...input(text, 'restore'), admission: { sourceBytes, maxTransferBytes: 512 * MIB } });
         await expect(commitNativeBackupDocument(roomy.adapter, reference, fits.planJSON, NAME)).resolves.toMatchObject({ operation: 'restore' });
         expect(await roomy.adapter.libraryBytes()).toBeGreaterThan(maxTransferBytes);
     });
 
-    it('refuses the 60 000-row CSV whose library would pass 12 MiB, leaving SQLite and the receipts as they were', async () => {
+    it('runs the 60 000-row CSV whose library would pass 12 MiB without Undo, as RN runs it (large-library pass b)', async () => {
         const rows = Array.from({ length: 60_000 }, (_, index) => `Task ${index}`);
         const text = `Title\n${rows.join('\n')}\n`;
         expect(text.length).toBeLessThan(MIB);
         const source = { ...csvInput(text), admission: { sourceBytes: text.length, maxTransferBytes: 12 * MIB } };
         const env = await open(); const prepared = await prepareNativeBackupDocument(env.adapter, source);
-        expect(JSON.parse(prepared.planJSON).maxLibraryBytes).toBe(12 * MIB - strToU8(prepared.recoveryJSON!).length);
-        const before = await env.state();
-        await expect(commitNativeBackupDocument(env.adapter, reference, prepared.planJSON, NAME)).rejects.toThrow('TOO_LARGE:');
-        expect(await env.state()).toEqual(before);
+
+        expect(prepared).toMatchObject({ undo: false });
+        expect(prepared.recoveryJSON).toEqual(expect.any(String));
+        const plan = JSON.parse(prepared.planJSON);
+        expect(plan.reply).not.toHaveProperty('undo');
+        expect(plan).not.toHaveProperty('maxLibraryBytes');
+        expect(plan.undoLibraryBytes).toBe(12 * MIB - strToU8(prepared.recoveryJSON!).length);
+        const reply = await commitNativeBackupDocument(env.adapter, reference, prepared.planJSON, NAME);
+        expect(reply).toMatchObject({ operation: 'csv', undo: false });
+        expect((await env.state()).tasks).toHaveLength(original.tasks.length + 60_000);
+        expect(await env.adapter.libraryBytes()).toBeGreaterThan(12 * MIB - strToU8(prepared.recoveryJSON!).length);
+
+        const model = buildNativeBackupDocumentResult(reply, t);
+        expect(model.undoLabel).toBe('');
+        expect(model.message).toContain(t('settings.backupMobile.undoUnavailableResult'));
+        expect(await readNativeBackupDocumentOutcome(env.adapter, reference, prepared.planJSON, NAME)).toMatchObject({ undo: false });
+
         const roomy = await open(); const fits = await prepareNativeBackupDocument(roomy.adapter, { ...source, admission: { sourceBytes: text.length, maxTransferBytes: 512 * MIB } });
-        await expect(commitNativeBackupDocument(roomy.adapter, reference, fits.planJSON, NAME)).resolves.toMatchObject({ operation: 'csv' });
-        expect((await roomy.state()).tasks).toHaveLength(original.tasks.length + 60_000);
+        expect(fits).toMatchObject({ undo: true });
+        expect(JSON.parse(fits.planJSON).undoLibraryBytes).toBe(512 * MIB - strToU8(fits.recoveryJSON!).length);
+        const kept = await commitNativeBackupDocument(roomy.adapter, reference, fits.planJSON, NAME);
+        expect(kept).not.toHaveProperty('undo');
+        expect(buildNativeBackupDocumentResult(kept, t).undoLabel).toBe(t('settings.undoImport'));
     }, 120_000);
+
+    it('keeps Undo for L1\'s restore, which the admission before pass b kept: 3 MiB of emoji rows over 3 MiB at 15 MiB (large-library pass b)', async () => {
+        const emoji = (prefix: string): AppData => {
+            const row = (index: number) => task(`${prefix}${index} 🦉`, { description: 'aé🦉日本語 '.repeat(40) });
+            const per = strToU8(JSON.stringify(row(0), null, 2)).length + 8;
+            return { ...clone(original), tasks: Array.from({ length: Math.round(3 * MIB / per) }, (_, index) => row(index)) };
+        };
+        const env = await open();
+        const first = await prepareNativeBackupDocument(env.adapter, input(serializeBackupData(emoji('a')), 'replace'));
+        await commitNativeBackupDocument(env.adapter, reference, first.planJSON, NAME);
+        const text = serializeBackupData(emoji('b'));
+        const second = { id: '22222222-2222-4222-8222-222222222222', sha256: 'b'.repeat(64), byteCount: 420 };
+        const prepared = await prepareNativeBackupDocument(env.adapter, { ...input(text, 'replace'), requestId: second.id,
+            admission: { sourceBytes: strToU8(text).length, maxTransferBytes: 15 * MIB } });
+        expect(prepared).toMatchObject({ undo: true });
+        const reply = await commitNativeBackupDocument(env.adapter, second, prepared.planJSON, NAME);
+        expect(reply).not.toHaveProperty('undo');
+
+        expect(strToU8(prepared.recoveryJSON!).length + await env.adapter.libraryBytes()).toBeLessThanOrEqual(15 * MIB);
+    }, 120_000);
+
+    it('a question asked on the estimate still keeps Undo when the real bytes fit, and a recovery snapshot past the limit alone never has Undo (large-library pass b)', async () => {
+        const text = serializeBackupData(incoming);
+        const sourceBytes = strToU8(text).length;
+        const probe = await prepareNativeBackupDocument((await open()).adapter, { ...input(text, 'merge'), admission: { sourceBytes, maxTransferBytes: 512 * MIB } });
+        const recoveryBytes = strToU8(probe.recoveryJSON!).length;
+
+        const tight = async (maxTransferBytes: number) => {
+            const env = await open();
+            const pages = vi.spyOn(env.adapter, 'libraryBytes').mockResolvedValue(0);
+            const prepared = await prepareNativeBackupDocument(env.adapter, { ...input(text, 'merge'), admission: { sourceBytes, maxTransferBytes } });
+            pages.mockRestore();
+            return { env, prepared, plan: JSON.parse(prepared.planJSON) };
+        };
+
+        const asked = await tight(recoveryBytes + 1);
+        expect(asked.prepared).toMatchObject({ undo: false });
+        expect(asked.plan.undoLibraryBytes).toBe(1);
+        expect(asked.plan.reply).not.toHaveProperty('undo');
+        const kept = await commitNativeBackupDocument(asked.env.adapter, reference, JSON.stringify({ ...asked.plan, undoLibraryBytes: 512 * MIB }), NAME);
+        expect(kept).not.toHaveProperty('undo');
+        expect(buildNativeBackupDocumentResult(kept, t).undoLabel).toBe(t('settings.undoImport'));
+
+        const over = await tight(recoveryBytes - 1);
+        expect(over.prepared).toMatchObject({ undo: false });
+        expect(over.plan).not.toHaveProperty('undoLibraryBytes');
+        expect(over.plan.reply.undo).toBe(false);
+        await expect(commitNativeBackupDocument(over.env.adapter, reference, over.prepared.planJSON, NAME)).resolves.toMatchObject({ undo: false });
+    });
+
+    it('a library that ends larger than the estimate still lands, and its result says Undo is not available (large-library pass b)', async () => {
+        const env = await open();
+        const text = serializeBackupData(incoming);
+        const prepared = await prepareNativeBackupDocument(env.adapter, { ...input(text, 'merge'), admission: { sourceBytes: strToU8(text).length, maxTransferBytes: 512 * MIB } });
+        expect(prepared).toMatchObject({ undo: true });
+
+        const plan = JSON.parse(prepared.planJSON);
+        plan.undoLibraryBytes = 1;
+        const planJSON = JSON.stringify(plan);
+        const reply = await commitNativeBackupDocument(env.adapter, reference, planJSON, NAME);
+        expect(reply).toMatchObject({ operation: 'merge', undo: false });
+        expect((await env.state()).tasks.map((item) => item.id)).toEqual(expect.arrayContaining(incoming.tasks.map((item) => item.id)));
+        const model = buildNativeBackupDocumentResult(reply, t);
+        expect(model.undoLabel).toBe('');
+        expect(model.message).toContain(t('settings.backupMobile.undoUnavailableResult'));
+        expect(await readNativeBackupDocumentOutcome(env.adapter, reference, planJSON, NAME)).toMatchObject({ undo: false });
+    });
+
+    it('an old plan\'s undo bound still refuses, a stored reply never drops a planned undo: false, and only false is a reply\'s undo', async () => {
+        const env = await open();
+        const text = serializeBackupData(incoming);
+        const prepared = await prepareNativeBackupDocument(env.adapter, { ...input(text, 'merge'), admission: { sourceBytes: strToU8(text).length, maxTransferBytes: 512 * MIB } });
+
+        const { undoLibraryBytes: _room, ...legacy } = JSON.parse(prepared.planJSON);
+        const before = await env.state();
+        await expect(commitNativeBackupDocument(env.adapter, reference, JSON.stringify({ ...legacy, maxLibraryBytes: 1 }), NAME))
+            .rejects.toThrow('TOO_LARGE: The imported library would be too large to undo');
+        expect(await env.state()).toEqual(before);
+        await commitNativeBackupDocument(env.adapter, reference, prepared.planJSON, NAME);
+        const planned = JSON.parse(prepared.planJSON);
+        await expect(readNativeBackupDocumentOutcome(env.adapter, reference, JSON.stringify({ ...planned, reply: { ...planned.reply, undo: false } }), NAME))
+            .rejects.toThrow('SAVE_FAILED:');
+        expect(() => buildNativeBackupDocumentResult({ ...planned.reply, undo: true }, t)).toThrow('INVALID_INPUT:');
+        expect(() => buildNativeBackupDocumentResult({ version: 1, operation: 'restore', snapshotName: NAME, added: 0, updated: 0, undo: false }, t)).toThrow('INVALID_INPUT:');
+    });
+
+    it('the question before an operation without Undo uses its own words', () => {
+        expect(buildNativeBackupNoUndoConfirmation(t)).toEqual({ title: t('settings.backupMobile.undoUnavailableTitle'),
+            message: t('settings.backupMobile.undoUnavailableConfirm'), confirmLabel: t('settings.backupMobile.undoUnavailableContinue'),
+            cancelLabel: t('common.cancel') });
+    });
 
     it('counts the receipt: data that fits and a receipt that crosses the limit are both rolled back', async () => {
         const reply = { blob: 'r'.repeat(40_000) };
@@ -414,7 +521,7 @@ describe('an import whose Undo could not be admitted is refused before COMMIT (D
             return env.adapter.saveDocumentWithReceipt({ requestId: ID, payload, expectedCurrent: current,
                 data: { ...clone(current), tasks: [...clone(current).tasks, task('added')] }, reply, maxLibraryBytes });
         };
-        // A dry run measures the library inside the open transaction: at the receipt insert, and at COMMIT.
+
         const dry = await open(); let atInsert = 0; let atCommit = 0;
         dry.hooks.run = async (statement) => {
             if (statement.startsWith('INSERT INTO native_request_receipts')) atInsert = await pageBytes(dry.sql.client);
@@ -457,7 +564,7 @@ describe('a restore keeps this device\'s App Lock (D1a review 2, P1)', () => {
 });
 
 describe('native backup artifacts never hold a legacy AI key (D1a review P2-5)', () => {
-    // An older build saved settings.ai.apiKey in the document; the store strips it on load but the row keeps it until a save.
+
     const SENTINEL = 'sk-legacy-sentinel-5f2c9e';
     it.each(['merge', 'replace'] as const)('%s: the plan, the recovery snapshot and the reply hold no key; the commit is not stale and drops it', async (operation) => {
         const env = await open();
@@ -580,7 +687,7 @@ describe('native immutable Mindwtr CSV and ZIP import', () => {
         await expect(prepareNativeBackupDocument(env.adapter, { ...csvInput(), text })).rejects.toThrow('INVALID_INPUT:');
         expect(read).not.toHaveBeenCalled(); expect(env.writes).toEqual([]);
     });
-    // Real 16 MiB boundary fixtures need headroom under coverage instrumentation.
+
     it('bounds decoded bytes before allocating and preserves the shared 8 MiB text limit inside the 16 MiB transport', async () => {
         const env = await open(); const read = vi.spyOn(env.adapter, 'getData');
         const tooLarge = 'A'.repeat(4 * Math.ceil((16 * 1024 * 1024 + 1) / 3));
@@ -638,14 +745,14 @@ describe('an import\'s stored warnings hold codes and counts, never the file\'s 
         await commitNativeBackupDocument(env.adapter, reference, prepared.planJSON, NAME);
         const receipts = await env.sql.client.all<{ reply: string; method: string }>('SELECT reply, method FROM native_request_receipts');
         expect(swept(JSON.stringify(receipts))).toEqual([]);
-        // The rule was dropped and the nested archive skipped: neither reaches the library either.
+
         const library = JSON.stringify(await env.sql.client.all('SELECT * FROM tasks')) + JSON.stringify(await env.sql.client.all('SELECT * FROM projects'));
         expect(swept(library)).toEqual([S2]);
-        // The live toast still names the renamed project (RN's text); building it lets the names go.
+
         const live = buildNativeBackupDocumentResult(reply, t);
         expect(live.message).toContain(S2);
         expect(nativeBackupDocumentWarningsHeld()).toBe(false);
-        // After a death the same reply reads as counts.
+
         expect(swept(buildNativeBackupDocumentResult(reply, t).message)).toEqual([]);
         expect(swept(JSON.stringify(lines))).toEqual([]);
     });
@@ -663,7 +770,7 @@ describe('an import\'s stored warnings hold codes and counts, never the file\'s 
         expect(swept(JSON.stringify(lines))).toEqual([]);
     });
 
-    // Code review P2: a plan or a receipt written before the stored form holds sentences that can quote the file.
+
     const LEGACY = [`Imported project "${S2}" was renamed to "${S2} (Todoist)" to avoid a title conflict.`, `Unsupported Recurrence rules: ${S1}.`];
     const legacyPlan = async (env: Awaited<ReturnType<typeof open>>) => {
         const plan = JSON.parse((await prepareNativeBackupDocument(env.adapter, todoistInput())).planJSON);
@@ -688,7 +795,7 @@ describe('an import\'s stored warnings hold codes and counts, never the file\'s 
         expect(swept(JSON.stringify(replayed))).toEqual([]);
         const outcome = await readNativeBackupDocumentOutcome(env.adapter, reference, JSON.stringify(plan), NAME);
         expect(swept(JSON.stringify(outcome))).toEqual([]);
-        // A result record written before the stored form, read after a restart (no names in memory).
+
         expect(nativeBackupDocumentWarningsHeld()).toBe(false);
         const cold = buildNativeBackupDocumentResult(stored, t);
         expect(swept(cold.message)).toEqual([]);
@@ -769,7 +876,7 @@ describe('native selected JSON backup replacement', () => {
             expect(plan.expectedCurrent.tasks.some((item: Task) => item.id === 'latest-before-replace')).toBe(true);
             const recovery = validateBackupJson(prepared.recoveryJSON!).data!; expect(recovery.tasks).toEqual(plan.expectedCurrent.tasks);
             expect(recovery.settings.theme).toBe('light'); expect(plan.data.settings).toMatchObject({ theme: 'dark', language: 'ar', gtd: { focusTaskLimit: 1 }, syncPreferences: { gtd: false }, pendingRemoteWriteAt: AT });
-            // App Lock is this device's own (13c807f07): the backup's value is dropped and the current device's kept (D1a review 2).
+
             expect(plan.data.settings.security).toEqual({ mobileAppLockEnabled: true }); expect(plan.data.settings.syncPreferencesUpdatedAt.preferences > '2099-01-01T00:00:00.000Z').toBe(true);
             const restored = plan.data.tasks.find((item: Task) => item.id === 'visible'); expect(restored.title).toBe('日本語 🦉'); expect(restored.deletedAt).toBeUndefined(); expect(restored.rev).toBeGreaterThan(99);
             for (const [field, localId] of [['tasks','latest-before-replace'],['projects','local-project'],['sections','local-section'],['areas','local-area'],['people','local-person']]) {
@@ -883,7 +990,7 @@ describe('native Todoist CSV and ZIP prepared import', () => {
     it.each(['TR==','TWF=','TQ=','====','VGl0bGUs\n','VGl0bGUs_'])('Todoist rejects noncanonical base64 %s before adapter operations', async (text) => {
         const env = await open(); const read = vi.spyOn(env.adapter, 'getData'); await expect(prepareNativeBackupDocument(env.adapter, { ...todoistInput(), text })).rejects.toThrow('INVALID_INPUT:'); expect(read).not.toHaveBeenCalled(); expect(env.writes).toEqual([]);
     });
-    // Real 16 MiB boundary fixtures need headroom under coverage instrumentation.
+
     it('Todoist bounds decoded bytes before allocation and retains shared8MiB text and ZIP entry/expanded limits', async () => {
         const env = await open(); const read = vi.spyOn(env.adapter, 'getData');
         await expect(prepareNativeBackupDocument(env.adapter, { ...todoistInput(), text: 'A'.repeat(4 * Math.ceil((16 * 1024 * 1024 + 1) / 3)) })).rejects.toThrow('Todoist source exceeds 16 MiB');
@@ -1055,7 +1162,7 @@ describe('native DGT JSON and ZIP prepared import', () => {
         expect(preview.summary).toContain(t('settings.backupMobile.checklistItemsWillBePreserved', { checklistItemCount: 2 })); expect(preview.summary).toContain(t('settings.backupMobile.tasksWillStayOutsideProjects', { taskCount: 6 }));
         expect(preview.summary).toContain('• Work / Archived launch: 1'); expect(preview.summary).not.toContain(t('settings.backupMobile.importedTasksStayInInboxSoYouCanProcessThem'));
         for (const diagnostic of createImportDiagnostics(parsed.preview!.warnings, 'warning')) expect(preview.summary).toContain(formatImportDiagnostic(diagnostic, t));
-        // Later provider bytes have no effect on this accepted preview or owned source.
+
         const other = inspectNativeBackupDocument(dgtInput('{}').text, source.metadata, t, 'dgt'); expect(other.valid).toBe(false); expect(preview.valid).toBe(true);
         expect(env.writes).toEqual([]); expect(await env.state()).toEqual(before);
     });
@@ -1235,7 +1342,7 @@ describe('native OmniFocus CSV/JSON/ZIP prepared import', () => {
         const env = await open(); const { source } = omniSource(kind); const reply = JSON.parse((await prepareNativeBackupDocument(env.adapter, source)).planJSON).reply; const result = reply.result;
         const model = buildNativeBackupDocumentResult(reply, t); expect(model.title).toBe(t('settings.backupMobile.importComplete')); expect(model.undoLabel).toBe(t('settings.undoImport')); expect(model.message).toContain(t('settings.backupMobile.importedTaskProjectCounts', { taskCount: result.importedTaskCount, projectCount: result.importedProjectCount }));
         if (result.importedAreaCount) expect(model.message).toContain(t('settings.backupMobile.omnifocusAreasCreated', { areaCount: result.importedAreaCount })); if (result.importedChecklistItemCount) expect(model.message).toContain(t('settings.backupMobile.nestedTasksBecameChecklistItems', { taskCount: result.importedChecklistItemCount })); expect(model.message).toContain(t('settings.backupMobile.tasksStayedOutsideProjects', { taskCount: result.importedStandaloneTaskCount })); expect(model.message).toContain(NAME);
-        // Stored codes read back as RN's count lines.
+
         for (const token of result.warnings as string[]) { const [code, count] = token.split(':'); expect(model.message).toContain(formatImportDiagnostic({ code: code as 'adjusted-records', params: { count: Number(count) }, severity: 'warning' }, t)); }
     });
     it('accepts shared UTF16LE CSV bytes through unchanged binary transport', async () => {
@@ -1277,11 +1384,7 @@ describe('native OmniFocus CSV/JSON/ZIP prepared import', () => {
     });
 });
 
-/**
- * Pass D1c: prepare's plan and recovery snapshot, frozen from HEAD (f5d7d792a) before the plan is written in parts and the
- * copies are cut. A host that passes no writer (iOS) must keep getting these exact bytes. `MINDWTR_WRITE_PLAN_FIXTURE=1`
- * rewrites the fixture; only a deliberate format change may do that.
- */
+
 describe('native backup prepare output stays byte-identical (D1c parity fixture)', () => {
     const FIXTURE = new URL('./native-backup-plan-parity.fixtures.json', import.meta.url);
     const digest = (text: string | null) => text === null ? null
@@ -1297,7 +1400,7 @@ describe('native backup prepare output stays byte-identical (D1c parity fixture)
         try {
             for (const [mode, make] of cases) {
                 vi.setSystemTime(new Date(AT));
-                // Importers name new rows with random UUIDs: a counter per mode makes the plan repeatable.
+
                 let next = 0;
                 vi.spyOn(globalThis.crypto, 'randomUUID').mockImplementation(() =>
                     `00000000-0000-4000-8000-${String(next++).padStart(12, '0')}` as ReturnType<typeof crypto.randomUUID>);
@@ -1343,18 +1446,20 @@ describe('native backup prepare output stays byte-identical (D1c parity fixture)
                 const recovery: string[] = []; const parts: string[] = [];
                 const written = await prepareNativeBackupDocument((await open()).adapter, clone(withAdmission),
                     { recovery: (text) => recovery.push(text), plan: (part) => parts.push(part) });
-                expect(written).toEqual({ written: true, recovery: whole.recoveryJSON !== null });
+                expect(written).toEqual({ written: true, recovery: whole.recoveryJSON !== null, ...('undo' in whole ? { undo: whole.undo } : {}) });
                 expect(recovery).toEqual(whole.recoveryJSON === null ? [] : [whole.recoveryJSON]);
                 expect(parts.length).toBeGreaterThan(2);
                 expect(parts.join('')).toBe(whole.planJSON);
                 expect(JSON.stringify(JSON.parse(whole.planJSON))).toBe(whole.planJSON);
-                expect('maxLibraryBytes' in JSON.parse(whole.planJSON)).toBe(admitted);
+
+                const plan = JSON.parse(whole.planJSON);
+                expect('maxLibraryBytes' in plan || 'undoLibraryBytes' in plan).toBe(admitted);
             }
         } finally { vi.useRealTimers(); }
     }, 120_000);
 });
 
-/** Pass D1c cuts a and f-h: what the native transfer hands over is not kept alive by core while the commit writes and reloads. */
+
 describe('native backup prepare and commit let their documents go (D1c)', () => {
     setFlagsFromString('--expose_gc');
     const gc = runInNewContext('gc') as () => void;
@@ -1382,20 +1487,20 @@ describe('native backup prepare and commit let their documents go (D1c)', () => 
         const source = { taken: 0, take() { this.taken += 1; return prepared.planJSON; } };
         const refs: Record<string, WeakRef<object>> = {};
         const save = env.adapter.saveDocumentWithReceipt.bind(env.adapter);
-        // Plain wrappers, not spies: a spy records its calls' arguments and results, which would keep them alive.
+
         env.adapter.saveDocumentWithReceipt = async (document) => {
             refs.expected = new WeakRef(document.expectedCurrent); refs.data = new WeakRef(document.data);
             return save(document);
         };
-        // Every full read runs the adapter's locked body (getDataNow): the stale check inside the document save's own lock
-        // hold, then the store reload through the public getData.
+
+
         const reader = env.adapter as unknown as { getDataNow: SqliteAdapter['getData'] };
         const read = reader.getDataNow.bind(env.adapter);
         let reads = 0; let alive: Record<string, boolean> | null = null;
         reader.getDataNow = async (options) => {
             reads += 1;
             if (reads === 2) {
-                // The reload's read: before it builds the new library, nothing of the old operation may still be reachable.
+
                 await settle(); gc(); await settle(); gc();
                 alive = Object.fromEntries(Object.entries(refs).map(([name, ref]) => [name, ref.deref() !== undefined]));
             }
@@ -1403,7 +1508,7 @@ describe('native backup prepare and commit let their documents go (D1c)', () => 
             if (reads === 1) refs.current = new WeakRef(data);
             return data;
         };
-        // While the document is written (at its COMMIT), both baselines are already gone; the data being written is not.
+
         let writing: Record<string, boolean> | null = null;
         env.hooks.run = async (statement) => {
             if (statement !== 'COMMIT' || writing) return;
@@ -1417,17 +1522,13 @@ describe('native backup prepare and commit let their documents go (D1c)', () => 
     });
 });
 
-/**
- * Pass D1c against main's sync write gate (0c277ee77): a sync cycle runs in the same document lane as the commit
- * (mobile-sync-service.ts runs each cycle through runSerializedSyncDocumentOperation), so no sync commits and publishes
- * between the commit's COMMIT and its store reload.
- */
+
 describe('a sync cycle waits behind a native backup commit and its reload (D1c, sync write gate)', () => {
     it('starts only after the commit reloaded the store', async () => {
         const env = await open();
         const prepared = await prepareNativeBackupDocument(env.adapter, input());
         const events: string[] = [];
-        // The stale check (read 1) and the reload (read 2) both run the adapter's locked body (getDataNow).
+
         const reader = env.adapter as unknown as { getDataNow: SqliteAdapter['getData'] };
         const read = reader.getDataNow.bind(env.adapter);
         let reads = 0;

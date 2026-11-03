@@ -207,9 +207,8 @@ export function SettingsFeedbackModal({
             describedBy={onOpenGitHub && status !== 'sent' ? descriptionId : undefined}
             placement="top"
             overlayClassName="px-4 pt-[12vh]"
-            // Capped to fit under the 12vh offset: the form is taller than a
-            // short window, and without this the Send button sat off-screen
-            // with nothing to scroll (#957).
+
+
             panelClassName="max-h-[84vh] max-w-lg border-border"
             panelRef={modalRef}
         >

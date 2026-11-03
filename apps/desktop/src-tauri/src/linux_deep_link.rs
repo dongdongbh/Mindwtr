@@ -12,20 +12,18 @@ fn desktop_exec(executable: &str) -> io::Result<String> {
             "Invalid desktop executable",
         ));
     }
-    // Desktop string escapes are decoded before Exec quoting; both layers must survive.
-    let escaped = executable
+
+    let desktop_entry_escaped_executable = executable
         .replace('\\', "\\\\\\\\")
         .replace('"', "\\\\\"")
         .replace('$', "\\\\$")
         .replace('`', "\\\\`")
         .replace('%', "%%");
-    // GIO validates Exec argv[0] before expanding %% into %. Keep that validation on
-    // a fixed executable for percent-bearing paths; env receives the literal path
-    // as one argument and launches it directly, without interpreting a shell.
+
     if executable.contains('%') {
-        Ok(format!("env -- \"{escaped}\" %u"))
+        Ok(format!("env -- \"{desktop_entry_escaped_executable}\" %u"))
     } else {
-        Ok(format!("\"{escaped}\" %u"))
+        Ok(format!("\"{desktop_entry_escaped_executable}\" %u"))
     }
 }
 
@@ -41,8 +39,6 @@ fn executable_in_path(name: &str, search_path: &std::ffi::OsStr) -> Option<PathB
 fn correct_handler(path: &Path, executable: &str) -> io::Result<()> {
     let command = desktop_exec(executable)?;
     if executable.contains('%') {
-        // Desktop Exec resolves bare executables through PATH, including on NixOS
-        // where /usr/bin/env is not part of the filesystem layout.
         if std::env::var_os("PATH")
             .and_then(|path| executable_in_path("env", &path))
             .is_none()
@@ -54,16 +50,16 @@ fn correct_handler(path: &Path, executable: &str) -> io::Result<()> {
         }
     }
     let contents = fs::read_to_string(path)?;
-    let mut in_entry = false;
-    let mut replaced = 0;
+    let mut in_desktop_entry = false;
+    let mut replaced_exec_count = 0;
     let corrected = contents
         .lines()
         .map(|line| {
             if line.starts_with('[') {
-                in_entry = line == "[Desktop Entry]";
+                in_desktop_entry = line == "[Desktop Entry]";
             }
-            if in_entry && line.starts_with("Exec=") {
-                replaced += 1;
+            if in_desktop_entry && line.starts_with("Exec=") {
+                replaced_exec_count += 1;
                 format!("Exec={command}")
             } else {
                 line.to_owned()
@@ -72,7 +68,7 @@ fn correct_handler(path: &Path, executable: &str) -> io::Result<()> {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    if replaced != 1 {
+    if replaced_exec_count != 1 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Invalid desktop handler",
@@ -88,7 +84,6 @@ fn correct_handler(path: &Path, executable: &str) -> io::Result<()> {
     Ok(())
 }
 
-// tauri-plugin-deep-link 2.4.6 generates an unquoted Linux Exec; retain its registration/delivery.
 pub(crate) fn correct_registered_handler(app: &tauri::App) -> io::Result<()> {
     let bin = tauri::utils::platform::current_exe()?;
     let name = bin
@@ -177,8 +172,7 @@ mod tests {
         ] {
             let dir = tempfile::tempdir().unwrap();
             let executable = dir.path().join(name);
-            // Resolve the interpreter through the build's PATH. Nix supplies sh
-            // in its store rather than /bin; printf is a shell builtin.
+
             fs::write(
                 &executable,
                 format!(
@@ -205,7 +199,7 @@ mod tests {
                 .success());
             let output = dir.path().join("argv.bin");
             let expected = [uri.as_bytes(), b"\0"].concat();
-            // Creation precedes the child's write; wait for complete argv bytes.
+
             for _ in 0..100 {
                 if fs::read(&output).is_ok_and(|bytes| bytes == expected) {
                     break;

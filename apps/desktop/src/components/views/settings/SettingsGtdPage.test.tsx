@@ -28,7 +28,7 @@ describe('SettingsGtdPage', () => {
                 areas={[]}
             />
         );
-        // A sync save holds the gate while the user clicks, then publishes another device's auto-archive change.
+
         const finish = holdSyncSave(() => useTaskStore.setState({
             settings: { gtd: { defaultProjectFlowMode: 'parallel', autoArchiveDays: 3 } },
         }));
@@ -50,7 +50,7 @@ describe('SettingsGtdPage', () => {
                 showSaved={vi.fn()} autoArchiveDays={7} areas={[]} />
         );
         fireEvent.click(getByRole('button', { name: new RegExp(t.taskEditorLayout) }));
-        // The other device hid Status after this page rendered it as visible.
+
         useTaskStore.setState({ settings: { gtd: { taskEditor: { hidden: ['status'] } } } });
         const row = getByText(t.taskEditorFieldStatus).closest('div.flex') as HTMLElement;
         fireEvent.click(within(row).getByRole('button', { name: t.visible }));

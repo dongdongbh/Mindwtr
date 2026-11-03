@@ -5,8 +5,7 @@ import Security
 import XCTest
 @testable import MindwtrNativeCore
 
-/// A private DAV endpoint, not a claim of compatibility with a real backend.
-/// Every request is intercepted, including unknown destinations.
+
 private final class ForegroundDAVProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var stores: [String: ForegroundDAVStore] = [:]
@@ -84,8 +83,8 @@ private final class ForegroundDAVStore: @unchecked Sendable {
             if let etag { headers["ETag"] = etag }
             return Reply(status: status, headers: headers, body: method == "HEAD" ? Data() : bytes)
         }
-        // Never retain or report a received credential. Every accepted DAV
-        // operation must carry the exact synthetic account configured by setup.
+
+
         guard request.value(forHTTPHeaderField: "Authorization") == expectedAuthorization else { return reply(401) }
         guard url.scheme == "https", path.hasPrefix("/sync/"), request.url?.query == nil else {
             unexpected += 1; return reply(400)
@@ -213,8 +212,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         guard let physical = Darwin.realpath(fixture.path, nil) else { throw HostFailure("Foreground fixture root is unavailable") }
         defer { free(physical) }; root = URL(fileURLWithPath: String(cString: physical), isDirectory: true)
         #if os(macOS)
-        // Workflow tests use durable synthetic credentials without entering the
-        // interactive macOS Keychain. iOS keeps the actual Security port below.
+
+
         bundle = try NativeSyntheticSecretFixture.makeBundle(source: bundle, directory: root)
         #endif
         hostname = "foreground-" + UUID().uuidString.lowercased() + ".invalid"
@@ -232,7 +231,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertEqual(operations, 0, "macOS fixtures refuse native secret mutations and unscoped reads")
         #else
         if let service {
-            // createSecureSyncConfigStore's secureKeyFor removes the storage '@'.
+
             for account in ["mindwtr_webdav_password", "mindwtr_cloud_token", "mindwtr_sync_encryption_key_v1"] {
                 for alias in ["no-auth", "auth", "legacy"] {
                     let bytes = Data(account.utf8)
@@ -267,10 +266,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
             self.secretLock.unlock()
             if self.traceBusyLease { NSLog("Native WebDAV CI phase=secure-before operation=%@", operation) }
         }
-        // Owned Project downloads compare native credential observations as well
-        // as the JS fixture's saved value. Model an absent native account without
-        // entering Security; the existing synthetic port still supplies Basic auth.
-        // Every mutation and every read outside that explicit scope still refuses.
+
+
         faults.secretStatus = { operation, _ in
             observeNativeCredentials && operation == "get" ? errSecItemNotFound : errSecNotAvailable
         }
@@ -287,9 +284,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
     }
     private func projectCore(faults: HostIOFaults? = nil) throws -> CoreHost {
         #if os(macOS)
-        // Capture the acknowledged synthetic Save before native selection. The
-        // normal decorator reads its cache file on every get, which is correctly
-        // forbidden inside a selected Project's target-only file capability.
+
+
         let bytes = try Data(contentsOf: fixtureSecrets)
         guard bytes.count <= 16 * 1024 else { throw HostFailure("Synthetic selected credential fixture is unavailable") }
         let values = try object(String(decoding: bytes, as: UTF8.self))
@@ -340,9 +336,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
             parametersJSON: json([taskID, try json([attachment]), at, at]))
         try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         try originalBytes.write(to: target)
-        // An absent plaintext document is intentionally legacy-plaintext in RN.
-        // An existing canonical document makes the real Test connection prove
-        // this server's strong conditional writes before cleanup is admitted.
+
+
         remote.seed("/sync/data.json", bytes: Data(try json(["tasks": [], "projects": [], "sections": [], "areas": [], "settings": [:]]).utf8))
     }
     private func command(_ host: CoreHost, _ name: String, _ input: [String: Any] = [:]) async throws -> [String: Any] {
@@ -486,8 +481,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         try assertCleaned(original: original); try assertConfiguration()
         let taskBeforeOff = try json(task())
         _ = try await command(cold, "selectSyncBackend", ["requestId": UUID().uuidString.lowercased(), "option": "off"])
-        // This immediate read must be admitted by the real host: Off's receipt
-        // cannot precede the status-reset store save acknowledgement.
+
+
         let off = try await command(cold, "syncSettings")
         let offOptions = try XCTUnwrap((off["backend"] as? [String: Any])?["options"] as? [[String: Any]])
         XCTAssertEqual(offOptions.first { $0["selected"] as? Bool == true }?["option"] as? String, "off")
@@ -525,9 +520,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
     private func configureStoredCleanupCandidate() async throws -> [String: Any] {
         try await seed()
         let original = try attachment()
-        // The verified settings path persists real KV/Keychain configuration.
-        // Its cycle has no candidate; only the subsequent cold stored invocation
-        // loads this newly seeded local edit and can own its cleanup.
+
+
         let setupSQL = try SQLiteBridge(url: database)
         _ = try setupSQL.execute("UPDATE tasks SET attachments=NULL WHERE id=?", parametersJSON: json([taskID]))
         setupSQL.close()
@@ -565,8 +559,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertEqual(remote.recorded.count, beforeStart, "Cold startup does not activate Sync")
         let result = try await command(host, "syncStored")
         XCTAssertEqual(try json(result), try json(["success": true, "skipped": false]), "The actual stored cycle returns only primitive booleans")
-        // This ordinary read is immediate: native admission must see the cycle's
-        // acknowledged store save, not an unflushed status/attachment patch.
+
+
         let read = try object(await host.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])))
         XCTAssertNotNil(read["diagnostics"])
         XCTAssertEqual(boundary.count, 1, "The stored invocation reaches the existing journaled physical callback")
@@ -582,8 +576,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         let remoteBytes = try XCTUnwrap(remote.bytes("/sync/data.json")), remoteETag = try XCTUnwrap(remote.etag("/sync/data.json"))
         await host.close()
 
-        // A new VM has no open settings form or process-local cycle snapshot.
-        // Its unchanged stored call must use the existing persisted fast proof.
+
         let coldBoundary = ForegroundBoundaryState(), cold = core(boundary: coldBoundary)
         let beforeCold = remote.recorded.count
         _ = try await cold.start()
@@ -613,8 +606,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         let skipped = try await command(host, "syncResume")
         XCTAssertEqual(try json(skipped), try json(["success": true, "skipped": true]))
         XCTAssertEqual(remote.recorded.count, afterStored, "Immediate resume cannot bypass the stored cycle's shared cadence")
-        // Wait past RN's real WebDAV foreground interval. Time alone must not
-        // start a native cycle; only the next explicitly owned command may run.
+
+
         try await Task.sleep(nanoseconds: 31_000_000_000)
         XCTAssertEqual(remote.recorded.count, afterStored, "No timer or follow-up runs after the invocation returns")
         let due = try await command(host, "syncResume")
@@ -681,16 +674,15 @@ final class NativeForegroundWebDAVTests: XCTestCase {
     }
 
     func testBusyLeaseReturnsWithoutDetachedFollowUpAndLaterExplicitSyncOwnsCleanup() async throws {
-        // Fixed stage labels distinguish a platform wait from the intentional
-        // lease delay when CI terminates before XCTest can report a result.
+
+
         traceBusyLease = true
         NSLog("Native WebDAV CI phase=seed-before")
         try await seed()
         NSLog("Native WebDAV CI phase=seed-after")
         let original = try attachment()
-        // Configure through the real verified Test/Save path without giving its
-        // ordinary cycle this test's cleanup candidate. The cold host below loads
-        // a freshly seeded tombstone; no running store is changed externally.
+
+
         let setupSQL = try SQLiteBridge(url: database)
         _ = try setupSQL.execute("UPDATE tasks SET attachments=NULL WHERE id=?", parametersJSON: json([taskID]))
         setupSQL.close()
@@ -715,8 +707,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         let serverNow = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
         let serverNowMs = serverNow.timeIntervalSince1970 * 1_000
         let expiresAt = serverNowMs + 10_000
-        // A conforming live lease: 10s TTL, 3s heartbeat, last renewed now.
-        // This is separate from the existing fatal test's retained five-minute lease.
+
+
         let lease: [String: Any] = ["schema": 1, "leaseId": UUID().uuidString.lowercased(),
             "ownerId": "synthetic-live-peer", "purpose": "ordinary-sync",
             "expiresAt": expiresAt, "heartbeatMs": 3_000, "renewedAt": serverNowMs]
@@ -747,8 +739,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         let settledRequests = remote.recorded.count
         let cleanupMarkers = try markers("v1.3.5/ios-cleanup-owned-retirement").count
 
-        // Keep this actual Engine/VM alive through its automatic idle pumping,
-        // then perform a normal read so due timers are pumped even without HTTP.
+
         let waitStarted = ProcessInfo.processInfo.systemUptime
         try await Task.sleep(nanoseconds: UInt64((retryAfterMs + 2_000) * 1_000_000))
         XCTAssertGreaterThanOrEqual((ProcessInfo.processInfo.systemUptime - waitStarted) * 1_000, retryAfterMs)
@@ -762,8 +753,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertEqual(try markers("v1.3.5/ios-cleanup-owned-retirement").count, cleanupMarkers)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
 
-        // Only a later explicit owner can act. Model server expiry by advancing
-        // its Date, never by deleting or rewriting the peer's lease/ETag.
+
         remote.advanceServerTime(to: Date(timeIntervalSince1970: expiresAt / 1_000 + 1))
         let explicitStart = remote.recorded.count
         try await sync(host)
@@ -831,9 +821,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         let filter = try object(await host.call("areaFilter"))
         let option = try XCTUnwrap((filter["options"] as? [[String: Any]])?.first { $0["id"] as? String == "__none__" })
         XCTAssertEqual(option["state"] as? String, "none")
-        // This existing explicit preference command runs the actual whole-store
-        // writer before the measured operation. Swift's sorted/slash-escaped
-        // seed JSON is not the shared writer's persisted representation.
+
+
         _ = try await host.call("setAreaFilter", argumentsJSON: json([json(XCTUnwrap(option["next"]))]))
         let currentTask = try task()
         for (old, current) in [(beforeTask, currentTask)] + (try beforeProjects.map { ($0, try projectRow(XCTUnwrap($0["id"] as? String))) }) {
@@ -879,11 +868,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         }
     }
     private func assertDownloadPreservation(rows before: [String: String], projects oldProjects: [[String: Any]], selected: String, allowTaskIndexRebuild: Bool = false, expectPendingJournal: Bool = false) throws {
-        // Existing projects_au rewrites its FTS shadow pages for any Project
-        // update. Keep all other raw tables and all unrelated Projects exact.
-        // Only the lost-COMMIT test permits these two Task index layouts: failed
-        // acknowledgements discard writer fingerprints and retries re-upsert
-        // byte-identical Task rows. Every Task row and remaining index table stays exact.
+
+
         let domain = { (name: String) in name != "projects" && !name.hasPrefix("projects_fts")
             && (!allowTaskIndexRebuild || !["tasks_fts_data", "tasks_fts_idx"].contains(name)) }
         XCTAssertEqual(try rows().filter { domain($0.key) }, before.filter { domain($0.key) })
@@ -998,7 +984,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         await host.close()
     }
 
-    func testProjectDownloadAuthHashAndCapFailuresStayRetryableWhile404IsTerminal() async throws {
+    func testProjectDownloadAuthHashCapAnd404FailuresStayRetryableAndLeaveTheRow() async throws {
         _ = try await configureStoredCleanupCandidate()
         var fixtures: [(String, ProjectDownloadFixture)] = []
         for mode in ["auth", "hash", "cap", "404"] {
@@ -1014,38 +1000,27 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         for (mode, fixture) in fixtures {
             let input = try await projectDownloadInput(host, fixture), before = try rows(), oldProjects = try projectRows(), requestStart = remote.recorded.count
             let answer = try await command(host, "projectAttachmentDownload", input)
-            XCTAssertEqual(answer["status"] as? String, mode == "404" ? "unrecoverable" : "unavailable", mode)
+
+            XCTAssertEqual(answer["status"] as? String, "unavailable", mode)
             XCTAssertTrue(answer["update"] is NSNull)
             XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.target.path), mode)
             try assertDownloadPreservation(rows: before, projects: oldProjects, selected: fixture.projectID)
             XCTAssertTrue(remote.recorded.dropFirst(requestStart).allSatisfy { $0.method == "GET" && $0.path == fixture.remotePath })
             XCTAssertGreaterThan(remote.recorded.count, requestStart)
             let current = try projectDownloadAttachment(fixture)
-            if mode == "404" {
-                XCTAssertNotNil(current["deletedAt"] as? String); XCTAssertNil(current["cloudKey"]); XCTAssertNil(current["fileHash"])
-                XCTAssertEqual(current["title"] as? String, fixture.attachment["title"] as? String)
-                XCTAssertEqual(current["contentRev"] as? Int, fixture.attachment["contentRev"] as? Int)
-                let repeatInput = try await projectDownloadInput(host, fixture), repeatStart = remote.recorded.count, terminalRows = try rows()
-                do {
-                    _ = try await host.foregroundSync(command: "projectAttachmentDownload", requestJSON: json(repeatInput))
-                    XCTFail("The native owned preflight must refuse the terminal tombstone")
-                } catch { XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed") }
-                XCTAssertEqual(remote.recorded.count, repeatStart); XCTAssertEqual(try rows(), terminalRows)
-            } else {
-                XCTAssertNil(current["deletedAt"]); XCTAssertEqual(current["cloudKey"] as? String, fixture.attachment["cloudKey"] as? String)
-                XCTAssertEqual(current["fileHash"] as? String, fixture.attachment["fileHash"] as? String)
-                XCTAssertEqual(current["localStatus"] as? String, "missing")
-            }
+            XCTAssertNil(current["deletedAt"]); XCTAssertEqual(current["cloudKey"] as? String, fixture.attachment["cloudKey"] as? String)
+            XCTAssertEqual(current["fileHash"] as? String, fixture.attachment["fileHash"] as? String)
+            XCTAssertEqual(current["localStatus"] as? String, "missing")
             XCTAssertEqual(jobs?.counters.jobs, 0, "No refused response remains retained after this scope")
             XCTAssertEqual(jobs?.counters.running, 0, "No failed download escapes the foreground invocation")
-            try assertProjectDownloadMarker(mode == "404" ? ["unrecoverable"] : [])
+            try assertProjectDownloadMarker([])
         }
         try assertConfiguration(); await host.close()
         let cold = core(), beforeCold = remote.recorded.count
         _ = try await cold.start(); XCTAssertEqual(remote.recorded.count, beforeCold)
         for (mode, fixture) in fixtures {
             let current = try projectDownloadAttachment(fixture)
-            XCTAssertEqual(current["deletedAt"] != nil, mode == "404", "The durable distinction survives recreation")
+            XCTAssertNil(current["deletedAt"], "No failure, a 404 included, deletes the row after recreation (\(mode))")
             XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.target.path))
         }
         XCTAssertEqual(try Data(contentsOf: target), originalBytes); assertNativeCredentialObservation(); await cold.close()
@@ -1086,9 +1061,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         try await settleDownloadFixtureWriter(host)
         let input = try await projectDownloadInput(host, fixture), before = try rows(), oldProjects = try projectRows(), requestStart = remote.recorded.count
         try assertTaskSearchMembership()
-        // The hook is after the real COMMIT, and fires only when its durable row
-        // already contains the final installed availability, not a transient
-        // downloading patch or a pre-commit refusal.
+
+
         faults.afterSQL = { statement in
             guard statement == "COMMIT", FileManager.default.fileExists(atPath: fixture.target.path),
                   try self.projectDownloadAttachment(fixture)["localStatus"] as? String == "available" else { return }
@@ -1161,8 +1135,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertEqual(try json(attachment()), try json(original), "An unexpired remote lease defers shared metadata cleanup")
         XCTAssertEqual(remote.bytes(fencePath), fenceBytes); XCTAssertEqual(remote.etag(fencePath), fenceETag)
         try assertConfiguration()
-        // Model server-time expiry without deleting or rewriting the original lease.
-        // HTTP Date has whole-second precision, so advance one second beyond its observed deadline.
+
+
         remote.advanceServerTime(to: Date(timeIntervalSince1970: expiresAt / 1000 + 1))
         XCTAssertEqual(remote.bytes(fencePath), fenceBytes); XCTAssertEqual(remote.etag(fencePath), fenceETag)
         let expiredRequestStart = remote.recorded.count

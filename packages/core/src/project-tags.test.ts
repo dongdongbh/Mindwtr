@@ -40,4 +40,10 @@ describe('Project Tags RN policy', () => {
         ], [project(['legacy', '#a', '', 'legacy', '##raw'])]))
             .toEqual(['#a', '#z', 'legacy', '##raw']);
     });
+
+    it('suggests a saved unused tag without changing Project assignments', () => {
+        const settings = { taxonomy: { tags: [{ token: '#unused', rev: 1, revBy: 'test', updatedAt: '2026-10-20T00:00:00.000Z' }] } };
+        expect(projectTagSuggestions([], [], settings)).toEqual(['#unused']);
+    });
+
 });

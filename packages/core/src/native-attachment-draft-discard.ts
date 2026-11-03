@@ -63,8 +63,8 @@ const text = (value: unknown, limit: number): string => {
     return value as string;
 };
 const own = (value: object, field: string): boolean => Object.prototype.hasOwnProperty.call(value, field);
-// The request has only three structural levels and scalar leaves. Capture via
-// descriptors, never by invoking caller accessors, iterators or serialization.
+
+
 const fields = (value: unknown, names: readonly string[]): Record<string, unknown> => {
     if (!value || typeof value !== 'object' || Array.isArray(value)
         || Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) invalid();
@@ -91,8 +91,8 @@ const capture = (input: unknown): NativeAttachmentDraftDiscardInput => {
     if (!Array.isArray(value.operations) || Object.getPrototypeOf(value.operations) !== Array.prototype) invalid();
     const length = Object.getOwnPropertyDescriptor(value.operations, 'length')?.value as unknown;
     if (typeof length !== 'number' || length > 128 || Reflect.ownKeys(value.operations).length !== length + 1) invalid();
-    // Measure captured scalar encoding incrementally; never concatenate an
-    // oversized history before admission. Primitive serialization has no hooks.
+
+
     const header = `{"version":1,"historyVersion":${value.historyVersion},"taskID":${quote(taskID)},`
         + `"managedDirectoryURI":${quote(managedDirectoryURI)},"initialPayloadJSON":${quote(initialPayloadJSON)},`
         + `"checkpointPayloadJSON":${quote(checkpointPayloadJSON)},"operations":[]}`;
@@ -119,8 +119,7 @@ const capture = (input: unknown): NativeAttachmentDraftDiscardInput => {
         initialPayloadJSON, checkpointPayloadJSON, operations };
 };
 
-// Opaque JSON remains byte-for-byte intact. Inspect its parsed shape before
-// existing readers compare it, bounding traversal even for hostile nesting.
+
 const parsed = (json: string, budget: { remaining: number }, maximumDepth = 40): unknown => {
     const value: unknown = JSON.parse(json);
     const pending = [{ value, depth: 0 }];
@@ -139,7 +138,7 @@ const parsed = (json: string, budget: { remaining: number }, maximumDepth = 40):
     return value;
 };
 
-/** Logical owned-Add candidates only. Native separately proves existence and retirement authority. */
+
 export function prepareNativeAttachmentDraftDiscardCandidates(input: unknown): NativeAttachmentDraftDiscardCandidates {
     try {
         const captured = capture(input), budget = { remaining: 100_000 };
@@ -232,7 +231,7 @@ const captureMixed = (input: unknown, version: 2 | 3): NativeAttachmentDraftDisc
         initialPayloadJSON, checkpointPayloadJSON, operations } as NativeAttachmentDraftDiscardInputV3 | NativeAttachmentDraftDiscardInputV4;
 };
 
-/** Pure mixed-history candidates. Native separately proves publication and retirement authority. */
+
 export function prepareNativeAttachmentDraftDiscardCandidatesV3(input: unknown): NativeAttachmentDraftDiscardCandidatesV3 {
     return prepareMixedCandidates(input, 2) as NativeAttachmentDraftDiscardCandidatesV3;
 }
@@ -344,7 +343,7 @@ const captureAvailability = (input: unknown): NativeAttachmentDraftDiscardInputV
     return { version: 4, historyVersion: 5, taskID, managedDirectoryURI, initialPayloadJSON, checkpointPayloadJSON, operations };
 };
 
-/** Availability metadata candidates only; native must separately prove the installed file generation and live references. */
+
 export function prepareNativeAttachmentDraftDiscardCandidatesV5(input: unknown): NativeAttachmentDraftDiscardCandidatesV5 {
     try {
         const captured = captureAvailability(input);
@@ -379,7 +378,7 @@ export function prepareNativeAttachmentDraftDiscardCandidatesV5(input: unknown):
         const targets = new Set<string>();
         const candidates: NativeAttachmentDraftDiscardCandidatesV5['candidates'][number][] = [];
         for (const candidate of planned) {
-            // Baseline tombstones can appear in the generic plan but confer no ownership on this projection.
+
             if (candidate.reason !== 'uncommitted-draft') continue;
             const attachmentId = candidate.attachment.id, targetURI = candidate.attachment.uri;
             if (baselineURIs.has(targetURI) || targets.has(targetURI)) invalid();

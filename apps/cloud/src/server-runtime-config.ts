@@ -126,12 +126,7 @@ const resolveInteger = (
         : parseInteger(environmentValue, environmentKey, minimum, maximum);
 };
 
-/**
- * Resolves every public numeric cloud control before startup can construct
- * storage resources or bind a network listener. Environment validation is
- * unconditional, so a programmatic override cannot hide a malformed deployed
- * value that would take effect on a later restart.
- */
+
 export const resolveCloudRuntimeConfig = (
     env: CloudRuntimeEnvironment = process.env,
     overrides: CloudRuntimeConfigOverrides = {},
@@ -175,8 +170,8 @@ export const resolveCloudRuntimeConfig = (
             1,
         ),
         maxBodyBytes,
-        // The sync document is the whole library, so it gets its own limit. An
-        // operator who raised the small limit above the default never gets less.
+
+
         maxDataBodyBytes: resolveInteger(
             env,
             overrides,

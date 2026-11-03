@@ -1,0 +1,15 @@
+<en-US>
+Projects get a Per section flow mode. Set default task reminders, tick Reference checklists, sort by Priority, give projects a color and try Gruvbox themes. Tap a context to switch, long-press to combine; nested contexts group. Widgets add date filters, Upcoming previews, direct context picks, a Contexts button and capture descriptions. App Lock can wait before asking. Background sync sets reminders, and sync keeps other devices' changes. File Sync works with more storage apps.
+</en-US>
+<de-DE>
+Projekte erhalten den Ablauf „Pro Abschnitt“. Standard-Erinnerungen, abhakbare Referenzlisten, Sortierung nach Priorität, Projektfarben und Gruvbox-Designs. Tippen wechselt den Kontext, langes Drücken kombiniert. Widgets: Datumsfilter, Vorschau „Demnächst“, direkte Kontextwahl, Kontexte-Taste und Beschreibung. Die App-Sperre kann warten. Hintergrund-Sync setzt Erinnerungen; Sync behält Änderungen anderer Geräte.
+</de-DE>
+<es-ES>
+Los proyectos tienen el flujo Por sección. Recordatorios por defecto, listas de Referencia marcables, orden por Prioridad, colores de proyecto y temas Gruvbox. Toca un contexto para cambiar y mantén pulsado para combinar. Widgets: filtros de fecha, vista Próximas, contextos directos, botón Contextos y descripción. El bloqueo puede esperar. La sincronización en segundo plano fija recordatorios y conserva cambios de otros dispositivos.
+</es-ES>
+<fr-FR>
+Les projets ont le flux Par section. Rappels par défaut, listes Référence à cocher, tri par Priorité, couleurs de projet et thèmes Gruvbox. Touchez un contexte pour changer, appui long pour combiner. Widgets : filtres de dates, aperçu À venir, contextes directs, bouton Contextes et description. Le verrouillage peut attendre. La synchro en arrière-plan pose les rappels et garde les changements des autres appareils.
+</fr-FR>
+<zh-CN>
+项目新增「按分区」流程模式。可设置默认任务提醒、勾选参考清单、按优先级排序、为项目设置颜色，并新增 Gruvbox 主题。点按情境即可切换，长按可组合；嵌套情境按组显示。小组件新增日期筛选、即将到来预览、直接选择情境、情境按钮和捕获描述。应用锁可延迟要求解锁。后台同步会设置提醒，同步会保留其他设备的更改。
+</zh-CN>

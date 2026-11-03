@@ -31,7 +31,7 @@ const task = (patch: Partial<Task> = {}): Task => ({ id: 'owned-resume', title: 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const validateField = (field: TaskDraftField, value: unknown) => field === 'relativeStartOffset'
     ? value === undefined || normalizeRelativeStartOffset(value) !== undefined
-    : ['focusedToday', 'showFutureRecurrence'].includes(field) ? typeof value === 'boolean'
+    : ['focusedToday', 'showFutureRecurrence', 'preserveChecklistOnRepeat'].includes(field) ? typeof value === 'boolean'
         : field === 'timeSpentMinutes' ? value === undefined || typeof value === 'number' && Number.isFinite(value) && value >= 0
             : typeof value === 'string';
 const databases: Database[] = [];

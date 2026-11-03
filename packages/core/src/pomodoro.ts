@@ -1,3 +1,6 @@
+import { isTaskActionable } from './task-status';
+import type { Task } from './types';
+
 export type PomodoroPhase = 'focus' | 'break';
 export type PomodoroEvent = 'focus-finished' | 'break-finished';
 
@@ -21,9 +24,9 @@ export interface PomodoroState {
 export interface PomodoroSessionHistory {
     totalCompletedFocusSessions: number;
     completedFocusSessionsByTaskId: Record<string, number>;
-    /** Local YYYY-MM-DD the today-count belongs to; rolls over automatically. */
+
     todayDayKey: string;
-    /** Sessions completed on todayDayKey — the count the panels display (#833). */
+
     completedTodayFocusSessions: number;
 }
 
@@ -141,9 +144,7 @@ export function sanitizePomodoroSessionHistory(
         taskTotal
     );
 
-    // The today-count survives a reload only while the stored day key still is
-    // today; a stale or missing key (including pre-daily-count stored data)
-    // starts the day at zero.
+
     const completedTodayFocusSessions = value?.todayDayKey === todayDayKey
         ? sanitizeCompletedSessionCount(value?.completedTodayFocusSessions)
         : 0;
@@ -156,7 +157,7 @@ export function sanitizePomodoroSessionHistory(
     };
 }
 
-/** The count the panels display: today's sessions, zero once the local day rolls. */
+
 export function getPomodoroFocusSessionsCompletedToday(
     history: Partial<PomodoroSessionHistory> | undefined,
     todayDayKey: string = getPomodoroLocalDayKey()
@@ -270,7 +271,7 @@ export function advancePomodoroState(
     options: PomodoroAutoStartOptions = {},
 ): PomodoroAdvanceResult {
     const safeElapsedSeconds = Math.max(0, Math.floor(elapsedSeconds));
-    if (safeElapsedSeconds <= 0) {
+    if (!Number.isFinite(elapsedSeconds) || safeElapsedSeconds <= 0 || !state.isRunning) {
         return {
             state,
             lastEvent: null,
@@ -279,15 +280,46 @@ export function advancePomodoroState(
 
     let nextState = state;
     let lastEvent: PomodoroEvent | null = null;
+    let remainingElapsedSeconds = safeElapsedSeconds;
 
-    for (let i = 0; i < safeElapsedSeconds; i += 1) {
-        const next = tickPomodoroState(nextState, durations, options);
-        nextState = next.state;
-        if (next.switchedPhase) {
-            lastEvent = next.completedFocusSession ? 'focus-finished' : 'break-finished';
-            if (!nextState.isRunning) break;
-        } else if (!nextState.isRunning) {
+    while (remainingElapsedSeconds > 0 && nextState.isRunning) {
+
+
+        const countdownSeconds = nextState.remainingSeconds > 1
+            ? Math.ceil(nextState.remainingSeconds) - 1
+            : 0;
+        if (remainingElapsedSeconds <= countdownSeconds) {
+            nextState = { ...nextState, remainingSeconds: nextState.remainingSeconds - remainingElapsedSeconds };
             break;
+        }
+
+        const next = tickPomodoroState({
+            ...nextState,
+            remainingSeconds: nextState.remainingSeconds - countdownSeconds,
+        }, durations, options);
+        nextState = next.state;
+        remainingElapsedSeconds -= countdownSeconds + 1;
+        lastEvent = next.completedFocusSession ? 'focus-finished' : 'break-finished';
+
+        if (nextState.isRunning && options.autoStartFocus === true && options.autoStartBreaks === true) {
+
+
+            const cycleSeconds = getPomodoroPhaseSeconds('focus', durations) + getPomodoroPhaseSeconds('break', durations);
+            const fullCycles = Math.floor(remainingElapsedSeconds / cycleSeconds);
+            if (fullCycles > 0) {
+                const count = nextState.completedFocusSessions;
+                const incremented = count + 1;
+
+
+                const completedFocusSessions = incremented === count
+                    ? count
+                    : count >= Number.MAX_SAFE_INTEGER + 1
+                        ? incremented
+                        : Math.min(count + fullCycles, Number.MAX_SAFE_INTEGER + 1);
+                nextState = { ...nextState, completedFocusSessions };
+                remainingElapsedSeconds %= cycleSeconds;
+                lastEvent = nextState.phase === 'focus' ? 'break-finished' : 'focus-finished';
+            }
         }
     }
 
@@ -309,4 +341,15 @@ export function formatPomodoroClock(totalSeconds: number): string {
 
     const totalMinutes = Math.floor(safeSeconds / 60);
     return `${String(totalMinutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+export function getPomodoroTaskChoices(pools: {
+    focusedTasks: readonly Task[]; schedule: readonly Task[]; nextActions: readonly Task[]; reviewDue: readonly Task[];
+}): Task[] {
+    const byId = new Map<string, Task>();
+    for (const task of [...pools.focusedTasks, ...pools.schedule, ...pools.nextActions, ...pools.reviewDue]) {
+
+        if (!task.deletedAt && isTaskActionable(task)) byId.set(task.id, task);
+    }
+    return Array.from(byId.values());
 }

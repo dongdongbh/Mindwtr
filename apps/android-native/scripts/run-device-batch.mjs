@@ -1,31 +1,22 @@
-// Runs the native Android device checks as one batch on the shared S23 test phone, under /home/dd/scratch/s23.lock.
-//
-//   node apps/android-native/scripts/run-device-batch.mjs [--tree <worktree>] [--harness <dir>] [--log <dir>] [--no-build]
-//       [--detach [--unit <name>]] [check names...]
-//
-// It builds the bundle, the four Gradle variants and the upgrade harness, and stops before any check when one of them fails
-// (`STOP: <step> failed`). Each check then starts from the home screen with rotation on, runs for at most an hour and adds
-// `## <check> HH:MM` and `EXIT=<code> rotation=<r>` to <log>/summary.txt (its output goes to <log>/<check>.log). The last line
-// of summary.txt is `VERDICT PASS <n>/<n>` or `VERDICT FAIL <passed>/<n>: <failed checks>`; the exit code is 0 only on PASS.
-// With no names it runs every check-*-device.mjs and capture-parity-screens.mjs in the tree (check-projects-device with
-// --prune-old first, check-upgrade-device last). --detach starts the batch as a systemd user unit (a worker shell's
-// background jobs die when the worker pauses) and prints the unit and the log folder. phone-queue.mjs shows who holds the
-// phone and who waits.
+
+
+
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const SERIAL = 'RFCW10JBP0Y';
 const LOCK = '/home/dd/scratch/s23.lock';
 const ADB = '/opt/android-sdk/platform-tools/adb';
+const ADB_PORT = '5038';
 const SDK = '/home/dd/Android/Sdk';
 const LOCK_TIMED_OUT = 75;
 const here = dirname(fileURLToPath(import.meta.url));
 const scriptsDir = 'apps/android-native/scripts';
 const apkDir = 'apps/android-native/android/app/build/outputs/apk/play';
 
-// The order the batch has always run in: lists first, the RN-to-native upgrade (it reinstalls the app) last.
+
 const ORDER = ['check-projects-device', 'check-bgsync-device', 'check-encryption-device', 'check-widgets-device',
     'check-project-details-device', 'capture-parity-screens', 'check-startup-device', 'check-lifecycle-device',
     'check-editor-device', 'check-search-device', 'check-process-inbox-device', 'check-capture-device',
@@ -33,7 +24,8 @@ const ORDER = ['check-projects-device', 'check-bgsync-device', 'check-encryption
     'check-review-device', 'check-calendar-board-device', 'check-toolbars-device', 'check-settings-editor-device',
     'check-sweep-saved-device', 'check-review-organize-device', 'check-app-lock-device', 'check-net-device',
     'check-intl-device', 'check-sync-device', 'check-language-device', 'check-focus-device', 'check-log-device',
-    'check-ai-device', 'check-attachments-device', 'check-reminders-device', 'check-runner-device', 'check-upgrade-device'];
+    'check-ai-device', 'check-attachments-device', 'check-continue-without-files-device', 'check-reminders-device', 'check-runner-device',
+    'check-upgrade-device'];
 const LAST = 'check-upgrade-device';
 
 export function parseArgs(argv) {
@@ -57,12 +49,25 @@ export function parseArgs(argv) {
     return opts;
 }
 
-// Every check script in the tree, in ORDER; a check ORDER does not know yet runs before the upgrade check.
+
 export function defaultChecks(names) {
     const found = names.map((n) => n.replace(/\.mjs$/, '')).filter((n) => /^check-[\w-]+-device$|^capture-parity-screens$/.test(n));
     const known = ORDER.filter((n) => found.includes(n) && n !== LAST);
     const fresh = found.filter((n) => !ORDER.includes(n)).sort();
     return [...known, ...fresh, ...(found.includes(LAST) ? [LAST] : [])];
+}
+
+
+export function withAdbPort(env) {
+    env.ANDROID_ADB_SERVER_PORT ||= ADB_PORT;
+    return env;
+}
+export const setenvArgs = (env) => ['PATH', 'JAVA_HOME', 'HOME', 'ANDROID_ADB_SERVER_PORT', 'PARITY_ONLY'].filter((k) => env[k]).map((k) => `--setenv=${k}=${env[k]}`);
+
+
+export function unreachable(result, port, total) {
+    const state = result.stdout?.trim() || result.stderr?.trim().split('\n').pop() || result.error?.message || `exit ${result.status}`;
+    return state === 'device' ? null : `VERDICT FAIL 0/${total}: not run, ${SERIAL} not reachable on adb port ${port} (${state})`;
 }
 
 export function verdict(results) {
@@ -76,13 +81,32 @@ export function verdict(results) {
 export function checkArgs(check) {
     if (check === 'check-projects-device') return ['--prune-old'];
     if (check === 'check-startup-device') return [`${apkDir}/benchmarkSeed/app-play-benchmarkSeed.apk`, `${apkDir}/benchmark/app-play-benchmark.apk`];
+    if (check === 'check-onboarding-device') return [`${apkDir}/benchmarkSeed/app-play-benchmarkSeed.apk`];
     return [];
+}
+
+
+export function harnessChecks(checks, read) {
+    const reads = (check) => read(check).includes('apks/manifest.json');
+    return checks.filter((check) => reads(check)
+        || [...read(check).matchAll(/'((?:check-[\w-]+-device|capture-parity-screens))\.mjs'/g)].some(([, other]) => other !== check && reads(other)));
+}
+
+
+export function buildSteps(tree, needHarness) {
+    return [
+        ['bundle', process.execPath, [`${scriptsDir}/build-bundle.mjs`]],
+        ['gradle', './gradlew', [':app:assembleDebug', ':app:assembleUpgradetest', ':app:assemblePlayBenchmark', ':app:assemblePlayBenchmarkSeed', '--offline', '-q'],
+            { cwd: join(tree, 'apps/android-native/android') }],
+        ...(needHarness.length ? [['harness', process.execPath, [`${scriptsDir}/build-upgrade-harness.mjs`]]] : []),
+    ];
 }
 
 const hhmm = () => new Date().toTimeString().slice(0, 5);
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
 
 function main() {
+    withAdbPort(process.env);
     let opts;
     try {
         opts = parseArgs(process.argv.slice(2));
@@ -104,8 +128,8 @@ function main() {
 
     if (opts.detach) {
         const unit = opts.unit ?? `device-batch-${basename(opts.log)}`.replace(/[^\w.-]/g, '-');
-        const env = ['PATH', 'JAVA_HOME', 'HOME', 'ANDROID_ADB_SERVER_PORT'].filter((k) => process.env[k]).map((k) => `--setenv=${k}=${process.env[k]}`);
-        // KillMode=process: the unit's end must not take down an adb server or Gradle daemon other sessions now use.
+        const env = setenvArgs(process.env);
+
         const run = spawnSync('systemd-run', ['--user', `--unit=${unit}`, '--collect', '--property=KillMode=process', `--working-directory=${opts.tree}`, ...env,
             `--property=StandardOutput=append:${opts.log}/runner.out`, `--property=StandardError=append:${opts.log}/runner.out`,
             process.execPath, ...self], { stdio: 'inherit' });
@@ -113,7 +137,7 @@ function main() {
         process.exit(run.status ?? 1);
     }
 
-    // One batch on the phone at a time: run again under the lock. -o keeps the lock out of the adb server this batch may start.
+
     if (!process.env.S23_LOCKED) {
         const run = spawnSync('flock', ['-o', '-E', String(LOCK_TIMED_OUT), '-w', '43200', LOCK, process.execPath, ...self],
             { stdio: 'inherit', env: { ...process.env, S23_LOCKED: '1' } });
@@ -147,14 +171,17 @@ function main() {
 
     const head = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: opts.tree, encoding: 'utf8' }).stdout.trim();
     say(`start ${new Date().toString()} tree ${opts.tree} head ${head} harness ${opts.harness ?? env.MINDWTR_HARNESS_DIR ?? '(default)'}`);
+
+    const stop = unreachable(spawnSync(ADB, ['-s', SERIAL, 'get-state'], { encoding: 'utf8' }), process.env.ANDROID_ADB_SERVER_PORT, checks.length);
+    if (stop) {
+        say(stop);
+        process.exit(1);
+    }
+    const needHarness = harnessChecks(checks, (check) => readFileSync(join(opts.tree, scriptsDir, `${check}.mjs`), 'utf8'));
+    let harnessFailed = false;
     if (opts.build) {
-        const steps = [
-            ['bundle', process.execPath, [`${scriptsDir}/build-bundle.mjs`]],
-            ['gradle', './gradlew', [':app:assembleDebug', ':app:assembleUpgradetest', ':app:assemblePlayBenchmark', ':app:assemblePlayBenchmarkSeed', '--offline', '-q'],
-                { cwd: join(opts.tree, 'apps/android-native/android') }],
-            ['harness', process.execPath, [`${scriptsDir}/build-upgrade-harness.mjs`]],
-        ];
-        for (const [name, cmd, args, extra] of steps) {
+        if (!needHarness.length) say('harness=skipped (no check needs it)');
+        for (const [name, cmd, args, extra] of buildSteps(opts.tree, needHarness)) {
             const code = run(cmd, args, `${name}.log`, extra);
             say(`${name}=${code}`);
             if (name === 'gradle' && code === 0) {
@@ -162,7 +189,11 @@ function main() {
                 const sha = spawnSync('sha256sum', [apk], { encoding: 'utf8' }).stdout.slice(0, 12);
                 say(`apk sha ${sha}`);
             }
-            if (code !== 0) {
+
+            if (code !== 0 && name === 'harness' && needHarness.length < checks.length) {
+                say(`harness failed (${opts.log}/harness.log): not run: ${needHarness.join(' ')}`);
+                harnessFailed = true;
+            } else if (code !== 0) {
                 say(`STOP: ${name} failed (${opts.log}/${name}.log)`);
                 say(`VERDICT FAIL 0/${checks.length}: not run, ${name} failed`);
                 process.exit(1);
@@ -172,6 +203,12 @@ function main() {
 
     const results = [];
     for (const check of checks) {
+        if (harnessFailed && needHarness.includes(check)) {
+            say(`## ${check} ${hhmm()}`);
+            say('EXIT=1 not run, harness failed');
+            results.push({ check, exit: 1 });
+            continue;
+        }
         if (!adb('dumpsys', 'activity', 'activities').split('\n').find((l) => l.includes('topResumedActivity'))?.includes('launcher')) {
             adb('input', 'keyevent', 'KEYCODE_HOME');
         }

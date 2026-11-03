@@ -32,8 +32,8 @@ const getFreePort = async (): Promise<number> =>
 
 const waitForHealth = async (baseUrl: string, token?: string) => {
   let lastError: unknown = null;
-  // Up to 30 s: a loaded CI runner can take seconds to bind the port, and a
-  // readiness wait is not a performance budget.
+
+
   for (let attempt = 0; attempt < 600; attempt += 1) {
     try {
       const response = await fetch(`${baseUrl}/health`, {
@@ -54,8 +54,7 @@ type SpawnApiOptions = {
   token?: string;
 };
 
-// Every test here spawns the script as a subprocess, which costs seconds on a
-// loaded runner. Bun's 5 s default is not enough now that CI runs this file.
+
 const SPAWN_TEST_TIMEOUT_MS = 60_000;
 
 const spawnApi = (
@@ -321,8 +320,8 @@ describe('mindwtr-api', () => {
       dataPath,
       JSON.stringify(
         {
-          // 'starred-numeric' stores the flag as 1 rather than true: synced payloads
-          // round-trip booleans that way, so a `=== true` filter would drop it.
+
+
           tasks: [
             { id: 'starred', title: 'Starred', status: 'next', isFocusedToday: true, createdAt: now, updatedAt: now },
             { id: 'starred-numeric', title: 'Starred numeric', status: 'next', isFocusedToday: 1, createdAt: now, updatedAt: now },
@@ -354,7 +353,7 @@ describe('mindwtr-api', () => {
       expect(await ids('?isFocusedToday=false')).toEqual(['plain']);
       expect((await ids('')).sort()).toEqual(['plain', 'starred', 'starred-numeric']);
 
-      // Garbage is rejected rather than read as false, which would return everything.
+
       const invalid = await fetch(`${baseUrl}/tasks?isFocusedToday=yes`);
       expect(invalid.status).toBe(400);
     } finally {

@@ -17,3 +17,8 @@ export function shouldSendTaskReminders(
     const policy = getTaskReminderPolicy(task);
     return policy === 'inherit' ? settings.taskReminderDefault !== 'skip' : policy === 'send';
 }
+
+
+export function getTaskReminderDefault(settings: Pick<NotificationSettings, 'taskReminderDefault'> = {}): 'send' | 'skip' {
+    return settings.taskReminderDefault === 'skip' ? 'skip' : 'send';
+}

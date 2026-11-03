@@ -132,7 +132,7 @@ vi.mock('expo-file-system', () => ({
     }
     write(text: string) {
       if (fileSystemMocks.writeError) throw fileSystemMocks.writeError;
-      // A death in the middle of a write: the file is cut short, then nothing more runs.
+
       const cut = fileSystemMocks.truncateThenThrow;
       if (cut) { fileSystemMocks.truncateThenThrow = null; fileSystemMocks.fileContents.set(this.uri, ''); throw cut; }
       fileSystemMocks.fileWrites.push(text);
@@ -203,7 +203,7 @@ describe('mobile data transfer', () => {
     );
     fileSystemMocks.writeSafFileAsync.mockResolvedValue(undefined);
     fileSystemMocks.deletedDocuments.clear();
-    // A content:// document is gone once deleted; Expo's getInfoAsync confirms it.
+
     fileSystemMocks.deleteSafFileAsync.mockImplementation(async (uri: string) => { fileSystemMocks.deletedDocuments.add(uri); });
     fileSystemMocks.getInfoAsync.mockImplementation(async (uri: string) => (
       uri.startsWith('content://') ? { exists: !fileSystemMocks.deletedDocuments.has(uri) } : { exists: true, size: 1 }));
@@ -305,8 +305,7 @@ describe('mobile data transfer', () => {
     expect(listedUris()).toEqual([]);
   });
 
-  // D1a review 3 (P1): cleanup deletes only a recorded URI. An export that died before its document existed (or a provider
-  // that renamed it) never costs an older backup that shares the name.
+
   it('an older backup with the same name survives an export that died before its document existed', async () => {
     Platform.OS = 'android';
     fileSystemMocks.requestDirectoryPermissionsAsync.mockResolvedValue({ granted: true, directoryUri: 'content://tree/downloads' });
@@ -334,7 +333,7 @@ describe('mobile data transfer', () => {
     expect(listedUris()).toEqual([]);
   });
 
-  // D1a review 2: the record an older build wrote (`{ uri }`) keeps its cleanup.
+
   it('cleans the older one-document record', async () => {
     const fileUri = 'content://com.android.providers.downloads.documents/document/downloads%3AOlder.json';
     fileSystemMocks.fileContents.set(RECORD, JSON.stringify({ uri: fileUri }));
@@ -355,8 +354,7 @@ describe('mobile data transfer', () => {
     expect(fileSystemMocks.deleteSafFileAsync).toHaveBeenCalledWith(half, { idempotent: true });
   });
 
-  // D1a review P1-3: a list that cannot drop the finished document fails the export now; no later cleanup deletes a backup
-  // the export reported as written.
+
   it('a finished folder write whose entry cannot leave the list fails the export and deletes its own file', async () => {
     Platform.OS = 'android';
     const fileUri = 'content://com.android.providers.downloads.documents/document/downloads%3AFinished.json';
@@ -370,8 +368,7 @@ describe('mobile data transfer', () => {
     expect(sharingMocks.shareAsync).toHaveBeenCalledOnce();
   });
 
-  // D1a review 3: created, then its URI cannot be listed: the document goes at once. A provider that also refuses that delete
-  // leaves one empty document nobody owns (accepted: no cleanup by name).
+
   it('a document whose URI cannot be listed is deleted at once and never looked up by name later', async () => {
     Platform.OS = 'android';
     const fileUri = 'content://com.android.providers.downloads.documents/document/downloads%3ALost.json';
@@ -386,7 +383,7 @@ describe('mobile data transfer', () => {
     expect(listedUris()).toEqual([]);
   });
 
-  // D1a review 2: Expo's delete resolves although the provider kept the file; the entry stays until it is really gone.
+
   it('keeps an entry whose delete resolved but whose document is still there', async () => {
     const fileUri = 'content://com.android.providers.downloads.documents/document/downloads%3AKept.json';
     fileSystemMocks.fileContents.set(RECORD, JSON.stringify({ pending: [fileUri] }));
@@ -397,7 +394,7 @@ describe('mobile data transfer', () => {
     expect(listedUris()).toEqual([fileUri]);
   });
 
-  // D1a review 2: a replace cut short leaves the whole new list in the pending file; it wins over the older record.
+
   it('reads a whole pending list before the record it was replacing', async () => {
     const finished = 'content://com.android.providers.downloads.documents/document/downloads%3AFinished.json';
     fileSystemMocks.fileContents.set(RECORD, JSON.stringify({ pending: [finished] }));
@@ -408,8 +405,7 @@ describe('mobile data transfer', () => {
     expect(fileSystemMocks.deleteSafFileAsync).not.toHaveBeenCalled();
   });
 
-  // D1a review 3: a first death left the newest list only in the pending file; the next update promotes it to the record before
-  // it reuses the pending file, so a second death in that write loses nothing.
+
   it('keeps a recovered pending list through a second interrupted write', async () => {
     Platform.OS = 'android';
     const half = 'content://com.android.providers.downloads.documents/document/downloads%3AHalf.json';
@@ -426,7 +422,7 @@ describe('mobile data transfer', () => {
     expect(listedUris()).toEqual([half]);
   });
 
-  // D1a review P2-4: a cleanup the provider refused keeps its entry, and a later export never replaces it.
+
   it('keeps an interrupted write the provider could not delete, through the next export, until a cleanup succeeds', async () => {
     Platform.OS = 'android';
     const half = 'content://com.android.providers.downloads.documents/document/downloads%3AHalf.json';
@@ -607,7 +603,7 @@ describe('mobile data transfer', () => {
     }
   });
 
-  // D1a review 2 (P1): App Lock is this device's own (core 13c807f07); a restore keeps the enabled lock, whatever the file says.
+
   it('a snapshot restore keeps this device\'s enabled App Lock', async () => {
     const snapshotName = 'data.2026-08-08T12-00-00.000.snapshot.json';
     fileSystemMocks.fileContents.set(`file://document/snapshots/${snapshotName}`, JSON.stringify({ ...emptyData, settings: { security: { mobileAppLockEnabled: false } } }));
@@ -634,7 +630,7 @@ describe('mobile data transfer', () => {
   });
 
   it('leaves no snapshot file behind and prunes nothing when the snapshot write fails', async () => {
-    // One more than MAX_LOCAL_SNAPSHOTS, so a stray empty file would evict a real one.
+
     const existing = Array.from({ length: 6 }, (_unused, index) =>
       `file://document/snapshots/data.2026-08-0${index + 1}T00-00-00.000.snapshot.json`);
     existing.forEach((uri) => fileSystemMocks.fileContents.set(uri, '{}'));
@@ -649,7 +645,7 @@ describe('mobile data transfer', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-09T12:34:05.123Z'));
     try {
-      // Written while the clock ran ahead; after it goes back they all outrank a new snapshot by name.
+
       Array.from({ length: 5 }, (_unused, index) =>
         `file://document/snapshots/data.2027-01-0${index + 1}T00-00-00.000.snapshot.json`)
         .forEach((uri) => fileSystemMocks.fileContents.set(uri, '{}'));

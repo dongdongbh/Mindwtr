@@ -23,8 +23,10 @@ import { useTaskStore } from '@mindwtr/core';
 import { isFlatpakRuntime, isLinuxRuntime, isMacRuntime, isTauriRuntime, isWindowsRuntime } from './runtime';
 import { invokeNative } from './tauri-invoke';
 import { logInfo, logWarn } from './app-log';
+import { isAppLocked } from './app-lock';
 
 const notifiedAtByTask = new Map<string, string>();
+const advanceObservedByTask = new Set<string>();
 const repeatNotifiedByTask = new Map<string, string>();
 const notifiedAtByProject = new Map<string, string>();
 const digestSentOnByKind = new Map<'morning' | 'evening', string>();
@@ -58,36 +60,18 @@ const LINUX_NOTIFICATION_ERROR_TYPES = [
     'unsupported_install',
     'unsupported_platform',
 ] as const;
-/**
- * Furthest back a poll will look for reminders it slept through. Browsers throttle
- * a hidden tab's timers to roughly one a minute, and a laptop that suspends stops
- * them altogether, so consecutive polls are not reliably CHECK_INTERVAL_MS apart
- * and a reminder can land between two of them (#962). Capped, because a window
- * reopened after hours should not empty a queue of stale reminders at once.
- */
+
+
 const MAX_CATCH_UP_MS = 5 * 60_000;
 let lastPollAt: number | null = null;
 
-/**
- * How far back a poll should look for reminders it slept through, given when the
- * previous poll ran. Floors at one poll window so a debounce-triggered check never
- * narrows the normal window, and caps at MAX_CATCH_UP_MS. A first poll gets the
- * plain window: reminders reached before the app was open stay skipped, which is
- * the same limitation repeats already document.
- */
+
 export function resolvePollCatchUpMs(nowMs: number, lastPollAtMs: number | null): number {
     if (lastPollAtMs === null) return CHECK_INTERVAL_MS;
     return Math.min(Math.max(nowMs - lastPollAtMs, CHECK_INTERVAL_MS), MAX_CATCH_UP_MS);
 }
-/**
- * Picks the due-time repeat occurrence to fire on this poll tick, or null.
- *
- * Repeat occurrences are in the past (the due time already fired the single reminder), so they are
- * resolved here rather than via the future-only `getNextScheduledAt`. Only an occurrence reached
- * within the last poll window fires; one missed while the app was not polling is skipped, which is
- * how desktop repeats inherit the "only fires while the app is open" limitation. Dedup key embeds
- * the due ISO, so editing the due time invalidates prior-occurrence keys automatically.
- */
+
+
 export function resolveDueRepeatToFire(
     task: Task,
     now: Date,
@@ -125,15 +109,14 @@ function localDateKey(date: Date): string {
     return `${year}-${month}-${day}`;
 }
 
-// Moved to core (`buildReminderNotificationBody`) so mobile can share the same labelled,
-// markdown-stripped body instead of showing raw description text (#reminder-schedule).
+
 export const buildDesktopTaskNotificationBody = buildReminderNotificationBody;
 
 async function loadTauriNotificationApi(): Promise<TauriNotificationApi | null> {
     if (!isTauriRuntime()) return null;
     if (tauriNotificationApi) return tauriNotificationApi;
     try {
-        // Optional dependency. If unavailable, we fall back to Web Notifications.
+
         const mod = await import('@tauri-apps/plugin-notification');
         tauriNotificationApi = mod as unknown as TauriNotificationApi;
         return tauriNotificationApi;
@@ -152,7 +135,7 @@ async function ensurePermission() {
             }
             return;
         } catch {
-            // Ignore and fall through to web notifications.
+
         }
     }
 
@@ -165,7 +148,7 @@ async function ensurePermission() {
         try {
             await Notification.requestPermission();
         } catch {
-            // ignore
+
         }
     }
 }
@@ -183,7 +166,7 @@ export async function sendDesktopImmediateNotification(title: string, body?: str
     await sendNotification(title, body);
 }
 
-/** Never carries the title or body: a reminder's text is the user's own task content. */
+
 function logNotificationSent(path: string): void {
     void logInfo('Desktop notification sent', {
         scope: 'notification',
@@ -212,13 +195,9 @@ function classifyLinuxNotificationError(error: unknown): string {
     return LINUX_NOTIFICATION_ERROR_TYPES.find((candidate) => detail.includes(candidate)) ?? 'unknown';
 }
 
-/**
- * Linux never reaches the notification plugin: its sync notify-rust call can nest a Tokio
- * runtime and panic after IPC already reported success (#1232). Flatpak keeps the portal;
- * native packages await org.freedesktop.Notifications.Notify on the existing runtime.
- */
-async function handleLinuxNotification(title: string, body?: string, tag?: string): Promise<boolean> {
-    if (!isTauriRuntime() || (!isLinuxRuntime() && !isFlatpakRuntime())) return false;
+
+async function handleLinuxNotification(title: string, body?: string, tag?: string): Promise<boolean | null> {
+    if (!isTauriRuntime() || (!isLinuxRuntime() && !isFlatpakRuntime())) return null;
 
     const flatpak = isFlatpakRuntime();
     const backend = flatpak ? 'linux-portal' : 'linux-dbus';
@@ -237,6 +216,7 @@ async function handleLinuxNotification(title: string, body?: string, tag?: strin
                 outcome: 'submitted',
             },
         });
+        return true;
     } catch (error) {
         void logWarn('Linux desktop notification delivery failed', {
             scope: 'notification',
@@ -248,18 +228,11 @@ async function handleLinuxNotification(title: string, body?: string, tag?: strin
         });
     }
 
-    // A timeout may mean the daemon accepted Notify but its reply was lost. Never resend through
-    // the plugin (or the web API) after any Linux native attempt.
-    return true;
+
+    return false;
 }
 
-/**
- * Sends through the Windows package identity, which is the only notifier an MSIX (Microsoft
- * Store) install can use. `tauri-plugin-notification` always passes the Tauri identifier as an
- * application id; Windows rejects that id in a packaged process and the plugin swallows the
- * error, so Store users saw no reminder toasts at all (#1146). The command reports "not
- * packaged" on every other Windows install, and those fall through to the plugin as before.
- */
+
 async function sendWindowsPackagedNotification(title: string, body?: string, tag?: string): Promise<boolean> {
     if (!isTauriRuntime() || !isWindowsRuntime()) return false;
 
@@ -276,9 +249,7 @@ async function sendWindowsPackagedNotification(title: string, body?: string, tag
     }
 }
 
-/**
- * A macOS or unpackaged Windows reminder that replaces its task's notification. On any error the plugin shows it instead, as one more notification.
- */
+
 async function sendReplacingNotification(title: string, body: string | undefined, tag: string): Promise<boolean> {
     if (!isTauriRuntime() || (!isMacRuntime() && !isWindowsRuntime())) return false;
 
@@ -295,54 +266,53 @@ async function sendReplacingNotification(title: string, body: string | undefined
     }
 }
 
-/**
- * `tag` names the notification a reminder replaces: one per task (core's getReminderNotificationTag),
- * so a task's start, due and every due-time repeat show as one notification that alerts again,
- * instead of one more notification per occurrence.
- */
-async function sendNotification(title: string, body?: string, tag?: string) {
-    if (await handleLinuxNotification(title, body, tag)) {
-        return;
+
+async function sendNotification(title: string, body?: string, tag?: string): Promise<boolean> {
+
+
+    if (isAppLocked()) {
+        title = resolveI18nText(getTranslator(getCurrentLanguage()), 'appLock.lockedReminder', { fallback: 'Mindwtr reminder' });
+        body = undefined;
     }
+    const linuxSent = await handleLinuxNotification(title, body, tag);
+    if (linuxSent !== null) return linuxSent;
 
     if (await sendWindowsPackagedNotification(title, body, tag)) {
         logNotificationSent('windows-packaged');
-        return;
+        return true;
     }
 
     if (tag && await sendReplacingNotification(title, body, tag)) {
         logNotificationSent('replacing');
-        return;
+        return true;
     }
 
     if (tauriNotificationApi?.sendNotification) {
         try {
             tauriNotificationApi.sendNotification({ title, body });
             logNotificationSent('plugin');
-            return;
+            return true;
         } catch (error) {
             logNotificationFailed('plugin', error);
-            // Fall back to Web Notifications below.
+
         }
     }
 
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
-            // `renotify` alerts again when the tag replaces a shown notification.
+
             const options = { ...(body ? { body } : {}), ...(tag ? { tag, renotify: true } : {}) } as NotificationOptions;
             new Notification(title, Object.keys(options).length > 0 ? options : undefined);
             logNotificationSent('web');
+            return true;
         } catch (error) {
             logNotificationFailed('web', error);
         }
     }
+    return false;
 }
 
-/**
- * One line per reminder the desktop poll loop actually fires, so a log from a user who sees no
- * toast separates "the scheduler never fired" from "the send path failed" (#1146). Task text is
- * never logged.
- */
+
 function logReminderFired(kind: 'due-repeat' | 'task' | 'project', fireAt: string): void {
     void logInfo('Desktop reminder fired', {
         scope: 'notification',
@@ -365,12 +335,7 @@ export type DesktopReminderGates = {
     eveningDigestEnabled: boolean;
 };
 
-/**
- * Which reminder categories are live for this poll, mirroring core's `buildReminderSchedule`
- * gating (the module mobile pre-arms alarms from): the weekly review nudge is deliberately
- * independent of the task-reminder master switch, as are explicitly enabled morning/evening
- * digests. Start/due/review task reminders and project reviews still require the master switch.
- */
+
 export function resolveDesktopReminderGates(
     settings: NotificationSettings,
     digest: DigestSchedule = getDigestSchedule(settings),
@@ -392,15 +357,12 @@ function checkDueAndNotify() {
     const lang = getCurrentLanguage();
     void loadTranslations(lang);
     const tr = getTranslationsSync(lang);
-    // resolveI18nText, not a raw `tr[key]`: an override locale legitimately omits any key whose
-    // translation equals English (digest.focus in nl and it), and the raw read renders those as
-    // "undefined" in the notification title.
+
+
     const translator = getTranslator(lang);
     const text = (key: string, fallback: string) => resolveI18nText(translator, key, { fallback });
 
-    // How much of the past this poll is answerable for. Anchoring the reminder lookup at that
-    // moment instead of `now` is what keeps a just-missed reminder visible. notifiedAtByTask/
-    // repeatNotifiedByTask/notifiedAtByProject dedupe, so a late fire is never a second fire.
+
     const catchUpMs = resolvePollCatchUpMs(now.getTime(), lastPollAt);
     lastPollAt = now.getTime();
     const lookbackFrom = new Date(now.getTime() - catchUpMs);
@@ -410,9 +372,7 @@ function checkDueAndNotify() {
     const gates = resolveDesktopReminderGates(settings, digest);
     const includeDueDate = areDueDateRemindersEnabled(settings);
 
-    // Due-time repeats resolve on their own bounded chain, independent of the "next" occurrence
-    // below: a task whose due time already passed has no future "next", but its remaining
-    // repeat occurrences must still fire (#905).
+
     tasks.forEach((task: Task) => {
         const repeat = resolveDueRepeatToFire(task, now, repeatNotifiedByTask.get(task.id), { includeDueDate, catchUpMs, taskReminderDefault: settings.taskReminderDefault });
         if (!repeat) return;
@@ -421,9 +381,7 @@ function checkDueAndNotify() {
         repeatNotifiedByTask.set(task.id, repeat.key);
     });
 
-    // Everything else -- each task's next start/due/review reminder, each project's review
-    // reminder -- comes from core's buildReminderSchedule (the same module mobile pre-arms
-    // alarms from), windowed to what this poll is answerable for (#962).
+
     const dueReminders = resolveDueReminders(
         { settings, tasks, projects, translations: tr },
         { from: lookbackFrom, to: lookaheadTo },
@@ -433,6 +391,15 @@ function checkDueAndNotify() {
         const taskId = request.data.taskId;
         const projectId = request.data.projectId;
         if (taskId) {
+            if (request.data.kind === 'task-due-advance' || request.data.kind === 'task-start-advance') {
+
+                if (request.fireAt.getTime() > now.getTime() || !advanceObservedByTask.has(request.key)) continue;
+                void sendNotification(request.title, request.message, getReminderNotificationTag(request.key)).then((sent) => {
+                    if (sent) void logInfo('Advance reminder delivered', { scope: 'notifications', force: true,
+                        extra: { releaseCheck: request.data.kind === 'task-start-advance' ? 'v1.3.8/start-advance-reminder' : 'v1.3.8/due-advance-reminder', outcome: 'delivered' } });
+                });
+                continue;
+            }
             if (notifiedAtByTask.get(taskId) === fireIso) continue;
             logReminderFired('task', fireIso);
             void sendNotification(request.title, request.message, getReminderNotificationTag(request.key));
@@ -444,6 +411,14 @@ function checkDueAndNotify() {
             notifiedAtByProject.set(projectId, fireIso);
         } else {
             console.warn('resolveDueReminders returned a request with neither taskId nor projectId', request);
+        }
+    }
+
+    advanceObservedByTask.clear();
+    for (const task of gates.taskRemindersEnabled ? tasks : []) {
+        const plan = getTaskReminderPlan(task, now, { includeStartTime: settings.startDateNotificationsEnabled !== false, includeDueDate, taskReminderDefault: settings.taskReminderDefault });
+        for (const advance of [plan.advance, plan.startAdvance]) {
+            if (advance) advanceObservedByTask.add(advance.key);
         }
     }
 
@@ -509,7 +484,7 @@ export async function startDesktopNotifications() {
         intervalId = window.setInterval(checkDueAndNotify, CHECK_INTERVAL_MS);
         checkDueAndNotify();
 
-        // Re-check on data changes.
+
         storeSubscription?.();
         storeSubscription = useTaskStore.subscribe((state, prevState) => {
             if (state.lastDataChangeAt === prevState.lastDataChangeAt
@@ -550,6 +525,7 @@ export function stopDesktopNotifications() {
 
     notifiedAtByTask.clear();
     repeatNotifiedByTask.clear();
+    advanceObservedByTask.clear();
     notifiedAtByProject.clear();
     lastPollAt = null;
     digestSentOnByKind.clear();

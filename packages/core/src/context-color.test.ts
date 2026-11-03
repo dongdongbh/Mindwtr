@@ -3,12 +3,12 @@ import {
     CATPPUCCIN_MACCHIATO_CONTEXT_COLOR_PALETTE,
     DRACULA_CONTEXT_COLOR_PALETTE,
     getContextColor,
+    GRUVBOX_DARK_CONTEXT_COLOR_PALETTE,
+    GRUVBOX_LIGHT_CONTEXT_COLOR_PALETTE,
     NORD_CONTEXT_COLOR_PALETTE,
 } from './context-color';
 
-// One token per slot, so this table pins the canonical palette's values AND
-// its order — the hash modulo is the palette length, so a reorder or a resize
-// recolors contexts that have already been on screen for months (#974).
+
 const SLOT_TOKENS: Array<[token: string, canonical: string, nord: string, catppuccin: string, dracula: string]> = [
     ['@office', '#2563eb', '#5e81ac', '#8aadf4', '#6272a4'],
     ['@calls', '#0f766e', '#8fbcbb', '#8bd5ca', '#8be9fd'],
@@ -53,6 +53,14 @@ describe('getContextColor', () => {
     it('swaps in the Dracula palette slot-for-slot', () => {
         expect(SLOT_TOKENS.map(([token]) => getContextColor(token, 'dracula')))
             .toEqual(SLOT_TOKENS.map(([, , , , dracula]) => dracula));
+    });
+
+    it.each([
+        ['gruvbox-light', GRUVBOX_LIGHT_CONTEXT_COLOR_PALETTE],
+        ['gruvbox-dark', GRUVBOX_DARK_CONTEXT_COLOR_PALETTE],
+    ] as const)('swaps in a ten-slot palette of distinct colors under %s', (theme, palette) => {
+        expect(new Set(palette).size).toBe(SLOT_TOKENS.length);
+        expect(SLOT_TOKENS.map(([token]) => getContextColor(token, theme))).toEqual([...palette]);
     });
 
     it('leaves every other theme on the canonical palette', () => {

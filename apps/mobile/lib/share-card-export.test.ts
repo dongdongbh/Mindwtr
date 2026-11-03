@@ -31,8 +31,8 @@ vi.mock('expo-file-system', () => ({
 
     constructor(...uris: unknown[]) {
       nativeMocks.constructFile(...uris);
-      // Faithfully model the app URL shim bug: Expo Paths.join drops later
-      // segments when File receives a Directory plus filename.
+
+
       this.uri = uris.length === 1
         ? String(uris[0])
         : String((uris[0] as { uri?: string })?.uri);
@@ -93,8 +93,8 @@ describe('share card PNG export', () => {
       'file:///cache/mindwtr-share-card-1234-0.png',
       { dialogTitle: 'Share image', mimeType: 'image/png', UTI: 'public.png' },
     );
-    // The chooser can resolve before the receiver has read the URI. The unique
-    // cache file stays available for the receiving app and is OS-cache managed.
+
+
     expect(nativeMocks.deleteFile).not.toHaveBeenCalled();
     expect(nativeMocks.logInfo).toHaveBeenCalledWith('Share card export completed', {
       scope: 'share-card',

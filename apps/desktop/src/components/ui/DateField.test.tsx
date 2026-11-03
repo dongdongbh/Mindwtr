@@ -1,12 +1,12 @@
-/**
- * DateField is the one desktop date input (see DateField.tsx). These cover the
- * two things the extraction had to keep working everywhere it is now adopted:
- * the calendar popover escaping a Dialog-hosted parent, and the label/clear
- * chrome staying optional for hosts that supply their own.
- */
+
+
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { JALALI_LOCALE_TAG } from '@mindwtr/core';
+import { JALALI_LOCALE_TAG, useTaskStore } from '@mindwtr/core';
+
+import { LanguageProvider } from '../../contexts/language-context';
+import { useNativeDateInputLocale } from '../../hooks/use-native-date-input-locale';
 
 import { Dialog, DialogBody } from './Dialog';
 import { DateField } from './DateField';
@@ -36,11 +36,41 @@ afterEach(() => {
 });
 
 describe('DateField', () => {
+    it('opens and edits dates when WebKit reports navigator.language as C', () => {
+        const previousSettings = useTaskStore.getState().settings;
+        const language = vi.spyOn(navigator, 'language', 'get').mockReturnValue('C');
+        const languages = vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['C']);
+        const onDateChange = vi.fn();
+        function SystemDateField() {
+            const locale = useNativeDateInputLocale();
+            return <DateField
+                t={t}
+                dateAriaLabel="Due"
+                dateValue="2026-04-19"
+                selectedDate={new Date(2026, 3, 19)}
+                {...locale}
+                dateInputClassName="border"
+                onDateChange={onDateChange}
+            />;
+        }
+        try {
+            useTaskStore.setState({ settings: { dateFormat: 'system', timeFormat: 'system' } });
+            render(<LanguageProvider><SystemDateField /></LanguageProvider>);
+            fireEvent.click(screen.getByRole('button', { name: 'Due Calendar' }));
+            expect(screen.getByRole('dialog', { name: 'Due Calendar' })).toHaveTextContent('April 2026');
+            fireEvent.change(screen.getByRole('textbox', { name: 'Due' }), { target: { value: '04/20/2026' } });
+            expect(onDateChange).toHaveBeenCalledWith('2026-04-20');
+        } finally {
+            cleanup();
+            useTaskStore.setState({ settings: previousSettings });
+            language.mockRestore();
+            languages.mockRestore();
+        }
+    });
+
     it('opens its calendar popover from inside a Dialog', () => {
-        // The popover is position:fixed rather than its own portal, so a Dialog
-        // panel's overflow-hidden must not be allowed to swallow it. jsdom
-        // cannot measure the escape; asserting it mounts under the panel is the
-        // part a test can pin.
+
+
         render(
             <Dialog onClose={vi.fn()} label="Host dialog">
                 <DialogBody>
@@ -69,10 +99,7 @@ describe('DateField', () => {
         expect(screen.getByRole('dialog', { name: 'Host dialog' }).contains(popover)).toBe(true);
     });
 
-    // #1254, macOS only: WebKit there does not focus a button on click. Pressing a month arrow
-    // blurred the field to nothing and the popover closed instead of paging. Every popover
-    // button has to cancel the press so the field keeps focus; jsdom cannot play WebKit's focus
-    // rule, so the cancelled mousedown is the part a test can pin.
+
     it('keeps the calendar open and pages it when a month arrow is pressed', () => {
         render(
             <DateField
@@ -92,7 +119,7 @@ describe('DateField', () => {
         const popover = screen.getByRole('dialog', { name: 'Due Calendar' });
 
         for (const name of ['Calendar: Next month', 'Calendar: Previous month']) {
-            // fireEvent returns false when the handler called preventDefault.
+
             expect(fireEvent.mouseDown(screen.getByRole('button', { name }))).toBe(false);
         }
         for (const button of Array.from(popover.querySelectorAll('button'))) {
@@ -215,9 +242,8 @@ describe('DateField', () => {
 
         const input = screen.getByRole('textbox', { name: 'Due' });
         fireEvent.change(input, { target: { value: 'saasdjfasdj' } });
-        // The visual cue is immediate, but a half-typed date is unparseable on
-        // nearly every keystroke — announcing "invalid" that often is noise, so
-        // aria-invalid waits until the field is left.
+
+
         expect(input.className).toContain('border-warning');
         expect(input).not.toHaveAttribute('aria-invalid');
         expect(onDateChange).not.toHaveBeenCalled();
@@ -251,7 +277,7 @@ describe('DateField', () => {
         fireEvent.change(input, { target: { value: '' } });
         expect(onDateChange).not.toHaveBeenCalled();
 
-        // The reset is deferred past any in-flight pointer press (#901).
+
         fireEvent.blur(input);
         await waitFor(() => expect(input.value).toBe('04/19/2026'));
     });
@@ -275,15 +301,15 @@ describe('DateField', () => {
             );
 
             const input = screen.getByLabelText('Due') as HTMLInputElement;
-            // Never mid-typing: completing "1/1" on the keystroke rewrote the
-            // text under the user and made "1/1/27" impossible to type.
+
+
             fireEvent.change(input, { target: { value: '1/1' } });
             expect(onDateChange).not.toHaveBeenCalled();
             expect(input.className).not.toContain('border-warning');
             fireEvent.blur(input);
             await waitFor(() => expect(onDateChange).toHaveBeenLastCalledWith('2027-01-01'));
 
-            // Still ahead this year, so no rollover.
+
             onDateChange.mockClear();
             fireEvent.change(input, { target: { value: '12/25' } });
             fireEvent.blur(input);
@@ -295,7 +321,7 @@ describe('DateField', () => {
             fireEvent.blur(input);
             await waitFor(() => expect(onDateChange).toHaveBeenLastCalledWith('2027-01-01'));
 
-            // A complete date still applies while typing, no blur needed.
+
             onDateChange.mockClear();
             fireEvent.change(input, { target: { value: '04/20/2026' } });
             expect(onDateChange).toHaveBeenLastCalledWith('2026-04-20');
@@ -332,7 +358,7 @@ describe('DateField', () => {
             fireEvent.change(input, { target: { value: '31/2' } });
             expect(onDateChange).not.toHaveBeenCalled();
             expect(input.className).toContain('border-warning');
-            // An unparseable draft still reverts to the saved value on leave.
+
             fireEvent.blur(input);
             await waitFor(() => expect(input.value).toBe('19/04/2026'));
             expect(onDateChange).not.toHaveBeenCalled();

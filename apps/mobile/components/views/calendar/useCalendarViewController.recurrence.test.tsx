@@ -10,8 +10,8 @@ const mocks = vi.hoisted(() => {
   return {
     alert,
     areaById: new Map(),
-    // Stable identity: the controller memoizes task filtering on it, and a
-    // fresh object per render would fake an extra store expansion.
+
+
     areaFilterSelection: { included: [] as string[], excluded: [] as string[] },
     expandTaskSet: vi.fn(),
     storeState: {
@@ -33,7 +33,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mindwtr/core')>();
   return {
     ...actual,
-    // The screen expands recurring tasks through core's calendar view model.
+
     getCalendarRangeTasks: (...args: Parameters<typeof actual.getCalendarRangeTasks>) => {
       mocks.expandTaskSet(...args);
       return actual.getCalendarRangeTasks(...args);
@@ -99,9 +99,7 @@ const makeTask = (overrides: Partial<Task>): Task => ({
   ...overrides,
 });
 
-/** Bare host so the hook can be exercised without rendering the whole
- *  (much heavier) calendar-view screen -- this repo has no renderHook
- *  helper for mobile, so the host component stands in for one. */
+
 function ControllerHost({ onResult }: { onResult: (value: ReturnType<typeof useCalendarViewController>) => void }) {
   const controller = useCalendarViewController();
   onResult(controller);
@@ -142,8 +140,7 @@ describe('useCalendarViewController recurrence range projection', () => {
     });
     await flush();
 
-    // The real occurrence (the task on its own dueDate, 04-02) plus a
-    // projected occurrence for every remaining day of April.
+
     const paintedDays: { date: number; hasReal: boolean; hasProjected: boolean }[] = [];
     for (let day = 2; day <= 30; day += 1) {
       const items = controller.getCalendarItemsForDate(new Date(2026, 3, day));
@@ -157,12 +154,11 @@ describe('useCalendarViewController recurrence range projection', () => {
 
     expect(paintedDays.find((entry) => entry.date === 2)?.hasReal).toBe(true);
     const projectedDayCount = paintedDays.filter((entry) => entry.hasProjected).length;
-    // Every remaining day of the visible month should have its own projected
-    // occurrence -- a range, not a single "next occurrence" preview.
+
+
     expect(projectedDayCount).toBeGreaterThan(20);
 
-    // Read-only: acting on a projected occurrence is a no-op / explanatory
-    // alert, never a write to the store.
+
     const projectedItem = controller.getCalendarItemsForDate(new Date(2026, 3, 10))
       .find((item): item is Extract<typeof item, { task: Task }> => 'task' in item && item.task.id.startsWith('task-recurring-daily:projected-recurrence:'));
     expect(projectedItem).toBeDefined();

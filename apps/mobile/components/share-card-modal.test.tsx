@@ -135,14 +135,14 @@ describe('ShareCardModal', () => {
     let tree!: ReactTestRenderer;
     act(() => { tree = create(<ShareCardModal visible onClose={() => {}} />); });
     const body = tree.root.find((node) => (node.type as unknown) === 'KeyboardAvoidingView');
-    // Padding keeps the measured outer frame stable across keyboard hide and
-    // share-sheet cancellation; height avoidance feeds changes back into itself.
+
+
     expect(body.props.behavior).toBe('padding');
     expect(body.props.enabled).toBe(platform !== 'android');
     if (platform === 'android') {
       act(() => mocks.keyboardListeners.get('keyboardDidShow')?.());
       expect(body.props.enabled).toBe(true);
-      // Native sharing dismisses the keyboard before returning to the composer.
+
       act(() => mocks.keyboardListeners.get('keyboardDidHide')?.());
       expect(body.props.enabled).toBe(false);
       act(() => mocks.keyboardListeners.get('keyboardDidShow')?.());

@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { resolveMobileSyncBadgeState } from './sync-badge';
+import {
+    getMobileLocalChangePending,
+    resolveMobileSyncBadgeState,
+    setMobileLocalChangePending,
+    subscribeMobileLocalChangePending,
+} from './sync-badge';
 
 describe('resolveMobileSyncBadgeState', () => {
     it('returns hidden when sync is not configured', () => {
@@ -70,5 +75,32 @@ describe('resolveMobileSyncBadgeState', () => {
             activityState: 'idle',
             lastSyncStatus: 'idle',
         })).toBe('attention');
+    });
+});
+
+describe('mobile local change pending (#1431)', () => {
+    it('shows syncing, not healthy, while a local change waits after a successful sync', () => {
+        expect(resolveMobileSyncBadgeState({
+            configured: true,
+            activityState: 'idle',
+            localChangePending: true,
+            lastSyncStatus: 'success',
+            lastSyncAt: '2026-10-21T21:27:47.214Z',
+        })).toBe('syncing');
+    });
+
+    it('notifies subscribers only when the pending flag changes', () => {
+        const listener = vi.fn();
+        const unsubscribe = subscribeMobileLocalChangePending(listener);
+        setMobileLocalChangePending(true);
+        setMobileLocalChangePending(true);
+        expect(getMobileLocalChangePending()).toBe(true);
+        setMobileLocalChangePending(false);
+        expect(getMobileLocalChangePending()).toBe(false);
+        expect(listener).toHaveBeenCalledTimes(2);
+        unsubscribe();
+        setMobileLocalChangePending(true);
+        expect(listener).toHaveBeenCalledTimes(2);
+        setMobileLocalChangePending(false);
     });
 });

@@ -53,6 +53,14 @@ function parseNginxResponseBlocks(source: string): Array<{
   return blocks;
 }
 
+function parseContentSecurityPolicy(source: string): Map<string, string[]> {
+  return new Map(
+    source.split(';').map((directive) => directive.trim().split(/\s+/))
+      .filter(([name]) => name !== '')
+      .map(([name, ...sources]) => [name, sources]),
+  );
+}
+
 describe('desktop static security headers', () => {
   it('ships a CSP for hosted PWA builds without inline scripts or embeddable content', () => {
     expect(headers).toContain('Content-Security-Policy:');
@@ -69,9 +77,31 @@ describe('desktop static security headers', () => {
     expect(headers).toContain('Permissions-Policy: camera=(), microphone=(), geolocation=()');
   });
 
-  it('keeps every Docker response block in semantic parity with the hosted PWA policy', () => {
+  it('only maps safe DNS or IPv4 hostnames into the Docker connection source', () => {
+    const hostMap = nginxConfig.match(/map\s+\$host\s+\$mindwtr_same_host_connect_src\s*\{([^}]+)\}/)?.[1];
+    expect(hostMap).toMatch(/default\s+"";/);
+    const hostnameRule = hostMap?.match(/~([^\s]+)\s+"\$scheme:\/\/\$host:\*";/)?.[1];
+    expect(hostnameRule).toBeDefined();
+    const matchesAllowedHost = new RegExp(hostnameRule ?? 'a^');
+    for (const hostname of ['localhost', '192.168.1.50', 'mindwtr.example', 'my-server.lan']) {
+      expect(matchesAllowedHost.test(hostname), hostname).toBe(true);
+    }
+    for (const hostname of [
+      'host.test;object-src', 'host.test;base-uri', 'host.test\'unsafe-inline\'',
+      'host.test connect-src *', 'host.test/path', 'host.test:8787', '[::1]',
+    ]) {
+      expect(matchesAllowedHost.test(hostname), hostname).toBe(false);
+    }
+  });
+
+  it('keeps every Docker response block in parity with only a same-host connection exception', () => {
     const authoritativeHeaders = parseStaticHeaders(headers);
     const responseBlocks = parseNginxResponseBlocks(nginxConfig);
+    const dockerPolicy = parseContentSecurityPolicy(authoritativeHeaders.get('Content-Security-Policy') ?? '');
+    dockerPolicy.set('connect-src', [
+      ...dockerPolicy.get('connect-src') ?? [],
+      '$mindwtr_same_host_connect_src',
+    ]);
 
     expect(responseBlocks.map((block) => block.name)).toEqual([
       'server',
@@ -80,6 +110,10 @@ describe('desktop static security headers', () => {
     ]);
     for (const block of responseBlocks) {
       for (const header of sharedSecurityHeaders) {
+        if (header === 'Content-Security-Policy') {
+          expect(parseContentSecurityPolicy(block.headers.get(header) ?? ''), block.name).toEqual(dockerPolicy);
+          continue;
+        }
         expect(block.headers.get(header), `${block.name}: ${header}`).toBe(
           authoritativeHeaders.get(header),
         );

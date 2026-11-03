@@ -11,6 +11,19 @@ import {
 } from 'react-native';
 import {
   useTaskStore,
+  CONTEXTS_FILTER_STATUSES,
+  getContextsSaveCriteria,
+  selectContextsFilterTasks,
+  getFocusProjectFilterOptions,
+  getTaskMetadataFilterVisibility,
+  resolveFeatureFlags,
+  normalizeSavedFilters,
+  useTaskFilterSelections,
+  generateUUID,
+  updateSettingsFromLatest,
+  TIME_ESTIMATE_OPTIONS,
+  SAVED_FILTER_NO_PROJECT_ID,
+  type SavedFilter,
   shallow,
   buildContextsTokenIndex,
   buildContextsViewModel,
@@ -18,16 +31,21 @@ import {
   CONTEXTS_BULK_STATUSES,
   editContextsTaskTokens,
   formatListItemCount,
+  getContextsChipLabels,
   getContextsEmptyState,
   getContextsMatchModeLabels,
   getContextsRouteTokens,
   getContextsTokenPicker,
   getContextsTokenPickerTitle,
+  getTaskListHeaderText,
+  getTaskSortByLabel,
   resolveContextsMatchMode,
   runStoreCommand,
   selectContextsRouteTokens,
+  selectContextsToken,
   toggleContextsNoContext,
   toggleContextsToken,
+  TASK_LIST_SORT_OPTIONS,
   type ContextOrTagMatchMode,
   type Task,
   type TaskStatus,
@@ -45,9 +63,13 @@ import { TaskEditModal } from '../task-edit-modal';
 import { TokenPickerModal } from '../token-picker-modal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableTaskItem, type TaskRowActions } from '../swipeable-task-item';
-import { Tag, CheckCircle2 } from 'lucide-react-native';
+import { Tag, CheckCircle2, X, SlidersHorizontal } from 'lucide-react-native';
+import { TaskFilterSheet, FilterChip } from '../task-filter-sheet';
+import { styles as bulkStyles } from '../task-list/task-list.styles';
 import { assertBulkActionSucceeded, useTaskListSelection } from '../use-task-list-selection';
 import { TASK_LIST_WINDOWING_PROPS } from '../task-list-windowing';
+import { TaskListSortButton } from '../task-list/TaskListSortButton';
+import { TaskListSortModal } from '../task-list/TaskListSortModal';
 
 type BulkTokenPickerState = {
   field: 'tags' | 'contexts';
@@ -57,6 +79,7 @@ type BulkTokenPickerState = {
 export function ContextsView() {
   const {
     tasks,
+    projects,
     updateTask,
     deleteTask,
     restoreTask,
@@ -64,8 +87,10 @@ export function ContextsView() {
     batchDeleteTasks,
     batchUpdateTasks,
     settings,
+    updateSettings,
   } = useTaskStore((state) => ({
     tasks: state.tasks,
+    projects: state.projects,
     updateTask: state.updateTask,
     deleteTask: state.deleteTask,
     restoreTask: state.restoreTask,
@@ -73,6 +98,7 @@ export function ContextsView() {
     batchDeleteTasks: state.batchDeleteTasks,
     batchUpdateTasks: state.batchUpdateTasks,
     settings: state.settings,
+    updateSettings: state.updateSettings,
   }), shallow);
   const { isDark } = useTheme();
   const { t } = useLanguage();
@@ -82,10 +108,44 @@ export function ContextsView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [bulkTokenPicker, setBulkTokenPicker] = useState<BulkTokenPickerState>(null);
+  const [sortModalVisible, setSortModalVisible] = useState(false);
 
   const tc = useThemeColors();
   const { showToast } = useToast();
   const { visibleTasks } = useVisibleTaskContext();
+  const [filtersVisible, setFiltersVisible] = useState(false);
+  const [saveFilterVisible, setSaveFilterVisible] = useState(false);
+  const [saveFilterName, setSaveFilterName] = useState('');
+  const features = resolveFeatureFlags(settings);
+  const filterVisibility = useMemo(() => getTaskMetadataFilterVisibility(visibleTasks, {
+    prioritiesEnabled: features.priorities, timeEstimatesEnabled: features.timeEstimates,
+  }), [visibleTasks, features.priorities, features.timeEstimates]);
+  const savedContextFilters = useMemo(() => normalizeSavedFilters(settings?.savedFilters).filter((filter) =>
+    !filter.deletedAt && (filter.view === 'contexts' || filter.view === 'all')), [settings?.savedFilters]);
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const filters = useTaskFilterSelections({ view: 'list', t, visibility: filterVisibility,
+    savedFilters: savedContextFilters, rawSavedFilters: settings?.savedFilters,
+    getProjectLabel: (id) => id === SAVED_FILTER_NO_PROJECT_ID ? t('taskEdit.noProjectOption') : projectById.get(id)?.title });
+  const projectFilterOptions = useMemo(() => getFocusProjectFilterOptions(visibleTasks, projects, t), [visibleTasks, projects, t]);
+  const saveCriteria = getContextsSaveCriteria(filters.currentCriteria, selectedContexts, matchMode, [searchQuery, filters.searchQuery]);
+  const canSave = !filters.activeSavedFilter && saveCriteria !== null && !searchQuery.trim() && !filters.searchQuery.trim();
+  const applyContextFilter = (filter: SavedFilter) => {
+    filters.applySaved(filter); setSelectedContexts([]); setMatchMode('all'); setSearchQuery('');
+  };
+  const saveContextFilter = async () => {
+    if (!canSave || !saveCriteria || !saveFilterName.trim()) return;
+    const stamp = new Date().toISOString();
+    const filter: SavedFilter = { id: generateUUID(), name: saveFilterName.trim(), view: 'contexts', criteria: saveCriteria,
+      createdAt: stamp, updatedAt: stamp };
+    try {
+      await updateSettingsFromLatest((latest) => ({ savedFilters: [...(latest.savedFilters ?? []), filter] }));
+      applyContextFilter(filter); setSaveFilterVisible(false);
+    } catch { showToast({ message: t('common.error'), tone: 'error' }); }
+  };
+  const scopedTasks = useMemo(() => selectContextsFilterTasks(visibleTasks, filters.criteria, projects)
+    .filter((task) => !filters.searchQuery.trim() || `${task.title} ${task.description ?? ''}`.toLowerCase().includes(filters.searchQuery.trim().toLowerCase())),
+    [visibleTasks, filters.criteria, filters.searchQuery, projects]);
+
   const requestedTokens = useMemo(() => getContextsRouteTokens(token), [token]);
 
   useEffect(() => {
@@ -94,8 +154,8 @@ export function ContextsView() {
     setMatchMode('all');
   }, [requestedTokens]);
 
-  // The counts depend only on the tasks: count once per store change, not per selection.
-  const contextsIndex = useMemo(() => buildContextsTokenIndex(visibleTasks), [visibleTasks]);
+
+  const contextsIndex = useMemo(() => buildContextsTokenIndex(scopedTasks, { includeFinished: true }), [scopedTasks]);
   const model = buildContextsViewModel({
     index: contextsIndex,
     settings,
@@ -103,6 +163,8 @@ export function ContextsView() {
     matchMode,
     searchQuery,
   });
+
+  const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
   const tasksById = useMemo(
     () => tasks.reduce((acc, task) => {
       acc[task.id] = task;
@@ -159,9 +221,7 @@ export function ContextsView() {
     return updateTask(taskId, updates);
   };
 
-  // The row handlers are re-created on every render of this screen, so rows
-  // reach them through one object that never changes identity and reads the
-  // latest values from a ref (#766).
+
   const rowSourcesRef = useRef({ handleStatusChange, handleDelete, toggleMultiSelect });
   rowSourcesRef.current = { handleStatusChange, handleDelete, toggleMultiSelect };
   const rowActions = useMemo<TaskRowActions>(() => ({
@@ -195,6 +255,7 @@ export function ContextsView() {
     ? getContextsTokenPicker({
       ...bulkTokenPicker,
       activeTasks: model.activeTasks,
+      settings,
       selectedIds: selectedIdsArray,
       tasksById,
       t,
@@ -208,12 +269,19 @@ export function ContextsView() {
   const matchModeLabels = getContextsMatchModeLabels(t);
   const emptyState = getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: selectedContexts }, t);
 
+  const sortAccessibilityLabel = getTaskListHeaderText({
+    sortByLabel: getTaskSortByLabel(model.sortBy, t),
+    hasActiveFilters: false,
+    filterActiveCount: 0,
+    t,
+  }).sortAccessibilityLabel;
+
   const handleBulkTokenConfirm = async (values: string[]) => {
     if (!bulkTokenPicker || !hasSelection) return;
     await runBulkAction(tokenPickerTitle, async () => {
       setBulkTokenPicker(null);
-      // One store command builds each list from the task as stored and writes it: a sync save admitted
-      // first may have published a token another device added, and the rows on screen lack it.
+
+
       const outcome = await runStoreCommand(() => editContextsTaskTokens({ batchUpdateTasks }, {
         taskIds: selectedIdsArray,
         tasksById: Object.fromEntries(useTaskStore.getState()._tasksById),
@@ -235,7 +303,7 @@ export function ContextsView() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={[styles.container, { backgroundColor: tc.bg }]}>
-        {/* Search box for contexts */}
+        {                             }
         <View style={[styles.searchContainer, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
           <TextInput
             style={[styles.searchInput, { backgroundColor: tc.inputBg, color: tc.text }]}
@@ -244,8 +312,25 @@ export function ContextsView() {
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('filters.label')}
+            onPress={() => {
+              if (filters.statuses.length === 0 && !filters.activeSavedFilter) filters.setStatusSelection([...CONTEXTS_FILTER_STATUSES]);
+              setFiltersVisible(true);
+            }} style={{ padding: 10, minHeight: 44, minWidth: 44 }}>
+            <SlidersHorizontal size={20} color={tc.tint} />
+          </TouchableOpacity>
+          <TaskListSortButton
+            accessibilityLabel={sortAccessibilityLabel}
+            onPress={() => setSortModalVisible(true)}
+            themeColors={tc}
+          />
         </View>
 
+        {savedContextFilters.length > 0 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 8, padding: 8 }}>
+          {savedContextFilters.map((filter) => <FilterChip key={filter.id} label={filter.name}
+            selected={filters.activeSavedFilterId === filter.id} themeColors={tc}
+            onPress={() => filters.activeSavedFilterId === filter.id ? filters.clear() : applyContextFilter(filter)} />)}
+        </ScrollView> : null}
         <View style={[styles.contextFiltersPanel, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
           <ScrollView
             horizontal
@@ -334,7 +419,7 @@ export function ContextsView() {
                 </Text>
               </View>
             </Pressable>
-            {model.tokenChips.map(({ token: context, count, selected: isActive }) => {
+            {model.tokenChips.map(({ token: context, count, selected: isActive }, chipIndex) => {
               return (
                 <Pressable
                   key={context}
@@ -342,10 +427,15 @@ export function ContextsView() {
                     styles.contextButton,
                     { backgroundColor: isActive ? tc.tint : tc.filterBg, borderColor: tc.border },
                   ]}
-                  onPress={() => setSelectedContexts((prev) => toggleContextsToken(prev, context))}
+                  onPress={() => setSelectedContexts((prev) => selectContextsToken(prev, context))}
+                  onLongPress={() => setSelectedContexts((prev) => toggleContextsToken(prev, context))}
                   accessibilityRole="button"
                   accessibilityLabel={`${context} (${count})`}
                   accessibilityState={{ selected: isActive }}
+                  accessibilityActions={[{ name: 'longpress', label: isActive ? t('filters.remove') : t('common.add') }]}
+                  onAccessibilityAction={(event) => {
+                    if (event.nativeEvent.actionName === 'longpress') setSelectedContexts((prev) => toggleContextsToken(prev, context));
+                  }}
                 >
                   <Text
                     style={[
@@ -353,7 +443,7 @@ export function ContextsView() {
                       { color: isActive ? tc.onTint : tc.text },
                     ]}
                   >
-                    {context}
+                    {chipLabels[chipIndex]?.label ?? context}
                   </Text>
                   <View
                     style={[
@@ -400,16 +490,17 @@ export function ContextsView() {
 
         <View style={styles.content}>
           {selectionMode ? (
-            <View style={[styles.bulkBar, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
-              <View style={styles.bulkHeaderRow}>
-                <Text style={[styles.bulkCount, { color: tc.secondaryText }]}>
+
+            <View style={[bulkStyles.bulkBar, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
+              <View style={bulkStyles.bulkStatusRow}>
+                <Text style={[bulkStyles.bulkCount, { color: tc.secondaryText }]}>
                   {selectedIdsArray.length} {t('bulk.selected')}
                 </Text>
-                <View style={styles.bulkHeaderActions}>
+                <View style={bulkStyles.bulkStatusActions}>
                   {bulkActionLoading ? (
-                    <View style={styles.bulkLoadingRow}>
+                    <View style={bulkStyles.bulkLoadingRow}>
                       <ActivityIndicator size="small" color={tc.tint} />
-                      <Text style={[styles.bulkLoadingText, { color: tc.secondaryText }]}>
+                      <Text style={[bulkStyles.bulkLoadingText, { color: tc.secondaryText }]}>
                         {bulkActionLabel || t('common.loading')}
                       </Text>
                     </View>
@@ -417,112 +508,49 @@ export function ContextsView() {
                   <TouchableOpacity
                     onPress={exitSelectionMode}
                     disabled={bulkActionLoading}
-                    style={[
-                      styles.bulkDoneButton,
-                      {
-                        borderColor: tc.border,
-                        backgroundColor: tc.filterBg,
-                        opacity: bulkActionLoading ? 0.5 : 1,
-                      },
-                    ]}
+                    style={[bulkStyles.bulkExitButton, { backgroundColor: tc.filterBg, opacity: bulkActionLoading ? 0.5 : 1 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('bulk.exitSelect')}
                   >
-                    <Text style={[styles.bulkDoneButtonText, { color: tc.text }]}>
-                      {t('bulk.exitSelect')}
-                    </Text>
+                    <X size={16} color={tc.secondaryText} strokeWidth={2} />
                   </TouchableOpacity>
                 </View>
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkRow}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={bulkStyles.bulkMoveRow}>
                 {CONTEXTS_BULK_STATUSES.map((status) => (
                   <TouchableOpacity
                     key={status}
                     onPress={() => void handleBatchMove(status)}
                     disabled={!hasSelection || bulkActionLoading}
-                    style={[
-                      styles.bulkButton,
-                      {
-                        backgroundColor: tc.filterBg,
-                        borderColor: tc.border,
-                        opacity: hasSelection && !bulkActionLoading ? 1 : 0.5,
-                      },
-                    ]}
+                    style={[bulkStyles.bulkMoveButton, { backgroundColor: tc.filterBg, opacity: hasSelection && !bulkActionLoading ? 1 : 0.5 }]}
+                    accessibilityRole="button"
                   >
-                    <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t(`status.${status}`)}</Text>
+                    <Text style={[bulkStyles.bulkMoveText, { color: tc.text }]}>{t(`status.${status}`)}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkRow}>
-                <TouchableOpacity
-                  onPress={() => setBulkTokenPicker({ field: 'tags', action: 'add' })}
-                  disabled={!hasSelection || bulkActionLoading}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t('bulk.addTag')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setBulkTokenPicker({ field: 'tags', action: 'remove' })}
-                  disabled={!hasSelection || bulkActionLoading || removableTagOptions.length === 0}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading && removableTagOptions.length > 0 ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{removeTagLabel}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setBulkTokenPicker({ field: 'contexts', action: 'add' })}
-                  disabled={!hasSelection || bulkActionLoading}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t('bulk.addContext')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setBulkTokenPicker({ field: 'contexts', action: 'remove' })}
-                  disabled={!hasSelection || bulkActionLoading || removableContextOptions.length === 0}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading && removableContextOptions.length > 0 ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t('bulk.removeContext')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleBatchDelete}
-                  disabled={!hasSelection || bulkActionLoading}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t('common.delete')}</Text>
-                </TouchableOpacity>
-              </ScrollView>
+              <View style={bulkStyles.bulkActions}>
+                {([
+                  { label: t('bulk.addTag'), onPress: () => setBulkTokenPicker({ field: 'tags', action: 'add' }), canRun: true },
+                  { label: removeTagLabel, onPress: () => setBulkTokenPicker({ field: 'tags', action: 'remove' }), canRun: removableTagOptions.length > 0 },
+                  { label: t('bulk.addContext'), onPress: () => setBulkTokenPicker({ field: 'contexts', action: 'add' }), canRun: true },
+                  { label: t('bulk.removeContext'), onPress: () => setBulkTokenPicker({ field: 'contexts', action: 'remove' }), canRun: removableContextOptions.length > 0 },
+                  { label: t('common.delete'), onPress: handleBatchDelete, canRun: true },
+                ]).map(({ label, onPress, canRun }) => {
+                  const enabled = hasSelection && !bulkActionLoading && canRun;
+                  return (
+                    <TouchableOpacity
+                      key={label}
+                      onPress={onPress}
+                      disabled={!enabled}
+                      style={[bulkStyles.bulkActionButton, { backgroundColor: tc.filterBg, opacity: enabled ? 1 : 0.5 }]}
+                      accessibilityRole="button"
+                    >
+                      <Text style={[bulkStyles.bulkActionText, { color: tc.text }]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           ) : null}
 
@@ -562,6 +590,25 @@ export function ContextsView() {
           />
         </View>
 
+        <TaskFilterSheet visible={filtersVisible} onClose={() => { setFiltersVisible(false); setSaveFilterVisible(false); }}
+          selections={filters} options={{ tokens: [], projects: projectFilterOptions, timeEstimates: TIME_ESTIMATE_OPTIONS, visibility: filterVisibility }}
+          statusOptions={CONTEXTS_FILTER_STATUSES} themeColors={tc} t={t}
+          headerActions={canSave ? <TouchableOpacity accessibilityRole="button" onPress={() => {
+            setSaveFilterName(selectedContexts.join(' + ')); setSaveFilterVisible(true);
+          }} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}><Text style={{ color: tc.tint }}>{t('common.save')}</Text></TouchableOpacity> : undefined}
+          overlay={saveFilterVisible ? <View style={{ flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.4)' }}>
+            <View style={{ backgroundColor: tc.cardBg, borderRadius: 16, padding: 20, gap: 12 }}>
+              <Text accessibilityRole="header" style={{ color: tc.text, fontSize: 18, fontWeight: '600' }}>{t('savedFilters.saveTitle')}</Text>
+              <TextInput autoFocus value={saveFilterName} onChangeText={setSaveFilterName} placeholder={t('savedFilters.namePlaceholder')}
+                accessibilityLabel={t('savedFilters.namePlaceholder')} placeholderTextColor={tc.secondaryText}
+                style={{ color: tc.text, backgroundColor: tc.bg, borderColor: tc.border, borderWidth: 1, borderRadius: 8, padding: 12 }} />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                <TouchableOpacity accessibilityRole="button" onPress={() => setSaveFilterVisible(false)} style={{ padding: 12 }}><Text style={{ color: tc.secondaryText }}>{t('common.cancel')}</Text></TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" disabled={!saveFilterName.trim()} onPress={() => { void saveContextFilter(); }} style={{ padding: 12 }}><Text style={{ color: tc.tint }}>{t('common.save')}</Text></TouchableOpacity>
+              </View>
+            </View>
+          </View> : undefined} />
+
         <TokenPickerModal
           visible={bulkTokenPicker !== null}
           title={tokenPickerTitle}
@@ -576,7 +623,20 @@ export function ContextsView() {
           }}
         />
 
-        {/* Task Edit Modal */}
+        <TaskListSortModal
+          onClose={() => setSortModalVisible(false)}
+          onSelect={(option) => {
+            void updateSettings({ taskSortBy: option });
+            setSortModalVisible(false);
+          }}
+          sortBy={model.sortBy}
+          sortOptions={TASK_LIST_SORT_OPTIONS}
+          t={t}
+          themeColors={tc}
+          visible={sortModalVisible}
+        />
+
+        {                     }
         <TaskEditModal
           visible={editingTask !== null}
           task={editingTask}
@@ -598,12 +658,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB',
   },
   searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     padding: 12,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
   searchInput: {
+    flex: 1,
     height: 40,
     borderRadius: 8,
     paddingHorizontal: 12,
@@ -681,58 +745,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  bulkBar: {
-    borderBottomWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 10,
-  },
-  bulkHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  bulkCount: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  bulkHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  bulkLoadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  bulkLoadingText: {
-    fontSize: 12,
-  },
-  bulkDoneButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  bulkDoneButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  bulkRow: {
-    gap: 8,
-  },
-  bulkButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  bulkButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
   taskList: {
     flex: 1,

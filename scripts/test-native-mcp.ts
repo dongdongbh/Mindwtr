@@ -1,5 +1,5 @@
-// Runs the official MCP client against the native HTTP listener with fixture data.
-// Real persistence is covered by the shared-operation Rust tests.
+
+
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

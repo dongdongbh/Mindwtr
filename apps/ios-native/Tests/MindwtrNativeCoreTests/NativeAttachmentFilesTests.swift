@@ -15,8 +15,8 @@ final class NativeAttachmentFilesTests: XCTestCase {
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("attachment-files-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        // Foundation can retain Apple's /var alias after resolving symlinks.
-        // POSIX realpath gives the exact spelling used by the descriptor port.
+
+
         guard let physical = Darwin.realpath(root.path, nil) else { throw NativeAttachmentFilesError.unavailable }
         defer { Darwin.free(physical) }
         physicalRootPath = String(cString: physical)
@@ -111,8 +111,8 @@ final class NativeAttachmentFilesTests: XCTestCase {
         let bytes = Data(repeating: 0x61, count: NativeAttachmentFiles.maximumBytes)
         try write(target, bytes)
         XCTAssertEqual(try read(target), bytes)
-        // The same encoded length can represent limit, limit+1 or limit+2;
-        // validate padding-derived decoded size before Data allocation.
+
+
         let encodedLength = ((NativeAttachmentFiles.maximumBytes + 2) / 3) * 4
         for oversized in [String(repeating: "A", count: encodedLength), String(repeating: "A", count: encodedLength - 1) + "=",
                           String(repeating: "A", count: encodedLength + 4)] {
@@ -450,7 +450,7 @@ final class NativeAttachmentFilesTests: XCTestCase {
                 XCTAssertEqual(failure as? NativeAttachmentFilesError, .unavailable)
                 XCTAssertEqual(try read(target), Data("old target".utf8))
                 XCTAssertEqual(try Data(contentsOf: retained), requested)
-                // The replacement is not this operation's inode; do not erase it.
+
                 let remaining = try XCTUnwrap(names(folder).first { $0.hasPrefix(".mindwtr-native-file-") })
                 XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent(remaining)), malicious)
             } else {
@@ -486,7 +486,7 @@ final class NativeAttachmentFilesTests: XCTestCase {
         guard Darwin.chmod(folder.path, mode_t(0o700)) == 0 else { throw NativeAttachmentFilesError.unavailable }
         XCTAssertEqual(try read(target), Data("old".utf8))
         guard Darwin.chmod(folder.path, mode_t(0o500)) == 0 else { throw NativeAttachmentFilesError.unavailable }
-        // Existing bytes remain readable, but exclusive stage creation must fail.
+
         assertError(.unavailable) { try self.write(target, Data("replacement".utf8)) }
         XCTAssertEqual(try read(target), Data("old".utf8))
         XCTAssertEqual(try names(folder), ["target"])

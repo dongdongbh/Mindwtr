@@ -43,17 +43,18 @@ export function GeneralSettingsScreen() {
     const [timeFormatPickerOpen, setTimeFormatPickerOpen] = useState(false);
     const [regionalFormatsOpen, setRegionalFormatsOpen] = useState(false);
     const [quickAccessPickerOpen, setQuickAccessPickerOpen] = useState(false);
+    const [relockDelayPickerOpen, setRelockDelayPickerOpen] = useState(false);
     const [appLockBusy, setAppLockBusy] = useState(false);
     const [appLockErrorKey, setAppLockErrorKey] = useState<string | null>(null);
 
     const systemLocale = typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function'
         ? Intl.DateTimeFormat().resolvedOptions().locale
         : '';
-    // Device-local Android integration (#1017): whether this device's active
-    // tasks/projects/areas are mirrored into Android's system-search index.
+
+
     const [appSearchEnabled, setAppSearchEnabled] = useState(false);
-    // Every control's options, labels and writes come from core's General model,
-    // shared with the native host. The device's locale fills the "System default" labels.
+
+
     const model = buildGeneralSettingsModel({
         settings,
         themeMode,
@@ -68,8 +69,8 @@ export function GeneralSettingsScreen() {
         t,
     });
     const { appearance, privacy, regional } = model;
-    // Re-picking the stored value writes nothing, as the native host's contract:
-    // a repeat write would stamp the synced settings as newer than they are.
+
+
     const writeSetting = (edit: GeneralSettingsEdit) => {
         const update = buildGeneralSettingsUpdate(settings, edit);
         if (update && !isGeneralSettingStored(settings, edit)) updateSettings(update).catch(console.error);
@@ -105,9 +106,8 @@ export function GeneralSettingsScreen() {
         setAppSearchEnabled(value);
         writeAppSearchIndexingEnabled(value).catch(console.error);
         if (value) {
-            // enableAppSearchIndexing re-reads the preference after its
-            // reindex finishes, so a quick toggle-off mid-flight wins
-            // instead of resurrecting documents and re-arming after OFF.
+
+
             enableAppSearchIndexing().catch(console.error);
         } else {
             wipeAppSearchIndex().catch(console.error);
@@ -167,6 +167,17 @@ export function GeneralSettingsScreen() {
                         />
                     </View>
 
+                    {privacy.appLockRelockDelay && (
+                        <SettingRow
+                            divider
+                            onPress={() => setRelockDelayPickerOpen(true)}
+                            label={privacy.appLockRelockDelay.label}
+                            description={privacy.appLockRelockDelay.value}
+                        >
+                            <Ionicons color={tc.secondaryText} name="chevron-down" size={18} />
+                        </SettingRow>
+                    )}
+
                     {privacy.appSearch && (
                         <SettingToggleRow
                             divider
@@ -178,6 +189,49 @@ export function GeneralSettingsScreen() {
                         />
                     )}
                 </View>
+
+                {privacy.appLockRelockDelay && (
+                    <Modal
+                        transparent
+                        visible={relockDelayPickerOpen}
+                        animationType="fade"
+                        onRequestClose={() => setRelockDelayPickerOpen(false)}
+                    >
+                        <Pressable style={styles.pickerOverlay} onPress={() => setRelockDelayPickerOpen(false)}>
+                            <View
+                                style={[styles.pickerCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
+                                onStartShouldSetResponder={() => true}
+                            >
+                                <Text style={[styles.pickerTitle, { color: tc.text }]}>{privacy.appLockRelockDelay.pickerTitle}</Text>
+                                <ScrollView style={styles.pickerList} contentContainerStyle={styles.pickerListContent}>
+                                    {privacy.appLockRelockDelay.options.map((option) => {
+                                        const { selected } = option;
+                                        return (
+                                            <TouchableOpacity
+                                                key={option.value}
+                                                accessibilityRole="radio"
+                                                accessibilityState={{ selected }}
+                                                style={[
+                                                    styles.pickerOption,
+                                                    { borderColor: tc.border, backgroundColor: selected ? tc.filterBg : 'transparent' },
+                                                ]}
+                                                onPress={() => {
+                                                    writeSetting(option.edit);
+                                                    setRelockDelayPickerOpen(false);
+                                                }}
+                                            >
+                                                <Text style={[styles.pickerOptionText, { color: selected ? tc.tint : tc.text }]}>
+                                                    {option.label}
+                                                </Text>
+                                                {selected && <Ionicons color={tc.tint} name="checkmark" size={18} />}
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </ScrollView>
+                            </View>
+                        </Pressable>
+                    </Modal>
+                )}
 
                 <Modal
                     transparent

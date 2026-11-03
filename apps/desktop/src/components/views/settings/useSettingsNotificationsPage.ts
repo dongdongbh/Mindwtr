@@ -6,17 +6,13 @@ import type { SettingsNotificationsPageProps } from './SettingsNotificationsPage
 
 type UseSettingsNotificationsPageOptions = {
     language: Language;
-    /** From useSettingsMainPage — weekday names follow the display calendar. */
+
     dateFormat: string;
     calendarSystem: string;
     showSaved: () => void;
 };
 
-/**
- * Notification toggles derived from stored settings, plus the localized weekday
- * list for the weekly review picker. Returns members already named as props so
- * SettingsView can spread them.
- */
+
 export function useSettingsNotificationsPage({
     language,
     dateFormat,

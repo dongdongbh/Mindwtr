@@ -1,9 +1,5 @@
-/**
- * Minimal, safe Markdown helpers.
- *
- * These are intentionally conservative and avoid HTML rendering.
- * Apps can use `stripMarkdown` for previews and notifications.
- */
+
+
 
 import type { Project, Task } from './types';
 import { isSafeMarkdownExternalHref } from './markdown-links';
@@ -11,7 +7,7 @@ import { isSafeMarkdownExternalHref } from './markdown-links';
 const CODE_BLOCK_RE = /```[\s\S]*?```/g;
 const INLINE_CODE_RE = /`([^`]+)`/g;
 const LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
-const INLINE_TOKEN_RE = /(\*\*([^*]+)\*\*|__([^_]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|((?:https?:\/\/|mailto:|tel:|mid:)[^\s<>\]]+))/gi;
+const INLINE_TOKEN_RE = /(\*\*([^*]+)\*\*|__([^_]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|((?:https?:\/\/|mailto:|tel:|mid:)[^\s<>\]]+|www\.[a-z0-9][^\s<>\]]*))/gi;
 const INTERNAL_LINK_RE = /\[\[(task|project):([^\]|]+)\|([^\]]+)\]\]/g;
 const INTERNAL_LINK_TOKEN_RE = /^\[\[(task|project):([^\]|]+)\|([^\]]+)\]\]$/;
 const MARKDOWN_LIST_ITEM_RE = /^(\s*)(?:(?:[-+*])\s+(?:\[(?: |x|X)\]\s*)?|\d+[.)]\s+)(?:\S|$)/;
@@ -235,18 +231,12 @@ export function normalizeMarkdownInternalLinks(markdown: string): string {
     ));
 }
 
-// Typing helpers that fire automatically as the user edits (auto-pairing,
-// url-to-link paste, list continuation, reference autocomplete). They are
-// gated by a single setting so the description can act as a plain-text field
-// with nothing injected (discussion #742). Explicit actions (toolbar buttons,
-// keyboard shortcuts) are deliberate and stay enabled regardless.
+
 export type MarkdownAssistOptions = {
     assist?: boolean;
 };
 
-// Single source of truth for the default-on semantics. Only an explicit
-// `false` turns the helpers off; unset keeps them on (the maintainer's #742
-// commitment that pairing stays on by default).
+
 export function isMarkdownEditorAssistEnabled(
     settings?: { markdownEditorAssist?: boolean } | null,
 ): boolean {
@@ -410,7 +400,11 @@ export function parseInlineMarkdown(text: string): InlineToken[] {
             }
         } else if (rawHref) {
             const { href, trailing } = splitRawLinkToken(rawHref);
-            const safeHref = sanitizeLinkHref(href);
+
+
+            const isBareWww = /^www\./i.test(href);
+            const midWord = isBareWww && match.index > 0 && /[\w./@-]/.test(source[match.index - 1]);
+            const safeHref = midWord ? null : sanitizeLinkHref(isBareWww ? `http://${href}` : href);
             if (safeHref) {
                 tokens.push({ type: 'link', text: href, href: safeHref });
                 if (trailing) tokens.push({ type: 'text', text: trailing });
@@ -447,28 +441,28 @@ export function stripMarkdown(markdown: string): string {
 
     let text = normalizeMarkdownInternalLinks(markdown);
 
-    // Remove fenced code blocks but keep their contents.
+
     text = text.replace(CODE_BLOCK_RE, (block) => block.replace(/```/g, ''));
 
-    // Inline code.
+
     text = text.replace(INLINE_CODE_RE, '$1');
 
-    // Links: keep label.
+
     text = text.replace(LINK_RE, '$1');
 
-    // Remove block-level markers.
+
     text = text.replace(/^\s{0,3}(?:[-*+]\s+)?\[(?: |x|X)\]\s+/gm, '');
     text = text.replace(/^\s{0,3}>\s?/gm, '');
     text = text.replace(/^\s{0,3}#{1,6}\s+/gm, '');
     text = text.replace(/^\s{0,3}[-*+]\s+/gm, '');
     text = text.replace(/^\s{0,3}\d+\.\s+/gm, '');
 
-    // Remove emphasis markers.
+
     text = text.replace(/(\*\*|__)(.*?)\1/g, '$2');
     text = text.replace(/(\*|_)(.*?)\1/g, '$2');
     text = text.replace(/~~(.*?)~~/g, '$1');
 
-    // Normalize whitespace.
+
     text = text.replace(/\r\n/g, '\n');
     text = text.replace(/\n{3,}/g, '\n\n');
     text = text.replace(/[ \t]{2,}/g, ' ');
@@ -478,11 +472,7 @@ export function stripMarkdown(markdown: string): string {
 
 const PASTED_CHECKLIST_LINE_RE = /^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\[( |x|X)\]\s*)?/;
 
-/**
- * Split pasted multi-line plain text into checklist items. Bullet, numbered,
- * and checkbox markers are stripped; `[x]` marks an item completed. Empty and
- * marker-only lines are dropped.
- */
+
 export function parsePastedChecklistItems(text: string): MarkdownChecklistItem[] {
     if (!text) return [];
     const items: MarkdownChecklistItem[] = [];
@@ -782,10 +772,7 @@ const detectSelectionReplacement = (
 
 const escapeMarkdownLinkLabel = (label: string): string => label.replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
 
-// Maps, not object literals: these are indexed by user-typed/pasted text, and a
-// plain object would resolve a key like "constructor" or "toString" through
-// Object.prototype instead of returning undefined, injecting native function
-// source into the note (SEC-13).
+
 const MARKDOWN_INSERTION_PAIRS: Map<string, string> = new Map([
     ['[', ']'],
     ['(', ')'],
@@ -797,10 +784,7 @@ const MARKDOWN_INSERTION_PAIRS: Map<string, string> = new Map([
     ['~', '~~'],
 ]);
 
-// Auto-close only the characters that carry Markdown meaning (links and code).
-// Quotes, angle brackets, and braces were removed: auto-closing them while typing
-// fights normal prose and pasted URLs with no Markdown benefit (discussion #742).
-// Selection wrapping (MARKDOWN_INSERTION_PAIRS) still supports the full set.
+
 const MARKDOWN_AUTO_INSERTION_PAIRS: Map<string, string> = new Map([
     ['[', ']'],
     ['(', ')'],

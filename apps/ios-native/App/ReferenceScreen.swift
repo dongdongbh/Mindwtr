@@ -52,12 +52,11 @@ struct ReferenceScreen: View {
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 60_000_000_000) } catch { return }
                 guard scenePhase == .active, model.selectedSurface == .reference else { return }
-                // The first selection query has not published selection mode yet.
-                // Do not queue a timer refresh behind that in-flight operation.
+
+
                 guard !model.busy else { continue }
-                // A periodic reread disables the current controls while it runs.
-                // Keep an in-progress selection usable; writes still validate
-                // the selected revisions against durable data before committing.
+
+
                 guard !model.referenceSelectionMode, !model.referenceBulkTagPresented, !model.referenceBulkRemovePresented, !model.referenceActionPending else {
                     NSLog("Native iOS Reference periodic refresh deferred releaseCheck=v1.3.4/ios-reference-bulk-refresh outcome=selection")
                     continue
@@ -317,8 +316,8 @@ private struct ReferenceBulkRemoveTagDialog: View {
         GeometryReader { geometry in
             ZStack {
                 Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { if !model.busy && !model.retryNeeded { model.closeReferenceBulkRemove() } }.accessibilityHidden(true)
-                // Keep one query field as keyboard height changes. Accessibility
-                // text or less than 500pt moves only informational copy into the scroll.
+
+
                 contents(scrollingHeading: dynamicTypeSize.isAccessibilitySize || geometry.size.height < 500)
                 .padding(16).frame(maxWidth: 420, maxHeight: max(0, geometry.size.height - 32))
                 .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
@@ -338,7 +337,7 @@ private struct ReferenceBulkRemoveTagDialog: View {
     }
 }
 
-// Grouped tag lists may contain the same task in several sections.
+
 struct ListRowEntry: Identifiable {
     let item: CoreObject
     var id: Data {
@@ -351,7 +350,7 @@ struct ListRowEntry: Identifiable {
     }
 }
 
-// Reference and Done consume the same core status-list DTO and RN TaskList layout.
+
 struct StatusListContent: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -381,7 +380,7 @@ struct StatusListContent: View {
     var selectedTaskIDs: [String] = []
     var onSelection: ((CoreObject) -> Void)? = nil
     var onSelectionStart: ((CoreObject) -> Void)? = nil
-    // One stable list owner serves repeated tag-group occurrences of a task.
+
     @State private var referenceStatusRow: CoreObject = [:]
     @State private var referenceStatusOptions: CoreObject = [:]
     @State private var referenceStatusMenuPresented = false
@@ -394,9 +393,7 @@ struct StatusListContent: View {
     @State private var referenceBackdateOptions: CoreObject = [:]
     @State private var referenceBackdateInitialDate = Date()
 
-    // Keep Reference's existing row identities during a background reread.
-    // Removing the snapshot here resets List's scroll position every minute.
-    // `current` still gates interaction until the new snapshot is accepted.
+
     private var displaysSnapshot: Bool {
         current || (prefix == "reference" && data.text("kind") == "reference" && error == nil)
     }
@@ -553,7 +550,7 @@ struct StatusListContent: View {
 
     private func openReferenceBackdatePicker() {
         guard referenceStatusIsCurrent, enabled, !model.busy, !model.retryNeeded, let onBackdateOptions else { return }
-        // Keep the same owned gate and captured row through the system-dialog handoff.
+
         referenceBackdateActive = true
         referenceStatusMenuPresented = false
         referenceStatusGeneration += 1
@@ -595,8 +592,8 @@ struct StatusListContent: View {
         model.presentQueuedReferenceProjectNextAction()
         ownsReferenceStatusMenu = false
         if let destination {
-            // Navigation may have reached refresh before this owner's menu gate
-            // was released. Load that destination once after cancelling the read.
+
+
             Task {
                 guard model.selectedSurface == destination else { return }
                 await model.refresh()
@@ -918,8 +915,8 @@ private struct ReferenceTaskBackdateDialog: View {
 
     private func scrollMinutesIntoView(_ reader: ScrollViewProxy) {
         guard minutesFocused, !frozen else { return }
-        // Match the editor: iOS 17 applies its keyboard inset after the
-        // notification, so scrolling immediately uses the old viewport.
+
+
         DispatchQueue.main.async {
             guard minutesFocused, !frozen else { return }
             reader.scrollTo("reference-backdate-minutes-field", anchor: .bottom)
@@ -1093,7 +1090,7 @@ struct ReferencePanel: View {
                     else {
                         HStack(spacing: 8) {
                             if model.referencePanel == "group" || isSort {
-                                Button { model.referencePanel = "menu" } label: {
+                                Button { model.backReferencePanel() } label: {
                                     Text(model.label("common.back")).rnFont(13, .semibold).padding(.horizontal, 8).frame(minHeight: 44).contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain).foregroundStyle(palette.tint).accessibilityIdentifier("reference-panel-back").disabled(model.busy || model.retryNeeded)
@@ -1123,7 +1120,7 @@ struct ReferencePanel: View {
                 guard !model.busy, !model.retryNeeded else { return }
                 focusedField = nil
                 if !model.referencePickerName.isEmpty { model.closeReferencePicker() }
-                else if model.referencePanel == "group" || isSort { model.referencePanel = "menu" }
+                else if model.referencePanel == "group" || isSort { model.backReferencePanel() }
                 else { close() }
             }
         }
@@ -1139,22 +1136,7 @@ struct ReferencePanel: View {
                 overflowRow(title: model.label("list.groupBy"), value: model.reference.object("group").text("label"),
                             icon: "folder", id: "reference-group-action") { model.referencePanel = "group" }
             } else if isSort {
-                if let error = model.referenceSortError {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("reference-sort-error")
-                    Button(model.label("common.retry")) { Task { await model.retryReferenceSort() } }
-                        .rnFont(15, .semibold).foregroundStyle(palette.tint).frame(minHeight: 44)
-                        .disabled(model.busy).accessibilityIdentifier("reference-sort-retry")
-                }
-                let choices = model.referenceSortOptions.objects("choices")
-                ForEach(choices.indices, id: \.self) { index in
-                    let option = choices[index]
-                    overflowRow(title: option.text("label"), selected: option.flag("selected"),
-                                id: "reference-sort-" + option.text("value")) {
-                        Task { await model.setReferenceSort(option.text("value")) }
-                    }
-                }
-                if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
+                TaskListSortChoices(model: model, palette: palette, caller: .reference)
             } else {
                 let options = model.reference.object("group").objects("options")
                 ForEach(options.indices, id: \.self) { index in
@@ -1206,4 +1188,49 @@ struct ReferencePanel: View {
     }
 
     private func close() { focusedField = nil; model.closeReferencePanel() }
+}
+
+struct TaskListSortChoices: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    let caller: CoreModel.TaskListSortCaller
+    private var prefix: String { caller == .inbox ? "inbox" : "reference" }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            if let error = model.referenceSortError {
+                Text(error).rnFont(13).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier(prefix + "-sort-error")
+                Button(model.label("common.retry")) {
+                    Task {
+                        if caller == .inbox { await model.retryInboxSort() }
+                        else { await model.retryReferenceSort() }
+                    }
+                }
+                .rnFont(15, .semibold).foregroundStyle(palette.tint).frame(minHeight: 44)
+                .disabled(model.busy).accessibilityIdentifier(prefix + "-sort-retry")
+            }
+            let choices = model.referenceSortOptions.objects("choices")
+            ForEach(choices.indices, id: \.self) { index in
+                let option = choices[index]
+                Button {
+                    Task {
+                        if caller == .inbox { await model.setInboxSort(option.text("value")) }
+                        else { await model.setReferenceSort(option.text("value")) }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Text(option.text("label")).rnFont(15, .semibold).frame(maxWidth: .infinity, alignment: .leading)
+                        if option.flag("selected") { Image(systemName: "checkmark").font(.system(size: 16)).foregroundStyle(palette.tint) }
+                    }
+                    .padding(10).frame(minHeight: 52).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(!model.taskListSortActionsEnabled)
+                .accessibilityLabel(option.text("label"))
+                .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
+                .accessibilityIdentifier(prefix + "-sort-" + option.text("value"))
+            }
+            if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
+        }
+    }
 }

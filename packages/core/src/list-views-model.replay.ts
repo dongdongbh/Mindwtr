@@ -1,13 +1,6 @@
-/**
- * Test support only (imported by the list views tests; not exported).
- * Replays the frozen React Native Contexts, Archive, Trash and History scenarios
- * (list-views-model-parity.fixtures.json, captured by the mobile *.parity tests
- * and history.test.tsx) through core: either core's functions directly, or the
- * native host contract. A backend builds one screen model; `observe*` turns it
- * into the fixture's shape, so both backends are held to the same observations.
- * Selection mode, the open picker or dialog and the view options are host UI
- * state and are kept here, as the React Native hooks keep them.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import {
     ARCHIVE_SEGMENTS,
@@ -45,6 +38,7 @@ import {
     buildContextsViewModel,
     CONTEXTS_BULK_STATUSES,
     editContextsTaskTokens,
+    getContextsChipLabels,
     getContextsEmptyState,
     getContextsMatchModeLabels,
     getContextsTokenPicker,
@@ -52,6 +46,7 @@ import {
     getContextsRouteTokens,
     resolveContextsMatchMode,
     selectContextsRouteTokens,
+    selectContextsToken,
     toggleContextsNoContext,
     toggleContextsToken,
 } from './contexts-view-model';
@@ -131,7 +126,7 @@ const RECORDED = [
 type StoreActions = Record<(typeof RECORDED)[number], (...args: unknown[]) => Promise<unknown>>;
 let realActions: StoreActions | null = null;
 
-/** The store writes a scenario asks for, encoded as the mobile capture encoded them. */
+
 export function createWriteRecorder() {
     const log: unknown[][] = [];
     const encode = (args: unknown[]) => JSON.parse(JSON.stringify(args.map((arg) => (
@@ -143,7 +138,7 @@ export function createWriteRecorder() {
 }
 export type WriteRecorder = ReturnType<typeof createWriteRecorder>;
 
-/** Load the scenario's data through the store, as the mobile capture did, and record the screens' writes. */
+
 export async function seedListViewsStore(
     part: ListViewsPart,
     scenario: ListViewsScenario,
@@ -173,7 +168,7 @@ export async function seedListViewsStore(
     } as never);
     await useTaskStore.getState().fetchData({ throwOnError: true });
     await flushPendingSave();
-    // Only the screens' own calls: batchMoveTasks calls batchUpdateTasks inside the store.
+
     let moving = 0;
     useTaskStore.setState(Object.fromEntries(RECORDED.map((name) => [name, async (...args: unknown[]) => {
         if (!(name === 'batchUpdateTasks' && moving > 0)) recorder.log.push([name, ...recorder.encode(args)]);
@@ -211,7 +206,7 @@ const areaScope = () => {
     };
 };
 
-/** A replay: the observation after opening, then after each action. */
+
 async function replay<Screen>(
     screen: Screen & { observe: () => Record<string, unknown>; settle?: () => void },
     perform: (screen: Screen, action: unknown[]) => Promise<void>,
@@ -234,10 +229,12 @@ async function replay<Screen>(
     return observed;
 }
 
-// --- Contexts --------------------------------------------------------------
 
+type ContextsSelection = { tokens: string[]; matchMode: ContextOrTagMatchMode };
 type ContextsModel = {
     chips: [string, boolean, string[]][];
+
+    press: (chip: string, additive: boolean) => ContextsSelection;
     matchMode: [string, [string, boolean][]] | null;
     rowIds: string[];
     empty: [string, string, string] | null;
@@ -269,7 +266,7 @@ type ContextsState = {
 };
 const ICONS = { tag: 'Icon:Tag', check: 'Icon:CheckCircle2' } as const;
 
-/** Contexts through core's functions, as the React Native screen calls them. */
+
 export function createContextsCoreBackend(t: Translate): ContextsBackend {
     return {
         model(state) {
@@ -279,15 +276,22 @@ export function createContextsCoreBackend(t: Translate): ContextsBackend {
             const labels = getContextsMatchModeLabels(t);
             const tasksById = Object.fromEntries(store.tasks.map((task) => [task.id, task]));
             const empty = getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: state.tokens }, t);
+            const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
             return {
                 chips: [
                     [t('contexts.all'), state.tokens.length === 0, [t('common.all'), String(model.allCount)]],
                     [t('contexts.none'), model.noContextSelected, [t('contexts.none'), String(model.noContextCount)]],
-                    ...model.tokenChips.map((chip): [string, boolean, string[]] => [`${chip.token} (${chip.count})`, chip.selected, [chip.token, String(chip.count)]]),
+
+                    ...model.tokenChips.map((chip, index): [string, boolean, string[]] => [`${chip.token} (${chip.count})`, chip.selected, [chipLabels[index].label, String(chip.count)]]),
                 ],
                 matchMode: model.showMatchMode
                     ? [labels.label, [[labels.all, state.matchMode === 'all'], [labels.any, state.matchMode === 'any']]]
                     : null,
+                press: (chip, additive) => {
+                    if (chip === t_all) return { tokens: [], matchMode: 'all' };
+                    if (chip === t_none) return { tokens: toggleContextsNoContext(state.tokens), matchMode: 'all' };
+                    return { tokens: (additive ? toggleContextsToken : selectContextsToken)(state.tokens, chip), matchMode: state.matchMode };
+                },
                 rowIds: model.tasks.map((task) => task.id),
                 empty: [ICONS[empty.icon], empty.title, empty.message],
                 bulk: {
@@ -299,7 +303,7 @@ export function createContextsCoreBackend(t: Translate): ContextsBackend {
                     }))),
                     delete: t('common.delete'),
                 },
-                picker: (field, mode) => getContextsTokenPicker({ field, action: mode, activeTasks: model.activeTasks, selectedIds: state.selected, tasksById, t }),
+                picker: (field, mode) => getContextsTokenPicker({ field, action: mode, activeTasks: model.activeTasks, settings: store.settings, selectedIds: state.selected, tasksById, t }),
                 deleteConfirmation: getBulkTrashConfirmation(t),
             };
         },
@@ -326,10 +330,7 @@ export function createContextsCoreBackend(t: Translate): ContextsBackend {
     };
 }
 
-/**
- * Contexts through the native host contract: views from getContextsView, writes through
- * runContextsAction with the revisions the last view showed, as the native screen sends them.
- */
+
 export function createContextsContractBackend(host: Host, requestId: () => string): ContextsBackend {
     let shown: NativeContextsView | null = null;
     const toToast = (result: NativeListActionResult<NativeContextsAction>): Toast | null => {
@@ -350,6 +351,11 @@ export function createContextsContractBackend(host: Host, requestId: () => strin
             const pickers = view.bulk?.tokenActions ?? [];
             return {
                 chips: view.chips.map((chip): [string, boolean, string[]] => [chip.accessibilityLabel, chip.selected, [chip.label, String(chip.count)]]),
+
+                press: (label, additive) => {
+                    const chip = view.chips.find(({ id }) => id === (label === t_all ? 'all' : label === t_none ? 'none' : label))!;
+                    return (additive && chip.additive ? chip.additive : chip).next;
+                },
                 matchMode: view.matchMode ? [view.matchMode.label, view.matchMode.options.map((option): [string, boolean] => [option.label, option.selected])] : null,
                 rowIds: view.rows.map((row) => row.id),
                 empty: view.empty ? [ICONS[view.empty.icon], view.empty.title, view.empty.message] : null,
@@ -367,14 +373,14 @@ export function createContextsContractBackend(host: Host, requestId: () => strin
             };
         },
         async run(write) {
-            // A row's revision, or the selection's (the bulk bar acts on the selected rows).
+
             const rows = new Map(shown!.rows.map((row) => [row.id, row.taskRevision]));
             const revisions = (ids: string[]) => Object.fromEntries(ids.map((id) => [id, shown!.taskRevisions[id] ?? rows.get(id) ?? '']));
             const action = ('taskId' in write
                 ? { ...write, taskRevision: rows.get(write.taskId) ?? '' }
                 : { ...write, taskRevisions: revisions(write.taskIds) }) as NativeContextsAction;
             const result = expectOk(await host.runContextsAction({ requestId: requestId(), action }));
-            // The row's own toast (Task deleted, Undo) belongs to the shared row; the capture mocked the row.
+
             return write.type === 'trashTask' ? null : toToast(result);
         },
     };
@@ -392,7 +398,7 @@ export async function replayContexts(backend: ContextsBackend, scenario: ListVie
     const exitSelection = () => { state.selectionMode = false; state.selected = []; };
     const screen = {
         settle() {
-            // The screen's effects: an empty selection matches with All; rows that leave take their selection with them.
+
             state.matchMode = resolveContextsMatchMode(state.tokens, state.matchMode);
             current = backend.model(state);
             state.selected = state.selected.filter((id) => current.rowIds.includes(id));
@@ -429,10 +435,9 @@ export async function replayContexts(backend: ContextsBackend, scenario: ListVie
     return replay(screen, async (_screen, action) => {
         const [kind, first, second, third] = action as [string, string, string, unknown];
         if (kind === 'search') state.searchQuery = first;
-        else if (kind === 'chip') {
-            if (first === t_all) { state.tokens = []; state.matchMode = 'all'; }
-            else if (first === t_none) { state.tokens = toggleContextsNoContext(state.tokens); state.matchMode = 'all'; }
-            else state.tokens = toggleContextsToken(state.tokens, first);
+        else if (kind === 'chip' || kind === 'chipTap') {
+
+            ({ tokens: state.tokens, matchMode: state.matchMode } = current.press(first, kind === 'chip'));
         } else if (kind === 'matchMode') state.matchMode = first as ContextOrTagMatchMode;
         else if (kind === 'row') {
             if (second === 'edit') state.editor = first;
@@ -475,11 +480,10 @@ export async function replayContexts(backend: ContextsBackend, scenario: ListVie
         else throw new Error(`Unknown Contexts action ${kind}`);
     }, scenario.actions, recorder);
 }
-// The capture presses All and No context by their labels.
+
 const t_all = 'All Contexts';
 const t_none = 'No context';
 
-// --- Archive ---------------------------------------------------------------
 
 type FilterState = {
     searchQuery: string; tokens: string[]; excludedTokens: string[];
@@ -515,10 +519,8 @@ type ArchiveModel = {
     labels: ReturnType<typeof getArchiveRowLabels> & { selectAll: string; restoreSelected: string; done: string; bulkSelected: string };
     confirmations: { trashTask: ListConfirmation; trashTasks: ListConfirmation };
 };
-/**
- * Mobile's writes: explicit ids and ISO completion times (the contract's selectAll and
- * day/time forms have their own tests). The contract backend adds the revisions its view showed.
- */
+
+
 type ArchiveWrite =
     | { type: 'moveToInbox'; taskId: string }
     | { type: 'moveTasksToInbox'; taskIds: string[] }
@@ -533,7 +535,7 @@ type ArchiveBackend = {
     run: (write: ArchiveWrite) => Promise<Toast | null>;
 };
 
-/** The filter sheet's selections as mobile's hook turns them into criteria, chips and a count. */
+
 function resolveHookFilters(filters: FilterState, visibility: TaskMetadataFilterVisibility, t: Translate) {
     const priorities = visibility.priority ? filters.priorities : [];
     const energyLevels = visibility.energyLevel ? filters.energyLevels : [];
@@ -559,7 +561,7 @@ function resolveHookFilters(filters: FilterState, visibility: TaskMetadataFilter
     };
 }
 
-/** Archive through core's functions, as the React Native screen calls them. */
+
 export function createArchiveCoreBackend(t: Translate): ArchiveBackend {
     return {
         model(state) {
@@ -649,7 +651,7 @@ export function createArchiveCoreBackend(t: Translate): ArchiveBackend {
     };
 }
 
-/** Archive through the native host contract, writing with the revisions the last view showed. */
+
 export function createArchiveContractBackend(host: Host, requestId: () => string): ArchiveBackend {
     let shown: NativeArchiveView | null = null;
     return {
@@ -676,7 +678,7 @@ export function createArchiveContractBackend(host: Host, requestId: () => string
                             ? { ...item, confirmation: item.trashConfirmation }
                             : item
                 )),
-                // The contract counts the ids; Select all pages through the rows.
+
                 visibleIds: view.items.flatMap((item) => (item.type === 'task' ? [item.row.id] : [])).filter((id, index, ids) => ids.indexOf(id) === index),
                 empty: view.empty,
                 labels: { ...view.labels, bulkSelected: view.labels.selected.replace(/^\d+ /, '') },
@@ -684,7 +686,7 @@ export function createArchiveContractBackend(host: Host, requestId: () => string
             };
         },
         async run(write) {
-            // A row's or project item's revision, or the selection's.
+
             const revision = new Map(shown!.items.flatMap((item) => (
                 item.type === 'task' ? [[item.row.id, item.row.taskRevision]] : item.type === 'project' ? [[item.id, item.projectRevision]] : []
             )));
@@ -719,7 +721,7 @@ export async function replayArchive(backend: ArchiveBackend, scenario: ListViews
     const screen = {
         settle() {
             current = backend.model(state);
-            // The hook drops selections a section no longer justifies; rows a filter or fold hides leave the selection.
+
             const { visibility } = current.filters;
             if (!visibility.priority) state.filters.priorities = [];
             if (!visibility.energyLevel) state.filters.energyLevels = [];
@@ -862,7 +864,7 @@ export async function replayArchive(backend: ArchiveBackend, scenario: ListViews
             state.completedAt = null;
             await backend.run({ type: 'setCompletedAt', taskId, completedAt: first });
         } else if (kind === 'editorSave') {
-            // The editor's own save; the screen closes it after asking the store.
+
             await useTaskStore.getState().updateTask(first, second as Partial<Task>);
             state.editor = null;
         } else if (kind === 'alert') await dialogs[dialogs.length - 1].buttons.find((button) => button.text === first)?.run?.();
@@ -872,27 +874,26 @@ export async function replayArchive(backend: ArchiveBackend, scenario: ListViews
     }, scenario.actions, recorder);
 }
 
-// --- Trash -----------------------------------------------------------------
 
 type TrashModel = {
     summary: string | null;
     retentionHint: string | null;
     items: { type: 'task' | 'project'; id: string; title: string; deletedAt: string; typeLabel: string; deletedLabel: string; markdown: string | null; indicatorColor: string | null }[];
-    /** What Select all selects: mobile takes the shown tasks and projects in store order. */
+
     selectAll: { taskIds: string[]; projectIds: string[] };
     labels: ReturnType<typeof getTrashRowLabels> & { done: string; clearAll: string; selectAll: string; restoreSelected: string; deleteSelected: string; bulkSelected: string };
     confirmations: { purgeItem: ListConfirmation; purgeSelection: ListConfirmation };
     emptyTrash: { confirmation: ListConfirmation; run: () => Promise<void> } | null;
     empty: { title: string; message: string } | null;
 };
-/** Trash's writes; the contract backend adds the revisions its view showed. */
+
 type TrashWrite =
     | { type: 'restoreItem' | 'purgeItem'; kind: 'task' | 'project'; id: string }
     | { type: 'restoreItems' | 'purgeItems'; taskIds: string[]; projectIds: string[] }
     | { type: 'emptyTrash'; revision: string };
 type TrashBackend = { model: () => TrashModel; run: (write: TrashWrite) => Promise<void> };
 
-/** Trash through core's functions, as the React Native screen calls them. */
+
 export function createTrashCoreBackend(t: Translate): TrashBackend {
     const run = async (write: TrashWrite) => {
         const store = useTaskStore.getState();
@@ -939,7 +940,7 @@ export function createTrashCoreBackend(t: Translate): TrashBackend {
                 confirmations: { purgeItem: getTrashPurgeConfirmation({ kind: 'item' }, t), purgeSelection: getTrashPurgeConfirmation({ kind: 'selection' }, t) },
                 emptyTrash: items.length === 0 ? null : {
                     confirmation: getTrashPurgeConfirmation({ kind: 'clear', narrowed: scope.narrowed, taskCount: scope.taskIds.length, projectCount: scope.projectIds.length }, t),
-                    // Always the ids the dialog opened for.
+
                     run: () => run({ type: 'purgeItems', taskIds: scope.taskIds, projectIds: scope.projectIds }),
                 },
                 empty: items.length === 0 ? getTrashEmptyState(t) : null,
@@ -948,7 +949,7 @@ export function createTrashCoreBackend(t: Translate): TrashBackend {
     };
 }
 
-/** Trash through the native host contract, writing with the revisions the last view showed. */
+
 export function createTrashContractBackend(host: Host, requestId: () => string): TrashBackend {
     let shown: NativeTrashView | null = null;
     const run = async (write: TrashWrite) => {
@@ -979,7 +980,7 @@ export function createTrashContractBackend(host: Host, requestId: () => string):
                         indicatorColor: item.type === 'project' ? item.indicatorColor : '#6B7280',
                     };
                 }),
-                // The host selects every row it has paged; the contract hands the store its own order.
+
                 selectAll: {
                     taskIds: view.items.flatMap((item) => (item.type === 'task' ? [item.row.id] : [])),
                     projectIds: view.items.flatMap((item) => (item.type === 'project' ? [item.id] : [])),
@@ -1092,9 +1093,7 @@ export async function replayTrash(backend: TrashBackend, scenario: ListViewsScen
     }, scenario.actions, recorder);
 }
 
-// --- History ---------------------------------------------------------------
 
-/** History for a route's tab: the tabs as it opens, then after tapping the other one. */
 export function observeHistory(tab: string | null, readTabs: (tab: string | null) => { tab: string; tabs: { id: string; label: string; selected: boolean }[] }) {
     const opened = readTabs(tab);
     const other = opened.tabs.find((entry) => !entry.selected)!.id;
@@ -1103,7 +1102,7 @@ export function observeHistory(tab: string | null, readTabs: (tab: string | null
     return { tab, opened: shape(opened), switched: { ...shape(switched), setParams: [[{ tab: other }]] } };
 }
 
-/** History through core's functions. */
+
 export const readHistoryTabs = (t: Translate) => (tab: string | null) => {
     const resolved = resolveHistoryTab(tab);
     return { tab: resolved, tabs: getHistoryTabs(t).map((entry) => ({ ...entry, selected: entry.id === resolved })) };

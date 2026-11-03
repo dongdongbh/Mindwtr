@@ -14,9 +14,7 @@ import type { AppData, AppSettings, Area, Person, Project, Section, Task } from 
 const NOW_ISO = '2026-04-10T12:00:00.000Z';
 const NOW_MS = Date.parse(NOW_ISO);
 
-// Settings for a document that has already been through every migration at
-// least once, so a test that opts in to exactly one stale field is the only
-// thing that can fire.
+
 const settledSettings = (): AppSettings => ({
     deviceId: 'device-a',
     analyticsProfileId: 'profile-a',
@@ -236,8 +234,8 @@ describe('runLoadMigrations', () => {
             });
             archiveData.settings = {
                 ...archiveData.settings,
-                // Isolate project restoration from the normal 7-day auto-archive
-                // sweep; the default policy is also covered by the third row.
+
+
                 gtd: autoArchiveDays === undefined
                     ? archiveData.settings.gtd
                     : { ...archiveData.settings.gtd, autoArchiveDays },
@@ -323,16 +321,27 @@ describe('runLoadMigrations', () => {
 
     it('promote-scheduled-tasks: promotes an inbox task whose due date has passed', () => {
         const data = settledData({
-            tasks: [{ id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: NOW_ISO, updatedAt: NOW_ISO } as unknown as Task],
+            tasks: [{ id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '2026-03-20T00:00:00.000Z' } as unknown as Task],
         });
         const { data: result, applied } = runLoadMigrations(data, ctxFor(data));
         expect(applied).toEqual(['promote-scheduled-tasks']);
         expect(result.tasks[0].status).toBe('next');
     });
 
-    // `settledSettings` carries `lastAutoArchiveAt: NOW_ISO`, i.e. a pass that just
-    // ran. The old twice-daily throttle skipped this load entirely, so a stale task
-    // sat in Done across restarts with nothing to explain why (#959).
+    it('promote-scheduled-tasks: keeps a task the user put in Inbox after its date arrived (#1452)', () => {
+        const data = settledData({
+            tasks: [{
+                id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [],
+                startTime: '2026-04-01', dueDate: '2026-04-01T21:00:00.000Z',
+                createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '2026-04-05T00:00:00.000Z',
+            } as unknown as Task],
+        });
+        const { data: result, applied } = runLoadMigrations(data, ctxFor(data));
+        expect(applied).not.toContain('promote-scheduled-tasks');
+        expect(result.tasks[0].status).toBe('inbox');
+    });
+
+
     it('auto-archive-stale-tasks: archives a stale completed task on a load right after the last pass', () => {
         const data = settledData({
             tasks: [{
@@ -353,7 +362,7 @@ describe('runLoadMigrations', () => {
             } as unknown as Task],
         });
         const { applied } = runLoadMigrations(data, ctxFor(data));
-        // No bookkeeping timestamp to bump, so an idle load stays a no-op.
+
         expect(applied).toEqual([]);
     });
 
@@ -433,12 +442,11 @@ describe('runLoadMigrations', () => {
     });
 
     it('reports every migration that mutated data, in pipeline order, and nothing else', () => {
-        // Two independent triggers: a due inbox task (promote-scheduled-tasks)
-        // and a tombstone-cleanup throttle that has elapsed with an expired
-        // tombstone to purge. Everything else in this fixture is already settled.
+
+
         const data = settledData({
             tasks: [
-                { id: 't-due', title: 'Due', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: NOW_ISO, updatedAt: NOW_ISO } as unknown as Task,
+                { id: 't-due', title: 'Due', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '2026-03-20T00:00:00.000Z' } as unknown as Task,
                 {
                     id: 't-tombstone', title: 'Old', status: 'done', tags: [], contexts: [],
                     createdAt: '2000-01-01T00:00:00.000Z', updatedAt: '2000-01-01T00:00:00.000Z',
@@ -455,8 +463,7 @@ describe('runLoadMigrations', () => {
         expect(result.tasks[0].status).toBe('next');
     });
 
-    // One malformed row used to take the whole pipeline down, and the load path's
-    // outer catch leaves the store empty forever after that -- every launch.
+
     it('isolates a throwing migration so the rest of the pipeline still runs', () => {
         const logs: LogPayload[] = [];
         setLogger((payload) => logs.push(payload));
@@ -479,9 +486,7 @@ describe('runLoadMigrations', () => {
         }
     });
 
-    // The version bump is the receipt for the one-time schema backfill. Writing it
-    // while one of those migrations was skipped closes shouldRunSchemaMigration
-    // forever, so the skipped step never gets a second chance.
+
     it('keeps the schema gate open when a schema-gated migration fails', () => {
         const logs: LogPayload[] = [];
         setLogger((payload) => logs.push(payload));
@@ -494,7 +499,7 @@ describe('runLoadMigrations', () => {
             expect(applied).not.toContain('normalize-project-status-and-tags');
             expect(applied).not.toContain('bump-migrations-version');
             expect(result.settings.migrations?.version ?? 0).toBe(0);
-            // The next launch must still see the backfill as owed.
+
             expect(buildLoadContext(result.settings, false, NOW_ISO, NOW_MS).shouldRunSchemaMigration).toBe(true);
         } finally {
             setLogger(consoleLogger);
@@ -505,8 +510,8 @@ describe('runLoadMigrations', () => {
         const logs: LogPayload[] = [];
         setLogger((payload) => logs.push(payload));
         try {
-            // No schema-gated migration reads sections, so only the ungated
-            // repair pass trips here.
+
+
             const data = settledData({ sections: [null as unknown as Section] });
             data.settings = { ...data.settings, migrations: { ...data.settings.migrations, version: 0 } };
 
@@ -544,9 +549,7 @@ describe('runLoadMigrations', () => {
         expect(second.data).toBe(first.data);
     });
 
-    // The narrow fixture above touches three migrations. This one carries a row
-    // for every shape the risky migrations rewrite, so a pass that re-stamps
-    // rev/updatedAt on every load (the sync rewrite-loop class) cannot hide.
+
     it('idempotence: the pipeline settles on archive, tombstone, attachment and dedupe shapes', () => {
         const ARCHIVED_AT = '2025-12-01T00:00:00.000Z';
         const EXPIRED_AT = '2025-11-01T00:00:00.000Z';
@@ -554,29 +557,29 @@ describe('runLoadMigrations', () => {
 
         const messyData: AppData = {
             tasks: [
-                // recover-legacy-project-references: a reference child of an
-                // archived project still wearing the legacy completion markers.
+
+
                 {
                     id: 't-legacy-reference', title: 'Reference child', status: 'done',
                     tags: [], contexts: [], projectId: 'p-archived',
                     statusBeforeProjectArchive: 'reference', projectArchivedAt: ARCHIVED_AT,
                     completedAt: ARCHIVED_AT, createdAt: ARCHIVED_AT, updatedAt: ARCHIVED_AT,
                 } as unknown as Task,
-                // archive-descendants-of-archived-projects: a still-open child
-                // and (below) a still-live section under the archived project.
+
+
                 {
                     id: 't-archive-child', title: 'Open child', status: 'next',
                     tags: [], contexts: [], projectId: 'p-archived',
                     createdAt: ARCHIVED_AT, updatedAt: ARCHIVED_AT,
                 } as unknown as Task,
-                // purge-expired-tombstones: an expired task tombstone.
+
                 {
                     id: 't-tombstone', title: 'Deleted long ago', status: 'next',
                     tags: [], contexts: [], deletedAt: EXPIRED_AT,
                     createdAt: EXPIRED_AT, updatedAt: EXPIRED_AT,
                 } as unknown as Task,
-                // purge-expired-tombstones: attachment pruning inside a live task,
-                // plus normalize-people-for-load's assignedTo derivation.
+
+
                 {
                     id: 't-attachment', title: 'Has a file', status: 'next',
                     tags: [], contexts: [], assignedTo: 'Alex',
@@ -592,23 +595,23 @@ describe('runLoadMigrations', () => {
                     ],
                     createdAt: RECENT_AT, updatedAt: RECENT_AT,
                 } as unknown as Task,
-                // A cancelled task: archived, never completed.
+
                 {
                     id: 't-cancelled', title: 'Called off', status: 'archived',
                     tags: [], contexts: [], cancelledAt: RECENT_AT,
                     createdAt: RECENT_AT, updatedAt: RECENT_AT,
                 } as unknown as Task,
-                // auto-archive-stale-tasks: a done task older than the window.
+
                 {
                     id: 't-stale-done', title: 'Finished ages ago', status: 'done',
                     tags: [], contexts: [], completedAt: ARCHIVED_AT,
                     createdAt: ARCHIVED_AT, updatedAt: ARCHIVED_AT,
                 } as unknown as Task,
-                // promote-scheduled-tasks: an inbox task whose due date has passed.
+
                 {
                     id: 't-scheduled', title: 'Was due', status: 'inbox',
                     tags: [], contexts: [], dueDate: '2026-04-01',
-                    createdAt: RECENT_AT, updatedAt: RECENT_AT,
+                    createdAt: ARCHIVED_AT, updatedAt: ARCHIVED_AT,
                 } as unknown as Task,
             ],
             projects: [
@@ -623,8 +626,8 @@ describe('runLoadMigrations', () => {
                 } as unknown as Project,
             ],
             sections: [
-                // An archived section: deletedAt == updatedAt == projectArchivedAt,
-                // expired but retained because its project can still be restored.
+
+
                 {
                     id: 's-archived', projectId: 'p-archived', title: 'Archived section', order: 0,
                     projectArchivedAt: ARCHIVED_AT, deletedAt: ARCHIVED_AT,
@@ -634,13 +637,13 @@ describe('runLoadMigrations', () => {
                     id: 's-live-under-archived', projectId: 'p-archived', title: 'Still live', order: 2,
                     createdAt: ARCHIVED_AT, updatedAt: ARCHIVED_AT,
                 } as unknown as Section,
-                // A plain expired section tombstone, which the purge does remove.
+
                 {
                     id: 's-tombstone', projectId: 'p-live', title: 'Deleted section', order: 1,
                     deletedAt: EXPIRED_AT, createdAt: EXPIRED_AT, updatedAt: EXPIRED_AT,
                 } as unknown as Section,
             ],
-            // dedupe-areas-by-name: two live areas with the same name.
+
             areas: [
                 { id: 'area-work-a', name: 'Work', order: 0, createdAt: RECENT_AT, updatedAt: RECENT_AT } as Area,
                 { id: 'area-work-b', name: 'work', order: 1, createdAt: RECENT_AT, updatedAt: RECENT_AT } as Area,
@@ -659,8 +662,8 @@ describe('runLoadMigrations', () => {
         };
 
         const first = runLoadMigrations(messyData, buildLoadContext(messyData.settings, false, NOW_ISO, NOW_MS));
-        // Every risky migration really ran, so the property below has something
-        // to prove. A name dropping out of this list means the fixture drifted.
+
+
         for (const name of [
             'recover-legacy-project-references',
             'promote-scheduled-tasks',
@@ -671,7 +674,7 @@ describe('runLoadMigrations', () => {
         ]) {
             expect(first.applied).toContain(name);
         }
-        // The purge kept the restorable archive section and dropped the rest.
+
         expect(first.data.sections.map((section) => section.id).sort()).toEqual(['s-archived', 's-live-under-archived']);
         expect(first.data.tasks.map((task) => task.id)).not.toContain('t-tombstone');
 
@@ -679,8 +682,7 @@ describe('runLoadMigrations', () => {
         expect(second.applied).toEqual([]);
         expect(second.data).toBe(first.data);
 
-        // Past the 24 h cleanup throttle only the two throttled steps run again,
-        // and neither may change a single row.
+
         const laterIso = new Date(NOW_MS + 25 * 60 * 60 * 1000).toISOString();
         const third = runLoadMigrations(
             second.data,

@@ -68,8 +68,8 @@ describe('filter-criteria', () => {
     });
 
     it('drops an excluded token that is also included (include wins)', () => {
-        // criteriaFromSelections keeps both sides verbatim; normalization (used
-        // when the criteria is read back) is where include wins.
+
+
         const criteria = criteriaFromSelections({ tokens: ['@office'], excludedTokens: ['@office'] });
         expect(selectionsFromCriteria(criteria)).toMatchObject({
             tokens: ['@office'],
@@ -85,18 +85,27 @@ describe('filter-criteria', () => {
             energy: ['low', 'bogus' as never],
             timeEstimates: ['30min', { minutes: 45 } as never],
         });
-        // Bare tokens gain their prefix so rebuilding criteria keeps them.
+
         expect(selections.tokens).toEqual(['@office', '#deep']);
-        // 'none' and unknown enum values never reach the pickers.
+
         expect(selections.priorities).toEqual(['high']);
         expect(selections.energyLevels).toEqual(['low']);
-        // Custom estimates have no picker option and are dropped.
+
         expect(selections.timeEstimates).toEqual(['30min']);
         expect(selections.contextMatchMode).toBe('all');
         expect(selections.tagMatchMode).toBe('all');
     });
 
-    it('handles absent criteria', () => {
+    it('round-trips and counts a rolling task date selection', () => {
+        const anyDateRange = { preset: 'next_14_days' as const };
+        const criteria = criteriaFromSelections({ anyDateRange });
+        expect(criteria).toEqual({ anyDateRange });
+        expect(selectionsFromCriteria(criteria).anyDateRange).toEqual(anyDateRange);
+        expect(countActiveFilterCriteria(criteria)).toBe(1);
+        expect(criteriaFromSelections({ anyDateRange: undefined })).toEqual({});
+    });
+
+    it('handles absent criteria' , () => {
         expect(selectionsFromCriteria(undefined)).toEqual({
             tokens: [],
             excludedTokens: [],

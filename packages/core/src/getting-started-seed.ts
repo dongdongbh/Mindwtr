@@ -58,11 +58,7 @@ const STARTER_SAMPLE_TASK_KEYS = ['starter.sampleBuyMilk', 'starter.sampleReplyS
 const STARTER_PROJECT_TITLE_KEY = 'starter.projectTitle';
 const STARTER_PROJECT_NOTES_KEY = 'starter.projectNotes';
 
-// Every app language, from the generated starter-seed table — the seed matches titles across
-// all of them (see getStarterTaskKeyByTitle below), so it needs the whole set, but only for
-// the ~39 `starter.*` keys. Loading the full locale dictionaries here would put ~45,000
-// strings on every platform's cold path, since store.ts reaches this module through
-// store-settings.ts.
+
 const seedLanguages = (): Language[] => Object.keys(STARTER_SEED_STRINGS) as Language[];
 
 const resolveStarterString = (lang: Language, key: string): string =>
@@ -85,8 +81,7 @@ export const resolveSeedLanguage = (explicit?: string, settingsLanguage?: string
     return getSystemDefaultLanguage();
 };
 
-// Seeded titles are matched across every app language so a seed created in one
-// language repairs (never duplicates) after the user switches languages.
+
 let starterTaskKeyByTitleCache: Map<string, StarterTaskKey> | null = null;
 const getStarterTaskKeyByTitle = (): Map<string, StarterTaskKey> => {
     if (starterTaskKeyByTitleCache) return starterTaskKeyByTitleCache;
@@ -96,7 +91,7 @@ const getStarterTaskKeyByTitle = (): Map<string, StarterTaskKey> => {
             map.set(normalizeStarterTaskTitle(resolveStarterString(lang, template.titleKey)), template.key);
         }
     }
-    // Titles from older seed copy; keep so existing installs repair instead of duplicating.
+
     map.set('process your first inbox item', 'process-inbox');
     map.set('start here: process your first inbox item', 'process-inbox');
     map.set('try quick capture with a context and date', 'quick-capture');
@@ -120,7 +115,7 @@ const getStarterProjectTitles = (): Set<string> => {
     return titles;
 };
 
-/** Recognition only: mirrors seed compatibility without repairing or writing data. */
+
 export function isGettingStartedProject(project: Project, tasks: readonly Task[]): boolean {
     return !project.deletedAt && project.status !== 'archived' && !project.cancelledAt
         && getStarterProjectTitles().has(normalizeStarterTaskTitle(project.title))
@@ -238,7 +233,7 @@ const buildFreshInstallGettingStartedData = (
         order: 0,
         tagIds: [],
         supportNotes: resolveStarterString(lang, STARTER_PROJECT_NOTES_KEY),
-        // Canonical synced-boolean defaults; see the note in store-tasks.ts.
+
         isSequential: false,
         isFocused: false,
         rev: 1,
@@ -294,11 +289,7 @@ const buildFreshInstallGettingStartedData = (
     return { projects: [project], tasks: [...tasks, ...sampleInboxTasks] };
 };
 
-/**
- * Builds the seedGettingStarted store action. Takes only the three pieces of
- * SettingsActionContext it actually uses (see store-settings.ts) so this
- * module has no dependency back on the store action wiring.
- */
+
 export const createSeedGettingStartedAction = (
     set: (partial: Partial<TaskStore> | ((state: TaskStore) => Partial<TaskStore> | TaskStore)) => void,
     debouncedSave: (data: AppData, onError?: (msg: string) => void) => void,
@@ -331,8 +322,8 @@ export const createSeedGettingStartedAction = (
             ...starterTemplateProject,
             order: maxProjectOrder + 1,
         };
-        // Repair the tutorial project's canonical copy into the seed language,
-        // mirroring how the starter tasks are repaired below.
+
+
         let starterProjectUpdate: Project | null = null;
         if (existingProject
             && (existingProject.title !== starterTemplateProject.title
@@ -389,8 +380,8 @@ export const createSeedGettingStartedAction = (
                 .filter((task) => !task.deletedAt)
                 .map(activeTaskTitleKey)
         );
-        // Sample inbox items are matched across languages too, so re-seeding
-        // after a language switch does not duplicate them.
+
+
         const sampleTaskKeyByTitle = getSampleTaskKeyByTitle();
         const existingSampleKeys = new Set<string>();
         for (const task of state._allTasks) {
@@ -441,8 +432,7 @@ export const createSeedGettingStartedAction = (
         };
     });
 
-    // The native host's command (native-host-contract-settings.ts) passes awaitSave: false: its request receipt's own save
-    // then commits these rows and the receipt in one transaction.
+
     if (options?.awaitSave !== false) await flushPendingSave();
     return { success: true, id: projectId };
 };

@@ -42,8 +42,7 @@ const controller = (overrides: Partial<SyncEncryptionController> = {}): SyncEncr
     ...overrides,
 });
 
-// The submit control repeats the button label of the action that opened the form,
-// so the trailing match is always the one inside the form.
+
 const lastButton = (name: string): HTMLElement => {
     const matches = screen.getAllByRole('button', { name });
     return matches[matches.length - 1];
@@ -254,7 +253,7 @@ describe('SyncEncryptionSection', () => {
             />,
         );
         expect(screen.getByText(t.syncEncryptionErrorWrongPassphrase)).toBeTruthy();
-        // The field is still there to try again, and nothing suggests broken data.
+
         expect(screen.getByLabelText(t.syncEncryptionPassphrase)).toBeTruthy();
     });
 
@@ -275,7 +274,7 @@ describe('SyncEncryptionSection', () => {
         render(<SyncEncryptionSection t={t} encryption={encryption} />);
 
         expect(screen.getByText(t.syncEncryptionRemotePlaintextDesc)).toBeTruthy();
-        // Rotating a passphrase against a location that no longer holds ciphertext is not a remedy.
+
         expect(screen.queryByRole('button', { name: t.syncEncryptionChange })).toBeNull();
 
         fireEvent.click(screen.getByRole('button', { name: t.syncEncryptionDisable }));
@@ -324,8 +323,8 @@ describe('useSyncEncryptionSettings cleanup outcome', () => {
 });
 
 describe('classifyFailure', () => {
-    // Only the explicit verify sentinel may blame the passphrase: by the time a
-    // rotation fails, the current passphrase has already been proven (#1056).
+
+
     it('blames the passphrase only on the verify sentinel, not on rotation failures', () => {
         expect(classifyFailure(new Error('SYNC_ENCRYPTION_WRONG_PASSPHRASE'), 'generic')).toBe('wrong-passphrase');
         expect(classifyFailure(new Error('SYNC_ENCRYPTION_BACKEND_REQUIRED'), 'generic')).toBe('backend-required');
@@ -333,7 +332,7 @@ describe('classifyFailure', () => {
             new SyncEncryptionRemoteVersionUnavailableError('data.json has no strong ETag'),
             'generic',
         )).toBe('transition-incomplete');
-        // A server refused before the fence is incompatible, not a change left half done.
+
         expect(classifyFailure(
             new SyncEncryptionBackendIncompatibleError(new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json')),
             'generic',
@@ -342,7 +341,7 @@ describe('classifyFailure', () => {
             classifyFailure(new SyncEncryptionTerminalError(new SyncCryptoAuthError()), 'generic'),
         ).toBe('generic');
         expect(classifyFailure(new Error('disk full'), 'generic')).toBe('generic');
-        // Disable keeps its terminal mapping: the remedy really is rotation-first.
+
         expect(
             classifyFailure(new SyncEncryptionTerminalError(new SyncCryptoAuthError()), 'rotation-first'),
         ).toBe('rotation-first');
@@ -360,9 +359,7 @@ describe('useSyncEncryptionSettings transport refresh (#1001)', () => {
         );
         await waitFor(() => expect(result.current.state).toBe('off'));
 
-        // The activation probe (run by Sync now / Test connection) discovered an
-        // encrypted location and persisted the no-key state; when the action ends,
-        // the section must flip to the unlock UI without a failed enable first.
+
         rerender({ busy: true });
         rerender({ busy: false });
         await waitFor(() => expect(result.current.state).toBe('remote-encrypted-no-key'));

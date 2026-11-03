@@ -61,9 +61,7 @@ vi.mock('../../../lib/update-service', () => ({
 
 vi.mock('./SettingsUpdateModal', () => ({ SettingsUpdateModal: () => null }));
 
-// Only the sidebar (the search UI) and the GTD page (the collapsed card the
-// reporter's setting hides in) are real here; the rest would drag in Tauri
-// plumbing this test doesn't exercise.
+
 vi.mock('./useSyncSettings', () => ({
     useSyncSettings: () => ({
         syncPageProps: { syncError: null },
@@ -84,8 +82,7 @@ vi.mock('./SettingsIntegrationsPage', () => ({ SettingsIntegrationsPage: () => <
 
 import { SettingsView } from '../SettingsView';
 
-// The sidebar's small-screen page <select> also exposes `option` roles, so
-// results are always queried inside the results listbox.
+
 function resultOptions(): HTMLElement[] {
     const list = document.querySelector<HTMLElement>('[role="listbox"]');
     return list ? within(list).queryAllByRole('option') : [];
@@ -124,8 +121,7 @@ describe('settings search results', () => {
         }));
     });
 
-    // The #884 reporter's exact miss: a setting buried in a collapsed card,
-    // with nothing in the old search to say where it lived.
+
     it('lists the matched setting with its page and section path', () => {
         const { getByRole } = renderSettings();
 
@@ -154,19 +150,19 @@ describe('settings search results', () => {
         fireEvent.change(getByRole('combobox', { name: /search settings/i }), { target: { value: 'clean up quick add' } });
         fireEvent.click(resultOptions()[0]);
 
-        // The disclosure that hides the row opens...
+
         await waitFor(() => {
             const card = document.querySelector('[data-settings-section="captureDefault"]');
             expect(card).toHaveAttribute('aria-expanded', 'true');
         });
 
-        // ...and the row itself is marked so the eye lands on it.
+
         await waitFor(() => {
             expect(document.querySelector('[data-settings-key="quickAddAutoClean"]'))
                 .toHaveAttribute('data-settings-highlight', 'true');
         });
 
-        // Picking a result also leaves the search box empty again.
+
         expect(getByRole('combobox', { name: /search settings/i })).toHaveValue('');
     });
 

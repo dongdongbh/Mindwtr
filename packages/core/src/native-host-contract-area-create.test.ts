@@ -27,7 +27,7 @@ const task = (id: string, overrides: Partial<Task> = {}): Task => ({
     ...TASK_SYNC_SCHEMA_FIXTURE, id, title: id, createdAt: now, updatedAt: now, ...overrides,
 });
 
-// These mutations model a saved sync/other-writer change, rather than a UI-only projection.
+
 let updateSavedData: (() => void) | undefined;
 const setSavedState: typeof useTaskStore.setState = (...args) => {
     useTaskStore.setState(...args); updateSavedData?.();
@@ -72,7 +72,7 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean, recove
 afterEach(async () => { await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Area create', () => {
-    it('accepts the Manage default gray for a fresh Area and replays the exact journal after reload', async () => {
+    it.each([1, 2] as const)('accepts default gray and cold-replays an exact v%s Area creation journal', async (version) => {
         const { methods, data } = await open();
         const options = methods.getAreaCreateOptions();
         expect(options).toMatchObject({ ok: true, value: { defaultColor: '#3b82f6' } });
@@ -86,7 +86,8 @@ describe('prepared native Area create', () => {
             kind: 'fresh', effect: { area: { after: { id: requestId, color: '#94a3b8' } } },
         } } });
         if (!plan.ok || plan.value.kind !== 'prepared') throw new Error('prepare failed');
-        const frozen = { request: input, prepared: plan.value.prepared };
+        expect(plan.value.prepared.version).toBe(2);
+        const frozen = { request: input, prepared: { ...plan.value.prepared, version } };
         expect(methods.validatePreparedAreaCreate(frozen)).toMatchObject({ ok: true });
         const cold = await open(data());
         expect(cold.methods.validatePreparedAreaCreate(frozen)).toMatchObject({ ok: true });
@@ -183,7 +184,7 @@ describe('prepared native Area create', () => {
         const independentlyDeleted = project('other-deletion', { areaId: old.id, areaTitle: 'Work',
             deletedAt: '2026-09-26T12:00:00.000Z', rev: 7 });
         const restoredSection = section('planning', restoredProject.id, { deletedAt, rev: 3 });
-        // Not purged: the schema fixture's purgedAt (2026-07-14) would let the tombstone purge drop them on load once 90 days pass.
+
         const direct = task('direct', { areaId: old.id, projectId: undefined, sectionId: undefined, deletedAt, purgedAt: undefined, rev: 5 });
         const linked = task('project-task', { projectId: restoredProject.id, sectionId: restoredSection.id,
             deletedAt, purgedAt: undefined, rev: 6 });

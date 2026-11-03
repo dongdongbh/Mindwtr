@@ -1,21 +1,18 @@
-/**
- * Settings › Data's preview and result texts, the one home for both apps: React Native's backup actions hook
- * (use-sync-settings-backup-actions.ts) and the native apps' backup document (native-backup-document.ts) both build them here.
- * Each builder takes the caller's translator (RN's `tr`, the native host's template translator). Moved from the RN hook
- * byte-identical (its parity fixture: use-sync-settings-backup-actions.parity.fixtures.json).
- */
+
+
+
 import { createImportDiagnostics, formatImportDiagnostic, type ImportDiagnostic, type ImportDiagnosticTranslator } from './import-diagnostics';
 
 type Translate = ImportDiagnosticTranslator;
 type ProjectLine = { name: string; taskCount: number; areaName?: string };
 
-// A warning is RN's sentence, or a diagnostic the native backup document already built from its stored code and count.
+
 type Warning = string | ImportDiagnostic;
 const warningLines = (warnings: readonly Warning[], t: Translate): string[] => warnings
     .map((warning) => typeof warning === 'string' ? createImportDiagnostics([warning], 'warning')[0] : warning)
     .map((diagnostic) => formatImportDiagnostic(diagnostic, t));
 
-/** The first four projects (`• [area / ]name: count`), then how many more. */
+
 const projectLines = (projects: readonly ProjectLine[], t: Translate, withArea: boolean): string[] => {
     const lines = projects
         .slice(0, 4)
@@ -26,13 +23,10 @@ const projectLines = (projects: readonly ProjectLine[], t: Translate, withArea: 
     return lines;
 };
 
-// Drops the absent lines only: an '' is the blank line before a project list or the warnings (RN dropped it with filter(Boolean)).
+
 const join = (details: (string | null)[]): string => details.filter((line) => line !== null).join('\n');
 
-/**
- * Restore and merge preview the same file identically; only the sentence about what the action does to local data differs
- * ([effect]).
- */
+
 export function buildBackupPreviewSummary(validation: {
     metadata?: { backupAt?: string | null; fileName?: string | null; taskCount?: number; projectCount?: number } | null;
     diagnostics?: readonly ImportDiagnostic[];
@@ -133,7 +127,7 @@ export function buildMindwtrCsvPreviewSummary(preview: {
     ]);
 }
 
-/** Merge backup's result: what changed, then the snapshot its Undo restores. */
+
 export const buildMergeResultMessage = (merged: { added: number; updated: number }, snapshotName: string, t: Translate): string => [
     t('settings.mergeBackupSummary', { addedCount: merged.added, updatedCount: merged.updated }),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
@@ -143,18 +137,18 @@ export const buildTodoistResultMessage = (result: { importedTaskCount: number; i
     snapshotName: string, t: Translate): string => join([
     t('settings.backupMobile.importedTodoistTasksIntoProjects', { taskCount: result.importedTaskCount, projectCount: result.importedProjectCount }),
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.subtasksBecameChecklistItems', { subtaskCount: result.importedChecklistItemCount }) : null,
+    ...warningLines(result.warnings, t),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
-    ...(result.warnings.length > 0 ? ['', ...warningLines(result.warnings, t)] : []),
 ]);
 
-/** TickTick's and DGT GTD's result (the same lines). */
+
 export const buildAreaImportResultMessage = (result: {
     importedTaskCount: number; importedProjectCount: number; importedAreaCount: number; importedChecklistItemCount: number; warnings: readonly Warning[];
 }, snapshotName: string, t: Translate): string => join([
     t('settings.backupMobile.importedTaskProjectAreaCounts', { taskCount: result.importedTaskCount, projectCount: result.importedProjectCount, areaCount: result.importedAreaCount }),
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.checklistItemsPreserved', { checklistItemCount: result.importedChecklistItemCount }) : null,
+    ...warningLines(result.warnings, t),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
-    ...(result.warnings.length > 0 ? ['', ...warningLines(result.warnings, t)] : []),
 ]);
 
 export const buildOmniFocusResultMessage = (result: {
@@ -165,8 +159,8 @@ export const buildOmniFocusResultMessage = (result: {
     result.importedAreaCount > 0 ? t('settings.backupMobile.omnifocusAreasCreated', { areaCount: result.importedAreaCount }) : null,
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.nestedTasksBecameChecklistItems', { taskCount: result.importedChecklistItemCount }) : null,
     result.importedStandaloneTaskCount > 0 ? t('settings.backupMobile.tasksStayedOutsideProjects', { taskCount: result.importedStandaloneTaskCount }) : null,
+    ...warningLines(result.warnings, t),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
-    ...(result.warnings.length > 0 ? ['', ...warningLines(result.warnings, t)] : []),
 ]);
 
 export const buildMindwtrCsvResultMessage = (result: {
@@ -180,6 +174,6 @@ export const buildMindwtrCsvResultMessage = (result: {
         areaCount: result.importedAreaCount,
     }),
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.checklistItemsPreserved', { checklistItemCount: result.importedChecklistItemCount }) : null,
+    ...warningLines(result.warnings, t),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
-    ...(result.warnings.length > 0 ? ['', ...warningLines(result.warnings, t)] : []),
 ]);

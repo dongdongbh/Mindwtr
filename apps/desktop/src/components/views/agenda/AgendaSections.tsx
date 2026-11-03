@@ -1,3 +1,4 @@
+import { getProjectAccentColor, type Area } from '@mindwtr/core';
 import type { ReactNode } from 'react';
 import { safeFormatDate, type Project, tFallback } from '@mindwtr/core';
 import { ChevronDown, ChevronRight, Folder, type LucideIcon } from 'lucide-react';
@@ -62,6 +63,7 @@ type AgendaProjectSectionProps = {
     onToggle: () => void;
     onProjectPress: (projectId: string) => void;
     projects: Project[];
+    areaById?: Map<string, Area>;
     t: (key: string) => string;
     title: string;
 };
@@ -74,6 +76,7 @@ export function AgendaProjectSection({
     onToggle,
     onProjectPress,
     projects,
+    areaById = new Map(),
     t,
     title,
 }: AgendaProjectSectionProps) {
@@ -102,7 +105,7 @@ export function AgendaProjectSection({
                         )}
                     >
                         <div className="flex items-center gap-2">
-                            <Folder className="h-4 w-4" style={{ color: project.color }} />
+                            <Folder className="h-4 w-4" style={{ color: getProjectAccentColor(project, areaById) }} />
                             <span className="text-sm font-medium text-foreground">{project.title}</span>
                             <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
                                 {t(`status.${project.status}`)}

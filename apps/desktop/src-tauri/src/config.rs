@@ -94,9 +94,6 @@ fn is_valid_calendar_url(raw: &str) -> bool {
         || calendar_file_url_to_path(trimmed).is_some()
 }
 
-/// Resolves a calendar URL to a path only when it is one of the stored
-/// subscriptions, so the webview cannot turn the read command into an
-/// arbitrary-file-read primitive.
 fn configured_calendar_file_path(raw: Option<&str>, url: &str) -> Option<PathBuf> {
     let trimmed = url.trim();
     let calendars = serde_json::from_str::<Vec<ExternalCalendarSubscription>>(raw?).ok()?;
@@ -130,12 +127,7 @@ pub(crate) fn read_config_toml(path: &Path) -> AppConfigToml {
     let Ok(content) = fs::read_to_string(path) else {
         return AppConfigToml::default();
     };
-    // A file that isn't valid TOML falls back to default() here — same as a
-    // missing file — rather than the old hand-rolled parser's per-line
-    // recovery. On its own that would be a silent-loss regression the moment
-    // a caller writes the "empty" config back over the real file; see the
-    // guard in `write_config_toml_with_header` below, which is what actually
-    // keeps that from happening.
+
     toml::from_str(&content).unwrap_or_default()
 }
 
@@ -149,9 +141,6 @@ fn write_secrets_toml(path: &Path, config: &AppConfigToml) -> Result<(), String>
     write_secrets_toml_with_restrict(path, config, restrict_to_owner)
 }
 
-/// Restricts a path holding credentials to owner-only access. No-op on
-/// Windows, where file ACLs are not expressible through
-/// `std::fs::Permissions`.
 #[cfg(unix)]
 pub(crate) fn restrict_to_owner(path: &Path, mode: u32) -> Result<(), String> {
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|e| e.to_string())
@@ -188,9 +177,6 @@ fn sync_config_parent_directory(parent: &Path) -> Result<(), String> {
 
 #[cfg(not(unix))]
 fn sync_config_parent_directory(_parent: &Path) -> Result<(), String> {
-    // Windows has no documented equivalent of fsyncing a directory. Its
-    // namespace barrier lives in `publish_atomic_temp_file` (and the durable
-    // deletion path) via MOVEFILE_WRITE_THROUGH instead.
     Ok(())
 }
 
@@ -212,7 +198,7 @@ fn windows_move_file_write_through(source: &Path, destination: &Path) -> Result<
 
     let source = windows_path_wide(source);
     let destination = windows_path_wide(destination);
-    // SAFETY: both buffers are NUL-terminated and remain alive for the call.
+
     if unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -237,15 +223,11 @@ fn publish_atomic_temp_file(
 
     let source_path = temp_file.path().to_path_buf();
     let source = windows_path_wide(&source_path);
-    // tempfile marks named files temporary on Windows. Normalize the attribute
-    // before publishing so the committed file has ordinary persistence rules.
-    // SAFETY: `source` is NUL-terminated and alive for the call.
+
     if unsafe { SetFileAttributesW(source.as_ptr(), FILE_ATTRIBUTE_NORMAL) } == 0 {
         return Err(io::Error::last_os_error().to_string());
     }
     if let Err(error) = windows_move_file_write_through(&source_path, destination) {
-        // Best effort: preserve tempfile's cleanup behavior after a failed move.
-        // SAFETY: `source` is NUL-terminated and alive for the call.
         let _ = unsafe { SetFileAttributesW(source.as_ptr(), FILE_ATTRIBUTE_TEMPORARY) };
         return Err(error);
     }
@@ -268,10 +250,6 @@ fn sync_backend_state_path_from_secrets_path(secrets_path: &Path) -> PathBuf {
     sync_backend_state_path_in(secrets_path.parent().unwrap_or_else(|| Path::new(".")))
 }
 
-// The single "resolve, migrating if needed" seam. Every producer of the state
-// path goes through here, so a local API/CLI/MCP process that opens an
-// un-migrated profile migrates it before its own first read - including the
-// bare `.exists()` probes that never parse the file.
 fn sync_backend_state_path_in(dir: &Path) -> PathBuf {
     let path = dir.join(SYNC_BACKEND_STATE_FILE_NAME);
     let legacy = dir.join(LEGACY_SYNC_BACKEND_STATE_FILE_NAME);
@@ -281,12 +259,6 @@ fn sync_backend_state_path_in(dir: &Path) -> PathBuf {
     path
 }
 
-// Both names can exist at once after a crash mid-migration, or after a
-// downgrade wrote the old name again. Prefer the file that still validates,
-// and between two valid ones the newer generation - the same counter every
-// state write bumps. The migration is a rename, never copy-then-delete, so no
-// window leaves zero files, and the legacy file is removed only once a valid
-// successor is confirmed on disk.
 fn migrate_legacy_sync_backend_state(legacy: &Path, path: &Path) {
     let legacy_state = read_dropbox_credential_state_file(legacy).ok().flatten();
     let current_state = read_dropbox_credential_state_file(path).ok().flatten();
@@ -298,9 +270,7 @@ fn migrate_legacy_sync_backend_state(legacy: &Path, path: &Path) {
         }
         (Some(_), _) => fs::rename(legacy, path).map_err(|error| error.to_string()),
         (None, Some(_)) => remove_file_durably(legacy),
-        // Neither file validates: keep the legacy bytes for inspection and let
-        // the caller re-derive state from the config pair as it would for a
-        // profile that never had one.
+
         (None, None) => return,
     };
     if let Err(error) = outcome {
@@ -540,7 +510,11 @@ fn write_owner_only_atomic_text(path: &Path, content: &str) -> Result<(), String
     )
 }
 
-fn write_atomic_text(path: &Path, content: &str, owner_only: bool) -> Result<(), String> {
+pub(crate) fn write_atomic_text(
+    path: &Path,
+    content: &str,
+    owner_only: bool,
+) -> Result<(), String> {
     write_atomic_text_with_hooks(
         path,
         content,
@@ -614,8 +588,7 @@ fn securely_clear_windows_deletion_tombstone(path: &Path) -> Result<(), String> 
         .as_file()
         .sync_all()
         .map_err(|error| error.to_string())?;
-    // If a crash resurrects the final unlink, it can reveal only this durable
-    // empty replacement, never the removed credential bytes.
+
     publish_atomic_temp_file(empty_file, path)?;
     fs::remove_file(path).map_err(|error| error.to_string())
 }
@@ -633,9 +606,6 @@ fn remove_config_file_for_platform(path: &Path) -> Result<bool, String> {
         return Ok(false);
     }
 
-    // Windows has no documented directory-fsync primitive. A same-directory
-    // write-through rename makes removal of the canonical name durable. The
-    // tombstone is then durably replaced with empty content before unlinking.
     windows_move_file_write_through(path, &tombstone_path)?;
     securely_clear_windows_deletion_tombstone(&tombstone_path)?;
     Ok(true)
@@ -812,8 +782,6 @@ where
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     restrict(parent, 0o700)?;
     if path.exists() {
-        // A pre-fix file may already be too broad. Tighten it before reading
-        // or replacing it so this write cannot extend the exposure window.
         restrict(path, 0o600)?;
     }
     let content = serialize_config_toml_with_header(path, config, "# Mindwtr desktop secrets")?;
@@ -822,8 +790,7 @@ where
         .suffix(".tmp")
         .tempfile_in(parent)
         .map_err(|e| e.to_string())?;
-    // Protect the empty file before the first credential byte is written.
-    // Even a permissive process umask therefore cannot expose plaintext.
+
     restrict(temp_file.path(), 0o600)?;
     temp_file
         .write_all(content.as_bytes())
@@ -835,12 +802,6 @@ where
 }
 
 fn preflight_existing_config_toml(path: &Path) -> Result<(), String> {
-    // Refuse to overwrite a file whose current on-disk content this build
-    // cannot parse. Every read-modify-write call site reads via
-    // `read_config_toml`, which silently falls back to `default()` on a
-    // parse failure; without this guard, writing that "empty" config back
-    // would permanently erase whatever was actually on disk. A missing file
-    // (first write) is not a failure and is not blocked.
     match fs::read_to_string(path) {
         Ok(existing) => {
             if !existing.trim().is_empty() && toml::from_str::<AppConfigToml>(&existing).is_err() {
@@ -885,10 +846,6 @@ fn write_config_toml_with_header(
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
-/// Converts an `AppConfigToml` to its generic JSON-object view. Both
-/// `merge_config` and `split_config_for_secrets` shuffle fields between two
-/// `AppConfigToml` values by key name instead of restating the field roster,
-/// so a new field only ever needs to be declared once, on the struct itself.
 fn config_as_object(config: &AppConfigToml) -> Map<String, Value> {
     match serde_json::to_value(config).expect("AppConfigToml serializes infallibly") {
         Value::Object(map) => map,
@@ -924,9 +881,6 @@ fn read_config_before_legacy_secret_migration(
     Ok(config)
 }
 
-/// Result-returning read for capabilities that must revoke access when the
-/// device configuration cannot be verified. Caller owns the outer RMW lock;
-/// migration/publication take only the distinct credential lock internally.
 pub(crate) fn read_config_verified(app: &tauri::AppHandle) -> Result<AppConfigToml, String> {
     let mut config = read_config_before_legacy_secret_migration(app)?;
     migrate_legacy_secrets(app, &mut config)?;
@@ -942,19 +896,12 @@ pub(crate) fn read_config(app: &tauri::AppHandle) -> AppConfigToml {
         }
     };
     if let Err(error) = migrate_legacy_secrets(app, &mut config) {
-        // Preserve this infallible legacy accessor's existing behavior while
-        // callers of read_config_verified can fail closed on publication.
         log::warn!("Failed to clear migrated plaintext secrets from config.toml: {error}");
         emit_keyring_fallback_warning(app, "Migrated secrets");
     }
     config
 }
 
-// The one place to check when adding a credential field: list it here and
-// `split_config_for_secrets` keeps it out of the plaintext config.toml. This
-// is real policy (which fields may never touch the public file), not
-// derivable from the struct itself, so it stays its own table rather than an
-// attribute a refactor could quietly drop.
 const SECRET_FIELDS: &[&str] = &[
     "webdav_password",
     "cloud_token",
@@ -1053,14 +1000,6 @@ fn recover_config_publication_unlocked(
         &state.config_fingerprint,
         &state.secrets_fingerprint,
     )? {
-        // No transaction is pending, so this mismatch is an out-of-band edit —
-        // the pending/rollback branch above owns every torn transactional
-        // write. Hand-editing config.toml/secrets.toml is a legitimate
-        // (portable-mode) workflow that predates generation tracking; refusing
-        // forever bricked the app at startup with no remedy (#1064). Adopt the
-        // edit as the new committed generation as long as both files still
-        // parse strictly; the per-service credential bindings keep guarding
-        // endpoint/credential pairing on their own fingerprints regardless.
         read_config_toml_optional_strict(config_path).map_err(|error| {
             format!(
                 "Config file {} was modified outside the app and no longer reads: {error}",
@@ -1220,46 +1159,17 @@ where
     Ok(())
 }
 
-// Poison-recovering (I1): a panic while holding this must not permanently
-// block every future config read/write. Matches the codebase's established
-// recovery shape (local_api.rs's LocalApiServerState lock) rather than
-// failing the caller — the protected data is a Mutex<()>, so "recovering"
-// just means proceeding; there's no partially-mutated state to distrust.
 fn lock_dropbox_credential_state() -> Result<std::sync::MutexGuard<'static, ()>, String> {
     Ok(DROPBOX_CREDENTIAL_STATE_MUTEX
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()))
 }
 
-// Distinct from lock_dropbox_credential_state: that one guards individual
-// file operations for microseconds each (read_config/write_config_files each
-// take-and-release it internally). This one is held by a CALLER across a
-// whole read-config-mutate-write span (e.g. write_local_api_config,
-// clear_sync_path, set_desktop_rendering_config, and B3's config.rs setters)
-// — those commands now run off the main thread, and each's
-// read_config()+write_config_files() pair used to be serialized only by
-// accident, by never actually running concurrently. Never call this while
-// already holding it — that's the only illegal nesting.
-//
-// LOCK ORDERING: this mutex may always be taken around a call to
-// read_config()/write_config_files()/read_bound_credential()/
-// update_bound_credential()/read_dropbox_credential_state()/
-// update_dropbox_credential_state()/read_sync_backend_publication_state()/
-// publish_sync_backend_paths_with()/read_sync_configuration_pair() — all of
-// those internally take-and-release lock_dropbox_credential_state, a
-// different mutex, so this one nests around them safely (including through
-// read_config()'s own conditional migrate_legacy_secrets() call, which
-// itself calls write_config_files() — nesting the SAME mutex there would
-// deadlock, which is why this is a second, distinct lock rather than reusing
-// lock_dropbox_credential_state). Never acquire lock_dropbox_credential_state
-// directly and then try to also take this one inside that scope — always the
-// other order (this one outermost, if both are needed).
 fn config_read_modify_write_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
-// Poison-recovering (I1) — same rationale as lock_dropbox_credential_state above.
 pub(crate) fn lock_config_read_modify_write() -> Result<std::sync::MutexGuard<'static, ()>, String>
 {
     Ok(config_read_modify_write_lock()
@@ -1329,24 +1239,18 @@ fn write_config_files_with_backend_authority_unlocked_with_hook<AfterStage>(
 where
     AfterStage: FnMut(ConfigPublicationStage) -> Result<(), String>,
 {
-    // These two files form one logical configuration document. Validate both
-    // before mutating either so a corrupt or unreadable secrets file cannot be
-    // interpreted as an empty split and deleted after config.toml is changed.
     preflight_existing_config_toml(config_path)?;
     preflight_existing_config_toml(secrets_path)?;
     let mut sanitized = config.clone();
+    let device_pair = device_config_pair_for(config_path);
+    if device_pair.is_some() {
+        copy_device_config_keys(&mut sanitized, &AppConfigToml::default(), true);
+    }
     let state_path = sync_backend_state_path_from_secrets_path(secrets_path);
     if let Some(state) = read_dropbox_credential_state_file(&state_path)? {
-        // Once the dedicated state file exists it is the sole authority for
-        // Dropbox fallback bytes. A stale whole-config snapshot must never
-        // write either legacy field back into secrets.toml.
         sanitized.dropbox_tokens = None;
         sanitized.dropbox_promotion_journal = None;
         if preserve_dedicated_backend {
-            // Generic setters carry a whole AppConfigToml snapshot even though
-            // they own only one field. Preserve the dedicated backend marker so
-            // a snapshot captured before an atomic backend publication cannot
-            // clobber the newly committed raw backend after the lock is released.
             let marker = normalize_backend(state.sync_backend_marker.trim())
                 .expect("validated Dropbox backend marker");
             sanitized.sync_backend = Some(marker.to_string());
@@ -1370,7 +1274,30 @@ where
         &public_content,
         secrets_content.as_deref(),
         after_stage,
-    )
+    )?;
+    if let Some((device_config, device_secrets)) = device_pair {
+        publish_device_config_keys(&device_config, &device_secrets, config);
+    }
+    Ok(())
+}
+
+fn publish_device_config_keys(device_config: &Path, device_secrets: &Path, config: &AppConfigToml) {
+    let result = read_config_files_verified_unlocked(device_config, device_secrets).and_then(
+        |mut device| {
+            if copy_device_config_keys(&mut device, config, false) {
+                write_config_files_with_backend_authority_unlocked(
+                    device_config,
+                    device_secrets,
+                    &device,
+                    true,
+                )?;
+            }
+            Ok(())
+        },
+    );
+    if let Err(error) = result {
+        log::warn!("Failed to save device-level settings to the default workspace: {error}");
+    }
 }
 
 fn endpoint_fingerprint(service: CredentialService, config: &AppConfigToml) -> String {
@@ -1900,7 +1827,63 @@ fn read_config_files_unlocked(
         config.dropbox_tokens = None;
         config.dropbox_promotion_journal = None;
     }
+    if let Some((device_config, device_secrets)) = device_config_pair_for(config_path) {
+        match read_config_files_verified_unlocked(&device_config, &device_secrets) {
+            Ok(device) => {
+                copy_device_config_keys(&mut config, &device, true);
+            }
+            Err(error) => log::warn!("Failed to read device-level settings: {error}"),
+        }
+    }
     Ok(config)
+}
+
+pub(crate) fn is_device_config_key(key: &str) -> bool {
+    matches!(
+        key,
+        "disable_hardware_acceleration" | "autostart_startup_flag_migrated"
+    ) || key.starts_with("app_lock_")
+}
+
+fn device_config_pair_for(config_path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let device_dir = crate::workspaces::device_dir_of_workspace_dir(config_path.parent()?)?;
+    Some((
+        device_dir.join(CONFIG_FILE_NAME),
+        device_dir.join(SECRETS_FILE_NAME),
+    ))
+}
+
+fn copy_device_config_keys(
+    target: &mut AppConfigToml,
+    source: &AppConfigToml,
+    include_absent: bool,
+) -> bool {
+    let source = config_as_object(source);
+    let mut map = config_as_object(target);
+    let keys: Vec<String> = map
+        .keys()
+        .chain(source.keys())
+        .filter(|key| is_device_config_key(key))
+        .cloned()
+        .collect();
+    let mut changed = false;
+    for key in keys {
+        let value = source.get(&key).filter(|value| !value.is_null()).cloned();
+        if value.is_none() && !include_absent {
+            continue;
+        }
+        if map.get(&key).filter(|value| !value.is_null()) != value.as_ref() {
+            changed = true;
+            match value {
+                Some(value) => map.insert(key, value),
+                None => map.remove(&key),
+            };
+        }
+    }
+    if changed {
+        *target = object_as_config(map);
+    }
+    changed
 }
 
 fn load_or_migrate_dropbox_credential_state_unlocked(
@@ -1919,9 +1902,6 @@ fn load_or_migrate_dropbox_credential_state_paths_unlocked(
     secrets_path: &Path,
     state_path: &Path,
 ) -> Result<DropboxCredentialStateFile, String> {
-    // Dropbox's dedicated marker is layered on top of the public/private
-    // config pair. Recover that lower-level transaction before either reading
-    // the raw backend or deriving legacy state from it.
     recover_config_publication_unlocked(config_path, secrets_path)?;
     if let Some(state) = read_dropbox_credential_state_file(state_path)? {
         return Ok(state);
@@ -1944,9 +1924,7 @@ fn load_or_migrate_dropbox_credential_state_paths_unlocked(
         sync_backend_marker: backend,
         ..DropboxCredentialStateFile::default()
     };
-    // Publish the dedicated authority before removing either legacy field.
-    // A crash at this point leaves duplicate bytes, but state-file existence
-    // makes them permanently non-authoritative on the next read.
+
     write_dropbox_credential_state_file(state_path, &state)?;
     write_config_files_unlocked(config_path, secrets_path, &config)?;
     Ok(state)
@@ -2059,17 +2037,62 @@ fn migrate_legacy_secrets(
         }
     }
     if migrated {
-        // The secrets are in the keyring now, but this write is what removes
-        // the plaintext copies from config.toml. Swallowing its failure left
-        // them on disk silently, to be re-read (and re-migrated) every launch.
-        // The legacy accessor warns; strict capabilities revoke on failure.
         write_config_files(&get_config_path(app), &get_secrets_path(app), config)?;
     }
     Ok(())
 }
 
 fn keyring_service(app: &tauri::AppHandle) -> String {
-    format!("{}:secrets", app.config().identifier)
+    keyring_service_name(
+        &app.config().identifier,
+        crate::workspaces::active_workspace_id(),
+    )
+}
+
+pub(crate) fn keyring_service_name(identifier: &str, workspace: Option<&str>) -> String {
+    match workspace {
+        Some(id) => format!("{identifier}:secrets:{id}"),
+        None => format!("{identifier}:secrets"),
+    }
+}
+
+const WORKSPACE_KEYRING_KEYS: &[&str] = &[
+    KEYRING_WEB_DAV_PASSWORD,
+    KEYRING_CLOUD_TOKEN,
+    KEYRING_DROPBOX_TOKENS,
+    KEYRING_AI_OPENAI,
+    KEYRING_AI_ANTHROPIC,
+    KEYRING_AI_GEMINI,
+    KEYRING_EMAIL_CAPTURE_PASSWORD,
+    crate::sync::KEYRING_DROPBOX_PROMOTION_JOURNAL,
+    crate::sync_encryption::KEYRING_SYNC_ENCRYPTION_KEY,
+];
+
+pub(crate) fn delete_workspace_keyring_entries(app: &tauri::AppHandle, workspace: &str) {
+    if !keyring_enabled() {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    if crate::install::is_flatpak() {
+        return;
+    }
+    let identifier = &app.config().identifier;
+    let service = keyring_service_name(identifier, Some(workspace));
+    let config_path = crate::workspaces::workspace_dir(
+        &crate::storage::get_device_config_dir(app),
+        Some(workspace),
+    )
+    .join(CONFIG_FILE_NAME);
+    let gmail_vault = crate::gmail_capture::vault_name(identifier, &config_path);
+    for key in WORKSPACE_KEYRING_KEYS
+        .iter()
+        .copied()
+        .chain(std::iter::once(gmail_vault.as_str()))
+    {
+        if let Ok(entry) = Entry::new(&service, key) {
+            let _ = entry.delete_password();
+        }
+    }
 }
 
 fn keyring_entry(app: &tauri::AppHandle, key: &str) -> Result<Entry, String> {
@@ -2129,12 +2152,6 @@ pub(crate) fn set_keyring_secret(
     }
 }
 
-// Held across the whole read+possible-migrate-write (B3): the legacy-key
-// migration branch below writes config.toml, and read_config/write_config_files
-// only lock/unlock lock_dropbox_credential_state briefly on their own — a
-// different, DISTINCT mutex from this one (nesting the same mutex here would
-// deadlock the moment read_config's own migrate_legacy_secrets fires; see
-// lock_config_read_modify_write's definition).
 #[tauri::command(async)]
 pub(crate) fn get_ai_key(app: tauri::AppHandle, provider: String) -> Option<String> {
     let _config_guard = lock_config_read_modify_write().ok()?;
@@ -2156,9 +2173,7 @@ pub(crate) fn get_ai_key(app: tauri::AppHandle, provider: String) -> Option<Stri
                 "gemini" => config.ai_key_gemini = None,
                 _ => {}
             }
-            // Same as migrate_legacy_secrets: this write is what removes the
-            // plaintext key. The command's Option return can't carry the
-            // failure — the key itself is fine — so warn instead of dropping it.
+
             if let Err(error) =
                 write_config_files(&get_config_path(&app), &get_secrets_path(&app), &config)
             {
@@ -2180,7 +2195,6 @@ fn ai_key_label(provider: &str) -> &'static str {
     }
 }
 
-// Held across the whole read+mutate+write (B3) — see lock_config_read_modify_write.
 #[tauri::command(async)]
 pub(crate) fn set_ai_key(
     app: tauri::AppHandle,
@@ -2211,8 +2225,7 @@ pub(crate) fn set_ai_key(
                 "gemini" => config.ai_key_gemini = None,
                 _ => {}
             }
-            // Propagated, like the keyring-unavailable branch below: a failure
-            // here leaves the previous plaintext key in config.toml.
+
             write_config_files(&get_config_path(&app), &get_secrets_path(&app), &config)
         }
         Err(_) => {
@@ -2282,9 +2295,8 @@ fn sync_configuration_snapshot_value(
             .as_deref()
             .and_then(|value| normalize_backend(value.trim()))
             .unwrap_or("off"),
-        // Use the raw stored path here. The normal getter validates and
-        // canonicalizes the directory, which would lose a dormant path that is
-        // temporarily unavailable precisely when rollback needs to preserve it.
+
+
         "syncPath": config.sync_path.clone().unwrap_or_default(),
         "webdav": {
             "url": config.webdav_url.clone().unwrap_or_default(),
@@ -2339,10 +2351,6 @@ fn read_snapshot_config_paths(
     let secrets = read_config_toml_optional_strict(secrets_path);
     match secrets {
         Ok(secrets) => {
-            // Shipped pre-split builds could leave these fields in config.toml.
-            // Prefer the private split when present, but retain the readable
-            // public legacy value so an exact rollback snapshot does not erase
-            // it merely because migration has not run yet.
             let webdav_password = Ok(secrets.webdav_password.clone().or(public_webdav_password));
             let cloud_token = Ok(secrets.cloud_token.clone().or(public_cloud_token));
             merge_config(&mut config, secrets);
@@ -2381,9 +2389,7 @@ where
     )?;
     let (mut config, webdav_fallback, cloud_fallback) =
         read_snapshot_config_paths(config_path, secrets_path)?;
-    // The dedicated marker is the commit authority. Project it explicitly so
-    // even a legacy secrets.toml containing a stray sync_backend field cannot
-    // override the reconciled public value in the renderer snapshot.
+
     config.sync_backend = Some(
         normalize_backend(state.sync_backend_marker.trim())
             .expect("validated Dropbox backend marker")
@@ -2466,10 +2472,6 @@ fn read_sync_backend_publication_state_paths_unlocked_with<AfterRawRead>(
 where
     AfterRawRead: FnOnce(),
 {
-    // Initial migration derives the marker from the existing raw backend, so
-    // an upgraded installation keeps its prior backend. After that point the
-    // dedicated marker is the commit authority: a process that stopped after
-    // publishing raw config but before publishing the marker did not commit.
     let state = load_or_migrate_dropbox_credential_state_paths_unlocked(
         config_path,
         secrets_path,
@@ -2541,9 +2543,6 @@ where
     let normalized =
         normalize_backend(backend.trim()).ok_or_else(|| "Invalid sync backend".to_string())?;
 
-    // Establish the dedicated authority first, then reread the latest complete
-    // config while still holding the caller's mutex. Only the backend field is
-    // changed, so another native setter's unrelated update cannot be lost.
     load_or_migrate_dropbox_credential_state_paths_unlocked(config_path, secrets_path, state_path)?;
     let mut config = read_config_files_verified_unlocked(config_path, secrets_path)?;
     config.sync_backend = Some(normalized.to_string());
@@ -2685,10 +2684,6 @@ fn read_obsidian_config_payload(config: &AppConfigToml) -> ObsidianConfigPayload
         .unwrap_or_default()
 }
 
-/// Every Obsidian write and the filesystem-scope grant are bound to the vault
-/// the app has persisted: a renderer-supplied vault path is checked against it
-/// rather than trusted, so neither can be pointed at an arbitrary folder.
-/// Pure read, no write branch (B3) — no lock needed.
 pub(crate) fn assert_configured_obsidian_vault(
     app: &tauri::AppHandle,
     vault_path: &str,
@@ -2708,11 +2703,6 @@ fn expand_obsidian_payload_scope(app: &tauri::AppHandle, payload: &ObsidianConfi
     expand_tauri_fs_scope(app, &PathBuf::from(vault_path));
 }
 
-// I1: the repair write below only holds lock_dropbox_credential_state, a
-// different mutex from lock_config_read_modify_write — an RMW-lock holder's
-// read..write gap could land a torn-publication repair here and then have it
-// silently reverted by the RMW writer's stale-snapshot write. Outer RMW lock
-// closes that; see lock_config_read_modify_write's LOCK ORDERING comment.
 #[tauri::command(async)]
 pub(crate) fn get_sync_backend(app: tauri::AppHandle) -> Result<String, String> {
     let _config_guard = lock_config_read_modify_write()?;
@@ -2725,15 +2715,12 @@ pub(crate) fn get_sync_backend(app: tauri::AppHandle) -> Result<String, String> 
     Ok(marker.to_string())
 }
 
-// I1: same race as get_sync_backend above — read_dropbox_credential_state's
-// migration write only holds lock_dropbox_credential_state, not the RMW lock.
 #[tauri::command(async)]
 pub(crate) fn get_sync_cloud_provider(app: tauri::AppHandle) -> Result<String, String> {
     let _config_guard = lock_config_read_modify_write()?;
     Ok(read_dropbox_credential_state(&app)?.cloud_provider)
 }
 
-// Same as get_sync_cloud_provider above (I1) — identical migration-write path.
 #[tauri::command(async)]
 pub(crate) fn get_sync_cloud_provider_state(app: tauri::AppHandle) -> Result<Value, String> {
     let _config_guard = lock_config_read_modify_write()?;
@@ -2744,9 +2731,6 @@ pub(crate) fn get_sync_cloud_provider_state(app: tauri::AppHandle) -> Result<Val
     }))
 }
 
-// I1: read_sync_configuration_pair calls the same torn-publication repair
-// path as get_sync_backend internally (read_sync_backend_publication_state_
-// paths_unlocked_with) — not a pure read; same race, same fix.
 #[tauri::command(async)]
 pub(crate) fn get_sync_configuration_snapshot(
     app: tauri::AppHandle,
@@ -2776,15 +2760,16 @@ pub(crate) fn get_sync_configuration_snapshot(
     ))
 }
 
-// I1: publish_sync_backend_paths_with only holds lock_dropbox_credential_state
-// for its own read+mutate+write, so an RMW-lock holder's gap could still land
-// a concurrent write here and lose it (or lose this one) — outer RMW lock.
 #[tauri::command(async)]
 pub(crate) fn set_sync_backend(app: tauri::AppHandle, backend: String) -> Result<bool, String> {
     let _config_guard = lock_config_read_modify_write()?;
     let Some(normalized) = normalize_backend(backend.trim()) else {
         return Err("Invalid sync backend".to_string());
     };
+
+    if normalized == "cloudkit" && crate::workspaces::active_workspace_id().is_some() {
+        return Err("iCloud sync is available only in the default workspace".to_string());
+    }
     publish_sync_backend_paths_with(
         &get_config_path(&app),
         &get_secrets_path(&app),
@@ -2795,13 +2780,6 @@ pub(crate) fn set_sync_backend(app: tauri::AppHandle, backend: String) -> Result
     Ok(true)
 }
 
-// update_dropbox_credential_state/read_dropbox_credential_state each hold
-// lock_dropbox_credential_state internally for their own file, but the tail
-// config.sync_cloud_provider write below is a separate file with no lock of
-// its own — held across the WHOLE body (B3) so no other config.rs setter can
-// interleave. Different mutex from lock_dropbox_credential_state, so nesting
-// it around calls that take that one internally is deadlock-safe (see
-// lock_config_read_modify_write's definition).
 #[tauri::command(async)]
 pub(crate) fn set_sync_cloud_provider(
     app: tauri::AppHandle,
@@ -2811,9 +2789,7 @@ pub(crate) fn set_sync_cloud_provider(
     let Some(normalized) = normalize_sync_cloud_provider(provider.trim()) else {
         return Err("Invalid cloud sync provider".to_string());
     };
-    // The dedicated marker is recovery authority and must move first. The
-    // renderer only activates `cloud` after this command returns and reads the
-    // provider back exactly.
+
     update_dropbox_credential_state(&app, |state| {
         state.cloud_provider = normalized.to_string();
         state.cloud_provider_authority = "native".to_string();
@@ -2830,14 +2806,12 @@ pub(crate) fn set_sync_cloud_provider(
     Ok(true)
 }
 
-// Pure read, no write branch (B3) — no lock needed.
 #[tauri::command(async)]
 pub(crate) fn get_obsidian_config(app: tauri::AppHandle) -> Result<Value, String> {
     let config = read_config(&app);
     serde_json::to_value(read_obsidian_config_payload(&config)).map_err(|e| e.to_string())
 }
 
-// Held across the whole read+mutate+write (B3) — see lock_config_read_modify_write.
 #[tauri::command(async)]
 pub(crate) fn set_obsidian_config(app: tauri::AppHandle, config: Value) -> Result<Value, String> {
     let _config_guard = lock_config_read_modify_write()?;
@@ -2855,11 +2829,6 @@ pub(crate) fn set_obsidian_config(app: tauri::AppHandle, config: Value) -> Resul
     serde_json::to_value(payload).map_err(|e| e.to_string())
 }
 
-// A read of the persisted vault plus a Tauri fs-scope grant (B3) — no lock
-// needed. The grant is recursive and lasts the whole app lifetime, so it is
-// bound to the configured vault: the renderer only ever re-grants the folder
-// it already had scanning access to (`set_obsidian_config` grants the same
-// path when the vault is saved).
 #[tauri::command(async)]
 pub(crate) fn expand_obsidian_vault_scope(
     app: tauri::AppHandle,
@@ -2883,15 +2852,13 @@ pub(crate) struct DetectedObsidianVault {
 
 fn obsidian_registry_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    // Obsidian keeps a registry of every vault it has opened in
-    // <config-dir>/obsidian/obsidian.json on all three platforms.
+
     if let Some(config_dir) = dirs::config_dir() {
         paths.push(config_dir.join("obsidian").join("obsidian.json"));
     }
     #[cfg(target_os = "linux")]
     {
         if let Some(home) = dirs::home_dir() {
-            // Flatpak-packaged Obsidian keeps its config inside the sandbox home.
             paths.push(home.join(".var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json"));
         }
     }
@@ -2915,8 +2882,6 @@ pub(crate) fn parse_obsidian_vault_registry(contents: &str) -> Vec<String> {
     paths
 }
 
-// Off the UI thread: a stale registry entry can point at an unmounted network
-// share, where the `is_dir` probe below blocks. Read-only, so no locking.
 #[tauri::command(async)]
 pub(crate) fn list_obsidian_vaults() -> Vec<DetectedObsidianVault> {
     let mut vaults = Vec::new();
@@ -2929,7 +2894,7 @@ pub(crate) fn list_obsidian_vaults() -> Vec<DetectedObsidianVault> {
             if !seen.insert(path.clone()) {
                 continue;
             }
-            // The registry can hold stale entries; only offer vaults that still exist.
+
             if !Path::new(&path).is_dir() {
                 continue;
             }
@@ -2944,8 +2909,6 @@ pub(crate) fn list_obsidian_vaults() -> Vec<DetectedObsidianVault> {
     vaults
 }
 
-// Off the UI thread for the same reason as `list_obsidian_vaults`: the vault
-// path comes from the user and may be a slow or dead mount.
 #[tauri::command(async)]
 pub(crate) fn check_obsidian_vault_marker(vault_path: String) -> Result<bool, String> {
     let trimmed = vault_path.trim();
@@ -2961,8 +2924,6 @@ pub(crate) fn check_obsidian_vault_marker(vault_path: String) -> Result<bool, St
     }
 }
 
-// read_bound_credential already holds lock_dropbox_credential_state across
-// its whole span (B3) — safe as-is.
 #[tauri::command(async)]
 pub(crate) fn get_webdav_config(app: tauri::AppHandle) -> Result<Value, String> {
     let (config, password) = read_bound_credential(&app, CredentialService::Webdav)?;
@@ -3006,7 +2967,6 @@ where
         || {},
     )?;
     if backend.trim() == "webdav" {
-        // Disable before deleting credentials so interruption leaves sync safely off.
         publish_sync_backend_paths_unlocked_with(
             config_path,
             secrets_path,
@@ -3018,11 +2978,6 @@ where
     Ok(())
 }
 
-// I1: update_bound_credential only holds lock_dropbox_credential_state for
-// its own transaction — that serializes it against other CRED-only callers,
-// but not against an RMW-lock holder's read..write gap on config.toml. Outer
-// RMW lock closes that (deadlock-safe: update_bound_credential's internal
-// CRED lock is a different mutex — see the LOCK ORDERING comment).
 #[tauri::command(async)]
 pub(crate) fn set_webdav_config(
     app: tauri::AppHandle,
@@ -3086,14 +3041,12 @@ pub(crate) fn set_webdav_config(
     Ok(true)
 }
 
-// Same as get_webdav_config above (B3) — safe as-is.
 #[tauri::command(async)]
 pub(crate) fn get_webdav_password(app: tauri::AppHandle) -> Result<String, String> {
     let (_, password) = read_bound_credential(&app, CredentialService::Webdav)?;
     Ok(password.unwrap_or_default())
 }
 
-// Same as get_webdav_config above (B3) — safe as-is.
 #[tauri::command(async)]
 pub(crate) fn get_cloud_config(app: tauri::AppHandle) -> Result<Value, String> {
     let (config, token) = read_bound_credential(&app, CredentialService::Cloud)?;
@@ -3104,7 +3057,6 @@ pub(crate) fn get_cloud_config(app: tauri::AppHandle) -> Result<Value, String> {
     }))
 }
 
-// Same as set_webdav_config above (I1) — outer RMW lock.
 #[tauri::command(async)]
 pub(crate) fn set_cloud_config(
     app: tauri::AppHandle,
@@ -3152,7 +3104,6 @@ pub(crate) fn set_cloud_config(
     Ok(true)
 }
 
-// Held across the whole read+mutate+write (B3) — see lock_config_read_modify_write.
 #[tauri::command(async)]
 pub(crate) fn set_network_proxy(app: tauri::AppHandle, proxy_url: String) -> Result<bool, String> {
     let _config_guard = lock_config_read_modify_write()?;
@@ -3179,7 +3130,6 @@ pub(crate) fn set_network_proxy(app: tauri::AppHandle, proxy_url: String) -> Res
     Ok(true)
 }
 
-// Pure read, no write branch (B3) — no lock needed.
 #[tauri::command(async)]
 pub(crate) fn get_external_calendars(
     app: tauri::AppHandle,
@@ -3203,7 +3153,6 @@ pub(crate) fn get_external_calendars(
         .collect())
 }
 
-// Held across the whole read+mutate+write (B3) — see lock_config_read_modify_write.
 #[tauri::command(async)]
 pub(crate) fn set_external_calendars(
     app: tauri::AppHandle,
@@ -3230,11 +3179,6 @@ pub(crate) fn set_external_calendars(
     Ok(true)
 }
 
-/// Local `.ics` subscriptions are read here rather than through the Tauri fs
-/// plugin: its scope check canonicalizes the path first, and canonicalize is
-/// unimplemented on the virtual volumes (rclone/WinFSP mounts) these files
-/// often live on, so the read could never be allowed. No path resolution of
-/// any kind happens below.
 #[tauri::command(async)]
 pub(crate) fn read_external_calendar_file(
     app: tauri::AppHandle,
@@ -3249,6 +3193,99 @@ pub(crate) fn read_external_calendar_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyring_service_differs_per_workspace_and_the_default_is_unchanged() {
+        let id = "tech.dongdongbh.mindwtr";
+        assert_eq!(
+            keyring_service_name(id, None),
+            "tech.dongdongbh.mindwtr:secrets"
+        );
+        let work = keyring_service_name(id, Some("0123456789abcdef"));
+        let other = keyring_service_name(id, Some("fedcba9876543210"));
+        assert_eq!(work, "tech.dongdongbh.mindwtr:secrets:0123456789abcdef");
+        assert_ne!(work, other);
+        assert_ne!(work, keyring_service_name(id, None));
+    }
+
+    #[test]
+    fn device_keys_live_in_the_default_root_while_another_workspace_is_open() {
+        let root = tempfile::tempdir().expect("should create temp dir");
+        let device_config = root.path().join(CONFIG_FILE_NAME);
+        let device_secrets = root.path().join(SECRETS_FILE_NAME);
+        let workspace = crate::workspaces::workspace_dir(root.path(), Some("0123456789abcdef"));
+        let work_config = workspace.join(CONFIG_FILE_NAME);
+        let work_secrets = workspace.join(SECRETS_FILE_NAME);
+        fs::create_dir_all(&workspace).expect("workspace dir");
+
+        let personal = AppConfigToml {
+            cloud_url: Some("https://personal.example".into()),
+            local_api_token: Some("personal-token".into()),
+            disable_hardware_acceleration: Some("false".into()),
+            ..AppConfigToml::default()
+        };
+        write_config_files(&device_config, &device_secrets, &personal).expect("personal");
+        let work = AppConfigToml {
+            cloud_url: Some("https://work.example".into()),
+            ..AppConfigToml::default()
+        };
+        write_config_files(&work_config, &work_secrets, &work).expect("work");
+
+        assert_eq!(
+            read_config_toml(&device_config)
+                .disable_hardware_acceleration
+                .as_deref(),
+            Some("false")
+        );
+
+        let mut config = read_config_files_verified(&work_config, &work_secrets).expect("read");
+        assert_eq!(
+            config.disable_hardware_acceleration.as_deref(),
+            Some("false")
+        );
+        assert_eq!(config.cloud_url.as_deref(), Some("https://work.example"));
+        assert_eq!(config.local_api_token, None);
+
+        config.disable_hardware_acceleration = Some("true".into());
+        config.autostart_startup_flag_migrated = Some("true".into());
+        config.local_api_token = Some("work-token".into());
+        write_config_files(&work_config, &work_secrets, &config).expect("write work");
+
+        let default_side =
+            read_config_files_verified(&device_config, &device_secrets).expect("default");
+        assert_eq!(
+            default_side.disable_hardware_acceleration.as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            default_side.autostart_startup_flag_migrated.as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            default_side.cloud_url.as_deref(),
+            Some("https://personal.example")
+        );
+        assert_eq!(
+            default_side.local_api_token.as_deref(),
+            Some("personal-token")
+        );
+
+        let work_public = read_config_toml(&work_config);
+        assert_eq!(work_public.disable_hardware_acceleration, None);
+        assert_eq!(work_public.autostart_startup_flag_migrated, None);
+        assert_eq!(
+            work_public.cloud_url.as_deref(),
+            Some("https://work.example")
+        );
+        assert_eq!(
+            read_config_toml(&work_secrets).local_api_token.as_deref(),
+            Some("work-token")
+        );
+
+        assert!(is_device_config_key("app_lock_enabled"));
+        assert!(!is_device_config_key("local_api_enabled"));
+        assert!(!is_device_config_key("cloud_url"));
+    }
 
     #[test]
     fn obsidian_required_inline_tag_survives_native_round_trip() {
@@ -3354,7 +3391,7 @@ mod tests {
             sync_backend: Some("webdav".to_string()),
             webdav_url: Some("https://dav.example.com/mindwtr".to_string()),
             webdav_username: Some("demo".to_string()),
-            // Embedded quote and backslash exercise the escaping path.
+
             webdav_password: Some("s3cr3t \"pass\" with \\backslash".to_string()),
             webdav_allow_insecure_http: Some("false".to_string()),
             webdav_allow_weak_fingerprint: Some("true".to_string()),
@@ -3384,6 +3421,8 @@ mod tests {
             mcp_allow_delete: Some("false".to_string()),
             mcp_port: Some("9123".to_string()),
             mcp_token: Some("managed-mcp-token-value".to_string()),
+            app_lock_enabled: Some(true),
+            app_lock_relock_delay_minutes: Some(5),
         }
     }
 
@@ -3401,9 +3440,6 @@ mod tests {
 
     #[test]
     fn config_toml_written_by_a_shipped_version_still_parses() {
-        // Hand-written in the exact shape the pre-serde `write_config_toml_with_header`
-        // emitted: one header comment line, then `key = "value"` lines in the
-        // same order it wrote them. New code must keep reading this shape.
         let legacy_config = concat!(
             "# Mindwtr desktop config\n",
             "sync_path = \"/home/user/Sync\"\n",
@@ -3431,8 +3467,7 @@ mod tests {
             config.disable_hardware_acceleration.as_deref(),
             Some("true")
         );
-        // Everything the legacy file didn't mention stays None, exactly as the
-        // old ad hoc parser left unmatched keys as None.
+
         assert_eq!(config.cloud_url, None);
         assert_eq!(config.local_api_token, None);
     }
@@ -3457,17 +3492,16 @@ mod tests {
                 .and_then(|value| value.as_str().map(str::to_string))
                 .expect("fully populated config sets every secret field");
 
-            // Structural check: the field itself is absent from the public struct...
             assert!(
                 config_as_object(&public_config).get(field).is_none(),
                 "{field} must not be present in the public config"
             );
-            // ...and the raw text never contains the secret value either.
+
             assert!(
                 !public_raw.contains(&secret_value),
                 "{field}'s value leaked into the public config.toml text"
             );
-            // It must have moved to secrets.toml instead.
+
             assert_eq!(
                 config_as_object(&secrets_config)
                     .get(field)
@@ -3477,7 +3511,6 @@ mod tests {
             );
         }
 
-        // Non-secret fields still round-trip through the public file.
         assert_eq!(public_config.sync_backend, original.sync_backend);
         assert_eq!(public_config.local_api_port, original.local_api_port);
     }
@@ -3563,20 +3596,16 @@ mod tests {
             .expect("seed config");
         read_config_files_verified(&config_path, &secrets_path).expect("read committed config");
 
-        // A hand-edit (#1064: the reporter changed a calendar path in
-        // secrets.toml) shifts the pair fingerprint without breaking the TOML;
-        // a default seed writes no secrets file, so the edit here creates one.
         let mut secrets = fs::read_to_string(&secrets_path).unwrap_or_default();
         secrets.push_str("\n# hand-edited outside the app\n");
         fs::write(&secrets_path, secrets).expect("hand-edit secrets");
 
         read_config_files_verified(&config_path, &secrets_path)
             .expect("adopt the out-of-band edit");
-        // Adoption re-committed the generation, so the next read is clean too.
+
         read_config_files_verified(&config_path, &secrets_path)
             .expect("second read after adoption");
 
-        // An edit that no longer parses still fails closed, naming the file.
         fs::write(&secrets_path, "not = [valid").expect("corrupt secrets");
         let error = read_config_files_verified(&config_path, &secrets_path)
             .expect_err("unparseable secrets must fail");
@@ -3904,8 +3933,7 @@ mod tests {
         let config = fully_populated_config();
 
         write_config_files(&config_path, &secrets_path, &config).expect("should write first time");
-        // Loosen both, as a file left behind by a pre-fix build would be, so
-        // the second write has to actually re-apply the restriction.
+
         fs::set_permissions(&secrets_path, fs::Permissions::from_mode(0o644))
             .expect("should loosen secrets.toml");
         fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755))
@@ -3992,14 +4020,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("should create temp dir");
         let config_path = dir.path().join("config.toml");
         let secrets_path = dir.path().join("secrets.toml");
-        // Bare (unquoted) value: syntactically invalid TOML, as if the file
-        // were hand-edited or truncated mid-write.
+
         let corrupt = "# Mindwtr desktop config\nsync_backend = webdav\n";
         fs::write(&config_path, corrupt).expect("should write corrupt config.toml");
 
-        // Reproduces the real read-modify-write flow every setter uses:
-        // read (falls back to default() because the file won't parse), set
-        // one field, write back.
         let mut config = read_config_toml(&config_path);
         assert_eq!(config.sync_backend, None, "corrupt file reads as empty");
         config.local_api_port = Some("3456".to_string());
@@ -4024,9 +4048,6 @@ mod tests {
         fs::write(&config_path, public).expect("write public config");
         fs::write(&secrets_path, corrupt_secrets).expect("write corrupt secrets");
 
-        // Match a normal public-setting read/modify/write. The unreadable
-        // secrets currently look empty to read_config_toml, but that must not
-        // authorize deleting the only recoverable credential bytes.
         let mut config = read_config_toml(&config_path);
         merge_config(&mut config, read_config_toml(&secrets_path));
         config.local_api_port = Some("3456".to_string());
@@ -4588,20 +4609,6 @@ mod tests {
         }
     }
 
-    // I1: reproduces the lost-update race at the mechanism level (no
-    // AppHandle needed — the race lives entirely in which mutex each writer
-    // takes, and these are the same raw-path primitives the real command
-    // functions call). An RMW-guarded writer (the pre-fix shape of e.g.
-    // set_ai_key) reads, then blocks on a channel instead of sleeping — a
-    // fixed-duration sleep here was flaky under `cargo test`'s parallel
-    // scheduling (this test run alone: passes; run inside the full suite,
-    // with dozens of threads contending for CPU: the sleep windows drift and
-    // the interleaving this test depends on stops happening). A CRED-only
-    // writer (the PRE-FIX shape of set_webdav_config — no outer RMW lock,
-    // just what update_bound_credential_paths_with takes internally) runs
-    // and fully completes before the RMW writer is released to mutate+write.
-    // The RMW writer's write uses its stale snapshot and silently reverts
-    // the CRED-only writer's change.
     #[test]
     fn rmw_holder_gap_loses_a_cred_only_writers_update_without_the_outer_rmw_lock() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -4653,13 +4660,6 @@ mod tests {
         );
     }
 
-    // Same race as above, but the CRED-only side now also takes the outer
-    // RMW lock first — the FIXED shape of set_webdav_config/set_cloud_config/
-    // set_sync_backend/get_sync_backend/get_sync_cloud_provider(_state)/
-    // get_sync_configuration_snapshot (I1). Both changes must survive. This
-    // one needs no timing coordination at all: the mutex fully serializes
-    // the two writers regardless of which reaches lock_config_read_modify_write
-    // first, so the assertions hold either way.
     #[test]
     fn outer_rmw_lock_on_both_sides_prevents_the_lost_update() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -5235,8 +5235,6 @@ mod tests {
 
     #[test]
     fn both_sync_backend_state_file_names_resolve_to_the_newest_valid_generation() {
-        // Newer under the legacy name (a downgrade wrote it after the upgrade
-        // had already migrated once): the legacy file wins and replaces it.
         let dir = tempfile::tempdir().expect("should create temp dir");
         let legacy_path = dir.path().join(LEGACY_SYNC_BACKEND_STATE_FILE_NAME);
         let state_path = dir.path().join(SYNC_BACKEND_STATE_FILE_NAME);
@@ -5259,8 +5257,6 @@ mod tests {
             newer_legacy
         );
 
-        // Older under the legacy name: the current file stands and the legacy
-        // leftover is dropped.
         let dir = tempfile::tempdir().expect("should create temp dir");
         let legacy_path = dir.path().join(LEGACY_SYNC_BACKEND_STATE_FILE_NAME);
         let state_path = dir.path().join(SYNC_BACKEND_STATE_FILE_NAME);
@@ -5282,7 +5278,6 @@ mod tests {
             current
         );
 
-        // A corrupt file never wins over a valid one, whichever name carries it.
         let dir = tempfile::tempdir().expect("should create temp dir");
         let legacy_path = dir.path().join(LEGACY_SYNC_BACKEND_STATE_FILE_NAME);
         let state_path = dir.path().join(SYNC_BACKEND_STATE_FILE_NAME);
@@ -5722,10 +5717,6 @@ mod tests {
         );
     }
 
-    // #1043: a Flatpak/NixOS profile has no Secret Service at all, so every
-    // keyring read AND write errors. The whole first-setup sequence — the
-    // settings snapshot, the activation commit, and the native sync read that
-    // follows it — has to survive on the secrets.toml fallback alone.
     #[test]
     fn keyring_less_first_setup_commits_and_resolves_through_the_secrets_fallback() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -5735,9 +5726,6 @@ mod tests {
         let keyring_read = || Err("keyring unavailable".to_string());
         let keyring_write = |_: Option<String>| Err("keyring unavailable".to_string());
 
-        // Opening sync settings resolves BOTH services. Neither has a binding
-        // yet, so an intolerant snapshot fails the whole screen (and every
-        // auto-sync eligibility check) before any backend can be configured.
         for service in [CredentialService::Webdav, CredentialService::Cloud] {
             let config =
                 read_config_files_verified(&config_path, &secrets_path).unwrap_or_default();
@@ -5755,8 +5743,6 @@ mod tests {
             );
         }
 
-        // The activation transaction: disable, write the proven candidate,
-        // verify its secret reads back exactly, then activate.
         publish_sync_backend_paths_with(
             &config_path,
             &secrets_path,
@@ -5803,7 +5789,6 @@ mod tests {
         )
         .expect("activate the proven backend");
 
-        // What every later native sync request does (webdav_get_json).
         let (config, password) = read_bound_credential_paths_with(
             &config_path,
             &secrets_path,
@@ -5822,10 +5807,6 @@ mod tests {
         );
     }
 
-    // #1043 follow-on: the keyring held the secret when it was saved and later
-    // stopped answering. The binding stays fail-closed (it must not silently
-    // fall back to a weaker authority), but re-entering the secret has to be a
-    // way out rather than a dead end.
     #[test]
     fn reentered_secret_recommits_a_binding_whose_authority_disappeared() {
         let dir = tempfile::tempdir().expect("tempdir");

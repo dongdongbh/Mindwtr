@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildCaptureModalRequest, formatCaptureModalCopilotApplied, planCaptureModalRequest, saveCaptureModalLines } from './capture-modal-model';
+import { buildCaptureModalRequest, buildCaptureModalView, createCaptureModalDraft, formatCaptureModalCopilotApplied, planCaptureModalRequest, saveCaptureModalLines } from './capture-modal-model';
 import { parseQuickAdd } from './quick-add';
-import type { Project, Task } from './types';
+import type { AppSettings, Project, Task } from './types';
 
 const NOW = new Date('2026-09-28T14:00:00.000Z');
 const request = (text: string, extra: { projects?: readonly Project[]; initialProps?: Partial<Task>; description?: string } = {}) => {
@@ -20,9 +20,8 @@ const request = (text: string, extra: { projects?: readonly Project[]; initialPr
 };
 
 describe('capture confirmation screen model', () => {
-    // RN bug (apps/mobile/app/capture-modal.tsx:553, 586-593 before the move): the entry's
-    // description stayed under the field, so an edited field saved both, and a cleared one
-    // saved the entry's.
+
+
     it('saves the description field as it shows it, a typed /note: token after it', () => {
         const shared = { initialProps: { description: 'Body with https://example.com/doc\nhttps://example.com/doc' } };
         const description = (text: string, field: string) => {
@@ -35,9 +34,7 @@ describe('capture confirmation screen model', () => {
         expect(description('Subject /note:read later', '')).toBe('read later');
     });
 
-    // RN bug (apps/mobile/app/capture-modal.tsx:692-719 before the move): lines were prepared
-    // one by one, so the project an earlier line named was created before a later line's
-    // date command refused the batch.
+
     it('refuses a batch with an unreadable date command before any project or task is written', async () => {
         const addProject = vi.fn(async (title: string) => ({ id: `p-${title}`, title }) as Project);
         const addTasks = vi.fn(async () => ({ success: true }));
@@ -52,8 +49,7 @@ describe('capture confirmation screen model', () => {
         expect(addTasks).not.toHaveBeenCalled();
     });
 
-    // RN bug (apps/mobile/app/capture-modal.tsx:903-906 before the move): the estimate and the
-    // tags ran together ("Applied @phone 15min#finance").
+
     it('spaces every applied copilot part', () => {
         const t = (key: string) => (key === 'copilot.applied' ? 'Applied' : key);
         expect(formatCaptureModalCopilotApplied(t, { context: '@phone', timeEstimate: '15min', tags: ['#finance', '#urgent'] }, true))
@@ -62,5 +58,28 @@ describe('capture confirmation screen model', () => {
         expect(formatCaptureModalCopilotApplied(t, { context: '@computer', tags: [] }, true)).toBe('Applied @computer');
         expect(formatCaptureModalCopilotApplied(t, { timeEstimate: '15min', tags: ['#urgent'] }, false)).toBe('Applied #urgent');
         expect(formatCaptureModalCopilotApplied(t, { tags: [] }, true)).toBeNull();
+    });
+
+
+    it('offers the AI the saved contexts and tags after the used ones', () => {
+        const at = '2026-10-20T00:00:00.000Z';
+        const saved = (token: string) => ({ token, rev: 1, revBy: 'device', updatedAt: at });
+        const settings = {
+            ai: { enabled: true, provider: 'openai', baseUrl: 'http://localhost:11434/v1' },
+            taxonomy: { contexts: [saved('@errands'), saved('@phone')], tags: [saved('#someday'), { ...saved('#gone'), deletedAt: at }] },
+        } as unknown as AppSettings;
+        const tasks = [{ id: 't1', title: 'Call', status: 'next', contexts: ['@phone'], tags: ['#finance'], createdAt: at, updatedAt: at }] as Task[];
+        const view = buildCaptureModalView(createCaptureModalDraft({ initialValue: 'Call the bank' }, {}), {
+            t: (key: string) => key,
+            settings,
+            projects: [],
+            areas: [],
+            tasks,
+            initialProps: {},
+            parsed: parseQuickAdd('Call the bank', [], NOW, []),
+            formatDate: () => '',
+            aiKey: { required: false, available: false },
+        });
+        expect(view.copilot.request).toEqual({ title: 'Call the bank', contexts: ['@phone', '@errands'], tags: ['#finance', '#someday'] });
     });
 });

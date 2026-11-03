@@ -121,7 +121,7 @@ describe('resolveBoardColumnDropTarget', () => {
         { id: 'task-e', top: 136, height: 60 },
         { id: 'task-r', top: 204, height: 60 },
     ];
-    // What mobile writes for a drop: the measured target through core's drop plan.
+
     const reorder = (taskId: string, dragCenterY: number) => {
         const target = resolveBoardColumnDropTarget({ taskId, dragCenterY, columnTasks });
         if (!target) return null;

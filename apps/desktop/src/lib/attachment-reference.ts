@@ -6,19 +6,13 @@ import { isTauriRuntime } from './runtime';
 
 type AttachmentRef = Pick<Attachment, 'kind' | 'uri' | 'cloudKey'>;
 
-// A folder link ("Link folder…") is a plain `kind: 'link'` to a local path.
-// The standard directory MIME type is its only marker, so rows can show a
-// folder icon without touching the disk; editing the link drops it.
+
 export const FOLDER_LINK_MIME_TYPE = 'inode/directory';
 
 export const isFolderLinkAttachment = (attachment: Pick<Attachment, 'kind' | 'mimeType'>): boolean =>
     attachment.kind === 'link' && attachment.mimeType === FOLDER_LINK_MIME_TYPE;
 
-// An external reference is a file attachment whose path lies outside the
-// managed attachments dir. Pre-#1001-fix "Add link" items are this shape —
-// possibly with a synced copy (cloudKey) attached — and are the ones Edit
-// can convert into true link pointers. Pure string comparison — never stats
-// the disk, safe in render paths.
+
 export function isExternalFileReference(attachment: AttachmentRef, managedDirPrefix: string | null): boolean {
     if (attachment.kind !== 'file') return false;
     if (!managedDirPrefix) return false;
@@ -28,8 +22,7 @@ export function isExternalFileReference(attachment: AttachmentRef, managedDirPre
     return !normalized.startsWith(managedDirPrefix);
 }
 
-// A bare reference is an external reference the app also cannot restore:
-// no synced copy (cloudKey) exists.
+
 export function isBareFileReference(attachment: AttachmentRef, managedDirPrefix: string | null): boolean {
     if (attachment.cloudKey) return false;
     return isExternalFileReference(attachment, managedDirPrefix);
@@ -38,11 +31,7 @@ export function isBareFileReference(attachment: AttachmentRef, managedDirPrefix:
 let cachedManagedDirPrefix: string | null = null;
 let managedDirPrefixPromise: Promise<string | null> | null = null;
 
-/** The managed attachments dir, normalized and trailing-slashed, for `isExternalFileReference`.
- *  Exported so the sync gate (`hasAttachmentSyncWork` in sync-service.ts) asks the same
- *  question the UI's paperclip/link icons ask, rather than reimplementing the prefix rules.
- *  Resolves at most one IPC per session; `null` means "not resolved / not desktop", which
- *  every caller must treat as "assume external". */
+
 export async function loadManagedAttachmentsDirPrefix(): Promise<string | null> {
     if (!isTauriRuntime()) return null;
     if (cachedManagedDirPrefix) return cachedManagedDirPrefix;
@@ -50,10 +39,8 @@ export async function loadManagedAttachmentsDirPrefix(): Promise<string | null> 
         managedDirPrefixPromise = import('./managed-paths')
             .then(async ({ getManagedDataDir }) => {
                 const base = await getManagedDataDir();
-                // Owned copies live only in the managed attachments dir
-                // (portable-aware, same dir as imports and sync downloads).
-                // The trailing slash keeps sibling dirs like ".../attachments-old"
-                // from matching by prefix.
+
+
                 cachedManagedDirPrefix = `${normalizeAttachmentPathForUrl(base).replace(/\/+$/, '')}/attachments/`;
                 return cachedManagedDirPrefix;
             })
@@ -62,8 +49,7 @@ export async function loadManagedAttachmentsDirPrefix(): Promise<string | null> 
     return managedDirPrefixPromise;
 }
 
-// Resolves the managed attachments dir once per session; until it resolves,
-// every attachment counts as owned (paperclip) so icons never flicker.
+
 function useManagedDirPrefix(): string | null {
     const [prefix, setPrefix] = useState<string | null>(cachedManagedDirPrefix);
     useEffect(() => {

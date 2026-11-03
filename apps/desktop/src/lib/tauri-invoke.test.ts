@@ -88,26 +88,23 @@ describe('invokeNativeOr', () => {
 });
 
 describe('preloadNativeTransport', () => {
-    // Callers preload for timing, not for a result, so it must stay a no-op off
-    // Tauri — a rejection here would break the reveal path it exists to protect.
+
+
     it('resolves without reaching for the module off Tauri', async () => {
         await expect(preloadNativeTransport()).resolves.toBeUndefined();
     });
 });
 
-// Ten hand-rolled `tauriInvoke` copies existed before this seam, in three
-// different off-Tauri shapes (throw / return a default / swallow), because
-// nothing stopped the eleventh from being written. This is that stop.
+
 const DESKTOP_SRC = resolve(import.meta.dirname, '..');
 const CORE_MODULE_SPECIFIER = '@tauri-apps/api/core';
 const SEAM_FILE = 'lib/tauri-invoke.ts';
 const EXCLUDED_DIR_NAMES = new Set(['node_modules', 'coverage', 'dist']);
-// Each entry needs a reason and a way out. Converting one of these? Delete its
-// line — the stale-exclusion test below fails until you do, because a list that
-// only ever grows quietly re-permits the thing the ratchet exists to prevent.
+
+
 const EXCLUDED_FILES = new Map<string, string>([
-    // convertFileSrc rewrites a path into a webview URL. It is not an IPC call,
-    // so the invoke seam has nothing to offer it.
+
+
     ['components/Task/task-item-attachment-utils.ts', 'imports convertFileSrc, not invoke'],
 ]);
 
@@ -122,8 +119,8 @@ function collectSourcePaths(): string[] {
                 continue;
             }
             if (!/\.tsx?$/.test(entry.name)) continue;
-            // Tests mock the module by specifier; that is the point of a seam,
-            // not a bypass of it.
+
+
             if (/\.test\.tsx?$/.test(entry.name)) continue;
             paths.push(full);
         }
@@ -132,9 +129,7 @@ function collectSourcePaths(): string[] {
     return paths;
 }
 
-// Walking every desktop source file runs well under a second locally and has
-// still blown vitest's 5s default on loaded CI runners, so both tests below
-// share one walk.
+
 let coreImporters: Set<string> | null = null;
 const filesImportingCore = (): Set<string> => (coreImporters ??= new Set(
     collectSourcePaths()
@@ -175,8 +170,8 @@ describe('setNativeInvokeTransport', () => {
         setNativeInvokeTransport((async () => 'fake') as never);
         await expect(invokeNative<string>('get_thing')).resolves.toBe('fake');
         setNativeInvokeTransport(null);
-        // The real transport reaches @tauri-apps/api/core, which has no IPC
-        // handler in jsdom; the point is only that the fake is gone.
+
+
         await expect(invokeNative<string>('get_thing')).rejects.toThrow();
     });
 });

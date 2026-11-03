@@ -367,8 +367,8 @@ describe('task-driven project reactivation persistence', () => {
         expect(saved?.tasks.map(({ status }) => status)).toEqual(Array(12).fill('next'));
         expect(saved?.projects.map(({ status }) => status)).toEqual(['active', 'active']);
         expect(saved?.sections.every(({ deletedAt }) => !deletedAt)).toBe(true);
-        // A few batch-wide maps are expected; task preparation must not project
-        // the full original collection once per selected task.
+
+
         expect(sectionMapVisits).toBeLessThanOrEqual(sections.length * 4);
     });
 
@@ -500,8 +500,8 @@ describe('task-driven project reactivation persistence', () => {
     );
 
     it('persists the reopened task, parent, and archive-owned section after the archive save already flushed', async () => {
-        // Keep the recurring fixture before its due date: otherwise normal
-        // load-time promotion changes Someday to Next as the real date advances.
+
+
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(REOPENED_AT));
         let persisted: AppData = {

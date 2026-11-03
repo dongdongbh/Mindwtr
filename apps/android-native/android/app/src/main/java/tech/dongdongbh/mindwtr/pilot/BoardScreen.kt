@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -84,16 +83,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/*
- * RN's Board (components/views/board-view.tsx) drawn from core's getBoardView: the filter bar (search, Clear, Filters), the five
- * status columns stacked as RN stacks them on a phone, each with core's label, tone and count, core's cards (the title, project,
- * tags, contexts and estimate core puts on each), and core's empty line; RN's filter sheet on core's sheet view. A card opens
- * the editor on a tap; a swipe right past half duplicates, a swipe left past half deletes (RN's Swipeable); held for RN's
- * 180 ms it follows the finger (the Board scrolls at its edges) and its drop sends one core moveCard. TalkBack reaches every
- * action as the card's custom actions. Every word is core's.
- */
 
-/** Where the Board's columns and cards are on screen (root coordinates), for a drop: measured as they lay out. */
 private class Layouts {
     val columns = HashMap<String, Pair<Float, Float>>()
     val cards = HashMap<String, Pair<Float, Float>>()
@@ -112,7 +102,7 @@ fun BoardList(model: InboxViewModel) = with(model.menu.board) {
     }
 }
 
-/** RN's filter bar: the search (its clear button while it holds text), then Clear while filters are on, then Filters. */
+
 @Composable
 private fun FilterBar(model: InboxViewModel, shown: BoardPage) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -129,7 +119,7 @@ private fun FilterBar(model: InboxViewModel, shown: BoardPage) = with(model.menu
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder }.testTag("board-search"),
                 decorationBox = { inner ->
-                    Box(Modifier.heightIn(min = 44.dp).clip(shape).background(if (searching) c.filterBg else c.inputBg).border(1.dp, if (searching) c.tint else c.border, shape)
+                    Box(Modifier.heightIn(min = 44.dp).clip(shape).background(if (searching) c.filterBg else c.inputBg).rnBorder(1.dp, if (searching) c.tint else c.border, shape)
                         .padding(start = 12.dp, end = if (searching) 44.dp else 12.dp, top = 8.dp, bottom = 8.dp), contentAlignment = Alignment.CenterStart) {
                         if (value.isEmpty()) Text(placeholder, style = rnText(14, 400), color = c.secondaryText, maxLines = 1)
                         inner()
@@ -153,7 +143,7 @@ private fun FilterBar(model: InboxViewModel, shown: BoardPage) = with(model.menu
             }
         }
         val label = bar.getString("filterLabel")
-        Row(Modifier.heightIn(min = 44.dp).clip(CircleShape).background(if (active) c.tint else c.filterBg).border(1.dp, if (active) c.tint else c.border, CircleShape)
+        Row(Modifier.heightIn(min = 44.dp).clip(CircleShape).background(if (active) c.tint else c.filterBg).rnBorder(1.dp, if (active) c.tint else c.border, CircleShape)
             .clearAndSetSemantics { contentDescription = label; role = Role.Button; onClick { board.keepSheet(JSONObject()); true } }
             .clickable { board.keepSheet(JSONObject()) }.padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -163,10 +153,7 @@ private fun FilterBar(model: InboxViewModel, shown: BoardPage) = with(model.menu
     }
 }
 
-/**
- * The columns in one scrolling list, as RN's ScrollView: each card's drop is resolved against where the columns and cards are,
- * and a card held near the list's top or bottom edge scrolls it.
- */
+
 @Composable
 private fun Columns(model: InboxViewModel, shown: BoardPage) = with(model.menu) {
     val density = LocalDensity.current
@@ -175,7 +162,7 @@ private fun Columns(model: InboxViewModel, shown: BoardPage) = with(model.menu) 
     var viewport by remember { mutableStateOf(0f to 0f) }
     var dragging by remember { mutableStateOf<String?>(null) }
     var edge by remember { mutableIntStateOf(0) }
-    // RN's auto-scroll: while a held card sits within 72 of an edge, the Board scrolls toward it.
+
     LaunchedEffect(edge) {
         val step = with(density) { 8.dp.toPx() }
         while (edge != 0) { scroll.scrollBy(edge * step); withFrameNanos { } }
@@ -195,7 +182,7 @@ private fun Columns(model: InboxViewModel, shown: BoardPage) = with(model.menu) 
     }
 }
 
-/** RN's column: the tone's 4-high top, core's label and count badge, core's cards, core's empty line, and More for a long column. */
+
 @Composable
 private fun BoardColumn(model: InboxViewModel, shown: BoardPage, column: JSONObject, columns: List<JSONObject>, layouts: Layouts, isSource: Boolean,
                         onDrag: (String?, Float) -> Unit) = with(model.menu) {
@@ -205,18 +192,18 @@ private fun BoardColumn(model: InboxViewModel, shown: BoardPage, column: JSONObj
     val tone = theme.columnTone(column.getString("tone"))
     val shape = RoundedCornerShape(12.dp)
     val cards = shown.cards[status].orEmpty()
-    // Not clipped (RN's overflow visible): a held card is drawn outside its column, and its column is raised above the others.
+
     Column(Modifier.fillMaxWidth().zIndex(if (isSource) 500f else 0f).shadow(2.dp, shape, clip = false).background(c.cardBg, shape).heightIn(min = 100.dp)
         .onGloballyPositioned { layouts.columns[status] = it.positionInRoot().y to it.positionInRoot().y + it.size.height }) {
         Box(Modifier.fillMaxWidth().height(4.dp).background(tone, RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)))
         val label = column.getString("label")
         val count = column.getInt("count")
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(12.dp).testTag("board-column")
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(12.dp).testTag("board-column")
             .clearAndSetSemantics { contentDescription = "$label · $count"; heading() },
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = rnText(15, 600), color = c.text)
             Text("$count", style = rnText(12, 600), color = c.text, modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(c.filterBg)
-                .border(1.dp, tone, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 2.dp))
+                .rnBorder(1.dp, tone, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 2.dp))
         }
         Column(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(10.dp)) {
             cards.forEachIndexed { index, card ->
@@ -233,12 +220,7 @@ private fun BoardColumn(model: InboxViewModel, shown: BoardPage, column: JSONObj
     }
 }
 
-/**
- * One card (RN's DraggableTask): the swipe panels behind it (Duplicate on the left, Delete on the right, each run once the card
- * is let go past half its width, as RN's Swipeable opens), and the card, which follows the finger once held. Its drop: into the
- * column under its middle (the nearest when between columns), and inside its own column after the last other card whose middle
- * is above it. A drop that changes nothing sends nothing.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject, status: String, before: String?, cards: List<JSONObject>,
@@ -249,7 +231,7 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
     val row = card.getJSONObject("row")
     val meta = card.getJSONObject("card")
     val id = row.getString("id")
-    // The card's revision as core's view showed it: its moves and its Delete send it.
+
     val revision = row.optString("taskRevision")
     val title = row.getString("title")
     val swipes = shown.view.getJSONObject("cardActions").getJSONObject("swipes")
@@ -260,7 +242,7 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
     var width by remember { mutableFloatStateOf(1f) }
     var top by remember { mutableFloatStateOf(0f) }
     var height by remember { mutableFloatStateOf(0f) }
-    // A drag: the finger's place and the card's top when it began, and the finger's place now (root coordinates).
+
     var held by remember { mutableStateOf(false) }
     var grab by remember { mutableFloatStateOf(0f) }
     var startTop by remember { mutableFloatStateOf(0f) }
@@ -290,7 +272,7 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
             if (after != before) board.move(id, revision, status, after, sameColumn = true)
         }
     }
-    // The gesture outlives a recomposition: it drops with the column as it is now.
+
     val dropNow by rememberUpdatedState(drop)
     val moveActions = columns.mapNotNull { column ->
         val target = column.getString("status")
@@ -312,7 +294,7 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
                 .testTag("board-card")
                 .clearAndSetSemantics {
                     contentDescription = spoken; role = Role.Button
-                    // While a command runs or a retry is owed, TalkBack hears the card disabled, with no actions, as every other control.
+
                     if (canEdit) {
                         onClick(t("common.edit")) { model.openEditor(id); true }
                         customActions = swipeActions.map { (side, label) -> CustomAccessibilityAction(label) { run(if (side == "left") "duplicate" else "trash"); true } } + moveActions
@@ -334,17 +316,17 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
                     onDragStopped = {
                         val side = if (swipe.value > width / 2) "left" else if (swipe.value < -width / 2) "right" else null
                         scope.launch { swipe.animateTo(0f) }
-                        // RN's Swipeable runs the opened side's action, then closes (#S2 of the Board review).
+
                         side?.let { run(if (it == "left") "duplicate" else "trash") }
                     })
                 .graphicsLayer { translationX = swipe.value; translationY = lift; if (held) { scaleX = 1.05f; scaleY = 1.05f; alpha = 0.85f } }
-                .shadow(if (held) 12.dp else 3.dp, shape).clip(shape).background(c.taskItemBg).border(1.dp, c.border, shape).padding(12.dp)) {
+                .shadow(if (held) 12.dp else 3.dp, shape).clip(shape).background(c.taskItemBg).rnBorder(1.dp, c.border, shape).padding(12.dp)) {
                 Text(title, style = rnText(14, 500), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (meta.optBoolean("showMetaRow")) {
                     FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         meta.menuText("projectTitle")?.let { project ->
                             val color = coreColorOrNull(meta.menuText("projectColor")) ?: c.secondaryText
-                            Row(Modifier.clip(RoundedCornerShape(10.dp)).background(c.filterBg).border(1.dp, color, RoundedCornerShape(10.dp))
+                            Row(Modifier.clip(RoundedCornerShape(10.dp)).background(c.filterBg).rnBorder(1.dp, color, RoundedCornerShape(10.dp))
                                 .padding(horizontal = 8.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Icon(Lucide.Folder, null, tint = c.text, modifier = Modifier.size(12.dp))
                                 Text(project, style = rnText(11, 700, 14), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -352,10 +334,10 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
                         }
                         for (token in meta.optJSONArray("tags").ids() + meta.optJSONArray("contexts").ids()) {
                             Text(token, style = rnText(11, 400, 14), color = c.secondaryText, modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.filterBg)
-                                .border(1.dp, c.border, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp))
+                                .rnBorder(1.dp, c.border, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp))
                         }
                         meta.menuText("timeEstimateLabel")?.let { estimate ->
-                            Row(Modifier.clip(RoundedCornerShape(4.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(4.dp))
+                            Row(Modifier.clip(RoundedCornerShape(4.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(4.dp))
                                 .padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Icon(Lucide.Clock3, null, tint = c.secondaryText, modifier = Modifier.size(12.dp))
                                 Text(estimate, style = rnText(11, 600, 14), color = c.secondaryText)
@@ -368,21 +350,17 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
     }
 }
 
-/** RN's swipe panel behind a card: core's label on the screen's background, bordered in the action's color. */
+
 @Composable
 private fun SwipePanel(label: String, border: Color, align: Alignment, modifier: Modifier) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Box(modifier.clip(shape).background(c.bg).border(1.dp, border, shape).padding(horizontal = 20.dp), contentAlignment = align) {
+    Box(modifier.clip(shape).background(c.bg).rnBorder(1.dp, border, shape).padding(horizontal = 20.dp), contentAlignment = align) {
         Text(label, style = rnText(14, 600), color = c.text)
     }
 }
 
-/**
- * RN's filter sheet (task-filter-sheet.tsx with the Board's due-date section on top) on core's sheet view: the active filters
- * (core's chips, each removed by its edit), the due-date disclosure with core's presets, Contexts & tags and Projects (each a
- * picker page; the tokens page ends with the Any/All match controls core shows), Clear, and Done.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BoardFilterSheet(model: InboxViewModel, shown: BoardPage, open: JSONObject) = with(model.menu) {
@@ -401,7 +379,7 @@ private fun BoardFilterSheet(model: InboxViewModel, shown: BoardPage, open: JSON
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         val tall = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
         Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().then(if (picker != null) Modifier.height(tall) else Modifier.heightIn(max = tall))
-            .clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("board-filters")
+            .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("board-filters")
             .semantics { contentDescription = t("filters.label") }.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp)) {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (picker != null) Text(t("common.back"), style = rnText(13, 600), color = c.tint, modifier = Modifier.heightIn(min = 44.dp)
@@ -413,8 +391,8 @@ private fun BoardFilterSheet(model: InboxViewModel, shown: BoardPage, open: JSON
                     .clickable(enabled = idle, role = Role.Button) { board.clearFilters() }.padding(horizontal = 10.dp, vertical = 12.dp))
             }
             if (picker != null) {
-                // RN's picker search, as the Inbox's: core's matching options (the query from offset zero), read again whenever the
-                // Board changes, since a tap changes the options' states.
+
+
                 val query = open.optString("query")
                 val found = board.found?.takeIf { it.getString("name") == picker && it.getString("query") == query && it.getString("revision") == shown.revision }
                 LaunchedEffect(shown.revision, picker) { if (query.isNotBlank()) board.searchPicker(picker, query, board.found?.optJSONArray("items")?.length() ?: 0) }
@@ -481,7 +459,7 @@ private fun BoardFilterSheet(model: InboxViewModel, shown: BoardPage, open: JSON
     }
 }
 
-/** RN's due-date disclosure on top of the Board's sheet: core's label and summary (the tint once a preset is on), and core's presets while open. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DueSection(model: InboxViewModel, due: JSONObject, open: JSONObject) = with(model.menu) {
@@ -493,7 +471,7 @@ private fun DueSection(model: InboxViewModel, due: JSONObject, open: JSONObject)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val spoken = due.getString("accessibilityLabel")
         val fold = { board.keepSheet(JSONObject(open.toString()).put("due", !expanded)) }
-        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(shape).background(c.bg).border(1.dp, c.border, shape)
+        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape)
             .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; onClick { fold(); true } }
             .clickable { fold() }.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -509,13 +487,13 @@ private fun DueSection(model: InboxViewModel, due: JSONObject, open: JSONObject)
     }
 }
 
-/** RN's Any/All control for a kind of token, shown once core says two of that kind are included. */
+
 @Composable
 private fun MatchMode(model: InboxViewModel, kind: String, label: String, mode: String) = with(model.menu) {
     val c = LocalTheme.current.colors
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, style = rnText(12, 600), color = c.secondaryText)
-        Row(Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(18.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(18.dp)).padding(2.dp)) {
+        Row(Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(18.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(18.dp)).padding(2.dp)) {
             for ((value, text) in listOf("any" to t("filters.matchAny"), "all" to t("common.all"))) {
                 val active = mode == value
                 Box(Modifier.widthIn(min = 52.dp).heightIn(min = 30.dp).clip(RoundedCornerShape(15.dp)).background(if (active) c.tint else Color.Transparent)

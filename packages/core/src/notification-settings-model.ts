@@ -38,7 +38,7 @@ export function isNotificationSettingEdit(value: unknown): value is Notification
     return typeof value.value === 'boolean';
 }
 
-/** Raw legacy values are transport witnesses only, never arbitrary Settings patches. */
+
 export function readNotificationSettingWitness(input: unknown): NotificationSettingWitness | null {
     if (!record(input) || !exact(input, ['present', 'value']) || typeof input.present !== 'boolean'
         || !input.present && input.value !== null) return null;
@@ -52,7 +52,7 @@ export function readNotificationSettingWitness(input: unknown): NotificationSett
             && Object.values(value).every((entry) => jsonValue(entry, depth + 1));
     };
     if (!jsonValue(input.value, 0)) return null;
-    // At most 1024 UTF-16 units (<=3072 UTF-8 bytes); the complete native envelope has its own byte cap.
+
     if (JSON.stringify(input.value).length > 1024) return null;
     const canonical = (value: NotificationSettingJson): NotificationSettingJson => Array.isArray(value)
         ? value.map(canonical) : record(value)
@@ -79,12 +79,12 @@ export type NotificationSettingsModel = {
     text: { cancel: string; done: string };
 };
 
-/** RN defaults/locale path; projection never writes or repairs the stored Settings. */
+
 export function buildNotificationSettingsModel(input: { settings: AppSettings; language: string; systemLocale: string | null;
     t: (name: string) => string }): NotificationSettingsModel {
     const { settings, language, systemLocale, t } = input;
     const tr = (name: string) => resolveI18nText(t, name);
-    // Legacy non-string cells cannot enter parseTimeOfDay; keep their raw witness untouched.
+
     const digest = getDigestSchedule({ ...settings,
         weeklyReviewTime: typeof settings.weeklyReviewTime === 'string' ? settings.weeklyReviewTime : undefined,
         dailyDigestMorningTime: typeof settings.dailyDigestMorningTime === 'string' ? settings.dailyDigestMorningTime : undefined,
@@ -97,7 +97,7 @@ export function buildNotificationSettingsModel(input: { settings: AppSettings; l
         value: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, disabled: !enabled });
     const locale = resolveDateLocaleTag({ language, dateFormat: normalizeDateFormatSetting(settings.dateFormat),
         calendarSystem: settings.calendarSystem, systemLocale });
-    // Same Sunday-zero reference and locale/calendar resolution as the RN Notifications screen.
+
     const days = Array.from({ length: 7 }, (_, day) => ({ value: day,
         label: new Date(2024, 0, 7 + day).toLocaleDateString(locale, { weekday: 'long' }),
         selected: day === digest.weekly.day, edit: { type: 'weeklyReviewDay' as const, value: day } }));

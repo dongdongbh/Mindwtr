@@ -6,23 +6,14 @@ type SyncResult = {
     error?: string;
 };
 
-/** The three pacing numbers a platform may vary at runtime. Desktop keeps them
- *  fixed for the life of the controller; mobile swaps the whole set per sync
- *  backend (File Sync is far cheaper to leave alone than a remote one). */
+
 export type AutoSyncCadence = {
     minIntervalMs: number;
     debounceFirstChangeMs: number;
     debounceContinuousChangeMs: number;
 };
 
-/** Mobile pacing policy (#766). Three coupled behaviours, one switch:
- *  1. the throttle interval is measured from cycle END, not cycle start, so a
- *     cycle that runs longer than the interval cannot roll straight into the next;
- *  2. the interval stretches to `min(cycleDuration * durationMultiplier, maxIntervalMs)`,
- *     which caps the share of the JS thread sync occupies on a busy device;
- *  3. a follow-up queued during a cycle re-runs at the ordinary cadence instead
- *     of repeating the original request's interval override.
- *  Desktop leaves this unset and keeps cycle-start anchoring. */
+
 export type AutoSyncAdaptivePacing = {
     durationMultiplier: number;
     maxIntervalMs: number;
@@ -30,26 +21,22 @@ export type AutoSyncAdaptivePacing = {
 
 export type AutoSyncControllerOptions = {
     performSync: () => Promise<SyncResult>;
-    /** False limits delivery to awaited request methods: no timers, window/data
-     *  triggers, or queued in-flight follow-ups. Ordinary platforms default true. */
+
+
     allowDeferredWork?: boolean;
     flushPendingSave: () => Promise<void>;
     reportError: (label: string, error: unknown) => void;
     isRuntimeActive: () => boolean;
-    /** Absent means "always allowed"; desktop gates on its own sync runtime. */
+
     canSync?: () => Promise<boolean>;
-    /** #1056 decision #5: the encryption states that hold automatic and background sync off
-     *  for a backend until the user acts, or `null` when nothing is holding it. Two states
-     *  qualify and they are opposites — `remote-encrypted-no-key` (the remote is encrypted
-     *  and this device has no key) and `remote-plaintext` (this device is encrypted and the
-     *  remote went back to plaintext) — so the suppression log names the one it got instead
-     *  of asserting the first. A MANUAL run is deliberately still allowed through: it is how
-     *  the user finds out, and it surfaces the typed failure instead of doing nothing. */
+
+
     syncEncryptionSuspension?: () => Promise<'remote-encrypted-no-key' | 'remote-plaintext' | null>;
     onSyncFailure?: (error: string) => void;
-    /** Desktop: the task editor lock. Holds window-driven syncs off mid-edit. */
+
     shouldPauseWindowSync?: () => boolean;
-    /** Desktop: blur only syncs when this device has something to push. */
+
+
     hasPendingLocalChanges?: () => boolean;
     logInfo?: (message: string, extra?: Record<string, string>) => void;
     now?: () => number;
@@ -63,34 +50,27 @@ export type AutoSyncControllerOptions = {
     maxFailureCooldownMs?: number;
     initialSyncDelayMs?: number;
     periodicSyncIntervalMs?: number | null;
-    /** Overrides the three fixed pacing numbers on every read. Mobile returns the
-     *  cadence for the currently selected backend. */
+
+
     getCadence?: () => AutoSyncCadence;
-    /** Awaited before a debounced data-change fires, so a platform that reads its
-     *  cadence from storage can refresh it first. Desktop leaves it unset and the
-     *  debounced trigger stays synchronous. */
+
+
     refreshCadence?: () => Promise<unknown>;
-    /** Last gate before a debounced data change syncs. Mobile compares the sync
-     *  payload fingerprint here, once per quiet period rather than per write (#766). */
+
+
     shouldSyncOnDebouncedChange?: () => boolean;
     adaptivePacing?: AutoSyncAdaptivePacing;
-    /** Mobile: the app is backgrounded. A request that arrives while a cycle
-     *  started in that state is remembered but not chained onto — Android pauses
-     *  background JS timers, so a follow-up there would not run reliably anyway. */
+
+
     isSuspended?: () => boolean;
-    /** Mobile: the first-change debounce applies once per foreground session, not
-     *  once per quiet period. After the first debounced sync every later edit keeps
-     *  the continuous-change delay until the runtime suspends. Desktop resets to
-     *  the first-change delay after each debounced sync. */
+
+
     continuousDebounceUntilSuspend?: boolean;
-    /** Mobile: an internal retry (a throttle or cooldown timer firing) that a newer
-     *  cycle has already overtaken is satisfied by that cycle and dropped. Desktop
-     *  queues it as a follow-up. Only internal retries are affected; a genuinely new
-     *  request always queues. */
+
+
     skipRetryWhileCycleRunning?: boolean;
-    /** Failures this platform does not treat as a reason to back off: no cooldown,
-     *  no `onSyncFailure`. Mobile exempts offline errors and result-shaped failures
-     *  that carry no message. */
+
+
     isIgnorableFailure?: (error: string | undefined) => boolean;
 };
 
@@ -101,22 +81,22 @@ type AutoSyncRequest = {
 };
 
 export type AutoSyncController = {
-    /** A user-initiated run: bypasses the failure cooldown. */
+
     requestSync: (minIntervalMs?: number) => Promise<void>;
-    /** An automatic run: waits out the failure cooldown like every other trigger (#948). */
+
     requestAutoSync: (minIntervalMs?: number, source?: string) => Promise<void>;
     handleFocus: () => void;
     handleBlur: () => void;
     handleDataChange: () => void;
     scheduleInitialSync: () => void;
-    /** The runtime is going away (mobile background). Drops the pacing timers it
-     *  cannot honour, but never a failure-owned retry deadline. */
+
+
     handleSuspend: () => void;
-    /** A successful sync that ran outside this controller (mobile's manual button)
-     *  cancels the automatic retry left by an earlier failure (#948). */
+
+
     notifyExternalSyncSuccess: () => void;
-    /** Reads and clears "a request arrived while the runtime was suspended and a
-     *  cycle was already running". Mobile runs it on the next foreground. */
+
+
     takePendingSuspendedRequest: () => boolean;
     getLastAutoSyncAt: () => number;
     dispose: () => void;
@@ -148,9 +128,8 @@ export const createAutoSyncController = (
     const autoFailureCooldownMs = options.autoFailureCooldownMs ?? DEFAULT_AUTO_FAILURE_COOLDOWN_MS;
     const maxFailureCooldownMs = options.maxFailureCooldownMs ?? DEFAULT_MAX_FAILURE_COOLDOWN_MS;
     const initialSyncDelayMs = options.initialSyncDelayMs ?? DEFAULT_INITIAL_SYNC_DELAY_MS;
-    // `null` means "no heartbeat" and must not fall back to the default: mobile
-    // relies on that, because Android pauses background JS timers and its
-    // periodic sync is a platform job, not a timer here.
+
+
     const periodicSyncIntervalMs = options.periodicSyncIntervalMs === undefined
         ? DEFAULT_PERIODIC_SYNC_INTERVAL_MS
         : options.periodicSyncIntervalMs;
@@ -162,6 +141,7 @@ export const createAutoSyncController = (
 
     let lastAutoSyncAt = 0;
     let lastCycleDurationMs = 0;
+    let lastCycleCarriedLocalChange = false;
     let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     let syncThrottleTimer: ReturnType<typeof setTimeout> | null = null;
     let initialSyncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -209,7 +189,7 @@ export const createAutoSyncController = (
             periodicSyncTimer = null;
             if (disposed) return;
             const runtimeActive = options.isRuntimeActive();
-            // Preserve the gate's short circuit: an inactive runtime never reads the editor.
+
             const editorPause = runtimeActive ? (options.shouldPauseWindowSync?.() ?? false) : null;
             trace('Auto sync periodic fired', {
                 delayMs: String(periodicSyncIntervalMs),
@@ -266,18 +246,18 @@ export const createAutoSyncController = (
         && (options.hasPendingLocalChanges?.() ?? true)
     );
 
-    // An explicit 0 (a manual run, a lifecycle transition, an internal retry)
-    // bypasses pacing entirely; every other request is stretched by how long the
-    // last cycle actually took on this device.
+
     const resolveEffectiveMinIntervalMs = (requestedMinIntervalMs: number | undefined) => {
         const requested = typeof requestedMinIntervalMs === 'number'
             ? requestedMinIntervalMs
             : cadence().minIntervalMs;
-        if (!adaptivePacing || requested <= 0) return requested;
-        return Math.max(
+        if (!adaptivePacing || requested <= 0) return { minIntervalMs: requested, adaptiveMinIntervalMs: requested };
+        const adaptiveMinIntervalMs = Math.max(
             requested,
             Math.min(lastCycleDurationMs * adaptivePacing.durationMultiplier, adaptivePacing.maxIntervalMs),
         );
+        const freshLocalChange = !lastCycleCarriedLocalChange && (options.hasPendingLocalChanges?.() ?? false);
+        return { minIntervalMs: freshLocalChange ? requested : adaptiveMinIntervalMs, adaptiveMinIntervalMs };
     };
 
     const autoSyncOrchestrator = createSyncOrchestrator<AutoSyncRequest, void>({
@@ -288,11 +268,23 @@ export const createAutoSyncController = (
             }
             if (!request.bypassFailureCooldown && !shouldRunAutoSyncNow(request.source)) return;
 
-            const effectiveMinIntervalMs = resolveEffectiveMinIntervalMs(request.minIntervalMs);
+            const {
+                minIntervalMs: effectiveMinIntervalMs,
+                adaptiveMinIntervalMs,
+            } = resolveEffectiveMinIntervalMs(request.minIntervalMs);
             const nowMs = now();
-            if (nowMs - lastAutoSyncAt < effectiveMinIntervalMs) {
+            const elapsedMs = nowMs - lastAutoSyncAt;
+            if (effectiveMinIntervalMs < adaptiveMinIntervalMs && elapsedMs < adaptiveMinIntervalMs) {
+                trace('Auto sync local change skipped adaptive pacing', {
+                    releaseCheck: 'v1.3.7/local-change-upload',
+                    source: request.source,
+                    delayMs: String(Math.max(0, effectiveMinIntervalMs - elapsedMs)),
+                    adaptiveWaitMs: String(adaptiveMinIntervalMs - elapsedMs),
+                });
+            }
+            if (elapsedMs < effectiveMinIntervalMs) {
                 if (allowDeferredWork && !syncThrottleTimer) {
-                    const waitMs = Math.max(0, effectiveMinIntervalMs - (nowMs - lastAutoSyncAt));
+                    const waitMs = Math.max(0, effectiveMinIntervalMs - elapsedMs);
                     trace('Auto sync throttled', {
                         source: request.source,
                         waitMs: String(waitMs),
@@ -307,9 +299,7 @@ export const createAutoSyncController = (
                 return;
             }
 
-            // Captured here, not after the awaits below: a lifecycle transition can
-            // land during an awaited port and would otherwise misclassify a cycle
-            // that started in the foreground as a background one.
+
             const cycleStartedSuspended = options.isSuspended?.() ?? false;
 
             const suspension = request.source === 'manual'
@@ -332,6 +322,8 @@ export const createAutoSyncController = (
             }
 
             lastAutoSyncAt = nowMs;
+
+            const cycleCarriesLocalChange = !!adaptivePacing && (options.hasPendingLocalChanges?.() ?? false);
             trace('Auto sync run start', {
                 source: request.source,
                 minIntervalMs: String(effectiveMinIntervalMs),
@@ -339,6 +331,7 @@ export const createAutoSyncController = (
             await options.flushPendingSave().catch((error) => options.reportError('Save failed', error));
 
             const result = await options.performSync();
+            lastCycleCarriedLocalChange = cycleCarriesLocalChange;
             trace('Auto sync run complete', {
                 source: request.source,
                 success: String(result.success),
@@ -350,14 +343,12 @@ export const createAutoSyncController = (
             if (result.success) {
                 autoSyncRetryAfter = 0;
                 consecutiveAutoSyncFailures = 0;
-                // A manual run can recover before a scheduled automatic retry.
-                // Its successful cycle already includes the pending local work.
+
+
                 clearSyncThrottle();
             } else if (!ignorableFailure) {
-                // CloudKit answers a throttle with the delay it wants; honour it
-                // rather than retrying on a fixed 60s that keeps tripping the
-                // same limit. Arm the retry now instead of waiting for another
-                // edit, focus change, or heartbeat to discover the cooldown.
+
+
                 consecutiveAutoSyncFailures += 1;
                 const cooldownMs = resolveSyncFailureCooldownMs({
                     error: result.error,
@@ -381,8 +372,8 @@ export const createAutoSyncController = (
                 lastCycleDurationMs = cycleEndedAt - nowMs;
                 lastAutoSyncAt = cycleEndedAt;
                 if (cycleStartedSuspended && requestedWhileSuspended) {
-                    // The next trigger will run this work; chaining a cycle while
-                    // backgrounded is what the platform will not let finish anyway.
+
+
                     requestedWhileSuspended = false;
                     autoSyncOrchestrator.clearFollowUp();
                 } else if (allowDeferredWork && autoSyncOrchestrator.getState().queued) {
@@ -492,8 +483,8 @@ export const createAutoSyncController = (
         },
         handleSuspend: () => {
             clearSyncDebounce();
-            // Normal pacing should not block the next attempt, but a failure retry
-            // must keep its owned deadline even when the runtime suspends.
+
+
             if (autoSyncRetryAfter === 0) clearSyncThrottle();
         },
         notifyExternalSyncSuccess: () => {

@@ -35,7 +35,7 @@ interface GeminiResponse {
 const resolveTimeoutMs = (value?: number) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : DEFAULT_TIMEOUT_MS;
 
-// Gemini 2.5+ (and 3.x) support `thinkingConfig`; sending it to older models can be rejected.
+
 const modelSupportsThinking = (model: string): boolean => /gemini-(2\.[5-9]|[3-9])/i.test(model);
 
 type GeminiThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
@@ -59,7 +59,7 @@ const resolveGeminiThinkingConfig = (
 
     let thinkingLevel: GeminiThinkingLevel;
     if (normalizedBudget <= 0) {
-        // Gemini 3 Pro does not support `minimal`; Flash models do.
+
         thinkingLevel = /\bpro\b/.test(normalizeGeminiModelId(model)) ? 'low' : 'minimal';
     } else if (normalizedBudget <= 128) {
         thinkingLevel = 'low';
@@ -86,7 +86,7 @@ async function buildGeminiError(response: BufferedAIResponse, usingOfficialGemin
                 raw = '';
             }
         } catch {
-            // Not JSON; fall back to the raw body text below.
+
         }
     }
 
@@ -196,14 +196,13 @@ const COPILOT_SCHEMA: GeminiSchema = {
 async function requestGemini(config: AIProviderConfig, prompt: { system: string; user: string }, schema?: GeminiSchema, options?: AIRequestOptions) {
     const endpoint = config.endpoint || GEMINI_BASE_URL;
     const usingOfficialGemini = endpoint === GEMINI_BASE_URL;
-    // Trim to tolerate keys pasted with a trailing newline or spaces (parity with OpenAI).
+
     const apiKey = String(config.apiKey || '').trim();
     if (!apiKey) {
         throw new Error('Gemini API key is required.');
     }
-    // Retired-id remap applies to Google's own API only — a compatible custom
-    // endpoint owns its model namespace (Google retired gemini-2.5-flash early
-    // on 2026-07-09, which broke every saved default silently).
+
+
     const model = usingOfficialGemini ? resolveGeminiModel(config.model) : config.model;
     const rawUrl = `${endpoint.replace(/\/+$/, '')}/${model}:generateContent`;
     let url = rawUrl;
@@ -214,12 +213,11 @@ async function requestGemini(config: AIProviderConfig, prompt: { system: string;
         }
         url = parsed.toString();
     } catch {
-        // If URL parsing fails, fall back to a manual cleanup of key params.
+
         url = rawUrl.replace(/([?&])key=[^&]+&?/gi, '$1').replace(/[?&]$/, '');
     }
-    // Gemini 2.5 uses numeric token budgets. Gemini 3 replaced those with relative
-    // thinking levels and rejects the legacy shape on newer models. Keep the stored
-    // setting stable and translate it only at the provider boundary.
+
+
     const thinkingConfig = resolveGeminiThinkingConfig(model, config.thinkingBudget);
     const supportsSamplingParameters = !isGemini3Model(model);
     const body = {

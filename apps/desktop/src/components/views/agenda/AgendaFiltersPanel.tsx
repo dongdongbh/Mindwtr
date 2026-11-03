@@ -1,7 +1,8 @@
+import { TaskDateFilter } from '../list/TaskDateFilter';
 import { useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react';
 import { SAVED_FILTER_NO_PROJECT_ID, tFallback } from '@mindwtr/core';
-import type { MultiValueFilterMatchMode, TaskEnergyLevel, TaskPriority, TimeEstimate } from '@mindwtr/core';
+import type { DateRange, MultiValueFilterMatchMode, TaskEnergyLevel, TaskPriority, TimeEstimate } from '@mindwtr/core';
 import { Filter, Save } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
@@ -26,10 +27,13 @@ export type AgendaProjectFilterOption = {
 
 export type AgendaActiveFilterChip = DesktopActiveFilterChip;
 
-type FilterCategoryId = 'tokens' | 'projects' | 'location' | 'priority' | 'energy' | 'time';
+type FilterCategoryId = 'dates' | 'tokens' | 'projects' | 'location' | 'priority' | 'energy' | 'time';
 
 type AgendaFiltersPanelProps = {
+    anyDateRange?: DateRange;
+    onAnyDateRangeChange?: (value: DateRange | undefined) => void;
     allTokens: string[];
+    showTokenFilters?: boolean;
     activeFilterChips: AgendaActiveFilterChip[];
     energyLevelOptions: TaskEnergyLevel[];
     formatEstimate: (estimate: TimeEstimate) => string;
@@ -62,6 +66,7 @@ type AgendaFiltersPanelProps = {
     saveFilterLabel: string;
     selectedEnergyLevels: TaskEnergyLevel[];
     selectedProjects: string[];
+    excludedProjects?: string[];
     selectedPriorities: TaskPriority[];
     selectedTimeEstimates: TimeEstimate[];
     selectedTokens: string[];
@@ -81,7 +86,10 @@ const focusFiltersTrigger = () => {
 };
 
 export function AgendaFiltersPanel({
+    anyDateRange,
+    onAnyDateRangeChange,
     allTokens,
+    showTokenFilters = true,
     activeFilterChips,
     energyLevelOptions,
     formatEstimate,
@@ -114,6 +122,7 @@ export function AgendaFiltersPanel({
     saveFilterLabel,
     selectedEnergyLevels,
     selectedProjects,
+    excludedProjects = [],
     selectedPriorities,
     selectedTimeEstimates,
     selectedTokens,
@@ -162,10 +171,9 @@ export function AgendaFiltersPanel({
         ...selectedTokens,
         ...excludedTokens.map((token) => `${excludedStateLabel}: ${token}`),
     ], allLabel);
-    const projectSummary = summarizeFilterValues(selectedProjects.map((projectId) => (
-        projectId === SAVED_FILTER_NO_PROJECT_ID
-            ? tFallback(t, 'taskEdit.noProjectOption', 'No project')
-            : projectTitleById.get(projectId) ?? projectId
+    const projectSummary = summarizeFilterValues([...selectedProjects, ...excludedProjects].map((projectId) => (
+        `${excludedProjects.includes(projectId) ? `${excludedStateLabel}: ` : ''}${projectId === SAVED_FILTER_NO_PROJECT_ID
+            ? tFallback(t, 'taskEdit.noProjectOption', 'No project') : projectTitleById.get(projectId) ?? projectId}`
     )), allLabel);
     const prioritySummary = summarizeFilterValues(
         selectedPriorities.map((priority) => t(`priority.${priority}`)),
@@ -190,9 +198,7 @@ export function AgendaFiltersPanel({
         setProjectQuery('');
     }, [showFiltersPanel]);
 
-    // Only Escape raised inside the panel folds it. A window listener also ate
-    // the Escape that closed a dialog or cancelled an edit, and stole focus to
-    // the Filters button one frame later.
+
     const handlePanelKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
         if (event.key !== 'Escape' || !showFiltersPanel) return;
         event.preventDefault();
@@ -258,7 +264,11 @@ export function AgendaFiltersPanel({
             <ActiveFilterChips chips={activeFilterChips} excludedLabel={excludedStateLabel} removeLabel={removeLabel} />
             {showFiltersPanel && (
                 <div className="rounded-md border border-border/60 px-2">
-                    <FilterCategory
+                    {onAnyDateRangeChange && (
+                        <TaskDateFilter id="agenda-date-filters" value={anyDateRange} onChange={onAnyDateRangeChange}
+                            expanded={expandedCategory === 'dates'} onToggle={() => toggleCategory('dates')} t={t} />
+                    )}
+                    {showTokenFilters && <FilterCategory
                         id="agenda-token-filters"
                         label={t('filters.contexts')}
                         summary={tokenSummary}
@@ -312,7 +322,7 @@ export function AgendaFiltersPanel({
                                 })}
                             </div>
                         ) : renderNoMatches()}
-                    </FilterCategory>
+                    </FilterCategory>}
 
                     {(showNoProjectOption || projectOptions.length > 0 || selectedProjects.length > 0) && (
                         <FilterCategory
@@ -328,9 +338,11 @@ export function AgendaFiltersPanel({
                                     <button
                                         type="button"
                                         onClick={() => onToggleProject(SAVED_FILTER_NO_PROJECT_ID)}
-                                        aria-pressed={selectedProjects.includes(SAVED_FILTER_NO_PROJECT_ID)}
+                                        aria-pressed={selectedProjects.includes(SAVED_FILTER_NO_PROJECT_ID) || excludedProjects.includes(SAVED_FILTER_NO_PROJECT_ID)}
+                                        aria-label={excludedProjects.includes(SAVED_FILTER_NO_PROJECT_ID) ? `${t('taskEdit.noProjectOption')} (${excludedStateLabel})` : undefined}
                                         className={cn(
                                             FILTER_OPTION_BASE,
+                                            excludedProjects.includes(SAVED_FILTER_NO_PROJECT_ID) ? 'text-destructive line-through' : '',
                                             selectedProjects.includes(SAVED_FILTER_NO_PROJECT_ID)
                                                 ? 'bg-primary text-primary-foreground'
                                                 : 'bg-muted text-muted-foreground hover:bg-muted/80',
@@ -341,15 +353,18 @@ export function AgendaFiltersPanel({
                                 )}
                                 {visibleProjects.map((project) => {
                                     const isActive = selectedProjects.includes(project.id);
+                                    const isExcluded = excludedProjects.includes(project.id);
                                     return (
                                         <button
                                             key={project.id}
                                             type="button"
                                             onClick={() => onToggleProject(project.id)}
-                                            aria-pressed={isActive}
+                                            aria-pressed={isExcluded ? 'mixed' : isActive}
+                                            aria-label={isExcluded ? `${project.title} (${excludedStateLabel})` : undefined}
                                             className={cn(
                                                 FILTER_OPTION_BASE,
                                                 'inline-flex max-w-full items-center gap-2',
+                                                isExcluded ? 'text-destructive line-through' : '',
                                                 isActive
                                                     ? 'bg-primary text-primary-foreground'
                                                     : 'bg-muted text-muted-foreground hover:bg-muted/80',

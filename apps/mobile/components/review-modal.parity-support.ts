@@ -1,11 +1,6 @@
-/**
- * Test support for the Review parity harnesses (review.parity.test.tsx,
- * review-modal.parity.test.tsx, daily-review-modal.parity.test.tsx): the shared
- * data set, the store seeding with recorded writes, and what an observation reads
- * from a rendered screen. The fixture they write is
- * packages/core/src/review-views-parity.fixtures.json; core's review model and
- * the native host contract are tested against it.
- */
+
+
+
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
@@ -23,7 +18,7 @@ import {
 export const FIXTURE_PATH = new URL('../../../packages/core/src/review-views-parity.fixtures.json', import.meta.url).pathname;
 export const CAPTURE = process.env.MINDWTR_CAPTURE_REVIEW_VIEWS === '1';
 export const TIME_ZONE = 'America/New_York';
-/** Wednesday 2026-09-23, 10:00 in New York. The default review week began on Sunday the 20th. */
+
 export const NOW = '2026-09-23T14:00:00.000Z';
 export const DEVICE_LOCALE = 'en-US';
 
@@ -82,7 +77,7 @@ export const tasks: Task[] = [
   task('t-trashed', 'Trashed idea', 'next', '09-01', { deletedAt: at('09-15'), updatedAt: at('09-15') }),
 ];
 
-/** What the external calendar returns for every fetch. */
+
 export const calendarEvents: ExternalCalendarEvent[] = [
   { id: 'e-standup', sourceId: 'cal', title: 'Standup', start: at('09-23', '13:00:00'), end: at('09-23', '13:30:00'), allDay: false },
   { id: 'e-holiday', sourceId: 'cal', title: 'Company holiday', start: '2026-09-23T04:00:00.000Z', end: '2026-09-24T04:00:00.000Z', allDay: true },
@@ -95,13 +90,13 @@ export const calendarEvents: ExternalCalendarEvent[] = [
 export type Scenario = {
   name: string;
   settings: string;
-  /** Only these tasks (default: all). */
+
   taskIds?: string[];
-  /** Only these projects (default: all). */
+
   projectIds?: string[];
-  /** The external calendar: its events (default), a fetch error, or nothing configured. */
+
   calendar?: 'events' | 'error' | 'none';
-  /** Device storage before the screen opens. */
+
   storage?: Record<string, string>;
   actions: [string, ...unknown[]][];
 };
@@ -117,7 +112,7 @@ export const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(
 const RECORDED = ['updateTask', 'deleteTask', 'restoreTask', 'addTask', 'batchUpdateTasks', 'batchMoveTasks', 'batchDeleteTasks'] as const;
 let realActions: Record<string, (...args: any[]) => Promise<any>> | null = null;
 
-/** Loads the scenario's data through the real store and records the writes the screens ask for. */
+
 export async function seedStore(settings: AppSettings, seededTasks: Task[], seededProjects: Project[] = projects) {
   await flushPendingSave();
   resetForTests();
@@ -149,8 +144,6 @@ export const scenarioProjects = (scenario: Scenario) => (
   scenario.projectIds ? projects.filter((entry) => scenario.projectIds!.includes(entry.id)) : projects
 );
 
-// ---------------------------------------------------------------------------
-// Reading a rendered screen.
 
 const isText = (node: ReactTestInstance) => String(node.type) === 'Text';
 const deepText = (node: ReactTestInstance | string | number | null | undefined | boolean): string => {
@@ -159,7 +152,7 @@ const deepText = (node: ReactTestInstance | string | number | null | undefined |
   return node.children.map((child) => deepText(child as ReactTestInstance | string)).join('');
 };
 
-/** Hidden modals render their children in the test shim; skip them, as a user would. */
+
 export function visibleNodes(root: ReactTestInstance): ReactTestInstance[] {
   const out: ReactTestInstance[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -171,7 +164,7 @@ export function visibleNodes(root: ReactTestInstance): ReactTestInstance[] {
   return out;
 }
 
-/** The visible text, one entry per outermost Text, in screen order. */
+
 export function textsIn(root: ReactTestInstance): string[] {
   const out: string[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -192,7 +185,7 @@ export const flattenStyle = (style: unknown): Record<string, unknown> => (
   Array.isArray(style) ? Object.assign({}, ...style.map(flattenStyle)) : style && typeof style === 'object' ? style as Record<string, unknown> : {}
 );
 
-/** A pressable by its accessibility label or, without one, its text. */
+
 export function findPressable(root: ReactTestInstance, label: string): ReactTestInstance | undefined {
   const candidates = visibleNodes(root).filter((node) => typeof node.props?.onPress === 'function');
   return candidates.find((node) => node.props.accessibilityLabel === label)

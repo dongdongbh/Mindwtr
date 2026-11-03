@@ -57,6 +57,28 @@ describe('ProjectSectionActionsMenu', () => {
         expect(actions.onDelete).toHaveBeenCalledTimes(1);
     });
 
+    it('offers the section Flow mode only when the menu is given one (#1429)', () => {
+        renderMenu();
+        openMenu();
+        expect(screen.queryByRole('menuitemradio')).toBeNull();
+        fireEvent.keyDown(window, { key: 'Escape' });
+
+        const onChange = vi.fn();
+        renderMenu({ sectionTitle: 'Book campsite', flow: {
+            label: 'Flow Mode', parallelLabel: 'Parallel', sequentialLabel: 'Sequential',
+            isSequential: false, onChange,
+        } });
+        fireEvent.click(screen.getByRole('button', { name: 'More options: Book campsite' }));
+        expect(screen.getByRole('group', { name: 'Flow Mode' })).toBeInTheDocument();
+        expect(screen.getByRole('menuitemradio', { name: 'Parallel' })).toHaveAttribute('aria-checked', 'true');
+        fireEvent.click(screen.getByRole('menuitemradio', { name: 'Parallel' }));
+        expect(onChange).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole('button', { name: 'More options: Book campsite' }));
+        fireEvent.click(screen.getByRole('menuitemradio', { name: 'Sequential' }));
+        expect(onChange).toHaveBeenCalledWith(true);
+    });
+
     it('keeps notes available but blocks mutations for read-only archived sections', () => {
         const actions = renderMenu({ readOnly: true, readOnlyHint: 'Archived projects are read-only' });
 

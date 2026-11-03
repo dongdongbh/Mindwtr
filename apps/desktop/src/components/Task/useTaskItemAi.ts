@@ -18,7 +18,7 @@ type TaskItemAiContext = {
     projectTasks: string[];
 } | null;
 
-/** One separately applicable piece of a copilot suggestion. */
+
 export type CopilotPart = { kind: 'context' | 'timeEstimate' | 'tag'; value: string };
 
 type UseTaskItemAiArgs = {
@@ -38,7 +38,7 @@ type UseTaskItemAiArgs = {
     projectContext: TaskItemAiContext;
     timeEstimatesEnabled: boolean;
     setField: TaskDraftSetter;
-    /** Off for surfaces that only want the on-demand actions (no background metadata calls). */
+
     copilotEnabled?: boolean;
 };
 
@@ -81,8 +81,8 @@ export function useTaskItemAi({
     const copilotMountedRef = useRef(true);
 
     useEffect(() => {
-        // No key read for the surfaces that never call a provider: every task
-        // row mounts this hook, and most of them have AI switched off.
+
+
         if (!aiEnabled) return;
         let active = true;
         loadAIKey(aiProvider)
@@ -100,9 +100,8 @@ export function useTaskItemAi({
     useEffect(() => {
         if (!aiEnabled || !copilotEnabled || (keyRequired && !aiKey)) {
             setCopilotSuggestion(null);
-            // Row went inactive with a signature already dispatched (e.g. the
-            // editor closed): clear it so reopening with unchanged text isn't
-            // treated as a duplicate of a request that never really re-ran.
+
+
             copilotInputRef.current = '';
             return;
         }
@@ -130,11 +129,8 @@ export function useTaskItemAi({
         let completed = false;
         let localAbort: AbortController | null = null;
         const handle = setTimeout(async () => {
-            // Record the signature only once the request actually dispatches:
-            // a re-render can clear this timer before it fires (effect
-            // cleanup below), and marking the ref at schedule time would make
-            // that rerun's dedup check see a signature that was never really
-            // sent, permanently skipping the reschedule.
+
+
             copilotInputRef.current = signature;
             try {
                 const currentContexts = editContexts.split(',').map((c) => c.trim()).filter(Boolean);
@@ -203,8 +199,7 @@ export function useTaskItemAi({
         };
     }, []);
 
-    // One log line per AI failure, through the app-log adapter: the provider,
-    // model and task that produced it are the whole point of the entry.
+
     const logAIFailure = useCallback((step: string, message: string) => {
         void logWarn(`AI ${step} failed`, {
             scope: 'ai',
@@ -255,8 +250,7 @@ export function useTaskItemAi({
         setAiClarifyResponse(null);
     }, []);
 
-    // The suggestion splits into parts the user applies one at a time (#1022);
-    // a part leaves the pending list once it is in the applied markers below.
+
     const pendingCopilotParts = useMemo<CopilotPart[]>(() => {
         if (!visibleCopilotSuggestion) return [];
         const parts: CopilotPart[] = [];
@@ -272,8 +266,7 @@ export function useTaskItemAi({
         return parts;
     }, [copilotContext, copilotEstimate, copilotTags, timeEstimatesEnabled, visibleCopilotSuggestion]);
 
-    // Batched on purpose: applying several tags one call at a time would each
-    // re-read the same stale draft string and drop all but the last.
+
     const applyCopilotParts = useCallback((parts: CopilotPart[]) => {
         if (parts.length === 0) return;
         const context = parts.find((part) => part.kind === 'context')?.value;
@@ -370,9 +363,7 @@ export function useTaskItemAi({
         }
     }, [editDescription, editTitle, getAIProvider, isAIWorking, logAIFailure, projectContext]);
 
-    // The three behaviours below used to live as inline closures on the row
-    // component; they are AI outcomes, so they belong beside the state they
-    // consume.
+
     const addBreakdownStepsToChecklist = useCallback(() => {
         if (!aiBreakdownSteps?.length) return;
         const newItems = aiBreakdownSteps.map((step) => ({
@@ -380,7 +371,7 @@ export function useTaskItemAi({
             title: step,
             isCompleted: false,
         }));
-        // Append to the latest row, so an item a sync save added meanwhile is kept.
+
         void updateTaskFromLatest(taskId, (latest) => ({ checklist: [...(latest.checklist ?? []), ...newItems] }));
         setAiBreakdownSteps(null);
     }, [aiBreakdownSteps, taskId]);

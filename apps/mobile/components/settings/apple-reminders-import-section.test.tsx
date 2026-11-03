@@ -81,7 +81,7 @@ describe('AppleRemindersImportSection workspace busy boundary', () => {
     });
 
     expect(reminders.importAppleRemindersIntoInbox).toHaveBeenCalledOnce();
-    // The manual button owes the same durability as the foreground run.
+
     expect(reminders.importAppleRemindersIntoInbox).toHaveBeenCalledWith(
       expect.objectContaining({
         flushPendingSave: expect.any(Function),
@@ -126,8 +126,7 @@ describe('AppleRemindersImportSection workspace busy boundary', () => {
       await Promise.resolve();
     });
 
-    // The write is queued behind any running import and re-reads the stored
-    // settings, so the screen hands it a change instead of a whole blob.
+
     const apply = reminders.updateAppleRemindersImportSettings.mock.calls.at(-1)?.[0] as
       (current: typeof settings) => typeof settings;
     expect(apply(settings)).toEqual({ ...settings, autoImportOnOpen: true });

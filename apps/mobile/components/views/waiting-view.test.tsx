@@ -65,7 +65,7 @@ let renderer: ReactTestRenderer | null = null;
 
 describe('WaitingView', () => {
   beforeEach(() => {
-    // waiting-view.tsx relies on the automatic JSX runtime the app bundler provides.
+
     vi.stubGlobal('React', React);
     mocked.showToast.mockClear();
     mocked.state = {

@@ -10,7 +10,7 @@ export type DesktopActiveFilterChip = {
     dotColor?: string;
     isAdvanced?: boolean;
     excluded?: boolean;
-    /** Selected, but this view does not apply it: shown muted, still removable. */
+
     inactive?: boolean;
     onRemove?: () => void;
 };

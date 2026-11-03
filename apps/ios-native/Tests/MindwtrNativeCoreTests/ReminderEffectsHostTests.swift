@@ -215,7 +215,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         var data = try object(try XCTUnwrap(selected.first?["data"] as? String)); mutate(&data)
         _ = try sql("UPDATE settings SET data=? WHERE id=1", [json(data)])
     }
-    /// Canonical outer SQL encoding leaves every cell's original bytes and storage type intact.
+
     private func rows() throws -> [String: String] {
         let db = try SQLiteBridge(url: database); defer { db.close() }
         let tables = try XCTUnwrap(NativeJSON.jsonObject(with: Data(db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").utf8)) as? [[String: Any]])
@@ -301,7 +301,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         await unavailable { try await value.reconcileReminders() }
         let before = await port.addCount; XCTAssertEqual(before, 2); XCTAssertEqual(try markers().count, 0)
         await unavailable { try await value.readAboutUpdateState() }
-        // The exact retained bytes settle, but that retry cannot resume or acknowledge the old plan.
+
         await unavailable { try await value.reconcileReminders() }
         let afterSettlement = await port.addCount; XCTAssertEqual(afterSettlement, before); XCTAssertEqual(try markers().count, 0)
         let result = try object(try await value.reconcileReminders()); XCTAssertEqual(result["scheduled"] as? Int, 0)
@@ -459,7 +459,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         XCTAssertEqual(try maps()[1], "{}"); let events = await port.mutations
         XCTAssertFalse(events.contains { $0.operation == "delivered-remove" })
         await cold.close()
-        // Restore only the known expired map fixture and actual owned tray evidence; disappearance alone above created none.
+
         var restored = try saved(); restored[alarmName] = try json(map); restored[stateName] = "{}"
         try Data(json(restored).utf8).write(to: manifest, options: .atomic); await port.setDelivered([first])
         let deliveredHost = host(); _ = try await deliveredHost.start(); let baseline = try rows()
@@ -476,7 +476,7 @@ final class ReminderEffectsHostTests: XCTestCase {
          "details": ["title": "PRIVATE_REMINDER_SNOOZE", "message": "PRIVATE_REMINDER_BODY", "tag": "task:task-0",
                      "play_sound": true, "data": ["alarmKey": "task:task-0", "taskId": "task-0"]] as [String: Any]]
     }
-    /// A real durable armed receipt; the ordinary master switch is off to isolate independent Snooze policy.
+
     private func seedSnooze(fireAtMs: Double? = nil, armed: Bool = true, ordinary: Bool = false) async throws -> CoreHost {
         let initial = try await seed(count: 1); await initial.close()
         if !ordinary { try settings { $0["notificationsEnabled"] = false } }
@@ -573,7 +573,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         await port.releasePermission(); await unavailable { try await task.value }
         let count = await port.addCount; XCTAssertEqual(count, 0); XCTAssertEqual(try maps(), before)
         XCTAssertEqual(try markers().count, 0); XCTAssertEqual(try snoozeMarkers().count, 0); XCTAssertEqual(try rows(), baseline)
-        // An existing fresh cycle is safe and leaves this now-past armed receipt alone.
+
         let retry = try object(try await value.reconcileReminders()); XCTAssertEqual(retry["scheduled"] as? Int, 0)
     }
     private func refuseSnoozeArrivalDuringPermissionWait(delivered: Bool, foreign: Bool = false) async throws {
@@ -654,7 +654,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         let effects = await port.mutations; XCTAssertEqual(effects.count, before)
         XCTAssertEqual(try Data(contentsOf: manifest), bytes); XCTAssertEqual(try rows(), baseline); XCTAssertEqual(try markers().count, 1)
         _ = try await value.readAboutUpdateState()
-        // The external owner then retires its replacement; our next explicit cycle must be usable.
+
         if delivered { await port.setDelivered(Array(owned.dropFirst())) }
         else { await port.setPending(Array(owned.dropFirst())) }
         let next = try object(try await value.reconcileReminders()); XCTAssertEqual(next["mode"] as? String, "revoked")
@@ -703,7 +703,7 @@ final class ReminderEffectsHostTests: XCTestCase {
     }
     private func reminderIdentifier(_ id: Int) -> String { "mindwtr-native:\(namespace!):\(id)" }
     private func collapseMarkers() throws -> [[String: Any]] {
-        _ = try markers() // The same full log privacy checks apply to both fixed markers.
+        _ = try markers()
         let text = (try? String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)) ?? ""
         let entries = try text.split(separator: "\n").filter { $0.contains("v1.3.5/ios-reminder-thread-collapse") }.map { try object(String($0)) }
         for entry in entries {
@@ -909,7 +909,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         let recorder = ReminderWakeRecorder(); _ = try await value.observeReminders { recorder.record($0) }
         fault.enable(true)
         do { _ = try await value.call("complete", argumentsJSON: json(["task-0"])); XCTFail("Expected retained receipt") } catch {}
-        _ = try? await value.readAboutUpdateState() // Queue barrier while the retained owner still refuses reads.
+        _ = try? await value.readAboutUpdateState()
         XCTAssertTrue(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
         XCTAssertEqual(recorder.events.map(\.0), ["source"])
         let revision = try XCTUnwrap(recorder.events.last?.1), baseline = try rows()
@@ -932,7 +932,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         let entered = expectation(description: "OS add holds confirmed result")
         await port.holdAdd(entered); let task = Task { try await value.reconcileReminders() }
         await fulfillment(of: [entered], timeout: 5)
-        // A real held callback spans a controlled second; the shared deadline was already planned.
+
         try await Task.sleep(nanoseconds: 1_000_000_000)
         await port.releaseAdd(); let result = try object(try await task.value)
         let deadline = try XCTUnwrap(result["topUpAtMs"] as? NSNumber)
@@ -962,8 +962,8 @@ final class ReminderEffectsHostTests: XCTestCase {
 
     func testPostPerformReleaseRearmsActualJSTimerAndIdlePumpDeliversSourceWithoutAnotherCall() async throws {
         let initial = try await seed(); await initial.close()
-        // Test-local derived bundle only: the original command/production bundle are unchanged.
-        // complete's pending receipt blocks invoke's idle scheduling; its later retirement must re-arm this timer.
+
+
         var bytes = try Data(contentsOf: bundle)
         bytes.append(Data(#"""
         ;(() => {
@@ -984,7 +984,7 @@ final class ReminderEffectsHostTests: XCTestCase {
             if recorder.events.count == 2 { timer.fulfill() }
         }
         _ = try await value.call("complete", argumentsJSON: json(["task-0"]))
-        // There is intentionally no later host operation to rescue a stranded timer.
+
         await fulfillment(of: [timer], timeout: 5)
         XCTAssertEqual(recorder.events.map(\.0), ["source", "source"])
         XCTAssertGreaterThan(try XCTUnwrap(recorder.events.last?.1), try XCTUnwrap(recorder.events.first?.1))
@@ -1043,7 +1043,7 @@ final class ReminderEffectsHostTests: XCTestCase {
             XCTAssertEqual(try rows(), baseline); XCTAssertEqual(try Data(contentsOf: manifest), before)
         }
         let effects = await port.mutations; XCTAssertEqual(effects.count, 0); XCTAssertEqual(try markers().count, 0)
-        _ = try await value.reconcileReminders() // Both reservations released after success and original admission failure.
+        _ = try await value.reconcileReminders()
     }
 
     func testCancelledOrdinaryWaiterCannotWriteAndReleasesReservationAfterReminderDrain() async throws {
@@ -1087,7 +1087,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         hold.arm(); defer { hold.release() }
         let writing = Task { try await value.recordAboutUpdateCheck(timestamp: "1") }
         await fulfillment(of: [entered], timeout: 5)
-        // begin runs before queued Engine work; no observation has seen a transient reservation.
+
         await unavailable { try await value.reconcileReminders() }
         XCTAssertEqual(recorder.events.count, 0)
         let effects = await port.mutations; XCTAssertEqual(effects.count, 0)

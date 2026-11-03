@@ -16,6 +16,17 @@ struct ProcessInboxSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if !model.processInboxUndoLabel.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(model.processInboxToast).rnFont(13).foregroundStyle(palette.success)
+                    actionButton(model.processInboxUndoLabel, id: "process-inbox-undo",
+                                 requiresControls: false, active: model.processInboxUndoEnabled) {
+                        Task { await model.undoProcessInboxDecision() }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20).padding(.vertical, 8)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     if view.isEmpty { completed }
@@ -292,6 +303,12 @@ struct ProcessInboxSheet: View {
                     if !project.object("current").isEmpty {
                         option(project.object("current"), id: "process-inbox-project-current")
                     }
+
+                    let sections = project.object("sections")
+                    if !sections.isEmpty {
+                        Text(sections.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                        options(sections.objects("options"), prefix: "process-inbox-section")
+                    }
                     let search = project.object("search")
                     if !search.isEmpty {
                         let searchLayout = dynamicTypeSize.isAccessibilitySize
@@ -488,7 +505,7 @@ struct ProcessInboxSheet: View {
                     .foregroundStyle(notice.text("tone") == "error" ? palette.danger : palette.warning)
                     .accessibilityIdentifier("process-inbox-notice")
             }
-            if !model.processInboxToast.isEmpty {
+            if !model.processInboxToast.isEmpty && model.processInboxUndoLabel.isEmpty {
                 Text(model.processInboxToast).rnFont(13).foregroundStyle(palette.success)
                     .accessibilityIdentifier("process-inbox-toast")
             }
@@ -522,7 +539,7 @@ struct ProcessInboxSheet: View {
             .padding(12).frame(maxWidth: .infinity, minHeight: 44)
             .background(palette.input, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
-            // Pure text reads leave controls enabled, so focus survives typing.
+
             .disabled(!enabled)
             .contentShape(Rectangle())
             .onTapGesture { if enabled { focusedField = field } }

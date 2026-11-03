@@ -17,7 +17,6 @@ export interface LanguageContextType {
 }
 
 
-
 export const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
@@ -38,7 +37,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
             const systemDateFormat = getSystemDateFormat();
             if (config.systemDateFormat === systemDateFormat) return;
             configureDateFormatting({ ...config, systemDateFormat });
-            // Context consumers include memoized task rows and the open Settings preview.
+
             refreshRegionalFormats((revision) => revision + 1);
             void logInfo('System date format configured', { scope: 'regional-format', extra: {
                 releaseCheck: 'v1.3.5/system-date-format', outcome: systemDateFormat ? 'native' : 'locale-fallback',

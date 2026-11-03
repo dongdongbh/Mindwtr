@@ -246,8 +246,8 @@ describe('AppleImageEvaluationController durable save', () => {
   it('re-enqueues a full snapshot after terminal persistence exhaustion without creating a duplicate', async () => {
     const controller = await readyController();
     const addTask = vi.fn(async () => ({ success: true, id: 'task-1' }));
-    // Core has exhausted and removed the original queue entry when this rejects.
-    // A second bare flush would return success on the empty queue.
+
+
     const flushPendingSave = vi.fn(async () => { throw new Error('terminal disk failure'); });
     const retryPendingPersistence = vi.fn(async () => undefined);
 

@@ -229,7 +229,7 @@ describe('TaskInput autocomplete', () => {
         for (const name of ['/link:<url>', '/energy:<level>', '/priority:<level>', '/area:<name>', '/reference', '/archived', '/*']) {
             expect(getByRole('option', { name })).toBeInTheDocument();
         }
-        // Only /priority:<level> suggestions carry the decorative flag.
+
         expect(document.querySelectorAll('[data-priority-flag]')).toHaveLength(0);
     });
 
@@ -247,6 +247,23 @@ describe('TaskInput autocomplete', () => {
         await waitFor(() => {
             expect(input.value).toBe('Sample task /start:now /note:');
         });
+    });
+
+    it('suggests projects and contexts typed after a slash command value (#1259)', () => {
+        const { getByRole, getAllByRole, rerender } = render(
+            <TaskInput value="Sample task /start:next friday +La" onChange={vi.fn()} projects={[buildProject('Launch')]} contexts={['@phone']} />
+        );
+        const input = getByRole('combobox') as HTMLInputElement;
+        const open = () => {
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+            fireEvent.click(input);
+            return getAllByRole('option').map((option) => option.textContent);
+        };
+        expect(open()).toEqual(['Launch', 'Create Project "La"']);
+
+        rerender(<TaskInput value="Sample task /due:tomorrow @ph" onChange={vi.fn()} projects={[]} contexts={['@phone']} />);
+        expect(open()).toContain('@phone');
     });
 
     it('keeps a value with spaces and slashes inside one slash command', () => {
@@ -294,8 +311,7 @@ describe('TaskInput autocomplete', () => {
             '/priority:urgent',
         ]);
 
-        // Each level suggestion carries the canonical decorative flag; other
-        // command suggestions keep their plain label markup.
+
         const priorityFlagColors = {
             low: '#3b82f6',
             medium: '#ca8a04',

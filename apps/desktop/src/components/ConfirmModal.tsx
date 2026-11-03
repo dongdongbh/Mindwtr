@@ -39,13 +39,12 @@ export function ConfirmModal({
             describedBy={description ? descriptionId : undefined}
             placement="top"
             overlayClassName="pt-[20vh]"
-            // Capped at the space left below the 20vh top offset: callers pass
-            // user content as the title (Trash confirms with the task title),
-            // so an unbounded card pushed the buttons off-screen (#947).
+
+
             panelClassName="max-h-[60vh]"
         >
-            {/* Header scrolls as one block so the buttons below stay pinned
-                and reachable no matter how long the title or description is. */}
+            {
+                                                                                }
             <DialogBody className="px-4 py-3 border-b">
                 <h3 id={titleId} className="font-semibold break-words">{title}</h3>
                 {description && (

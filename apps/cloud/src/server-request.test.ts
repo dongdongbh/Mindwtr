@@ -9,7 +9,7 @@ import { isBodyReadError, readJsonBody } from './server-storage';
 
 const TOKEN = 'admission-body-token-1234567890';
 
-/** A chunked body that never ends on its own; `cancelled` resolves when the reader gives up. */
+
 const endlessChunkedPut = () => {
     let markCancelled: () => void = () => undefined;
     const cancelled = new Promise<void>((resolve) => { markCancelled = resolve; });

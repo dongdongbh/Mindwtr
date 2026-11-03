@@ -15,7 +15,7 @@ export default function CaptureTab() {
       const defaultCapture = settings.gtd?.defaultCaptureMethod ?? 'text';
       const autoRecord = defaultCapture === 'audio';
 
-      // Guard against accidental navigation to the hidden capture tab route.
+
       const timer = setTimeout(() => {
         openQuickCapture({ autoRecord });
         if (router.canGoBack()) {

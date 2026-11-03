@@ -32,7 +32,7 @@ const fixture = loadProcessInboxFixture();
 const scenario = (name: string) => fixture.scenarios.find((entry) => entry.name.startsWith(name))!;
 const CONTRACT_FIELDS = ['taskId', 'back', 'fileIt', 'progress', 'returning', 'draft'] as const;
 
-/** The contract as a replay backend: every action is one host call. */
+
 function createContractBackend(host: ReturnType<typeof createNativeHostContract>, toasts: unknown[]): ReplayBackend {
     const started = host.startInboxProcessing();
     if (!started.ok) throw new Error(started.error.message);
@@ -87,7 +87,7 @@ describe('native host contract: Process Inbox', () => {
         vi.restoreAllMocks();
     });
 
-    // Revisions and quick dates read the clock.
+
     const freezeClock = () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(fixture.now));
@@ -117,7 +117,7 @@ describe('native host contract: Process Inbox', () => {
         const { host, recorder } = await openHost(entry);
         const contract = await replay(entry, (toasts) => createContractBackend(host, toasts), recorder);
 
-        // The same steps, choices, drafts, writes and messages as core's functions called directly.
+
         const coreRecorder = createWriteRecorder();
         await seedProcessInboxStore(fixture, entry, coreRecorder);
         const core = await replay(entry, (toasts) => createCoreBackend({ t, toasts }), coreRecorder);
@@ -168,7 +168,7 @@ describe('native host contract: Process Inbox', () => {
             sessionId: sessionIdValue, taskId: 'inbox-a', step: 'later', edit: { type: 'setPickedDate', field: 'startTime', day: '2026-10-05' },
         });
         expect(picked).toMatchObject({ ok: true, value: { dateRow: { date: '2026-10-05', display: formatDate('2026-10-05', 'P') } } });
-        // The notice for a missing date is a result, not an error.
+
         const cleared = host.getInboxProcessingStep({
             sessionId: sessionIdValue, taskId: 'inbox-a', step: 'later', edit: { type: 'setDate', field: 'startTime', value: null },
         });
@@ -206,6 +206,49 @@ describe('native host contract: Process Inbox', () => {
             expect(backend.view()!.draft[row.field]).toEqual({ date: '2028-02-29', dateOnly: false });
         }
         expect(recorder.log).toEqual([]);
+    });
+
+    it('takes a picked clock time on a date row and files it, as React Native does (#1445)', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('start later'));
+        const started = host.startInboxProcessing({ mode: 'guided' });
+        if (!started.ok || !started.value.view) throw new Error('Expected an Inbox task');
+        const sessionId = started.value.sessionId!;
+        await host.commitInboxProcessingStep({ sessionId, taskId: 'inbox-a', step: 'actionable', decision: { choice: 'later' }, requestId: generateUUID() });
+        const request = { sessionId, taskId: 'inbox-a', step: 'later' as const };
+        expect(host.getInboxProcessingStep({ ...request, edit: { type: 'setPickedDate', field: 'startTime', day: '2026-10-05' } }).ok).toBe(true);
+        for (const value of ['25:00', '9:00', '14:30:00', '', 42]) {
+            expect(host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field: 'startTime', value } as never }))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        const timed = host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field: 'startTime', value: '14:30' } as never });
+        if (!timed.ok) throw new Error(JSON.stringify(timed));
+        expect(timed.value.dateRow).toMatchObject({ dateOnly: false, time: { label: '14:30', hour: 14, minute: 30, edit: { type: 'setTime', field: 'startTime' } } });
+        expect(timed.value.dateRow!.display).toMatch(/ 14:30$/);
+
+        const moved = host.getInboxProcessingStep({ ...request, edit: { type: 'setPickedDate', field: 'startTime', day: '2026-10-06' } });
+        expect(moved.ok && moved.value.draft.startTime).toEqual({ date: '2026-10-06', dateOnly: false, time: '14:30' });
+        expect(await host.commitInboxProcessingStep({ ...request, decision: { choice: 'fileIt' }, requestId: generateUUID() })).toMatchObject({ ok: true });
+        expect(useTaskStore.getState()._tasksById.get('inbox-a')?.startTime).toBe('2026-10-06T14:30');
+    });
+
+    it('reloads the draft from the task the full editor saved, keeping the step, as RN\'s Edit button does (#1445)', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('start later'));
+        const started = host.startInboxProcessing({ mode: 'guided', mergeSyncedChanges: true });
+        if (!started.ok || !started.value.view) throw new Error('Expected an Inbox task');
+        const sessionId = started.value.sessionId!;
+        await host.commitInboxProcessingStep({ sessionId, taskId: 'inbox-a', step: 'actionable', decision: { choice: 'later' }, requestId: generateUUID() });
+        const request = { sessionId, taskId: 'inbox-a', step: 'later' as const };
+        expect(host.getInboxProcessingStep({ ...request, edit: { type: 'set', field: 'title', value: 'typed' } }).ok).toBe(true);
+
+        const unchanged = host.getInboxProcessingStep({ ...request, reload: true } as never);
+        expect(unchanged.ok && unchanged.value.draft.title).toBe('typed');
+        await useTaskStore.getState().updateTask('inbox-a', { title: 'Edited in the editor', contexts: ['@desk'] });
+        const reloaded = host.getInboxProcessingStep({ ...request, reload: true } as never);
+        if (!reloaded.ok) throw new Error(JSON.stringify(reloaded));
+        expect(reloaded.value).toMatchObject({ step: 'later', draft: { title: 'Edited in the editor', contexts: ['@desk'] } });
+        expect(host.getInboxProcessingStep({ ...request, reload: 'yes' } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
     it('rejects malformed picked dates and fields without changing the draft', async () => {
@@ -257,7 +300,7 @@ describe('native host contract: Process Inbox', () => {
         expect(recorder.log).toHaveLength(1);
         expect(useTaskStore.getState()._tasksById.get('inbox-a')).toBe(written);
         expect((saveData.mock.lastCall?.[0] as { tasks: Array<{ id: string; status: string }> }).tasks.find(({ id }) => id === 'inbox-a')?.status).toBe('next');
-        // A lost reply repeats the request once more: still no write.
+
         const saves = saveData.mock.calls.length;
         expect(await host.commitInboxProcessingStep(input)).toEqual(retried);
         expect(recorder.log).toHaveLength(1);
@@ -279,7 +322,8 @@ describe('native host contract: Process Inbox', () => {
         expect(await host.commitInboxProcessingStep(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
         saveData.mockResolvedValue(undefined);
         expect(await host.commitInboxProcessingStep(input)).toEqual({ ok: true, value: {
-            view: null, notice: null, toast: { message: 'Plan trip moved to Trash', undoLabel: 'Undo' },
+            view: null, notice: null, toast: { message: 'Plan trip moved to Trash', undoLabel: 'Undo',
+                undoReceipt: expect.objectContaining({ taskId: 'inbox-c', kind: 'discarded' }) },
         } });
         expect(recorder.log).toEqual([['deleteTask', 'inbox-c']]);
         expect(host.getInboxProcessingStep({ sessionId: input.sessionId, taskId: 'inbox-c', step: 'actionable' }))
@@ -344,13 +388,13 @@ describe('native host contract: Process Inbox', () => {
         view = edited.value;
         const convert = { sessionId, taskId: view.taskId, step: view.step, decision: { choice: 'createProject' }, requestId: generateUUID() };
         const projectId = requestRowId(convert.requestId, 'project');
-        // The project lands; the task's move into it fails.
+
         const updateTask = useTaskStore.getState().updateTask;
         useTaskStore.setState({ updateTask: async () => ({ success: false, error: 'Task store refused' }) });
         expect(await host.commitInboxProcessingStep(convert)).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
         useTaskStore.setState({ updateTask });
         const [[landed]] = made();
-        // Another device renames it before the retry.
+
         await useTaskStore.getState().updateProject(landed as string, { title: 'Renamed' });
         expect(await host.commitInboxProcessingStep(convert)).toMatchObject({ ok: true });
         expect(made()).toEqual([[projectId, 'Renamed', false]]);
@@ -427,7 +471,7 @@ describe('native host contract: Process Inbox', () => {
             const request = { sessionId, taskId: 'inbox-a', step: 'actionable', decision: { choice: 'trash' }, requestId: generateUUID() };
             owed.push(() => host.commitInboxProcessingStep(request));
             expect(await owed[index]()).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
-            // The item is gone from the queue; restore it so the next session opens it.
+
             expect((await useTaskStore.getState().restoreTask('inbox-a')).success).toBe(true);
         }
         expect(host.startInboxProcessing()).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
@@ -462,7 +506,7 @@ describe('native host contract: Process Inbox', () => {
         expect(restarted).toMatchObject({ ok: true, value: { view: { taskId: 'inbox-a', capture: { title: 'Edited on another device' } } } });
         expect(host.endInboxProcessing({ sessionId })).toEqual({ ok: true, value: null });
         expect(host.getInboxProcessingStep({ ...base, step: 'actionable' })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
-        // The four most recent sessions stay open.
+
         const ids = Array.from({ length: 4 }, () => {
             const next = host.startInboxProcessing();
             return next.ok ? next.value.sessionId! : '';
@@ -490,12 +534,12 @@ describe('native host contract: Process Inbox', () => {
             ? current.commitInboxProcessingStep({ ...base, step: 'actionable', decision: { choice: 'trash' } })
             : current.skipInboxProcessingTask(base));
         expect(await run(host)).toMatchObject({ ok: true });
-        // A later change to the item: restored from Trash, or edited.
+
         if (command === 'commitInboxProcessingStep') await useTaskStore.getState().restoreTask('inbox-a');
         else expect((await useTaskStore.getState().updateTask('inbox-a', { title: 'Edited later' })).success).toBe(true);
         const after = useTaskStore.getState()._tasksById.get('inbox-a');
         recorder.log.length = 0;
-        // The session lived in the old process: the replay is stale and writes nothing.
+
         expect(await replayAfterRestart(run)).toMatchObject({ result: { ok: false, error: { code: 'STALE_REVISION' } }, wrote: false });
         expect(recorder.log).toEqual([]);
         expect(useTaskStore.getState()._tasksById.get('inbox-a')).toEqual(after);

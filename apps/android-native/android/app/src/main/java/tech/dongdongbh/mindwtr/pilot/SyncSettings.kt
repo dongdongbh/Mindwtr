@@ -1,9 +1,14 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.provider.DocumentsContract
 import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,12 +24,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,74 +71,67 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.core.net.toUri
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
+import tech.dongdongbh.mindwtr.pilot.core.PendingSyncFolderPick
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-/*
- * RN's Settings › Sync (sync-settings-screen.tsx in sync mode, its backend panels, sync-settings-sections.tsx and the encryption
- * card) on core's contract (native-host-contract-settings-sync.ts). Kotlin keeps only what RN keeps in React state for one visit:
- * the form as typed, the passphrase fields, which folds are open, and the command running. Every word, check, enabled state,
- * toast and write is core's.
- */
 
-/**
- * Settings › Sync's screen commands (host-entry.ts MENU_COMMANDS). CoreHost.syncCommand sends them without holding the engine,
- * and never journals them (WriteJournal.UNJOURNALED; several carry a password).
- */
 val SYNC_COMMANDS = setOf("openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection",
-    "pickSyncFolder", "connectDropbox", "disconnectDropbox", "runSyncEncryptionAction")
+    "pickSyncFolder", "connectDropbox", "disconnectDropbox", "runSyncEncryptionAction", "answerSyncMissingFiles")
 
-/**
- * The WebDAV or self-hosted form as typed (RN's panel state). A null [password] or [token] was not edited: the field shows core's
- * dots and the stored one is kept.
- */
-/** Core's dot for a stored password or token (native-host-contract-settings-sync.ts PASSWORD_DOTS). */
+
 private const val MASK_DOT = "•"
 
 data class SyncForm(val kind: String, val url: String, val username: String, val password: String?, val token: String?, val insecure: Boolean)
 
 class SyncSettingsModel(private val menu: MenuModel) {
     private companion object {
-        /** A visit's open and close, in order, never behind a long command: a late close must never end the next visit. */
+
         val visits: ExecutorService = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-sync-visits") }
-        /** The encryption card's light actions in the order sent: a passphrase field's text never overtakes an earlier keystroke. */
+
         val light: ExecutorService = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-sync-light") }
-        /** Backend chips in tap order, as RN sends each choice: Off tapped during a slow WebDAV choice is the one that stays. */
+
         val choices: ExecutorService = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-sync-choices") }
     }
     private val shell get() = menu.shell
     private val settings get() = menu.settings
 
-    /** openSyncSettings ran for this visit: RN reads the stored configuration once, when the screen mounts. */
+
     @Volatile private var opened = false
     var form by mutableStateOf<SyncForm?>(null); private set
-    /** The encryption card's passphrase fields as typed (current, next, confirm); core holds their text too. */
+
     val passphrases = PassphraseFields()
     val fields: Map<String, String> get() = passphrases.texts
     var historyOpen by mutableStateOf(false); private set
     var preferencesOpen by mutableStateOf(false); private set
     var snapshotsOpen by mutableStateOf(false); private set
-    /** How many commands run now (each its own thread, as RN's run side by side); core's view shows each control's spinner. */
+
+
+    var answeredQuestion by mutableStateOf<String?>(null); private set
+
     var running by mutableStateOf(0); private set
-    /** The commands running, by key (a name, a backend choice): a second identical tap before core's view disables the control sends nothing. Main thread. */
+
     private val inFlight = HashSet<String>()
-    /** The panel the form last followed (RN's form takes a stored value again whenever it changes). */
+
     private var followed: JSONObject? = null
     private var typed = 0
 
-    /** Settings' read of this screen: it opens once per visit (its toasts shown), then core's view for the form's typed text. */
+
     fun read(runtime: CoreHost): JSONObject {
         open(runtime)
         val input = JSONObject().put("draft", draft()).toString()
         return try {
             runtime.menuRead("syncSettings", input)
         } catch (failure: Exception) {
-            // Core has no open screen (a close that raced this visit): open it again, once.
+
             if (failure.message?.contains("(openSyncSettings)") != true) throw failure
             opened = false
             open(runtime)
@@ -137,21 +139,24 @@ class SyncSettingsModel(private val menu: MenuModel) {
         }
     }
 
-    /** One open per visit, after any close sent before it: a refresh and a reload can read at once. */
-    private fun open(runtime: CoreHost) = visits.submit {
+
+    private fun open(runtime: CoreHost) = visits.submit { openNow(runtime) }.get()
+
+
+    private fun openNow(runtime: CoreHost) {
         if (!opened) {
             val reply = runtime.syncCommand("openSyncSettings", "{}")
             opened = true
             shell.ui { toasts("openSyncSettings", reply) }
         }
-    }.get()
+    }
 
-    /** The form's typed URL and token (null: not edited), which core's checks follow. */
+
     private fun draft(): JSONObject = form?.let { typed ->
         JSONObject().put("url", typed.url).apply { if (typed.kind == "selfhosted") put("token", typed.token ?: JSONObject.NULL) }
     } ?: JSONObject()
 
-    /** RN's form effects for core's new view: a form mounts with the stored values and takes each again when it changes. Main thread. */
+
     fun follow(view: JSONObject) {
         val panel = view.optJSONObject("panel")
         val kind = panel?.optString("kind")
@@ -173,17 +178,14 @@ class SyncSettingsModel(private val menu: MenuModel) {
         form = next
     }
 
-    /** A field of the form as typed; core's view is read again for it once typing pauses. */
+
     fun edit(change: SyncForm.() -> SyncForm) {
         form = form?.change() ?: return
         val mine = ++typed
         shell.ui { if (mine == typed) settings.refresh() }
     }
 
-    /**
-     * RN's secure field starts with the stored secret; here it starts with core's dots, so the first edit starts it over: the
-     * text typed after the dots, or, for any other edit (a Backspace, a keystroke among the dots), what was typed, dots left out.
-     */
+
     fun secret(masked: String?, mask: String, text: String): String = when {
         masked != null -> text
         text.startsWith(mask) -> text.removePrefix(mask)
@@ -194,12 +196,13 @@ class SyncSettingsModel(private val menu: MenuModel) {
     fun togglePreferences() { preferencesOpen = !preferencesOpen }
     fun toggleSnapshots() { snapshotsOpen = !snapshotsOpen }
 
-    /** Leaving the screen (RN unmounts it): core drops a backend chosen but not proven, and the next visit opens afresh. */
+
     fun leave() {
         if (!opened && form == null) return
         opened = false
         form = null
         followed = null
+        answeredQuestion = null
         passphrases.clear()
         historyOpen = false
         preferencesOpen = false
@@ -208,44 +211,64 @@ class SyncSettingsModel(private val menu: MenuModel) {
         visits.execute { runCatching { runtime.syncCommand("closeSyncSettings", "{}") }.onFailure { Log.w(CoreHost.TAG, "Sync screen close failed ${failureForLog(it)}") } }
     }
 
-    // ---- Commands: each tap sends core's command with a new request UUID ----
 
-    /** A backend chip (core's option): a complete target activates through its first sync. */
     fun select(option: String) =
         run("selectSyncBackend", JSONObject().put("requestId", uuid()).put("option", option), key = "selectSyncBackend:$option", ordered = choices)
 
-    /** The form's Save: core proves the settings with a sync, then stores them. [revision] is the view's configRevision. */
+
     fun save(view: JSONObject) = formFields()?.let { (name, fields) ->
         run("saveSyncBackend", JSONObject().put("requestId", uuid()).put("revision", view.getString("configRevision")).put(name, fields))
     }
 
-    /** The panel's Sync now; the WebDAV and self-hosted forms sync what they hold, as RN's do. */
+
     fun syncNow(view: JSONObject) {
         val input = JSONObject().put("requestId", uuid())
         formFields()?.let { (name, fields) -> input.put("revision", view.getString("configRevision")).put(name, fields) }
         run("syncNow", input)
     }
 
-    /** The panel's Test connection (Dropbox sends no fields). */
+
+    fun answerMissingFiles(questionId: String, continueWithout: Boolean) {
+        if (answeredQuestion == questionId) return
+        answeredQuestion = questionId
+        Log.i(CoreHost.TAG, "Native Android sync screen missing files answer=${if (continueWithout) "continue" else "cancel"}")
+        run("answerSyncMissingFiles", JSONObject().put("questionId", questionId).put("continue", continueWithout), light = true)
+    }
+
+
     fun test() = run("testSyncConnection", formFields()?.let { (name, fields) -> JSONObject().put(name, fields) } ?: JSONObject())
 
-    fun pickFolder() = run("pickSyncFolder", JSONObject().put("requestId", uuid()))
+
+    fun folderPicked(context: Context, result: ActivityResult) {
+        val tree = result.data?.data?.takeIf { result.resultCode == Activity.RESULT_OK } ?: return
+        val flags = result.data!!.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        val kept = runCatching { context.contentResolver.takePersistableUriPermission(tree, flags) }
+            .onFailure { Log.w(CoreHost.TAG, "Sync folder grant refused ${failureForLog(it)}") }.isSuccess
+        PendingSyncFolderPick.put(if (kept) JSONObject().put("treeUri", tree.toString()) else JSONObject().put("grant", "refused"))
+        val runtime = shell.coreHost() ?: return
+
+
+        visits.execute { runCatching { openNow(runtime) }.onFailure { Log.w(CoreHost.TAG, "Sync screen open failed ${failureForLog(it)}") } }
+
+        val requestId = uuid()
+        run("pickSyncFolder", JSONObject().put("requestId", requestId), key = "pickSyncFolder:$requestId", after = visits)
+    }
 
     fun dropbox(connected: Boolean) = run(if (connected) "disconnectDropbox" else "connectDropbox", JSONObject().put("requestId", uuid()))
 
-    /** A settings sync option: a synced setting, so it goes through the Menu tab's journaled command path. */
+
     fun preference(key: String, value: Boolean) = menu.command("syncPreference", JSONObject().put("key", key).put("value", value))
 
-    /** The encryption card: core's action; a submit or decline takes a request UUID, and Generate fills both new fields. */
+
     fun encryption(action: JSONObject) {
         val type = action.getString("type")
         val input = JSONObject().put("action", action).apply { if (type == "submit" || type == "decline") put("requestId", uuid()) }
         val heavy = type == "submit" || type == "decline"
-        // A field core refused (past its limit, or its `typed` command failed) still holds the older text core kept: never submit
-        // that. A flow change drops the fields' refusals.
+
+
         passphrases.admit(action)?.let { refusal -> shell.showToast(null, refusal, "error"); return }
-        // A submit runs with the fields core holds: it waits for every keystroke sent before it (the light queue), never overtakes
-        // one, and then asks again, as a keystroke core refused in that wait counts too.
+
+
         run("runSyncEncryptionAction", input, light = !heavy, after = if (heavy) SyncSettingsModel.light else null,
             admit = if (type == "submit") ({ passphrases.admit(action) }) else null) { reply ->
             reply.menuText("passphrase")?.let { phrase -> passphrases.generated(phrase) }
@@ -253,17 +276,14 @@ class SyncSettingsModel(private val menu: MenuModel) {
         }
     }
 
-    /**
-     * A passphrase field as typed; core keeps its copy (`typed`), which also clears the card's error. An edit past core's limit
-     * ([maxLength], the row's) is refused with core's words ([tooLongText]) and never reaches core.
-     */
+
     fun typePassphrase(field: String, text: String, maxLength: Int, tooLongText: String) {
         val edit = passphrases.type(field, text, maxLength, tooLongText) ?: return shell.showToast(null, tooLongText, "error")
         run("runSyncEncryptionAction", JSONObject().put("action", JSONObject().put("type", "typed").put("field", field).put("value", text)), light = true,
             failed = { message -> passphrases.settled(field, edit, message) }) { passphrases.settled(field, edit, null) }
     }
 
-    /** The form's fields as core takes them: `webdav` or `selfHosted`, a password or token left null when not edited. */
+
     private fun formFields(): Pair<String, JSONObject>? {
         val typed = form ?: return null
         return if (typed.kind == "webdav") {
@@ -274,16 +294,7 @@ class SyncSettingsModel(private val menu: MenuModel) {
         }
     }
 
-    /**
-     * Sends a screen command off the main thread, in order. A [light] one (a field's text, opening a flow) is not the command
-     * running; the screen reads core's view again after each. [key] names a pending command a repeat tap drops, an [ordered] one
-     * waits behind the earlier ones sent there, and one sent [after] a queue starts once that queue's earlier work is done (and
-     * leaves the queue free while it runs).
-     */
-    /**
-     * [admit] runs on the main thread once [after] drains (its answers settled there first): a refusal it returns stops the command
-     * with that toast. [failed] gets a failed command's message as its toast shows it.
-     */
+
     private fun run(name: String, input: JSONObject, light: Boolean = false, key: String = name, ordered: ExecutorService? = null,
                     after: ExecutorService? = null, admit: (() -> String?)? = null, failed: (String) -> Unit = {},
                     done: (JSONObject) -> Unit = {}) {
@@ -315,10 +326,7 @@ class SyncSettingsModel(private val menu: MenuModel) {
         }
     }
 
-    /**
-     * Core's toasts for the command, RN's in order: the last one stays on screen, as RN's toast shows the newest. The log names
-     * each toast's tone and title (core's fixed words; a message can quote a server) for the device check.
-     */
+
     private fun toasts(name: String, reply: JSONObject) {
         val all = reply.menuObjects("toasts")
         if (all.isNotEmpty()) Log.i(CoreHost.TAG, "Native Android sync screen command=$name toasts=${all.joinToString("|") { "${it.optString("tone")}:${it.optString("title")}" }}")
@@ -328,7 +336,7 @@ class SyncSettingsModel(private val menu: MenuModel) {
 
     private fun uuid() = UUID.randomUUID().toString()
 
-    /** [read] on the main thread, from a command's worker, after everything the main thread was already given. */
+
     private fun <T> onMain(read: () -> T): T {
         val answer = java.util.concurrent.atomic.AtomicReference<Result<T>>()
         val done = java.util.concurrent.CountDownLatch(1)
@@ -338,21 +346,26 @@ class SyncSettingsModel(private val menu: MenuModel) {
     }
 }
 
-// ---- The screen ----
 
-/** RN's Sync screen from core's view; while a command runs, the view is read again every half second (RN re-renders as it goes). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SyncSettings(model: InboxViewModel, view: JSONObject) {
     val sync = model.menu.settings.sync
     val c = LocalTheme.current.colors
-    LaunchedEffect(sync.running > 0) {
-        while (sync.running > 0) {
-            delay(500)
-            model.menu.settings.refresh()
+
+    val owner = LocalLifecycleOwner.current
+    val polling = sync.running > 0 && view.optJSONObject("missingFiles") == null
+    LaunchedEffect(polling, owner) {
+        if (!polling) return@LaunchedEffect
+        owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (sync.running > 0) {
+                delay(500)
+                model.menu.settings.refresh()
+            }
         }
     }
     val backend = view.getJSONObject("backend")
+    OnboardingHandoffCard(model)
     Card {
         Column(Modifier.padding(16.dp)) {
             Text(backend.getString("title"), style = rnText(16, 500, 21), color = c.text)
@@ -383,16 +396,38 @@ internal fun SyncSettings(model: InboxViewModel, view: JSONObject) {
     view.optJSONObject("encryption")?.let { EncryptionCard(sync, it) }
     PreferencesCard(model, view.getJSONObject("preferences"), view.getJSONObject("disclosure"))
     SnapshotsCard(model, sync, view.getJSONObject("recoverySnapshots"), view.getJSONObject("disclosure"))
+    view.optJSONObject("missingFiles")?.takeIf { it.getString("questionId") != sync.answeredQuestion }?.let { question -> MissingFilesDialog(sync, question) }
 }
 
-/** RN's backendOption chip: the chosen one outlined in the tint on the filter wash. */
+
+@Composable
+private fun MissingFilesDialog(sync: SyncSettingsModel, question: JSONObject) {
+    AlertDialog(
+        onDismissRequest = { sync.answerMissingFiles(question.getString("questionId"), false) },
+        title = { Text(question.getString("title")) },
+
+        text = { Text(question.getString("message"), modifier = Modifier.verticalScroll(rememberScrollState())) },
+        confirmButton = {
+            TextButton(onClick = { sync.answerMissingFiles(question.getString("questionId"), true) }, Modifier.testTag("sync-missing-files-continue")) {
+                Text(question.getString("continueLabel").uppercase())
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { sync.answerMissingFiles(question.getString("questionId"), false) }, Modifier.testTag("sync-missing-files-cancel")) {
+                Text(question.getString("cancelLabel").uppercase())
+            }
+        },
+    )
+}
+
+
 @Composable
 private fun BackendChip(sync: SyncSettingsModel, option: JSONObject) {
     val c = LocalTheme.current.colors
     val selected = option.getBoolean("selected")
     val label = option.getString("label")
     val shape = RoundedCornerShape(16.dp)
-    Box(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).border(1.dp, if (selected) c.tint else c.border, shape)
+    Box(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).rnBorder(1.dp, if (selected) c.tint else c.border, shape)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; this.selected = selected; testTag = "sync-backend-${option.getString("option")}"
             onClick { sync.select(option.getString("option")); true } }
         .clickable { sync.select(option.getString("option")) }.padding(horizontal = 10.dp, vertical = 6.dp)) {
@@ -400,7 +435,7 @@ private fun BackendChip(sync: SyncSettingsModel, option: JSONObject) {
     }
 }
 
-/** RN's SettingsGuideLink: the title in the tint with lucide's external-link; it opens the guide in the browser. */
+
 @Composable
 internal fun GuideLink(guide: JSONObject, tag: String, bottom: Int = 12) {
     val c = LocalTheme.current.colors
@@ -416,12 +451,12 @@ internal fun GuideLink(guide: JSONObject, tag: String, bottom: Int = 12) {
     }
 }
 
-/** RN's helpBox: a bordered card with a 15/600 title and 13/20 lines. */
+
 @Composable
 private fun HelpBox(title: String, lines: List<String>) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
-    Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(16.dp)) {
+    Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp)) {
         Text(title, style = rnText(15, 600), color = c.text, modifier = Modifier.padding(bottom = 8.dp))
         lines.forEachIndexed { index, line ->
             Text(line, style = rnText(13, 400, 20), color = c.secondaryText, modifier = Modifier.padding(top = if (index > 0) 8.dp else 0.dp))
@@ -429,7 +464,7 @@ private fun HelpBox(title: String, lines: List<String>) {
     }
 }
 
-/** RN's pressable settingRow with a colored label, its description, and RN's small spinner while it runs. */
+
 @Composable
 private fun SyncAction(action: JSONObject, tag: String, divider: Boolean = true, press: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -438,7 +473,7 @@ private fun SyncAction(action: JSONObject, tag: String, divider: Boolean = true,
     val enabled = action.getBoolean("enabled")
     val busy = action.getBoolean("busy")
     val spoken = if (description == null) label else "$label, $description"
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier)
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier)
         .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; testTag = tag; if (enabled) onClick { press(); true } else disabled() }
         .clickable(enabled = enabled, onClick = press).padding(16.dp), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f).padding(end = 16.dp)) {
@@ -449,7 +484,7 @@ private fun SyncAction(action: JSONObject, tag: String, divider: Boolean = true,
     }
 }
 
-/** RN's textInput inside an inputGroup: a bordered field on the input color. */
+
 @Composable
 private fun SyncInput(value: String, label: String, placeholder: String?, secure: Boolean, tag: String, keyboard: KeyboardType, change: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -457,7 +492,7 @@ private fun SyncInput(value: String, label: String, placeholder: String?, secure
     BasicTextField(value, change, singleLine = true, cursorBrush = SolidColor(c.tint), textStyle = rnText(14, 400).copy(color = c.text),
         visualTransformation = if (secure) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = keyboard, imeAction = ImeAction.Done),
-        modifier = Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+        modifier = Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
             .semantics { contentDescription = label }.testTag(tag),
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -467,14 +502,14 @@ private fun SyncInput(value: String, label: String, placeholder: String?, secure
         })
 }
 
-/** RN's inputGroup: 16 around, a hairline above unless first. */
+
 @Composable
 private fun InputGroup(divider: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalTheme.current.colors
-    Column(Modifier.fillMaxWidth().then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).padding(16.dp), content = content)
+    Column(Modifier.fillMaxWidth().then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).padding(16.dp), content = content)
 }
 
-/** The WebDAV and self-hosted forms (RN's SyncWebDavBackendPanel, SyncSelfHostedBackendPanel), with the last sync card below. */
+
 @Composable
 private fun FormPanel(model: InboxViewModel, view: JSONObject, panel: JSONObject) {
     val sync = model.menu.settings.sync
@@ -532,13 +567,24 @@ private fun FormPanel(model: InboxViewModel, view: JSONObject, panel: JSONObject
         SyncAction(panel.getJSONObject("syncNow"), "sync-now") { sync.syncNow(view) }
         SyncAction(panel.getJSONObject("test"), "sync-test") { sync.test() }
     }
-    LastSyncCard(sync, panel.getJSONObject("lastSync"), inside = false)
+    LastSyncCard(sync, panel.getJSONObject("lastSync"))
 }
 
-/** RN's File Sync panel: the how-to box, then the folder and Sync now, with the last sync card inside the card. */
+
 @Composable
 private fun FilePanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONObject) {
     val c = LocalTheme.current.colors
+    val context = LocalContext.current
+
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { sync.folderPicked(context, it) }
+    val pickFolder = {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        tech.dongdongbh.mindwtr.pilot.core.debugProperty("sync_tree").ifEmpty { null }
+            ?.let { intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, it.toUri()) }
+        runCatching { picker.launch(intent) }.onFailure { Log.w(CoreHost.TAG, "Sync folder picker unavailable ${failureForLog(it)}") }
+        Unit
+    }
     val help = panel.getJSONObject("help")
     HelpBox(help.getString("title"), listOf(help.getString("text"), help.getString("tip")))
     SectionTitle(panel.getString("title"), top = 16, color = c.text)
@@ -552,15 +598,18 @@ private fun FilePanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONObje
             }
             Text(select.getString("label"), style = rnText(16, 400, 21), color = c.tint, textAlign = TextAlign.End,
                 modifier = Modifier.clearAndSetSemantics { contentDescription = select.getString("label"); role = Role.Button; testTag = "sync-select-folder"
-                    if (select.getBoolean("enabled")) onClick { sync.pickFolder(); true } else disabled() }
-                    .clickable(enabled = select.getBoolean("enabled")) { sync.pickFolder() })
+                    if (select.getBoolean("enabled")) onClick { pickFolder(); true } else disabled() }
+                    .clickable(enabled = select.getBoolean("enabled"), onClick = pickFolder))
         }
         SyncAction(panel.getJSONObject("syncNow"), "sync-now") { sync.syncNow(view) }
-        Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) { LastSyncCard(sync, panel.getJSONObject("lastSync"), inside = true) }
+
+        Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) {
+            Column(Modifier.padding(end = 16.dp)) { LastSyncCard(sync, panel.getJSONObject("lastSync")) }
+        }
     }
 }
 
-/** RN's Dropbox panel: the app key text, the account status, Connect or Disconnect, Test connection and Sync now. */
+
 @Composable
 private fun DropboxPanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONObject) {
     val c = LocalTheme.current.colors
@@ -576,21 +625,21 @@ private fun DropboxPanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONO
         SyncAction(panel.getJSONObject("test"), "sync-test") { sync.test() }
         SyncAction(panel.getJSONObject("syncNow"), "sync-now") { sync.syncNow(view) }
     }
-    LastSyncCard(sync, panel.getJSONObject("lastSync"), inside = false)
+    LastSyncCard(sync, panel.getJSONObject("lastSync"))
 }
 
-/** RN's iCloud panel (iOS only; drawn for completeness of core's view). */
+
 @Composable
 private fun CloudKitPanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONObject) {
     val help = panel.getJSONObject("help")
     HelpBox(help.getString("title"), listOf(help.getString("text"), help.getString("status")))
     Card { SyncAction(panel.getJSONObject("syncNow"), "sync-now", divider = false) { sync.syncNow(view) } }
-    LastSyncCard(sync, panel.getJSONObject("lastSync"), inside = false)
+    LastSyncCard(sync, panel.getJSONObject("lastSync"))
 }
 
-/** RN's SyncLastStatusCard: the last sync, its counts and conflicts, the error in the danger color, and the folded history. */
+
 @Composable
-private fun LastSyncCard(sync: SyncSettingsModel, card: JSONObject, inside: Boolean) {
+private fun LastSyncCard(sync: SyncSettingsModel, card: JSONObject) {
     val c = LocalTheme.current.colors
     val body: @Composable ColumnScope.() -> Unit = {
         Text(card.getString("title"), style = rnText(16, 500, 21), color = c.text)
@@ -613,19 +662,17 @@ private fun LastSyncCard(sync: SyncSettingsModel, card: JSONObject, inside: Bool
             }
         }
     }
-    if (inside) Column(content = body)
-    else Card(top = 12) { Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(16.dp), content = body) }
+    Card(top = 12) { Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(16.dp), content = body) }
 }
 
-/** The encryption card (RN's SyncEncryptionCard): core's rows in order; a field's text goes back to core as typed. */
+
 @Composable
 private fun EncryptionCard(sync: SyncSettingsModel, card: JSONObject) {
     val c = LocalTheme.current.colors
     SectionTitle(card.getString("title"), top = 16, color = c.text)
     card.optJSONObject("guide")?.let { GuideLink(it, "sync-encryption-guide-link") }
-    // RN groups consecutive texts in one settingRowColumn, but a warning or an error starts its own (the enable flow's warnings sit
-    // below the description, an error stands alone). Every block after the first has a hairline above, except the generated
-    // passphrase's hint under Generate.
+
+
     val blocks = mutableListOf<List<JSONObject>>()
     for (row in card.menuObjects("rows")) {
         val last = blocks.lastOrNull()
@@ -640,7 +687,7 @@ private fun EncryptionCard(sync: SyncSettingsModel, card: JSONObject) {
                 && blocks[index - 1].first().optJSONObject("action")?.optString("type") == "generate")
             val row = block.first()
             when (row.getString("kind")) {
-                "text" -> Column(Modifier.fillMaxWidth().then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).padding(16.dp)) {
+                "text" -> Column(Modifier.fillMaxWidth().then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).padding(16.dp)) {
                     block.forEachIndexed { at, line ->
                         val tone = line.getString("tone")
                         val gap = if (at == 0) 0 else if (tone == "description" && block[at - 1].getString("tone") == "label") 2 else 8
@@ -661,8 +708,8 @@ private fun EncryptionCard(sync: SyncSettingsModel, card: JSONObject) {
                 }
                 "reveal" -> {
                     val label = row.getString("label")
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier)
-                        // RN's switch states whether the passphrase shows (accessibilityState checked).
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier)
+
                         .clearAndSetSemantics { contentDescription = label; role = Role.Switch; toggleableState = ToggleableState(row.getBoolean("revealed"))
                             onClick { sync.encryption(row.getJSONObject("action")); true } }
                         .clickable { sync.encryption(row.getJSONObject("action")) }.padding(16.dp)) {
@@ -672,7 +719,7 @@ private fun EncryptionCard(sync: SyncSettingsModel, card: JSONObject) {
                 else -> {
                     val label = row.getString("label")
                     val enabled = row.getBoolean("enabled")
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier)
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = "sync-encryption-${row.getJSONObject("action").getString("type")}"
                             if (enabled) onClick { sync.encryption(row.getJSONObject("action")); true } else disabled() }
                         .clickable(enabled = enabled) { sync.encryption(row.getJSONObject("action")) }.padding(16.dp), verticalAlignment = Alignment.Top) {
@@ -685,23 +732,16 @@ private fun EncryptionCard(sync: SyncSettingsModel, card: JSONObject) {
     }
 }
 
-/**
- * The encryption card's passphrase fields as typed, for one visit. Core takes at most the row's `maxLength` characters a field:
- * a longer edit is refused, never cut to fit, and while a refused edit stands no submit runs (it would run with the shorter text
- * core kept, a passphrase other devices could never match).
- */
+
 class PassphraseFields {
     var texts by mutableStateOf(emptyMap<String, String>()); private set
-    /** A refused field and what to say about it: core's limit, or core's answer to its `typed` command. */
+
     private var refused by mutableStateOf(emptyMap<String, String>())
-    /** Each field's newest edit; core's answer to an older one changes nothing (the light queue answers in order). */
+
     private val edits = HashMap<String, Int>()
     val submittable: Boolean get() = refused.isEmpty()
 
-    /**
-     * The edit's number when it is taken (it goes to core, whose answer comes to [settled]); null when [text] is past
-     * [maxLength] (the field keeps what it held and stays refused with [tooLong]).
-     */
+
     fun type(field: String, text: String, maxLength: Int, tooLong: String): Int? {
         val edit = next(field)
         if (text.length > maxLength) {
@@ -713,30 +753,27 @@ class PassphraseFields {
         return edit
     }
 
-    /** Core's answer to [edit] of [field]: null took it; a refusal ([refusal], core's words) stands until core takes a later edit. */
+
     fun settled(field: String, edit: Int, refusal: String?) {
         if (edits[field] != edit) return
         refused = if (refusal == null) refused - field else refused + (field to refusal)
     }
 
-    /** Generate's passphrase, in both new-passphrase fields (core set it, so an older edit's answer no longer counts). */
+
     fun generated(phrase: String) {
         next("next"); next("confirm")
         texts = texts + mapOf("next" to phrase, "confirm" to phrase)
         refused = refused - "next" - "confirm"
     }
 
-    /**
-     * What blocks [action], or null. A flow change (open, cancel, retry) starts the fields afresh, so a refusal never outlives its
-     * flow; a submit waits for every refused field, except Abandon setup's, which asks for no passphrase.
-     */
+
     fun admit(action: JSONObject): String? = when (action.optString("type")) {
         "open", "cancel", "retry" -> { clear(); null }
         "submit" -> if (action.optString("flow") == "abandon") null else refused.values.firstOrNull()
         else -> null
     }
 
-    /** Counters are kept, so an answer to an edit made before the clear never matches a new one. */
+
     fun clear() {
         edits.keys.forEach { next(it) }
         texts = emptyMap()
@@ -746,7 +783,7 @@ class PassphraseFields {
     private fun next(field: String): Int = ((edits[field] ?: 0) + 1).also { edits[field] = it }
 }
 
-/** RN's folded card heading (Settings sync options, Recovery snapshots): its title, description and ▸ or ▾. */
+
 @Composable
 private fun FoldHeading(title: String, description: String, open: Boolean, glyphs: JSONObject, tag: String, toggle: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -762,7 +799,7 @@ private fun FoldHeading(title: String, description: String, open: Boolean, glyph
     }
 }
 
-/** RN's SyncPreferencesCard: folded; each option's switch sends core's setSyncPreference. */
+
 @Composable
 private fun PreferencesCard(model: InboxViewModel, preferences: JSONObject, glyphs: JSONObject) {
     val sync = model.menu.settings.sync
@@ -772,7 +809,7 @@ private fun PreferencesCard(model: InboxViewModel, preferences: JSONObject, glyp
         FoldHeading(preferences.getString("title"), preferences.getString("description"), sync.preferencesOpen, glyphs, "sync-preferences-disclosure") { sync.togglePreferences() }
         if (sync.preferencesOpen) for (row in preferences.menuObjects("rows")) {
             val label = row.getString("label")
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true).padding(16.dp), verticalAlignment = Alignment.Top) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border).padding(16.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f).padding(end = 16.dp)) {
                     Text(label, style = rnText(16, 500, 21), color = c.text)
                     row.menuText("hint")?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp)) }
@@ -783,10 +820,7 @@ private fun PreferencesCard(model: InboxViewModel, preferences: JSONObject, glyp
     }
 }
 
-/**
- * RN's RecoverySnapshotsCard, folded: each snapshot's date label over its file name and RN's Restore word (its spinner while it
- * restores); a row asks core's question first (DataTransfer.kt), and every row is off while a sync or any data action runs.
- */
+
 @Composable
 private fun SnapshotsCard(model: InboxViewModel, sync: SyncSettingsModel, snapshots: JSONObject, glyphs: JSONObject) {
     val c = LocalTheme.current.colors
@@ -795,7 +829,7 @@ private fun SnapshotsCard(model: InboxViewModel, sync: SyncSettingsModel, snapsh
         FoldHeading(snapshots.getString("title"), snapshots.getString("description"), sync.snapshotsOpen, glyphs, "recovery-snapshots-disclosure") { sync.toggleSnapshots() }
         if (sync.snapshotsOpen) {
             val rows = snapshots.optJSONArray("rows")?.let { list -> List(list.length()) { list.getJSONObject(it) } }.orEmpty()
-            if (rows.isEmpty()) Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true).padding(16.dp)) {
+            if (rows.isEmpty()) Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border).padding(16.dp)) {
                 Text(snapshots.getString("empty"), style = rnText(13, 400, 18), color = c.secondaryText)
             }
             val enabled = snapshots.optBoolean("enabled", true) && !transfer.busy
@@ -803,7 +837,7 @@ private fun SnapshotsCard(model: InboxViewModel, sync: SyncSettingsModel, snapsh
                 val name = row.getString("name")
                 val busy = transfer.action == "snapshot:$name"
                 val spoken = row.getString("accessibilityLabel") + ", " + row.getString("accessibilityHint")
-                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true)
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border)
                     .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; testTag = "recovery-snapshot-$name"
                         if (busy) stateDescription = "busy"
                         if (enabled) onClick { transfer.askSnapshot(name, undo = false); true } else disabled() }

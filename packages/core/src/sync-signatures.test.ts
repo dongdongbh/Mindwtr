@@ -60,6 +60,12 @@ const project = (updates: Partial<Project> = {}): Project => ({
 });
 
 describe('sync signatures', () => {
+    it('treats a reset override as missing but preserves explicit grey and same-Area choices', () => {
+        const signature = (value: Project) => toComparableSignature(normalizeProjectForContentComparison(value));
+        expect(signature(project({ colorOverride: null }))).toBe(signature(project()));
+        expect(signature(project({ colorOverride: '#6B7280' }))).not.toBe(signature(project()));
+        expect(signature(project({ colorOverride: '#10b981' }))).not.toBe(signature(project()));
+    });
     it('sorts only present comparable fields, not the absent normalized task schema', () => {
         const normalized = normalizeTaskForContentComparison(task());
         const originalSort = Array.prototype.sort;
@@ -179,15 +185,15 @@ describe('sync signatures', () => {
         const first = normalizeAreaForContentComparison(area({ rev: 3, revBy: 'device-a' }));
         const clone = { ...first };
 
-        // First call caches by identity; the clone takes the uncached path.
+
         expect(toComparableSignature(first)).toBe(toComparableSignature(clone));
-        // Repeat on the cached reference: same answer.
+
         expect(toComparableSignature(first)).toBe(toComparableSignature(clone));
     });
 
     it('computes the same object signature once (identity memo has teeth)', () => {
-        // Cache-hit validation recomputes on every hit under NODE_ENV=test; turn
-        // it off so the spy can observe the true memoized path.
+
+
         setSignatureCacheValidationForTests(false);
         try {
             const item = normalizeAreaForContentComparison(area({ rev: 4, name: 'Memoized' }));
@@ -215,7 +221,7 @@ describe('sync signatures', () => {
             const viaMemo = getMergeComparableSignature(raw, normalizeAreaForContentComparison);
             const manual = toComparableSignature(normalizeAreaForContentComparison({ ...raw }));
             expect(viaMemo).toBe(manual);
-            // Cached on the raw object: second call computes nothing.
+
             const stringifySpy = vi.spyOn(JSON, 'stringify');
             expect(getMergeComparableSignature(raw, normalizeAreaForContentComparison)).toBe(viaMemo);
             expect(stringifySpy).not.toHaveBeenCalled();

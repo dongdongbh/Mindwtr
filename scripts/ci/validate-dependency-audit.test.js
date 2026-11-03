@@ -6,15 +6,15 @@ import { dirname, join } from "node:path";
 import ts from "typescript";
 
 import { validateMobileAuditReport } from "./validate-mobile-npm-audit.js";
-import { validateBunAuditTopology, validateNpmAuditTopology, validateNpmAuditReport } from "./validate-npm-audit.js";
+import { AUDIT_EXCEPTIONS, validateBunAuditTopology, validateNpmAuditTopology, validateNpmAuditReport } from "./validate-npm-audit.js";
 
 const rootRequire = createRequire(import.meta.url);
 
 const IMAGE_SIZE_ADVISORIES = ["GHSA-5p2g-fcmc-qvqq", "GHSA-w3rx-r6r6-pgpr"];
-const BRACES_ADVISORY = "GHSA-vfj7-8cjw-p6xm";
 const FORGE_ADVISORY = "GHSA-86w9-cpqp-85rv";
-const BUN_ADVISORIES = [...IMAGE_SIZE_ADVISORIES, BRACES_ADVISORY, FORGE_ADVISORY];
-const profiles = {desktop: "apps/desktop", mobile: "apps/mobile", eas: "tools/eas-cli"};
+const DEEPMERGE_ADVISORY = "GHSA-gcqx-w48m-w2h4";
+const BUN_ADVISORIES = [...IMAGE_SIZE_ADVISORIES, FORGE_ADVISORY, DEEPMERGE_ADVISORY];
+const profiles = {mobile: "apps/mobile", eas: "tools/eas-cli"};
 const npmLock = (profile) => JSON.parse(readFileSync(`${profiles[profile]}/package-lock.json`, "utf8"));
 const bunLock = () => {
   const parsed = ts.parseConfigFileTextToJson("bun.lock", readFileSync("bun.lock", "utf8"));
@@ -187,10 +187,8 @@ const advisory = (name, id, range) => ({
 
 const allowedReport = (profile) => {
   const vulnerabilities = {
-    braces: {name: "braces", severity: "high", via: [advisory("braces", BRACES_ADVISORY, "<=3.0.3")], nodes: ["node_modules/braces"]},
-  };
-  if (profile !== "desktop") vulnerabilities["node-forge"] = {
-    name: "node-forge", severity: "high", via: [advisory("node-forge", FORGE_ADVISORY, "<=1.4.0")], nodes: ["node_modules/node-forge"],
+    "node-forge": {name: "node-forge", severity: "high", via: [advisory("node-forge", FORGE_ADVISORY, "<=1.4.0")], nodes: ["node_modules/node-forge"]},
+    deepmerge: {name: "deepmerge", severity: "low", via: [advisory("deepmerge", DEEPMERGE_ADVISORY, ">=4.2.0 <=4.3.1")], nodes: ["node_modules/deepmerge"]},
   };
   if (profile === "mobile") vulnerabilities["image-size"] = {
     name: "image-size", severity: "high", via: [
@@ -198,8 +196,9 @@ const allowedReport = (profile) => {
       advisory("image-size", IMAGE_SIZE_ADVISORIES[1], ">=0.6.3 <=2.0.2"),
     ], nodes: ["node_modules/image-size"],
   };
+  const count = (severity) => Object.values(vulnerabilities).filter((vulnerability) => vulnerability.severity === severity).length;
   return {auditReportVersion: 2, vulnerabilities, metadata: {vulnerabilities: {
-    info: 0, low: 0, moderate: 0, high: Object.keys(vulnerabilities).length, critical: 0, total: Object.keys(vulnerabilities).length,
+    info: 0, low: count("low"), moderate: 0, high: count("high"), critical: 0, total: Object.keys(vulnerabilities).length,
   }}};
 };
 
@@ -208,28 +207,25 @@ for (const profile of Object.keys(profiles)) {
     expect(() => validateNpmAuditReport(allowedReport(profile), profile, npmLock(profile))).not.toThrow();
     if (profile === "mobile") expect(() => validateMobileAuditReport(allowedReport(profile))).not.toThrow();
     const unexpected = allowedReport(profile);
-    unexpected.vulnerabilities.braces.via.push(advisory("braces", "GHSA-unexpected-advisory", "<=3.0.3"));
+    unexpected.vulnerabilities["node-forge"].via.push(advisory("node-forge", "GHSA-unexpected-advisory", "<=1.4.0"));
     expect(() => validateNpmAuditReport(unexpected, profile, npmLock(profile))).toThrow(/unexpected direct advisories/);
     const missing = allowedReport(profile);
-    missing.vulnerabilities.braces.via = [];
+    missing.vulnerabilities["node-forge"].via = [];
     expect(() => validateNpmAuditReport(missing, profile, npmLock(profile))).toThrow(/invalid dependency record/);
   });
 
   test(`${profile} exceptions fail on version, topology, or runtime exposure drift`, () => {
     for (const mutate of [
-      (lock) => { lock.packages["node_modules/braces"].version = "3.0.4"; },
-      (lock) => { lock.packages["node_modules/new-runtime"] = {version: "1.0.0", dependencies: {braces: "3.0.3"}}; },
-      (lock) => { lock.packages["node_modules/nested/node_modules/braces"] = {version: "3.0.3"}; },
-      (lock) => { lock.packages[""].dependencies.braces = "3.0.3"; },
-      (lock) => { lock.packages["node_modules/micromatch"].dependencies.braces = "^2.0.0"; },
+      (lock) => { lock.packages["node_modules/node-forge"].version = "1.4.1"; },
+      (lock) => { lock.packages["node_modules/new-runtime"] = {version: "1.0.0", dependencies: {"node-forge": "1.4.0"}}; },
+      (lock) => { lock.packages["node_modules/nested/node_modules/node-forge"] = {version: "1.4.0"}; },
+      (lock) => { lock.packages[""].dependencies["node-forge"] = "1.4.0"; },
+      (lock) => { lock.packages["node_modules/@expo/code-signing-certificates"].dependencies["node-forge"] = "^0.10.0"; },
+      (lock) => { lock.packages["node_modules/deepmerge"].version = "4.3.2"; },
+      (lock) => { lock.packages["node_modules/new-runtime"] = {version: "1.0.0", dependencies: {deepmerge: "^4.3.1"}}; },
     ]) {
       const lock = npmLock(profile);
       mutate(lock);
-      expect(() => validateNpmAuditTopology(lock, profile)).toThrow(/unreviewed/);
-    }
-    if (profile === "desktop") {
-      const lock = npmLock(profile);
-      lock.packages["node_modules/braces"].dev = false;
       expect(() => validateNpmAuditTopology(lock, profile)).toThrow(/unreviewed/);
     }
   });
@@ -243,15 +239,15 @@ test("npm exceptions reject malformed reports, API errors, unknown records, and 
     (r) => { delete r.metadata; },
     (r) => { r.metadata.vulnerabilities.total = 999; },
     (r) => { r.metadata.vulnerabilities.high = -1; },
-    (r) => { r.vulnerabilities.braces.name = "unrelated"; },
-    (r) => { r.vulnerabilities.braces.severity = "unknown"; },
-    (r) => { r.vulnerabilities.braces.nodes = ["node_modules/unknown"]; },
-    (r) => { r.vulnerabilities.braces.via[0].dependency = "unrelated"; },
-    (r) => { r.vulnerabilities.braces.via[0].url = `https://evil.example/advisories/${BRACES_ADVISORY}`; },
-    (r) => { r.vulnerabilities.braces.via[0].range = "*"; },
-    (r) => { r.vulnerabilities.braces.via.push(null); },
-    (r) => { r.vulnerabilities.braces.via.push("unrelated"); },
-    (r) => { r.vulnerabilities.braces.via.push(r.vulnerabilities.braces.via[0]); },
+    (r) => { r.vulnerabilities["node-forge"].name = "unrelated"; },
+    (r) => { r.vulnerabilities["node-forge"].severity = "unknown"; },
+    (r) => { r.vulnerabilities["node-forge"].nodes = ["node_modules/unknown"]; },
+    (r) => { r.vulnerabilities["node-forge"].via[0].dependency = "unrelated"; },
+    (r) => { r.vulnerabilities["node-forge"].via[0].url = `https://evil.example/advisories/${FORGE_ADVISORY}`; },
+    (r) => { r.vulnerabilities["node-forge"].via[0].range = "*"; },
+    (r) => { r.vulnerabilities["node-forge"].via.push(null); },
+    (r) => { r.vulnerabilities["node-forge"].via.push("unrelated"); },
+    (r) => { r.vulnerabilities["node-forge"].via.push(r.vulnerabilities["node-forge"].via[0]); },
   ]) {
     const report = allowedReport("mobile");
     mutate(report);
@@ -261,11 +257,13 @@ test("npm exceptions reject malformed reports, API errors, unknown records, and 
 
 test("npm advisory closure rejects missing dependencies and unrelated cycles", () => {
   const missing = allowedReport("mobile");
-  missing.vulnerabilities.micromatch = {name: "micromatch", severity: "high", via: ["braces"], nodes: ["node_modules/micromatch"]};
+  missing.vulnerabilities["@expo/code-signing-certificates"] = {
+    name: "@expo/code-signing-certificates", severity: "high", via: ["node-forge"], nodes: ["node_modules/@expo/code-signing-certificates"],
+  };
   missing.metadata.vulnerabilities.high += 1;
   missing.metadata.vulnerabilities.total += 1;
   expect(() => validateMobileAuditReport(missing)).not.toThrow();
-  delete missing.vulnerabilities.braces;
+  delete missing.vulnerabilities["node-forge"];
   missing.metadata.vulnerabilities.high -= 1;
   missing.metadata.vulnerabilities.total -= 1;
   expect(() => validateMobileAuditReport(missing)).toThrow(/unexpected direct advisories/);
@@ -279,10 +277,12 @@ test("npm advisory closure rejects missing dependencies and unrelated cycles", (
 
 test("Bun exceptions reject new runtime consumers, nested copies, and changed versions", () => {
   for (const mutate of [
-    (lock) => { lock.packages.braces[0] = "braces@3.0.4"; },
-    (lock) => { lock.packages["unexpected-runtime"] = ["unexpected-runtime@1.0.0", "", {dependencies: {braces: "3.0.3"}}]; },
-    (lock) => { lock.packages["nested/braces"] = structuredClone(lock.packages.braces); },
-    (lock) => { lock.workspaces["apps/cloud"].dependencies.braces = "3.0.3"; },
+    (lock) => { lock.packages["node-forge"][0] = "node-forge@1.4.1"; },
+    (lock) => { lock.packages["unexpected-runtime"] = ["unexpected-runtime@1.0.0", "", {dependencies: {"node-forge": "1.4.0"}}]; },
+    (lock) => { lock.packages["nested/node-forge"] = structuredClone(lock.packages["node-forge"]); },
+    (lock) => { lock.workspaces["apps/cloud"].dependencies["node-forge"] = "1.4.0"; },
+    (lock) => { lock.packages.deepmerge[0] = "deepmerge@4.3.2"; },
+    (lock) => { lock.workspaces["packages/core"].dependencies = {...lock.workspaces["packages/core"].dependencies, deepmerge: "^4.3.1"}; },
   ]) {
     const lock = bunLock();
     mutate(lock);
@@ -292,16 +292,60 @@ test("Bun exceptions reject new runtime consumers, nested copies, and changed ve
 
 test("Hono is pinned to the patched version throughout the Bun lock", () => {
   const manifest = JSON.parse(readFileSync("package.json", "utf8"));
-  expect(manifest.overrides.hono).toBe("4.13.7");
-  expect(manifest.resolutions.hono).toBe("4.13.7");
+  expect(manifest.overrides.hono).toBe("4.13.13");
+  expect(manifest.resolutions.hono).toBe("4.13.13");
   const versions = Object.values(bunLock().packages).filter((metadata) => metadata[0].startsWith("hono@"));
-  expect(versions.map((metadata) => metadata[0])).toEqual(["hono@4.13.7"]);
+  expect(versions.map((metadata) => metadata[0])).toEqual(["hono@4.13.13"]);
 });
 
 const buildToolImportNames = [
   "braces", "node-forge", "image-size", "micromatch", "chokidar", "fast-glob", "tailwindcss", "metro", "metro-config",
   "@expo/cli", "@expo/code-signing-certificates", "@expo/pkcs12", "jks-js", "nativewind/metro",
+  "deepmerge", "@expo/config", "expo/config",
 ];
+
+
+const EXPO_CONFIG_BUILD_TOOLS = ["@expo/cli", "@expo/metro-config", "@expo/prebuild-config", "eas-cli"];
+const EXPO_CONFIG_RUNTIME_PACKAGES = ["expo", "expo-constants", "expo-manifests"];
+test("deepmerge stays a build-time dependency of @expo/config only, at the excepted version", () => {
+  const workflow = readFileSync(".github/workflows/dependency-audit.yml", "utf8");
+  const excepted = AUDIT_EXCEPTIONS.deepmerge;
+  expect(excepted.advisories).toEqual({[DEEPMERGE_ADVISORY]: ">=4.2.0 <=4.3.1"});
+  expect(workflow).toContain(`if [ "$deepmerge_latest" != "${excepted.version}" ]; then`);
+  const consumers = new Set();
+  const configUsers = new Set();
+  for (const profile of Object.keys(profiles)) {
+    for (const [path, metadata] of Object.entries(npmLock(profile).packages)) {
+      const name = path.split("node_modules/").at(-1);
+      const deps = {...metadata.dependencies, ...metadata.optionalDependencies};
+      if (name === "deepmerge") expect(metadata.version).toBe(excepted.version);
+      if ("deepmerge" in deps) consumers.add(name);
+      if ("@expo/config" in deps) configUsers.add(name);
+    }
+  }
+  for (const metadata of Object.values(bunLock().packages)) {
+    const name = metadata[0].slice(0, metadata[0].lastIndexOf("@"));
+    const deps = {...metadata[2]?.dependencies, ...metadata[2]?.optionalDependencies};
+    if (name === "deepmerge") expect(metadata[0]).toBe(`deepmerge@${excepted.version}`);
+    if ("deepmerge" in deps) consumers.add(name);
+    if ("@expo/config" in deps) configUsers.add(name);
+  }
+  expect([...consumers]).toEqual(["@expo/config"]);
+  expect([...configUsers].sort()).toEqual([...EXPO_CONFIG_BUILD_TOOLS, ...EXPO_CONFIG_RUNTIME_PACKAGES].filter((name) => configUsers.has(name)).sort());
+  const installed = (path) => readdirSync(path, {withFileTypes: true}).flatMap((entry) => {
+    if (entry.name === "node_modules") return [];
+    const child = join(path, entry.name);
+    return entry.isDirectory() ? installed(child) : /\.[cm]?[jt]sx?$/.test(entry.name) && !entry.name.endsWith(".d.ts") ? [child] : [];
+  });
+  for (const name of EXPO_CONFIG_RUNTIME_PACKAGES) {
+    const root = dirname(rootRequire.resolve(`${name}/package.json`));
+    const runtimeImports = installed(root).filter((path) => /@expo\/config/.test(readFileSync(path, "utf8")))
+      .flatMap((path) => buildToolImports(readFileSync(path, "utf8"), path).filter((spec) => spec.startsWith("@expo/config"))
+        .map(() => path.slice(root.length + 1)))
+      .filter((path) => !/^(config|scripts)\//.test(path));
+    expect([name, runtimeImports]).toEqual([name, []]);
+  }
+});
 const buildToolImports = (source, path = "runtime.ts") => {
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   const matches = [];
@@ -331,7 +375,7 @@ test("runtime exposure guard catches static, side-effect, dynamic, and template-
 
 test("shipped runtime sources never import the excepted Node build-tool chains", () => {
   const files = (path) => readdirSync(path, {withFileTypes: true}).flatMap((entry) => {
-    // build/.build/Pods hold Gradle, SwiftPM, and CocoaPods output under the native module dirs, never shipped JS source.
+
     if (["node_modules", "__tests__", ".expo", "dist", "build", ".build", "Pods"].includes(entry.name)) return [];
     const child = join(path, entry.name);
     return entry.isDirectory() ? files(child) : /\.[cm]?[jt]sx?$/.test(entry.name) && !/\.(test|spec)\./.test(entry.name) ? [child] : [];
@@ -342,7 +386,7 @@ test("shipped runtime sources never import the excepted Node build-tool chains",
     "packages/core/src", "apps/cloud/src", "apps/mcp-server/src",
   ];
   const sources = [...roots.flatMap(files), "apps/mobile/index.js", "apps/mobile/polyfills.js"];
-  // Parsing all ~1,300 files takes over 20 s on a loaded machine; a file that never names a chain cannot import it.
+
   const imports = sources.flatMap((path) => {
     const source = readFileSync(path, "utf8");
     if (!buildToolImportNames.some((name) => source.includes(name))) return [];

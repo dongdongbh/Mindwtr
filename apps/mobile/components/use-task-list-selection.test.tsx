@@ -2,17 +2,34 @@ import React from 'react';
 import renderer from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runStoreCommand, runSyncStoreSave, useTaskStore, type StoreActionResult, type Task } from '@mindwtr/core';
+import { NavigationContext } from '@react-navigation/native';
 
 const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
   alert: vi.fn(),
+  backListeners: [] as (() => boolean)[],
 }));
+
+
+const pressBack = () => {
+  let handled = false;
+  renderer.act(() => {
+    handled = [...mocks.backListeners].reverse().some((listener) => listener());
+  });
+  return handled;
+};
 
 vi.mock('react-native', async () => {
   const actual = await vi.importActual<any>('react-native');
   return {
     ...actual,
     Alert: { ...actual.Alert, alert: mocks.alert },
+    BackHandler: {
+      addEventListener: (_event: string, listener: () => boolean) => {
+        mocks.backListeners.push(listener);
+        return { remove: () => { mocks.backListeners = mocks.backListeners.filter((item) => item !== listener); } };
+      },
+    },
   };
 });
 
@@ -84,7 +101,7 @@ describe('useTaskListSelection handleBatchDelete', () => {
     await confirmDelete();
 
     expect(batchDeleteTasks).toHaveBeenCalledWith(['a']);
-    // No false confirmation: no success/undo toast, selection is retained so the user can retry.
+
     const toasts = mocks.showToast.mock.calls.map((call) => call[0]);
     expect(toasts.some((toast) => toast.tone === 'success')).toBe(false);
     expect(toasts.some((toast) => toast.actionLabel === 'Restore')).toBe(false);
@@ -140,7 +157,7 @@ describe('useTaskListSelection handleBatchDelete', () => {
   });
 });
 
-// Tag writes build each list from the task as stored (the real core store), not the rows on screen.
+
 const seedStore = (tasks: Record<string, Task>) => useTaskStore.setState({ _allTasks: Object.values(tasks) });
 
 describe('useTaskListSelection handleBatchRemoveTags', () => {
@@ -160,7 +177,7 @@ describe('useTaskListSelection handleBatchRemoveTags', () => {
   });
 
   it('adds and removes a tag on the rows a sync save published while the write waited behind it', async () => {
-    // batchUpdateTasks as the store runs it: a command behind the write gate (store-write-gate.ts).
+
     const batchUpdateTasks = vi.fn((updates: { id: string; updates: Partial<Task> }[]) => runStoreCommand(async () => {
       const byId = new Map(updates.map((entry) => [entry.id, entry.updates]));
       useTaskStore.setState({ _allTasks: useTaskStore.getState()._allTasks.map((task) => ({ ...task, ...byId.get(task.id) })) });
@@ -173,7 +190,7 @@ describe('useTaskListSelection handleBatchRemoveTags', () => {
       hookRef.toggleMultiSelect('b');
       hookRef.setTagInput('#new');
     });
-    // The write is issued while a sync save holds the gate; the save then publishes another device's tag on b.
+
     const behindSyncSave = async (tag: string, write: () => Promise<void>) => {
       let release!: () => void;
       const held = new Promise<void>((resolve) => { release = resolve; });
@@ -224,7 +241,7 @@ describe('useTaskListSelection handleBatchRemoveTags', () => {
       await hookRef.handleBatchRemoveTags(['#ops', '#urgent']);
     });
 
-    // Task c keeps only #keep, so it is left out of the write entirely.
+
     expect(batchUpdateTasks).toHaveBeenCalledWith([
       { id: 'a', updates: { tags: ['#keep'] } },
       { id: 'b', updates: { tags: [] } },
@@ -266,7 +283,7 @@ describe('useTaskListSelection handleBatchRemoveTags', () => {
     await renderer.act(async () => {
       await hookRef.handleBatchAddTag();
     });
-    // The dialog closes so the warning toast shows; reopening it shows the tag again.
+
     expect(hookRef.tagModalVisible).toBe(false);
     expect(hookRef.tagInput).toBe('#new');
     expect(hookRef.hasSelection).toBe(true);
@@ -402,7 +419,7 @@ describe('useTaskListSelection handleBatchOrganize', () => {
     renderer.act(() => { hookRef.toggleMultiSelect('b'); });
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
-    // Another device's tag, published by a sync save that holds the gate while Apply is pressed.
+
     const save = runSyncStoreSave(async () => {
       await held;
       const stored = useTaskStore.getState()._tasksById.get('b')!;
@@ -413,5 +430,79 @@ describe('useTaskListSelection handleBatchOrganize', () => {
     release();
     await renderer.act(async () => { await save; await pending; });
     expect(useTaskStore.getState()._tasksById.get('b')?.tags).toEqual(expect.arrayContaining(['#urgent', '#remote', '#new']));
+  });
+});
+
+describe('useTaskListSelection Android Back (#1415)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.backListeners = [];
+  });
+
+  it('leaves selection mode on Back and consumes the press', () => {
+    renderer.act(() => {
+      renderer.create(<Harness {...baseParams()} />);
+    });
+    expect(mocks.backListeners).toHaveLength(0);
+    expect(pressBack()).toBe(false);
+
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a');
+    });
+    expect(hookRef.selectionMode).toBe(true);
+
+    expect(pressBack()).toBe(true);
+    expect(hookRef.selectionMode).toBe(false);
+    expect(hookRef.hasSelection).toBe(false);
+
+    expect(mocks.backListeners).toHaveLength(0);
+    expect(pressBack()).toBe(false);
+  });
+
+  it('leaves Back to the screen on top while its own screen is not focused', () => {
+    const navigation = { isFocused: () => false };
+    renderer.act(() => {
+      renderer.create(
+        <NavigationContext.Provider value={navigation as never}>
+          <Harness {...baseParams()} />
+        </NavigationContext.Provider>,
+      );
+    });
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a');
+    });
+    expect(pressBack()).toBe(false);
+    expect(hookRef.selectionMode).toBe(true);
+
+    navigation.isFocused = () => true;
+    expect(pressBack()).toBe(true);
+    expect(hookRef.selectionMode).toBe(false);
+  });
+
+  it('leaves Back to the screen while it says a dialog is open, or while a tag dialog is open', () => {
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<Harness {...baseParams({ backExitsSelection: false })} />);
+    });
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a');
+    });
+    expect(pressBack()).toBe(false);
+    expect(hookRef.selectionMode).toBe(true);
+
+    renderer.act(() => {
+      tree.update(<Harness {...baseParams()} />);
+    });
+    renderer.act(() => {
+      hookRef.setTagModalVisible(true);
+    });
+    expect(pressBack()).toBe(false);
+    expect(hookRef.selectionMode).toBe(true);
+
+    renderer.act(() => {
+      hookRef.setTagModalVisible(false);
+    });
+    expect(pressBack()).toBe(true);
+    expect(hookRef.selectionMode).toBe(false);
   });
 });

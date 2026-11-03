@@ -8,9 +8,8 @@ import { TextAttachmentModal } from './TextAttachmentModal';
 import type { useTaskItemAttachments } from './useTaskItemAttachments';
 
 type TaskAttachmentOverlaysProps = {
-    // The seam is the hook's own return type: every overlay below is driven by
-    // state that lives in useTaskItemAttachments, so there is nothing for the
-    // row component to unpack and re-list.
+
+
     attachments: ReturnType<typeof useTaskItemAttachments>;
     t: (key: string) => string;
 };
@@ -45,8 +44,8 @@ export function TaskAttachmentOverlays({ attachments, t }: TaskAttachmentOverlay
         openTextExternally,
     } = attachments;
     const isObsidianLink = linkPromptVariant === 'obsidian';
-    // Browsing for a target only makes sense for plain links, and only in the
-    // desktop shell where a file dialog exists.
+
+
     const canBrowseLinkTarget = linkPromptVariant === 'link' && isTauriRuntime();
     const batchEntry = !editingLinkAttachmentId && linkPromptVariant === 'link';
 

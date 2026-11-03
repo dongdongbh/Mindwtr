@@ -8,7 +8,6 @@ import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
@@ -41,12 +40,6 @@ import org.json.JSONObject
 import tech.dongdongbh.mindwtr.notificationopenintents.PersistentCaptureNotifier
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 
-/*
- * RN's Settings › Notifications (components/settings/notifications-settings-screen.tsx) on core's getNotificationsSettings: three
- * cards, every word, value, dimmed row and edit core's. A switch core marks `askPermission` asks for Android's notification
- * permission first and sends its edit only once it is granted (RN's ensureNotificationsPermission); a time row opens Android's
- * time picker (RN's DateTimePicker, display "default") and sends the picked time; the day row opens RN's day picker.
- */
 
 @Composable
 internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = with(model.menu.settings) {
@@ -55,7 +48,7 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
     val reminders = view.getJSONObject("reminders")
     val weekly = view.getJSONObject("weeklyReview")
     val digest = view.getJSONObject("dailyDigest")
-    // The edit a permission request waits for; a granted permission sends it, a refusal drops it, as RN's does.
+
     var waiting by rememberSaveable { mutableStateOf<String?>(null) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         waiting?.let { edit -> if (granted) notifications(JSONObject(edit)) }
@@ -84,22 +77,22 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
             contentDescription = "$label: $value"; role = Role.Button; if (on) onClick { open(); true } else disabled()
         }.clickable(enabled = on, onClick = open), dimmed = row.getBoolean("disabled"))
     }
-    val time = { row: JSONObject -> { pickTime(context, row) { picked -> notifications(JSONObject().put("type", row.getString("type")).put("value", picked)) } } }
+    val time = { row: JSONObject -> { pickTime(context, row, theme.isDark) { picked -> notifications(JSONObject().put("type", row.getString("type")).put("value", picked)) } } }
 
     Card {
         Toggle(reminders.getJSONObject("enable"), false)
         Pressable(reminders.getJSONObject("taskDefault")) { model.menu.keepDialog(JSONObject().put("kind", "settingsPicker").put("picker", "taskReminderDefault")) }
         Toggle(reminders.getJSONObject("startReminders"), true)
         Toggle(reminders.getJSONObject("dueReminders"), true)
-        // RN's exact-alarm row while a notification feature is on: shown only while Android 12+ denies exact alarms, read again on
-        // each resume; Allow opens Android's Alarms & reminders page.
+
+
         reminders.optJSONObject("exactAlarmNotice")?.let { notice ->
             val denied = remember(model.resumes) { ReminderAlarms.exactAlarmsDenied(context) }
             if (denied) SettingRow(notice.getString("label"), notice.getString("description"), true, Modifier.testTag("exact-alarm-notice")) {
                 val action = notice.getString("actionLabel")
                 val shape = RoundedCornerShape(10.dp)
-                // RN's manageEditorButton, primary: #2563eb, white 14/600.
-                Box(Modifier.widthIn(min = 92.dp).heightIn(min = 42.dp).clip(shape).background(ALLOW_BLUE).border(1.dp, ALLOW_BLUE, shape)
+
+                Box(Modifier.widthIn(min = 92.dp).heightIn(min = 42.dp).clip(shape).background(ALLOW_BLUE).rnBorder(1.dp, ALLOW_BLUE, shape)
                     .clearAndSetSemantics { testTag = "exact-alarm-allow"; contentDescription = action; role = Role.Button; onClick { ReminderAlarms.openExactAlarmSettings(context); true } }
                     .clickable { ReminderAlarms.openExactAlarmSettings(context) }.padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center) {
@@ -123,32 +116,41 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
     }
 }
 
-/** RN's manageEditorButtonPrimary. */
+
 private val ALLOW_BLUE = Color(0xFF2563EB)
 
-/** RN's Android time picker for [row] (core's hour and minute), in the device's 12/24-hour format; [picked] gets 'HH:MM'. */
-private fun pickTime(context: Context, row: JSONObject, picked: (String) -> Unit) {
-    TimePickerDialog(context, { _, hour, minute -> picked(coreTime(hour, minute)) }, row.getInt("hour"), row.getInt("minute"),
+
+internal fun pickTime(context: Context, row: JSONObject, dark: Boolean, picked: (String) -> Unit) {
+    TimePickerDialog(systemDialogContext(context, dark), { _, hour, minute -> picked(coreTime(hour, minute)) }, row.getInt("hour"), row.getInt("minute"),
         DateFormat.is24HourFormat(context)).show()
 }
 
-/** Core's 'HH:MM' in ASCII digits whatever the device's language (Arabic and Persian format digits of their own). */
+
 internal fun coreTime(hour: Int, minute: Int): String = String.format(Locale.ROOT, "%02d:%02d", hour, minute)
 
-/**
- * RN's persistent capture notification (PersistentCaptureNotifier.kt, RN's own Kotlin): posted or removed as core says, and posted
- * again at start and on every resume while it is on and notifications are allowed (RN's keepPersistentCaptureNotificationArmed).
- */
+
 internal object PersistentCapture {
-    /** The line Settings › Diagnostics shows for a notification that was not posted or removed (docs/release-notes/diagnostics-ledger.md). */
+
     const val FAILED = "Native Android persistent capture notification not applied releaseCheck=v1.3.5/native-persistent-capture"
-    /** Held by every post, removal and process-start restore, so a removal never runs between a restore's read and its post. */
+
+    const val OVERTAKEN = "Native Android persistent capture restore overtaken by the switch releaseCheck=v1.3.8/native-capture-restore-overtaken"
+
     private val LOCK = Any()
-    /** A process start's failure, kept here (no engine runs yet) until the next boot's restore logs it. */
+
     private const val PREFS = "mindwtr_persistent_capture_host"
     private const val START_FAILURE = "startFailure"
 
-    /** Core's `{ post }`: the title, text and channel's name to post, or null to remove it. A failure goes to [log] (core's log). */
+
+    private val switchGeneration = java.util.concurrent.atomic.AtomicLong()
+    internal fun switchApplied() { switchGeneration.incrementAndGet() }
+
+
+    fun switched(context: Context, reply: JSONObject, log: (String, JSONObject) -> Unit) {
+        switchApplied()
+        apply(context, reply, log)
+    }
+
+
     fun apply(context: Context, reply: JSONObject, log: (String, JSONObject) -> Unit) = guarded(log) {
         val post = reply.optJSONObject("post")
         synchronized(LOCK) {
@@ -157,10 +159,7 @@ internal object PersistentCapture {
         }
     }
 
-    /**
-     * RN's process-start restore (NotificationOpenIntentsPackage) from the notifier's own mirror, before any engine: a receiver,
-     * a widget or the app. Its failure is kept for the next boot's [restore].
-     */
+
     fun restoreAtProcessStart(context: Context) = startWith(restore = { PersistentCaptureNotifier.restoreOnProcessStart(context) },
         keep = { failure -> context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(START_FAILURE, failure).commit() })
 
@@ -171,11 +170,7 @@ internal object PersistentCapture {
         }
     }
 
-    /**
-     * RN's restore with core's answer applied whole: on, it is posted again (only with the notification permission, which is never
-     * asked for here); off, it is removed, so an off whose removal never ran (the process died after the key went) does not stay
-     * pinned from the notifier's mirror.
-     */
+
     fun restore(context: Context, runtime: CoreHost) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         restoreWith(read = { runtime.menuRead("persistentCaptureNotification", "{}") }, granted = { ReminderAlarms.permissionGranted(context) },
@@ -183,17 +178,28 @@ internal object PersistentCapture {
             startFailure = { prefs.getString(START_FAILURE, null)?.also { prefs.edit().remove(START_FAILURE).commit() } })
     }
 
-    /** [restore] apart from Android (JVM-tested: PersistentCaptureTest). */
+
     internal fun restoreWith(read: () -> JSONObject, granted: () -> Boolean, apply: (JSONObject) -> Unit, log: (String, JSONObject) -> Unit,
         startFailure: () -> String? = { null }) {
         runCatching { startFailure() }.getOrNull()?.let { failure -> runCatching { log(FAILED, JSONObject().put("error", failure).put("path", "process-start")) } }
         guarded(log) {
+            val generation = switchGeneration.get()
             val reply = read()
-            if (reply.isNull("post") || granted()) apply(reply)
+
+            val overtaken = { generation != switchGeneration.get() }
+            if (overtaken()) return@guarded skipped(log)
+            if (!reply.isNull("post") && !granted()) return@guarded
+            if (overtaken()) return@guarded skipped(log)
+            apply(reply)
         }
     }
 
-    /** [block], its failure in Settings › Diagnostics (core's log) and logcat: no screen shows a notification that was not posted. */
+    private fun skipped(log: (String, JSONObject) -> Unit) {
+        runCatching { log(OVERTAKEN, JSONObject().put("releaseCheck", "v1.3.8/native-capture-restore-overtaken").put("outcome", "skipped")) }
+        runCatching { Log.i(CoreHost.TAG, "Native Android persistent capture restore overtaken by the switch releaseCheck=v1.3.8/native-capture-restore-overtaken") }
+    }
+
+
     private fun guarded(log: (String, JSONObject) -> Unit, block: () -> Unit) {
         runCatching(block).onFailure {
             runCatching { log(FAILED, JSONObject().put("error", it.javaClass.simpleName)) }

@@ -11,6 +11,7 @@ export type SavedFilterCriteriaChipOptions = {
     formatDate?: (value: string) => string;
     getAreaColor?: (areaId: string) => string | undefined;
     getAreaLabel?: (areaId: string) => string | undefined;
+    getProjectLabel?: (projectId: string) => string | undefined;
     resolveText?: (key: string, fallback: string) => string;
     translate?: (key: string) => string;
 };
@@ -26,6 +27,11 @@ const DATE_RANGE_PRESET_LABELS: Record<string, string> = {
     this_month: 'This month',
     overdue: 'Overdue',
     no_date: 'No date',
+    next_7_days: 'Next 7 days',
+    overdue_next_7_days: 'Overdue + next 7 days',
+    next_14_days: 'Next 14 days',
+    next_30_days: 'Next 30 days',
+    upcoming: 'All upcoming',
 };
 
 function titleCase(value: string): string {
@@ -102,6 +108,10 @@ export function buildAdvancedFilterCriteriaChips(
     });
 
     const statusLabel = resolveText(options, 'taskEdit.statusLabel', 'Status');
+    criteria.excludedProjects?.forEach((projectId) => chips.push({
+        id: `excluded-project:${projectId}`,
+        label: `${resolveText(options, 'filters.excluded', 'Excluded')}: ${options.getProjectLabel?.(projectId) ?? projectId}`,
+    }));
     criteria.statuses?.forEach((status) => {
         chips.push({
             id: `status:${status}`,
@@ -133,6 +143,10 @@ export function buildAdvancedFilterCriteriaChips(
     const startDateRange = formatDateRange(startDateLabel, criteria.startDateRange, options);
     if (startDateRange) chips.push({ id: 'startDateRange', label: startDateRange });
 
+    const taskDatesLabel = resolveText(options, 'filters.taskDates', 'Task dates');
+    const anyDateRange = formatDateRange(taskDatesLabel, criteria.anyDateRange, options);
+    if (anyDateRange) chips.push({ id: 'anyDateRange', label: anyDateRange });
+
     const timeEstimateRange = formatTimeEstimateRange(criteria.timeEstimateRange, options);
     if (timeEstimateRange) chips.push({ id: 'timeEstimateRange', label: timeEstimateRange });
 
@@ -157,9 +171,7 @@ export function buildAdvancedFilterCriteriaChips(
     return chips;
 }
 
-// Also runs on stored criteria (a saved filter as written), so a value
-// matches by its trimmed text, as the reader shows it, and a value this build
-// does not understand stays.
+
 function removeListItem<T extends string>(values: T[] | undefined, target: string): T[] | undefined {
     if (!Array.isArray(values)) return values;
     const next = values.filter((value) => typeof value !== 'string' || value.trim() !== target);
@@ -167,6 +179,13 @@ function removeListItem<T extends string>(values: T[] | undefined, target: strin
 }
 
 export function removeAdvancedFilterCriteriaChip(criteria: FilterCriteria, chipId: string): FilterCriteria {
+    if (chipId.startsWith('excluded-project:')) {
+        const next = { ...criteria };
+        const projects = removeListItem(criteria.excludedProjects, chipId.slice('excluded-project:'.length));
+        if (projects) next.excludedProjects = projects;
+        else delete next.excludedProjects;
+        return next;
+    }
     if (chipId.startsWith(AREA_CHIP_PREFIX)) {
         const next = { ...criteria };
         const areas = removeListItem(criteria.areas, chipId.slice(AREA_CHIP_PREFIX.length));
@@ -206,6 +225,11 @@ export function removeAdvancedFilterCriteriaChip(criteria: FilterCriteria, chipI
 
     if (chipId === 'startDateRange') {
         const { startDateRange: _removed, ...next } = criteria;
+        return next;
+    }
+
+    if (chipId === 'anyDateRange') {
+        const { anyDateRange: _removed, ...next } = criteria;
         return next;
     }
 

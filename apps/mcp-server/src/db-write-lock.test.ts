@@ -8,14 +8,13 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
-// Each test spawns a child process and waits up to 5s on it, which is exactly
-// bun's default per-test timeout; CI hit 5000.93ms. Give the whole test headroom.
+
+
 const CROSS_PROCESS_TEST_TIMEOUT_MS = 20_000;
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-// A second bun process on a loaded CI runner can take well over 5 s to reach
-// its ready marker (three flakes in a week); the whole test has 20 s.
+
 const waitForPath = async (
   path: string,
   child: ChildProcess,

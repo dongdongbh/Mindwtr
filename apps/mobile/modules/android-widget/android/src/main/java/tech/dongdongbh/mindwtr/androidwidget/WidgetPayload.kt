@@ -9,7 +9,6 @@ import java.net.URLEncoder
 import java.text.DateFormat
 import java.text.ParsePosition
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -17,12 +16,7 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
-/**
- * The widget payload the React Native side publishes (widget-service.ts,
- * `AndroidTasksWidgetPayload`), shared by every widget kind. Every string the
- * widgets or the quick-capture dialog show is localized in TypeScript; Kotlin
- * refreshes Upcoming dates in the current locale/timezone. Unknown keys are ignored.
- */
+
 data class WidgetPayload(
   val headerTitle: String,
   val dateLabel: String,
@@ -44,6 +38,8 @@ data class WidgetPayload(
   val taskPeek: TaskPeekLabels,
   val chooseListLabel: String = "Change",
   val viewAllLabel: String = "View all {{count}} tasks",
+  val prioritiesEnabled: Boolean = true,
+  val upcomingDays: UpcomingDays? = null,
 ) {
   data class DisplaySnapshot(val sourceTaskIds: Set<String>, val payload: WidgetPayload)
 
@@ -57,7 +53,7 @@ data class WidgetPayload(
     val contextLabel: String?,
     val identityColor: Int?,
     val dueTone: DueTone,
-    // Only the task sheet reads the rest; absent on rows that carry none.
+
     val description: String?,
     val contexts: List<String>,
     val tags: List<String>,
@@ -65,14 +61,16 @@ data class WidgetPayload(
     val priorityLabel: String?,
     val upcomingDate: String? = null,
     val upcomingLabel: String? = null,
+    val statusLabel: String? = null,
+    val showStatus: Boolean = false,
   )
 
   enum class DueTone { OVERDUE, TODAY, NORMAL }
 
-  /** A Focus screen section (#1173): title plus its rows, in screen order. */
-  data class Section(val title: String, val detail: String?, val items: List<Item>)
 
-  /** One list a placed Tasks widget can show (#1173). */
+  data class Section(val title: String, val detail: String?, val items: List<Item>, val key: String? = null)
+
+
   data class ListPayload(
     val title: String,
     val dateLabel: String?,
@@ -89,12 +87,15 @@ data class WidgetPayload(
     }
 
     fun renderedTaskCount(): Int =
-      if (sections.isEmpty()) items.size else sections.sumOf { it.items.size }
+      (if (sections.isEmpty()) items else sections.flatMap { it.items }).distinctBy { it.id }.size
 
     fun eligibleTaskCount(): Int = totalCount ?: renderedTaskCount()
   }
 
   data class SavedFilterOption(val id: String, val name: String)
+
+
+  data class UpcomingDays(val today: String, val tomorrow: String, val weekdays: List<String>, val dayFirst: Boolean)
 
   data class Palette(
     val background: Int,
@@ -130,9 +131,12 @@ data class WidgetPayload(
     val audioError: String,
     val audioPermissionDenied: String,
     val descriptionPlaceholder: String = "Description (optional)",
+    val statusLabel: String = "Status",
+    val statusLabels: Map<String, String> = mapOf("inbox" to "Inbox", "next" to "Next Actions", "waiting" to "Waiting For", "someday" to "Someday/Maybe"),
+    val queued: String = "Saved. Your task will be added when Mindwtr opens.",
   )
 
-  /** True when the launcher's own day/night resources should color the widget. */
+
   val usesSystemColors: Boolean get() = palette == null || themeMode == "system"
 
   fun resolvedPalette(context: Context): Palette? = when {
@@ -143,7 +147,7 @@ data class WidgetPayload(
     else -> palette
   }
 
-  /** Every task id the payload can draw, across the flat list, the sections and every named list. */
+
   fun allTaskIds(): Set<String> {
     val ids = HashSet<String>()
     items.forEach { ids.add(it.id) }
@@ -156,22 +160,23 @@ data class WidgetPayload(
     return ids
   }
 
-  /**
-   * Builds the launcher-facing snapshot without mutating the app-published
-   * payload. [sourceTaskIds] deliberately comes from the unfiltered payload so
-   * committed check-offs can still be reconciled after the app ingests them.
-   */
-  fun displaySnapshot(hiddenTaskIds: Set<String>, now: Date = Date(), timeZone: TimeZone = TimeZone.getDefault()): DisplaySnapshot {
-    if (hiddenTaskIds.isEmpty() && UPCOMING_LIST_ID !in lists) return DisplaySnapshot(allTaskIds(), this)
+
+  fun displaySnapshot(hiddenTaskIds: Set<String>, timeZone: TimeZone = TimeZone.getDefault(), now: Date = Date()): DisplaySnapshot {
+    if (hiddenTaskIds.isEmpty() && lists.keys.none { WidgetListStore.baseListId(it) == UPCOMING_LIST_ID }) return DisplaySnapshot(allTaskIds(), this)
     fun visible(items: List<Item>): List<Item> = items.filterNot { it.id in hiddenTaskIds }
     fun visible(sections: List<Section>): List<Section> = sections.mapNotNull { section ->
-      section.copy(items = visible(section.items)).takeIf { it.items.isNotEmpty() }
+      val groupCount = section.detail?.toIntOrNull()?.takeIf {
+        section.key?.substringBefore(":") in setOf("context", "project", "priority", "area", "tag", "energy", "person")
+      }
+      val hidden = section.items.filter { it.id in hiddenTaskIds }.distinctBy { it.id }.size
+      section.copy(items = visible(section.items), detail = groupCount?.let { (it - hidden).coerceAtLeast(0).toString() } ?: section.detail)
+        .takeIf { it.items.isNotEmpty() }
     }
     fun visible(list: ListPayload): ListPayload {
       val hiddenInList = list.taskIds().count { it in hiddenTaskIds }
       val visibleSections = visible(list.sections)
       val visibleItems = visible(list.items)
-      val visibleRowCount = if (visibleSections.isEmpty()) visibleItems.size else visibleSections.sumOf { it.items.size }
+      val visibleRowCount = (if (visibleSections.isEmpty()) visibleItems else visibleSections.flatMap { it.items }).distinctBy { it.id }.size
       return list.copy(
         sections = visibleSections,
         items = visibleItems,
@@ -185,31 +190,21 @@ data class WidgetPayload(
         sections = visible(sections),
         lists = lists.mapValues { (id, list) ->
           val unhidden = visible(list)
-          if (id == UPCOMING_LIST_ID) unhidden.upcomingSnapshot(now, timeZone) else unhidden
+          if (WidgetListStore.baseListId(id) == UPCOMING_LIST_ID) unhidden.upcomingSnapshot(timeZone, now) else unhidden
         },
       ),
     )
   }
 
-  private fun ListPayload.upcomingSnapshot(now: Date, timeZone: TimeZone): ListPayload {
-    val today = Calendar.getInstance(timeZone).apply {
-      time = now
-      set(Calendar.HOUR_OF_DAY, 0)
-      set(Calendar.MINUTE, 0)
-      set(Calendar.SECOND, 0)
-      set(Calendar.MILLISECOND, 0)
-    }
-    val tomorrow = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) }.time
-    val afterWindow = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 8) }.time
-    fun preview(items: List<Item>): List<Item> = items.mapNotNull { item ->
-      val raw = item.upcomingDate ?: return@mapNotNull null
-      val date = parseUpcomingDate(raw, timeZone) ?: return@mapNotNull null
-      if (date.before(tomorrow) || !date.before(afterWindow)) return@mapNotNull null
-      val format = if (DATE_ONLY.matches(raw)) DateFormat.getDateInstance(DateFormat.MEDIUM)
-      else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-      format.timeZone = timeZone
+  private fun ListPayload.upcomingSnapshot(timeZone: TimeZone, now: Date): ListPayload {
+
+    fun preview(items: List<Item>): List<Item> = items.map { item ->
+      val raw = item.upcomingDate ?: return@map item
+      val date = parseUpcomingDate(raw, timeZone) ?: return@map item
+
+      val day = upcomingDays?.let { upcomingDayLabel(date, !DATE_ONLY.matches(raw), it, now, timeZone) }
       item.copy(
-        dueLabel = item.upcomingLabel?.let { "$it ${format.format(date)}" } ?: item.dueLabel,
+        dueLabel = if (day != null && item.upcomingLabel != null) "${item.upcomingLabel} $day" else item.dueLabel,
         dueEmphasis = false,
         dueTone = DueTone.NORMAL,
       )
@@ -218,15 +213,13 @@ data class WidgetPayload(
     val nextSections = sections.mapNotNull { section ->
       section.copy(items = preview(section.items)).takeIf { it.items.isNotEmpty() }
     }
-    val removed = taskIds() - (nextItems.map { it.id } + nextSections.flatMap { it.items.map { item -> item.id } }).toSet()
     return copy(
       items = nextItems,
       sections = nextSections,
-      totalCount = totalCount?.let { (it - removed.size).coerceAtLeast(if (nextSections.isEmpty()) nextItems.size else nextSections.sumOf { section -> section.items.size }) },
     )
   }
 
-  /** The row a tap names, wherever the payload carries it; null when the payload has moved on. */
+
   fun itemFor(taskId: String): Item? {
     if (taskId.isEmpty()) return null
     items.firstOrNull { it.id == taskId }?.let { return it }
@@ -238,53 +231,50 @@ data class WidgetPayload(
     return null
   }
 
-  /** A list the chooser offers, named even before the app has built its rows. */
+
   fun titleFor(listId: String): String? =
     lists[listId]?.title
+      ?: WidgetListStore.grouping(listId)?.second?.let(::titleFor)
       ?: listTitles[listId]
       ?: savedFilters.firstOrNull { listId == WidgetListStore.FILTER_PREFIX + it.id }?.name
       ?: (contexts + tags).firstOrNull { it.id == listId }?.name
       ?: listId.substringAfter(":").takeIf { WidgetListStore.isTokenList(listId) && navigableListIdOrNull(listId) != null }
       ?: "Upcoming".takeIf { listId == UPCOMING_LIST_ID }
 
-  /** Unknown/retired selections draw and navigate as Focus; known legacy project payloads remain usable. */
+
   fun resolvedListId(listId: String): String =
     navigableListIdOrNull(listId)?.takeIf {
-      !it.startsWith(WidgetListStore.PROJECT_PREFIX) || titleFor(it) != null
+      !WidgetListStore.baseListId(it).startsWith(WidgetListStore.PROJECT_PREFIX) || titleFor(it) != null
     }
       ?: WidgetListStore.DEFAULT_LIST
 
-  /**
-   * The list a widget should draw. A selection the app has not published yet
-   * (a project just picked in the chooser) draws under its own name and empty,
-   * never as the Focus rows wearing another list's title; an id we cannot name
-   * at all falls back to Focus.
-   */
+
   fun listFor(listId: String): ListPayload =
     lists[listId]
       ?: (if (listId == WidgetListStore.DEFAULT_LIST) null else titleFor(listId)?.let { ListPayload(it, null, emptyList(), emptyList()) })
       ?: lists[WidgetListStore.DEFAULT_LIST]
       ?: ListPayload(headerTitle, dateLabel, sections, items)
 
-  /** Compact shows Next Actions only when Focus has no flat or section rows. */
+
   fun compactListId(): String {
     val focus = listFor(WidgetListStore.DEFAULT_LIST)
     val next = lists[NEXT_LIST_ID]
     return if (!focus.hasRows() && next?.hasRows() == true) NEXT_LIST_ID else WidgetListStore.DEFAULT_LIST
   }
 
-  /** Safe app destination for a selected list; unknown legacy ids return Focus. */
+
   fun openUriFor(listId: String): String {
     val safeFocusUri = listAppUriOrNull(focusUri, WidgetListStore.DEFAULT_LIST) ?: DEFAULT_FOCUS_URI
     val validListId = resolvedListId(listId)
     lists[validListId]?.openUri?.let { return it }
-    return when (validListId) {
+    val baseListId = WidgetListStore.baseListId(validListId)
+    return when (baseListId) {
       WidgetListStore.DEFAULT_LIST -> safeFocusUri
       "inbox" -> "mindwtr:///inbox"
-      NEXT_LIST_ID -> listRoute(validListId)
+      NEXT_LIST_ID -> listRoute(baseListId)
       "waiting" -> "mindwtr:///waiting"
       "someday" -> "mindwtr:///someday"
-      else -> listRoute(validListId)
+      else -> listRoute(baseListId)
     }
   }
 
@@ -304,14 +294,67 @@ data class WidgetPayload(
       accent = 0xFF4F9DFF.toInt(), onAccent = 0xFF000000.toInt(),
       border = 0xFF1F2937.toInt(), warning = 0xFFFBBF24.toInt(),
     )
+
+    internal val LIGHT_THEME_PALETTE = Palette(
+      background = 0xFFF8FAFC.toInt(), card = 0xFFFFFFFF.toInt(),
+      text = 0xFF0F172A.toInt(), mutedText = 0xFF475569.toInt(),
+      accent = 0xFF2563EB.toInt(), onAccent = 0xFFFFFFFF.toInt(),
+      border = 0xFFCBD5E1.toInt(), warning = 0xFFD97706.toInt(),
+    )
+    internal val DARK_THEME_PALETTE = Palette(
+      background = 0xFF111827.toInt(), card = 0xFF1F2937.toInt(),
+      text = 0xFFF9FAFB.toInt(), mutedText = 0xFFCBD5E1.toInt(),
+      accent = 0xFF2563EB.toInt(), onAccent = 0xFFFFFFFF.toInt(),
+      border = 0xFF374151.toInt(), warning = 0xFFF59E0B.toInt(),
+    )
     const val DEFAULT_FOCUS_URI = "mindwtr:///focus"
     const val NEXT_LIST_ID = "next"
     const val UPCOMING_LIST_ID = "upcoming"
     const val MAX_ITEMS = 200
     private const val MAX_LIST_ID_LENGTH = 1_024
-    private val FIXED_LIST_IDS = setOf(WidgetListStore.DEFAULT_LIST, "inbox", NEXT_LIST_ID, UPCOMING_LIST_ID, "waiting", "someday")
+    private val FIXED_LIST_IDS = setOf(
+      WidgetListStore.DEFAULT_LIST, WidgetListStore.FOCUS_AVAILABLE_LIST, "inbox", NEXT_LIST_ID, UPCOMING_LIST_ID, "waiting", "someday",
+    )
     private val DATE_ONLY = Regex("""\d{4}-\d{2}-\d{2}""")
     private val DATE_TIME = Regex("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?""")
+
+    private const val DAY_MS = 24L * 60 * 60 * 1000
+
+
+    fun upcomingDayLabel(
+      date: Date,
+      hasTime: Boolean,
+      days: UpcomingDays,
+      now: Date,
+      timeZone: TimeZone,
+      locale: Locale = Locale.getDefault(),
+    ): String {
+      fun epochDay(value: Date): Long = Math.floorDiv(value.time + timeZone.getOffset(value.time), DAY_MS)
+      val day = epochDay(date)
+      val ahead = day - epochDay(now)
+      val calendar = java.util.Calendar.getInstance(timeZone).apply { time = date }
+      val month = calendar.get(java.util.Calendar.MONTH) + 1
+      val dayOfMonth = calendar.get(java.util.Calendar.DAY_OF_MONTH)
+      val label = when {
+        ahead == 0L -> days.today
+        ahead == 1L -> days.tomorrow
+        ahead in 2..6 -> days.weekdays[Math.floorMod(day + 4, 7L).toInt()]
+        days.dayFirst -> "$dayOfMonth/$month"
+        else -> "$month/$dayOfMonth"
+      }
+      if (!hasTime) return label
+      val time = DateFormat.getTimeInstance(DateFormat.SHORT, locale).apply { this.timeZone = timeZone }
+      return "$label ${time.format(date)}"
+    }
+
+    private fun parseUpcomingDays(json: JSONObject?): UpcomingDays? {
+      json ?: return null
+      val weekdays = json.optJSONArray("weekdays")?.let { array -> (0 until array.length()).map { array.optString(it) } }
+      val today = json.optString("today").trim()
+      val tomorrow = json.optString("tomorrow").trim()
+      if (today.isEmpty() || tomorrow.isEmpty() || weekdays?.size != 7 || weekdays.any { it.isBlank() }) return null
+      return UpcomingDays(today, tomorrow, weekdays, json.optBoolean("dayFirst", false))
+    }
 
     private fun parseUpcomingDate(raw: String, timeZone: TimeZone): Date? {
       val pattern = when {
@@ -322,7 +365,7 @@ data class WidgetPayload(
           (if (raw.endsWith('Z') || raw.drop(10).contains('+') || raw.drop(10).contains('-')) "XXX" else "")
         else -> return null
       }
-      // Noon compares calendar days even where a DST transition skips local midnight.
+
       val normalized = if (DATE_ONLY.matches(raw)) "${raw}T12:00"
       else raw.replace(Regex("""\.(\d{1,3})(?=Z|[+-]|$)""")) { ".${it.groupValues[1].padEnd(3, '0')}" }
       val parser = SimpleDateFormat(pattern, Locale.ROOT).apply {
@@ -350,7 +393,7 @@ data class WidgetPayload(
       palette = null,
       quickCapture = QuickCaptureLabels(
         title = "Quick capture",
-        placeholder = "Add task to inbox...",
+        placeholder = "Add a task… use @context +Project #tag",
         save = "Save",
         cancel = "Cancel",
         added = "Task added to Mindwtr.",
@@ -387,7 +430,7 @@ data class WidgetPayload(
           val list = listsJson.optJSONObject(key) ?: continue
           val listSections = parseSections(list.optJSONArray("sections"))
           val listItems = parseItems(list.optJSONArray("items"))
-          val rowCount = if (listSections.isEmpty()) listItems.size else listSections.sumOf { it.items.size }
+          val rowCount = (if (listSections.isEmpty()) listItems else listSections.flatMap { it.items }).distinctBy { it.id }.size
           lists[key] = ListPayload(
             title = list.stringOr("title", key),
             dateLabel = list.optString("dateLabel").trim().takeIf { it.isNotEmpty() && !list.isNull("dateLabel") },
@@ -410,12 +453,19 @@ data class WidgetPayload(
           savedFilters.add(SavedFilterOption(id, name))
         }
       }
-      // Only the app's own routes may be launched from a tap.
+
       val focusUri = appUriOrNull(root.optString("focusUri")) ?: DEFAULT_FOCUS_URI
       val labels = root.optJSONObject("quickCapture")
       val quickCapture = QuickCaptureLabels(
         title = labels.stringOr("title", defaults.quickCapture.title),
-        placeholder = labels.stringOr("placeholder", defaults.quickCapture.placeholder),
+
+        placeholder = if (labels?.optJSONObject("statusLabels") != null) labels.stringOr("placeholder", defaults.quickCapture.placeholder)
+          else defaults.quickCapture.placeholder,
+        statusLabel = labels.stringOr("statusLabel", defaults.quickCapture.statusLabel),
+        statusLabels = defaults.quickCapture.statusLabels.mapValues { (status, fallback) ->
+          labels?.optJSONObject("statusLabels").stringOr(status, fallback)
+        },
+        queued = labels.stringOr("queued", defaults.quickCapture.queued),
         descriptionPlaceholder = labels.stringOr("descriptionPlaceholder", defaults.quickCapture.descriptionPlaceholder),
         save = labels.stringOr("save", defaults.quickCapture.save),
         cancel = labels.stringOr("cancel", defaults.quickCapture.cancel),
@@ -445,8 +495,8 @@ data class WidgetPayload(
         dateLabel = root.stringOr("dateLabel", defaults.dateLabel),
         inboxLabel = inboxLabel,
         inboxCount = inboxCount,
-        // Payloads written before #1173 had no subtitle; keep their exact
-        // Inbox count rather than showing a blank header chip.
+
+
         subtitle = root.stringOr("subtitle", "$inboxLabel: $inboxCount"),
         items = items,
         sections = sections,
@@ -462,6 +512,8 @@ data class WidgetPayload(
         quickCapture = quickCapture,
         taskPeek = taskPeek,
         viewAllLabel = root.stringOr("viewAllLabel", defaults.viewAllLabel),
+        prioritiesEnabled = root.optBoolean("prioritiesEnabled", true),
+        upcomingDays = parseUpcomingDays(root.optJSONObject("upcomingDays")),
       )
     }
 
@@ -474,7 +526,8 @@ data class WidgetPayload(
         val section = json.optJSONObject(index) ?: continue
         val sectionItems = parseItems(section.optJSONArray("items"), remaining)
         if (sectionItems.isEmpty()) continue
-        sections.add(Section(section.stringOr("title", ""), section.optString("detail").trim().takeIf { it.isNotEmpty() && !section.isNull("detail") }, sectionItems))
+        sections.add(Section(section.stringOr("title", ""), section.optString("detail").trim().takeIf { it.isNotEmpty() && !section.isNull("detail") },
+          sectionItems, section.optString("key").trim().takeIf { it.isNotEmpty() && !section.isNull("key") }))
         remaining -= sectionItems.size
       }
       return sections
@@ -509,6 +562,8 @@ data class WidgetPayload(
             priorityLabel = item.optString("priorityLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("priorityLabel") },
             upcomingDate = item.optString("upcomingDate").takeIf { !item.isNull("upcomingDate") },
             upcomingLabel = item.optString("upcomingLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("upcomingLabel") },
+            statusLabel = item.optString("statusLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("statusLabel") },
+            showStatus = item.optBoolean("showStatus", false),
           ),
         )
       }
@@ -543,9 +598,9 @@ data class WidgetPayload(
 
     fun appUriOrNull(value: String?): String? = value?.takeIf { it.startsWith("mindwtr:") }
 
-    /** List navigation accepts only hostless, hierarchical routes owned by this app. */
+
     private fun listAppUriOrNull(value: String?, listId: String): String? {
-      val validListId = navigableListIdOrNull(listId) ?: return null
+      val validListId = navigableListIdOrNull(listId)?.let(WidgetListStore::baseListId) ?: return null
       val candidate = value?.trim()?.takeIf { it.length in 1..MAX_LIST_URI_LENGTH } ?: return null
       val uri = try {
         URI(candidate)
@@ -575,10 +630,7 @@ data class WidgetPayload(
       return candidate.takeIf { routedListId == validListId }
     }
 
-    /**
-     * `#RRGGBB` or `#RRGGBBAA` (CSS order, what core's getAccentTint writes) to
-     * an ARGB int; android.graphics.Color is a stub on the JVM.
-     */
+
     fun parseHexColor(value: String?): Int? {
       val hex = value?.trim()?.removePrefix("#") ?: return null
       val digits = when (hex.length) {
@@ -608,6 +660,8 @@ data class WidgetPayload(
     }
 
     private fun navigableListIdOrNull(listId: String): String? = when {
+      listId.startsWith("group:") && listId.length <= MAX_LIST_ID_LENGTH * 12 + 32 ->
+        WidgetListStore.grouping(listId)?.second?.let(::navigableListIdOrNull)?.let { listId }
       listId in FIXED_LIST_IDS -> listId
       WidgetListStore.isTokenList(listId) &&
         listId.length <= MAX_LIST_ID_LENGTH && listId.substringAfter(":").isNotBlank() &&
@@ -625,7 +679,7 @@ data class WidgetPayload(
   }
 }
 
-/** The one place the payload JSON lives natively: SharedPreferences `mindwtr_widget` / `payload`. */
+
 object WidgetPayloadStore {
   const val PREFS_NAME = "mindwtr_widget"
   const val KEY_PAYLOAD = "payload"
@@ -636,13 +690,13 @@ object WidgetPayloadStore {
   fun read(context: Context): WidgetPayload =
     readRaw(context)?.let { WidgetPayload.parse(it) } ?: WidgetPayload.EMPTY
 
-  /** False when the payload did not reach the disk: the caller publishes it again. */
+
   fun write(context: Context, json: String): Boolean =
-    // commit(), not apply(): the widget provider and the dialog read this from
-    // other components right after the write.
+
+
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(KEY_PAYLOAD, json).commit()
 
-  /** The quick-capture dialog saved one Inbox item; show it before the app next publishes. */
+
   fun incrementInboxCount(context: Context) {
     val raw = readRaw(context) ?: return
     val next = incrementInboxCount(raw) ?: return
@@ -665,9 +719,8 @@ object WidgetPayloadStore {
       ?.removePrefix(previousPrefix)
       .orEmpty()
     root.put("inboxCount", nextCount)
-    // Keep the RN-published curated hidden count while advancing the Inbox
-    // count immediately after native quick capture. A legacy or malformed
-    // subtitle safely falls back to Inbox only.
+
+
     root.put("subtitle", "$inboxLabel: $nextCount$curatedSuffix")
     return root.toString()
   }

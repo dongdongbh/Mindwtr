@@ -4,7 +4,7 @@ import { logError } from './app-log';
 const DATA_KEY = 'mindwtr-data';
 const LEGACY_DATA_KEYS = ['focus-gtd-data', 'gtd-todo-data', 'gtd-data'];
 
-// Web version using localStorage
+
 export const mobileStorage: StorageAdapter = {
     getData: async (): Promise<AppData> => {
         if (typeof window === 'undefined') {
@@ -26,7 +26,7 @@ export const mobileStorage: StorageAdapter = {
         }
         try {
             const data = JSON.parse(jsonValue);
-            // Validation
+
             if (!Array.isArray(data.tasks) || !Array.isArray(data.projects)) {
                 throw new Error('Invalid data format');
             }

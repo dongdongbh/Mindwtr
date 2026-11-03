@@ -66,7 +66,7 @@ export function useTimelineDateEditing({
 
     useEffect(() => {
         cancel();
-        // Zoom or range changes cancel rather than reinterpret captured pixels.
+
     }, [geometryKey, cancel]);
 
     useEffect(() => {

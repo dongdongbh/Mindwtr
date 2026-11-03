@@ -10,6 +10,7 @@ import { Attachment,
     getProjectSectionsForView,
     getProjectToSectionEligibility,
     getSequentialProjectTaskCues,
+    getProjectFlowMode,
     isTaskFinished,
     isTaskCompleted,
     type BulkOrganizeTaskUpdateInput,
@@ -22,13 +23,14 @@ import { Attachment,
     parseAttachmentLinkBatch,
     getInlineMarkdownPreview,
     stripMarkdown,
+    PROJECT_TASK_SORT_OPTIONS,
     resolveTaskSortByForFeatures,
     sortTasksBy,
     splitCompletedTasks, tFallback, undoProjectDelete, updateProjectFromDraft, useTaskStore, } from '@mindwtr/core';
 import { useDndMonitor } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
-import { CheckCircle2, ChevronDown, ChevronRight, Folder, PanelLeftOpen, Plus, X } from 'lucide-react';
+import { SortableContext, verticalListSortingStrategy, horizontalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { Search, FileText, CheckCircle2, ChevronDown, ChevronRight, Folder, PanelLeftOpen, Plus, X } from 'lucide-react';
 
 import { PromptModal } from '../../PromptModal';
 import { browseForLinkTarget } from '../../../lib/attachment-import';
@@ -57,7 +59,7 @@ import { ProjectNotesSection } from './ProjectNotesSection';
 import { ProjectSectionActionsMenu } from './ProjectSectionActionsMenu';
 import { ProjectTaskToolbarMenu } from './ProjectTaskToolbarMenu';
 import { DraggableProjectTaskRow, SortableProjectTaskRow } from './SortableRows';
-import { SectionDropZone, getSectionContainerId, getSectionIdFromContainer, NO_SECTION_CONTAINER } from './section-dnd';
+import { SectionDropZone, SortableSectionHeader, getSectionHeaderId, getSectionContainerId, getSectionIdFromContainer, NO_SECTION_CONTAINER } from './section-dnd';
 import {
     DEFAULT_AREA_COLOR,
     getProjectColor,
@@ -67,8 +69,7 @@ import {
 import { toDateTimeLocalValue } from '../../Task/task-item-helpers';
 import type { ConfirmationRequestOptions } from '../../../hooks/useConfirmDialog';
 
-// The one visible line is far shorter; the cap only keeps a pathological
-// single-line note out of the inline markdown tokenizer.
+
 const SECTION_NOTES_PREVIEW_MAX_CHARS = 300;
 
 const PROJECT_TASK_VIRTUALIZATION_THRESHOLD = 80;
@@ -152,18 +153,7 @@ type ProjectTaskVirtualRow = {
     start: number;
 };
 
-/**
- * Where to draw a row the virtualizer is not currently rendering — the task
- * being edited, or the one a new-task highlight wants scrolled into view.
- *
- * It has to be the offset the virtualizer itself holds for that index, never
- * `index * estimate`. Once rows have been measured they come out shorter than
- * the estimate, so the list is far shorter than `index * estimate` suggests;
- * placing the row there puts it past the end of the list, and scrolling it into
- * view leaves the viewport in empty space with nothing rendered (#916).
- * The estimate is only a fallback for the first render, before any measuring,
- * where the two agree anyway.
- */
+
 export function resolvePinnedRowStart(
     measuredStart: number | undefined,
     index: number,
@@ -215,7 +205,7 @@ function ProjectTaskRows({ tasks, renderTask, scrollRef, pinnedTaskId }: Project
     });
 
     const rowVirtualizer = useVirtualizer({
-        // Inactive section virtualizers must not reset the shared scroller on mount (#1262).
+
         enabled: shouldVirtualize,
         count: shouldVirtualize ? tasks.length : 0,
         getScrollElement: () => scrollRef.current,
@@ -300,9 +290,7 @@ function ProjectTaskRows({ tasks, renderTask, scrollRef, pinnedTaskId }: Project
     );
 }
 
-// Renders one section as a board column. The column body is its own vertical
-// scroller, so the shared ProjectTaskRows virtualizer measures against the
-// column instead of the page — columns need no task-count ceiling of their own.
+
 function ProjectSectionColumn({
     id,
     dashed,
@@ -346,42 +334,39 @@ type BulkTokenPickerState = {
     action: 'add' | 'remove';
 } | null;
 
-// The workspace reads its store data and actions itself (useProjectWorkspaceStore
-// + useUiStore); only genuinely wrapper-owned state stays a prop. Store slices
-// re-threaded through ProjectsView were removed (arch review 2026-07-20 #8).
+
 type ProjectWorkspaceProps = {
-    // Cross-view navigation highlight — set from other views, cleared here.
+
     highlightTaskId: string | null;
-    // Area-creation-in-progress flag; drives the shared workspace loading banner.
+
     isAreaCreating: boolean;
-    // Project-creation-in-progress flag; drives the shared loading banner.
+
     isCreatingProject: boolean;
-    // App language (React context); threaded so tests keep translation control.
+
     language: string;
-    // Duplicate-then-select action; also wired to the sidebar in ProjectsView.
+
     onDuplicateProject: (projectId: string) => Promise<void> | void;
     onConvertProjectToSection?: (projectId: string) => Promise<void> | void;
-    // Opens the AreaManagerModal, whose open/close state lives in ProjectsView.
+
     onManageAreas: () => void;
-    // Opens the quick-area prompt, whose state lives in ProjectsView.
+
     onRequestQuickArea: (projectId: string) => void;
-    // Setter for the persisted showCompletedTasks view state (localStorage).
+
     onToggleShowCompletedTasks: () => void;
-    // The confirm-dialog host is rendered by ProjectsView.
+
     requestConfirmation: (options: ConfirmationRequestOptions) => Promise<boolean>;
-    // Selection identity — owned by ProjectsView (UI store + reset effects).
+
     selectedProjectId: string | null;
-    // Persisted view state (localStorage) owned by ProjectsView.
+
     showCompletedTasks: boolean;
-    // Translator (React context); threaded so tests keep translation control.
+
     t: (key: string) => string;
-    // Wrapper layout state.
+
     projectsSidebarCollapsed?: boolean;
-    // Toggles wrapper layout state.
+
     onToggleProjectsSidebar?: () => void;
-    // ADR 0023: the Projects view owns the shared DndContext; the workspace
-    // registers its in-list drag-end handling here so the view can delegate
-    // non-sidebar drops.
+
+
     taskDragEndRef: RefObject<((event: DragEndEvent) => void) | null>;
 };
 
@@ -467,13 +452,12 @@ export function ProjectWorkspace({
     const [sectionNotesOpen, setSectionNotesOpen] = useState<Record<string, boolean>>({});
     const [archivedSectionCollapsed, setArchivedSectionCollapsed] = useState<Record<string, boolean>>({});
     const [tagDraft, setTagDraft] = useState('');
-    // The project the tag draft was last filled from: its save merges against it.
+
     const tagDraftBaseRef = useRef<Project | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [editProjectTitle, setEditProjectTitle] = useState('');
-    // Effective sort is read straight from the selected project so it persists
-    // across restarts and view switches; the change handler writes it back via
-    // updateProject. Core normalizes 'default' to an absent field.
+
+
     const projectTaskSortBy: TaskSortBy = resolveTaskSortByForFeatures(
         selectedProject?.taskSortBy ?? 'default',
         settings,
@@ -492,8 +476,9 @@ export function ProjectWorkspace({
     const pendingProjectScrollRestoreRef = useRef<ProjectScrollSnapshot | null>(null);
     const selectedProjectIdRef = useRef<string | null>(selectedProjectId);
     const isArchivedProject = selectedProject?.status === 'archived';
+    const isPerSectionProject = Boolean(selectedProject && getProjectFlowMode(selectedProject) === 'perSection');
     const shouldGroupCompletedTasks = Boolean(
-        selectedProject && !selectedProject.isSequential && !isArchivedProject && showCompletedTasks
+        selectedProject && getProjectFlowMode(selectedProject) === 'parallel' && !isArchivedProject && showCompletedTasks
     );
     const resolveText = useCallback((key: string, fallback: string) => {
         const value = t(key);
@@ -677,28 +662,38 @@ export function ProjectWorkspace({
         [allSections, sections, selectedProject],
     );
 
-    // Progressive disclosure: the layout toggle exists only where sections do,
-    // and a project that loses its last section falls back to the list.
+
     const hasProjectSections = projectSections.length > 0;
     const columnsLayout = hasProjectSections && storedProjectLayout === 'columns';
     const columnsScrollRef = useRef<HTMLDivElement | null>(null);
     const handleColumnsPointerDown = useMiddleMousePan(columnsScrollRef);
 
-    const handleMoveSection = useCallback((sectionId: string, offset: -1 | 1) => {
+    const canDragSections = !isArchivedProject && projectSections.length > 1 && !showSectionPrompt
+        && !editingTaskId && !isCreatingProject && !Object.values(sectionNotesOpen).some(Boolean);
+
+    const handleReorderSection = useCallback((sectionId: string, overSectionId: string) => {
         const current = getMutableSelectedProject();
         if (!current) return;
-        const currentIndex = projectSections.findIndex((section) => section.id === sectionId);
-        const nextIndex = currentIndex + offset;
-        if (currentIndex < 0 || nextIndex < 0 || nextIndex >= projectSections.length) return;
-        const nextSections = [...projectSections];
-        const [moved] = nextSections.splice(currentIndex, 1);
-        if (!moved) return;
-        nextSections.splice(nextIndex, 0, moved);
+        const state = useTaskStore.getState();
+        const storedProject = state._allProjects.find((project) => project.id === current.id);
+        const currentSections = storedProject
+            ? getProjectSectionsForView(storedProject, state.sections, state._allSections)
+            : projectSections;
+        const currentIndex = currentSections.findIndex((section) => section.id === sectionId);
+        const nextIndex = currentSections.findIndex((section) => section.id === overSectionId);
+        if (currentIndex < 0 || nextIndex < 0 || currentIndex === nextIndex) return;
+        const nextSections = arrayMove(currentSections, currentIndex, nextIndex);
         void Promise.resolve(reorderSections(current.id, nextSections.map((section) => section.id))).catch((error) => {
             reportError('Failed to reorder sections', error);
             showToast(resolveText('projects.sectionReorderFailed', 'Failed to reorder sections.'), 'error');
         });
     }, [getMutableSelectedProject, projectSections, reorderSections, resolveText, showToast]);
+
+    const handleMoveSection = (sectionId: string, offset: -1 | 1) => {
+        const currentIndex = projectSections.findIndex((section) => section.id === sectionId);
+        const destination = projectSections[currentIndex + offset];
+        if (currentIndex >= 0 && destination) handleReorderSection(sectionId, destination.id);
+    };
 
     const sectionTaskGroups = useMemo(() => {
         if (!selectedProjectId || projectSections.length === 0) {
@@ -729,12 +724,10 @@ export function ProjectWorkspace({
         };
     }, [orderedProjectTasks, projectSections, selectedProjectId, sortProjectTasks]);
 
-    // "No Section" is a bucket, not a section: it renders after the named
-    // sections and only while it has tasks. During a live drag it must exist
-    // even when empty — it's the drop target that clears a task's section.
+
     const [taskDragActive, setTaskDragActive] = useState(false);
     useDndMonitor(useMemo(() => ({
-        onDragStart: () => setTaskDragActive(true),
+        onDragStart: (event) => setTaskDragActive(event.active.data.current?.type === 'task'),
         onDragEnd: () => setTaskDragActive(false),
         onDragCancel: () => setTaskDragActive(false),
     }), []));
@@ -767,8 +760,8 @@ export function ProjectWorkspace({
                 : [...orderedProjectTasks, ...completedProjectTasks];
         }
         const combined: Task[] = [];
-        // Keyboard order follows reading order: named sections, then the
-        // unsectioned tasks, in both layouts — "No Section" renders last.
+
+
         sectionTaskGroups.sections.forEach((group) => {
             if (!group.section.isCollapsed) {
                 combined.push(...group.tasks);
@@ -784,8 +777,8 @@ export function ProjectWorkspace({
         () => visibleProjectTaskList.map((task) => task.id),
         [visibleProjectTaskList],
     );
-    // Deliberately over allTasks (visible tasks), not the store's _tasksById
-    // (all tasks incl. hidden) — PERF-03 leaves this site alone on purpose.
+
+
     const tasksById = useMemo(() => new Map(allTasks.map((task) => [task.id, task])), [allTasks]);
     const {
         activeAction,
@@ -916,7 +909,7 @@ export function ProjectWorkspace({
         if (!hasProjectSections) return [];
         const tasksBySection = new Map<string, Task[]>(projectSections.map((section) => [section.id, []]));
         const unsectioned: Task[] = [];
-        // References are already sorted; retain that order within each bucket.
+
         for (const task of projectReferenceTasks) {
             const sectionTasks = task.projectId === selectedProjectId && task.sectionId
                 ? tasksBySection.get(task.sectionId)
@@ -933,8 +926,7 @@ export function ProjectWorkspace({
         ].filter((group) => group.tasks.length > 0);
     }, [hasProjectSections, projectReferenceTasks, projectSections, selectedProjectId, t]);
 
-    // Reference tasks render as their own section below the task list, so the
-    // keyboard walks them last rather than skipping them.
+
     const keyboardVisibleTasks = useMemo(
         () => [
             ...visibleProjectTaskList,
@@ -943,7 +935,7 @@ export function ProjectWorkspace({
         [hasProjectSections, projectReferenceTasks, referenceTaskGroups, visibleProjectTaskList],
     );
     const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
-    // Last highlight id whose row was handed DOM focus (#1014).
+
     const focusedHighlightIdRef = useRef<string | null>(null);
     useTaskListScope({
         getTasks: () => keyboardVisibleTasks,
@@ -961,9 +953,8 @@ export function ProjectWorkspace({
         }
         const exists = [...orderedProjectTaskList, ...projectReferenceTasks].some((task) => task.id === highlightTaskId);
         if (!exists) return;
-        // Focus once per highlight: the effect re-runs on list changes during
-        // the flash window, and refocusing then could steal focus from a modal
-        // the user already opened on the revealed task (#1014).
+
+
         if (focusedHighlightIdRef.current !== highlightTaskId) {
             focusedHighlightIdRef.current = highlightTaskId;
             focusTaskRowWhenMounted(highlightTaskId);
@@ -1014,8 +1005,17 @@ export function ProjectWorkspace({
     const handleTaskDragEnd = useCallback((event: DragEndEvent) => {
         const current = getMutableSelectedProject();
         if (!current || !selectedProject || isArchivedProject) return;
-        // In non-default sort modes the list is not a drop target; tasks can only
-        // be dragged out to the sidebar (handled by the Projects view).
+        const data = event.active.data.current;
+        if (data?.type === 'project-section') {
+            const overData = event.over?.data.current;
+            if (!canDragSections || data.projectId !== current.id || overData?.type !== 'project-section'
+                || overData.projectId !== current.id || typeof data.sectionId !== 'string'
+                || typeof overData.sectionId !== 'string') return;
+            handleReorderSection(data.sectionId, overData.sectionId);
+            return;
+        }
+
+
         if (!canReorderProjectTasks) return;
 
         const failTaskMove = (error: unknown) => {
@@ -1078,7 +1078,7 @@ export function ProjectWorkspace({
                 reorderProjectTasks(current.id, nextDestinationItems, getSectionIdFromContainer(destinationContainer), activeId),
             );
         })().catch(failTaskMove);
-    }, [canReorderProjectTasks, getMutableSelectedProject, isArchivedProject, reorderProjectTasks, selectedProject, showToast, taskIdToContainer, taskIdsByContainer, updateTask]);
+    }, [canDragSections, canReorderProjectTasks, getMutableSelectedProject, handleReorderSection, isArchivedProject, reorderProjectTasks, selectedProject, showToast, t, taskIdToContainer, taskIdsByContainer, updateTask]);
 
     useEffect(() => {
         taskDragEndRef.current = handleTaskDragEnd;
@@ -1183,7 +1183,7 @@ export function ProjectWorkspace({
         const renderCompletedTasks = selectionMode ? renderSelectableTasks : renderStaticTasks;
 
         return (
-            <div className="rounded-lg border border-border/60 bg-muted/10">
+            <div className="border-b border-border/50">
                 <button
                     type="button"
                     onClick={() => {
@@ -1214,8 +1214,7 @@ export function ProjectWorkspace({
         );
     };
 
-    // One header for both layouts; only the reorder arrows change axis, because
-    // in columns the same section order reads left-to-right.
+
     const renderSectionHeader = (
         group: { section: Section; tasks: Task[] },
         index: number,
@@ -1235,13 +1234,13 @@ export function ProjectWorkspace({
         const moveForwardLabel = isHorizontal
             ? resolveText('projects.moveSectionRight', 'Move section right')
             : resolveText('projects.moveSectionDown', 'Move section down');
-        // Hidden while the editor is open: the textarea below already shows the
-        // notes, and it saves on blur, so a preview would sit there stale.
+
+
         const notesPreview = hasNotes && !notesOpen
             ? getInlineMarkdownPreview(group.section.description ?? '').slice(0, SECTION_NOTES_PREVIEW_MAX_CHARS)
             : '';
-        // The tooltip is plain text, so it gets the markers stripped rather than
-        // rendered, and an ellipsis where the preview cut the notes short.
+
+
         const notesTooltip = notesPreview
             ? (() => {
                 const stripped = stripMarkdown(getInlineMarkdownPreview(group.section.description ?? ''));
@@ -1252,7 +1251,17 @@ export function ProjectWorkspace({
             : '';
         const moreOptionsLabel = resolveText('taskEdit.moreOptions', 'More options');
 
+        const sectionFlowLabel = isPerSectionProject
+            ? (group.section.isSequential === true ? t('projects.sequential') : t('projects.parallel'))
+            : null;
+
         return (
+            <SortableSectionHeader
+                projectId={group.section.projectId}
+                sectionId={group.section.id}
+                label={`${resolveText('projects.reorderSections', 'Reorder sections')}: ${group.section.title}`}
+                disabled={!canDragSections}
+            >
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <button
                     type="button"
@@ -1266,7 +1275,7 @@ export function ProjectWorkspace({
                         }
                         handleToggleSection(group.section);
                     }}
-                    className="flex min-w-0 items-center gap-2 text-sm font-semibold"
+                    className="project-section-title flex min-w-0 items-center gap-3 text-base font-semibold"
                 >
                     {isCollapsed ? (
                         <ChevronRight className="h-4 w-4 flex-none text-muted-foreground" />
@@ -1274,7 +1283,12 @@ export function ProjectWorkspace({
                         <ChevronDown className="h-4 w-4 flex-none text-muted-foreground" />
                     )}
                     <span className="truncate">{group.section.title}</span>
-                    <span className="text-xs text-muted-foreground">{group.tasks.length}</span>
+                    <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">{group.tasks.length}</span>
+                    {sectionFlowLabel && (
+                        <span data-section-flow-label className="text-xs font-normal text-muted-foreground">
+                            {sectionFlowLabel}
+                        </span>
+                    )}
                 </button>
                 <div className="flex items-center gap-1">
                     {!isArchivedProject && (
@@ -1307,6 +1321,16 @@ export function ProjectWorkspace({
                         onToggleNotes={() => handleToggleSectionNotes(group.section.id)}
                         onRename={() => handleRenameSection(group.section)}
                         onDelete={() => handleDeleteSection(group.section)}
+                        flow={isPerSectionProject ? {
+                            label: resolveText('projects.sequenceMode', 'Flow Mode'),
+                            parallelLabel: t('projects.parallel'),
+                            sequentialLabel: t('projects.sequential'),
+                            isSequential: group.section.isSequential === true,
+                            onChange: (isSequential) => {
+                                if (!getMutableSelectedProject()) return;
+                                void updateSection(group.section.id, { isSequential });
+                            },
+                        } : undefined}
                     />
                 </div>
                 {notesPreview && (
@@ -1319,11 +1343,11 @@ export function ProjectWorkspace({
                     </div>
                 )}
             </div>
+            </SortableSectionHeader>
         );
     };
 
-    // Every section body in both layouts shows this: an empty *section* is not
-    // an empty project, so it must not borrow the project-level empty copy.
+
     const sectionEmptyState = (
         <div className="py-2 text-xs text-muted-foreground">
             {t('projects.sectionEmpty')}
@@ -1355,10 +1379,7 @@ export function ProjectWorkspace({
         );
     };
 
-    // Sections as side-by-side columns (#1019). The drop containers, the
-    // sortable contexts and the drag-end resolver are the list layout's — only
-    // the box the sections sit in changes, so cross-column drops are the same
-    // cross-section drops the stacked layout already performed.
+
     const renderProjectSectionColumns = (renderTasks: RenderProjectTasks) => (
         <div className="space-y-3">
             <div
@@ -1415,7 +1436,7 @@ export function ProjectWorkspace({
                 <div className="space-y-3">
                     <SectionDropZone
                         id={NO_SECTION_CONTAINER}
-                        className="min-h-[120px] rounded-lg border border-dashed border-border/70 p-4"
+                        className="min-h-[120px] py-1"
                     >
                         {orderedProjectTasks.length > 0 ? (
                             renderTasks(orderedProjectTasks)
@@ -1436,16 +1457,16 @@ export function ProjectWorkspace({
                     <SectionDropZone
                         key={group.section.id}
                         id={getSectionContainerId(group.section.id)}
-                        className="rounded-lg border border-border/60"
+                        className="border-b border-border/40 pb-3"
                     >
-                        <div className="border-b border-border/50 px-3 py-2">
+                        <div className="border-b border-border/50 px-1 py-3">
                             {renderSectionHeader(group, index, 'vertical')}
                         </div>
                         {renderSectionNotes(group.section)}
                         {!(isArchivedProject
                             ? (archivedSectionCollapsed[group.section.id] ?? group.section.isCollapsed ?? false)
                             : Boolean(group.section.isCollapsed)) && (
-                            <div className="p-3">
+                            <div className="px-1 py-1">
                                 {group.tasks.length > 0 ? (
                                     renderTasks(group.tasks)
                                 ) : (
@@ -1458,9 +1479,9 @@ export function ProjectWorkspace({
                 {showUnsectionedGroup && (
                     <SectionDropZone
                         id={NO_SECTION_CONTAINER}
-                        className="rounded-lg border border-dashed border-border/70"
+                        className="border-b border-border/40 pb-3"
                     >
-                        <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
+                        <div className="flex items-center justify-between px-1 py-3">
                             <div className="flex items-center gap-2 text-sm font-semibold">
                                 <span>{t('projects.noSection')}</span>
                                 <span className="text-xs text-muted-foreground">
@@ -1468,7 +1489,7 @@ export function ProjectWorkspace({
                                 </span>
                             </div>
                         </div>
-                        <div className="p-3">
+                        <div className="px-1 py-1">
                             {sectionTaskGroups.unsectioned.length > 0 ? (
                                 renderTasks(sectionTaskGroups.unsectioned)
                             ) : (
@@ -1541,9 +1562,7 @@ export function ProjectWorkspace({
         setEditProjectTitle(selectedProject.title);
     };
 
-    // Archive without a confirmation: the action is fully reversible from the
-    // same header slot (the button becomes Reactivate and task statuses are
-    // restored), matching the mobile editor. Delete keeps its confirmation.
+
     const handleArchiveProject = async () => {
         const current = getMutableSelectedProject();
         if (!current) return;
@@ -1596,8 +1615,8 @@ export function ProjectWorkspace({
             if (confirmed && getMutableSelectedProject()?.id === projectId) {
                 setIsProjectDeleting(true);
                 try {
-                    // Deleting detaches the project's tasks, and only Undo can know
-                    // which they were -- the links must be read before the delete.
+
+
                     const detachedTasks = collectProjectTaskLinks(projectId);
                     await Promise.resolve(deleteProject(projectId));
                     setSelectedProjectId(null);
@@ -1669,7 +1688,7 @@ export function ProjectWorkspace({
             type="button"
             data-add-task-trigger
             onClick={() => openProjectQuickAdd()}
-            className="inline-flex h-8 shrink-0 items-center gap-2 whitespace-nowrap rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
             {t('projects.addTask')}
@@ -1719,52 +1738,57 @@ export function ProjectWorkspace({
         />
     ) : null;
 
+    const projectSearch = (
+        <div className="min-w-0 flex-1">
+            <div data-project-search-row className="flex flex-col gap-2 sm:flex-row">
+                {showProjectsSidebarToggle && (
+                    <button
+                        type="button"
+                        onClick={onToggleProjectsSidebar}
+                        className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                        title={expandProjectsSidebarLabel}
+                        aria-label={expandProjectsSidebarLabel}
+                        aria-expanded={false}
+                    >
+                        <PanelLeftOpen className="h-4 w-4" />
+                    </button>
+                )}
+                <div className="relative min-w-0 flex-1">
+                    <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                        ref={searchInputRef}
+                        type="text"
+                        data-view-filter-input
+                        placeholder={t('common.search')}
+                        aria-label={t('common.search')}
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        className={cn(
+                            VIEW_FILTER_INPUT,
+                            'min-w-0 pl-10',
+                            searchQuery && 'pr-9',
+                        )}
+                    />
+                    {searchQuery && (
+                        <button
+                            type="button"
+                            onClick={handleClearProjectSearch}
+                            aria-label={clearSearchLabel}
+                            className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                        >
+                            <X className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+
     return (
         <>
-            <div className="flex-1 min-w-0 h-full flex">
+            <div className={cn("project-workspace flex-1 min-w-0 h-full flex", !columnsLayout && "project-workspace--list")}>
                 <div className="flex h-full min-h-0 w-full max-w-none flex-col">
-                    <div className="mb-4">
-                        <div data-project-search-row className="flex flex-col gap-2 sm:flex-row">
-                            {showProjectsSidebarToggle && (
-                                <button
-                                    type="button"
-                                    onClick={onToggleProjectsSidebar}
-                                    className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                                    title={expandProjectsSidebarLabel}
-                                    aria-label={expandProjectsSidebarLabel}
-                                    aria-expanded={false}
-                                >
-                                    <PanelLeftOpen className="h-4 w-4" />
-                                </button>
-                            )}
-                            <div className="relative min-w-0 flex-1">
-                                <input
-                                    ref={searchInputRef}
-                                    type="text"
-                                    data-view-filter-input
-                                    placeholder={t('common.search')}
-                                    aria-label={t('common.search')}
-                                    value={searchQuery}
-                                    onChange={(event) => setSearchQuery(event.target.value)}
-                                    className={cn(
-                                        VIEW_FILTER_INPUT,
-                                        'min-w-0',
-                                        searchQuery && 'pr-9',
-                                    )}
-                                />
-                                {searchQuery && (
-                                    <button
-                                        type="button"
-                                        onClick={handleClearProjectSearch}
-                                        aria-label={clearSearchLabel}
-                                        className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                                    >
-                                        <X className="h-3.5 w-3.5" aria-hidden="true" />
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
+                    {!selectedProject && projectSearch}
                     {selectedProject ? (
                         <div
                             ref={projectScrollRef}
@@ -1778,6 +1802,7 @@ export function ProjectWorkspace({
                                 </div>
                             )}
                             <ProjectDetailsHeader
+                                primaryAction={projectAddTaskButton}
                                 project={selectedProject}
                                 projectColor={getProjectColor(selectedProject, areaById, DEFAULT_AREA_COLOR)}
                                 areaLabel={selectedProjectAreaLabel}
@@ -1828,8 +1853,8 @@ export function ProjectWorkspace({
                                         tagSuggestions={addTagOptions}
                                         onTagDraftChange={setTagDraft}
                                         onCommitTags={() => {
-                                            // Merged by token onto the latest row against the project the draft was
-                                            // filled from: a tag another device added since stays.
+
+
                                             const current = getMutableSelectedProject();
                                             if (!current) return;
                                             const base = tagDraftBaseRef.current?.id === current.id ? tagDraftBaseRef.current : current;
@@ -1843,8 +1868,16 @@ export function ProjectWorkspace({
                                         onAreaChange={(value) => {
                                             updateMutableSelectedProject({ areaId: value === noAreaId ? undefined : value });
                                         }}
-                                        isSequential={selectedProject.isSequential === true}
-                                        onToggleSequential={() => updateMutableSelectedProject({ isSequential: !selectedProjectRef.current?.isSequential })}
+                                        onColorChange={async (colorOverride) => {
+                                            const state = useTaskStore.getState();
+                                            if (state.persistenceFailure) await state.retryPersistence();
+                                            return updateMutableSelectedProject({ colorOverride });
+                                        }}
+                                        flowMode={getProjectFlowMode(selectedProject)}
+                                        onFlowModeChange={(mode) => {
+                                            const current = getMutableSelectedProject();
+                                            if (current) void useTaskStore.getState().setProjectFlowMode(current.id, mode);
+                                        }}
                                         sequentialScope={selectedProject.sequentialScope ?? 'project'}
                                         onSequentialScopeChange={(sequentialScope) => updateMutableSelectedProject({ sequentialScope })}
                                         status={selectedProject.status}
@@ -1865,9 +1898,9 @@ export function ProjectWorkspace({
                                 data-project-notes-disclosure
                                 aria-expanded={projectNotesExpanded}
                                 onClick={() => setProjectNotesExpanded((value) => !value)}
-                                className="flex h-10 w-full items-center justify-between border-b border-border/50 px-1 text-left text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                                className="flex h-12 w-full items-center justify-between border-b border-border/50 px-1 text-left text-base font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                             >
-                                <span>{t('project.notes')}</span>
+                                <span className="inline-flex items-center gap-3"><FileText className="h-5 w-5" aria-hidden="true" />{t('project.notes')}</span>
                                 {projectNotesExpanded
                                     ? <ChevronDown className="h-4 w-4" aria-hidden="true" />
                                     : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
@@ -1899,7 +1932,7 @@ export function ProjectWorkspace({
                                     data-project-task-toolbar
                                     data-compact={projectTaskToolbarCompact ? 'true' : 'false'}
                                     className={cn(
-                                        'sticky top-0 z-20 -mx-2 mb-4 border-y border-border/60 bg-background/95 px-2 shadow-sm backdrop-blur transition-[padding] duration-150 supports-[backdrop-filter]:bg-background/85',
+                                        'sticky top-0 z-20 -mx-2 mb-4 bg-background/95 px-2 shadow-sm backdrop-blur transition-[padding] duration-150 supports-[backdrop-filter]:bg-background/85',
                                         projectTaskToolbarCompact ? 'py-2' : 'py-3',
                                     )}
                                 >
@@ -1908,13 +1941,10 @@ export function ProjectWorkspace({
                                         data-project-task-toolbar-row
                                     >
                                         <div
-                                            className="flex shrink-0 items-center gap-3 whitespace-nowrap"
+                                            className="flex min-w-[160px] flex-1 items-center gap-3"
                                             data-project-task-primary-controls
                                         >
-                                            <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                                                {t('projects.sectionsLabel')}
-                                            </span>
-                                            {projectAddTaskButton}
+                                            {projectSearch}
                                         </div>
                                         <div
                                             className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2"
@@ -1928,6 +1958,7 @@ export function ProjectWorkspace({
                                                 <SortBySelect
                                                     value={projectTaskSortBy}
                                                     defaultValue="default"
+                                                    options={PROJECT_TASK_SORT_OPTIONS}
                                                     onChange={handleProjectTaskSortByChange}
                                                     t={t}
                                                 />
@@ -1970,7 +2001,12 @@ export function ProjectWorkspace({
                                         </div>
                                     )}
                                 </div>
-                                {tasksContent}
+                                <SortableContext
+                                    items={projectSections.map((section) => getSectionHeaderId(section.id))}
+                                    strategy={columnsLayout ? horizontalListSortingStrategy : verticalListSortingStrategy}
+                                >
+                                    {tasksContent}
+                                </SortableContext>
                             </section>
 
                             {projectReferenceTasks.length > 0 && (

@@ -119,7 +119,7 @@ const waitWithTimeout = async (
     }
 };
 
-/** Remove the one-shot request before parsing so a crash never reopens sandbox. */
+
 export function consumeDesktopSandboxBootRequest(
     storage: SessionStoragePort = window.sessionStorage,
     now = Date.now(),
@@ -151,7 +151,7 @@ function storeRequestAndReload(
     }
 }
 
-/** Personal entry is all-or-nothing: the request is not written until saves and sync settle. */
+
 export async function openDesktopSandbox(
     settings: AppSettings,
     overrides: Partial<SandboxTransitionDependencies> = {},
@@ -168,12 +168,11 @@ export async function openDesktopSandbox(
         if (!await deps.waitForSyncIdle(remainingMs())) {
             throw new Error('Sync is still finishing.');
         }
-        // Existing file-watcher, import, restore, and sync document work shares
-        // this lane. New document writers are rejected while the transition
-        // lease is held, so the barrier drains everything admitted before it.
+
+
         await waitWithTimeout(deps.waitForDocumentIdle(), remainingMs(), deps);
-        // Sync or a complete-document writer may have queued a local save after
-        // the first flush. This flush runs after both lanes are fully drained.
+
+
         await waitWithTimeout(deps.flush(), remainingMs(), deps);
         const persistenceBaseline = deps.getPersistenceStatus();
         const storageIdle = await deps.waitForStorageIdle(remainingMs());
@@ -181,8 +180,7 @@ export async function openDesktopSandbox(
             throw new Error('Personal storage is still finishing.');
         }
 
-        // No await is allowed after these observations. Generation equality
-        // catches a save admitted while the preceding native idle wait resumed.
+
         const finalPersistence = deps.getPersistenceStatus();
         const finalStorage = deps.getStorageStatus();
         if (finalPersistence.failed || finalStorage?.failed) {

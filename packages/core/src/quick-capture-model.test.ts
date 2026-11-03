@@ -27,7 +27,7 @@ import type { Area, Project, Task } from './types';
 import { resetForTests } from './store';
 
 const fixture = loadQuickCaptureFixture();
-// The contract serves the tab bar's popup, which opens with no preset.
+
 const contractScenarios = fixture.scenarios.filter((scenario) => !scenario.initialProps && scenario.initialValue === undefined);
 
 describe('capture popup parity with the frozen React Native fixture', () => {
@@ -52,7 +52,7 @@ describe('capture popup parity with the frozen React Native fixture', () => {
     it('was captured from React Native before the popup changed', () => {
         expect(fixture.provenance.capturedAt).toMatch(/^[0-9a-f]{40}$/);
         expect(fixture.scenarios.length).toBe(Object.keys(fixture.observations).length);
-        // Only scenarios the tab bar cannot open (a preset from another screen) skip the contract.
+
         expect(contractScenarios.length).toBeGreaterThanOrEqual(fixture.scenarios.length - 6);
     });
 
@@ -99,7 +99,7 @@ describe('capture popup model', () => {
         expect(normalizeQuickCaptureContext('＠home')).toBe('@home');
         expect(normalizeQuickCaptureContext('@@')).toBe('');
         expect(parseQuickCaptureContextQuery(' @work,home,@Work,, ＠errands ')).toEqual(['@work', '@home', '@errands']);
-        // "Add" keeps a choice's spelling and skips what is already chosen.
+
         expect(edit({ ...options, contexts: ['@home'] }, { type: 'addContexts', query: 'phone, HOME, desk' }).contexts)
             .toEqual(['@home', '@Phone', '@desk']);
     });
@@ -167,7 +167,7 @@ describe('capture popup save: what the popup shows is what is saved', () => {
             expect(props.projectId).toBeUndefined();
             expect(props).toMatchObject({ areaId: 'a-home', status: 'next' });
         }
-        // A preset project the popup keeps is saved as before.
+
         expect((await save({ projectId: 'p-home', status: 'next' })).props).toMatchObject({ projectId: 'p-home', status: 'next' });
     });
 

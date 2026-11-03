@@ -22,8 +22,7 @@ REPO_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
 OUTPUT_DIR="${OUTPUT_DIR:-${ROOT_DIR}/build}"
 cd "$ROOT_DIR"
 
-# Metro in this monorepo checks for a repo-level node_modules path even when
-# dependencies are installed per-package for F-Droid-style builds.
+
 mkdir -p "${REPO_ROOT}/node_modules"
 
 if [[ "${FOSS_BUILD}" == "1" && "${SKIP_FDROID_PREP:-0}" != "1" ]]; then
@@ -93,7 +92,7 @@ if not patched_any:
 PY
 
 if [[ "${FOSS_BUILD}" == "1" ]]; then
-  # Reproducible builds: pin RN gradle plugin dev-server host instead of host IP.
+
   python3 - <<'PY'
 from pathlib import Path
 
@@ -146,8 +145,7 @@ else
   echo "reactNativeArchitectures=${ARCHS}" >> android/gradle.properties
 fi
 
-# CI memory stability: ensure Gradle daemon has enough heap/metaspace for
-# createBundleReleaseJsAndAssets in monorepo builds.
+
 if grep -q "^org\\.gradle\\.jvmargs=" android/gradle.properties; then
   sed -i "s#^org\\.gradle\\.jvmargs=.*#org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8#" android/gradle.properties
 else
@@ -233,7 +231,7 @@ if [[ "${PREP_ONLY}" == "1" ]]; then
 fi
 
 cd android
-# JS bundling memory headroom for Gradle's Node subprocess.
+
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=6144}"
 ./gradlew assembleRelease -PreactNativeArchitectures="${ARCHS}"
 

@@ -35,7 +35,7 @@ describe('Local API area update golden parity with the app store', () => {
                 .map(([field, value]) => [field, value === null ? undefined : value])) as Partial<Area>;
             expect((await useTaskStore.getState().updateArea('area-1', updates)).success).toBe(true);
             const state = useTaskStore.getState();
-            // JSON removes undefined, just as the persisted API representation does.
+
             expect(JSON.parse(JSON.stringify(state._allAreas.find(area => area.id === 'area-1'))))
                 .toEqual(testCase.expected.area);
             expect(JSON.parse(JSON.stringify(state._allProjects))).toEqual(testCase.expected.projects);

@@ -200,12 +200,11 @@ describe('SettingsMainPage', () => {
         );
         const listedFonts = () => within(getByRole('listbox')).getAllByRole('option').map((option) => option.textContent);
 
-        // This case exercises browsing after the list loads; the next test covers
-        // focusing while loading. Resolve explicitly so the two paths cannot race.
+
         await act(async () => { resolveFonts(['Inter', 'Roboto']); });
         const input = getByRole('combobox', { name: 'Font' }) as HTMLInputElement;
-        // With a font already chosen, focusing must still open the whole list: the
-        // field clears for browsing and keeps the current font as its placeholder.
+
+
         fireEvent.focus(input);
         expect(getByRole('option', { name: 'Roboto' })).toBeInTheDocument();
         expect(input.value).toBe('');
@@ -219,7 +218,7 @@ describe('SettingsMainPage', () => {
         fireEvent.mouseDown(within(getByRole('listbox')).getByRole('option', { name: 'Roboto' }));
         expect(onFontFamilyChange).toHaveBeenLastCalledWith('Roboto');
 
-        // Leaving without a pick restores the current value instead of clearing it.
+
         onFontFamilyChange.mockClear();
         fireEvent.focus(input);
         fireEvent.change(input, { target: { value: 'zzz' } });
@@ -228,7 +227,7 @@ describe('SettingsMainPage', () => {
         expect((getByLabelText('Font') as HTMLInputElement).value).toBe('Inter');
         expect(queryByRole('listbox')).toBeNull();
 
-        // "App default" is a real entry, so the default is one pick away.
+
         fireEvent.focus(input);
         fireEvent.mouseDown(within(getByRole('listbox')).getByRole('option', { name: 'App default' }));
         expect(onFontFamilyChange).toHaveBeenLastCalledWith('');
@@ -286,8 +285,8 @@ describe('SettingsMainPage', () => {
     });
 
     it('keeps a chosen font that the list no longer offers (#1244)', async () => {
-        // The list now leaves out families with no real bold face, so a font chosen before
-        // this version can be missing from it. It must stay chosen, not be silently cleared.
+
+
         fontMocks.canListInstalledFonts.mockReturnValue(true);
         fontMocks.loadInstalledFontFamilies.mockResolvedValue(['Inter', 'Roboto']);
         const onFontFamilyChange = vi.fn();
@@ -330,8 +329,7 @@ describe('SettingsMainPage', () => {
         expect(getByRole('button', { name: 'History' })).toHaveAttribute('aria-pressed', 'false');
         unmount();
 
-        // A stored choice that hides only one of the two ids still leaves the
-        // sidebar entry visible, so the toggle reads as shown.
+
         useUiStore.setState({ hiddenSidebarViews: ['archived'] });
         const second = render(<SettingsMainPage {...baseProps} />);
         fireEvent.click(second.getByRole('button', { name: /Sidebar views/ }));

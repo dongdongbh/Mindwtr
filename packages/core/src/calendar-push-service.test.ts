@@ -17,11 +17,7 @@ import type { CalendarSyncEntry } from './sqlite-adapter';
 import type { Task } from './types';
 import { deterministicHash128Hex } from './uuid';
 
-/**
- * The push's device side as a native host binds it. React Native's own suite
- * (apps/mobile/tests/calendar-push-sync.test.ts) runs the same code through its
- * binding.
- */
+
 const google = { name: 'alex@gmail.com', type: 'com.google', isLocalAccount: false };
 const PRIMARY: DeviceCalendar = { id: 'primary', title: 'alex@gmail.com', ownerAccount: 'alex@gmail.com', accessLevel: 'owner', allowsModifications: true, source: google };
 
@@ -29,11 +25,11 @@ const task = (id: string, extra: Partial<Task> = {}): Task => ({
     id, title: `Task ${id}`, status: 'next', tags: [], contexts: [], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', ...extra,
 } as Task);
 
-/** The process died before a write: the write did not happen, and nothing after it runs. */
+
 class Death extends Error {}
 
 function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: Record<string, string>; entries?: CalendarSyncEntry[]; tasks?: Task[] } = {}) {
-    // Every device write first ticks: at `dieAt` the process dies, and every later write fails too.
+
     const life = { step: 0, dieAt: Infinity, died: false, failDelete: false, failUpdate: false, failList: false, lostCreateResponse: false };
     const tick = () => {
         life.step += 1;
@@ -134,11 +130,7 @@ function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: 
 
 type Phone = ReturnType<typeof device>;
 
-/**
- * A death between each pair of steps: runs `operation` on a device that dies before its
- * first write, then before its second, and so on, until a run finishes. After each death a
- * new service over the same device (a restart) runs `retry`; `check` sees every outcome.
- */
+
 async function everyDeath(
     setup: () => Phone,
     operation: (service: ReturnType<typeof createCalendarPushService>) => Promise<unknown>,
@@ -169,11 +161,11 @@ describe('calendar push behind the host ports', () => {
         const first = createCalendarPushService(phone.host);
         expect(await first.ensureMindwtrCalendar()).toBe('created-1');
         expect(phone.writes).toEqual([['createCalendar', 'Mindwtr', 'alex@gmail.com']]);
-        // A restart: a new service over the same device.
+
         const restarted = createCalendarPushService(phone.host);
         expect(await restarted.ensureMindwtrCalendar()).toBe('created-1');
         expect(phone.writes).toHaveLength(1);
-        // Deleted outside the app: made again, once.
+
         phone.calendars.splice(phone.calendars.findIndex((calendar) => calendar.id === 'created-1'), 1);
         expect(await restarted.ensureMindwtrCalendar()).toBe('created-2');
         expect(phone.storage.get(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe('created-2');
@@ -197,7 +189,7 @@ describe('calendar push behind the host ports', () => {
         expect(phone.writes).toEqual([['deleteCalendar', 'saved'], ['deleteSyncEntry', 't1']]);
         expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'app-made', 'users-own']);
         expect(phone.storage.has(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe(false);
-        // The chosen calendar was not the one deleted: it stays chosen.
+
         expect(phone.storage.get(CALENDAR_PUSH_TARGET_ID_KEY)).toBe('app-made');
         expect([...phone.entries.keys()]).toEqual(['t2']);
     });
@@ -553,7 +545,7 @@ describe('calendar push behind the host ports', () => {
             }),
             (service) => service.updateMindwtrCalendarColor('#059669'),
             (phone, dieAt) => {
-                // The next push run makes the calendar if the change stopped between its delete and its create.
+
                 const stored = phone.storage.get(CALENDAR_PUSH_COLOR_KEY);
                 const own = phone.calendars.filter((calendar) => calendar.title === 'Mindwtr');
                 expect({ dieAt, stored, own: own.length <= 1 }).toEqual({ dieAt, stored: '#059669', own: true });
@@ -562,7 +554,7 @@ describe('calendar push behind the host ports', () => {
                         .toEqual({ dieAt, color: '#059669', saved: own[0].id });
                 }
             },
-            // A retry is what a caller sends: React Native's re-pick and the contract's replay skip a color already stored.
+
             async (service) => {
                 if (planCalendarPushColor(await service.getCalendarPushColor(), '#059669')) await service.updateMindwtrCalendarColor('#059669');
             },
@@ -613,11 +605,11 @@ describe('calendar push behind the host ports', () => {
     it('clears nothing when the device cannot list its calendars', async () => {
         const marker = '11111111-1111-4111-8111-111111111111';
         const setups = [
-            // A creation cut short: the marked calendar exists.
+
             { calendars: [PRIMARY, { id: 'made', title: 'Mindwtr', name: `mindwtr:${marker}`, accessLevel: 'owner', source: google }], storage: { [CALENDAR_PUSH_PENDING_KEY]: marker } },
-            // Nothing saved, a chosen calendar.
+
             { calendars: [PRIMARY], storage: { [CALENDAR_PUSH_TARGET_ID_KEY]: 'primary' } },
-            // A saved calendar.
+
             { calendars: [PRIMARY, { id: 'saved', title: 'Mindwtr', accessLevel: 'owner', source: google }], storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'saved' } },
         ];
         for (const setup of setups) {
@@ -658,7 +650,7 @@ describe('calendar push behind the host ports', () => {
         expect(phone.storage.get(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe('saved');
         expect(phone.storage.get(CALENDAR_PUSH_TARGET_ID_KEY)).toBe('saved');
         expect([...phone.entries.keys()]).toEqual(['t1']);
-        // A retry that succeeds finishes it.
+
         phone.life.failDelete = false;
         await createCalendarPushService(phone.host).deleteMindwtrCalendar();
         expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary']);

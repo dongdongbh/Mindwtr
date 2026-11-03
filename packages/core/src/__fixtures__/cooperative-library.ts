@@ -1,7 +1,5 @@
 import type { AppData, Task } from '../types';
 
-// The cooperative passes' fixture library (cooperative.test.ts). Its golden values there were computed on origin/main
-// (04696d554), before the passes existed: change the fixture and they must be computed again the same way.
 
 const AT = '2026-07-01T00:00:00.000Z';
 const LATER = '2026-07-02T00:00:00.000Z';
@@ -20,7 +18,7 @@ const library = (tasks: Task[]): AppData => ({
     settings: { language: 'en' },
 } as unknown as AppData);
 export const local = library(Array.from({ length: 400 }, (_, i) => task(i)));
-// The other device: a third edited, some deleted, some only there; the first ones missing there.
+
 export const incoming = library([
     ...Array.from({ length: 380 }, (_, j) => {
         const i = j + 20;
@@ -32,7 +30,7 @@ export const incoming = library([
 ]);
 
 export const MERGE_AT = { nowIso: '2026-07-03T00:00:00.000Z' };
-/** A merged document with broken rows on slice boundaries (every 64th task), where a pass that skips one would miss them. */
+
 export const brokenMerge = (merged: AppData): AppData => ({
     ...merged,
     tasks: merged.tasks.map((row, i) => (i % 64 === 63 ? { ...row, projectId: 'missing', updatedAt: 'x' } : row)),

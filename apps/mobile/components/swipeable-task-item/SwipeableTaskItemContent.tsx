@@ -20,12 +20,12 @@ interface SwipeableTaskItemContentProps {
     accessibilityActions: { label: string; name: string }[];
     accessibilityHint: string;
     canShowFocusToggle: boolean;
-    /** When set, the star renders disabled with this as its label. */
+
     focusToggleDisabledLabel?: string;
     hideStatusBadge: boolean;
-    /** Title-only row: suppress the description preview, task age and detail meta parts. */
+
     hideDetails: boolean;
-    /** Render the status control as a compact icon button (no status-name label) for single-status lists */
+
     statusBadgeAsIcon: boolean;
     isDark: boolean;
     isHighlighted: boolean;
@@ -34,7 +34,7 @@ interface SwipeableTaskItemContentProps {
     localChecklist: Task['checklist'];
     interactionDisabled?: boolean;
     allowInspectionWhenDisabled?: boolean;
-    /** The row's labels and meta line, computed by core. */
+
     meta: TaskRowMeta;
     onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => void;
     onAddChecklistItem: (title: string) => void;
@@ -95,18 +95,17 @@ export function SwipeableTaskItemContent({
 }: SwipeableTaskItemContentProps) {
     const isReference = task.status === 'reference';
 
-    // Draft text lives here, not in useSwipeableChecklist: it must never reach the
-    // pending-checklist flush, so an unsubmitted line is discarded with the row.
+
     const [checklistDraft, setChecklistDraft] = useState('');
     const checklistDraftRef = useRef<TextInput>(null);
 
     const textDirection = meta.textDirection;
     const textAlign = textDirection === 'rtl' ? 'right' : 'left';
-    // Age is detail: the Focus "hide details" toggle drops it with the rest.
+
     const ageLabel = hideDetails ? null : meta.ageLabel;
     const descriptionPreview = hideDetails ? null : meta.descriptionPreview;
     const compactRecurrence = hideDetails && meta.parts.some((part) => part.kind === 'recurrence');
-    // Hidden details keep one cue that the task has more to read (#1287).
+
     const compactDescription = hideDetails && Boolean(meta.descriptionPreview);
     const statusColors = useStatusColors()[task.status];
     const isAvailableNextAction = sequenceCue === 'available';
@@ -149,8 +148,7 @@ export function SwipeableTaskItemContent({
         );
     };
 
-    // Items are separated by the row's gap alone. A "·" between them used to be
-    // its own node, so a wrapped line could start with a lone dot (#1161).
+
     const renderMetaPart = (part: TaskRowMetaPart): ReactNode => {
         switch (part.kind) {
             case 'project':
@@ -229,7 +227,7 @@ export function SwipeableTaskItemContent({
                     children: (
                         <>
                             <UserRound size={12} color={tc.secondaryText} strokeWidth={2} />
-                            {/* The person is what a Waiting row is read for, so the name stands out (#1282). */}
+                            {                                                                                   }
                             <CompactText
                                 style={[styles.metaText, { color: tc.text, fontWeight: '600' }]}
                                 numberOfLines={2}
@@ -470,48 +468,31 @@ export function SwipeableTaskItemContent({
                 {showChecklist && (localChecklist || []).length > 0 && (
                     <View style={styles.checklistItems}>
                         {(localChecklist || []).map((item, index) => (
-                            isReference ? (
-                                <View key={item.id || index} style={styles.referenceChecklistItem}>
-                                    <Text
-                                        style={[styles.referenceChecklistBullet, { color: tc.secondaryText }]}
-                                        accessible={false}
-                                    >
-                                        •
-                                    </Text>
-                                    <MarkdownInlineText
-                                        markdown={item.title}
-                                        tc={tc}
-                                        direction={textDirection}
-                                        style={[styles.referenceChecklistItemText, { color: tc.secondaryText }]}
-                                    />
-                                </View>
-                            ) : (
-                                <Pressable
-                                    key={item.id || index}
-                                    disabled={interactionDisabled}
-                                    onPress={interactionDisabled ? undefined : () => onToggleChecklistItem(index)}
-                                    style={styles.checklistItem}
-                                    accessibilityRole="button"
-                                    accessibilityLabel={item.title}
-                                    accessibilityState={{
-                                        checked: item.isCompleted,
-                                        ...(interactionDisabled ? { disabled: true } : {}),
-                                    }}
-                                >
-                                    <MarkdownInlineText
-                                        markdown={`${item.isCompleted ? '✓' : '○'} ${item.title}`}
-                                        tc={tc}
-                                        style={[
-                                            styles.checklistItemText,
-                                            { color: tc.secondaryText },
-                                            item.isCompleted ? styles.checklistItemCompleted : undefined,
-                                        ]}
-                                        numberOfLines={1}
-                                    />
-                                </Pressable>
-                            )
+                            <Pressable
+                                key={item.id || index}
+                                disabled={interactionDisabled}
+                                onPress={interactionDisabled ? undefined : () => onToggleChecklistItem(index)}
+                                style={styles.checklistItem}
+                                accessibilityRole="button"
+                                accessibilityLabel={item.title}
+                                accessibilityState={{
+                                    checked: item.isCompleted,
+                                    ...(interactionDisabled ? { disabled: true } : {}),
+                                }}
+                            >
+                                <MarkdownInlineText
+                                    markdown={`${item.isCompleted ? '✓' : '○'} ${item.title}`}
+                                    tc={tc}
+                                    style={[
+                                        styles.checklistItemText,
+                                        { color: tc.secondaryText },
+                                        item.isCompleted ? styles.checklistItemCompleted : undefined,
+                                    ]}
+                                    numberOfLines={1}
+                                />
+                            </Pressable>
                         ))}
-                        {!isReference && !selectionMode && !interactionDisabled && (
+                        {!selectionMode && !interactionDisabled && (
                             <TextInput
                                 ref={checklistDraftRef}
                                 value={checklistDraft}

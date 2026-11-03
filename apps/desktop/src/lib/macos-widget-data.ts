@@ -1,22 +1,6 @@
-/**
- * Builds the JSON payload the macOS WidgetKit "Tasks" widget reads (#1054).
- *
- * The "today focus" selection itself lives in core
- * (`computeTodayFocusTasks`), shared with the iOS/Android builder so both
- * widgets and the Focus screens name the same next action. Only the payload
- * shaping stays here: the mobile builder depends on
- * `react-native-android-widget` (for `ColorProp`) and AsyncStorage, neither of
- * which exists in the desktop runtime.
- *
- * Two deliberate shape differences from the iOS payload:
- *  - No `focusUri` / `quickCaptureUri`. The desktop app registers no
- *    `mindwtr://` URL scheme, so the Mac widget uses WidgetKit's default
- *    "tap opens the containing app" behavior instead of `Link(destination:)`
- *    (decision #1054/7) -- there is nothing for those URIs to resolve to.
- *  - One item list capped generously (`MAC_WIDGET_MAX_ITEMS`) rather than
- *    five per-size payloads. The Swift view itself caps further per family
- *    (systemSmall/systemMedium/systemLarge -- macOS has no systemExtraLarge).
- */
+
+
+
 import {
     type AppData,
     type AppTheme,
@@ -25,7 +9,10 @@ import {
     resolveWidgetTaskSort,
     getTranslationsSync,
     isTaskActionable,
-    isTaskInActiveProject,
+    isTaskVisibleInArea,
+    getFocusSelection,
+    resolveAreaFilterSelection,
+    taskMatchesAreaFilterSelection,
     loadTranslations,
     resolveTaskSortByForFeatures,
     resolveThemeColorScheme,
@@ -62,7 +49,7 @@ export interface MacWidgetPayload {
 }
 
 const resolveTaskSort = (data: AppData): TaskSortBy => (
-    // Widgets follow the feature toggles too (#1107).
+
     resolveTaskSortByForFeatures(resolveWidgetTaskSort(data.settings?.taskSortBy), data.settings)
 );
 
@@ -86,11 +73,7 @@ const DARK_PALETTE: MacWidgetPalette = {
     onAccent: '#FFFFFF',
 };
 
-// Only light/dark are resolved here -- unlike mobile's widget-data.ts, named
-// theme presets (Dracula, Nord, ...) are not ported to hex palettes for the
-// Mac widget in v1. The widget still falls back correctly (via `themeMode`
-// and `resolveThemeColorScheme`) to plain light/dark for any preset theme,
-// it just won't carry that preset's exact accent colors into the widget.
+
 const resolveMacWidgetPalette = (themeMode: string | undefined, systemIsDark: boolean): MacWidgetPalette => {
     const isDark = resolveThemeColorScheme(
         (themeMode || 'system') as AppTheme,
@@ -105,16 +88,19 @@ export function buildMacWidgetPayload(data: AppData, language: Language, systemI
     const tasks = data.tasks || [];
     const projects = data.projects || [];
     const projectById = new Map(projects.map((project) => [project.id, project]));
+    const areas = (data.areas ?? []).filter((area) => !area.deletedAt);
+    const areaById = new Map(areas.map((area) => [area.id, area]));
+    const resolvedAreaFilter = resolveAreaFilterSelection(data.settings?.filters, areas);
     const now = new Date();
     const themeMode = typeof data.settings?.theme === 'string' ? data.settings.theme : 'system';
     const palette = resolveMacWidgetPalette(themeMode, systemIsDark);
 
     const activeTasks = tasks.filter((task) => {
-        if (task.deletedAt) return false;
         if (!isTaskActionable(task)) return false;
-        if (!isTaskInActiveProject(task, projectById)) return false;
-        return true;
+        return isTaskVisibleInArea(task, { projectById, areaById, resolvedAreaFilter });
     });
+    const selection = getFocusSelection(tasks, activeTasks, now,
+        (task) => taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectById, areaById));
 
     const widgetSort = resolveTaskSort(data);
     const { starredTasks, focusTasks } = computeTodayFocusTasks({
@@ -143,7 +129,7 @@ export function buildMacWidgetPayload(data: AppData, language: Language, systemI
     return {
         headerTitle: tr['agenda.todaysFocus'] ?? 'Today',
         subtitle: subtitleParts.join(' · '),
-        focusedCount: starredTasks.length,
+        focusedCount: selection.globalCount,
         items,
         emptyMessage: tr['agenda.allClear'] ?? 'All clear',
         captureLabel: tr['widget.capture'] ?? 'Quick capture',

@@ -1,14 +1,6 @@
-// Link-kind attachments on the MCP write surface (#1154).
-//
-// A `kind: "link"` attachment is metadata only ({ title, uri }): nothing to upload, so the
-// "attachments need file bytes" reason that keeps `attachments` off the generic per-field
-// map does not apply to it. File-kind items stay out (the Zod literal below rejects them).
-//
-// Update semantics are "this is the complete list of link attachments": links in the input
-// are upserted (by id, else by uri), live links not in the input are tombstoned, and file
-// attachments are carried through untouched. Tombstoning rather than dropping matters: the
-// sync merge unions attachment records by id, so a record that simply vanishes from the
-// list is resurrected by the next merge, while a deletedAt marker wins (#1064).
+
+
+
 import { randomUUID } from 'node:crypto';
 import * as z from 'zod';
 import type { Attachment } from '@mindwtr/core';
@@ -64,11 +56,7 @@ type NormalizedLinkInput = {
 
 type NetworkSharePermission = (input: { id?: string; uri: string }) => boolean;
 
-// Desktop's open_path canonicalizes any absolute local path before its allow-list check
-// (apps/desktop/src-tauri/src/platform.rs), and on Windows canonicalizing a UNC path performs
-// an SMB/NTLM handshake with the host. A writer holding only the sync token (an MCP client,
-// possibly a prompt-injected agent) must not be able to plant that. Reject only the
-// UNC/network-share forms; file:// and plain local paths stay allowed (#1154 contract).
+
 const isNetworkShareUri = (uri: string): boolean => {
   const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(uri)?.[0];
   if (!scheme) return /^[/\\]{2}/.test(uri);
@@ -82,14 +70,12 @@ const isNetworkShareUri = (uri: string): boolean => {
       || normalized.slice(authority[0].length).startsWith('//')) return true;
   }
 
-  // Match desktop stripFileScheme: URL parsing resolves dot segments, then one
-  // percent-decoding pass can expose leading UNC separators before open_path.
-  // Decode only file:// paths; encoded separators in ordinary links stay literal.
+
   if (!/^file:\/\//i.test(uri)) return false;
   try {
     return /^[/\\]{2}/.test(decodeURIComponent(new URL(uri).pathname));
   } catch {
-    // Desktop falls back to removing file:// when parsing/decoding fails.
+
     return /^[/\\]{2}/.test(uri.replace(/^file:\/\//i, ''));
   }
 };
@@ -111,12 +97,12 @@ const normalizeInputs = (
     if (networkShare && !preservedNetworkShare) {
       throw new ValidationError(`Link attachment uri must not point at a network share: ${trimmedUri}`);
     }
-    // Network-share preservation is deliberately byte-for-byte. Trimming it here after the
-    // permission check would silently change the stored reference that granted permission.
+
+
     const uri = preservedNetworkShare ? input.uri : trimmedUri;
     if (id && seenIds.has(id)) throw new ValidationError(`Duplicate link attachment id: ${id}`);
     if (id) seenIds.add(id);
-    // Two entries for one uri would create two links the app cannot tell apart; keep the first.
+
     if (!id && seenUris.has(uri)) continue;
     seenUris.add(uri);
     const title = input.title?.trim() || defaultTitle(uri);
@@ -125,7 +111,7 @@ const normalizeInputs = (
   return normalized;
 };
 
-/** Attachments for a brand-new task or project: every input becomes a fresh live link. */
+
 export const buildLinkAttachments = (
   inputs: readonly LinkAttachmentInput[] | undefined,
   now: string = new Date().toISOString(),
@@ -142,11 +128,7 @@ export const buildLinkAttachments = (
   }));
 };
 
-/**
- * Applies a complete link replacement and reports how many live, byte-identical network-share
- * links were preserved. File attachments and deleted links pass through; omitted live links are
- * tombstoned. `null`/`[]` removes every live link.
- */
+
 export type ApplyLinkAttachmentsResult = {
   attachments: Attachment[];
   preservedNetworkLinkCount: number;
@@ -167,8 +149,8 @@ export const applyLinkAttachmentsWithResult = (
     if (!liveLinksByUri.has(attachment.uri)) liveLinksByUri.set(attachment.uri, attachment);
   }
   const normalized = normalizeInputs(inputs ?? [], (input) => {
-    // Supplying an id commits to id matching. URI fallback is only available when no id was
-    // supplied, so an arbitrary id cannot borrow permission from another live link.
+
+
     const match = input.id
       ? liveLinksById.get(input.id)
       : liveLinksByUri.get(input.uri);

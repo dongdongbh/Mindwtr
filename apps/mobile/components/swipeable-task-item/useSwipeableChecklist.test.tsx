@@ -104,8 +104,7 @@ describe('useSwipeableChecklist addChecklistItem', () => {
         expect(updateTask).not.toHaveBeenCalled();
     });
 
-    // The status recomputation lives in flushPendingChecklist, not in the caller:
-    // an unchecked item on a finished list-mode task reopens it.
+
     it('reopens a completed list-mode task when a new item lands on it', () => {
         const task = {
             id: 'task-1',
@@ -171,7 +170,7 @@ describe('useSwipeableChecklist addChecklistItem', () => {
             updatedAt: '2026-01-01T00:00:00.000Z',
         } as any;
         storeState._allTasks = [task];
-        // updateTask as the store runs it: a command behind the write gate (store-write-gate.ts).
+
         updateTask.mockImplementation((id: string, updates: any) => runStoreCommand(async () => {
             storeState._allTasks = storeState._allTasks.map((item) => (item.id === id ? { ...item, ...updates } : item));
             return { success: true };
@@ -183,7 +182,7 @@ describe('useSwipeableChecklist addChecklistItem', () => {
 
         let release!: () => void;
         const held = new Promise<void>((resolve) => { release = resolve; });
-        // Another device put an item in front of it: the sync save holds the gate, then publishes [new, item-1].
+
         const save = runSyncStoreSave(async () => {
             await held;
             storeState._allTasks = [{ ...task, rev: 3, checklist: [{ id: 'item-0', title: 'Milk', isCompleted: false }, one] }];

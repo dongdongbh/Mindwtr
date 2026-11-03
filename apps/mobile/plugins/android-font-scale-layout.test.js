@@ -19,7 +19,7 @@ class MainApplication : Application(), ReactApplication {
 }
 `;
 
-// android-startup-trace wraps the same call in a startupSection block.
+
 const wrappedTemplate = template.replace(
   '    loadReactNative(this)\n',
   '    startupSection("native.react_native.load") {\n      loadReactNative(this)\n    }\n',
@@ -38,7 +38,7 @@ describe('android-font-scale-layout', () => {
     for (const line of IMPORTS) {
       expect(patched).toContain(line);
     }
-    // The override runs before Expo's lifecycle dispatcher, which is the first thing that could read a flag.
+
     expect(patched.indexOf(OVERRIDE_MARKER)).toBeLessThan(patched.indexOf('ApplicationLifecycleDispatcher.onApplicationCreate'));
   });
 

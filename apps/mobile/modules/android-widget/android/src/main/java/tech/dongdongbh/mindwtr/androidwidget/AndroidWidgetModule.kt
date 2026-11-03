@@ -2,14 +2,34 @@ package tech.dongdongbh.mindwtr.androidwidget
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.functions.Queues
+import android.app.Activity
+import android.view.View
+import android.view.ViewGroup
+import com.facebook.react.views.modal.ReactModalHostView
 
 class AndroidWidgetModule : Module() {
+  companion object {
+
+    fun suppressWidgetModalExitAnimations(activity: Activity) {
+      if (WidgetLaunchCover.snapshot()?.get("stage") != "pending") return
+      fun visit(view: View) {
+        if (view is ReactModalHostView) view.dialog?.window?.let(WidgetLaunchCover::suppressExitAnimation)
+        if (view is ViewGroup) for (index in 0 until view.childCount) visit(view.getChildAt(index))
+      }
+      visit(activity.window.decorView)
+    }
+  }
+
   override fun definition() = ModuleDefinition {
     Name("MindwtrAndroidWidget")
 
+    Function("getWidgetLaunchState") { WidgetLaunchCover.snapshot() }
+    AsyncFunction("completeWidgetLaunch") { token: Int -> WidgetLaunchCover.complete(token) }.runOnQueue(Queues.MAIN)
+
     Function("setPayload") { json: String ->
       val context = appContext.reactContext ?: return@Function
-      // A payload that did not reach the disk fails the call, so widget-service.ts publishes it again.
+
       check(WidgetPayloadStore.write(context, json)) { "Widget payload not stored" }
     }
 

@@ -1,4 +1,3 @@
-//! Rich native task queries, matching core/search.ts and the API-mode MCP contract.
 use crate::local_api::valid_iso_date_like;
 use serde_json::{Map, Value};
 use time::format_description::well_known::Rfc3339;
@@ -503,8 +502,7 @@ fn relative_date(value: &str, now: PrimitiveDateTime) -> Option<PrimitiveDateTim
             ));
         }
     }
-    // Core lowercases date expressions before parseISO; its timestamp targets
-    // containing T consequently fail parsing. Keep the pinned search contract.
+
     if value.contains('t') {
         return None;
     }
@@ -544,8 +542,6 @@ fn match_date(value: &str, due: bool, term: &Term, now: PrimitiveDateTime) -> bo
     }
 }
 
-// Native conversions retain local calendar/DST semantics in request threads.
-// time's Unix local-offset feature fails closed in multi-threaded processes.
 #[cfg(unix)]
 pub(crate) fn local_wall(date: OffsetDateTime) -> Option<PrimitiveDateTime> {
     let timestamp = libc::time_t::try_from(date.unix_timestamp()).ok()?;
@@ -668,8 +664,8 @@ mod tests {
             let status = std::process::Command::new(std::env::current_exe().unwrap())
                 .arg("local_query::tests::mcp_native_rich_search_matches_core_fixture_in_isolated_timezone_process")
                 .args(["--exact", "--nocapture"])
-                // Explicit POSIX rules keep the fixture's New York calendar and
-                // DST semantics without requiring host-installed IANA tzdata.
+
+
                 .env(MARKER, "1")
                 .env("TZ", "EST5EDT,M3.2.0/2,M11.1.0/2")
                 .status()

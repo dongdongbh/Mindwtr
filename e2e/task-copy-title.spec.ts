@@ -13,7 +13,7 @@ test('copy with sidebar focus leaves the clipboard alone when no task is highlig
     await page.locator('[data-sidebar-item][data-view="contexts"]').focus();
     await page.evaluate(() => navigator.clipboard.writeText('Keep existing clipboard'));
     await page.keyboard.press('Control+c');
-    // Let an incorrectly initiated asynchronous clipboard write settle.
+
     await page.waitForTimeout(150);
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Keep existing clipboard');
     await expect(page.getByText('Title copied', { exact: true })).toHaveCount(0);

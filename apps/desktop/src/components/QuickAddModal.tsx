@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, ClipboardEvent } from 'react';
+import type { ChangeEvent, ClipboardEvent, SyntheticEvent } from 'react';
 import {
     executeCaptureTransaction,
     CaptureSessionCoordinator,
@@ -9,12 +9,15 @@ import {
     useTaskStore,
     buildTaskUpdatesFromSpeechResult,
     flushPendingSave,
+    runStoreCommand,
+    saveTaskDraftOntoLatest,
     isSandboxMode,
     findSelectableProjectByTitleAndArea,
     getQuickAddProjectInitialProps,
     buildQuickAddParseOptions,
     buildQuickAddPreviewEntries,
     getRetainedTaskContexts,
+    getSavedTaxonomyTokens,
     parseQuickAdd,
     normalizeFocusTaskLimit,
     getDefaultTaskAreaMode,
@@ -43,9 +46,11 @@ import { join } from '@tauri-apps/api/path';
 import { getManagedPath } from '../lib/managed-paths';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
-import { isTauriRuntime } from '../lib/runtime';
+import { isMacRuntime, isTauriRuntime } from '../lib/runtime';
 import { reportError } from '../lib/report-error';
 import { logWarn } from '../lib/app-log';
+import { getClipboardImageFiles, getImageExtension, isEmptyPasteEvent, readAsyncClipboardImageFiles } from '../lib/clipboard-images';
+import { createWebAttachmentDraft, getWebAttachmentUploadTarget, webAttachmentUploadMessage } from '../lib/web-attachment-upload';
 import { createDesktopRecoverySnapshot } from '../lib/data-transfer';
 import { MAX_AUDIO_RECORDING_SECONDS } from '../lib/audio-capture-buffer';
 import { AudioCaptureError, startAudioCapture, type AudioCaptureSession } from '../lib/audio-capture';
@@ -68,7 +73,7 @@ import { QuickAddSyntaxHint } from './ui/QuickAddSyntaxHint';
 import { QuickAddPreview } from './QuickAddPreview';
 import { FocusStarIcon } from './FocusStarIcon';
 
-// Relative to the managed data dir (portable-aware, #855).
+
 const QUICK_ADD_IMAGE_CAPTURE_DIR = 'quick-add-images';
 
 type PastedImageAttachment = {
@@ -99,37 +104,6 @@ type ParsedQuickAddTask = {
     parsed: QuickAddResult;
 };
 
-function getClipboardImageFiles(data: DataTransfer | null): File[] {
-    if (!data) return [];
-    const files: File[] = [];
-    for (const item of Array.from(data.items ?? [])) {
-        if (item.kind !== 'file' || !item.type.toLowerCase().startsWith('image/')) continue;
-        const file = item.getAsFile();
-        if (file) files.push(file);
-    }
-    for (const file of Array.from(data.files ?? [])) {
-        if (!file.type.toLowerCase().startsWith('image/')) continue;
-        if (files.includes(file)) continue;
-        files.push(file);
-    }
-    return files;
-}
-
-function getImageExtension(file: File): string {
-    const mime = file.type.toLowerCase();
-    if (mime === 'image/png') return 'png';
-    if (mime === 'image/jpeg') return 'jpg';
-    if (mime === 'image/webp') return 'webp';
-    if (mime === 'image/gif') return 'gif';
-    if (mime === 'image/bmp') return 'bmp';
-    if (mime === 'image/svg+xml') return 'svg';
-    if (mime === 'image/heic') return 'heic';
-    if (mime === 'image/heif') return 'heif';
-    const nameMatch = file.name.match(/\.([a-z0-9]{2,5})$/i);
-    if (nameMatch?.[1]) return nameMatch[1].toLowerCase() === 'jpeg' ? 'jpg' : nameMatch[1].toLowerCase();
-    return 'png';
-}
-
 const IS_MAC_PLATFORM = typeof navigator !== 'undefined' && /mac/i.test(navigator.userAgent);
 const SAVE_AND_EDIT_SHORTCUT_HINT = IS_MAC_PLATFORM ? '⌘Enter' : 'Ctrl+Enter';
 const SAVE_SHORTCUT_HINT = IS_MAC_PLATFORM ? 'Enter · ⇧Enter' : 'Enter · Shift+Enter';
@@ -158,11 +132,7 @@ async function readTextFile(file: File): Promise<string> {
     });
 }
 
-// Closed modal renders nothing (see the isOpen guard below); reading
-// getDerivedState() unconditionally forced the full derived-state rebuild
-// (12ms at 5k tasks) on every task write for this invisible overlay
-// (PERF-01). Only allContexts/allTags/focusedCount are used while closed is
-// skipped.
+
 const EMPTY_QUICK_ADD_DERIVED: Pick<DerivedState, 'allContexts' | 'allTags' | 'focusedCount'> = Object.freeze({
     allContexts: [],
     allTags: [],
@@ -196,8 +166,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         [allContexts, allTags]
     );
     const contextHistory = useMemo(
-        () => retainedTasks ? getRetainedTaskContexts(retainedTasks) : [],
-        [retainedTasks],
+        () => retainedTasks ? Array.from(new Set([...getRetainedTaskContexts(retainedTasks), ...getSavedTaxonomyTokens(settings, 'context')])) : [],
+        [retainedTasks, settings],
     );
     const { t } = useLanguage();
     const [value, setValue] = useState('');
@@ -212,7 +182,17 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const [recordingBusy, setRecordingBusy] = useState(false);
     const [recordingError, setRecordingError] = useState<string | null>(null);
     const [pastedImageAttachments, setPastedImageAttachments] = useState<PastedImageAttachment[]>([]);
+
+    const [canPasteImages, setCanPasteImages] = useState(isTauriRuntime);
+    const handleSyntaxHelpToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
+        if (isTauriRuntime() || !event.currentTarget.open) return;
+        void getWebAttachmentUploadTarget().then(() => setCanPasteImages(true), () => setCanPasteImages(false));
+    }, []);
     const [pastedImageError, setPastedImageError] = useState<string | null>(null);
+    const webDraftRef = useRef(createWebAttachmentDraft());
+    const admittedBrowserTaskRef = useRef<{ id: string; baseline: Task; attachments: Attachment[] } | null>(null);
+    const latestValueRef = useRef(value);
+    latestValueRef.current = value;
     const [pastingImageCount, setPastingImageCount] = useState(0);
     const [bulkQuickAddLines, setBulkQuickAddLines] = useState<string[] | null>(null);
     const [bulkQuickAddError, setBulkQuickAddError] = useState<string | null>(null);
@@ -255,7 +235,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const defaultAreaId = defaultAreaMode === 'active'
         ? activeAreaId ?? ''
         : resolveDefaultNewTaskAreaId(settings, sortedAreas) ?? '';
-    // Read lazily on each open: the modal does not subscribe to tasks/people.
+
     const quickAddParseOptions = useMemo(
         () => buildQuickAddParseOptions(settings, isOpen ? useTaskStore.getState() : {}),
         [isOpen, retainedTasks, settings],
@@ -264,7 +244,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         () => parseQuickAdd(value, projects, new Date(), areas, quickAddParseOptions),
         [value, projects, areas, quickAddParseOptions],
     );
-    // Same parse object the submit path uses, shaped for display only.
+
     const previewEntries = useMemo(
         () => buildQuickAddPreviewEntries(parsedInput, { t, projects, areas, rawInput: value }),
         [areas, parsedInput, projects, t, value],
@@ -295,7 +275,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
 
     const cleanupPastedImageAttachments = useCallback((attachments: PastedImageAttachment[]) => {
         if (isSandboxMode()) return;
-        attachments.forEach(({ path }) => {
+        attachments.forEach(({ path, attachment }) => {
+            if (!path) { webDraftRef.current.remove(attachment.id); return; }
             remove(path).catch((error) => {
                 void logWarn('Pasted image cleanup failed', {
                     scope: 'attachment',
@@ -310,6 +291,9 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         if (cleanup && current.length > 0) {
             cleanupPastedImageAttachments(current);
         }
+        webDraftRef.current.discard();
+        webDraftRef.current = createWebAttachmentDraft();
+        admittedBrowserTaskRef.current = null;
         pastedImageAttachmentsRef.current = [];
         setPastedImageAttachments([]);
         setPastedImageError(null);
@@ -318,6 +302,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
 
     useEffect(() => () => {
         cleanupPastedImageAttachments(pastedImageAttachmentsRef.current);
+        webDraftRef.current.discard();
         pastedImageAttachmentsRef.current = [];
     }, [cleanupPastedImageAttachments]);
 
@@ -442,9 +427,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         setRecordingError(null);
     }, [forcedCaptureMode, isOpen, settings?.gtd?.defaultCaptureMethod]);
 
-    // Returns whether the spoken words actually reached the task. The caller
-    // deletes the recording only on a true, so a run that resolves without
-    // writing anything never throws the words away (#1245).
+
     const applySpeechResult = useCallback(async (taskId: string, result: SpeechToTextResult): Promise<boolean> => {
         const {
             tasks: currentTasks,
@@ -522,6 +505,9 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         const now = new Date();
         const nowIso = now.toISOString();
         const displayTitle = `${tFallback(t, 'quickAdd.pastedImageTitle', 'Screenshot')} ${safeFormatDate(now, 'Pp')}`;
+        if (!isTauriRuntime()) {
+            return { path: '', attachment: webDraftRef.current.stage(file, `${displayTitle}.${getImageExtension(file)}`) };
+        }
         const fileName = `mindwtr-paste-${safeFormatDate(now, 'yyyyMMdd-HHmmss')}-${generateUUID().slice(0, 8)}.${getImageExtension(file)}`;
         const captureDir = await getManagedPath(QUICK_ADD_IMAGE_CAPTURE_DIR);
         await mkdir(captureDir, { recursive: true });
@@ -549,11 +535,12 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             return;
         }
         setPastedImageError(null);
+        const session = activeSubmissionSessionRef.current;
         imageFiles.forEach((file) => {
             setPastingImageCount((count) => count + 1);
             void createPastedImageAttachment(file)
                 .then((pastedAttachment) => {
-                    if (!isOpenRef.current) {
+                    if (!isOpenRef.current || activeSubmissionSessionRef.current !== session) {
                         cleanupPastedImageAttachments([pastedAttachment]);
                         return;
                     }
@@ -564,39 +551,25 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                     });
                 })
                 .catch((error) => {
+                    if (activeSubmissionSessionRef.current !== session) return;
                     reportError('Failed to attach pasted image', error);
                     setPastedImageError(tFallback(t, 'quickAdd.pastedImageError', 'Could not attach pasted image.'));
                 })
                 .finally(() => {
-                    setPastingImageCount((count) => Math.max(0, count - 1));
+                    if (activeSubmissionSessionRef.current === session) setPastingImageCount((count) => Math.max(0, count - 1));
                 });
+        });
+        if (!isTauriRuntime()) void getWebAttachmentUploadTarget().catch((error) => {
+            if (activeSubmissionSessionRef.current === session) setPastedImageError(webAttachmentUploadMessage(error, t));
         });
     }, [cleanupPastedImageAttachments, createPastedImageAttachment, t]);
 
-    // WebKitGTK (Linux) delivers an entirely empty DOM paste event for a
-    // clipboard image — no items, no files, no text — so an empty paste falls
-    // back to the async clipboard API, which the Rust side unlocks by allowing
-    // WebKit's clipboard permission request (#690). Anywhere the paste event
-    // already carried the image or any text, this never runs.
+
     const attachImagesFromAsyncClipboard = useCallback(async () => {
         if (isSandboxMode()) return;
-        if (typeof navigator === 'undefined' || !navigator.clipboard?.read) return;
-        let clipboardFiles: File[];
-        try {
-            const items = await navigator.clipboard.read();
-            const blobs = await Promise.all(items.map(async (item) => {
-                const imageType = item.types.find((type) => type.toLowerCase().startsWith('image/'));
-                return imageType ? { blob: await item.getType(imageType), type: imageType } : null;
-            }));
-            clipboardFiles = blobs
-                .filter((entry): entry is { blob: Blob; type: string } => entry !== null)
-                .map(({ blob, type }, index) => new File([blob], `clipboard-${index}`, { type }));
-        } catch {
-            // Permission denied or unsupported — identical outcome to the old
-            // behavior, where an image paste simply did nothing here.
-            return;
-        }
-        if (clipboardFiles.length > 0 && isOpenRef.current) {
+        const session = activeSubmissionSessionRef.current;
+        const clipboardFiles = await readAsyncClipboardImageFiles();
+        if (clipboardFiles.length > 0 && isOpenRef.current && activeSubmissionSessionRef.current === session) {
             attachPastedImageFiles(clipboardFiles);
         }
     }, [attachPastedImageFiles]);
@@ -606,11 +579,18 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         if (imageFiles.length > 0) {
             event.preventDefault();
             attachPastedImageFiles(imageFiles);
+            const text = !isTauriRuntime() ? event.clipboardData?.getData?.('text/plain') : '';
+            if (!isTauriRuntime() && text) {
+                const input = event.currentTarget;
+                const start = input.selectionStart ?? input.value.length;
+                const end = input.selectionEnd ?? start;
+                setValue(`${input.value.slice(0, start)}${text}${input.value.slice(end)}`);
+            }
             return;
         }
 
         const pastedText = event.clipboardData?.getData('text/plain') ?? '';
-        if (!pastedText && (event.clipboardData?.types?.length ?? 0) === 0) {
+        if (isEmptyPasteEvent(event.clipboardData)) {
             void attachImagesFromAsyncClipboard();
             return;
         }
@@ -630,25 +610,49 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         setBulkQuickAddError(null);
     }, [attachImagesFromAsyncClipboard, attachPastedImageFiles]);
 
+    const applyImportedText = useCallback((text: string) => {
+        const lines = splitQuickAddBulkLines(text);
+        setBulkQuickAddError(null);
+        if (lines.length > 1) {
+            setBulkQuickAddLines(lines);
+        } else if (lines.length === 1) {
+            setValue(lines[0]);
+        }
+    }, []);
+
+    const reportTextFileImportError = useCallback((error: unknown) => {
+        reportError('Failed to import quick add text file', error);
+        setBulkQuickAddError(tFallback(t, 'quickAdd.bulkImportError', 'Could not read that text file.'));
+    }, [t]);
+
     const handleTextFileImport = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
         if (isSandboxMode()) return;
         const file = event.target.files?.[0];
         event.target.value = '';
         if (!file) return;
         try {
-            const text = await readTextFile(file);
-            const lines = splitQuickAddBulkLines(text);
-            setBulkQuickAddError(null);
-            if (lines.length > 1) {
-                setBulkQuickAddLines(lines);
-            } else if (lines.length === 1) {
-                setValue(lines[0]);
-            }
+            applyImportedText(await readTextFile(file));
         } catch (error) {
-            reportError('Failed to import quick add text file', error);
-            setBulkQuickAddError(tFallback(t, 'quickAdd.bulkImportError', 'Could not read that text file.'));
+            reportTextFileImportError(error);
         }
-    }, [t]);
+    }, [applyImportedText, reportTextFileImportError]);
+
+
+    const importTextFileNative = useCallback(async () => {
+        if (isSandboxMode()) return;
+        try {
+            const { open } = await import('../lib/native-dialog');
+            const selected = await open({
+                multiple: false,
+                filters: [{ name: 'Text', extensions: ['txt'] }],
+            });
+            if (!selected || typeof selected !== 'string') return;
+            const { readTextFile: readTextFileAtPath } = await import('@tauri-apps/plugin-fs');
+            applyImportedText(await readTextFileAtPath(selected));
+        } catch (error) {
+            reportTextFileImportError(error);
+        }
+    }, [applyImportedText, reportTextFileImportError]);
 
     const startRecording = useCallback((): Promise<void> => {
         if (isSandboxMode()) return Promise.resolve();
@@ -667,9 +671,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         );
         const runStart = async () => {
             try {
-                // Voice capture is speech-to-text: if no model/key is configured, transcription
-                // can never run. Resolve it under the capture-session lease so a late result from
-                // a dismissed surface cannot toast or mutate the next one.
+
+
                 const { ready: speechConfigured } = await resolveSpeechCapture(settings.ai);
                 if (!isStartCurrent()) return;
                 if (!speechConfigured) {
@@ -790,8 +793,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             if (addTaskResult.success && addTaskResult.id) stoppedCaptureAdopted = true;
             if (!isSubmissionCurrent()) return;
             if (!addTaskResult.success) {
-                // Closing here would drop the recording with nothing said; keep
-                // the dialog so the capture can be retried.
+
+
                 showToast(tFallback(t, 'task.addFailed', 'Failed to add task'), 'error');
                 return;
             }
@@ -816,12 +819,10 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 });
             };
 
-            // The transcript was the only thing that would have carried the
-            // words, and it never arrived. Keep the recording and attach it
-            // instead of deleting it, or the note is lost for good (#1245).
+
             const keepCaptureAsAttachment = async () => {
                 if (saveAudioAttachments) return;
-                // Appended to the task as stored when the write is admitted, after any sync save ahead of it.
+
                 await updateTaskFromLatest(taskId, (existing) => (existing.attachments?.some((item) => item.id === audioAttachment.id)
                     ? null
                     : { attachments: [...(existing.attachments ?? []), audioAttachment] }));
@@ -859,9 +860,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             discardCapture();
                             return;
                         }
-                        // It resolved, but nothing reached the task: an empty
-                        // transcript, a refused write, or a project that could
-                        // not be created. The recording is all that is left.
+
+
                         keepCaptureAfterFailure('Speech-to-text saved nothing to the task');
                     })
                     .catch((error) => keepCaptureAfterFailure('Speech-to-text failed', error));
@@ -944,8 +944,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 setProjectView({ selectedProjectId: props.projectId });
             }
             dispatchNavigateEvent(view);
-            // The editor may file the task elsewhere (a status, a project); follow it
-            // there instead of leaving the user on a list it just left (#1243).
+
+
             followCreatedTaskAfterEdit(taskId, view);
         });
     }, [setEditingTaskId, setHighlightTask, setProjectView]);
@@ -984,16 +984,24 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         extraAttachments,
         input,
         parsed,
+        beforeTaskWrite,
     }: {
         currentAreas: Area[];
         currentProjects: Project[];
         extraAttachments?: Attachment[];
         input: string;
         parsed: QuickAddResult;
+        beforeTaskWrite?: () => void;
     }) => {
+        let baseline: Task | undefined;
         const transaction = await executeCaptureTransaction(
             buildQuickAddCaptureInput({ currentProjects, extraAttachments, input, parsed }),
-            { addProject, addTask },
+            { addProject, addTask: (title, props) => runStoreCommand(async () => {
+                beforeTaskWrite?.();
+                const result = await addTask(title, props);
+                if (result.success && result.id) baseline = useTaskStore.getState()._tasksById.get(result.id);
+                return result;
+            }) },
         );
         const createdProject = 'createdProject' in transaction
             ? transaction.createdProject
@@ -1007,6 +1015,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         return {
             success: true,
             createdTaskId: transaction.createdTaskId,
+            baseline,
             props: transaction.props,
             currentAreas,
             currentProjects: nextProjects,
@@ -1035,45 +1044,92 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             let currentProjects = projects;
             let currentAreas = areas;
             if (standaloneWindow) {
-                // The standalone window re-parses against projects/areas fetched
-                // here, which can be fresher than the ones the preview strip
-                // rendered from — the preview may lag by whatever this fetch pulls
-                // in. Accepted: the submit deciding on fresher data is the right
-                // direction, and the window closes on save.
+
+
                 await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
                 if (!submissionCoordinatorRef.current.isCurrent(session)) return;
                 const currentState = useTaskStore.getState();
                 currentProjects = currentState.projects;
                 currentAreas = currentState.areas;
             }
-            const parsed = parseQuickAdd(value, currentProjects, new Date(), currentAreas, quickAddParseOptions);
+            const webDraft = webDraftRef.current;
+            const hasBrowserFiles = !isTauriRuntime() && webDraft.has(pastedAttachments);
+            const priorAdmission = admittedBrowserTaskRef.current;
+            let preparedAttachments = pastedAttachments;
+            const hasNewFiles = hasBrowserFiles && (!priorAdmission
+                || pastedAttachments.some((attachment) => !priorAdmission.attachments.some((saved) => saved.id === attachment.id)));
+            if (hasNewFiles) {
+                try {
+                    preparedAttachments = await webDraft.prepareSave(pastedAttachments,
+                        () => submissionCoordinatorRef.current.isCurrent(session));
+                } catch (error) {
+                    if (submissionCoordinatorRef.current.isCurrent(session)) setPastedImageError(webAttachmentUploadMessage(error, t));
+                    return;
+                }
+            } else if (priorAdmission) {
+                preparedAttachments = pastedAttachments.map((attachment) => priorAdmission.attachments.find((saved) => saved.id === attachment.id) ?? attachment);
+            }
+            if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+            const savedInput = latestValueRef.current;
+            const parsed = parseQuickAdd(savedInput, currentProjects, new Date(), currentAreas, quickAddParseOptions);
             if (parsed.invalidDateCommands && parsed.invalidDateCommands.length > 0) {
-                // Save stays enabled for this case, so without the toast the
-                // dialog just looks frozen.
                 showToast(`${t('quickAdd.invalidDateCommand')}: ${parsed.invalidDateCommands.join(', ')}`, 'error');
                 return;
             }
-            const result = await createTaskFromParsedQuickAdd({
-                currentAreas,
-                currentProjects,
-                extraAttachments: pastedAttachments,
-                input: value,
-                parsed,
-            });
-            if (!submissionCoordinatorRef.current.isCurrent(session)) return;
-            if (!result.success) {
-                showToast(tFallback(t, 'task.addFailed', 'Failed to add task'), 'error');
-                return;
+            const beforeTaskWrite = () => {
+                if (!submissionCoordinatorRef.current.isCurrent(session)) throw new Error('attachments.webUploadChanged');
+                try { webDraft.retainBeforeStore(preparedAttachments); }
+                catch (error) { setPastedImageError(webAttachmentUploadMessage(error, t)); throw error; }
+            };
+            let submittedBaseline: Task | undefined;
+            let admittedAttachments = preparedAttachments;
+            let result: { success: boolean; createdTaskId?: string; props?: Partial<Task>; baseline?: Task };
+            if (priorAdmission) {
+                const prepared = await prepareCaptureTask(buildQuickAddCaptureInput({ currentProjects,
+                    extraAttachments: preparedAttachments, input: savedInput, parsed }), { addProject });
+                if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+                if (!prepared.success) { showToast(t('task.addFailed'), 'error'); return; }
+                const removed = priorAdmission.attachments.filter((saved) => !preparedAttachments.some((item) => item.id === saved.id))
+                    .map((saved) => saved.deletedAt ? saved : ({ ...saved, deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
+                const props = { ...prepared.props, attachments: [...(prepared.props.attachments ?? []), ...removed] };
+                webDraft.retainBeforeStore(preparedAttachments);
+                const updated = await saveTaskDraftOntoLatest(priorAdmission.id, priorAdmission.baseline, { ...props, title: prepared.title }, {
+                    write: (taskId, updates) => {
+                        beforeTaskWrite();
+                        return Object.keys(updates).length > 0 ? useTaskStore.getState().updateTask(taskId, updates) : { success: true, id: taskId };
+                    },
+                });
+
+                submittedBaseline = { ...priorAdmission.baseline, ...props, title: prepared.title };
+                admittedAttachments = [...preparedAttachments, ...removed];
+                result = { success: updated.success, createdTaskId: priorAdmission.id, props };
+            } else {
+                webDraft.retainBeforeStore(preparedAttachments);
+                result = await createTaskFromParsedQuickAdd({ currentAreas, currentProjects,
+                    extraAttachments: preparedAttachments, input: savedInput, parsed,
+                    beforeTaskWrite });
             }
-            if (standaloneWindow) {
-                await flushPendingSave().catch((error) => reportError('Failed to save quick add task', error));
+            if (submissionCoordinatorRef.current.isCurrent(session) && (hasBrowserFiles || priorAdmission) && result.success && result.createdTaskId) {
+                const baseline = submittedBaseline ?? result.baseline;
+                if (baseline) admittedBrowserTaskRef.current = { id: result.createdTaskId, baseline, attachments: admittedAttachments };
+            }
+            if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+            if (!result.success) { showToast(tFallback(t, 'task.addFailed', 'Failed to add task'), 'error'); return; }
+            if (standaloneWindow || hasBrowserFiles || priorAdmission) {
+                try { await flushPendingSave(); }
+                catch (error) {
+                    if (submissionCoordinatorRef.current.isCurrent(session)) setPastedImageError(webAttachmentUploadMessage(error, t));
+                    return;
+                }
                 if (!submissionCoordinatorRef.current.isCurrent(session)) return;
                 await notifyStandaloneTaskSaved();
                 if (!submissionCoordinatorRef.current.isCurrent(session)) return;
             }
+            if (latestValueRef.current !== savedInput || pastedImageAttachmentsRef.current.some((item) =>
+                !preparedAttachments.some((saved) => saved.id === item.attachment.id))) return;
             if (addAnother) {
-                // Shift+Enter batch capture: clear per-task state but keep the
-                // dialog (and the picked area) for the next entry.
+
+
                 setValue('');
                 setFocusNewTask(false);
                 setPastedImageError(null);
@@ -1084,12 +1140,12 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             if (openAfterSave && result.createdTaskId && result.props && !standaloneWindow) {
                 openCreatedTaskForEditing(result.createdTaskId, result.props);
             } else if (initialProps?.projectId && result.createdTaskId) {
-                // Opened from a project/section preset (ProjectWorkspace's add button):
-                // flash + scroll the new row in the project view. Global captures with
-                // no project preset intentionally skip this so they never leave a
-                // stray highlight on an unrelated view (#916).
+
+
                 setHighlightTask(result.createdTaskId);
             }
+        } catch (error) {
+            if (submissionCoordinatorRef.current.isCurrent(session)) setPastedImageError(webAttachmentUploadMessage(error, t));
         } finally {
             if (submissionCoordinatorRef.current.finishSubmission(session)) {
                 setIsSubmitting(false);
@@ -1132,10 +1188,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 return;
             }
 
-            // One store write for the whole import, not one per line (#942): a
-            // per-line loop left a half-imported inbox behind whenever any line
-            // failed, and queued one full-data save snapshot per task. Mobile's
-            // bulk capture already prepares then batches the same way.
+
             const bulkFailed = (detail?: string) => {
                 const message = tFallback(t, 'quickAdd.bulkCreateError', 'Could not create all tasks.');
                 setBulkQuickAddError(detail ? `${message} (${detail})` : message);
@@ -1216,13 +1269,13 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         <Dialog
             onClose={handleClose}
             labelledBy={titleId}
-            // Escape stays with the window keydown listener, which also has to
-            // close the standalone capture window (#869).
+
+
             closeOnEscape={false}
             placement="top"
             overlayClassName={cn(standaloneWindow ? 'bg-popover' : 'pt-[20vh]')}
-            // Uncapped on purpose: the title field's suggestion menus are
-            // absolutely positioned and have to escape the panel.
+
+
             panelClassName={cn(
                 'overflow-visible max-h-[none]',
                 standaloneWindow ? 'max-w-none rounded-none border-0 shadow-none' : 'max-w-lg',
@@ -1313,11 +1366,10 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                     "w-full rounded-lg border border-border bg-card py-3 pl-4 pr-12 shadow-sm transition-colors focus:border-transparent focus:ring-2 focus:ring-primary",
                                 )}
                             />
-                            {/* "Add to today's focus" star sits inside the field's right edge —
-                                the browser-bookmark idiom, so it reads as "star this capture".
-                                Label lives in the tooltip/aria-label; on = filled amber star,
-                                matching focused tasks in lists. Tapping past the focus cap
-                                explains the block via toast instead of a dead control. */}
+                            {
+
+
+                                                                                          }
                             <button
                                 type="button"
                                 onClick={() => {
@@ -1347,7 +1399,21 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             </p>
                         ) : null}
                         {pastedImageAttachments.length > 0 ? (
-                            <p className="text-xs text-muted-foreground">{pastedImageLabel}</p>
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                                <p>{pastedImageLabel}</p>
+                                {pastedImageAttachments.map((item) => (
+                                    <div key={item.attachment.id} className="flex items-center justify-between gap-2">
+                                        <span className="truncate">{item.attachment.title}</span>
+                                        <button type="button" disabled={isSubmitting} onClick={() => {
+                                            cleanupPastedImageAttachments([item]);
+                                            const next = pastedImageAttachmentsRef.current.filter((candidate) => candidate !== item);
+                                            pastedImageAttachmentsRef.current = next;
+                                            setPastedImageAttachments(next);
+                                            setPastedImageError(null);
+                                        }} className="text-primary underline">{t('attachments.remove')}</button>
+                                    </div>
+                                ))}
+                            </div>
                         ) : null}
                         {pastedImageError ? (
                             <p className="text-xs text-destructive">{pastedImageError}</p>
@@ -1372,13 +1438,18 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             </div>
                         )}
                         <p className="text-xs text-muted-foreground">{t('quickAdd.example')}</p>
-                        <details className="text-xs text-muted-foreground">
+                        <details className="text-xs text-muted-foreground" onToggle={handleSyntaxHelpToggle}>
                             <summary className="w-fit cursor-pointer whitespace-nowrap rounded-sm font-medium text-foreground/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
                                 {t('quickAdd.syntaxHelp')}
                             </summary>
                             <p className="mt-2 leading-5">
                                 <QuickAddSyntaxHint text={t('quickAdd.help')} />
                             </p>
+                            {canPasteImages && (
+                                <p className="mt-1 leading-5">
+                                    {t('quickAdd.pasteImagesHint').replace('{{shortcut}}', isMacRuntime() ? '⌘V' : 'Ctrl+V')}
+                                </p>
+                            )}
                         </details>
                         {scheduledLabel && (
                             <p className="text-xs text-muted-foreground">
@@ -1400,7 +1471,10 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             />
                             <button
                                 type="button"
-                                onClick={() => fileInputRef.current?.click()}
+                                onClick={() => {
+                                    if (isTauriRuntime()) void importTextFileNative();
+                                    else fileInputRef.current?.click();
+                                }}
                                 disabled={isSandboxMode() || isSubmitting}
                                 title={isSandboxMode() ? t('sandbox.unavailable') : undefined}
                                 className="px-3 py-1.5 rounded-md text-sm border border-border bg-background hover:bg-muted/60"
@@ -1469,8 +1543,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                 )}
                                 aria-label={audioButtonLabel}
                                 autoFocus
-                                // Keep focus while startup is busy so Enter can stop the recording.
-                                // onClick ignores activation until the operation finishes.
+
+
                                 aria-disabled={recordingBusy}
                             >
                                 {audioButtonLabel}

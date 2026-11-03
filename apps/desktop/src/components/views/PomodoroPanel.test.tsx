@@ -78,8 +78,8 @@ describe('PomodoroPanel desktop persistence', () => {
                 completedFocusSessionsByTaskId: {
                     'task-1': 2,
                 },
-                // The visible count is per-day: today's stored count restores,
-                // while a lifetime total from another day would show 0.
+
+
                 todayDayKey: getPomodoroLocalDayKey(),
                 completedTodayFocusSessions: 4,
             },
@@ -143,10 +143,10 @@ describe('PomodoroPanel desktop persistence', () => {
             </LanguageProvider>
         );
 
-        // Starts unlinked: the trigger shows the timer-only state.
+
         expect(screen.getByLabelText('Timer task').textContent).toContain('Timer only');
 
-        // Open the popup and filter down to a single match.
+
         fireEvent.click(screen.getByLabelText('Timer task'));
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'release' } });
         expect(screen.queryByRole('option', { name: 'Write RFC reply' })).toBeNull();
@@ -156,7 +156,7 @@ describe('PomodoroPanel desktop persistence', () => {
         let stored = JSON.parse(window.localStorage.getItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY) ?? '{}');
         expect(stored.selectedTaskId).toBe('task-2');
 
-        // Reopen and clear the link back to timer only.
+
         fireEvent.click(screen.getByLabelText('Timer task'));
         fireEvent.click(screen.getByRole('option', { name: 'Timer only' }));
 
@@ -176,10 +176,7 @@ describe('PomodoroPanel desktop persistence', () => {
         })
     );
 
-    // A timer started from Review or the calendar links a task that is not in the
-    // Focus list this panel is handed. Resolving the link against that list dropped
-    // it the moment the panel rendered, which is what made the row's Play button
-    // look dead outside Focus (#867).
+
     it('keeps a linked task that is not in the panel list', () => {
         const offFocusTask: Task = { ...task, id: 'task-3', title: 'Deferred chore' };
         useTaskStore.setState({ tasks: [task, offFocusTask], _allTasks: [task, offFocusTask] } as never);
@@ -196,8 +193,7 @@ describe('PomodoroPanel desktop persistence', () => {
         expect(stored.selectedTaskId).toBe('task-3');
     });
 
-    // The boundary: a task that is genuinely gone must still release the timer, so
-    // widening the lookup above does not just disable the guard.
+
     it('still clears the link when the linked task no longer exists', () => {
         useTaskStore.setState({ tasks: [task], _allTasks: [task] } as never);
         storeSession('deleted-task');
@@ -271,8 +267,8 @@ describe('PomodoroPanel desktop persistence', () => {
         fireEvent.click(screen.getByLabelText('Timer task'));
         expect(screen.queryByRole('option', { name: task.title })).toBeNull();
     });
-    // Mark done dropped the store result, so a rejected write left the task
-    // untouched with nothing on screen and the user pressed the button again.
+
+
     it('reports a failed Mark done instead of silently doing nothing', async () => {
         const updateTask = vi.fn().mockResolvedValue({ success: false, error: 'Disk full' });
         useUiStore.setState({ toasts: [] });

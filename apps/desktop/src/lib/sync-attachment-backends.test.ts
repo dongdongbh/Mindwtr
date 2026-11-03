@@ -15,6 +15,7 @@ import {
     markAttachmentPresenceReconciled,
 } from './attachment-presence-scope';
 import { clearAttachmentValidationFailures } from './sync-attachment-validation';
+import { DropboxFileNotFoundError } from './dropbox-sync';
 import {
     clearAttachmentSyncState,
     syncCloudAttachments,
@@ -22,6 +23,7 @@ import {
     syncDropboxAttachments,
     syncFileAttachments,
     syncWebdavAttachments,
+    isAttachmentDownloadBackedOff,
     type AttachmentBackendDeps,
 } from './sync-attachment-backends';
 
@@ -41,16 +43,13 @@ const fsMocks = vi.hoisted(() => ({
     readFile: vi.fn(),
     remove: vi.fn(),
     rename: vi.fn(),
-    // #1057: check-on-touch content detection stats the local file; default to a
-    // rejection so tests that don't care about it see "no stat available" (the
-    // lifecycle treats that as if getLocalFileStat were omitted) rather than a
-    // silently-resolved bogus value.
+
+
     stat: vi.fn().mockRejectedValue(new Error('not stubbed')),
     writeFile: vi.fn(),
 }));
 
-// #1037: the file backend must reach the sync folder through the async Rust
-// commands, never the fs plugin's main-thread exists/mkdir/remove/rename.
+
 const syncFsMocks = vi.hoisted(() => ({
     abandonAttachmentGeneration: vi.fn(),
     exists: vi.fn(),
@@ -97,8 +96,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     coreMocks.computeSha256Hex.mockImplementation(actual.computeSha256Hex);
     return {
         ...actual,
-        // Keep the File Sync read-boundary regressions small while exercising
-        // the same above-limit behavior as production's much larger ceiling.
+
+
         MAX_DOWNLOAD_BYTES: 16,
         MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES: 15,
         computeSha256Hex: coreMocks.computeSha256Hex,
@@ -125,7 +124,7 @@ vi.mock('./attachment-installer', () => ({
     installAttachmentDownload: installerMocks.installAttachmentDownload,
 }));
 
-/** Backends now return the folded document instead of mutating the one they were given. */
+
 const expectFoldedData = (result: AppData | boolean | null | undefined): AppData => {
     expect(typeof result === 'object' && result !== null).toBe(true);
     return result as AppData;
@@ -309,6 +308,36 @@ describe('desktop sync attachment backends', () => {
                 return syncFileAttachments(appData, '/sync-root', deps);
         }
     };
+
+    it.each<DownloadBackend>(['cloud', 'dropbox', 'cloudkit'])(
+        'asks %s nothing on the next pass for a file that answered not-found, until its backoff ends',
+        async (backend) => {
+
+            const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
+            const deps: AttachmentBackendDeps = {
+                getTauriFetch: async () => fetcher as unknown as typeof fetch,
+                isTauriRuntimeEnv: () => true,
+                logSyncInfo: vi.fn(),
+                logSyncWarning: vi.fn(),
+                resolveWebdavPassword: vi.fn(async () => 'secret'),
+            };
+            dropboxMocks.downloadDropboxFile.mockRejectedValue(new DropboxFileNotFoundError('gone'));
+            cloudKitMocks.fetchCloudKitAttachmentAsset.mockRejectedValue(new cloudKitMocks.CloudKitAttachmentNotFoundError('attachment-record-not-found'));
+            const asked = () => (backend === 'cloud'
+                ? fetcher.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('attachments/attachment-1.txt')).length
+                : backend === 'dropbox'
+                    ? dropboxMocks.downloadDropboxFile.mock.calls.length
+                    : cloudKitMocks.fetchCloudKitAttachmentAsset.mock.calls.length);
+            const appData = createDownloadData(backend);
+
+            await runDownload(backend, appData, deps);
+            const first = asked();
+            expect(first).toBeGreaterThan(0);
+            await runDownload(backend, appData, deps);
+
+            expect(asked()).toBe(first);
+        },
+    );
 
     it.each<DownloadBackend>(['webdav', 'cloud', 'dropbox', 'cloudkit', 'file'])(
         'stages and generation-binds an absent %s attachment download before publishing metadata',
@@ -499,7 +528,70 @@ describe('desktop sync attachment backends', () => {
         });
     });
 
-    it('marks cloud attachments unrecoverable when the remote file is missing', async () => {
+    it('backs off a WebDAV download that answered 404, so the next pass does not ask again', async () => {
+
+
+        const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
+        const appData = createCandidateAttachmentData();
+        Object.assign(appData.tasks[0].attachments![0], { uri: '', localStatus: 'missing' });
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+        };
+        const run = () => syncWebdavAttachments(
+            appData,
+            { url: 'https://dav.example/mindwtr', username: 'alice' },
+            'https://dav.example/mindwtr',
+            deps,
+        );
+        const gets = () => fetcher.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('attachments/attachment-1.txt')
+            && ((call as unknown[])[1] as RequestInit | undefined)?.method !== 'HEAD').length;
+
+        const firstResult = await run();
+        const first = gets();
+        expect(first).toBeGreaterThan(0);
+
+        const row = (firstResult || appData).tasks[0].attachments?.[0];
+        expect(row).toMatchObject({ cloudKey: 'attachments/attachment-1.txt', localStatus: 'missing' });
+        expect(row?.deletedAt).toBeUndefined();
+        expect(isAttachmentDownloadBackedOff('attachment-1')).toBe(true);
+        await run();
+        expect(gets()).toBe(first);
+    });
+
+    it('never lets the 404 backoff stop an activation probe, nor sets it from one', async () => {
+
+        const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
+        const appData = createCandidateAttachmentData();
+        Object.assign(appData.tasks[0].attachments![0], { uri: '', localStatus: 'missing' });
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+        };
+        const run = (helpers?: Parameters<typeof syncWebdavAttachments>[4]) => syncWebdavAttachments(
+            appData,
+            { url: 'https://dav.example/mindwtr', username: 'alice' },
+            'https://dav.example/mindwtr',
+            deps,
+            helpers,
+        );
+        const gets = () => fetcher.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('attachments/attachment-1.txt')
+            && ((call as unknown[])[1] as RequestInit | undefined)?.method !== 'HEAD').length;
+
+        await run(activationHelpers());
+        await run();
+        expect(gets()).toBe(2);
+        await run(activationHelpers());
+        expect(gets()).toBe(3);
+    });
+
+    it('leaves a cloud attachment live and keyed when the remote file is missing; only a probe marks its trial copy', async () => {
         const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
         const logSyncWarning = vi.fn();
         const appData: AppData = {
@@ -547,18 +639,26 @@ describe('desktop sync attachment backends', () => {
             deps,
         );
 
-        const attachment = expectFoldedData(result).tasks[0].attachments?.[0];
-        // The document handed in is never written to.
+
+        const attachment = (result || appData).tasks[0].attachments?.[0];
         expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.jpg');
         expect(fetcher).toHaveBeenCalledTimes(1);
-        expect(attachment?.cloudKey).toBeUndefined();
-        expect(attachment?.fileHash).toBeUndefined();
-        expect(attachment?.localStatus).toBe('missing');
-        expect(attachment?.deletedAt).toBeDefined();
+        expect(attachment).toMatchObject({ cloudKey: 'attachments/attachment-1.jpg', fileHash: 'a'.repeat(64), localStatus: 'missing' });
+        expect(attachment?.deletedAt).toBeUndefined();
         expect(logSyncWarning).not.toHaveBeenCalledWith(
             expect.stringContaining('Failed to download attachment'),
             expect.anything(),
         );
+
+        const probed = expectFoldedData(await syncCloudAttachments(
+            appData,
+            { url: 'https://cloud.example/v1/data', token: 'token' },
+            'https://cloud.example/v1',
+            deps,
+            activationHelpers(),
+        )).tasks[0].attachments?.[0];
+        expect(probed?.cloudKey).toBeUndefined();
+        expect(probed?.deletedAt).toBeDefined();
     });
 
     it('uploads self-hosted cloud attachments selected from Windows paths', async () => {
@@ -601,8 +701,7 @@ describe('desktop sync attachment backends', () => {
             resolveWebdavPassword: vi.fn(),
         };
 
-        // Windows profile root, so the upload-containment predicate sees the drive-letter
-        // form of the managed data dir.
+
         pathMocks.dataDir.mockResolvedValue('C:\\app-data');
         const relativePath = 'mindwtr\\attachments\\mindwtr-upload-test.txt';
         fsMocks.exists.mockImplementation(async (path: string) => path === relativePath);
@@ -622,8 +721,8 @@ describe('desktop sync attachment backends', () => {
 
         const attachment = expectFoldedData(result).tasks[0].attachments?.[0];
         expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
-        // Inside the profile root, so the read is scoped to the data dir; the drive-letter
-        // form still has to be recognised as such for that to happen at all.
+
+
         expect(fsMocks.exists).toHaveBeenCalledWith(relativePath, { baseDir: fsMocks.BaseDirectory.Data });
         expect(fsMocks.readFile).toHaveBeenCalledWith(relativePath, { baseDir: fsMocks.BaseDirectory.Data });
         expect(fsMocks.readFile).toHaveBeenCalledTimes(1);
@@ -674,15 +773,14 @@ describe('desktop sync attachment backends', () => {
             helpers,
         );
 
-        // A refusal below the limit changes nothing, so the backend returns false and the
-        // attachment to look at is still the one in the document that was handed in.
+
         const refusedAttachment = (result: AppData | false, appData: AppData) =>
             (result === false ? appData : result).tasks[0].attachments?.[0];
 
         const putCount = (fetcher: ReturnType<typeof vi.fn>): number =>
             fetcher.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PUT').length;
 
-        /** The cloud server's own error shape, `{"error":"…"}`, which is what the rule reads. */
+
         const serverRefusal = (status: number, serverMessage: string) => {
             const body = new TextEncoder().encode(JSON.stringify({ error: serverMessage }));
             return vi.fn(async () => ({
@@ -695,7 +793,7 @@ describe('desktop sync attachment backends', () => {
             }) as Response);
         };
 
-        // What the server says about THESE BYTES. Only these may end in a tombstone.
+
         const FINAL_REFUSALS: Array<[string, number, string]> = [
             [
                 'a blocked executable signature',
@@ -748,22 +846,19 @@ describe('desktop sync attachment backends', () => {
                 expect(attachment?.localStatus).toBe('missing');
                 expect(attachment?.deletedAt).toBeDefined();
                 expect(putCount(fetcher)).toBe(3);
-                // The document handed in is never written to.
+
                 expect(appData.tasks[0].attachments?.[0]?.deletedAt).toBeUndefined();
-                // Nothing is pending any more, so the next cycle can write the tasks again.
+
                 expect(findPendingAttachmentUploads(result)).toHaveLength(0);
                 expect(logSyncWarning).toHaveBeenCalledWith(
                     expect.stringContaining('marking attachment unrecoverable'),
                 );
-                // The server's own words never reach the log.
+
                 expect(JSON.stringify(logSyncWarning.mock.calls)).not.toContain('Blocked');
             },
         );
 
-        // A 400 the server did not say about the bytes is about the server: a storage folder
-        // that became a symbolic link or moved answers `Invalid attachment path` to EVERY
-        // upload. Giving up on those would soft-delete every waiting attachment at once, and
-        // the tombstones would take them off the other devices too.
+
         it.each([
             ['400 Invalid attachment path', 400, JSON.stringify({ error: 'Invalid attachment path' })],
             ['a 400 with a proxy page for a body', 400, '<html>Blocked by the firewall</html>'],
@@ -822,8 +917,7 @@ describe('desktop sync attachment backends', () => {
             expect(putCount(fetcher)).toBe(3);
         });
 
-        // The other devices hold the older copy of this attachment. Publishing the candidate
-        // hash without its bytes would make that good remote copy unverifiable.
+
         it('keeps a refused replacement pending and bounds retries to its content identity', async () => {
             const fetcher = serverRefusal(400, 'Blocked executable attachment signature: elf');
             const logSyncWarning = vi.fn();
@@ -981,10 +1075,8 @@ describe('desktop sync attachment backends', () => {
     });
 
     it.each(['upload', 'download'] as const)('allows File Sync %s through the shipped streaming permissions', async (direction) => {
-        // In the locked fs 2.4.4 ACL, allow-write-file also grants open/write,
-        // but neither fs:default nor allow-read-file grants handle reads.
-        // Upload retries verify an existing immutable generation with read().
-        // Unrestricted fs mocks hid that denial despite local readFile working.
+
+
         const openFile = fsMocks.open.getMockImplementation()!;
         const commands: string[] = [];
         const requireCommand = (command: string) => {
@@ -1048,7 +1140,7 @@ describe('desktop sync attachment backends', () => {
         };
         syncFsMocks.exists.mockResolvedValue(false);
         fsMocks.readFile.mockResolvedValue(DOWNLOAD_BYTES);
-        // Tauri IPC rejects with strings, not necessarily Error instances.
+
         fsMocks.open.mockRejectedValue(`fs.${command} not allowed. Private C:\\Documents\\personal.pdf`);
 
         expect(await syncFileAttachments(appData, '/candidate-sync', deps)).toBe(false);
@@ -1106,9 +1198,8 @@ describe('desktop sync attachment backends', () => {
     });
 
     it('re-copies a locally available attachment into a sync folder that is missing it on a regular sync', async () => {
-        // #1001: switching the File Sync folder outside the settings UI left
-        // attachments/ empty forever — the recorded cloudKey pointed at the
-        // old folder and nothing re-verified presence in the current one.
+
+
         const bytes = new Uint8Array([1, 2, 3]);
         const appData = createCandidateAttachmentData();
         const deps: AttachmentBackendDeps = {
@@ -1138,9 +1229,8 @@ describe('desktop sync attachment backends', () => {
         );
         expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith('', 'operation-1');
         expect(expectFoldedData(mutated).tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
-        // The sync folder is only ever touched off the main thread (#1037). The fs
-        // plugin is still how the app reads its OWN data dir, so the assertion names
-        // the sync folder rather than banning the plugin outright.
+
+
         expect(fsMocks.exists).not.toHaveBeenCalledWith(
             expect.stringContaining('/candidate-sync'),
             expect.anything(),
@@ -1162,11 +1252,11 @@ describe('desktop sync attachment backends', () => {
 
         const result = await syncFileAttachments(appData, '/candidate-sync', deps);
 
-        // localStatus reconciles to 'missing', but the cloud key survives on the folded copy.
+
         expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
         expect(fsMocks.writeFile).not.toHaveBeenCalled();
-        // The sync folder is only ever stat'd off the main thread (#1037); reads of the
-        // app's own data dir legitimately go through the fs plugin.
+
+
         expect(fsMocks.exists).not.toHaveBeenCalledWith(
             expect.stringContaining('/candidate-sync'),
             expect.anything(),
@@ -1188,8 +1278,8 @@ describe('desktop sync attachment backends', () => {
             logSyncWarning,
             resolveWebdavPassword: vi.fn(async () => 'secret'),
         };
-        // #1119 follow-up: the MKCOL now runs lazily from `onUpload`, so reaching it needs an
-        // attachment that actually wants uploading. An empty document issues no request at all.
+
+
         const uploadableData = (): AppData => ({
             tasks: [
                 {
@@ -1230,8 +1320,8 @@ describe('desktop sync attachment backends', () => {
             'https://dav.example/mindwtr',
             deps,
         );
-        // The MKCOL 503 aborts the upload, so no cloud key is recorded (the pass may still
-        // return a document for unrelated local bookkeeping).
+
+
         expect(cloudKeyAfter(rateLimitedRun)).toBeUndefined();
         await expect(
             syncWebdavAttachments(
@@ -1252,9 +1342,7 @@ describe('desktop sync attachment backends', () => {
             { remainingMs: '60000' },
         );
 
-        // Real timers for the recovery run: it reaches a genuine upload, whose per-request
-        // throttle sleeps, and the fake clock (June) is already behind the real one, so the
-        // cooldown deadline is long past either way.
+
         vi.advanceTimersByTime(60_000);
         vi.useRealTimers();
         coreMocks.webdavMakeDirectory.mockResolvedValueOnce(undefined);
@@ -1272,7 +1360,7 @@ describe('desktop sync attachment backends', () => {
     });
 
     it.each([[false, 11], [true, 11], [true, 100]] as const)('caps WebDAV upload batches and reports deferred transfers (activation=%s, files=%s)', async (activationProbe, attachmentCount) => {
-        // Exercise asynchronous cooperative yields without waiting for real renderer frames.
+
         vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
             queueMicrotask(() => callback(performance.now()));
             return 0;
@@ -1282,7 +1370,7 @@ describe('desktop sync attachment backends', () => {
             now += 1_000;
             return now;
         });
-        // Each batch stays capped even while a larger activation spans multiple calls.
+
         const bytes = new Uint8Array([1, 2, 3]);
         const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => new Response(null, { status: 200 }));
         const logSyncInfo = vi.fn();
@@ -1474,7 +1562,7 @@ describe('desktop sync attachment backends', () => {
     it.each([
         'attachment-record-not-found',
         'attachment-asset-missing',
-    ])('marks a CloudKit attachment unrecoverable after cleaning a terminal %s stage', async (reason) => {
+    ])('leaves a CloudKit attachment live and keyed after cleaning a terminal %s stage', async (reason) => {
         const appData = createDownloadData('cloudkit');
         appData.tasks[0].attachments![0].fileHash = DOWNLOAD_BYTES_HASH;
         const logSyncWarning = vi.fn();
@@ -1489,18 +1577,18 @@ describe('desktop sync attachment backends', () => {
             new cloudKitMocks.CloudKitAttachmentNotFoundError(reason),
         );
 
-        const result = expectFoldedData(await syncCloudKitAttachments(appData, deps));
+        const result = (await syncCloudKitAttachments(appData, deps)) || appData;
         const stagedPath = cloudKitMocks.fetchCloudKitAttachmentAsset.mock.calls[0]?.[1];
 
         expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
         expect(fsMocks.remove).toHaveBeenCalledWith(stagedPath);
         expect(installerMocks.installAttachmentDownload).not.toHaveBeenCalled();
         expect(result.tasks[0].attachments?.[0]).toMatchObject({
+            cloudKey: 'cloudkit:attachment-1',
+            fileHash: DOWNLOAD_BYTES_HASH,
             localStatus: 'missing',
-            deletedAt: expect.any(String),
         });
-        expect(result.tasks[0].attachments?.[0].cloudKey).toBeUndefined();
-        expect(result.tasks[0].attachments?.[0].fileHash).toBeUndefined();
+        expect(result.tasks[0].attachments?.[0].deletedAt).toBeUndefined();
         expect(appData.tasks[0].attachments?.[0]).toMatchObject({
             cloudKey: 'cloudkit:attachment-1',
             fileHash: DOWNLOAD_BYTES_HASH,
@@ -1646,8 +1734,8 @@ describe('desktop sync attachment backends', () => {
     );
 
     it('never reads or uploads an attachment whose uri points outside the profile (SEC-07)', async () => {
-        // A hostile sync document can put any absolute path in `uri` — it survives the
-        // merge sanitizer, which only rejects traversal segments.
+
+
         const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => new Response(null, { status: 200 }));
         const appData = createCandidateAttachmentData();
         appData.tasks[0].attachments![0].uri = '/home/alice/.ssh/id_rsa';
@@ -1724,8 +1812,8 @@ describe('desktop sync attachment backends', () => {
 
     describe('check-on-touch content change detection (#1057)', () => {
         const bytes = new Uint8Array([1, 2, 3]);
-        // Real SHA-256 of `bytes` above — computed once so "hash matches" and "hash
-        // differs" tests can both use realistic hashes rather than a stubbed hasher.
+
+
         const BYTES_HASH = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
 
         const prepareHelpers = () => ({
@@ -1777,7 +1865,7 @@ describe('desktop sync attachment backends', () => {
                     stage,
                     errorType: 'native-os-error',
                     nativeCode,
-                    // These fixtures fail with an OS error, which carries a path: never a named reason.
+
                     reason: 'unlisted',
                 },
             );
@@ -1981,8 +2069,7 @@ describe('desktop sync attachment backends', () => {
             expect(appData.tasks[0].attachments?.[0]?.deletedAt).toBeUndefined();
         });
 
-        /** The invalid generation every preservation test below starts from: the sync folder
-         *  holds a file under this content-addressed name whose bytes are not this content. */
+
         const stageCorruptGeneration = () => {
             const otherBytes = new Uint8Array([4, 5, 6]);
             fsMocks.exists.mockResolvedValue(true);
@@ -2041,8 +2128,7 @@ describe('desktop sync attachment backends', () => {
             const secondDeps = depsFor();
             const second = await syncFileAttachments(secondData, '/candidate-sync', secondDeps, postMergeHelpers());
 
-            // Preserving the generation must not touch the record: the local bytes are the
-            // good copy, so a tombstone here would lose them on every device.
+
             expect(second).toBe(false);
             expect(secondData.tasks[0].attachments?.[0]).toMatchObject({
                 cloudKey: 'attachments/attachment-1.txt',
@@ -2062,8 +2148,7 @@ describe('desktop sync attachment backends', () => {
                 postMergeHelpers(),
             )).toBe(false);
 
-            // Nothing is read from or written to the sync folder for that generation again,
-            // and the warning is not repeated every cycle.
+
             expect(syncFsMocks.exists.mock.calls.length + syncFsMocks.stat.mock.calls.length).toBe(settledReads);
             expect(removals()).toBe(0);
             expect(thirdDeps.logSyncWarning).not.toHaveBeenCalled();
@@ -2575,7 +2660,7 @@ describe('desktop sync attachment backends', () => {
             };
             fsMocks.exists.mockResolvedValue(true);
             fsMocks.readFile.mockResolvedValue(bytes);
-            // mtime moved on, so the pre-pass hashes the file to confirm the change.
+
             fsMocks.stat.mockResolvedValue({ mtime: new Date(9_999), size: 3 });
             coreMocks.webdavFileExists.mockResolvedValue(true);
 
@@ -2685,14 +2770,13 @@ describe('desktop sync attachment backends', () => {
         expect(result.settings.attachments?.pendingRemoteDeletes).toEqual([
             { cloudKey: 'attachments/legacy-file.jpg' },
         ]);
-        // The input document keeps both pending deletes and its un-uploaded attachment.
+
         expect(appData.settings.attachments?.pendingRemoteDeletes).toHaveLength(2);
         expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
         expect(logSyncWarning).not.toHaveBeenCalled();
     });
 
-    // The teeth of the purity contract: a deep-frozen document makes any in-place write
-    // throw (strict mode), so a backend that still mutates its input fails loudly here.
+
     describe('backend purity (frozen input document)', () => {
         const bytes = new Uint8Array([1, 2, 3]);
 
@@ -2704,7 +2788,7 @@ describe('desktop sync attachment backends', () => {
             resolveWebdavPassword: vi.fn(async () => 'secret'),
         });
 
-        /** A locally-available attachment with no cloud key: every backend has real work to do. */
+
         const frozenData = (): AppData => {
             const data = createCandidateAttachmentData();
             data.tasks[0].attachments![0].cloudKey = undefined;
@@ -2793,9 +2877,7 @@ describe('desktop sync attachment backends', () => {
         });
     });
 
-    // #1119 follow-up (audit F3), desktop port of mobile commit 06ebf5b41: an idle cycle for
-    // an attachment owner used to cost one MKCOL plus one HEAD per attachment, every cycle,
-    // forever. The presence proof is now periodic and the MKCOL lazy.
+
     describe('idle-cycle attachment traffic (#1119 follow-up)', () => {
         const SCOPE = JSON.stringify(['webdav', 'https://dav.example/mindwtr', 'alice']);
         const OTHER_SCOPE = JSON.stringify(['webdav', 'https://other.example/mindwtr', 'alice']);
@@ -2859,7 +2941,7 @@ describe('desktop sync attachment backends', () => {
             await runWebdav(settledData(), webdavDeps(SCOPE));
 
             expect(coreMocks.webdavFileExists).toHaveBeenCalledTimes(1);
-            // A completed pass advances the stamp, so the very next cycle is free again.
+
             expect(isAttachmentPresenceReconciliationDue(SCOPE)).toBe(false);
             await runWebdav(settledData(), webdavDeps(SCOPE));
             expect(coreMocks.webdavFileExists).toHaveBeenCalledTimes(1);
@@ -3020,8 +3102,7 @@ describe('desktop sync attachment backends', () => {
 
             await runWebdav(settledData(), webdavDeps(SCOPE), activationHelpers());
 
-            // A probe must prove every candidate object holds right now (#1119), stamp or no
-            // stamp — the same pass without the probe issues nothing (test (a)).
+
             expect(coreMocks.webdavFileExists).toHaveBeenCalledTimes(1);
         });
 
@@ -3029,7 +3110,7 @@ describe('desktop sync attachment backends', () => {
             await runWebdav(settledData(), webdavDeps(SCOPE), activationHelpers());
 
             expect(coreMocks.webdavFileExists).toHaveBeenCalledTimes(1);
-            // The scope names the COMMITTED location, which the probe did not run against.
+
             expect(hasCompletedAttachmentPresenceReconciliation(SCOPE)).toBe(false);
         });
 
@@ -3056,15 +3137,13 @@ describe('desktop sync attachment backends', () => {
         });
     });
 
-    // #1119 follow-up: a blob deleted on the server can only be restored by a device that
-    // still holds the bytes. WebDAV has repaired that since #1119; these are the same repair
-    // for Dropbox (one folder listing) and the self-hosted cloud (one probe per blob).
+
     describe('remote attachment presence repair (#1119 follow-up)', () => {
         const CLOUD_SCOPE = JSON.stringify(['cloud', 'selfhosted', 'https://cloud.example']);
         const DROPBOX_SCOPE = JSON.stringify(['cloud', 'dropbox']);
         const FILE_SCOPE = JSON.stringify(['file', '/candidate-sync']);
 
-        /** cloudKey set, bytes readable here, nothing pending: the one shape the repair may act on. */
+
         const uploadedData = (): AppData => {
             const appData = createCandidateAttachmentData();
             Object.assign(appData.tasks[0].attachments![0], { contentMtimeMs: 1000, contentSize: 3 });
@@ -3086,8 +3165,7 @@ describe('desktop sync attachment backends', () => {
             presenceScope,
         });
 
-        /** A self-hosted server that answers the presence HEAD however the test says, and
-         *  accepts the re-upload PUT. */
+
         const cloudFetcher = (presence: Response) => vi.fn(async (_url: string, init?: RequestInit) => (
             init?.method === 'HEAD' ? presence : new Response(null, { status: 200 })
         ));
@@ -3120,7 +3198,7 @@ describe('desktop sync attachment backends', () => {
 
             const result = expectFoldedData(await runCloud(appData, depsWith(CLOUD_SCOPE, fetcher)));
 
-            // The blob was gone, so the lifecycle uploaded it again under the same key.
+
             expect(cloudKeyOf(result)).toBe('attachments/attachment-1.txt');
             expect(methodsOf(fetcher)).toEqual(['HEAD', 'PUT']);
         });
@@ -3134,7 +3212,7 @@ describe('desktop sync attachment backends', () => {
             const folded = typeof result === 'object' && result !== null ? result : appData;
             expect(cloudKeyOf(folded)).toBe('attachments/attachment-1.txt');
             expect(methodsOf(fetcher)).toEqual(['HEAD']);
-            // A pass that could not prove anything must not park the repair for a day.
+
             expect(hasCompletedAttachmentPresenceReconciliation(CLOUD_SCOPE)).toBe(false);
         });
 
@@ -3151,8 +3229,8 @@ describe('desktop sync attachment backends', () => {
         });
 
         it('cloud: falls back to a bodiless GET against a server with no HEAD route', async () => {
-            // Desktop's fetch streams, so the fallback cancels after the headers. The blob
-            // is present, so nothing is cleared and nothing is uploaded.
+
+
             const fetcher = vi.fn(async (_url: string, init?: RequestInit) => (
                 init?.method === 'HEAD'
                     ? new Response(null, { status: 405 })
@@ -3309,7 +3387,7 @@ describe('desktop sync attachment backends', () => {
             );
 
             const folded = typeof result === 'object' && result !== null ? result : appData;
-            // Clearing here would drop the only pointer to bytes this device cannot re-upload.
+
             expect(cloudKeyOf(folded)).toBe('attachments/attachment-1.txt');
         });
     });

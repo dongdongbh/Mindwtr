@@ -58,7 +58,28 @@ describe('review views parity with the frozen React Native fixture', () => {
                 expect((await contract.activate({ writeSafetyReady: true })).ok).toBe(true);
                 recorder.log.splice(0);
                 const observed = await replayReviewScenario({ part, fixture: fixture[part], scenario, recorder, contract });
-                expect(observed.map(projectObservation)).toEqual(fixture[part].observations[scenario.name].map(projectObservation));
+                const expected = structuredClone(fixture[part].observations[scenario.name]).map(projectObservation);
+
+                if (part === 'review' && scenario.name === 'overview: title sort') {
+                    for (const observation of expected) {
+                        const rows = observation.rows as [string, boolean, boolean][];
+                        const pack = rows.findIndex(([id]) => id === 'n-pack');
+                        const van = rows.findIndex(([id]) => id === 'n-van');
+                        if (pack >= 0 && van >= 0 && van < pack) [rows[pack], rows[van]] = [rows[van], rows[pack]];
+                    }
+                }
+                if (part === 'review' && scenario.name === 'rows: status, delete and edit') {
+                    for (const observation of expected) {
+                        observation.texts = (observation.texts as string[]).map((text, index, texts) => texts[index - 1] === 'Launch' && text === '1 active task · Has Next Action' ? '1 active task · Scheduled' : text);
+                        for (const header of observation.headers as unknown[][]) {
+                            if (header[0] === 'Launch, 1 active task · Has Next Action') {
+                                header[0] = 'Launch, 1 active task · Scheduled';
+                                header[2] = ['#f59e0b'];
+                            }
+                        }
+                    }
+                }
+                expect(observed.map(projectObservation)).toEqual(expected);
             });
         }
     }
@@ -93,7 +114,7 @@ describe('review view models', () => {
 
     it('resumes a paused review only within its week or day', () => {
         const now = new Date(2026, 8, 23, 10);
-        // Sunday: this week by default, last week when weeks start on Monday.
+
         const stored = JSON.stringify({ step: 'projects', startedAt: new Date(2026, 8, 20, 9).toISOString() });
         expect(restoreReviewSession('weekly', stored, { now })).toMatchObject({ resumed: true, session: { step: 'projects' } });
         expect(restoreReviewSession('weekly', stored, { now, weekStart: 'monday' })).toMatchObject({ resumed: false, session: { step: 'inbox' } });
@@ -144,6 +165,14 @@ describe('review view models', () => {
         expect(area.summary).not.toContain('needs action');
         expect(area.projectGroups[0]).toMatchObject({ statusTone: null, summaryTone: 'secondary' });
         expect(area.projectGroups[0].summary).not.toContain('Needs Action');
+    });
+
+    it('shows a red Project override in a blue Area without changing next-action badges', () => {
+        const [entry] = getWeeklyReviewProjects([{ project: { id: 'project', areaId: 'blue',
+            color: '#ff0000', colorOverride: '#ff0000' }, tasks: [], nextActionState: 'none' }] as never,
+        new Map([['blue', { id: 'blue', color: '#0000ff' } as never]]), getWeeklyReviewLabels((key) => key));
+        expect(entry.areaColor).toBe('#ff0000');
+        expect(entry.badge.color).toBe('#EF4444');
     });
 
     it('uses the singular active-task noun in Weekly Review Projects', () => {

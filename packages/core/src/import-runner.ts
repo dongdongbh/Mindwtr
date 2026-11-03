@@ -1,7 +1,6 @@
-// Shell-side seam: the desktop and mobile data-transfer modules each repeated the same
-// addBreadcrumb -> logInfo(start) -> transaction -> logInfo(complete)/logError boilerplate once
-// per import source. This module owns that boilerplate once; each shell keeps only its own
-// boundaries object (storage/refresh/snapshot plumbing) and its own logInfo/logError module.
+
+
+
 import { prepareRestoredBackupDataForSync, validateBackupJson, type BackupValidation } from './backup-transfer';
 import {
     runDataTransferTransaction,
@@ -17,6 +16,7 @@ import {
 import { addBreadcrumb } from './log-breadcrumbs';
 import { createImportDiagnostics, type ImportDiagnostic } from './import-diagnostics';
 import type { ImportSourceInput } from './import-source-reader';
+import type { LocalAttachmentPresence } from './attachment-transfer';
 import {
     applyMindwtrCsvImport,
     parseMindwtrCsvImportSource,
@@ -45,6 +45,7 @@ import {
     type TodoistImportParseResult,
 } from './todoist-import';
 import type { AppData, Attachment } from './types';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
 
 export type ImportSourceId = 'backup' | 'backup-merge' | 'dgt' | 'mindwtr-csv' | 'omnifocus' | 'ticktick' | 'todoist';
 export type ImportPickerSourceId = Exclude<ImportSourceId, 'backup' | 'backup-merge'>;
@@ -78,6 +79,7 @@ export type DataTransferBoundaries = {
     persistData: (data: AppData) => Promise<void>;
     readCurrentData: () => Promise<AppData>;
     refreshData: () => Promise<void>;
+    getLocalAttachmentPresence?: (uri: string) => Promise<LocalAttachmentPresence>;
 };
 
 export type TransferLogInfo = (
@@ -94,9 +96,7 @@ export type ImportRunnerLog = {
     logInfo: TransferLogInfo;
 };
 
-// Maps each import source to its real parsed-input and applied-result types. The descriptor
-// table below is keyed off this so each entry's `apply`/`countExtra` is checked against the
-// actual importer signature instead of erasing to `unknown` and casting back per source.
+
 type ImportTypeMap = {
     backup: { parsed: AppData; result: AppData };
     'backup-merge': { parsed: AppData; result: MergeResult };
@@ -124,10 +124,7 @@ const toBackupCountExtra = (data: AppData): Record<string, string> => ({
     areas: String(data.areas.filter((area) => !area.deletedAt).length),
 });
 
-// The backup is user-supplied bytes, so its attachment paths get the same sanitizing the sync
-// merge applies (bad uri -> '', bad cloudKey/fileHash -> undefined; the record itself survives).
-// mergeAppDataWithStats normalizes incoming entities again downstream — this pins the shape at
-// the entry point so the guarantee does not depend on which importer consumes it.
+
 const filterAdditiveBackupAttachments = (
     incoming: Attachment[] | undefined,
     current: Attachment[] | undefined,
@@ -138,10 +135,7 @@ const filterAdditiveBackupAttachments = (
     );
 };
 
-// `resolvedUsingIncoming` counts every record the backup supplied, records this device had
-// never seen included, so the records that were genuinely *changed* are what's left once the
-// additions come out. Both shells report merge results through this, so the arithmetic can't
-// drift between desktop and mobile.
+
 export const summarizeBackupMerge = (result: MergeResult): { added: number; updated: number } => ({
     added: result.stats.tasks.incomingOnly,
     updated: Math.max(0, result.stats.tasks.resolvedUsingIncoming - result.stats.tasks.incomingOnly),
@@ -174,10 +168,8 @@ const IMPORT_DESCRIPTORS: { [S in ImportSourceId]: ImportDescriptor<S> } = {
         },
         countExtra: toBackupCountExtra,
     },
-    // Same file, opposite intent: restore replaces local data and deliberately outranks local
-    // tombstones (prepareRestoredBackupDataForSync stamps fresh revisions), while merge is
-    // additive. Incoming entity/attachment tombstones are ignored, local tombstones still
-    // participate in the ordinary merge, and live incoming records retain newer-wins semantics.
+
+
     'backup-merge': {
         operation: 'mergeBackup',
         source: 'backup-merge',
@@ -341,23 +333,31 @@ export function parseImportSource<S extends ImportSourceId>(
     } as ImportSourceParseResultMap[S];
 }
 
-/** Shared import policy for native hosts that persist a prepared document with an
- * atomic request receipt. This only computes the application; callers still own
- * the serialized write barrier, recovery snapshot, persistence and canonical reload.
- */
+
 export function applyImportSource<S extends ImportSourceId>(
     source: S,
     currentData: AppData,
     parsed: ImportTypeMap[S]['parsed'],
 ): DataTransferApplication<ImportTypeMap[S]['result']> {
-    return IMPORT_DESCRIPTORS[source].apply(currentData, parsed);
+    const applied = IMPORT_DESCRIPTORS[source].apply(currentData, parsed);
+    if (source === 'backup') return applied;
+    const tasksBefore = new Map(currentData.tasks.map((row) => [row.id, row]));
+    const projectsBefore = new Map(currentData.projects.map((row) => [row.id, row]));
+    const taskPairs = [];
+    for (const task of applied.data.tasks) {
+        const before = tasksBefore.get(task.id);
+        if (task !== before) taskPairs.push({ before, after: task });
+    }
+    const projectPairs = [];
+    for (const project of applied.data.projects) {
+        const before = projectsBefore.get(project.id);
+        if (project !== before) projectPairs.push({ before, after: project });
+    }
+    const settings = retainTaxonomyEffects(applied.data.settings, taskPairs, projectPairs);
+    return settings === applied.data.settings ? applied : { ...applied, data: { ...applied.data, settings } };
 }
 
-// Closing this on `source` (rather than two free type parameters the caller had to spell out)
-// lets `parsed`'s and the return value's types be inferred from the source id literal itself —
-// `ImportTypeMap[S]` is exact per source, so every cast this function used to need to bridge
-// "the caller's declared TParsed/TResult" against "whatever IMPORT_DESCRIPTORS[source] resolves
-// to at runtime" is now just a correct, unconditional type instead of an erasure.
+
 export async function runImport<S extends ImportSourceId>(
     source: S,
     parsed: ImportTypeMap[S]['parsed'],

@@ -17,8 +17,7 @@ import { CLOUD_PROVIDER_KEY, CLOUD_TOKEN_KEY, CLOUD_URL_KEY, SYNC_BACKEND_KEY } 
 import { createSyncEncryptionStateStore } from './sync-encryption-local-state';
 import type { AppData, Project, Task } from './types';
 
-// A command that lands while a sync cycle waits on the network, after its first local save,
-// must act on what that save wrote: the store must not lag the disk (D9b change 0).
+
 const require = createRequire(import.meta.url);
 type Database = { exec: (sql: string) => void; prepare: (sql: string) => {
     run: (...params: unknown[]) => unknown; all: (...params: unknown[]) => unknown[];
@@ -52,7 +51,7 @@ async function openStore(guarded: boolean, receipts = false, extraTasks: Task[] 
     const options = guarded ? { rejectConcurrentWrites: true } : {};
     const adapter = receipts ? new NativeReceiptSqliteAdapter(client, options) : new SqliteAdapter(client, options);
     setStorageAdapter(adapter);
-    // A load never drops rows the store holds (its partial-snapshot guard): start each database on an empty store.
+
     useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {} });
     await useTaskStore.getState().fetchData({ silent: true });
     return adapter;
@@ -106,7 +105,7 @@ function createHost(adapter: SqliteAdapter, remote: AppData, sliced = false) {
             subscribe: () => ({ remove: () => undefined }),
         },
         localData: { getData: () => adapter.getData(), saveData: (data: AppData) => adapter.saveData(data) },
-        // Native Android's sliced cycles (D9b): token-checked reads and saves, rows prepared before the gate.
+
         ...(sliced ? {
             sliceYield: async () => undefined,
             localData: {
@@ -202,7 +201,7 @@ describe.each([[false, false], [true, false], [true, true]])('a command during t
             await flushPendingSave();
             const after = (await adapter.getData()).settings;
             expect(after.theme).toBe('dark');
-            // The cycle ended on a stale exit after its remote write: the marker stays for the next cycle to settle.
+
             expect(after.pendingRemoteWriteAt).toBeTruthy();
         } finally {
             fake.releasePut();
@@ -218,7 +217,7 @@ describe.each([[false, false], [true, false], [true, true]])('a command during t
         let command: Promise<unknown> | null = null;
         fake.host.localData.saveData = async (data: AppData, options?: SaveOptions) => {
             await adapter.saveData(data, options);
-            // The commit has landed; the cycle has not published it yet.
+
             command ??= useTaskStore.getState().updateTask('shared', { status: 'done' });
         };
         const service = createMobileSyncService(fake.host);
@@ -240,7 +239,7 @@ describe.each([[false, false], [true, false], [true, true]])('a command during t
         const fake = createHost(adapter, winner(), sliced);
         fake.host.localData.saveData = async (data: AppData, options?: SaveOptions) => {
             await adapter.saveData(data, options);
-            // The rows are committed; the File Sync lease check that follows the save now fails.
+
             fake.lease.lost = true;
         };
         const service = createMobileSyncService(fake.host);
@@ -274,7 +273,7 @@ describe.each([[false, false], [true, false], [true, true]])('a command during t
             const rows = await read(...args);
             if (holdNextStoreRead) {
                 holdNextStoreRead = false;
-                // The load read the old rows; it publishes them only after this point.
+
                 await readHeld;
             }
             return rows;
@@ -303,7 +302,7 @@ describe.each([[false, false], [true, false], [true, true]])('a command during t
         let load: Promise<void> | null = null;
         let afterLoad: { title?: string; saved?: Task } = {};
         fake.put.mockImplementation(async () => {
-            // The remote write follows the save's release of the gate, before the cycle's own end-of-cycle load.
+
             await load;
             const title = useTaskStore.getState()._tasksById.get('shared')?.title;
             await useTaskStore.getState().updateTask('shared', { status: 'done' });
@@ -313,7 +312,7 @@ describe.each([[false, false], [true, false], [true, true]])('a command during t
         });
         fake.host.localData.saveData = async (data: AppData, options?: SaveOptions) => {
             await adapter.saveData(data, options);
-            // A reconciliation took this snapshot before the save; its load queues behind the save's hold of the gate.
+
             load ??= useTaskStore.getState().fetchData({ silent: true, preloadedData: old });
         };
         const service = createMobileSyncService(fake.host);
@@ -341,7 +340,7 @@ describe.each([[false, false], [true, false], [true, true]])('a command during t
         try {
             const cycle = runCycle(service);
             await inAttachments;
-            // A slow attachments phase (a backend choice waits behind it in Settings › Sync) holds no gate.
+
             const answered = await Promise.race([
                 useTaskStore.getState().updateSettings({ theme: 'dark' }).then(() => 'answered'),
                 new Promise((resolve) => setTimeout(() => resolve('blocked'), 500)),
@@ -363,7 +362,7 @@ describe.each([[false, false], [true, false], [true, true]])('a command during t
         const service = createMobileSyncService(fake.host);
         try {
             await runCycle(service);
-            // Nothing landed, so the store still shows the disk.
+
             expect(useTaskStore.getState()._tasksById.get('shared')?.title).toBe('old');
             expect(useTaskStore.getState().settings.pendingRemoteWriteAt).toBeUndefined();
         } finally {
@@ -391,7 +390,7 @@ describe('a native command during the sync save', () => {
         let command: Promise<unknown> | null = null;
         fake.host.localData.saveData = async (data: AppData) => {
             await adapter.saveData(data);
-            // The first save has committed the other device's star, inside the sync's hold of the gate.
+
             command ??= contract.setProjectFocus({ id: 'starred', focused: true, projectRevision: shown });
         };
         const service = createMobileSyncService(fake.host);
@@ -416,7 +415,7 @@ describe('a native command during the sync save', () => {
         fake.put.mockImplementation(async () => ({ fingerprint: 'remote-after-put' }));
         let command: Promise<unknown> | null = null;
         fake.host.localData.saveData = async () => {
-            // The command arrives while the sync save holds the gate; that save then fails before its commit.
+
             command ??= start(contract);
             throw new Error('disk full before commit');
         };
@@ -448,7 +447,7 @@ describe('a native command during the sync save', () => {
         expect(saved.tasks.find((row) => row.id === 'shared')?.title).toBe('winner');
     });
 
-    // A method outside the gate may still answer: its own body reads only the published store and writes none.
+
     const directStoreWrites = /receipts\.run\(|setState\(|readAreaDurableData|\.getData\(|\.saveData\(|flushPendingSave/;
     const storeActionsNamed = (body: string) => [...body.matchAll(/useTaskStore\.getState\(\)\.(\w+)\(/g)].map((match) => match[1]);
 
@@ -457,14 +456,14 @@ describe('a native command during the sync save', () => {
         const functions = Object.entries(contract).filter(([, value]) => typeof value === 'function');
         for (const [name, method] of functions) {
             if (isStoreCommand(method) || NATIVE_CONTRACT_UNGATED_METHODS.has(name)) continue;
-            // An ungated method answers synchronously: it never awaits, and it writes no receipt.
+
             expect(method.constructor.name, name).not.toBe('AsyncFunction');
             expect(/receipts\.run\(|await /.test(Function.prototype.toString.call(method)), name).toBe(false);
         }
         expect(isStoreCommand(contract.setProjectFocus)).toBe(true);
         expect(isStoreCommand(contract.updateTask)).toBe(true);
         expect(isStoreCommand(contract.setFocusGroupBy)).toBe(true);
-        // Add writes the subscriptions to settings; the heartbeat only sends a request.
+
         expect(isStoreCommand(contract.addCalendarFeed)).toBe(true);
         expect(isStoreCommand(contract.sendAboutHeartbeat)).toBe(false);
         expect(isStoreCommand(contract.syncNow)).toBe(false);
@@ -480,12 +479,12 @@ describe('a native command during the sync save', () => {
             expect(isStoreCommand(contract[name]), name).toBe(false);
             expect(directStoreWrites.test(body), name).toBe(false);
             for (const action of storeActionsNamed(body)) {
-                // A network read calls no store writer; the sync screen's writers are store commands.
+
                 if (NATIVE_CONTRACT_NETWORK_READS.has(name)) expect(STORE_NON_COMMAND_KEYS.has(action), `${name} calls ${action}`).toBe(true);
                 else expect(STORE_NON_COMMAND_KEYS.has(action) || isStoreCommand(store[action]), `${name} calls ${action}`).toBe(true);
             }
         }
-        // The sync screen writes the store through these actions and its receipts' saves, each gated on its own.
+
         expect(isStoreCommand(store.updateSettings)).toBe(true);
         expect(isStoreCommand(contract.setSyncPreference)).toBe(true);
     });
@@ -514,13 +513,12 @@ describe('a native command during the sync save', () => {
     });
 });
 
-// D9b W6 (design §3, §7): a sliced cycle builds its save rows and its store publish before the gate; the gate swaps the
-// publish in only onto the store it was built against, and the end-of-cycle refresh is dropped only when it changes nothing.
+
 describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () => {
     let now: { mockRestore: () => void } | null = null;
     beforeEach(() => {
         vi.useRealTimers();
-        // Every slice is due at once, so each pass yields at every point it may.
+
         let clock = 0;
         now = vi.spyOn(performance, 'now').mockImplementation(() => (clock += 10));
     });
@@ -531,7 +529,7 @@ describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () =
     });
 
     const other = task({ id: 'other', title: 'on disk' });
-    /** Runs [act] once, at the [nth] slice yield after the first save's rows were prepared. */
+
     const afterRowsPrepared = (fake: ReturnType<typeof createHost>, adapter: SqliteAdapter, nth: number, act: () => Promise<unknown> | unknown) => {
         let yieldsSincePrepared = -1;
         fake.host.localData.prepareSave = (data: AppData) => (function* () {
@@ -545,7 +543,7 @@ describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () =
             if (yieldsSincePrepared === nth) await act();
         };
     };
-    const published = (fake: ReturnType<typeof createHost>) => fake.logs.find((line) => line.message === 'Sync save published to the store')?.extra;
+    const published = (fake: ReturnType<typeof createHost>) => fake.logs.find((line) => line.message === 'Sync cycle ran in slices')?.extra;
 
     it('swaps in the prepared publish, and the store then equals disk', async () => {
         const adapter = await openStore(true, false, [other]);
@@ -586,18 +584,18 @@ describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () =
     });
 
     it('computes the publish in the gate when the store moved after the preparation without a new stamp or token', async () => {
-        // More rows than one slice holds, so the publish's preparation yields after it has taken the store's references.
+
         const filler = Array.from({ length: 80 }, (_, index) => task({ id: `filler-${index}`, title: `Filler ${index}` }));
         const adapter = await openStore(true, false, [other, ...filler]);
-        // The store shows a copy of 'other' that disk does not hold, at the same revision. A change during the
-        // preparation (as a load would make: no stamp, no write) shows disk's row again.
+
+
         const diskOther = useTaskStore.getState()._tasksById.get('other')!;
         const withOther = (row: Task) => (state: { _allTasks: Task[] }) => ({ _allTasks: state._allTasks.map((item) => (item.id === 'other' ? row : item)) });
         useTaskStore.setState(withOther({ ...diskOther, title: 'stale copy' }));
         const stamp = useTaskStore.getState().lastDataChangeAt;
         const fake = createHost(adapter, winner(), true);
         fake.put.mockImplementation(async () => ({ fingerprint: 'remote-after-put' }));
-        // The second yield after the rows: the publish's preparation has taken the store's references by then.
+
         afterRowsPrepared(fake, adapter, 2, () => useTaskStore.setState(withOther(diskOther)));
         const service = createMobileSyncService(fake.host);
         try {
@@ -612,10 +610,10 @@ describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () =
         }
     });
 
-    // fetchData keeps no row object across a recovery load and the normal load after it (store-settings.ts reuseEntities).
+
     it.each([false, true])('keeps the load-normalized rows after a recovery load, through a cycle and a later store save (sliced: %s)', async (sliced) => {
         const adapter = await openStore(true, false, [task({ id: 'raw', title: 'Raw row' })]);
-        // A row the load normalizes without a new revision (an invalid time spent), then a recovery load: the raw rows.
+
         await flushPendingSave();
         const disk = await adapter.getData();
         await adapter.saveData({ ...disk, tasks: disk.tasks.map((row) => (row.id === 'raw' ? { ...row, timeSpentMinutes: -5 } : row)) });
@@ -629,7 +627,7 @@ describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () =
         } finally {
             service.__mobileSyncTestUtils.reset();
         }
-        // A later store save writes every row the store shows.
+
         await useTaskStore.getState().updateSettings({ theme: 'dark' });
         await flushPendingSave();
         const saved = (await adapter.getData()).tasks.find((row) => row.id === 'raw');
@@ -637,8 +635,7 @@ describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () =
         expect(useTaskStore.getState()._tasksById.get('raw')?.timeSpentMinutes).toBeUndefined();
     });
 
-    // A task done long ago, which the load's auto-archive migration archives, written as an old client would (no
-    // pushCount, a legacy status casing), so it also needs normalizeTaskForLoad.
+
     const doneLongAgo = () => ({
         ...task({ id: 'done-old', title: 'Done long ago', rev: 1, revBy: 'other-device' }),
         status: 'done', completedAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString(), pushCount: undefined,
@@ -658,7 +655,7 @@ describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () =
         const refreshes = load.mock.calls.filter(([options]) => options?.preloadedData).length;
         load.mockRestore();
         const state = useTaskStore.getState();
-        // Each fresh store draws its own analytics id; the sync status times are the cycle's own.
+
         const { lastSyncAt: _at, lastSyncHistory: _history, lastSyncStats: _stats, analyticsProfileId: _id, ...settings } = state.settings;
         return {
             refreshes,

@@ -4,7 +4,7 @@ import Darwin
 import CryptoKit
 @testable import MindwtrNativeCore
 
-/// Real descriptors only. Observations have no Save or retirement authority.
+
 final class AttachmentBaselineObservationTests: XCTestCase {
     private typealias Observation = NativeAttachmentFiles.BaselineAttachmentObservation
     private enum Cancelled: Error { case stopped }
@@ -26,7 +26,7 @@ final class AttachmentBaselineObservationTests: XCTestCase {
         let directories = try object(files.directoriesJSON)
         documents = try XCTUnwrap(URL(string: XCTUnwrap(directories["document"] as? String)))
         cache = try XCTUnwrap(URL(string: XCTUnwrap(directories["cache"] as? String)))
-        // Leave attachments absent so a first observation can prove that state.
+
     }
     override func tearDownWithError() throws {
         files = nil
@@ -140,8 +140,8 @@ final class AttachmentBaselineObservationTests: XCTestCase {
             XCTAssertEqual(try files.snapshotBaselineAttachment(attachmentID: attachmentID, targetURI: uri), .unmanaged(targetURI: uri))
         }
         XCTAssertEqual(try token(fifo), fifoIdentity); XCTAssertEqual(try Data(contentsOf: external), bytes)
-        // A broken native-owned documents namespace must not cause target IO on
-        // a URI already classified as unmanaged by path/scheme alone.
+
+
         let held = root.appendingPathComponent("held-documents")
         try FileManager.default.moveItem(at: documents, to: held)
         defer { try? FileManager.default.moveItem(at: held, to: documents) }
@@ -161,8 +161,8 @@ final class AttachmentBaselineObservationTests: XCTestCase {
             }
         }
         let file = try target("é.txt"), identity = try token(file)
-        // APFS/Foundation may decompose a URL built from a filesystem name.
-        // Keep the incoming URI strings explicit to prove byte-based matching.
+
+
         let parent = files.managedRoot.absoluteString
         XCTAssertTrue(parent.hasSuffix("/"))
         let composedURI = parent + "%C3%A9.txt", decomposedURI = parent + "e%CC%81.txt"

@@ -21,8 +21,10 @@ import type {
     SyncRunResult,
     SyncRunStorage,
     SyncRunStoreBridge,
+    ActivationMissingAttachment,
 } from './sync-run-ports';
 import { SyncRemoteWriteConflict, type SyncFollowUpReason } from './sync-run-ports';
+import { parseUnreachableAttachments, pruneUnreachableAttachments, rememberUnreachableAttachments, type UnreachableAttachments } from './unreachable-attachments';
 import { LocalSyncAbort, captureInMemoryAppDataSnapshot, ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from './sync-client-helpers';
 import { hasFreshAttachmentCleanupWork } from './attachment-cleanup';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
@@ -30,6 +32,7 @@ import { createAttachmentTransferAdmission, isAttachmentUploadTooLargeError, isC
 import { isSyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import { isHostResponseTooLargeError } from './http-utils';
 import { flushPendingSave, useTaskStore } from './store';
+import { getStoreListenerCount } from './store-notify-profiler';
 import { markArchiveRetentionSyncCompleted } from './store-archive-retention';
 import {
     assertNoPendingAttachmentContentReplacements,
@@ -71,23 +74,10 @@ import {
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
 
-/**
- * ADR 0014 — the platform-independent sync cycle state machine.
- *
- * Owns the phase sequence both apps used to duplicate: flush → backend setup →
- * unchanged-skip checks → attachment pre-sync → core merge cycle → post-merge
- * attachments → periodic cleanup → fast-sync bookkeeping → refresh, plus the
- * LocalSyncAbort requeue and error/history shaping around it. Transport,
- * platform storage, and UI notification arrive through the ports in
- * `sync-run-ports.ts`. Behavior was transplanted from the desktop `SyncRun`
- * and `MobileSyncRun` implementations; deliberate platform divergences are
- * expressed as `SyncRunPolicy` switches and optional hooks, not re-decided here.
- */
 
 type RemoteWriteResultLike = Partial<RemoteJsonWriteResult & CloudJsonWriteResult>;
 
-/** Normalize a backend transport write result (ETag/Last-Modified headers or an
- *  explicit fingerprint) into the machine's remote-write outcome shape. */
+
 export const normalizeRemoteWriteResult = (
     source: 'cloud' | 'webdav',
     result: RemoteWriteResultLike | boolean | null | undefined,
@@ -115,48 +105,46 @@ type SharedSyncRunState = {
     fastSyncScope: string | null;
     localSnapshotChangeAt: number;
     localDataCache: { changeAt: number; data: AppData } | null;
-    /** Sliced cycles only (design D9b W3): the token of the local read this cycle's next save rests on. */
+
     localReadToken: SqliteReadToken | undefined;
-    /** `localDataCache.data` is byte-identical to the persisted document, so a
-     *  write of content-equal data can be skipped. False whenever the snapshot
-     *  was reconciled from the in-memory store, carries attachment pre-sync
-     *  patches, or the cycle has written since. */
+
+
     localSnapshotMatchesDisk: boolean;
     localDocumentFingerprint: { data: AppData; fingerprint: string } | null;
     fastSyncStateCache: { scope: string; value: FastSyncState | null } | null;
     preSyncedLocalData: AppData | null;
     wroteLocal: boolean;
-    /** Each store publish's wait for the write gate, in ms, and the step of the first: the cycle's one published line. */
+
     publishedGateWaitsMs: number[];
-    /** Sliced cycles: each save's time in the gate (ms), and whether its prepared store publish was swapped in. */
+
     publishedCommitMs: number[];
     publishedSwaps: ('prepared' | 'in-gate')[];
     publishedStep: string | null;
+
+    requeueReason: string | null;
     remoteDataForCompare: AppData | null;
-    /** The authoritative remote read repaired a legacy attachment shape and
-     *  must be rewritten even when its repaired view equals the merge output. */
+
+
     remoteLegacyAttachmentsChanged: boolean;
     readCheckRemoteData: AppData | undefined;
-    /** Set by `tryArmLocalOnlyUploadFastPath` once the remote is proven
-     *  unchanged since this device's last cycle: the document read is then
-     *  answered as "absent" so the merge normalizes local instead. */
+
+
     localOnlyUploadFingerprint: string | null;
     lastRemoteWriteFingerprint: string | null;
     lastRemoteWriteMergedServerData: boolean;
     webdavRemoteCorrupted: boolean;
     hadAttachmentWarning: boolean;
     fileAttachmentUploadBlocked: 'too-large' | null;
+
+    acceptedMissingAttachments: string[];
+    keptAttachmentNotFoundLogged: boolean;
+
+    locationScope: string | null;
 };
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-/** Stable digest of every attachment a document carries, keyed by owner id.
- *  The change fingerprint stops at the owner's revision tuple, so this is what
- *  covers the fields attachment merging actually arbitrates — `cloudKey`,
- *  `contentRev`, `fileHash`, `localStatus`, `pendingContentUpload`, the
- *  recorded stats — without naming them one by one (a list that rots the
- *  moment a new attachment field is added). Free for a document with no
- *  attachments, which is most of them. */
+
 const computeAttachmentIdentityDigest = (data: AppData): string => {
     const parts: string[] = [];
     const append = (items: readonly { id: string; attachments?: Attachment[] }[] | undefined): void => {
@@ -174,35 +162,17 @@ const computeAttachmentIdentityDigest = (data: AppData): string => {
     return parts.join('\n');
 };
 
-/**
- * The local document a previous cycle read and then concluded was unchanged,
- * carried into the next cycle so a run of idle cycles reads SQLite, clones the
- * store and stable-serializes the document once instead of every time (#766).
- *
- * The invariant it rests on: every write that changes the local document bumps
- * the store's `lastDataChangeAt` first — the same stamp `readLocalDataForSyncCycle`
- * and `ensureFreshLocalSyncSnapshot` already key on, and the one desktop's
- * local-data-watcher bumps when another process writes the database. Sync
- * status bookkeeping is deliberately exempt from that stamp and is exactly what
- * this snapshot must not be trusted for, which is why only cycles that skipped
- * (and therefore never wrote a document) publish one.
- *
- * ponytail: one retained AppData per process. Drop it to a fingerprint-only
- * cache if the retained copy ever shows up in a memory profile.
- */
+
 let idleCycleSnapshot: { scope: string; changeAt: number; data: AppData; fingerprint: string; token?: SqliteReadToken } | null = null;
 
-/** Hand the snapshot to the starting run and drop it: only a run that reaches
- *  an unchanged-skip publishes a new one, so any run that writes, errors or
- *  merges leaves the next cycle with nothing to reuse. */
+
 const takeIdleCycleSnapshot = (): typeof idleCycleSnapshot => {
     const carried = idleCycleSnapshot;
     idleCycleSnapshot = null;
     return carried;
 };
 
-/** Test seam: a store replaced wholesale (import, restore, sign-out) must not
- *  leave a stale document behind for the next cycle. */
+
 export const clearIdleSyncCycleSnapshot = (): void => {
     idleCycleSnapshot = null;
 };
@@ -266,9 +236,7 @@ const mergedContentMustReplaceCandidateBlob = (
 
 const normalizeAttachmentHash = (value?: string): string => value?.trim().toLowerCase() ?? '';
 
-/** A candidate winner may still have an identical managed copy on this device.
- *  Hash + content revision are the only cross-backend proof that those local
- *  bytes are safe to publish if the candidate object turns out to be missing. */
+
 const buildExactLocalActivationFallback = (
     merged: Attachment,
     local: Attachment | undefined,
@@ -315,8 +283,10 @@ const prepareActivationAttachmentSnapshot = (
     localFallbacks: Map<string, Attachment>;
     metadataOnlyIds: Set<string>;
     noLocalBytesIds: Set<string>;
-    /** The key each record carried before the trial cleared it, so a refusal can
-     *  still say which sync location the file lives on (#1151). */
+
+    noLocalFileIds: Set<string>;
+
+
     originalCloudKeys: Map<string, string>;
 } => {
     const candidateAttachments = new Map<string, Attachment>();
@@ -336,6 +306,7 @@ const prepareActivationAttachmentSnapshot = (
     const localFallbacks = new Map<string, Attachment>();
     const metadataOnlyIds = new Set<string>();
     const noLocalBytesIds = new Set<string>();
+    const noLocalFileIds = new Set<string>();
     const originalCloudKeys = new Map<string, string>();
     const count = visitLiveFileAttachments(candidate, (attachment) => {
         expectedIds.add(attachment.id);
@@ -343,12 +314,13 @@ const prepareActivationAttachmentSnapshot = (
         const localAttachment = localAttachments.get(attachment.id);
         const originalKey = candidateAttachment?.cloudKey || localAttachment?.cloudKey || attachment.cloudKey;
         if (originalKey) originalCloudKeys.set(attachment.id, originalKey);
-        // This device holds no bytes for the record (never had it, or already knew
-        // the file is missing) and cannot reach it on the previous backend either.
-        const noLocalBytes = !localAttachment?.cloudKey
-            && (!localAttachment || !localAttachment.uri?.trim() || localAttachment.localStatus === 'missing');
+
+
+        const noLocalFile = !localAttachment || !localAttachment.uri?.trim() || localAttachment.localStatus === 'missing';
+        if (noLocalFile) noLocalFileIds.add(attachment.id);
+        const noLocalBytes = noLocalFile && !localAttachment?.cloudKey;
         if (noLocalBytes) noLocalBytesIds.add(attachment.id);
-        // ...and the candidate has no blob for it: metadata only, nowhere to fetch from.
+
         if (noLocalBytes && !candidateAttachment?.cloudKey) metadataOnlyIds.add(attachment.id);
         const mustReplaceCandidateBlob = Boolean(
             candidateAttachment?.cloudKey
@@ -362,31 +334,26 @@ const prepareActivationAttachmentSnapshot = (
             );
             if (fallback) localFallbacks.set(attachment.id, fallback);
         }
-        // Only a key read from the candidate destination belongs to that
-        // destination. A local/previous-backend key is cleared so the adapter
-        // creates the missing candidate blob; a candidate key is preserved so
-        // stale local bytes can never replace an already-present remote winner.
-        // If the merged content identity instead came from the local snapshot,
-        // retain that destination key but explicitly require the adapter to
-        // replace its older blob before publishing the merged metadata.
+
+
         attachment.cloudKey = candidateAttachment?.cloudKey;
         attachment.pendingContentUpload = mustReplaceCandidateBlob ? true : undefined;
-        // A candidate-remote winner must be downloaded even when an unrelated
-        // local file exists at the merged uri. Clearing only this temporary clone's
-        // uri makes successful download the proof and prevents localStatus alone
-        // from turning a missing candidate object into a false positive.
+
+
         if (candidateAttachment?.cloudKey && !mustReplaceCandidateBlob) {
             attachment.uri = '';
         }
         attachment.localStatus = 'missing';
     });
-    return { data: candidate, count, expectedIds, localFallbacks, metadataOnlyIds, noLocalBytesIds, originalCloudKeys };
+    return { data: candidate, count, expectedIds, localFallbacks, metadataOnlyIds, noLocalBytesIds, noLocalFileIds, originalCloudKeys };
 };
 
 const prepareActivationFallbackRetry = (
     data: AppData,
     localFallbacks: ReadonlyMap<string, Attachment>,
     consumedFallbackIds: Set<string> = new Set<string>(),
+
+    includeLiveMissing = false,
 ): { data: AppData; count: number } => {
     if (localFallbacks.size === 0) return { data, count: 0 };
     const retryData = cloneAppData(data);
@@ -394,14 +361,16 @@ const prepareActivationFallbackRetry = (
     for (const owner of [...retryData.tasks, ...retryData.projects]) {
         if (owner.deletedAt) continue;
         for (const attachment of owner.attachments ?? []) {
-            if (attachment.kind !== 'file' || !attachment.deletedAt) continue;
+            if (attachment.kind !== 'file') continue;
+
+            const failed = Boolean(attachment.deletedAt)
+                || (includeLiveMissing && Boolean(attachment.cloudKey) && attachment.localStatus === 'missing');
+            if (!failed) continue;
             if (consumedFallbackIds.has(attachment.id)) continue;
             const fallback = localFallbacks.get(attachment.id);
             if (!fallback) continue;
-            // The adapter exposes both remote 404 and local-read failure as an
-            // untyped tombstone. Restore only the pre-proven local identity and
-            // give the adapter one bounded upload attempt; final proof below
-            // rejects any tombstone that survives this retry.
+
+
             Object.assign(attachment, fallback);
             consumedFallbackIds.add(attachment.id);
             count += 1;
@@ -417,17 +386,47 @@ const clipTitle = (value: string | undefined, max = 60): string => {
     return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 };
 
-/**
- * An attachment the activation could not prove. Its message (what logs, the sync status and its history keep) names the
- * attachment and its owner by ID only; `displayMessage`, which only the activation's answer to the screen carries, names the
- * file and its owner as well and says why (#1151: a UUID alone sent a reporter to curl and jq against /v1/data).
- */
+
 export class ActivationAttachmentProofError extends Error {
     constructor(message: string, readonly displayMessage: string) {
         super(message);
         this.name = 'ActivationAttachmentProofError';
     }
 }
+
+
+export class ActivationMissingAttachmentsError extends ActivationAttachmentProofError {
+    constructor(readonly attachments: ActivationMissingAttachment[]) {
+        const ids = attachments.map((attachment) => attachment.id).join(', ');
+        const names = attachments
+            .map((attachment) => `"${clipTitle(attachment.title) || attachment.id}"${attachment.ownerTitle ? ` on ${attachment.ownerType} "${clipTitle(attachment.ownerTitle)}"` : ''}`)
+            .join(', ');
+        const reason = 'the file is on neither this device nor the new sync location';
+        super(`Candidate attachment proof failed for ${ids}: ${reason}`, `Candidate attachment proof failed for ${names}: ${reason}`);
+        this.name = 'ActivationMissingAttachmentsError';
+    }
+}
+
+
+const sameAttachmentOwners = (data: AppData, next: AppData): boolean => {
+    const same = <T>(left: T, right: T) => left === right || JSON.stringify(left) === JSON.stringify(right);
+    const sameList = <T>(left: T[], right: T[]) => left === right
+        || (left.length === right.length && left.every((item, index) => same(item, right[index])));
+    return sameList(data.tasks, next.tasks) && sameList(data.projects, next.projects) && same(data.settings, next.settings);
+};
+
+const replaceAttachments = (
+    data: AppData,
+    ids: ReadonlySet<string>,
+    replace: (attachment: Attachment) => Attachment,
+): AppData => {
+    const patchOwner = <T extends { attachments?: Attachment[] }>(owner: T): T => (
+        owner.attachments?.some((attachment) => ids.has(attachment.id))
+            ? { ...owner, attachments: owner.attachments.map((attachment) => (ids.has(attachment.id) ? replace(attachment) : attachment)) }
+            : owner
+    );
+    return { ...data, tasks: data.tasks.map(patchOwner), projects: data.projects.map(patchOwner) };
+};
 
 const describeUnprovenAttachment = (
     ownerType: 'task' | 'project',
@@ -465,15 +464,13 @@ const classifyActivationAttachmentProof = (
     noLocalBytesIds: ReadonlySet<string>,
     backend: SyncBackend,
 ): ActivationAttachmentProof => {
-    // Adapters expose a terminal remote 404 and a local-read failure as the
-    // same untyped tombstone. Without local bytes there is nothing to misread,
-    // so the tombstone is the convergent remote outcome (#1119). A local-copy
-    // tombstone stays unproven and gets at most one exact fallback below.
+
+
     if (ownerDeleted || Boolean(attachment.deletedAt)) {
         return noLocalBytesIds.has(attachment.id) ? 'proven' : 'unproven';
     }
-    // A metadata-only record with no bytes anywhere converges to this shape on
-    // an established device too; accepting it cannot strand a recoverable blob.
+
+
     if (
         metadataOnlyIds.has(attachment.id)
         && !attachment.cloudKey
@@ -498,8 +495,7 @@ const classifyActivationAttachmentProof = (
         : 'unproven';
 };
 
-/** Count only states the final activation assertion accepts as proved. This is
- * intentionally insensitive to unrelated attachment metadata churn. */
+
 const countActivationAttachmentProofs = (
     data: AppData,
     expectedIds: ReadonlySet<string>,
@@ -535,9 +531,13 @@ const assertActivationAttachmentsProven = (
     noLocalBytesIds: ReadonlySet<string>,
     backend: SyncBackend,
     originalCloudKeys: ReadonlyMap<string, string>,
-): string[] => {
+    noLocalFileIds: ReadonlySet<string>,
+
+    acceptedMissingIds: ReadonlySet<string> | null,
+): { deferred: string[]; missing: string[] } => {
     const resolved = new Set<string>();
     const deferred: string[] = [];
+    const missing: ActivationMissingAttachment[] = [];
     const owners: Array<['task' | 'project', { id?: string; title?: string; deletedAt?: string; attachments?: Attachment[] }]> = [
         ...data.tasks.map((task) => ['task', task] as ['task', typeof task]),
         ...data.projects.map((project) => ['project', project] as ['project', typeof project]),
@@ -545,8 +545,8 @@ const assertActivationAttachmentsProven = (
     for (const [ownerType, owner] of owners) {
         for (const attachment of owner.attachments ?? []) {
             if (attachment.kind !== 'file') continue;
-            // Pre-existing tombstones were never part of the live activation
-            // snapshot and must not become a new activation refusal.
+
+
             if ((owner.deletedAt || attachment.deletedAt) && !expectedIds.has(attachment.id)) {
                 continue;
             }
@@ -561,26 +561,44 @@ const assertActivationAttachmentsProven = (
                 if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
                 continue;
             }
-            // File Sync: a blob the folder does not hold yet is not a verdict. A
-            // replicator (Syncthing, a mounted drive) can deliver it after the
-            // switch, and this device holds no bytes that waiting could lose. Keep
-            // the key, leave the record missing for a later cycle to download,
-            // instead of refusing the folder forever (a fresh desktop joining a
-            // folder whose attachments/ had not arrived, 2026-09-04 feedback).
+
+
             if (proof === 'deferred') {
                 deferred.push(attachment.id);
                 if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
                 continue;
             }
+
+
+            if (
+                acceptedMissingIds
+                && !owner.deletedAt
+                && expectedIds.has(attachment.id)
+                && noLocalFileIds.has(attachment.id)
+                && (Boolean(attachment.deletedAt) || !attachment.cloudKey)
+            ) {
+                missing.push({
+                    id: attachment.id,
+                    ownerType,
+                    ownerId: owner.id ?? '',
+                    title: attachment.title ?? '',
+                    ownerTitle: owner.title ?? '',
+                });
+                resolved.add(attachment.id);
+                continue;
+            }
             throw describeUnprovenAttachment(ownerType, owner, attachment, backend, originalCloudKeys.get(attachment.id));
         }
     }
-    // An expected attachment that vanished without a tombstone is a silent drop
-    // and still refuses the activation.
+
+
     if (resolved.size !== expectedIds.size) {
         throw new Error(`Candidate attachment proof incomplete: expected ${expectedIds.size}, proved ${resolved.size}`);
     }
-    return deferred;
+    if (missing.some((attachment) => !acceptedMissingIds?.has(attachment.id))) {
+        throw new ActivationMissingAttachmentsError(missing);
+    }
+    return { deferred, missing: missing.map((attachment) => attachment.id) };
 };
 
 class SharedSyncRunMachine {
@@ -596,9 +614,9 @@ class SharedSyncRunMachine {
     private io: SyncBackendIO | null = null;
     private remoteMutationFence: SyncRemoteMutationFenceLease | null = null;
     private carriedIdleSnapshot = takeIdleCycleSnapshot();
-    /** A host that binds sliceYield (cooperative.ts) gets this run's long passes in slices; every other host at once. */
+
     private readonly slicer: Slicer | undefined;
-    // One run is one cycle: every attachment phase of it shares this admission (design D9b W7).
+
     private readonly transferAdmission = createAttachmentTransferAdmission((attachment, direction) => {
         this.notifier.logInfo('Attachment transfer already started this cycle; skipped', {
             attachmentId: attachment.id,
@@ -606,7 +624,7 @@ class SharedSyncRunMachine {
             releaseCheck: 'v1.3.7/attachment-download-reuse',
         });
     });
-    /** Design D9b §3: a sliced cycle's saves are token-checked, and an abort writes nothing (W1). Set only by sliceYield. */
+
     private readonly slicedCycle: boolean;
     private readonly state: SharedSyncRunState = {
         backend: 'off',
@@ -625,6 +643,7 @@ class SharedSyncRunMachine {
         publishedCommitMs: [],
         publishedSwaps: [],
         publishedStep: null,
+        requeueReason: null,
         remoteDataForCompare: null,
         remoteLegacyAttachmentsChanged: false,
         readCheckRemoteData: undefined,
@@ -634,6 +653,9 @@ class SharedSyncRunMachine {
         webdavRemoteCorrupted: false,
         hadAttachmentWarning: false,
         fileAttachmentUploadBlocked: null,
+        acceptedMissingAttachments: [],
+        keptAttachmentNotFoundLogged: false,
+        locationScope: null,
     };
 
     constructor(ports: SyncRunPorts) {
@@ -651,7 +673,7 @@ class SharedSyncRunMachine {
         this.slicedCycle = this.slicer !== undefined;
     }
 
-    /** A sliced cycle's read or save met another write to the database: requeue quietly (design D9b W4). */
+
     private staleDatabase(): Error {
         this.requestFollowUp('stale-db');
         return new LocalSyncAbort('stale-db');
@@ -672,9 +694,10 @@ class SharedSyncRunMachine {
                 result = await this.handleRunError(error);
             }
         } finally {
-            // A refused native cleanup quarantines the cycle: nothing more is logged or written.
+
             if (!cleanupUnconfirmed) this.logSavesPublished();
-            // A retained native cleanup owner forbids another remote request; the lease expires naturally.
+            if (!cleanupUnconfirmed) this.logSlices();
+
             if (!cleanupUnconfirmed) cleanupRetryAfterMs = await this.releaseRemoteMutationFence();
         }
         if (cleanupRetryAfterMs !== null) {
@@ -703,14 +726,14 @@ class SharedSyncRunMachine {
             setBackend: (backend) => { this.state.backend = backend; },
         });
         if (setup.kind === 'disabled') {
-            // Callers must be able to tell "nothing to do, sync is off" from a
-            // completed sync — a manual "Sync now" with sync off must not toast
-            // "Sync completed" (#1001).
+
+
             return { success: true, skipped: 'disabled' };
         }
         this.state.backend = setup.backend;
         this.state.cloudProvider = setup.cloudProvider ?? 'selfhosted';
         this.state.fastSyncScope = setup.fastSyncScope;
+        this.state.locationScope = setup.locationScope ?? null;
         this.io = setup.io;
 
         if (this.policy.preSyncAttachmentsBeforeFastCheck) {
@@ -734,7 +757,7 @@ class SharedSyncRunMachine {
             }
             result = await this.runMergePhase();
         }
-        // Only a merged or confirmed-unchanged remote lets archive retention run (R-2).
+
         if (!this.options.activationProbe && (!result.skipped || result.skipped === 'unchanged')) {
             markArchiveRetentionSyncCompleted();
         }
@@ -769,9 +792,7 @@ class SharedSyncRunMachine {
         await this.hooks.ensureNetworkStillAvailable?.();
     }
 
-    /** Lazily acquire only when a run is about to enter a mutation-capable
-     *  path. A read-check performed before acquisition is advisory only: once
-     *  the fence is held, discard it and take the authoritative read again. */
+
     private async ensureRemoteMutationFence(): Promise<void> {
         if (this.remoteMutationFence) {
             await this.runRemoteMutationFenceOperation(
@@ -833,10 +854,8 @@ class SharedSyncRunMachine {
             await lease.release();
             return null;
         } catch (error) {
-            // Release is conditional, so an error can never justify deleting
-            // whatever generation is now present. A crashed lease is bounded
-            // by its server-time expiry; request a later retry and surface the
-            // delayed availability without rewriting an otherwise valid run.
+
+
             this.notifier.logWarning('Failed to release remote sync mutation fence', error);
             const retryAfterMs = lease.retryAfterMs();
             this.requestFollowUpAfter(retryAfterMs, 'remote-fence-release');
@@ -848,7 +867,7 @@ class SharedSyncRunMachine {
         try {
             this.notifier.onDiagnostic?.({ event: 'follow-up-requested', followUpReason: reason,
                 data, previousData, extra: { step: this.state.step } });
-        } catch { /* Diagnostics must not change queue decisions. */ }
+        } catch {                                                    }
     }
 
     private requestFollowUp(reason: SyncFollowUpReason, data?: AppData, previousData?: AppData | null): void {
@@ -875,12 +894,8 @@ class SharedSyncRunMachine {
     ) {
         return {
             ensureLocalSnapshotFresh: () => this.ensureLocalSnapshotFresh(),
-            // Acquire-on-first-use, not acquire-on-entry. Every attachment
-            // backend calls this immediately before each remote mutation, so
-            // the fence is still held before anything is written; a pass that
-            // turns out to have nothing to upload or delete — the steady state
-            // for anyone who owns an attachment — now issues no fence PUT and
-            // no fence DELETE at all.
+
+
             assertRemoteMutationFenceHeld: (minRemainingMs?: number) => (
                 this.acquireAndAssertRemoteMutationFence(minRemainingMs)
             ),
@@ -928,9 +943,7 @@ class SharedSyncRunMachine {
         );
     }
 
-    /** Local snapshot for this cycle: persisted data (or the attachment
-     *  pre-sync result) reconciled with the in-memory store, calendars
-     *  injected, cached until the store's change stamp moves. */
+
     private async readLocalDataForSyncCycle(): Promise<AppData> {
         const currentChangeAt = this.store.getLastDataChangeAt();
         if (this.state.localDataCache && this.state.localDataCache.changeAt === currentChangeAt) {
@@ -944,10 +957,8 @@ class SharedSyncRunMachine {
             && carried.changeAt === currentChangeAt
             && !this.state.preSyncedLocalData
             && !this.options.activationProbe
-            // Proof that the carried document describes THIS location's disk and
-            // not some other store that happened to share a scope and a change
-            // stamp: the cycle that published it wrote the same fingerprint into
-            // the durable fast-sync record that lives beside the data.
+
+
             && (await this.readFastSyncState(carried.scope))?.localFingerprint === carried.fingerprint
         ) {
             this.state.localSnapshotChangeAt = currentChangeAt;
@@ -962,28 +973,13 @@ class SharedSyncRunMachine {
             });
             return carried.data;
         }
-        // Sliced (a host that binds sliceYield): the store's lists are taken in this turn, with the stamp read above, then
-        // copied a few records at a time.
+
+
         const inMemorySnapshot = this.slicer && this.store.captureInMemorySnapshot
             ? await runSliced('sync:storeSnapshot', cloneAppDataPass(this.store.captureInMemorySnapshot()), this.slicer)
             : traceSection('sync:storeSnapshot', () => this.store.getInMemorySnapshot());
-        // The persisted-vs-in-memory reconcile is a full-library merge — the
-        // single most expensive step of an idle cycle at whale scale — and after
-        // the flush at cycle start the two sides are almost always identical.
-        // When the change fingerprint (per-entity id|rev|revBy|updatedAt|
-        // deletedAt|purgedAt + sanitized settings) matches, use the persisted
-        // side directly, NOT the in-memory snapshot: persisted is the previous
-        // cycle's merge output, so its byte shape matches the recorded
-        // fast-sync localFingerprint — the raw store snapshot has no such
-        // guarantee on platforms without applyDataToStore, and handing it back
-        // would make the fast-check miss forever. Content diverging at
-        // identical revision metadata is deferred to the next changed cycle,
-        // the same trust reconcileEntityCollection already places in this
-        // tuple (#766). The attachment pre-sync branch cannot use the change
-        // fingerprint alone: its patches change fields that tuple does not
-        // cover (cloudKey, localStatus, contentRev), so it pairs the
-        // fingerprint with a digest of every attachment on both sides and
-        // merges whenever either differs.
+
+
         let baseData: AppData;
         let matchesDisk = false;
         if (this.state.preSyncedLocalData) {
@@ -991,11 +987,8 @@ class SharedSyncRunMachine {
             const reconcileStart = Date.now();
             const aligned = computeSyncChangeFingerprint(preSynced) === computeSyncChangeFingerprint(inMemorySnapshot)
                 && computeAttachmentIdentityDigest(preSynced) === computeAttachmentIdentityDigest(inMemorySnapshot);
-            // The pre-synced side carries this cycle's attachment patches, so it
-            // is the side that must survive — exactly as `persisted` is below.
-            // The device-local AI fields are the exception: neither the merge nor
-            // the change fingerprint sees them, so an endpoint edited during this
-            // cycle would be put back to the value read at cycle start.
+
+
             baseData = restoreDeviceLocalAiSettings(
                 aligned ? preSynced : mergeAppData(preSynced, inMemorySnapshot),
                 inMemorySnapshot,
@@ -1006,7 +999,7 @@ class SharedSyncRunMachine {
                 tasks: String(baseData.tasks.length),
             });
         } else {
-            // Sliced: pending store saves land before the read, so the flush inside the save's gate cannot void its token.
+
             if (this.slicedCycle) await this.store.flushPendingSave();
             const persisted = await traceSectionAsync('sync:readPersisted', () => (this.slicedCycle
                 ? this.storage.readPersistedLocal({ onStale: () => this.staleDatabase() })
@@ -1020,11 +1013,11 @@ class SharedSyncRunMachine {
                 : traceSection('sync:reconcileCheck', () => computeSyncChangeFingerprint(persisted) === computeSyncChangeFingerprint(inMemorySnapshot));
             const reconciled = aligned ? persisted : traceSection('sync:reconcileMerge', () => mergeAppData(persisted, inMemorySnapshot));
             baseData = restoreDeviceLocalAiSettings(reconciled, inMemorySnapshot);
-            // A restored endpoint means this snapshot holds content the disk copy
-            // does not, so it can no longer stand in for the disk document.
+
+
             matchesDisk = aligned && baseData === reconciled;
-            // One line per cycle so a diagnostics log shows whether whale-scale
-            // cycles take the cheap aligned path and what a miss costs (#766).
+
+
             this.notifier.logInfo('Sync local reconcile', {
                 reconcile: aligned ? 'aligned-skip' : 'merged',
                 durationMs: String(Date.now() - reconcileStart),
@@ -1034,38 +1027,29 @@ class SharedSyncRunMachine {
         const data = this.options.activationProbe
             ? baseData
             : await this.storage.injectExternalCalendars(baseData);
-        // Stamp with currentChangeAt (captured above, before readPersistedLocal/
-        // injectExternalCalendars yielded) rather than re-reading the change
-        // stamp now: a write landing during those awaits must never be marked
-        // as already covered by `data`, or a later local edit racing the very
-        // first read of a sync cycle is silently dropped instead of requeued (#910).
+
+
         this.state.localSnapshotChangeAt = currentChangeAt;
         this.state.localDataCache = {
             changeAt: currentChangeAt,
             data,
         };
-        // Only the untouched persisted document is a valid baseline for the
-        // unchanged-local-write guard: a reconciled or calendar-injected
-        // snapshot holds content the disk does not.
+
+
         this.state.localSnapshotMatchesDisk = matchesDisk && data === baseData;
         return data;
     }
 
-    /**
-     * One local save and its store publish, inside the store write gate (store-write-gate.ts): no command
-     * runs from the freshness check through the commit. A commit always reaches the store, before any check
-     * after the save can end the cycle. A save that fails publishes nothing: the store still matches the disk.
-     * [data] is a builder when the document must be read from the store inside the gate.
-     */
+
     private async persistLocalDataWithTracking(data: AppData | (() => AppData)): Promise<AppData> {
         if (this.slicedCycle && !this.state.localReadToken) {
-            // Fail closed, as an error and never a requeue: a host that loses the token shows as a failed sync, not a loop.
+
             this.notifier.logWarning('Sliced sync save refused: no read token');
             throw new Error('Sliced sync save refused: no read token');
         }
         await this.assertRemoteMutationFenceHeld();
-        // Design D9b §2, W6: a sliced cycle builds the save's rows and the store publish in slices before the gate, so
-        // the gate holds only the save's transaction and the swap. Each is keyed to this document; the gate checks it.
+
+
         let prepared: PreparedStorePublish | undefined;
         if (this.slicer && typeof data !== 'function') {
             const rows = this.storage.prepareLocalSave?.(data);
@@ -1076,23 +1060,23 @@ class SharedSyncRunMachine {
         }
         return runSyncStoreSave(async (gateWaitMs) => {
             const heldAt = Date.now();
-            // From the gate to the publish, in one turn on the native host (its SQLite calls settle in the turn).
+
             const { persisted, staleDuringSave } = await traceSectionAsync('sync:commitPublish', async () => {
-                // Pending store saves land first; a command they carry moved the change stamp, which the
-                // check below turns into a requeue before anything of this cycle is written.
+
+
                 await this.store.flushPendingSave();
                 const next = typeof data === 'function' ? data() : data;
                 this.ensureLocalSnapshotFresh(next);
                 const committed = await traceSectionAsync('sync:saveData', () => (this.slicedCycle
                     ? this.storage.persistLocal(next, { token: this.state.localReadToken, onStale: () => this.staleDatabase() })
                     : this.storage.persistLocal(next))) ?? next;
-                // The committed save's successor token authorizes only this cycle's next save.
+
                 if (this.slicedCycle) this.state.localReadToken = this.storage.readTokenOf?.(next);
-                // Disk has moved past the snapshot this cycle read, so it is no longer
-                // a baseline for the unchanged-write guard.
+
+
                 this.state.localSnapshotMatchesDisk = false;
-                // Behind the gate only an ungated writer can move the stamp during the save. The committed
-                // document is published anyway, so the store matches the disk; then the cycle requeues.
+
+
                 let stale: unknown = null;
                 try { this.ensureLocalSnapshotFresh(committed); } catch (error) { stale = error; }
                 this.publishToStore(committed, gateWaitMs, prepared);
@@ -1122,26 +1106,38 @@ class SharedSyncRunMachine {
         this.state.publishedGateWaitsMs.push(gateWaitMs);
     }
 
-    /** Once per cycle that published a save, when it ends: every save's gate wait, so none is lost to a later save. */
+
     private logSavesPublished(): void {
         if (this.state.publishedStep === null) return;
         this.notifier.logInfo('Sync save published to the store', {
             backend: this.backend,
             step: this.state.publishedStep,
             gateWaitMs: this.state.publishedGateWaitsMs.join(','),
-            // Sliced cycles only (D9b W6): each save's time in the gate, and whether its prepared publish was swapped in.
-            ...(this.slicedCycle ? {
-                commitPublishMs: this.state.publishedCommitMs.join(','),
-                storePublish: this.state.publishedSwaps.join(','),
-            } : {}),
             releaseCheck: 'v1.3.7/sync-write-gate',
+        });
+    }
+
+
+    private logSlices(): void {
+        if (!this.slicer) return;
+        const { slices, longestMs } = this.slicer.stats();
+        this.notifier.logInfo('Sync cycle ran in slices', {
+            backend: this.backend,
+            slices: String(slices),
+            longestSliceMs: String(Math.round(longestMs)),
+            gateWaitMs: this.state.publishedGateWaitsMs.join(',') || '-',
+            commitPublishMs: this.state.publishedCommitMs.join(',') || '-',
+            storePublish: this.state.publishedSwaps.join(',') || '-',
+            storeListeners: String(this.store.listenerCount?.() ?? '-'),
+            requeue: this.state.requeueReason ?? 'none',
+            releaseCheck: 'v1.3.7/native-sync-slices',
         });
     }
 
     private async persistPreSyncedDataAfterAbort(): Promise<void> {
         const preSynced = this.state.preSyncedLocalData;
         if (!preSynced || this.state.wroteLocal) return;
-        // Built inside the gate: the store it merges with is the one the save lands on.
+
         await this.persistLocalDataWithTracking(() => {
             this.state.localSnapshotChangeAt = this.store.getLastDataChangeAt();
             const inMemorySnapshot = this.store.getInMemorySnapshot();
@@ -1160,11 +1156,8 @@ class SharedSyncRunMachine {
             return data;
         }
         if (this.state.localOnlyUploadFingerprint) {
-            // The remote is proven identical to the document this device last
-            // synced, and local already holds it. Answering "absent" makes the
-            // merge phase a normalize-only pass over local; `remoteDataForCompare`
-            // stays null so the write's unchanged-guard cannot skip the upload
-            // this cycle exists for. See `tryArmLocalOnlyUploadFastPath`.
+
+
             this.state.remoteDataForCompare = null;
             this.state.remoteLegacyAttachmentsChanged = false;
             return null;
@@ -1172,9 +1165,8 @@ class SharedSyncRunMachine {
         await this.ensureNetwork();
         try {
             const raw = await this.requireIo().readRemote();
-            // A genuinely absent remote stays merge-neutral. Every document
-            // otherwise enters through the shared validation/normalization
-            // seam before code that assumes all AppData arrays are present.
+
+
             const parsed = raw == null ? null : traceSection('sync:parseRemote', () => parseSyncDocument(raw, 'remote'));
             this.state.remoteLegacyAttachmentsChanged = parsed?.ok === true
                 && parsed.legacyAttachmentsChanged === true;
@@ -1206,24 +1198,15 @@ class SharedSyncRunMachine {
         return io.readRemoteFingerprint();
     }
 
-    /**
-     * Development-only backstop for the local-only upload fast path, at the one
-     * place the document leaves for the wire. The fast path skips the
-     * empty-remote merge on the strength of one invariant — every local read is
-     * canonical, so `mergeAppData(local, {})` is the identity — and this is
-     * where a write path that broke it gets caught, before the non-canonical
-     * bytes reach a remote. Production pays nothing: the check costs two full
-     * serializations of the document.
-     */
+
     private assertLocalOnlyUploadIsCanonical(data: AppData): void {
         if (!this.state.localOnlyUploadFingerprint) return;
-        // Unlike the cheap store write contract, this full-document check must
-        // default to inert when a bundle does not define a process global.
+
+
         const isDevelopment = typeof process !== 'undefined' && process.env?.NODE_ENV === 'development';
         if (!isDevelopment) return;
-        // The same empty document the real cycle merges against (sync.ts parses
-        // an absent remote through parseSyncDocument), so the comparison is
-        // byte-exact against what production does.
+
+
         const parsedEmpty = parseSyncDocument({}, 'remote');
         const emptyRemote: AppData = parsedEmpty.ok
             ? parsedEmpty.data
@@ -1249,10 +1232,8 @@ class SharedSyncRunMachine {
         state.lastRemoteWriteMergedServerData = false;
         const pending = findPendingAttachmentUploads(data);
         if (this.backend === 'cloudkit') {
-            // CloudKit keeps local-only file attachments; other backends refuse
-            // to publish metadata whose bytes have not been uploaded (P8). A
-            // replacement for an existing blob is different: publishing its new
-            // hash/revision before the bytes land would expose stale content.
+
+
             this.logPendingAttachmentUploads('CloudKit sync has local-only file attachments', 'cloudkit-write', pending);
             assertNoPendingAttachmentContentReplacements(data);
         } else {
@@ -1269,7 +1250,7 @@ class SharedSyncRunMachine {
             && !remoteNeedsTombstoneCompaction
             && !state.remoteLegacyAttachmentsChanged
             && this.requireIo().requiresRemoteRepair?.() !== true
-            // areRemoteSyncDocumentsEqual over the two remote documents, through the memoized stable JSON.
+
             && (await this.stableDocument(previousRemoteData)).json === (await this.stableDocument(data)).json) {
             if (this.backend !== 'cloudkit') {
                 this.notifier.tracePayload?.('remote-write-skipped-unchanged', remoteDocument, { backend: this.backend });
@@ -1288,7 +1269,7 @@ class SharedSyncRunMachine {
             );
         } catch (error) {
             if (error instanceof SyncRemoteWriteConflict) {
-                // Another device wrote between readRemote and writeRemote; retry next cycle.
+
                 this.requestFollowUp('remote-conflict');
                 throw new LocalSyncAbort('remote-write-conflict', error.message);
             }
@@ -1342,13 +1323,13 @@ class SharedSyncRunMachine {
                 operation: 'attachment-cleanup',
                 outcome: 'required',
             });
-        } catch { /* Diagnostics must not suppress required cleanup. */ }
+        } catch {                                                       }
         return true;
     }
 
     private async trySkipUnchangedFastSync(): Promise<SyncRunResult | null> {
-        // User-initiated sync: never trust the cached fingerprint pair, so a
-        // stale cached fingerprint can't hide remote data.
+
+
         if (this.options.manual) return null;
         const scope = this.state.fastSyncScope;
         if (!scope) return null;
@@ -1372,8 +1353,7 @@ class SharedSyncRunMachine {
         }
         if (!remoteFingerprint || remoteFingerprint !== cached.remoteFingerprint) return null;
 
-        // A local edit landing during the fingerprint round trip must not be
-        // recorded as "synced, nothing changed"; abort and requeue instead.
+
         this.ensureLocalSnapshotFresh();
         await this.writeFastSyncState({
             scope,
@@ -1388,81 +1368,36 @@ class SharedSyncRunMachine {
         return { success: true, skipped: 'unchanged' };
     }
 
-    /**
-     * Local-only change: the document read, the decrypt and the two-sided merge
-     * are all skippable when the remote is still byte-for-byte the document
-     * this device last synced.
-     *
-     * The recorded remote fingerprint proves exactly that, and the local
-     * document already incorporates that remote, so `merge(local, remote)`
-     * degenerates to `normalize(local)` — which is what the merge phase runs
-     * anyway when the remote is absent. Arming this therefore changes one
-     * thing only: `readRemoteForCycle` answers "no remote document" without a
-     * network read. Every downstream guarantee (normalization, tombstone
-     * compaction, clock-skew clamping, validation, the pending-remote-write
-     * marker, the conditional write, the fast-sync bookkeeping) is the
-     * unmodified merge phase. Measured at 7000 tasks: the merge drops from
-     * 943 ms to 219 ms and a 3.9 MiB download plus its decrypt and parse go
-     * away, and the remote bytes are byte-identical to what a full cycle would
-     * have written (`sync-run.test.ts`, "local-only upload fast path").
-     *
-     * Refuses unless the swap is still a compare-and-swap: the write must go
-     * out under the very fingerprint this method just read
-     * (`adoptRemoteFingerprintForWrite`, false for weak/absent validators, for
-     * WebDAV's legacy-plaintext compatibility mode, and for every backend with
-     * no conditional-write primitive). A precondition failure at write time is
-     * the ordinary `SyncRemoteWriteConflict` → requeue, and the next cycle
-     * sees a moved fingerprint and runs in full.
-     *
-     * HARD DEPENDENCY: `mergeAppData(local, {})` equals `mergeAppData(local,
-     * remote-as-recorded)` only because every local write moves an entity
-     * forward (store writes bump `rev` and stamp `updatedAt`; a backup restore
-     * stamps forward too). Unlike a full merge, this path has no arbitration
-     * fallback: a write path that changed an entity without bumping its
-     * revision would be published here where a full cycle would have let the
-     * recorded remote win. Any new write producer must keep that convention.
-     *
-     * SECOND HARD DEPENDENCY: arming this also skips `mergeAppData(local, {})`
-     * itself (`io.skipEmptyRemoteMerge`; the tombstone purge and the validate
-     * step still run). That is sound only because readLocal output is canonical:
-     * `pass(readLocal(x)) === readLocal(x)`. Every storage codec must read a
-     * field back in exactly the shape the merge would emit — `showFutureRecurrence`
-     * is `true` or absent, never `false`; every other synced boolean is explicit
-     * — and every creation path must write that same shape. The invariant is
-     * guarded by `sync-canonical-reads.contract.test.ts` and re-checked at the
-     * wire exit by `assertLocalOnlyUploadIsCanonical` in development builds.
-     */
+
     private async tryArmLocalOnlyUploadFastPath(): Promise<boolean> {
-        // Same rule as the fast check: a user-initiated sync always reads, so a
-        // stale local record can never hide remote data behind a "Sync now".
+
+
         if (this.options.manual) return false;
-        // A candidate transport has to prove its own read before it may write.
+
         if (this.options.ignorePendingRemoteWriteBackoff) return false;
         const scope = this.state.fastSyncScope;
         if (!scope) return false;
         const io = this.requireIo();
         if (!io.adoptRemoteFingerprintForWrite || !io.readRemoteFingerprint) return false;
         if (io.requiresRemoteRepair?.() === true) return false;
-        // The `preSyncedLocalData` gate below only sees attachment pre-sync
-        // patches when that phase runs BEFORE this step. A platform that runs
-        // it afterwards must take the full cycle, or a later attachment patch
-        // would ride a write that skipped the read.
+
+
         if (!this.policy.preSyncAttachmentsBeforeFastCheck) return false;
         this.setStep('fast-check');
         await this.yieldToUi();
-        // Attachment pre-sync patches (both platforms run it before this point)
-        // mean the cycle is not local-document-only; let it read.
+
+
         if (this.state.preSyncedLocalData) return false;
         const localData = await this.readLocalDataForSyncCycle();
         this.ensureLocalSnapshotFresh();
-        // Pending remote write marker, pending attachment uploads, pending
-        // remote deletes: all need the full cycle's read.
+
+
         if (this.hasPendingCycleSideEffects(localData)) return false;
 
         const cached = await this.readFastSyncState(scope);
         if (!cached) return false;
-        // Nothing changed locally either — that is the fast check's business,
-        // and it has already had its turn.
+
+
         if (cached.localFingerprint === await this.localDocumentFingerprint(localData)) return false;
 
         let remoteFingerprint: string | null = null;
@@ -1475,10 +1410,7 @@ class SharedSyncRunMachine {
         if (!remoteFingerprint || remoteFingerprint !== cached.remoteFingerprint) return false;
         if (!io.adoptRemoteFingerprintForWrite(remoteFingerprint)) return false;
 
-        // Same abort-and-requeue as the fast check above: a local edit that
-        // landed during the fingerprint round trip leaves this cycle holding a
-        // stale snapshot, and the next cycle re-reads. (The merge phase would
-        // re-read too, but nothing here is worth racing over.)
+
         this.ensureLocalSnapshotFresh();
         this.state.localOnlyUploadFingerprint = remoteFingerprint;
         this.notifier.logInfo('Sync uploading a local-only change without a remote read', {
@@ -1487,14 +1419,12 @@ class SharedSyncRunMachine {
         return true;
     }
 
-    /** Mobile-only second skip: fetch the remote payload and compare directly.
-     *  Also covers manual syncs and backends without a cheap fingerprint; a
-     *  non-matching remote is cached and consumed by the merge phase's read. */
+
     private async trySkipUnchangedReadSync(): Promise<SyncRunResult | null> {
         this.setStep('read-check');
         await this.yieldToUi();
-        // A deferred pre-sync phase left attachment work (a download the last process never finished) to the post-merge
-        // pass, which this skip would drop too.
+
+
         if (this.state.preSyncedLocalData || this.hooks.hasDeferredAttachmentWork?.()) return null;
         const localData = await this.readLocalDataForSyncCycle();
         this.ensureLocalSnapshotFresh();
@@ -1507,10 +1437,7 @@ class SharedSyncRunMachine {
         if (this.state.remoteLegacyAttachmentsChanged) return null;
         if (hasUncompactedPurgedTombstones(remoteData)) return null;
 
-        // Fingerprints, not two stable-serialized documents: the same digest
-        // the fast check above already compares, and the same one the remote
-        // write records. Comparing documents here serialized both sides in
-        // full to reach the identical verdict.
+
         const localFingerprint = await this.localDocumentFingerprint(localData);
         const remoteFingerprint = await this.documentFingerprint(remoteData);
         if (localFingerprint !== remoteFingerprint) return null;
@@ -1555,8 +1482,7 @@ class SharedSyncRunMachine {
         });
     }
 
-    /** Read once per cycle: the carried idle snapshot validates against it,
-     *  and the fast check then asks for the same record. */
+
     private async readFastSyncState(scope: string): Promise<FastSyncState | null> {
         const cached = this.state.fastSyncStateCache;
         if (cached && cached.scope === scope) return cached.value;
@@ -1570,9 +1496,7 @@ class SharedSyncRunMachine {
         await this.storage.writeFastSyncState(state);
     }
 
-    /** Sanitized-document fingerprint of a local snapshot, memoized on the
-     *  snapshot's identity: the fast check, the read check and the fast-sync
-     *  bookkeeping all ask for the same one within a cycle. */
+
     private async localDocumentFingerprint(data: AppData): Promise<string> {
         const cached = this.state.localDocumentFingerprint;
         if (cached && cached.data === data) return cached.fingerprint;
@@ -1581,23 +1505,14 @@ class SharedSyncRunMachine {
         return fingerprint;
     }
 
-    /**
-     * A snapshot's remote document as stable sync JSON (the form both
-     * computeRemoteSyncDocumentFingerprint and areRemoteSyncDocumentsEqual
-     * (sync-document.ts) serialize), and its fingerprint,
-     * memoized on the snapshot's identity for this run. Sync never changes a
-     * snapshot in place (every step makes a new object), so the same object
-     * is the same document: the read check's remote document is the one the
-     * write compares against, and the document the write compares is the one
-     * the fast-sync record fingerprints.
-     */
+
     private readonly stableDocuments = new WeakMap<AppData, { json: string; fingerprint?: string }>();
 
     private async stableDocument(data: AppData): Promise<{ json: string; fingerprint?: string }> {
         const known = this.stableDocuments.get(data);
         if (known) return known;
         const json = await runSliced('sync:stableJson', remoteSyncDocumentStableJsonPass(data), this.slicer);
-        // Another step may have made it while this one yielded: the same document, so the same JSON.
+
         const entry = this.stableDocuments.get(data) ?? { json };
         this.stableDocuments.set(data, entry);
         return entry;
@@ -1609,11 +1524,7 @@ class SharedSyncRunMachine {
         return entry.fingerprint;
     }
 
-    /** Mirror of the remote write's `remote-write-skipped-unchanged` guard:
-     *  the merged document carries nothing the persisted one does not, so both
-     *  document writes of the merge phase would rewrite the same bytes. Only
-     *  the untouched persisted snapshot is a valid baseline, and a candidate
-     *  probe never writes locally at all. */
+
     private isLocalPersistUnchanged(data: AppData): boolean {
         if (this.options.activationProbe) return false;
         if (!this.state.localSnapshotMatchesDisk) return false;
@@ -1622,12 +1533,7 @@ class SharedSyncRunMachine {
         return isLocalPersistEquivalent(data, stored);
     }
 
-    /** #1001 proof line: both unchanged returns leave the cycle before the merge
-     *  phase, so the local document write, the post-sync store refresh and the
-     *  attachment passes never run. The remote mutation fence is reported from
-     *  state rather than assumed: an attachment pass earlier in the cycle can
-     *  already have taken one. The skipped full local read has its own line
-     *  (`Sync local reconcile` with `reconcile: 'idle-cache'`). */
+
     private logUnchangedCycleSkips(check: 'fast' | 'read'): void {
         const skippedPasses = ['local-persist', 'store-refresh', 'attachments'];
         if (!this.remoteMutationFence) skippedPasses.push('remote-fence');
@@ -1639,8 +1545,7 @@ class SharedSyncRunMachine {
         });
     }
 
-    /** Carry an unchanged local snapshot to the next cycle. Only reached from
-     *  a skip: nothing was written, so the store stamp still describes it. */
+
     private publishIdleCycleSnapshot(data: AppData, fingerprint: string): void {
         const scope = this.state.fastSyncScope;
         if (!this.policy.carryIdleCycleSnapshot) return;
@@ -1671,15 +1576,15 @@ class SharedSyncRunMachine {
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
-            // No eager fence acquisition: the helpers passed below take it on
-            // the first mutation, so an idle pre-sync pass issues no PUT/DELETE.
-            const result = await io.syncAttachments(localData, this.attachmentHelpers('prepare'));
+
+
+            const result = await this.syncAttachmentsKeepingUnreachable(localData, this.attachmentHelpers('prepare'));
             await this.assertRemoteMutationFenceHeld();
             const mutated = result === true || (Boolean(result) && typeof result === 'object');
             const mutatedData = result && typeof result === 'object' ? result : localData;
             if (mutated) {
-                // Capture pre-sync attachment mutations before stale-snapshot
-                // checks so they can be persisted when the cycle aborts early.
+
+
                 this.state.preSyncedLocalData = mutatedData;
                 this.state.localDataCache = null;
                 this.ensureLocalSnapshotFresh();
@@ -1692,7 +1597,7 @@ class SharedSyncRunMachine {
         } catch (error) {
             if (error instanceof LocalSyncAbort) throw error;
             if (isSyncRemoteMutationFenceError(error)) throw error;
-            // A refusal to mix plaintext into a partly encrypted location ends the cycle; it is never a warning.
+
             if (isSyncEncryptionPartlyEncryptedError(error)) throw error;
             if (isWebdavHostUploadLimitError(error) || isCloudHostUploadLimitError(error)) throw error;
             if (isHostResponseTooLargeError(error)) throw error;
@@ -1706,16 +1611,11 @@ class SharedSyncRunMachine {
         }
     }
 
-    /** Candidate attachment proof, or the normal final pending-upload pass,
-     *  immediately before the merged document is written remotely.
-     *  PREPARED_UNCHANGED when no pass ran: the cycle need not validate again. */
+
     private async prepareRemoteWriteData(data: AppData): Promise<AppData | typeof PREPARED_UNCHANGED> {
         if (this.options.activationProbe) {
-            // A device with no attachment storage (the web app) can never
-            // download or upload a file, so it has nothing to prove: the
-            // records stay unavailable here exactly as every later cycle keeps
-            // them. Demanding proof refused every setup against a location
-            // that held attachments (#1119).
+
+
             if (!this.policy.attachmentPhasesEnabled) return PREPARED_UNCHANGED;
             const activationSnapshot = prepareActivationAttachmentSnapshot(
                 data,
@@ -1749,16 +1649,15 @@ class SharedSyncRunMachine {
             );
             const runTransferPass = async (candidate: AppData) => {
                 const activationContinuation = transferCalls > 0;
-                // The first pass follows the activation phase's yield/network
-                // checks above. Every later primary or exact-fallback pass gets
-                // the same cooperative and connectivity boundary.
+
+
                 if (transferCalls > 0) {
                     await this.yieldToUi();
                     if (isRemoteSyncBackend(this.backend)) {
                         await this.ensureNetwork();
                     }
-                    // An edit or lost lease during the cooperative/network gap
-                    // must abort before admitting another transfer pass.
+
+
                     this.ensureLocalSnapshotFresh();
                     await this.assertRemoteMutationFenceHeld();
                 }
@@ -1778,9 +1677,7 @@ class SharedSyncRunMachine {
                 return { data: nextData, deferred: transferBatchDeferred };
             };
 
-            // A primary pass can discover candidate 404s before producing any
-            // positive proof. Apply each newly failed exact local fallback once
-            // inside that round, then measure their combined proof progress.
+
             for (let primaryRounds = 0; primaryRounds < activationSnapshot.count; primaryRounds += 1) {
                 const provenBeforeRound = countProofs(provenData);
                 const primary = await runTransferPass(provenData);
@@ -1790,14 +1687,14 @@ class SharedSyncRunMachine {
                     provenData,
                     activationSnapshot.localFallbacks,
                     consumedFallbackIds,
+                    !primary.deferred && this.backend === 'file',
                 );
                 fallbackRetries += fallbackRetry.count;
                 if (fallbackRetry.count > 0) {
                     provenData = fallbackRetry.data;
                     let fallbackProven = countProofs(provenData);
-                    // The restored set is fixed for this round. Each continued
-                    // pass must prove another member, so this count is a finite
-                    // ceiling; cap-skipped files stay in the evolving snapshot.
+
+
                     for (let fallbackBatches = 0; fallbackBatches < fallbackRetry.count; fallbackBatches += 1) {
                         const fallback = await runTransferPass(provenData);
                         provenData = fallback.data;
@@ -1813,14 +1710,55 @@ class SharedSyncRunMachine {
                 if (!primary.deferred || !madeRoundProgress) break;
                 usedBatchContinuation = true;
             }
-            const deferredIds = assertActivationAttachmentsProven(
+            const unreachable = await this.readUnreachableAttachments();
+            const { deferred: deferredIds, missing: missingIds } = assertActivationAttachmentsProven(
                 provenData,
                 activationSnapshot.expectedIds,
                 activationSnapshot.metadataOnlyIds,
                 activationSnapshot.noLocalBytesIds,
                 this.backend,
                 activationSnapshot.originalCloudKeys,
+                activationSnapshot.noLocalFileIds,
+
+                unreachable
+                    ? new Set([
+                        ...(this.options.acceptMissingAttachmentIds ?? []),
+                        ...(unreachable.record[unreachable.scope] ?? []),
+                    ])
+                    : null,
             );
+            if (missingIds.length > 0) {
+
+
+                const accepted = new Set(missingIds);
+                const merged = new Map<string, Attachment>();
+                visitLiveFileAttachments(data, (attachment) => {
+                    if (accepted.has(attachment.id)) merged.set(attachment.id, attachment);
+                });
+
+
+                const ownContent = new Map<string, Attachment>();
+                if (this.state.localDataCache?.data) {
+                    visitLiveFileAttachments(this.state.localDataCache.data, (attachment) => {
+                        if (accepted.has(attachment.id) && attachment.cloudKey) ownContent.set(attachment.id, attachment);
+                    });
+                }
+                provenData = replaceAttachments(provenData, accepted, (attachment) => {
+                    const original = merged.get(attachment.id) ?? attachment;
+                    const own = ownContent.get(attachment.id);
+                    const content = own ? {
+                        cloudKey: own.cloudKey,
+                        fileHash: own.fileHash,
+                        contentRev: own.contentRev,
+                        contentMtimeMs: own.contentMtimeMs,
+                        contentSize: own.contentSize,
+                        size: own.size,
+                        mimeType: own.mimeType,
+                    } : {};
+                    return { ...original, ...content, localStatus: 'missing', pendingContentUpload: undefined };
+                });
+                this.state.acceptedMissingAttachments = missingIds;
+            }
             if (usedBatchContinuation) {
                 this.notifier.logInfo(
                     'Sync activation proved attachments across transfer batches',
@@ -1868,7 +1806,7 @@ class SharedSyncRunMachine {
             await this.ensureNetwork();
         }
         await this.ensureRemoteMutationFence();
-        const result = await io.syncAttachments(data, this.attachmentHelpers('post-merge'));
+        const result = await this.syncAttachmentsKeepingUnreachable(data, this.attachmentHelpers('post-merge'));
         await this.assertRemoteMutationFenceHeld();
         const nextData = result && typeof result === 'object' ? result : data;
         const remainingUploads = findPendingAttachmentUploads(nextData);
@@ -1882,6 +1820,89 @@ class SharedSyncRunMachine {
             remainingUploads,
         );
         return nextData;
+    }
+
+
+    private async readUnreachableAttachments(): Promise<{ scope: string; record: UnreachableAttachments } | null> {
+        const scope = this.state.locationScope;
+        if (!scope || !this.storage.readUnreachableAttachments || !this.storage.writeUnreachableAttachments) return null;
+        const record = parseUnreachableAttachments(await this.storage.readUnreachableAttachments());
+        rememberUnreachableAttachments(record, this.rememberedScope(scope));
+        return { scope, record };
+    }
+
+    private async writeUnreachableAttachments(record: UnreachableAttachments, scope: string): Promise<void> {
+        await this.storage.writeUnreachableAttachments?.(JSON.stringify(record));
+        rememberUnreachableAttachments(record, this.rememberedScope(scope));
+    }
+
+
+    private rememberedScope(scope: string): string | undefined {
+        return this.options.activationProbe ? undefined : scope;
+    }
+
+
+    private async recordAcceptedMissingAttachments(): Promise<void> {
+        const accepted = this.state.acceptedMissingAttachments;
+        if (accepted.length === 0) return;
+        const unreachable = await this.readUnreachableAttachments();
+        if (!unreachable) throw new Error('Activation accepted missing attachments without a record to keep them');
+        const { scope, record } = unreachable;
+        await this.writeUnreachableAttachments({
+            ...record,
+            [scope]: [...new Set([...(record[scope] ?? []), ...accepted])],
+        }, scope);
+        this.notifier.logInfo('Sync activation continued without attachment files', {
+            releaseCheck: 'v1.3.8/activation-continue-without-files',
+            backend: this.backend,
+            missing: String(accepted.length),
+        });
+    }
+
+
+    private async syncAttachmentsKeepingUnreachable(
+        data: AppData,
+        helpers: ReturnType<SharedSyncRunMachine['attachmentHelpers']>,
+    ): Promise<AppData | boolean | null | undefined> {
+        const syncAttachments = this.requireIo().syncAttachments!;
+        const unreachable = await this.readUnreachableAttachments();
+        if (!unreachable || Object.keys(unreachable.record).length === 0) return syncAttachments(data, helpers);
+        const { scope, record } = unreachable;
+        const ids = new Set(record[scope] ?? []);
+
+        const before = new Map<string, Attachment>();
+        visitLiveFileAttachments(data, (attachment) => {
+            if (ids.has(attachment.id)) before.set(attachment.id, { ...attachment });
+        });
+        const result = await syncAttachments(data, helpers);
+        const next = result && typeof result === 'object' ? result : result ? data : null;
+        let restored = 0;
+        if (next && before.size > 0) {
+            for (const owner of [...next.tasks, ...next.projects]) {
+                if (owner.deletedAt) continue;
+                for (const attachment of owner.attachments ?? []) {
+                    const original = before.get(attachment.id);
+                    if (!original || !attachment.deletedAt) continue;
+
+                    for (const field of Object.keys(attachment) as (keyof Attachment)[]) delete attachment[field];
+                    Object.assign(attachment, original);
+                    restored += 1;
+                }
+            }
+        }
+        const pruned = pruneUnreachableAttachments(record, next ?? data, scope);
+        if (pruned !== record) await this.writeUnreachableAttachments(pruned, scope);
+        if (restored === 0) return result;
+
+        if (!this.state.keptAttachmentNotFoundLogged) {
+            this.state.keptAttachmentNotFoundLogged = true;
+            this.notifier.logInfo('Kept attachment not found at this sync location; row left as it is', {
+                releaseCheck: 'v1.3.8/kept-attachment-not-found',
+                backend: this.backend,
+                restored: String(restored),
+            });
+        }
+        return result !== true && sameAttachmentOwners(data, next!) ? false : result;
     }
 
     private async runPostMergeAttachmentPhase(
@@ -1906,11 +1927,9 @@ class SharedSyncRunMachine {
                 await this.ensureNetwork();
             }
             await this.ensureRemoteMutationFence();
-            // No defensive clone: the attachment backends are pure (they return a folded
-            // document instead of writing to this one), so cloning a whole library here was
-            // dead weight that also invalidated the storage layer's identity-keyed row cache
-            // for every unchanged row (#766).
-            const result = await io.syncAttachments(currentData, this.attachmentHelpers('post-merge'));
+
+
+            const result = await this.syncAttachmentsKeepingUnreachable(currentData, this.attachmentHelpers('post-merge'));
             await this.assertRemoteMutationFenceHeld();
             const nextData = result && typeof result === 'object'
                 ? result
@@ -1933,7 +1952,7 @@ class SharedSyncRunMachine {
         } catch (error) {
             if (error instanceof LocalSyncAbort) throw error;
             if (isSyncRemoteMutationFenceError(error)) throw error;
-            // A refusal to mix plaintext into a partly encrypted location ends the cycle; it is never a warning.
+
             if (isSyncEncryptionPartlyEncryptedError(error)) throw error;
             if (isWebdavHostUploadLimitError(error) || isCloudHostUploadLimitError(error)) throw error;
             if (isHostResponseTooLargeError(error)) throw error;
@@ -1948,15 +1967,12 @@ class SharedSyncRunMachine {
         }
     }
 
-    private buildSyncCycleIO(): SyncCycleIO {
+    private buildSyncCycleIO(keptAttachmentIds?: ReadonlySet<string>): SyncCycleIO {
         return {
             readLocal: async () => {
                 const localData = await this.readLocalDataForSyncCycle();
-                // Retry metadata belongs to the currently proven transport.
-                // A candidate transport must perform its own read/write proof
-                // even while the old backend is waiting in backoff. This copy
-                // is in-memory only; the durable old-backend retry state stays
-                // intact unless and until settings activate the candidate.
+
+
                 const data = this.options.activationProbe
                     ? withoutInheritedPendingRemoteWrite(localData)
                     : this.options.ignorePendingRemoteWriteBackoff
@@ -2005,8 +2021,9 @@ class SharedSyncRunMachine {
             },
             preferIncomingAttachmentCloudKeys:
                 this.options.ignorePendingRemoteWriteBackoff === true,
-            // Read lazily: the fast path arms before the merge phase builds this
-            // object, but nothing here should depend on that ordering.
+            preferIncomingAttachmentCloudKeyIds: keptAttachmentIds,
+
+
             skipEmptyRemoteMerge: () => this.state.localOnlyUploadFingerprint !== null,
             onStep: (next) => this.setStep(next),
             yieldToUi: this.notifier.yieldToUi ? () => this.notifier.yieldToUi!() : undefined,
@@ -2020,7 +2037,14 @@ class SharedSyncRunMachine {
 
     private async runMergePhase(): Promise<SyncRunResult> {
         this.hooks.onMergePhaseStart?.();
-        const syncResult = await this.performSyncCycleImpl(this.buildSyncCycleIO());
+
+
+        const unreachable = this.options.activationProbe ? null : await this.readUnreachableAttachments().catch((error) => {
+            this.notifier.logWarning('Kept attachment record could not be read before the merge', error);
+            return null;
+        });
+        const keptIds = unreachable?.record[unreachable.scope];
+        const syncResult = await this.performSyncCycleImpl(this.buildSyncCycleIO(keptIds?.length ? new Set(keptIds) : undefined));
         if (syncResult.status === 'skipped') {
             this.notifier.logInfo('Sync skipped while pending remote write backoff is active', {
                 backend: this.backend,
@@ -2046,7 +2070,7 @@ class SharedSyncRunMachine {
             data: mergedData,
             extra: {
                 status: syncResult.status,
-                // Steady nonzero across cycles = tombstone rev-bump loop (#766).
+
                 tombstoneRepairs: String(stats.tombstoneRepairs ?? 0),
             },
         });
@@ -2063,6 +2087,7 @@ class SharedSyncRunMachine {
         }
 
         if (this.options.activationProbe) {
+            await this.recordAcceptedMissingAttachments();
             return { success: true, stats };
         }
 
@@ -2082,8 +2107,8 @@ class SharedSyncRunMachine {
             && this.hooks.runAttachmentCleanup
             && (
                 shouldRunAttachmentCleanup(mergedData.settings.attachments?.lastCleanupAt, this.cleanupIntervalMs)
-                // Removing an attachment must not leave its files sitting in the
-                // local and sync folders until the daily pass (#1064).
+
+
                 || hasFreshAttachmentCleanupWork(mergedData)
             )) {
             await this.ensureRemoteMutationFence();
@@ -2096,10 +2121,8 @@ class SharedSyncRunMachine {
                 ),
             });
             await this.assertRemoteMutationFenceHeld();
-            // Cleanup may resolve credentials, remote targets, and provider IO
-            // before returning. Recheck the pre-cleanup snapshot here so a
-            // local edit made anywhere in that window is requeued instead of
-            // being overwritten by the returned full-data snapshot.
+
+
             this.ensureLocalSnapshotFresh(mergedData);
             if (cleanupResult) {
                 mergedData = cleanupResult.data;
@@ -2171,8 +2194,8 @@ class SharedSyncRunMachine {
             };
         }
         if (error instanceof SyncRemoteMutationFenceBusyError) {
-            // Attributable in the log: a holder with seconds left is a dead lease
-            // (a live one renews every ttl/3), not a device actively syncing.
+
+
             this.notifier.logWarning('Remote sync location is reserved; retrying after the lease lapses', error);
             if (!this.options.activationProbe) this.requestFollowUpAfter(error.retryAfterMs, 'remote-fence-busy');
             return {
@@ -2185,7 +2208,7 @@ class SharedSyncRunMachine {
         const errorContext: SyncRunErrorContext = {
             step: this.state.step,
             getWroteLocal: () => this.state.wroteLocal,
-            // A sliced cycle's abort writes nothing (design D9b W1): the next cycle redoes the attachment work.
+
             persistPreSyncedData: () => (this.slicedCycle ? Promise.resolve() : this.persistPreSyncedDataAfterAbort()),
         };
         const beforeResult = this.options.activationProbe
@@ -2194,17 +2217,14 @@ class SharedSyncRunMachine {
         if (beforeResult) return beforeResult;
 
         if (error instanceof LocalSyncAbort) {
-            // A normal cycle must retain local attachment bookkeeping that was
-            // completed before a requeue. Candidate probes operate on a clone,
-            // though: none of that destination-specific metadata is durable
-            // until the configuration has activated and a normal sync runs.
+
+
             if (!this.options.activationProbe && !this.slicedCycle) {
                 await this.persistPreSyncedDataAfterAbort();
             }
-            // Desktop has no onDiagnostic sink, so a requeued cycle used to leave
-            // no trace at all; an activation probe that keeps requeuing (a store
-            // write landing mid-probe on every attempt) then reads as "the switch
-            // never saves" with nothing in the log to say why.
+
+
+            this.state.requeueReason = error.reason;
             this.notifier.logInfo('Sync cycle requeued', {
                 backend: this.backend,
                 step: this.state.step ?? '-',
@@ -2231,8 +2251,9 @@ class SharedSyncRunMachine {
         if (this.options.activationProbe) {
             return {
                 success: false,
-                // Only this answer to the screen names a refused attachment's file and owner (#1151); logs and status keep IDs.
+
                 error: this.hooks.formatErrorMessage(error instanceof ActivationAttachmentProofError ? new Error(error.displayMessage) : error, this.backend),
+                ...(error instanceof ActivationMissingAttachmentsError ? { activationMissingAttachments: error.attachments } : {}),
                 ...(fileSyncLockUnavailable ? { fileSyncLockUnavailable: true } : {}),
                 ...(fileGenerationCorrupt ? { fileGenerationCorrupt: true } : {}),
             };
@@ -2288,13 +2309,12 @@ export const runSharedSyncCycle = async (ports: SyncRunPorts): Promise<SyncRunRe
     return new SharedSyncRunMachine(ports).run();
 };
 
-/** Store bridge over the shared core Zustand store — what both apps use
- *  outside tests. Kept as a factory so tests can substitute fakes and the
- *  desktop test-dependency bag can wrap individual members. */
+
 export const createDefaultSyncRunStoreBridge = (): SyncRunStoreBridge => ({
     getLastDataChangeAt: () => useTaskStore.getState().lastDataChangeAt,
     getInMemorySnapshot: () => getInMemoryAppDataSnapshot(),
     captureInMemorySnapshot: () => captureInMemoryAppDataSnapshot(),
+    listenerCount: () => getStoreListenerCount(),
     flushPendingSave: () => flushPendingSave(),
     setUiError: (message) => useTaskStore.getState().setError(message),
     getSettings: () => useTaskStore.getState().settings,

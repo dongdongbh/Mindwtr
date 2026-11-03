@@ -44,8 +44,8 @@ for (const locale of ['en-US', 'en-GB']) {
             await page.goto('/');
             await openEditor();
             await expect(time).toHaveValue('');
-            // Real keystrokes reproduce the native en-US control rejecting a
-            // complete 24-hour entry despite Mindwtr's explicit preference.
+
+
             await time.focus();
             await time.pressSequentially('13:59');
             await time.press('Tab');

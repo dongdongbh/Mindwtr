@@ -3,7 +3,7 @@ import { dismissOnboarding, localDateKey, seedAppData } from './seed';
 
 test('timed deadlines stay separate from work blocks and open the same task', async ({ page }) => {
     const day = localDateKey();
-    // Put the current-time line across the deadline button, as in the CI failure.
+
     await page.clock.setFixedTime(new Date(`${day}T17:18:00`));
     await dismissOnboarding(page);
     await seedAppData(page, {

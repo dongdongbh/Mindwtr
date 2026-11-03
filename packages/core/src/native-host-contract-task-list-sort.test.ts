@@ -66,7 +66,7 @@ describe('native checked task list sort', () => {
         expect(host.getTaskListSortOptions({})).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         raw(4);
         expect(host.getTaskListSortOptions({})).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        expect(host.getTaskListSortOptions({ extra: true })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(host.getTaskListSortOptions({ extra: true } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
     it('writes only the chosen scalar, including explicit default over missing and completed', async () => {

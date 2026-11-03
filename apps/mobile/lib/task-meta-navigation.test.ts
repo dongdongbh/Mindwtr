@@ -86,11 +86,7 @@ describe('task-meta-navigation', () => {
         });
     });
 
-    // #1029: the capture route's Save & edit leaves itself and opens the task
-    // on the screen underneath. A push left the filled capture form on the
-    // stack; a replace stacked a duplicate of the target screen (#938 trap),
-    // costing an extra back tap through an identical page. Pop + navigate
-    // updates the mounted screen's params without adding an entry.
+
     it('pops the current route and navigates in place when asked to replace', () => {
         vi.spyOn(Date, 'now').mockReturnValueOnce(13579);
 
@@ -130,9 +126,7 @@ describe('task-meta-navigation', () => {
         });
     });
 
-    // #1029: Save & edit from a project's own capture stashes the editor
-    // request instead of navigating — navigating to the screen already
-    // underneath stacks a duplicate of it (#938 trap).
+
     it('hands a stashed capture task open to its project exactly once', () => {
         stashPendingCaptureTaskOpen({ taskId: 'task-7', projectId: 'project-7', taskTab: 'task' });
 

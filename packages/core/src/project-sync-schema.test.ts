@@ -9,14 +9,7 @@ import {
 } from './project-sync-schema';
 import cloudKitProductionSchema from './cloudkit-production-schema.json';
 
-// The pre-refactor snapshot-equality guards that used to live here (PROJECT_SQLITE_COLUMNS,
-// PROJECT_UPSERT_UPDATE_CLAUSE, and the ensureProjectColumns migration list, each pinned to a
-// hand-written literal) were retired when `startDate` grew PROJECT_SYNC_FIELD_SCHEMA — per this
-// file's own long-standing instruction, a legitimate new synced field is expected to break that
-// byte-identity and the block should be deleted, not "fixed". The two contract checks below
-// (schema exhaustiveness) still apply, and PROJECT_SQLITE_MIGRATION_COLUMNS /
-// PROJECT_UPSERT_UPDATE_CLAUSE remain covered indirectly by sqlite-adapter.test.ts's round-trip
-// and migration-application tests.
+
 const sorted = (values: Iterable<string>): string[] => Array.from(values).sort();
 
 describe('Project sync schema contract', () => {

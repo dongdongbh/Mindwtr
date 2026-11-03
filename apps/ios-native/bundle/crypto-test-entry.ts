@@ -1,4 +1,4 @@
-// Built only with build-bundle.mjs --crypto-test; never the application resource.
+
 import '../../android-native/bundle/host-entry';
 import { createHostSyncCrypto } from '../../android-native/bundle/host-sync';
 import {

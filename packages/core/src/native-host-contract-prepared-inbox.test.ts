@@ -125,7 +125,6 @@ describe('native prepared Process Inbox writer', () => {
             }
         };
         await choose('project');
-        await choose('project');
         for (const edit of [{ type: 'set', field: 'nextAction', value: 'First project action' },
             { type: 'setExtraActions', value: ['Second project action', 'Third project action'] }]) {
             view = value(host.getInboxProcessingStep({ sessionId: start.sessionId!, taskId: view.taskId, step: view.step, edit }));
@@ -323,10 +322,11 @@ describe('native prepared Process Inbox writer', () => {
         const state = { ...baseline, _allTasks: tasks, _tasksById: new Map(tasks.map((task) => [task.id, task])) };
         const parseTitle = createProcessInboxTitleParser({ settings: state.settings,
             tasks, people: [], projects: state._allProjects, areas: state._allAreas });
-        const request = { sessionId: 'bounded-archived-session', taskId: source.id, step: 'decisions',
-            decision: { choice: 'next' }, requestId: generateUUID() };
+        const request = { sessionId: 'bounded-archived-session', taskId: source.id, step: 'file',
+            decision: { choice: 'fileIt' }, requestId: generateUUID() };
         const prepared = prepareNativeInboxWrite({ request, source, mode: 'quick',
-            answers: { ...INITIAL_PROCESS_INBOX_ANSWERS, actionability: 'actionable' },
+            answers: { ...INITIAL_PROCESS_INBOX_ANSWERS, actionability: 'actionable', twoMinute: 'no',
+                execution: 'defer', oneActionAnswered: true },
             draft: createProcessInboxDraft(source), plan: resolveProcessInboxPlan(state.settings),
             committed: 'next', decisionKind: 'next', state, parseTitle });
         expect(prepared.kind).toBe('prepared');
@@ -583,5 +583,69 @@ describe('native prepared Process Inbox writer', () => {
         expect(host.inboxAfterCommit({ sessionId: base.sessionId, requestId: request.requestId })).toEqual(advanced);
         expect(host.getInboxProcessingStep({ ...base, step,
             edit: { type: 'set', field: 'title', value: 'Editable now' } })).toMatchObject({ ok: true });
+    });
+    describe('task reminder default for created project actions', () => {
+        const value = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+
+        const prepareConversion = async (taskReminderDefault: 'send' | 'skip' | undefined) => {
+            vi.useFakeTimers({ toFake: ['Date'] });
+            vi.setSystemTime(new Date(fixture.now));
+            await seedProcessInboxStore(fixture, scenario('make it a project'), createWriteRecorder());
+            const host = createNativeHostContract();
+            expect(await host.activate({ writeSafetyReady: true })).toMatchObject({ ok: true });
+            useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault } }));
+            const start = value(host.startInboxProcessing({ mode: 'quick' }));
+            let view = start.view!;
+            const prepare = (choice: string) => value(host.inboxCommitPrepare({ sessionId: start.sessionId!, taskId: view.taskId,
+                step: view.step, decision: { choice }, requestId: generateUUID() }));
+            const flow = prepare('project');
+            if (flow.kind !== 'flow') throw new Error('Expected a flow step');
+            view = flow.result.view!;
+            for (const edit of [{ type: 'set', field: 'nextAction', value: 'First project action' },
+                { type: 'setExtraActions', value: ['Second project action', 'Third project action'] }]) {
+                view = value(host.getInboxProcessingStep({ sessionId: start.sessionId!, taskId: view.taskId, step: view.step, edit }));
+            }
+            const request = { sessionId: start.sessionId!, taskId: view.taskId, step: view.step,
+                decision: { choice: 'createProject' }, requestId: generateUUID() };
+            const prepared = value(host.inboxCommitPrepare(request));
+            if (prepared.kind !== 'prepared') throw new Error('Expected a prepared conversion');
+            return { host, envelope: { request, prepared: prepared.prepared } };
+        };
+
+        it('creates extra actions with Mindwtr reminders suppressed under Skip, as RN addTask does', async () => {
+            const { host, envelope } = await prepareConversion('skip');
+            const created = envelope.prepared.result.createdActionIds ?? [];
+            expect(created).toHaveLength(2);
+            expect(await host.inboxPreparedCommit(envelope)).toMatchObject({ ok: true });
+            for (const id of created) expect(useTaskStore.getState()._tasksById.get(id)?.suppressMindwtrReminders).toBe(true);
+            const ordinary = await useTaskStore.getState().addTask('Reference', { status: 'inbox' });
+            expect(useTaskStore.getState()._tasksById.get(ordinary.id!)?.suppressMindwtrReminders).toBe(true);
+        });
+
+        it('publishes the frozen rows after the default changes; an earlier Send journal stays valid under Skip', async () => {
+            const { host, envelope } = await prepareConversion('skip');
+            expect(envelope.prepared.version).toBe(1);
+            expect(envelope.prepared.witness.settings).not.toHaveProperty('taskReminderDefault');
+            useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault: 'send' } }));
+            expect(await host.inboxPreparedCommit(envelope)).toMatchObject({ ok: true });
+            for (const id of envelope.prepared.result.createdActionIds ?? []) {
+                expect(useTaskStore.getState()._tasksById.get(id)?.suppressMindwtrReminders).toBe(true);
+            }
+        });
+
+        it('validates and commits an earlier Send journal unchanged after Skip is chosen', async () => {
+            const { host, envelope } = await prepareConversion(undefined);
+            const before = JSON.stringify(envelope);
+            useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault: 'skip' } }));
+            expect(host.inboxPreparedValidate(envelope)).toMatchObject({ ok: true });
+            expect(await host.inboxPreparedCommit(envelope)).toMatchObject({ ok: true });
+            expect(JSON.stringify(envelope)).toBe(before);
+            for (const id of envelope.prepared.result.createdActionIds ?? []) {
+                expect(useTaskStore.getState()._tasksById.get(id)?.suppressMindwtrReminders).toBe(false);
+            }
+        });
     });
 });

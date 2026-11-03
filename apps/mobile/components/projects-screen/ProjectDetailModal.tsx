@@ -1,5 +1,5 @@
 import React from 'react';
-import { getProjectToSectionEligibility, isGettingStartedProject } from '@mindwtr/core';
+import { AREA_PRESET_COLORS, DEFAULT_PROJECT_COLOR, getProjectToSectionEligibility, isAttachmentKeptWithoutFile, isGettingStartedProject } from '@mindwtr/core';
 import { GettingStartedActions, type GettingStartedAction } from '../GettingStartedActions';
 import {
     Alert,
@@ -23,14 +23,17 @@ import {
     type Attachment,
     getAttachmentDisplayTitle,
     getProjectDetailsPresentation,
+    getProjectFlowMode,
+    planProjectFlowModeChange,
     type Project,
+    type ProjectFlowMode,
     type ProjectSequenceTaskCue,
     type Section,
     type Task,
     type TaskSortBy,
     getSequentialProjectTaskCues,
     resolveTaskSortByForFeatures,
-    TASK_LIST_SORT_OPTIONS,
+    PROJECT_TASK_SORT_OPTIONS,
     safeFormatDate,
     safeParseDate,
     shallow,
@@ -79,8 +82,8 @@ type ProjectDetailModalProps = {
     onOpenAreaPicker: () => void;
     onOpenQuickAdd: (project: Project) => void;
     onOpenTagPicker: () => void;
-    // The open project lives in the screen's state (it persists edits on close),
-    // so in-modal edits report back instead of owning it.
+
+
     onProjectChange: (project: Project) => void;
     onTaskSortByChange: (sortBy: TaskSortBy) => void;
     project: Project | null;
@@ -94,6 +97,7 @@ function ProjectSectionManagerModal({
     canManage,
     deleteSection,
     onClose,
+    perSectionFlow,
     projectId,
     reorderSections,
     sections,
@@ -106,6 +110,8 @@ function ProjectSectionManagerModal({
     canManage: boolean;
     deleteSection: (id: string) => Promise<unknown> | unknown;
     onClose: () => void;
+
+    perSectionFlow: boolean;
     projectId: string;
     reorderSections: (projectId: string, orderedIds: string[]) => Promise<unknown> | unknown;
     sections: Section[];
@@ -140,6 +146,9 @@ function ProjectSectionManagerModal({
         'Are you sure you want to delete this section?'
     );
     const sectionReorderFailed = tFallback(t, 'projects.sectionReorderFailed', 'Failed to reorder sections.');
+    const flowModeLabel = tFallback(t, 'projects.sequenceMode', 'Flow Mode');
+    const parallelLabel = tFallback(t, 'projects.parallel', 'Parallel');
+    const sequentialLabel = tFallback(t, 'projects.sequential', 'Sequential');
     const editing = sections.find((section) => section.id === editingSectionId);
     const showEditor = canManage && editingSectionId !== null;
 
@@ -359,6 +368,23 @@ function ProjectSectionManagerModal({
                                                         <Ionicons name="chevron-down" size={16} color={tc.secondaryText} />
                                                     </TouchableOpacity>
                                                 </View>
+                                                {perSectionFlow ? (
+                                                    <TouchableOpacity
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={`${flowModeLabel}: ${section.title}`}
+                                                        accessibilityValue={{ text: section.isSequential === true ? sequentialLabel : parallelLabel }}
+                                                        onPress={() => {
+                                                            if (!canMutateProject()) return;
+                                                            void Promise.resolve(updateSection(section.id, { isSequential: section.isSequential !== true }));
+                                                        }}
+                                                        style={[styles.smallButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                                                        testID={`project-section-flow-${section.id}`}
+                                                    >
+                                                        <Text style={[styles.smallButtonText, { color: tc.secondaryText }]}>
+                                                            {section.isSequential === true ? sequentialLabel : parallelLabel}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                ) : null}
                                                 <TouchableOpacity
                                                     accessibilityRole="button"
                                                     accessibilityLabel={`${editLabel}: ${section.title}`}
@@ -386,7 +412,7 @@ function ProjectSectionManagerModal({
                     )}
                 </View>
             </View>
-            {/* Its own delete/reorder confirms fire while this sheet is up (#940). */}
+            {                                                                         }
             <ThemedAlertHost />
         </Modal>
     );
@@ -399,10 +425,8 @@ function ProjectDetailScrollFrame({
     backgroundColor: string;
     children: React.ReactNode;
 }) {
-    // The task list (normal mode) or the reorder DraggableFlatList owns the
-    // scroll, so the frame is a plain flex column. The previous ScrollView +
-    // manually windowed list positioned rows from height estimates, which made
-    // the list shift as scrolls settled (#831).
+
+
     return (
         <KeyboardAvoidingView
             behavior={Platform.OS === 'android' ? 'height' : undefined}
@@ -562,6 +586,7 @@ export function ProjectDetailModal({
         updateProject,
         cancelProject,
         updateSection,
+        setProjectFlowMode,
         settings,
         allProjects,
     } = useTaskStore((state) => ({
@@ -571,12 +596,21 @@ export function ProjectDetailModal({
         updateProject: state.updateProject,
         cancelProject: state.cancelProject,
         updateSection: state.updateSection,
+        setProjectFlowMode: state.setProjectFlowMode,
         settings: state.settings,
         allProjects: state._allProjects,
     }), shallow);
     const selectedProjectRef = React.useRef(selectedProject);
     selectedProjectRef.current = selectedProject;
     const liveSelectedProject = allProjects?.find((project) => project.id === selectedProject?.id);
+    const [colorSaving, setColorSaving] = React.useState(false);
+    const [colorError, setColorError] = React.useState(false);
+    const [colorIntent, setColorIntent] = React.useState<string | null>(null);
+    const colorGeneration = React.useRef(0);
+    React.useEffect(() => {
+        colorGeneration.current += 1;
+        setColorSaving(false); setColorError(false); setColorIntent(null);
+    }, [selectedProject?.id]);
     const liveSelectedProjectStatus = liveSelectedProject?.status;
     const isArchivedProject = selectedProject?.status === 'archived' || liveSelectedProjectStatus === 'archived';
     const isArchivedProjectRef = React.useRef(isArchivedProject);
@@ -595,8 +629,25 @@ export function ProjectDetailModal({
         onProjectChange(next);
         return next;
     }, [getMutableSelectedProject, onProjectChange, updateProject]);
-    // A stored 'timeEstimate' project sort reverts to default order while the
-    // feature is off — list, sort sheet and label all read this one value (#1107).
+    const saveProjectColor = async (colorOverride: string | null) => {
+        const current = getMutableSelectedProject();
+        if (!current || colorSaving) return;
+        const generation = colorGeneration.current;
+        setColorSaving(true);
+        setColorIntent(colorOverride);
+        setColorError(false);
+        try {
+            const state = useTaskStore.getState();
+            if (state.persistenceFailure) await state.retryPersistence();
+            const result = await updateProject(current.id, { colorOverride });
+            if (!result.success) throw new Error('Save refused');
+            const live = useTaskStore.getState()._projectsById.get(current.id);
+            if (colorGeneration.current === generation && selectedProjectRef.current?.id === current.id) onProjectChange({ ...selectedProjectRef.current, colorOverride, color: live?.color ?? current.color });
+        } catch { if (colorGeneration.current === generation) setColorError(true); }
+        finally { if (colorGeneration.current === generation) setColorSaving(false); }
+    };
+
+
     const projectTaskSortBy = resolveTaskSortByForFeatures(storedProjectTaskSortBy, settings);
     const {
         commitSelectedProjectNotes,
@@ -647,9 +698,8 @@ export function ProjectDetailModal({
     const [showStartDatePicker, setShowStartDatePicker] = React.useState(false);
     const [showDueDatePicker, setShowDueDatePicker] = React.useState(false);
     const [showReviewPicker, setShowReviewPicker] = React.useState(false);
-    // Persisted device-locally so the choice survives app restarts, matching
-    // desktop's localStorage-backed toggle (#1030). Global, like desktop —
-    // per-project memory stays a possible follow-up.
+
+
     const [showCompletedTasks, setShowCompletedTasksState] = React.useState(false);
     const showCompletedTouchedRef = React.useRef(false);
     React.useEffect(() => {
@@ -691,8 +741,8 @@ export function ProjectDetailModal({
         : selectedProject;
     const taskListOptions = getProjectDetailTaskListOptions(taskListProject, showCompletedTasks);
     const canManageProjectSections = !isArchivedProject;
-    // Reorder mode always renders one self-scrolling DraggableFlatList (section
-    // headers are fixed rows inside it), so it owns the scroll for every project.
+
+
     const projectReorderOwnsScroll = projectTaskReorderMode;
     const showCompletedLabel = showCompletedTasks
         ? tFallback(t, 'common.hideCompleted', 'Hide completed')
@@ -711,7 +761,7 @@ export function ProjectDetailModal({
         t,
         'projects.projectTypeHelpText',
         'Sequential projects surface one available action at a time. Parallel projects can surface multiple independent Next tasks.'
-    );
+    ) + `\n\n${tFallback(t, 'projects.perSectionTooltip', 'Per section: each section is Parallel or Sequential, chosen from its menu.')}`;
     const sequenceCueLabels = React.useMemo<Record<ProjectSequenceTaskCue, string>>(
         () => ({
             available: tFallback(t, 'projects.availableNextAction', 'Available next action'),
@@ -788,6 +838,15 @@ export function ProjectDetailModal({
         projectTaskBulkBarPropsRef.current = props;
         setProjectTaskBulkBarProps(props);
     }, []);
+
+    const handleRequestClose = React.useCallback(() => {
+        const bulkBar = projectTaskBulkBarPropsRef.current;
+        if (bulkBar) {
+            bulkBar.onExitSelectionMode();
+            return;
+        }
+        onClose();
+    }, [onClose]);
     const handleProjectListScroll = React.useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
         projectDetailScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
     }, []);
@@ -896,6 +955,15 @@ export function ProjectDetailModal({
     const setSelectedProjectSequentialScope = (sequentialScope: Project['sequentialScope']) => {
         updateMutableSelectedProject({ sequentialScope });
     };
+    const setSelectedProjectFlowMode = (mode: ProjectFlowMode) => {
+        const current = getMutableSelectedProject();
+        if (!current) return;
+        const plan = planProjectFlowModeChange(current, useTaskStore.getState()._allSections ?? [], mode);
+        if (!plan) return;
+        void setProjectFlowMode(current.id, mode);
+        onProjectChange({ ...current, ...plan.project });
+    };
+    const selectedProjectFlowMode = selectedProject ? getProjectFlowMode(selectedProject) : 'parallel';
     const handleSetProjectStatus = (status: Project['status']) => {
         const current = liveSelectedProjectStatus === 'archived'
             ? liveSelectedProject
@@ -910,10 +978,8 @@ export function ProjectDetailModal({
         }
         setShowStatusMenu(false);
     };
-    // Archive without a native confirm: the action is fully reversible (the same
-    // button slot becomes Reactivate, task statuses are restored), and Alert.alert
-    // can present behind the pageSheet detail modal on iOS, leaving the button
-    // apparently dead.
+
+
     const handleArchiveSelectedProject = () => {
         updateMutableSelectedProject({ status: 'archived' });
     };
@@ -977,9 +1043,8 @@ export function ProjectDetailModal({
         if (typeof requestAnimationFrame === 'function') {
             requestAnimationFrame(scrollToOffset);
         }
-        // A freshly mounted list clamps the jump until enough rows render, and
-        // each clamped jump renders more — keep retrying briefly, stopping as
-        // soon as the list reaches (or the user scrolls past) the target.
+
+
         let attempts = 0;
         const retry = () => {
             if (projectDetailScrollOffsetRef.current >= offsetY - 1) return;
@@ -990,12 +1055,7 @@ export function ProjectDetailModal({
         setTimeout(retry, 250);
     }, []);
 
-    // Exiting reorder mode is handled inside TaskList: it scrolls the
-    // remounted task FlatList to the region the reorder view was showing.
-    // Restoring the pre-reorder offset here instead yanked the viewport away
-    // from where the dragged task just landed (#784). Only the saved offset is
-    // reset — the list mounts at 0 and mounting fires no scroll event, so a
-    // stale value would leak into the next bulk-bar restore.
+
     const prevProjectReorderOwnsScrollRef = React.useRef(projectReorderOwnsScroll);
     React.useLayoutEffect(() => {
         const wasReordering = prevProjectReorderOwnsScrollRef.current;
@@ -1023,8 +1083,7 @@ export function ProjectDetailModal({
         resetProjectDetailScroll();
     }, [resetProjectDetailScroll, selectedProject?.id]);
 
-    // Opening the modal, closing it, or swapping the open project all start from
-    // a collapsed details panel with every menu and picker shut.
+
     React.useEffect(() => {
         setProjectTaskReorderMode(false);
         setSectionManagerVisible(false);
@@ -1075,8 +1134,7 @@ export function ProjectDetailModal({
         };
     }, []);
 
-    // Scrolls away with the task rows as the list's ListHeaderComponent in
-    // normal mode; stays pinned above the self-scrolling reorder list in reorder mode.
+
     const projectDetailListHeader = selectedProject ? (
         <>
             {onGettingStartedAction && isGettingStartedProject(selectedProject, selectedProjectTasks ?? []) && (
@@ -1164,48 +1222,49 @@ export function ProjectDetailModal({
 
                                             <View style={[styles.reviewLabelRow, styles.projectSettingsRowSpacing]}>
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{projectTypeLabel}</Text>
-                                                <View style={styles.projectTypeControls}>
-                                                    <TouchableOpacity
-                                                        accessibilityRole="button"
-                                                        onPress={() => {
-                                                            updateMutableSelectedProject({ isSequential: !selectedProjectRef.current?.isSequential });
-                                                        }}
-                                                        disabled={isArchivedProject}
-                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
-                                                        accessibilityState={{ disabled: isArchivedProject }}
-                                                        style={[
-                                                            styles.sequentialToggle,
-                                                            {
-                                                                backgroundColor: selectedProject.isSequential ? tc.tint : tc.filterBg,
-                                                                borderColor: selectedProject.isSequential ? tc.tint : tc.border,
-                                                            },
-                                                        ]}
-                                                        testID="project-type-toggle"
-                                                    >
-                                                        <Text
+                                                <TouchableOpacity
+                                                    accessibilityLabel={projectTypeHelpLabel}
+                                                    accessibilityRole="button"
+                                                    onPress={showProjectTypeHelp}
+                                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                                    style={[
+                                                        styles.projectTypeHelpButton,
+                                                        { backgroundColor: tc.filterBg, borderColor: tc.border },
+                                                    ]}
+                                                >
+                                                    <Ionicons name="help-circle-outline" size={17} color={tc.secondaryText} />
+                                                </TouchableOpacity>
+                                            </View>
+                                            <View style={styles.sequentialScopeOptions} testID="project-flow-mode-options">
+                                                {(['parallel', 'sequential', 'perSection'] as const).map((mode) => {
+                                                    const selected = selectedProjectFlowMode === mode;
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={mode}
+                                                            accessibilityRole="button"
+                                                            onPress={() => setSelectedProjectFlowMode(mode)}
+                                                            disabled={isArchivedProject}
+                                                            accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                            accessibilityState={{ selected, disabled: isArchivedProject }}
                                                             style={[
-                                                                styles.sequentialToggleText,
-                                                                { color: selectedProject.isSequential ? tc.onTint : tc.secondaryText },
+                                                                styles.sequentialScopeButton,
+                                                                {
+                                                                    backgroundColor: selected ? tc.tint : tc.inputBg,
+                                                                    borderColor: selected ? tc.tint : tc.border,
+                                                                },
                                                             ]}
+                                                            testID={`project-flow-mode-${mode}`}
                                                         >
-                                                            {selectedProject.isSequential
-                                                                ? tFallback(t, 'projects.sequential', 'Sequential')
-                                                                : tFallback(t, 'projects.parallel', 'Parallel')}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity
-                                                        accessibilityLabel={projectTypeHelpLabel}
-                                                        accessibilityRole="button"
-                                                        onPress={showProjectTypeHelp}
-                                                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                                        style={[
-                                                            styles.projectTypeHelpButton,
-                                                            { backgroundColor: tc.filterBg, borderColor: tc.border },
-                                                        ]}
-                                                    >
-                                                        <Ionicons name="help-circle-outline" size={17} color={tc.secondaryText} />
-                                                    </TouchableOpacity>
-                                                </View>
+                                                            <Text style={[styles.sequentialScopeText, { color: selected ? tc.onTint : tc.text }]}>
+                                                                {mode === 'sequential'
+                                                                    ? tFallback(t, 'projects.sequential', 'Sequential')
+                                                                    : mode === 'perSection'
+                                                                        ? tFallback(t, 'projects.perSection', 'Per section')
+                                                                        : tFallback(t, 'projects.parallel', 'Parallel')}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
                                             </View>
                                         </View>
 
@@ -1301,6 +1360,30 @@ export function ProjectDetailModal({
 
                                         <View style={[styles.reviewContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                                             <View style={styles.projectMetadataRow}>
+                                                <Text style={[styles.reviewLabel, { color: tc.text }]}>{tFallback(t, 'projects.color', 'Project color')}</Text>
+                                                <View style={{ flex: 1, alignItems: 'flex-end', gap: 8 }}>
+                                                    <TouchableOpacity disabled={isArchivedProject || colorSaving} accessibilityRole="button"
+                                                        accessibilityLabel={tFallback(t, 'projects.useAreaColor', 'Use Area color')}
+                                                        accessibilityState={{ selected: !liveSelectedProject?.colorOverride, disabled: isArchivedProject || colorSaving }}
+                                                        onPress={() => { void saveProjectColor(null); }} style={{ minHeight: 44, justifyContent: 'center' }}>
+                                                        <Text style={{ color: tc.tint }}>{!liveSelectedProject?.colorOverride ? '✓ ' : ''}{tFallback(t, 'projects.useAreaColor', 'Use Area color')}</Text>
+                                                    </TouchableOpacity>
+                                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4 }}>
+                                                        {[DEFAULT_PROJECT_COLOR, ...AREA_PRESET_COLORS].map((color) => <TouchableOpacity key={color}
+                                                            disabled={isArchivedProject || colorSaving} accessibilityRole="button"
+                                                            accessibilityLabel={`${tFallback(t, 'projects.color', 'Project color')}: ${color}`}
+                                                            accessibilityState={{ selected: liveSelectedProject?.colorOverride === color, disabled: isArchivedProject || colorSaving }}
+                                                            onPress={() => { void saveProjectColor(color); }} style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
+                                                            <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: color, borderWidth: liveSelectedProject?.colorOverride === color ? 3 : 1, borderColor: liveSelectedProject?.colorOverride === color ? tc.text : tc.border }} />
+                                                            {liveSelectedProject?.colorOverride === color && <Text style={{ color: tc.text }}>✓</Text>}
+                                                        </TouchableOpacity>)}
+                                                    </View>
+                                                    {colorError && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('common.retry')} onPress={() => { void saveProjectColor(colorIntent); }} disabled={colorSaving}>
+                                                        <Text accessibilityRole="alert" style={{ color: tc.danger }}>{tFallback(t, 'projects.colorSaveFailed', 'Color could not be saved.')} {t('common.retry')}</Text>
+                                                    </TouchableOpacity>}
+                                                </View>
+                                            </View>
+                                            <View style={[styles.projectMetadataRow, styles.projectMetadataRowDivider, { borderTopColor: tc.border }]}>
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{t('projects.areaLabel')}</Text>
                                                 <TouchableOpacity
                                                     style={[styles.projectMetadataValueButton, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
@@ -1467,7 +1550,7 @@ export function ProjectDetailModal({
                                                         .map((attachment) => {
                                                             const isMissing = attachment.kind === 'file'
                                                                 && (!attachment.uri || attachment.localStatus === 'missing');
-                                                            const canDownload = isMissing && Boolean(attachment.cloudKey);
+                                                            const canDownload = isMissing && Boolean(attachment.cloudKey) && !isAttachmentKeptWithoutFile(attachment);
                                                             const isDownloading = attachment.localStatus === 'downloading';
                                                             return (
                                                                 <View key={attachment.id} style={[styles.attachmentRow, { borderBottomColor: tc.border }]}>
@@ -1669,11 +1752,11 @@ export function ProjectDetailModal({
             presentationStyle={presentationStyle}
             transparent={false}
             allowSwipeDismissal
-            onRequestClose={onClose}
+            onRequestClose={handleRequestClose}
             onDismiss={onDismiss}
         >
-            {/* Android Modal content needs its own gesture root; the screen root does not cover Modal.
-                https://docs.swmansion.com/react-native-gesture-handler/docs/fundamentals/installation/#android */}
+            {
+                                                                                                                  }
             <GestureHandlerRootView style={{ flex: 1 }}>
                 <KeyboardAccessoryHost backgroundColor={tc.bg}>
                     <SafeAreaView style={[styles.projectDetailRoot, { backgroundColor: tc.bg }]} edges={safeAreaEdges}>
@@ -1733,7 +1816,10 @@ export function ProjectDetailModal({
                                 {projectTaskPinnedToolbar}
                                 {projectTaskSelectionBulkBar}
                                 <ProjectDetailScrollFrame backgroundColor={tc.bg}>
-                                {projectTaskReorderMode ? projectDetailListHeader : null}
+                                {                                                                                          }
+                                {projectTaskReorderMode ? (
+                                    <View style={styles.projectReorderHeader} testID="project-reorder-header">{projectDetailListHeader}</View>
+                                ) : null}
 
                                 <View style={styles.projectReorderListFill}>
                                     <ProjectTaskList
@@ -1759,7 +1845,7 @@ export function ProjectDetailModal({
                                     onClose={() => setProjectSortModalVisible(false)}
                                     onSelect={handleProjectTaskSortSelect}
                                     sortBy={projectTaskSortBy}
-                                    sortOptions={TASK_LIST_SORT_OPTIONS}
+                                    sortOptions={PROJECT_TASK_SORT_OPTIONS}
                                     t={t}
                                     themeColors={tc}
                                     visible={projectSortModalVisible}
@@ -1810,9 +1896,8 @@ export function ProjectDetailModal({
                                         />
                                     ) : null}
                                     {taskListOptions.enableProjectReorder && hasProjectTaskOrderTargets ? (
-                                        // Kept visible but disabled under a custom sort: hiding
-                                        // the row read as "manual ordering doesn't exist" to
-                                        // users who had a sort active (Discord report).
+
+
                                         <ProjectOptionRow
                                             description={sortIsActive && !projectTaskReorderMode
                                                 ? tFallback(t, 'projects.reorderNeedsDefaultSort', 'Available when Sort is Default')
@@ -1905,9 +1990,8 @@ export function ProjectDetailModal({
                                         icon="trash-outline"
                                         label={t('common.delete')}
                                         onPress={() => {
-                                            // Same confirm and outcome as the swipe action on the
-                                            // project list; the project goes to Trash and its tasks
-                                            // stay, unassigned (#1142).
+
+
                                             setProjectActionsVisible(false);
                                             const projectId = selectedProject.id;
                                             Alert.alert(
@@ -1943,6 +2027,7 @@ export function ProjectDetailModal({
                                     canManage={canManageProjectSections}
                                     deleteSection={deleteSection}
                                     onClose={() => setSectionManagerVisible(false)}
+                                    perSectionFlow={getProjectFlowMode(selectedProject) === 'perSection'}
                                     projectId={selectedProject.id}
                                     reorderSections={reorderSections}
                                     sections={selectedProjectSections}
@@ -1974,7 +2059,7 @@ export function ProjectDetailModal({
                     </SafeAreaView>
                 </KeyboardAccessoryHost>
                 <ToastViewport />
-                {/* Last child so the alert covers the header and the toasts (#940). */}
+                {                                                                      }
                 <ThemedAlertHost />
             </GestureHandlerRootView>
         </Modal>

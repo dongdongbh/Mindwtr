@@ -32,14 +32,14 @@ type Scenario = {
 type Observation = { action: string; events: unknown[][]; attachments: Attachment[]; screen: Record<string, unknown> };
 type Fixture = { now: string; taskId: string; projectId: string; scenarios: Scenario[]; observations: Record<string, Observation[]> };
 
-// The fixture writes an undefined field as '<undefined>' (normalize); its inputs drop those fields again.
+
 const revive = <T,>(value: T): T => JSON.parse(JSON.stringify(value), (_key, entry) => (entry === '<undefined>' ? undefined : entry));
 const fixture = loadScreenFixture<Fixture>('attachments');
 const scenarios = revive(fixture.scenarios);
 const CREATED = '2026-09-01T00:00:00.000Z';
 const NOW = fixture.now;
 
-/** core's attachment modules as the parity harness replaced them, recording each call. */
+
 const fakeHost = (state: { ports: Ports; log: unknown[][] }): NativeAttachmentsHost => ({
     persistAttachmentLocally: async (attachment) => {
         state.log.push(['persistAttachmentLocally', attachment]);
@@ -57,14 +57,11 @@ const fakeHost = (state: { ports: Ports; log: unknown[][] }): NativeAttachmentsH
 const ok = <T,>(result: NativeHostResult<T>): T => value(result);
 const rnId = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
 
-/** The RN events a host call can be compared on: the native host does the rest (pickers, logs, React state). */
+
 const COMPARED = new Set(['alert', 'persistAttachmentLocally', 'ensureAttachmentAvailableDetailed', 'openURL',
     'tryOpenWithAndroidViewer', 'sharingAvailable', 'shareAsync']);
 
-/**
- * React Native names new links by generateUUID, the contract by the request (requestRowId):
- * new IDs are compared by order of appearance.
- */
+
 const canonicalIds = (value: unknown, known: Set<string>): unknown => {
     const names = new Map<string, string>();
     const json = JSON.stringify(value);
@@ -87,7 +84,7 @@ describe('native host contract: attachments, against React Native\'s frozen pari
         else process.env.TZ = originalTz;
     });
 
-    // Native has no sandbox mode, and its picker hands back one size (an image's is fileSize).
+
     const SKIPPED: Record<string, string> = {
         'task: sandbox refuses every attachment action': 'the native app has no sandbox mode',
         'task: an image without a name takes its file name, and only fileSize is kept': 'expo-image-picker reported `size` without `fileSize`; a native picker reports one size, as fileSize',
@@ -206,7 +203,7 @@ describe('native host contract: attachments, against React Native\'s frozen pari
                     ? frozen.screen
                     : { linkModalVisible: frozen.screen.linkModalVisible, linkInput: frozen.screen.linkInput, imagePreview: frozen.screen.imagePreview };
                 const frozenAttachments = scenario.surface === 'task' ? frozen.attachments : frozen.screen.storedAttachments;
-                // The host speaks JSON: an undefined field is an absent one on both sides.
+
                 expect(canonicalIds(revive({ step: step.action, events: normalize(state.log), attachments: listed(), screen }), known)).toEqual(
                     canonicalIds(revive({ step: step.action, events: frozen.events.filter(([kind]) => COMPARED.has(String(kind))),
                         attachments: frozenAttachments, screen: frozenScreen }), known),
@@ -263,7 +260,7 @@ describe('native host contract: attachments, crash safety', () => {
     });
 
     it('refuses a project file replayed after a restart whose picked document can no longer be read, and saves nothing', async () => {
-        // The process died before the first send's receipt; at the next boot the picker's read grant is gone.
+
         const state = { ports: { persist: 'unreadable' } as Ports, log: [] as unknown[][] };
         env = await openSqliteHost({ projects: [seedProject()] }, undefined, { attachments: fakeHost(state) });
         const input = { requestId: '00000000-0000-4000-8000-00000000a0f1', owner: projectOwner, source: 'image' as const, picked: PICKED };
@@ -315,6 +312,16 @@ describe('native host contract: attachments, crash safety', () => {
         expect(stored().attachments![0]).toEqual(removed);
     });
 
+    it('removes a missing file the sync location could not find, so such rows never pile up', async () => {
+
+        const missing = pdf('gone', { uri: '', cloudKey: 'attachments/gone.pdf', fileHash: 'c'.repeat(64), localStatus: 'missing' });
+        env = await openSqliteHost({ projects: [seedProject([missing])] }, undefined, { attachments: fakeHost({ ports: {}, log: [] }) });
+
+        ok(await env.host.removeAttachment({ requestId: '00000000-0000-4000-8000-00000000a013', owner: projectOwner, attachmentId: 'gone' }));
+
+        expect(stored().attachments![0]).toMatchObject({ id: 'gone', deletedAt: expect.any(String) });
+    });
+
     it('downloads a project file; a replay after a restart finds it there and writes nothing', async () => {
         const state = { ports: {} as Ports, log: [] as unknown[][] };
         env = await openSqliteHost({ projects: [seedProject([remote('r1')])] }, undefined, { attachments: fakeHost(state) });
@@ -344,7 +351,7 @@ describe('native host contract: attachments, crash safety', () => {
         env = await openSqliteHost({ projects: [seedProject([remote('r1')])] }, undefined, { attachments: host });
         const download = env.host.downloadAttachment({ owner: projectOwner, attachmentId: 'r1' });
         await downloadStarted;
-        // A sync save publishes a newer title while the request is stalled; it must not wait for the download.
+
         await runSyncStoreSave(async () => {
             useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((project) => (project.id === 'p1' ? { ...project, title: 'Synced' } : project)) }));
         });
@@ -398,11 +405,11 @@ describe('native host contract: attachments, crash safety', () => {
         expect(toC.attachments![0]).toMatchObject({ title: 'C', uri: 'https://c.example' });
 
         const restarted = await env.restart();
-        // The first request, retried with its own original values against the draft that now holds C.
+
         const replay = await restarted.submitAttachmentLinks({ requestId: first.requestId, owner: owner(toC.attachments!), text: first.text,
             editing: { attachmentId: 'l1', title: 'A', uri: 'https://a.example' } });
         expect(replay).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
-        // A retry whose draft already holds its text changes nothing.
+
         expect(ok(await restarted.submitAttachmentLinks({ requestId: first.requestId, owner: owner(toB.attachments!), text: first.text,
             editing: { attachmentId: 'l1', title: 'A', uri: 'https://a.example' } }))).toEqual({ kind: 'saved', ids: ['l1'], attachments: toB.attachments });
     });
@@ -413,7 +420,7 @@ describe('native host contract: attachments, crash safety', () => {
         env = await openSqliteHost({ tasks: [task] }, undefined, { attachments: fakeHost({ ports: {}, log: [] }) });
         const base = [other];
         const link: Attachment = { id: 'l1', kind: 'link', title: 'One', uri: 'https://one.example', createdAt: CREATED, updatedAt: CREATED };
-        // While the editor is open, sync records the other attachment's upload.
+
         await later(() => useTaskStore.getState().updateTask('t1', { attachments: [{ ...other, cloudKey: 'attachments/other.pdf' }] }));
         const input = { id: 't1', base: {}, patch: {}, attachments: { base, value: [...base, link] }, requestId: '00000000-0000-4000-8000-00000000c001' };
         const first = await env.host.saveTaskDraft(input);
@@ -455,7 +462,7 @@ describe('native host contract: attachments, crash safety', () => {
             return { baseline, draft, committed: saved.attachments!, taskId: 't1', taskRevision: taskRevisionOf(saved) };
         };
         const removal = await saveRemoval('00000000-0000-4000-8000-00000000c003');
-        // Restored (an undo, or another device) before the delayed cleanup runs.
+
         await later(() => useTaskStore.getState().updateTask('t1', { attachments: [kept] }));
         expect(ok(await env.host.settleTaskDraftAttachments(removal))).toEqual({ deleted: 0 });
         expect(state.log).toEqual([]);
@@ -475,8 +482,8 @@ describe('native host contract: attachments, crash safety', () => {
         const task: Task = { id: 't1', title: 'Task', status: 'next', tags: [], contexts: [], attachments: [kept], createdAt: CREATED, updatedAt: CREATED };
         const host: NativeAttachmentsHost = {
             ...fakeHost(state),
-            // As createMobileAttachmentFiles: the directory setup is awaited before the delete,
-            // and the attachment is restored meanwhile.
+
+
             deleteManagedAttachmentFile: async (attachment, options) => {
                 useTaskStore.getState().updateTask('t1', { attachments: [kept] });
                 await flushPendingSave();
@@ -558,7 +565,7 @@ describe('native host contract: attachments, the list and the editor\'s helpers'
         const { host } = await open();
         expect(ok(host.getAttachmentLinkCheck({ text: 'https://a.example\n\nDocs | https://b.example' }))).toEqual({ error: null });
         expect(ok(host.getAttachmentLinkCheck({ text: 'https://a.example\nnot a link' }))).toEqual({ error: 'Line 2: enter a valid link.' });
-        // The edit sheet takes one line and shows no line error, as RN's single-line field does.
+
         expect(ok(host.getAttachmentLinkCheck({ text: 'not a link', editing: true }))).toEqual({ error: null });
         expect(ok(host.getAttachmentLinkCheck({ text: '' }))).toEqual({ error: null });
         expect(host.getAttachmentLinkCheck({ text: 7 } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -582,7 +589,7 @@ describe('native host contract: attachments, the list and the editor\'s helpers'
         expect(applied[1]).toMatchObject({ uri: 'file:///data/files/attachments/r1.pdf', localStatus: 'available' });
         const replaced = attachments.map((item) => item.id === 'r1' ? { ...item, contentRev: 2 } : item);
         expect(ok(host.applyAttachmentUpdate({ attachments: replaced, update: answer.update! }))).toEqual(replaced);
-        // The draft owns it until Save: the stored task is unchanged.
+
         expect(useTaskStore.getState()._tasksById.get('t1')?.attachments?.[1]).toEqual(remote('r1'));
     });
 

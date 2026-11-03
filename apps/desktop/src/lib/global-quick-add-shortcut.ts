@@ -63,8 +63,8 @@ export function getGlobalQuickAddShortcutOptions(
     const isWindows = platform.isWindows === true;
     const defaultShortcut = getDefaultGlobalQuickAddShortcut(platform);
     const legacyLabel = isMac ? 'Cmd+Shift+A' : 'Ctrl+Shift+A';
-    // Never recommend the legacy combo: Chrome (tab search), Word, and Excel
-    // all use Ctrl/Cmd+Shift+A, and a global hotkey steals it from them.
+
+
     const legacyLabelTemplate = defaultShortcut === GLOBAL_QUICK_ADD_SHORTCUT_LEGACY
         ? t('settings.globalQuickAddShortcutRecommended')
         : t('settings.globalQuickAddShortcutLegacy');
@@ -79,8 +79,8 @@ export function getGlobalQuickAddShortcutOptions(
     return [
         {
             value: GLOBAL_QUICK_ADD_SHORTCUT_DEFAULT,
-            // On Windows the default is disabled, but Ctrl+Alt+M is still the
-            // pick to recommend when enabling one (least layout/app conflicts).
+
+
             label:
                 defaultShortcut === GLOBAL_QUICK_ADD_SHORTCUT_DEFAULT || isWindows
                     ? formatI18nTemplate(t('settings.globalQuickAddShortcutRecommended'), { shortcut: isMac ? 'Ctrl+Option+M' : 'Ctrl+Alt+M' })
@@ -125,16 +125,13 @@ export function formatGlobalQuickAddShortcutForDisplay(
     return isMac ? 'Ctrl+Option+M' : 'Ctrl+Alt+M';
 }
 
-/** Mirrors the Rust reply to `set_global_quick_add_shortcut`. */
+
 export type GlobalQuickAddShortcutApplyResult = {
     shortcut?: string | null;
     warning?: string | null;
 };
 
-/**
- * Registers the OS-level hotkey. The reply carries what actually got
- * registered, which can differ from the request when the combo is taken.
- */
+
 export const applyGlobalQuickAddShortcut = (
     shortcut: GlobalQuickAddShortcutSetting,
 ): Promise<GlobalQuickAddShortcutApplyResult> => (

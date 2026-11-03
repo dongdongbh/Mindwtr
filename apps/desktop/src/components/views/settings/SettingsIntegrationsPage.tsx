@@ -107,7 +107,7 @@ type SettingsIntegrationsPageProps = {
     calendarPushTargetCalendarId: string | null;
     calendarPushTargets: SystemCalendarPushTarget[];
     calendarPushLoading: boolean;
-    /** Active theme, for the calendar swatch fills only (#974). */
+
     theme?: string;
     onCalendarNameChange: (value: string) => void;
     onCalendarUrlChange: (value: string) => void;

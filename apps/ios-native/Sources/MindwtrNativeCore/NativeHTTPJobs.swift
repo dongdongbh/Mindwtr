@@ -1,7 +1,6 @@
 import Foundation
 
-/// Plain records only. URLSession delegates never enter JSC or the database.
-/// Two retained slots bound uploads, buffered downloads and undelivered replies.
+
 final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     static let maximumBytes = 8 * 1024 * 1024
     private static let methods: Set<String> = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "PROPFIND", "MKCOL", "MOVE", "COPY"]
@@ -20,8 +19,8 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
     private var invalidated = false
     private var wake: (() -> Void)?
     private var byteLimit = NativeHTTPJobs.maximumBytes
+    private var localHTTPLogged = false
     #if DEBUG
-    private var loopbackOrigin: URL?
     var beforeCompletion: (() -> Void)?
     #endif
 
@@ -58,7 +57,6 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         let limit = faults?.httpByteLimit ?? Self.maximumBytes
         self.init(registry: registry, configuration: configuration,
                   limit: (1...Self.maximumBytes).contains(limit) ? limit : Self.maximumBytes, timeout: faults?.httpTimeout ?? 300)
-        loopbackOrigin = faults?.httpLoopbackOrigin
     }
     #endif
     private init(registry: NativeAttachmentLocalRequests, configuration: URLSessionConfiguration, limit: Int, timeout: TimeInterval) {
@@ -79,16 +77,36 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
     func setWake(_ callback: (() -> Void)?) { condition.lock(); wake = callback; condition.unlock() }
 
     private func failure(_ message: String = "HTTP request is invalid") -> HostFailure { HostFailure(message) }
-    private func allowedURL(_ url: URL) -> Bool {
+    private func allowedURL(_ url: URL) -> Bool { Self.allowedURL(url) }
+
+
+    static func allowedURL(_ url: URL) -> Bool {
         guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil else { return false }
-        if parts.scheme?.lowercased() == "https" { return true }
-        #if DEBUG
-        if let origin = loopbackOrigin,
-           origin.scheme == "http", origin.host == "127.0.0.1", origin.port != nil,
-           parts.scheme == "http", parts.host == "127.0.0.1", sameOrigin(url, origin) { return true }
-        #endif
-        return false
+              let raw = parts.host, !raw.isEmpty, parts.user == nil, parts.password == nil else { return false }
+        switch parts.scheme?.lowercased() {
+        case "https": return true
+        case "http": break
+        default: return false
+        }
+        var host = raw.lowercased()
+        if host.hasPrefix("["), host.hasSuffix("]") { host = String(host.dropFirst().dropLast()) }
+        if host == "localhost" || host == "::1" { return true }
+        if host.contains(":") { return host.hasPrefix("fc") || host.hasPrefix("fd") || host.hasPrefix("fe80:") }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        func decimal(_ label: Substring) -> Bool { !label.isEmpty && label.utf8.allSatisfy { (48...57).contains($0) } }
+        let last = labels.last(where: { !$0.isEmpty }) ?? ""
+
+
+        if decimal(last) || (last.hasPrefix("0x") && last.dropFirst(2).allSatisfy(\.isHexDigit)) {
+            guard labels.count == 4, labels.allSatisfy({ decimal($0) && ($0.count == 1 || $0.first != "0") }) else { return false }
+            let octets = labels.compactMap { Int($0) }
+            guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return false }
+            let (first, second) = (octets[0], octets[1])
+            return first == 127 || first == 10 || (first == 172 && (16...31).contains(second))
+                || (first == 192 && second == 168) || (first == 100 && (64...127).contains(second))
+        }
+        if host.contains(".") { return host.hasSuffix(".local") || host.hasSuffix(".localdomain") || host.hasSuffix(".home.arpa") }
+        return host.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-" }
     }
     private func sameOrigin(_ a: URL, _ b: URL) -> Bool {
         a.scheme?.lowercased() == b.scheme?.lowercased() && a.host?.lowercased() == b.host?.lowercased()
@@ -144,7 +162,10 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         jobs[id] = Job(id: id, registryID: registryID, token: token, method: method, redirect: redirect,
                        origin: url, authorization: request.value(forHTTPHeaderField: "Authorization"), task: task)
         taskIDs[task.taskIdentifier] = id
+        let firstLocalHTTP = url.scheme?.lowercased() == "http" && !localHTTPLogged
+        if firstLocalHTTP { localHTTPLogged = true }
         condition.unlock()
+        if firstLocalHTTP { NSLog("Native iOS local-network HTTP admitted releaseCheck=v1.3.7/ios-local-http outcome=admitted") }
         token.setCancellationHandler { [weak self] in self?.abort(id) }
         task.resume()
         return id
@@ -155,7 +176,7 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         job?.task.cancel()
     }
 
-    /// Metadata and body stay paired until body() consumes the one retained slot.
+
     func next() throws -> (json: String, body: Bool)? {
         condition.lock(); defer { condition.unlock() }
         guard taken == nil else { throw failure("HTTP response body is unavailable") }
@@ -197,12 +218,11 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         condition.lock()
         var next: URLRequest?
         if let job = job(task), !job.cancelled {
-            if job.redirect == "manual" { /* Return the original complete 3xx response. */ }
+            if job.redirect == "manual" {                                                  }
             else if job.redirect == "error" { job.error = "fetch failed: unexpected redirect" }
             else if job.hops < 5, let url = request.url, allowedURL(url), sameOrigin(url, job.origin) {
-                // URLSession can strip explicit Authorization even on a 307
-                // within the same origin. Restore only the immutable admitted
-                // value, after every origin/URL/hop guard has passed.
+
+
                 var followed = request
                 if let authorization = job.authorization { followed.setValue(authorization, forHTTPHeaderField: "Authorization") }
                 job.hops += 1; next = followed
@@ -281,8 +301,8 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         condition.lock(); accepting = false; wake = nil; condition.unlock()
         session.invalidateAndCancel()
         condition.lock()
-        // Invalidation can precede delivery of a registered task's terminal
-        // callback. Neither signal alone grants library-lock release.
+
+
         while !invalidated || jobs.values.contains(where: { !$0.finished }) { condition.wait() }
         condition.unlock()
         delegateQueue.waitUntilAllOperationsAreFinished()

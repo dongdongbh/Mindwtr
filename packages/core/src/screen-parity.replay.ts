@@ -1,10 +1,6 @@
-/**
- * Test support only (imported by the native host contract tests; not exported).
- * Loads a frozen React Native screen fixture, seeds the store as the mobile harness
- * does, records the store calls the harness records, and opens a native host over
- * that store; replayAfterRestart replays a request on a new host. openSqliteHost
- * runs the host over a real SQLite file with its request receipts, as the app does.
- */
+
+
+
 import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -29,27 +25,20 @@ export const value = <T,>(result: NativeHostResult<T>): T => {
 };
 
 let requestCount = 0;
-/** A fresh request UUID. */
+
 export const requestId = () => `00000000-0000-4000-8000-${String(++requestCount).padStart(12, '0')}`;
 
 type StoreFn = (...args: unknown[]) => Promise<unknown>;
 const realActions = new Map<string, StoreFn>();
 
-/**
- * Seeds the store with `data` through a storage adapter (`saveData` can fail a save),
- * then opens a native host over it. Each store action named in `record` is logged to
- * `log` as [name, ...its first `record[name]` arguments] (all of them when null),
- * after `intercept` had its say: an intercept that returns a promise answers the call
- * instead of the store. This harness's hosts require replay tokens, as the journaling
- * Android host does (NativeReplayTokens).
- */
+
 export async function openScreenHost(input: {
     data: { tasks?: Task[]; projects?: Project[]; areas?: Area[]; settings?: AppSettings };
     record: Record<string, number | null>;
     log: unknown[][];
     saveData?: (data: unknown) => Promise<void>;
     intercept?: (name: string, args: unknown[]) => Promise<unknown> | undefined;
-    /** Device bindings (createNativeHostContract's options, such as `ai`). */
+
     bindings?: Omit<NonNullable<Parameters<typeof createNativeHostContract>[0]>, 'replayTokens'>;
 }) {
     await flushPendingSave();
@@ -84,7 +73,7 @@ export async function openScreenHost(input: {
 }
 export type ScreenHost = Awaited<ReturnType<typeof openScreenHost>>;
 
-/** A new host over the same store and storage, as after a restart: it holds no request receipts. */
+
 export async function restartScreenHost() {
     await flushPendingSave();
     const host = createNativeHostContract({ replayTokens: 'required' });
@@ -93,10 +82,7 @@ export async function restartScreenHost() {
     return host;
 }
 
-/**
- * A replay after a restart: a new host (restartScreenHost's) runs `replay`, a request that
- * already ran before a later change. `wrote` says whether the store's data changed.
- */
+
 export async function replayAfterRestart<T>(replay: (host: ScreenHost) => Promise<NativeHostResult<T>>) {
     const host = await restartScreenHost();
     const data = () => {
@@ -118,7 +104,7 @@ const openDatabase = (file: string): Database => {
         : (require('node:sqlite') as { DatabaseSync: new (file: string) => Database }).DatabaseSync;
     return new Database(file);
 };
-// bun:sqlite takes the parameters as one array, node:sqlite as arguments.
+
 const clientOf = (database: Database): SqliteClient => {
     const statement = (sql: string) => {
         const prepared = database.prepare ? database.prepare(sql) : database.query!(sql);
@@ -132,22 +118,17 @@ const clientOf = (database: Database): SqliteClient => {
     };
 };
 
-/** A SQLite file and a client over it, for a test's own adapter. */
+
 export const openScratchSqlite = (file: string) => {
     const database = openDatabase(file);
     return { client: clientOf(database), close: () => database.close() };
 };
 
-/**
- * The native host over a real SQLite file, booted as the app boots it: core's receipt
- * adapter, the receipts table loaded before activation. `wrap` sees every SQL call (to
- * hold one, or fail one). `restart()` is process death: nothing in memory survives
- * (the store, the receipts, the connection); the host boots again from the file.
- */
+
 export async function openSqliteHost(
     seed: Partial<AppData>,
     wrap: (client: SqliteClient) => SqliteClient = (client) => client,
-    /** The host's bindings (createNativeHostContract's options), such as `ai`. */
+
     bindings: Omit<NonNullable<Parameters<typeof createNativeHostContract>[0]>, 'replayTokens'> = {},
     adapterOptions?: SqliteAdapterOptions,
 ) {
@@ -177,13 +158,13 @@ export async function openSqliteHost(
         .map((row) => row.request_id);
     return {
         get host() { return host; },
-        /** The file itself, outside the host's connection wrapper. */
+
         client: () => clientOf(database),
         sql: <T,>(query: string, params?: unknown[]) => clientOf(database).all<T>(query, params),
         receiptIds,
-        /** A folder for this host's files (copies of the database). */
+
         dir,
-        /** Process death; `from` is a copy of the file taken earlier (the disk as it was then). */
+
         async restart(from?: string, options?: { recoveryLoad?: boolean }) {
             const status = getPersistenceStatus();
             if (status.queued || status.inFlight || status.immediate) throw new Error('Restart with a save still queued: flush the change first');
@@ -193,10 +174,8 @@ export async function openSqliteHost(
             host = await boot(options?.recoveryLoad);
             return host;
         },
-        /**
-         * A replay after process death: restart, then `replay` the request. `wrote` says whether the
-         * store's data changed; `receipts` whether the receipts table did.
-         */
+
+
         async replay<T>(replay: (restarted: ScreenHost) => Promise<NativeHostResult<T>>, from?: string) {
             const restarted = await this.restart(from);
             const data = () => {

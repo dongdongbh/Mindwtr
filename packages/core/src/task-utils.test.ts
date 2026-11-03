@@ -156,10 +156,8 @@ describe('task-utils', () => {
         });
 
         it('breaks full (order, createdAt) ties by id so array order never decides (#784)', () => {
-            // Imported duplicates carry identical order AND createdAt; a
-            // comparator returning 0 leaves stable sort at the mercy of array
-            // order, which every sync merge rebuild reshuffles — rows visibly
-            // swapped after each sync. The id tie-break pins them.
+
+
             const tied = (id: string) => task({ id, projectId: 'p', order: 5, createdAt: '2026-01-01T00:00:00.000Z' });
             const forward = [tied('dup-a'), tied('dup-b'), tied('dup-c')].sort(compareTasksByProjectOrder);
             const backward = [tied('dup-c'), tied('dup-b'), tied('dup-a')].sort(compareTasksByProjectOrder);
@@ -438,16 +436,14 @@ describe('task-utils', () => {
             expect(sorted.map(t => t.title)).toEqual(['Soon', 'Later', 'No Date']);
         });
 
-        // #766: these comparators parse date strings, and parsing them inside
-        // the comparator makes the work n·log(n) instead of n — at a few
-        // thousand tasks the parses, not the sort, were the cost.
+
         it.each([
             ['sortTasks', (tasks: Task[]) => sortTasks(tasks)],
             ['sortTasksBy due', (tasks: Task[]) => sortTasksBy(tasks, 'due')],
             ['sortDoneTasksForListView', (tasks: Task[]) => sortDoneTasksForListView(tasks)],
         ] as const)('reads each task date once per sort, not once per comparison (%s)', (_label, sort) => {
-            // Shuffled on purpose: an already-ordered array sorts in ~n
-            // comparisons, which hides the per-comparison parsing this guards.
+
+
             const tasks = Array.from({ length: 512 }, (_, index) => {
                 const day = (index * 197) % 512;
                 return {
@@ -465,14 +461,13 @@ describe('task-utils', () => {
             let parseCalls = 0;
             try {
                 sort(tasks);
-                // Read before restoring: mockRestore() clears the record.
+
                 parseCalls = parseSpy.mock.calls.length;
             } finally {
                 parseSpy.mockRestore();
             }
 
-            // Every date field of every task, read once, leaves headroom below
-            // the ~4,600 comparisons an n·log(n) sort of this list performs.
+
             expect(parseCalls).toBeLessThanOrEqual(tasks.length * 4);
         });
     });
@@ -767,6 +762,23 @@ describe('task-utils', () => {
     });
 
     describe('sortTasksBySavedPreference', () => {
+        it('falls through to the next key when both tasks lack the sorted date or estimate', () => {
+
+
+            const undated = (id: string, createdAt: string, extra: Partial<Task> = {}): Task => ({
+                id, title: id, status: 'next', tags: [], contexts: [], createdAt, updatedAt: createdAt, ...extra,
+            });
+            const newer = undated('newer', '2026-02-02T08:00:00.000Z');
+            const older = undated('older', '2026-02-01T08:00:00.000Z');
+            for (const sortBy of ['due', 'start', 'review', 'timeEstimate'] as const) {
+                expect(sortTasksBySavedPreference([newer, older], sortBy).map((task) => task.id)).toEqual(['older', 'newer']);
+            }
+            const dueLater = undated('due-later', '2026-02-01T07:00:00.000Z', { startTime: '2026-02-05T09:00:00.000Z' });
+            const dueSooner = undated('due-sooner', '2026-02-01T09:00:00.000Z', { startTime: '2026-02-03T09:00:00.000Z' });
+            expect(sortTasksBySavedPreference([dueLater, dueSooner], 'priority', { prioritizeByPriority: true })
+                .map((task) => task.id)).toEqual(['due-sooner', 'due-later']);
+        });
+
         it('sorts start-date perspectives before priority and creation fallbacks', () => {
             const sorted = sortTasksBySavedPreference([
                 {
@@ -1004,8 +1016,8 @@ describe('task-utils', () => {
             expect(shouldShowTaskForStart(task, { now, granularity: 'time' })).toBe(false);
             expect(shouldShowTaskForStart(task, { now, granularity: 'time', showFutureStarts: true })).toBe(true);
             expect(shouldShowTaskForStart(task, { now: new Date(2026, 4, 2, 17, 0, 0, 1), granularity: 'time' })).toBe(true);
-            // Day granularity (the default, e.g. Daily Review planning and the
-            // unstar-on-defer rule) keeps a later-today start visible.
+
+
             expect(shouldShowTaskForStart(task, { now })).toBe(true);
             expect(isTaskFutureStart(task, now)).toBe(false);
         });
@@ -1077,9 +1089,9 @@ describe('task-utils', () => {
             const tasks = [
                 { startTime: at(17).toISOString() },
                 { startTime: at(14, 30).toISOString() },
-                { startTime: at(8).toISOString() },          // already started
-                { startTime: '2026-05-02' },                 // date-only: never hidden today
-                { startTime: new Date(2026, 4, 3, 9, 0, 0, 0).toISOString() }, // beyond today: day-key's job
+                { startTime: at(8).toISOString() },
+                { startTime: '2026-05-02' },
+                { startTime: new Date(2026, 4, 3, 9, 0, 0, 0).toISOString() },
                 { startTime: undefined },
             ];
 
@@ -1177,7 +1189,7 @@ describe('task-utils', () => {
             const deferredStart = makeTask({ id: 'deferred', title: 'Prep slides', startTime: '2026-04-08' });
             const visibleToday = makeTask({ id: 'today', startTime: '2026-04-05' });
             const beyondWindow = makeTask({ id: 'far', startTime: '2026-04-20' });
-            // A plain due date never hides a task, so it is not "upcoming" — it is already visible.
+
             const oneTimeFutureDue = makeTask({ id: 'due-only', dueDate: '2026-04-09' });
             const somedayDeferred = makeTask({ id: 'someday', status: 'someday', startTime: '2026-04-08' });
 
@@ -1192,9 +1204,8 @@ describe('task-utils', () => {
         });
 
         it('leaves out a task that starts later today — that belongs to the Today section, not Upcoming', () => {
-            // Hidden from Next Actions by time granularity, but it is still
-            // today's business (GTD's hard landscape for the day) — the Today
-            // section lists it by its time instead.
+
+
             const laterToday = makeTask({ id: 'later-today', startTime: '2026-04-05T15:00' });
             const alreadyStarted = makeTask({ id: 'already', startTime: '2026-04-05T09:00' });
 
@@ -1202,8 +1213,8 @@ describe('task-utils', () => {
         });
 
         it('leaves out a recurring task due later today, which Next Actions already shows', () => {
-            // A due date never hides a task, so listing it here would show the
-            // same row in two sections at once.
+
+
             const recurringDueToday = makeTask({
                 id: 'recurring-today',
                 dueDate: '2026-04-05T18:00',
@@ -1332,9 +1343,8 @@ describe('task-utils', () => {
         });
 
         it('lets a waiting first step hold the slot and block later next tasks', () => {
-            // GTD: a committed step blocked on someone else keeps its place in
-            // the sequence — the project is legitimately blocked, so nothing
-            // from it surfaces in Focus until the waiting step clears.
+
+
             const firstTaskIds = getFocusSequentialFirstTaskIds([
                 { id: 'waiting-first', projectId: 'p1', status: 'waiting', order: 1, orderNum: undefined, createdAt: '2026-04-01T00:00:00.000Z' },
                 { id: 'next-after', projectId: 'p1', status: 'next', order: 2, orderNum: undefined, createdAt: '2026-04-02T00:00:00.000Z' },
@@ -1393,10 +1403,8 @@ describe('task-utils', () => {
         });
 
         it('keeps the first task in the slot when a later task merely starts today', () => {
-            // #1015: Task A due today, Task B due tomorrow with a start date
-            // today. B's start gates only B's own visibility — it must not
-            // take the project slot from A (which hid the whole project when
-            // B's timed start also kept B itself hidden).
+
+
             const firstTaskIds = getFocusSequentialFirstTaskIds([
                 {
                     id: 'first-due-today',
@@ -1525,7 +1533,7 @@ describe('summarizeTaskLifecycleCounts (#766)', () => {
             { createdAt: '2026-01-01T00:00:00.000Z' },
             { createdAt: '2026-07-10T12:00:00.000Z', deletedAt: '2026-07-11T00:00:00.000Z' },
             { createdAt: '2026-01-01T00:00:00.000Z', deletedAt: '2026-02-01T00:00:00.000Z', purgedAt: '2026-03-01T00:00:00.000Z' },
-            // Purged without a deletedAt still counts as a tombstone.
+
             { createdAt: '2026-01-01T00:00:00.000Z', purgedAt: '2026-03-01T00:00:00.000Z' },
         ], now);
 

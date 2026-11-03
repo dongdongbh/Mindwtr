@@ -9,8 +9,8 @@ export const STORE_REVIEW_MIN_ACTIVE_DAYS = 7;
 export const STORE_REVIEW_ATTEMPT_COOLDOWN_MS = 90 * DAY_MS;
 export const DONATION_PROMPT_MIN_DAYS_SINCE_FIRST_SEEN = 30;
 export const DONATION_PROMPT_MIN_ACTIVE_DAYS = 21;
-// One cooldown from the last time the notice was shown, whether or not the user
-// clicked support: a click is not proof of a donation, and twice a year is fine.
+
+
 export const DONATION_PROMPT_REPEAT_COOLDOWN_MS = 183 * DAY_MS;
 export const UPDATE_REMINDER_CHECK_INTERVAL_MS = DAY_MS;
 export const UPDATE_REMINDER_MIN_DAYS_SINCE_FIRST_SEEN = 7;
@@ -30,7 +30,7 @@ export type UserPromptState = {
     donation?: {
         askedEver?: boolean;
         lastShownAt?: string;
-        /** Legacy install-local field; no longer read. */
+
         lastActionAt?: string;
     };
     update?: {
@@ -51,7 +51,7 @@ export type StoreReviewPromptInput = {
 export type DonationPromptInput = {
     nowMs: number;
     promptState: UserPromptState | null | undefined;
-    /** settings.supportPrompt: the cooldown shared by every install on the dataset (#1237). */
+
     supportPrompt?: SupportPromptSettings | null;
     donationAllowed: boolean;
 };
@@ -293,8 +293,7 @@ export function shouldShowDonationPrompt({
 }: DonationPromptInput): boolean {
     if (!donationAllowed) return false;
 
-    // The install-local record and the synced one describe the same ask; the
-    // newest timestamp on either side starts the cooldown.
+
     const donationLastShownMs = latestTimeMs(promptState?.donation?.lastShownAt, supportPrompt?.lastShownAt);
     let activeDayCount: number;
 
@@ -431,9 +430,7 @@ export function recordUpdateReminderDismissed(
     };
 }
 
-// ---- The prompt state the mobile apps keep on the device (RN's AsyncStorage) ----
 
-/** The device's prompt state: first seen, active days, the store review's and the other prompts' last times. */
 export const LOCAL_USER_PROMPT_STATE_KEY = 'mindwtr:local-user-prompts:v1';
 
 type PromptStorage = {
@@ -470,16 +467,12 @@ export async function updateLocalUserPromptState(
     return next;
 }
 
-/** Today counts as an active day (at first paint). */
+
 export async function recordLocalPromptActivity(storage: PromptStorage, nowMs = Date.now()): Promise<UserPromptState> {
     return updateLocalUserPromptState(storage, (promptState) => recordPromptActivity(promptState, nowMs));
 }
 
-/**
- * After a positive moment (a finished Weekly Review): whether to ask the store for its review sheet now. A build that may ask
- * (`buildEligible`: a store build) asks when the store has a review action and the prompt state passes the gate; the attempt
- * is stored before the host asks, so a sheet the store never shows still starts the cooldown.
- */
+
 export async function attemptStoreReviewAfterPositiveMoment(input: {
     buildEligible: boolean;
     platform: UserPromptPlatform;

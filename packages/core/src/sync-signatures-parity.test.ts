@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { chooseDeterministicWinner, toComparableValue } from './sync-signatures';
 
-// Pinned pre-optimization implementation. This is intentionally independent
-// of production helpers: changing signature bytes can change equal-revision
-// winners across app versions even when both versions look deterministic alone.
+
 const ignored = new Set(['rev', 'revBy', 'updatedAt', 'createdAt', 'localStatus', 'purgedAt', 'order', 'orderNum', 'boardOrder', 'focusOrder']);
 const opaque = new Set(['statusBeforeProjectArchive', 'completedAtBeforeProjectArchive', 'isFocusedTodayBeforeProjectArchive', 'deletedAtBeforeProjectArchive', 'projectArchivedAt']);
 function legacy(value: unknown, includeIgnoredKeys = false): unknown {

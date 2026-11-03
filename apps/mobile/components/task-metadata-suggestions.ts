@@ -1,9 +1,6 @@
 import { getPersonSuggestionNames, type Person, type Task } from '@mindwtr/core';
 
-/**
- * Copilot token ranking: drop what is already selected, float the tokens the
- * typed terms hint at, keep the rest in pool order behind them.
- */
+
 export const rankTokenSuggestions = (
   pool: string[],
   selected: Iterable<string>,

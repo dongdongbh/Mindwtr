@@ -10,14 +10,13 @@ export function parseNativeViewport(value) {
   return { width, height, ratio };
 }
 
-// Match the unique copied executable of this iteration, not a window title,
-// application name, or whichever window happens to have keyboard focus.
+
 export function findOwnedNativeWindow(windows, application, executableForPid) {
   assert(Array.isArray(windows), 'Invalid compositor window inventory');
   const matches = windows.filter(window => {
     if (!Number.isSafeInteger(window.pid) || window.pid <= 0) return false;
     try { return executableForPid(window.pid) === application; }
-    catch { return false; } // A window may exit during inventory collection.
+    catch { return false; }
   });
   assert(matches.length <= 1, 'Ambiguous benchmark window ownership');
   if (!matches.length) return undefined;
@@ -41,7 +40,7 @@ export function validateNativeViewport(actual, expected) {
   return actual;
 }
 
-// Serialized into the benchmark WebView. Keep this function self-contained.
+
 export function installNativeViewportGuard(expected) {
   window.__nativeViewportDrift = false;
   const check = () => {

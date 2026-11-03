@@ -134,6 +134,23 @@ describe('project to section', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it('turns a Sequential source into a Sequential section of a Per section destination (#1429)', async () => {
+        rows([project('source', { isSequential: true }),
+            project('destination', { isSequential: false, perSectionFlow: true })],
+        [task('first', { order: 1 }), task('second', { order: 2 })]);
+        const command = prepare();
+        expect(await useTaskStore.getState().convertProjectToSection(command)).toMatchObject({ success: true });
+        expect(saved.sections.find((row) => row.id === command.sectionId)?.isSequential).toBe(true);
+        const destination = saved.projects.find((row) => row.id === 'destination')!;
+        const cues = getSequentialProjectTaskCues(destination, saved.tasks, saved.sections);
+        expect([cues.get('first'), cues.get('second')]).toEqual(['available', 'later']);
+
+
+        rows([project('source'), project('destination', { perSectionFlow: true })], [task('only')]);
+        const parallel = prepare();
+        expect(parallel.section.isSequential).toBe(false);
+    });
+
     it('refuses confirmation when the destination flow changes', async () => {
         rows([project('source', { isSequential: true }),
             project('destination', { isSequential: true, sequentialScope: 'section' })], [task('first')]);
@@ -180,7 +197,7 @@ describe('project to section', () => {
                 expect(previewDestination(destinationId), `${sourceId} -> ${destinationId}`).toEqual(expected);
             }
         }
-        // The fixture must reach the success branch with real counts, not only blocked paths.
+
         expect(okCount).toBeGreaterThan(4);
         expect(createProjectToSectionPreviewer(state, 'source')('in-area')).toMatchObject({
             ok: true, taskCount: 7, completedCount: 1, archivedCount: 1 });
@@ -220,7 +237,7 @@ describe('project to section', () => {
             expect(persisted.recurrence).toEqual(before.recurrence);
         }
         expect(command.tasks.map(({ after }) => after.order)).toEqual([21, 22, 23]);
-        expect(saved.tasks).toHaveLength(5); // no recurring follow-up
+        expect(saved.tasks).toHaveLength(5);
         expect(await useTaskStore.getState().convertProjectToSection(command)).toMatchObject({ success: true });
         expect(useTaskStore.getState()._allSections.filter((row) => row.id === command.sectionId)).toHaveLength(1);
     });

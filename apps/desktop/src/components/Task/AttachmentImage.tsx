@@ -5,14 +5,15 @@ import { inferAttachmentMimeTypeFromUri } from '../../lib/attachment-mime';
 import { normalizeAttachmentPathForUrl, resolveAttachmentReadPath } from '../../lib/attachment-paths';
 import { isTauriRuntime } from '../../lib/runtime';
 import { fetchWebCloudAttachmentBlob } from '../../lib/web-attachment-source';
+import { getStagedWebAttachmentPreviewUrl } from '../../lib/web-attachment-upload';
 import { resolveAttachmentSource } from './task-item-attachment-utils';
 
 type AttachmentImageProps = {
     attachment: Attachment;
     alt: string;
     className?: string;
-    /** Shown instead of the muted placeholder when the web build cannot fetch the bytes.
-     *  Only the full-size viewer passes it; thumbnails stay silent. */
+
+
     unavailableText?: string;
 };
 
@@ -62,8 +63,14 @@ export function AttachmentImage({ attachment, alt, className, unavailableText }:
                 setSrc(resolveAttachmentSource(attachment.uri));
                 return () => undefined;
             }
-            // No filesystem in the web build: the bytes can only come from a self-hosted
-            // cloud server, and only for a plaintext library.
+
+            const stagedUrl = !attachment.cloudKey ? getStagedWebAttachmentPreviewUrl(attachment.id) : undefined;
+            if (stagedUrl) {
+                setSrc(stagedUrl);
+                return () => undefined;
+            }
+
+
             setSrc(null);
             void fetchWebCloudAttachmentBlob(attachment).then((blobUrl) => {
                 if (!active) {

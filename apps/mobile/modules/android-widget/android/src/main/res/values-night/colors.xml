@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Same values as core widget-payload.ts's dark palette. -->
+
 <resources>
     <color name="mindwtr_widget_background">#111827</color>
     <color name="mindwtr_widget_card">#1F2937</color>

@@ -216,10 +216,7 @@ function isFsErrorWithCode(error: unknown, code: string): boolean {
         && (error as { code?: unknown }).code === code;
 }
 
-// S9: node fs errors embed the absolute path in .message (e.g. "ENOENT: no such
-// file or directory, lstat '/data/<namespace-key>/attachments/...'"). Callers that
-// surface removal/GC failures to a response body must use the short .code instead
-// (e.g. 'ENOENT', 'EIO') — never .message, and never the error object itself.
+
 export function getFsErrorCode(error: unknown): string {
     return typeof error === 'object'
         && error !== null
@@ -229,15 +226,7 @@ export function getFsErrorCode(error: unknown): string {
         : 'unknown';
 }
 
-/**
- * Walks each path segment from `rootRealPath` down to `targetDir`, rejecting any
- * symlink escape along the way. With `create: true` (the default; used by attachment
- * writes) missing segments are created as plain directories. With `create: false`
- * (used by read-only attachment access — see `resolveAttachmentPath`) a missing
- * segment stops the walk and returns `true` without creating anything: nothing exists
- * below that point, so there is no symlink to escape through, and the caller treats
- * the unresolved remainder as "not found" rather than "invalid".
- */
+
 function syncDirectoryEntryParent(
     parentPath: string,
     fileSystem: DurableDirectorySyncFileSystem,
@@ -253,7 +242,7 @@ function syncDirectoryEntryParent(
             try {
                 fileSystem.closeSync(handle);
             } catch {
-                // The durability failure remains authoritative.
+
             }
         }
     }
@@ -267,14 +256,8 @@ export function durablySyncDirectory(
 }
 
 export type DurableRemovalOptions = {
-    /**
-     * Set false only when the caller removes several entries from the same
-     * directory and durably syncs that directory itself once at the end (see
-     * garbageCollectOrphanAttachments' batched GC pass) — otherwise every
-     * per-entry removal keeps paying its own parent fsync, which is required
-     * for a standalone removal like the single-file DELETE route to durably
-     * acknowledge before responding. Defaults to true.
-     */
+
+
     syncParent?: boolean;
 };
 
@@ -286,9 +269,8 @@ function durablyRemoveEntry(
 ): boolean {
     const parentPath = dirname(targetPath);
     if (!fileSystem.existsSync(targetPath)) {
-        // A preceding attempt may have made the removal visible but failed while
-        // publishing the parent-directory change. Re-sync an existing parent so
-        // an idempotent retry cannot acknowledge visibility as durability.
+
+
         if (syncParent && fileSystem.existsSync(parentPath)) {
             syncDirectoryEntryParent(parentPath, fileSystem);
         }
@@ -356,21 +338,15 @@ export function ensureDirectoryWithinRoot(
 
         const currentRealPath = fileSystem.realpathSync(currentPath);
         if (!isPathWithinRoot(currentRealPath, rootRealPath)) return false;
-        // Persist the child entry itself, not only files later written inside
-        // it. Re-syncing an existing segment also makes a retry safe after a
-        // prior parent fsync failed while leaving the directory visible.
+
+
         if (create) syncDirectoryEntryParent(parentPath, fileSystem);
     }
 
     return true;
 }
 
-/**
- * Creates a directory tree from its nearest existing ancestor and durably
- * publishes every new directory entry before returning its canonical path.
- * Unsafe non-directory/symlink shapes return null; filesystem and durability
- * failures throw so request handlers can classify them as retryable 5xx.
- */
+
 export function ensureDurableDirectory(
     targetDir: string,
     fileSystem: DurableDirectoryFileSystem = nodeDurableDirectoryFileSystem,
@@ -389,13 +365,8 @@ export function ensureDurableDirectory(
 
             const relativeTarget = relative(existingAncestor, absoluteTarget);
             if (!relativeTarget || relativeTarget === '.') {
-                // The target already existed when this call began, so nothing was
-                // created — there is no new directory entry to publish. This is the
-                // hot path (every lock acquisition, every GET/HEAD /v1/data), so it
-                // must not pay a durability barrier; only first creation (below) does.
-                // A crash between a prior call's mkdir and its parent fsync either
-                // left the entry durable (nothing to fix) or drops it on a real
-                // crash/reboot, which self-heals via ENOENT below on the next call.
+
+
                 return existingRealPath;
             }
             const canonicalTarget = resolve(existingRealPath, relativeTarget);
@@ -450,13 +421,7 @@ export function normalizeAttachmentRelativePath(rawPath: string): string | null 
     return segments.join('/');
 }
 
-/**
- * `create` must be `true` only for PUT. GET and DELETE resolve with `create: false`
- * so an unknown token can never plant `<dataDir>/<key>/attachments` on disk merely by
- * reading or deleting — that side effect used to double as an undocumented namespace
- * creation, permanently exempting the token from `ensureNamespaceWriteAllowed` and
- * consuming a slot in `maxAnyTokenNamespaces` without ever writing data.
- */
+
 export function resolveAttachmentPath(
     dataDir: string,
     key: string,
@@ -466,16 +431,14 @@ export function resolveAttachmentPath(
     const relativePath = normalizeAttachmentRelativePath(rawPath);
     if (!relativePath) return null;
     const dataRoot = resolve(dataDir);
-    // Startup owns creation of the configured storage root. Request paths may
-    // create only descendants inside that already-existing root, otherwise a
-    // lost mount could be silently replaced with a fresh local directory.
+
+
     const dataRootRealPath = resolveExistingDirectory(dataRoot);
     if (!dataRootRealPath) return null;
     const rootDir = resolve(join(dataRootRealPath, key, 'attachments'));
     if (!ensureDirectoryWithinRoot(dataRootRealPath, rootDir, options.create)) return null;
-    // rootDir may not exist yet when options.create is false (nothing was ever
-    // uploaded for this key) — that's the whole point, so fall back to the
-    // unresolved path rather than realpathSync-ing a directory that isn't there.
+
+
     const rootRealPath = existsSync(rootDir) ? realpathSync(rootDir) : rootDir;
     if (!isPathWithinRoot(rootRealPath, dataRootRealPath)) return null;
     const filePath = resolve(join(rootRealPath, relativePath));
@@ -545,7 +508,7 @@ export function durablyPublishFile(
                 try {
                     fileSystem.closeSync(parentHandle);
                 } catch {
-                    // The original durability-stage error is more actionable.
+
                 }
             }
         }
@@ -555,14 +518,14 @@ export function durablyPublishFile(
             try {
                 fileSystem.closeSync(tempHandle);
             } catch {
-                // The original durability-stage error is more actionable.
+
             }
         }
         if (fileSystem.existsSync(tempPath)) {
             try {
                 fileSystem.unlinkSync(tempPath);
             } catch {
-                // Best-effort cleanup; the failed publication is still rejected.
+
             }
         }
     }
@@ -662,12 +625,12 @@ export function prepareFilePublicationSafely(
         try {
             closeSync(tempHandle);
         } catch {
-            // Preserve the stage-validation error.
+
         }
         try {
             unlinkSync(tempPath);
         } catch {
-            // Preserve the stage-validation error.
+
         }
         throw error;
     }
@@ -698,7 +661,7 @@ export function abandonPreparedFilePublication(prepared: PreparedFilePublication
         try {
             closeSync(prepared.tempHandle);
         } catch {
-            // Best effort. The request failure remains authoritative.
+
         }
         prepared.tempHandle = null;
     }
@@ -712,7 +675,7 @@ export function abandonPreparedFilePublication(prepared: PreparedFilePublication
             unlinkSync(prepared.tempPath);
         }
     } catch {
-        // The stage may have disappeared with the original storage root.
+
     }
 }
 
@@ -731,9 +694,8 @@ export function publishPreparedFilePublication(
 
     assertStorageRoot?.();
     if (!isPreparedFilePublicationCurrent(prepared)) return false;
-    // Keep the startup-pinned data root and this exact staged inode authoritative
-    // at the publication boundary. A same-path replacement must never inherit a
-    // publication operation that began against the old storage instance.
+
+
     assertStorageRoot?.();
     if (!isPreparedFilePublicationCurrent(prepared)) return false;
 
@@ -778,28 +740,19 @@ export type AppDataForWriteResult =
     | { state: 'ok'; data: AppData }
     | { state: 'unreadable' };
 
-/**
- * Discriminates "no namespace document yet" (fine, callers write a fresh default) from
- * "the document exists but couldn't be read/parsed" (EIO/EACCES/corrupt JSON) so a write
- * path never mistakes the latter for an empty namespace and silently replaces real data —
- * see loadExistingDataForMerge in server.ts, which already does this for PUT /v1/data.
- */
+
 export function loadAppDataForWriteUncached(filePath: string): AppDataForWriteResult {
     if (!existsSync(filePath)) return { state: 'ok', data: createDefaultData() };
     const raw = readData(filePath);
     if (!raw) return { state: 'unreadable' };
-    // Decode older API-created link strings before REST/attachment code reads
-    // the records. Invalid stored data remains unreadable, never an empty app.
-    // The parsed-data cache is separate from the trusted raw-file cache: only
-    // a subsequent successful write may establish trust in repaired bytes.
+
+
     const parsed = parseSyncDocument(raw, 'local');
     if (!parsed.ok) return { state: 'unreadable' };
     return { state: 'ok', data: normalizeLoadedAreas(parsed.data) };
 }
 
-// Raw, uncached disk read. server-data-cache.ts wraps this as the process-local-cached
-// `loadAppData` that the rest of the server imports; this uncached name stays distinct
-// so an import site can tell at a glance which one it's getting.
+
 export function loadAppDataUncached(filePath: string): AppData {
     const result = loadAppDataForWriteUncached(filePath);
     return result.state === 'ok' ? result.data : createDefaultData();
@@ -920,9 +873,8 @@ async function withCloudFileLock<T>(
         assertStorageRoot?.();
         const candidate = new Database(lockPath);
         try {
-            // Poll with a zero SQLite busy timeout instead of blocking Bun's event
-            // loop. BEGIN IMMEDIATE is an OS-backed process lock; the kernel drops
-            // it when a process crashes, so there is no stale lease to unlink.
+
+
             candidate.exec('PRAGMA busy_timeout = 0;');
             candidate.exec('BEGIN IMMEDIATE;');
             lockDatabase = candidate;
@@ -942,9 +894,8 @@ async function withCloudFileLock<T>(
         throwIfRequestAborted(signal);
         assertStorageRoot?.();
         const result = await fn();
-        // The callback may read, validate, or merge for long enough that an
-        // external remount can replace the same configured path. Never let a
-        // serialized operation return data from that replacement instance.
+
+
         assertStorageRoot?.();
         return result;
     } catch (error) {
@@ -954,7 +905,7 @@ async function withCloudFileLock<T>(
         try {
             lockDatabase?.exec('ROLLBACK;');
         } catch {
-            // Closing the connection below still releases the OS lock.
+
         } finally {
             lockDatabase?.close();
         }
@@ -1028,10 +979,7 @@ export function probeExistingWritableDir(
     return probeWritableDirectory(dirPath, false, options);
 }
 
-/** `/ready` is answered before auth, so every anonymous hit would otherwise run a
- *  synchronous open + write + fsync + unlink on the data volume. The verdict is
- *  cached for far less than the container healthcheck interval, and a cached
- *  failure is re-probed once the entry expires. */
+
 export const READINESS_PROBE_TTL_MS = 5_000;
 
 const readinessProbeVerdicts = new Map<string, { checkedAtMs: number; writable: boolean }>();
@@ -1092,9 +1040,8 @@ export async function readRequestBytes(
                 signal.removeEventListener('abort', onAbort);
             }
         }
-        // reader.cancel() resolves a pending read as { done: true } instead of
-        // throwing, so recheck the request signal before treating partial bytes
-        // as a complete body.
+
+
         throwIfRequestAborted(signal);
 
         if (chunks.length === 0) {

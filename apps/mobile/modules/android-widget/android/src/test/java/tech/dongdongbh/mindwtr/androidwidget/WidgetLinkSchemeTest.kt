@@ -24,14 +24,14 @@ class WidgetLinkSchemeTest {
 
   @Test
   fun rnsAppKeepsItsMindwtrLinks() {
-    // The module's default mindwtr_link_scheme is RN's, so RN's widgets open exactly the payload's links.
+
     val context = ApplicationProvider.getApplicationContext<Context>()
     assertEquals("mindwtr:///focus", WidgetRenderer.appIntent(context, "mindwtr:///focus").dataString)
   }
 
   @Test
   fun anAppThatOverridesTheSchemeGetsItsOwnLinks() {
-    // As the native development build's resource override: the app's mindwtr_link_scheme is its own scheme.
+
     val base = ApplicationProvider.getApplicationContext<Context>()
     @Suppress("DEPRECATION")
     val resources = object : Resources(base.assets, base.resources.displayMetrics, base.resources.configuration) {

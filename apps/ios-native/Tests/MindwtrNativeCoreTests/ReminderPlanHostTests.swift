@@ -29,7 +29,7 @@ private actor ReminderPermissionRead {
     func release() { continuation?.resume(returning: answer); continuation = nil }
 }
 
-/// No URL may escape interception. Passive planning has no HTTP/credential/crypto effects.
+
 private final class ReminderForbiddenHTTP: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -84,7 +84,7 @@ final class ReminderPlanHostTests: XCTestCase {
         do {
             let sql = try SQLiteBridge(url: database); defer { sql.close() }
             let stamp = ISO8601DateFormatter(), now = Date(), at = stamp.string(from: now)
-            // Reverse insertion order proves earliest-date selection, including Waiting/Someday.
+
             for index in (0..<205).reversed() {
                 let due = stamp.string(from: now.addingTimeInterval(3600 + Double(index) * 60))
                 _ = try sql.execute("INSERT INTO tasks(id,title,status,contexts,tags,dueDate,createdAt,updatedAt,rev,revBy,isFocusedToday,pushCount,showFutureRecurrence,suppressMindwtrReminders) VALUES (?,?,?,'[]','[]',?,?,?,3,'fixture',0,0,0,0)", parametersJSON: json(["cap-\(index)", "Private reminder \(index)", index % 2 == 0 ? "waiting" : "someday", due, at, at]))
@@ -97,7 +97,7 @@ final class ReminderPlanHostTests: XCTestCase {
         }
         let value = host(); _ = try await value.start(); return value
     }
-    /// Canonical outer SQL formatting preserves each cell's exact bytes and SQLite storage type.
+
     private func rows() throws -> [String: String] {
         let sql = try SQLiteBridge(url: database); defer { sql.close() }
         let tables = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").utf8)) as? [[String: Any]])
@@ -225,7 +225,7 @@ final class ReminderPlanHostTests: XCTestCase {
         let entered = expectation(description: "Passive read held"); await permission.hold(entered)
         let pending = Task { try await value.readReminderPlan() }
         await fulfillment(of: [entered], timeout: 5)
-        // This serialized command must finish while the OS-style callback is suspended.
+
         let state = try await value.readAboutUpdateState(); XCTAssertNotNil(try object(state)["shouldCheck"])
         pending.cancel(); await permission.release(); await cancelled { try await pending.value }
         try preserved(baseline, bytes); XCTAssertEqual(try markers().count, 0)

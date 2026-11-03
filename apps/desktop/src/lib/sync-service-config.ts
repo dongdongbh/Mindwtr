@@ -1,4 +1,4 @@
-import { normalizeCloudProvider, type CloudProvider } from '@mindwtr/core';
+import { generateUUID, normalizeCloudProvider, type CloudProvider } from '@mindwtr/core';
 
 import type { CloudConfig, WebDavConfig } from './sync-attachment-backends';
 import { normalizeSyncBackend, type SyncBackend } from './sync-service-utils';
@@ -15,6 +15,9 @@ export const CLOUD_ALLOW_INSECURE_HTTP_KEY = 'mindwtr-cloud-allow-insecure-http'
 export const CLOUD_REMEMBER_TOKEN_KEY = 'mindwtr-cloud-remember-token';
 export const CLOUD_PROVIDER_KEY = 'mindwtr-cloud-provider';
 const DEFAULT_DROPBOX_APP_KEY = String(import.meta.env.VITE_DROPBOX_APP_KEY || '').trim();
+const BROWSER_CONFIGURATION_GENERATION = 'mindwtr-browser-sync-configuration-generation';
+export const getBrowserSyncConfigurationGeneration = (): string => localStorage.getItem(BROWSER_CONFIGURATION_GENERATION) || '';
+const invalidateBrowserConfiguration = () => localStorage.setItem(BROWSER_CONFIGURATION_GENERATION, generateUUID());
 
 type ConfigDeps = {
     isTauriRuntimeEnv: () => boolean;
@@ -32,6 +35,7 @@ export const getSyncBackendLocal = (): SyncBackend => {
 };
 
 const setSyncBackendLocal = (backend: SyncBackend) => {
+    invalidateBrowserConfiguration();
     localStorage.setItem(SYNC_BACKEND_KEY, backend);
 };
 
@@ -57,6 +61,7 @@ type WebDavConfigWrite = {
 };
 
 const setWebDavConfigLocal = (config: WebDavConfigWrite) => {
+    invalidateBrowserConfiguration();
     if (!config.url && getSyncBackendLocal() === 'webdav') setSyncBackendLocal('off');
     localStorage.setItem(WEBDAV_URL_KEY, config.url);
     localStorage.setItem(WEBDAV_USERNAME_KEY, config.username || '');
@@ -92,6 +97,7 @@ export const getCloudConfigLocal = (): CloudConfig => {
 };
 
 const setCloudConfigLocal = (config: { url: string; token?: string; allowInsecureHttp?: boolean; rememberToken?: boolean }) => {
+    invalidateBrowserConfiguration();
     const rememberToken = config.rememberToken === true;
     localStorage.setItem(CLOUD_URL_KEY, config.url);
     localStorage.setItem(CLOUD_ALLOW_INSECURE_HTTP_KEY, config.allowInsecureHttp === true ? 'true' : 'false');
@@ -119,6 +125,7 @@ const getCloudProviderLocal = (): CloudProvider => {
 };
 
 const setCloudProviderLocal = (provider: CloudProvider) => {
+    invalidateBrowserConfiguration();
     localStorage.setItem(CLOUD_PROVIDER_KEY, normalizeCloudProvider(provider));
 };
 
@@ -132,7 +139,7 @@ const getDropboxAppKeyLocal = (): string => {
 };
 
 const setDropboxAppKeyLocal = (_value: string) => {
-    // Dropbox app key is provided via build env (VITE_DROPBOX_APP_KEY).
+
 };
 
 export async function readSyncBackend(deps: ConfigDeps): Promise<SyncBackend> {
@@ -191,7 +198,7 @@ export async function writeWebDavConfig(
     ].map((field) => [field, localStorage.getItem(field)])) : null;
     const capturedSessionPassword = capturedLegacy ? sessionStorage.getItem(WEBDAV_PASSWORD_KEY) : null;
     const retireLegacy = () => {
-        // Retired renderer credentials must not migrate back after an explicit clear.
+
         for (const [field, value] of capturedLegacy ?? []) {
             if (field === SYNC_BACKEND_KEY && value !== 'webdav') continue;
             if (localStorage.getItem(field) === value) localStorage.removeItem(field);
@@ -213,7 +220,7 @@ export async function writeWebDavConfig(
             try {
                 const persisted = await deps.invokeNative<WebDavConfig>('get_webdav_config');
                 if (!persisted.url && !persisted.username && persisted.hasPassword === false) retireLegacy();
-            } catch { /* Removal remains unconfirmed; keep the captured legacy values for retry. */ }
+            } catch {                                                                               }
         }
         deps.reportError('Failed to set WebDAV config', error);
         throw error;
@@ -283,8 +290,8 @@ export async function writeCloudProvider(provider: CloudProvider, deps: ConfigDe
         if (persistedProvider !== normalizedProvider) {
             throw new Error('Cloud sync provider did not persist correctly');
         }
-        // In Tauri, native state is authoritative. This key exists only long
-        // enough to migrate older renderer-owned installations.
+
+
         localStorage.removeItem(CLOUD_PROVIDER_KEY);
     } catch (error) {
         deps.reportError('Failed to set cloud sync provider', error);

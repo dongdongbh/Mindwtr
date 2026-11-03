@@ -121,7 +121,7 @@ fi
 if [[ "$package_info" != *versionName=* ]]; then
   echo "Package is not installed: $PACKAGE" >&2; exit 1
 fi
-# Fingerprint the actual installed base/split APKs, not the checkout's assumed SHA.
+
 apk_hashes=""
 while IFS= read -r apk_line; do
   apk_path="${apk_line#package:}"
@@ -315,7 +315,7 @@ for run in $(seq 1 "$RUNS"); do
     "$ADB_BIN" shell input keyevent 3 >/dev/null
     sleep 1
   fi
-  # Use the device clock and leave other apps' diagnostic buffers intact.
+
   logcat_since="$("$ADB_BIN" shell "date '+%m-%d %H:%M:%S.000'" | tr -d '\r')"
 
   start_output="$("$ADB_BIN" shell am start -W -n "$COMPONENT" 2>&1 || true)"
@@ -458,5 +458,5 @@ Raw logs:   ${run_dir}/run-*.log
 Crash logs: ${run_dir}/run-*-crash.log
 EOF
 
-# A failed/missing launch must never make a CI benchmark look faster or pass.
+
 node "${MOBILE_DIR}/../../scripts/performance/android-report.mjs" "$run_dir"

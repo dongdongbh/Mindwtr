@@ -2,7 +2,7 @@ import { afterEach, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 import { cleanup } from '@testing-library/react';
 import * as matchers from 'vitest-axe/matchers';
-import 'vitest-axe/extend-expect'; // Keep for types if needed, but extend manually too just in case
+import 'vitest-axe/extend-expect';
 expect.extend(matchers);
 
 afterEach(() => {
@@ -23,8 +23,7 @@ if (typeof window.cancelAnimationFrame !== 'function') {
     });
 }
 
-// jsdom has no layout/scrolling implementation. Editor section expansion calls
-// this from an animation frame, including in tests outside the section suite.
+
 if (typeof Element.prototype.scrollIntoView !== 'function') {
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
         configurable: true,
@@ -33,8 +32,7 @@ if (typeof Element.prototype.scrollIntoView !== 'function') {
     });
 }
 
-// jsdom's File/Blob polyfill has no arrayBuffer() (real webviews do); back it
-// with the FileReader jsdom does implement so file-drop tests can read bytes.
+
 if (typeof File.prototype.arrayBuffer !== 'function') {
     File.prototype.arrayBuffer = function (this: File) {
         return new Promise<ArrayBuffer>((resolve, reject) => {

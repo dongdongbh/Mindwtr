@@ -20,8 +20,7 @@ import { isLikelyOfflineSyncError } from './sync-service-utils';
 import { DropboxUnauthorizedError } from './dropbox';
 import type { MergeStats } from './sync-types';
 
-// Moved with the rules from apps/mobile/lib/sync-service.test.ts, which still runs against
-// React Native's re-exports.
+
 describe('mobile sync utils', () => {
   const emptyEntityStats = {
     localTotal: 0,
@@ -85,6 +84,17 @@ describe('mobile sync utils', () => {
     const message = formatSyncErrorMessage(error, 'file');
     expect(message).toContain('temporary Files copy');
     expect(message).toContain('iCloud Drive or WebDAV');
+  });
+
+  it('classifies an iOS temporary Inbox error from its raw text, though logs redact its path (S5)', () => {
+    for (const text of [
+      "File '/private/var/mobile/Containers/Data/Application/abc/tmp/tech.dongdongbh.mindwtr-Inbox/data.json' is not writable",
+      'Missing permission for uri: file:///private/var/mobile/Containers/Data/Application/abc/tmp/tech.dongdongbh.mindwtr-Inbox/data.json',
+    ]) {
+      expect(classifySyncFailure(new Error(text))).toBe('permission');
+    }
+    expect(formatSyncErrorMessage(new Error("File 'file:///private/var/mobile/x/tmp/tech.dongdongbh.mindwtr-Inbox/data.json' is not writable"), 'file'))
+      .toContain('temporary Files copy');
   });
 
   it('formats writable file sync errors with actionable text', () => {

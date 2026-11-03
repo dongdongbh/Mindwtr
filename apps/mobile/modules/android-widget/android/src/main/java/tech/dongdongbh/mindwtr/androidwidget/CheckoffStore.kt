@@ -9,21 +9,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 
-/**
- * Widget check-off with an undo window (#1173 phase 2). A ring tap marks the
- * task pending in an app-private AtomicFile (taskId → tapped at); a second
- * tap inside the window undoes it; once the window elapses the
- * task is appended to the pending-captures queue as ONE `complete` item and
- * the app completes it through the store when it next runs. The commit runs
- * from a main-thread Handler (~3 s), an inexact alarm (~15 s) if the process
- * died first, and a sweep on every widget update.
- *
- * A pending task stays struck through for Undo. Once its completion is durably
- * queued, local presentation filtering hides every occurrence until the app
- * ingests it and republishes. The delayed refresh sends direct rows and chrome
- * on API 31+, retaining the click template. Older Android uses legacy service
- * invalidation. This avoids Android 16's asynchronous legacy-adapter conversion.
- */
+
 object CheckoffStore {
   enum class TapAction { TOGGLE_PENDING, RECONCILE, NO_OP }
 
@@ -57,7 +43,7 @@ object CheckoffStore {
   private const val TAG = "MindwtrWidgetCheckoff"
   private val stateMonitor = Any()
 
-  // Lazy: the pure helpers run in JVM unit tests where android.os.Handler is a stub.
+
   private val handler by lazy { Handler(Looper.getMainLooper()) }
 
   private fun <T> withStateTransaction(action: () -> T): T = synchronized(stateMonitor, action)
@@ -68,11 +54,7 @@ object CheckoffStore {
 
   fun isPending(context: Context, taskId: String): Boolean = pending(context).containsKey(taskId)
 
-  /**
-   * Committed task id -> the queue file holding its completion. Entries written
-   * by older builds may hold `true` rather than a name; they map to "" and stay
-   * compatible. Once committed, a widget interaction never removes queue data.
-   */
+
   fun committedFiles(context: Context): Map<String, String> = withStateTransaction {
     context.getSharedPreferences(COMMITTED_PREFS_NAME, Context.MODE_PRIVATE).all
       .mapValues { (_, value) -> value as? String ?: "" }
@@ -82,15 +64,12 @@ object CheckoffStore {
 
   fun isCommitted(context: Context, taskId: String): Boolean = committed(context).contains(taskId)
 
-  /** Struck through on the widget: waiting for its undo window, or queued and not yet ingested. */
+
   fun isStruck(context: Context, taskId: String): Boolean = withStateTransaction {
     isPending(context, taskId) || isCommitted(context, taskId)
   }
 
-  /**
-   * Forgets committed ids the payload no longer lists: the app ingested them (or
-   * the task went away). Called on every render so the set cannot grow forever.
-   */
+
   fun prune(context: Context, presentTaskIds: Set<String>) = withStateTransaction {
     val current = committedFiles(context)
     val keep = pruned(current, presentTaskIds)
@@ -112,7 +91,7 @@ object CheckoffStore {
     else -> TapAction.TOGGLE_PENDING
   }
 
-  /** Refuses a state-changing tap when pending state cannot be read safely. */
+
   fun tapAction(context: Context, taskId: String, now: Long = System.currentTimeMillis()): TapAction = withStateTransaction {
     if (isCommitted(context, taskId)) return@withStateTransaction TapAction.RECONCILE
     val current = readPending(context) ?: return@withStateTransaction TapAction.NO_OP
@@ -125,7 +104,7 @@ object CheckoffStore {
     )
   }
 
-  /** Marks or, when already pending, un-marks (undo). Returns the durable state. */
+
   fun toggle(context: Context, taskId: String, now: Long = System.currentTimeMillis()): Boolean = withStateTransaction {
     if (isCommitted(context, taskId)) return@withStateTransaction false
     val current = readPending(context) ?: return@withStateTransaction false
@@ -148,10 +127,7 @@ object CheckoffStore {
     result.isPending
   }
 
-  /**
-   * Queues every entry older than the Undo window. Failed queue writes remain
-   * pending and are retried; only durably queued entries become hidden.
-   */
+
   fun sweep(context: Context, now: Long = System.currentTimeMillis()): SweepState = withStateTransaction {
     val committed = committedFiles(context)
     val current = readPending(context)
@@ -162,9 +138,8 @@ object CheckoffStore {
     if (next.newlyCommitted > 0) markRefreshNeeded(context, next.newlyCommitted)
     val retryIndex = needsIndexRetry(context)
     if ((next.committed != committed || retryIndex) && !writeCommitted(context, next.committed)) {
-      // The queue file is the durable command and must never be deleted here.
-      // Keep the old pending entries so a restart can republish the same
-      // deterministic file before it tries the index again.
+
+
       markIndexRetry(context, true)
       Log.e(TAG, "Could not persist queued widget completions; leaving check-offs pending")
       return@withStateTransaction next.copy(
@@ -286,7 +261,7 @@ object CheckoffStore {
       .commit()
   }
 
-  /** Read once by the React Native bridge so Diagnostics can prove the native request ran. */
+
   fun consumeHiddenCount(context: Context): Int {
     val prefs = context.getSharedPreferences(DIAGNOSTICS_PREFS_NAME, Context.MODE_PRIVATE)
     val count = prefs.getInt(HIDDEN_COUNT, 0).coerceAtLeast(0)
@@ -298,7 +273,7 @@ object CheckoffStore {
     val app = context.applicationContext
     setFastRetryCount(app, 0)
     handler.removeCallbacksAndMessages(null)
-    // Modern hosts receive direct rows + chrome without legacy adapter conversion.
+
     handler.postDelayed({ sweepAndRefresh(app, allowFastRetry = true) }, HANDLER_DELAY_MS)
     val alarm = app.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
     val intent = Intent(app, TasksWidgetProvider::class.java).setAction(ACTION_SWEEP)
@@ -334,7 +309,7 @@ object CheckoffStore {
     prefs.edit().putInt(SERIALIZED_COUNT, total).commit()
   }
 
-  /** Read once by the React Native bridge so Diagnostics can prove the serialized tap ran. */
+
   fun consumeSerializedCount(context: Context): Int = withStateTransaction {
     val prefs = context.getSharedPreferences(DIAGNOSTICS_PREFS_NAME, Context.MODE_PRIVATE)
     val count = prefs.getInt(SERIALIZED_COUNT, 0).coerceAtLeast(0)
@@ -345,7 +320,7 @@ object CheckoffStore {
   internal fun nextFastRetry(previous: Int): Int? =
     (previous + 1).takeIf { it <= MAX_FAST_RETRIES }
 
-  /** Explicit taps get a fresh bounded reconciliation budget. */
+
   fun reconcileFromInteraction(context: Context) {
     setFastRetryCount(context, 0)
     sweepAndRefresh(context, allowFastRetry = true)

@@ -1,11 +1,6 @@
-/**
- * The selected-day panel: what is on that day, the "find a task and give it a
- * time" search, and the inline start-time editor.
- *
- * `useCalendarScheduleFeedback` holds the transient state of that panel on its
- * own because month navigation clears it — the navigation hook needs the reset
- * before the selected-day hook (which needs navigation's selected date) exists.
- */
+
+
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import {
@@ -29,7 +24,7 @@ export function useCalendarScheduleFeedback() {
     const [editingTimeTaskId, setEditingTimeTaskId] = useState<string | null>(null);
     const [editingTimeValue, setEditingTimeValue] = useState<string>('');
 
-    /** Typing a new search clears the stale "no free time"/overlap message. */
+
     const updateScheduleQuery = useCallback((query: string) => {
         setScheduleQuery(query);
         setScheduleError(null);

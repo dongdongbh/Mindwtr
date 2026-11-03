@@ -37,7 +37,7 @@ const makeArea = (overrides: Partial<Area> = {}): Area => ({
     ...overrides,
 });
 
-/** English strings, so the error mapping is visible rather than key-shaped. */
+
 const ENGLISH: Record<string, string> = {
     'calendar.overlapWarning': 'That time overlaps with an event.',
     'quickAdd.invalidDateCommand': 'Invalid date command',
@@ -113,7 +113,7 @@ describe('useCalendarComposer', () => {
         expect(result.current.taskComposer?.startDateValue).toBe('2026-04-09');
         expect(result.current.taskComposer?.startAt?.getDate()).toBe(9);
 
-        // A half-typed date leaves the raw text alone and drops the resolved start.
+
         act(() => result.current.updateTaskComposerStart({ startDateValue: '2026-04-' }));
         expect(result.current.taskComposer?.startDateValue).toBe('2026-04-');
         expect(result.current.taskComposer?.startAt).toBeNull();

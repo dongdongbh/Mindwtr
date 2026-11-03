@@ -124,6 +124,7 @@ export type SettingsSyncLabels = {
     cloudProviderDropbox: string;
     cloudProviderCloudkit: string;
     cloudkitDesc: string;
+    workspacesICloudDefaultOnly: string;
     calendarFeed: string;
     calendarFeedDesc: string;
     calendarFeedWarning: string;
@@ -246,9 +247,7 @@ export type SettingsSyncLabels = {
 
 export type CloudProvider = 'selfhosted' | 'dropbox';
 
-/** Which message the section shows after a failed transition. `rotation-first` is
- *  the one terminal case with a real remedy: an interrupted passphrase change left
- *  the sync location on two salts, and only re-running the change can heal it. */
+
 export type SyncEncryptionErrorKind =
     | 'wrong-passphrase'
     | 'rotation-first'
@@ -259,21 +258,15 @@ export type SyncEncryptionErrorKind =
 
 export type SyncEncryptionWarningKind = 'cleanup-deferred' | 'no-encrypted-remote';
 
-/**
- * Everything the Encryption section needs, as one object rather than a dozen flat
- * props: it is a single self-contained flow, and `useSyncEncryptionSettings` is its
- * only producer. Every action resolves to whether it succeeded, so the section can
- * close its form without re-reading state.
- */
+
 export type SyncEncryptionController = {
-    /** `null` while the first status read is in flight, unavailable, or the backend cannot encrypt. */
+
     state: SyncEncryptionState | null;
     stateUnavailable: boolean;
-    /** File, WebDAV and Dropbox only — see `isEncryptionCapableBackend`. */
+
     supported: boolean;
-    /** True while no encryption-capable backend is durably active (e.g. a WebDAV config
-     *  typed but not yet proven by its first sync). Enable/disable then manage this
-     *  device's key only; nothing remote exists to convert. */
+
+
     pendingFirstSync: boolean;
     busy: boolean;
     progress: SyncEncryptionTransitionProgress | null;
@@ -292,11 +285,7 @@ export type SyncEncryptionController = {
 export type DropboxTestState = 'idle' | 'success' | 'error';
 export type SyncPreferences = SettingsSyncPreferences;
 
-/**
- * Prop groups, one per section component. `useSyncSettings` and
- * `useSettingsDataPage` return these already named as props, so `SettingsView`
- * spreads them instead of re-listing every member (see SettingsView renderPage).
- */
+
 export type SyncConfigurationProps = {
     isTauri: boolean;
     isMacOS: boolean;
@@ -343,7 +332,7 @@ export type SyncConfigurationProps = {
     onCloudAllowInsecureHttpChange: (value: boolean) => void;
     onCloudProviderChange: (provider: CloudProvider) => void;
     onSaveCloud: () => Promise<void> | void;
-    /** Null until the self-hosted server reports a published iCalendar feed (#952). */
+
     calendarFeedUrl: string | null;
     calendarFeedBusy: boolean;
     onCopyCalendarFeedUrl: () => Promise<void> | void;

@@ -39,6 +39,8 @@ Then open:
 
 From a phone or another computer, replace `localhost` with the Docker host's LAN IP. In Mindwtr, use the cloud port (`http://HOST_IP:8787`) as the Self-Hosted URL, not the PWA port (`:5173`).
 
+From v1.3.8, the Docker web app permits HTTP connections to the same hostname or IPv4 address on another port. Use the same address for the PWA and Cloud URLs, and set `MINDWTR_CLOUD_CORS_ORIGIN` to the PWA origin. Another LAN HTTP host is still blocked by the browser policy, even with Allow insecure connections enabled; use HTTPS for a separate cloud host.
+
 To build from source instead, clone the repository and run `docker compose -f docker/compose.yaml up --build -d` from its root.
 
 This HTTP compose file is best for local testing. Mindwtr desktop and mobile clients accept HTTP for localhost, private IPs, and local hostnames. Public URLs should use HTTPS.
@@ -128,6 +130,20 @@ MINDWTR_CLOUD_AUTH_TOKENS=alices-long-random-token,bobs-long-random-token
 Each distinct token gets its own private dataset on the server, so several people can share one instance without seeing each other's data. Devices that should sync together must use the same token. Tokens are 20-512 characters.
 
 `MINDWTR_CLOUD_TOKEN` is still accepted for backward compatibility, but deprecated.
+
+## Online-only web deployments
+
+For HTTP Basic Auth deployments, set `MINDWTR_PWA_ENABLED=false` on
+`mindwtr-app` (or in `.env` with the bundled Compose). This serves an online-only
+replacement at `/sw.js`; leave that exact path outside proxy authentication and
+route it to the app. Existing workers can then update without credentials.
+The replacement does not reload tabs or delete local tasks/settings, but offline
+app-shell loading is unavailable. If an old worker still blocks login, unregister
+only Mindwtr's worker in browser developer tools, close its tabs/PWA windows, and
+reopen. Do not clear site data. Keep `/v1/*` on bearer authentication. Proxy login
+controls server access, not access to previously downloaded browser data.
+See the [deployment guide](https://docs.mindwtr.app/power-users/docker-deployment)
+for the Caddy configuration. Default `true` retains normal PWA behavior.
 
 ## Preseed the web app's sync settings
 

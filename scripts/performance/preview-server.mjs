@@ -1,6 +1,6 @@
 import { preview } from 'vite';
 
-/** Await Vite's listening socket, never its human-readable (possibly coloured) URL. */
+
 export async function startPreview(root, port) {
   const server = await preview({
     root,

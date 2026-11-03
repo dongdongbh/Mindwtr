@@ -1,28 +1,12 @@
-// Settings and editor View tab check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-settings-editor-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays). A list task (RN's taskMode 'list', which the app
-// cannot make) is needed, so the script stops the app and, through core's own store on a host copy of the database, adds one Done
-// list task with two done items, titled for this run (70 + run id + 1); then it checks the screens against core's own views on
-// copies: (a) Settings opens from the More sheet with core's rows (the screens not built disabled); (b) General's week start is
-// stored once and a re-pick writes nothing (core's sync stamp stays); (c) the language switch to Chinese changes core's words and
-// the app's labels, and English comes back; (d) Manage's new area under an injected failed commit stores nothing, Try again
-// stores it once, and a second area of that name shows core's taken-name line with Save off; (e) a GTD choice (Focus task limit)
-// is stored once; rotation and process death keep the open GTD screen; (f) History's Done opens the Done list task on the View
-// tab, and rotation and process death keep that tab; (g) a tick in the View tab and an item added on the Form tab save in ONE
-// write (the task's rev + 1) with the status core's checklist edit sets (Next); (h) Reset checklist (from search) opens every
-// saved item in one write. Every setting it changes (week start, language, Focus task limit, Manage's open Areas) is put back
-// through the app before it ends, on failure too. It touches only the development package (it refuses any other APK), never
-// launches over another app, leaves the app on its Inbox tab, restores rotation and clears its debug properties on exit. Leave the
-// device on its home screen. It needs host `bun`.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, field, inboxCount, inEditor, isOn, mainList, owedRetry, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { box, button, check, connect, evidenced, fail, field, inboxCount, inEditor, isOn, mainList, owedRetry, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -48,20 +32,20 @@ const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/settings-editor-check');
 const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
-// Digits only: the keyboard guard allows only an English layout, and digits never compose.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
-const names = { task: `70${run}1`, area: `70${run}2`, items: [`72${run}1`, `72${run}2`], added: `73${run}` };
+const names = { task: `70${run}1`, area: `70${run}2`, items: [`72${run}1`, `72${run}2`], added: `73${run}`, pending: `74${run}` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
-// The phone's locale as Android reports it (the app sends Locale.getDefault()'s tag to core).
+
 const phoneLocale = (sh('getprop persist.sys.locale') || sh('getprop ro.product.locale')).trim();
 const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
 const commands = (operation, outcome = 'saved') => device.logs(pid(), TAG).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = (name = 'db') => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -70,11 +54,8 @@ const pullDatabase = (name = 'db') => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/**
- * Core on a copy: `inject` adds this run's Done list task (two done items) through core's store and checkpoints the WAL; `views`
- * prints core's words and values the check compares with: the More sheet's labels, the Settings menu rows, General's options (in
- * English, and its words in Chinese), Manage's and GTD's, the stored settings, this run's area, and the list task.
- */
+
+
 const core = (mode, db = pullDatabase()) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, flushPendingSave, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -150,8 +131,7 @@ const core = (mode, db = pullDatabase()) => JSON.parse(execFileSync('bun', ['-e'
     process.exit(0);
 `], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_NAMES: JSON.stringify(names), CHECK_LOCALE: phoneLocale } }).trim().split('\n').pop());
 
-// ---- UI ----
-/** The tabs show, in the app's language ([labels]): no Menu screen, editor, search or capture over them. */
+
 const onTabs = (nodes, labels) => !tagged(nodes, 'menu-screen') && !inEditor(nodes) && !tagged(nodes, 'global-search') && !tagged(nodes, 'quick-capture')
     && Boolean(tab(nodes, labels.strings['tab.menu']));
 const onInbox = (nodes) => !tagged(nodes, 'menu-screen') && !inEditor(nodes) && Number.isFinite(inboxCount(nodes));
@@ -164,7 +144,7 @@ const hideKeyboard = async () => {
     sh('input keyevent KEYCODE_BACK');
     await sleep(600);
 };
-/** Back until the tabs show (a Settings screen, the editor or the search closes; a sub-screen goes to its parent first). */
+
 const toTabs = async (labels) => {
     for (let step = 0; step < 8; step += 1) {
         const nodes = await screen();
@@ -176,7 +156,7 @@ const toTabs = async (labels) => {
     }
     return fail('the tabs did not come back');
 };
-/** The More sheet from the Menu tab ([labels] in the app's language), Settings, then the menu row labelled [row] (null: the menu). */
+
 const openSettings = async (labels, row, screenId) => {
     let nodes = await toTabs(labels);
     nodes = await tapExpecting(tab(nodes, labels.strings['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
@@ -185,15 +165,20 @@ const openSettings = async (labels, row, screenId) => {
     if (row === null) return nodes;
     return tapExpecting(withDescription(nodes, labels.rows.find((item) => item.id === row).label) ?? fail(`no ${row} row`), onSettings(screenId), `Settings › ${row}`);
 };
-/** The General screen's Regional formats opened, then the week start picker; [label] chosen there. */
+
 const pickWeekStart = async (labels, label) => {
     const week = `${labels.general.weekStart.label}: `;
     const regional = `${labels.general.regional.label}: `;
-    // A read during the picker's closing animation shows neither row (run 48), so wait for one.
-    let nodes = await waitFor('the Regional formats rows', (current) => Boolean(withPrefix(current, week) || withPrefix(current, regional)), 10_000);
+
+
+    let nodes = await device.settle();
+    if (!withPrefix(nodes, week) && !withPrefix(nodes, regional)) {
+        await device.revealNode((current) => withPrefix(current, week) ?? withPrefix(current, regional), 'the Regional formats rows', false);
+        nodes = await screen();
+    }
     const weekRow = () => withPrefix(nodes, week);
     if (!weekRow()) nodes = await tapExpecting(withPrefix(nodes, regional), (current) => Boolean(withPrefix(current, week)), 'Regional formats open');
-    // The opened rows can end at the screen's bottom edge, where a tap meets the gesture bar: move them up first.
+
     const listBottom = box(mainList(nodes))[3];
     if (box(weekRow())[3] > listBottom - 150) {
         requireAppFront();
@@ -203,13 +188,13 @@ const pickWeekStart = async (labels, label) => {
     nodes = await tapExpecting(weekRow(), (current) => Boolean(tagged(current, 'settings-picker')), 'the week start picker');
     return tapExpecting(withDescription(nodes, label) ?? fail(`no week start "${label}"`), (current) => !tagged(current, 'settings-picker'), 'the picker to close');
 };
-/** The language picker from the General screen ([labels]: its words now), and the language [label] chosen. */
+
 const pickLanguage = async (labels, label) => {
     let nodes = await screen();
     nodes = await tapExpecting(withPrefix(nodes, `${labels.general.language.label}: `) ?? fail('no Language row'), (current) => Boolean(tagged(current, 'settings-picker')), 'the language picker');
     return tapExpecting(withDescription(nodes, label) ?? fail(`no language "${label}"`), (current) => !tagged(current, 'settings-picker'), 'the picker to close');
 };
-/** The node tagged [tag] fully inside the screen's scrolling column, scrolled to (down first, then up); [required] false: undefined when absent. */
+
 const revealTagged = async (tag, description, match = () => true, required = true) => {
     let nodes = await screen();
     const shown = (current) => {
@@ -246,12 +231,12 @@ const rotateKeeps = async (done, description) => {
     return waitFor(`${description} in portrait`, done, 20_000);
 };
 
-// Everything the check changes, put back through the app (last change first), on failure too.
+
 const undo = [];
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
     while (undo.length > 0) {
         const step = undo.pop();
         try { if (front().includes(`${PKG}/`)) await step.run(); } catch (error) { console.error(`RESTORE FAILED: ${step.name}: ${error.message}; put it back by hand`); }
@@ -261,11 +246,11 @@ const restore = async () => {
             const nodes = await toTabs({ strings: { 'tab.menu': en['tab.menu'] } });
             if (tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
         }
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {                   }
 };
 
 try {
@@ -276,7 +261,7 @@ try {
     const beforeInstall = front();
     if (!beforeInstall.includes(`${PKG}/`) && !beforeInstall.includes(`${home}/`)) throw new Stopped(`another app is in front: ${beforeInstall.trim()}`);
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
-    // Boot once (this build's schema), stop, add this run's Done list task through core's store, and put the database back.
+
     device.launch(ACTIVITY);
     requireAppFront();
     sh('settings put system accelerometer_rotation 0');
@@ -295,9 +280,9 @@ try {
     check(seen.task?.id === injected.id && seen.task.status === 'done', `core stores ${names.task} as a Done list task with ${seen.task?.checklist.length} done items`);
     const { english, chinese } = seen;
 
-    // (a) Settings from the More sheet: core's rows; the screens not built here are disabled.
+
     let nodes = await openSettings(english, null);
-    // Rows below the fold are read after a drag down (a dump lists only what shows).
+
     const rowsSeen = new Map();
     for (let step = 0; step < 6 && rowsSeen.size < english.rows.length; step += 1) {
         for (const row of english.rows) {
@@ -313,10 +298,10 @@ try {
     nodes = await device.toTop();
     check(true, `(a) Settings opens from the More sheet with core's ${english.rows.length} rows (${english.rows.filter((row) => row.enabled).map((row) => row.id).join(', ')} built)`);
 
-    // (b) General › Week start: another choice stored once; a re-pick of it writes nothing.
+
     nodes = await tapExpecting(withDescription(nodes, english.rows.find((row) => row.id === 'general').label), onSettings('general'), 'General');
     const originalWeek = english.general.weekStart.options.find((option) => option.selected) ?? fail('core shows no week start');
-    // An explicit day, never core's first choice ("System default (…)"), so the choice is a real change.
+
     const otherWeek = english.general.weekStart.options.slice(1).find((option) => !option.selected);
     const stampBefore = seen.settings.languageStamp;
     let saves = commands('generalSetting');
@@ -335,7 +320,7 @@ try {
     await waitFor('the week start back', () => commands('generalSetting') === saves + 3, 15_000);
     undo.pop();
 
-    // (c) Language: Chinese changes core's words and the app's own labels; English comes back.
+
     const zh = english.general.options.find((option) => option.id === 'zh') ?? fail('core offers no Chinese');
     saves = commands('generalSetting');
     await pickLanguage(english, zh.label);
@@ -347,11 +332,10 @@ try {
     undo.pop();
     check(core('views').english.general.options.find((option) => option.id === 'en').selected, '(c) English is back: the header and core\'s words read English again');
 
-    // (d) Manage: a new area under an injected failed commit stores nothing; Try again stores it once; the same name again shows
-    // core's taken-name line with Save off.
+
     nodes = await openSettings(english, 'manage', 'manage');
     const areasHeading = () => withPrefix(nodes, `${seen.manage.areas} · `) ?? fail('no Areas heading');
-    // Areas is open when its New Area button is found (below the fold too); else its heading opens it (and it is closed again at the end).
+
     if (!(await revealTagged('manage-area-add', 'the New Area button', () => true, false)).node) {
         nodes = await device.toTop();
         await tap(areasHeading());
@@ -394,7 +378,7 @@ try {
     nodes = await tapExpecting(withDescription(await screen(), seen.manage.editor.cancel) ?? fail('no Cancel'), (current) => !tagged(current, 'manage-editor'), 'the editor to close');
     check(core('views').areas === 1, '(d) the refused duplicate wrote nothing');
 
-    // (e) GTD › Focus task limit: another choice stored once; rotation and process death keep the GTD screen.
+
     nodes = await openSettings(english, 'gtd', 'gtd');
     const originalLimit = seen.gtd.limit.find((option) => option.selected) ?? fail('core shows no Focus task limit');
     const otherLimit = seen.gtd.limit.find((option) => !option.selected);
@@ -414,12 +398,12 @@ try {
     await waitFor('the limit back', () => commands('gtdSetting') === saves + 1, 15_000);
     undo.pop();
 
-    // (f) History's Done opens the Done list task on the View tab; rotation and process death keep the tab.
+
     nodes = await toTabs(english);
     nodes = await tapExpecting(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
     nodes = await device.settle(nodes);
     await tapExpecting(withDescription(nodes, english.tiles.history) ?? fail('no History'), (current) => Boolean(tagged(current, 'menu-screen')), 'History');
-    // The injected task is the newest completion, so it heads History's Done.
+
     const row = await device.revealNode((current) => current.find((node) => node.text === names.task), `${names.task} in History's Done`);
     const inView = (current) => inEditor(current) && Boolean(tagged(current, 'task-view')) && isOn(withDescription(current, en['markdown.preview']));
     nodes = await tapExpecting(row, inView, 'the editor on its View tab');
@@ -428,8 +412,7 @@ try {
     nodes = await killAndRelaunch(inView, 'the View tab after process death');
     check(true, '(f) rotation and process death keep the editor on its View tab');
 
-    // (g) A tick in the View tab (the first item opens again: core sets the list task back to Next) and an item added on the Form
-    // tab save in one write.
+
     const before = core('views').task;
     const first = (current) => withDescription(current, names.items[0]);
     nodes = await waitFor('the first item', (current) => first(current)?.checked === 'true', 20_000);
@@ -455,7 +438,7 @@ try {
     check(after.status === 'next' && after.rev === before.rev + 1 && JSON.stringify(after.checklist) === JSON.stringify([[names.items[0], false], [names.items[1], true], [names.added, false]]),
         `(g) the tick and the added item saved in one write (rev ${before.rev} → ${after.rev}) with core's status "${after.status}": ${JSON.stringify(after.checklist)}`);
 
-    // (h) Reset checklist, from the task found by search: every saved item opens, in one write.
+
     nodes = await toTabs(english);
     nodes = await tapExpecting(withDescription(nodes, en['search.title']) ?? fail('no Search'), (current) => Boolean(tagged(current, 'global-search')), 'the search');
     await device.focusAtEnd(field(nodes) ?? fail('no search field'));
@@ -465,7 +448,7 @@ try {
     nodes = await waitFor('the task in the results', (current) => Boolean(result(current)), 20_000);
     await hideKeyboard();
     nodes = await tapExpecting(result(await screen()), (current) => inEditor(current) && Boolean(withDescription(current, en['markdown.edit'])), 'the editor');
-    // A search result opens on the Form tab unless the device's "Open tasks in" says Preview.
+
     if (!isOn(withDescription(nodes, en['markdown.edit']))) {
         nodes = await tapExpecting(withDescription(nodes, en['markdown.edit']), (current) => isOn(withDescription(current, en['markdown.edit'])), 'the Form tab');
     }
@@ -483,7 +466,26 @@ try {
     after = core('views').task;
     check(after.checklist.every(([, done]) => !done) && after.rev === before.rev + 2, `(h) Reset checklist opened every saved item in one write (rev ${after.rev})`);
     await sleep(1000);
-    await tapExpecting(withDescription(await screen(), en['common.close']) ?? fail('no Close'), (current) => !inEditor(current), 'the editor to close');
+
+
+    nodes = await tapExpecting(withDescription(await screen(), en['markdown.preview']) ?? fail('no View tab'), inView, 'the View tab');
+    const { node: pendingBox } = await revealTagged('view-checklist-add', 'the View tab add box');
+    await device.focusAtEnd(pendingBox);
+    requireAppFront();
+    sh(`input text '${names.pending}'`);
+    await waitFor(`"${names.pending}" in the add box`, (current) => tagged(current, 'view-checklist-add')?.text === names.pending, 15_000);
+    await hideKeyboard();
+    nodes = await tapExpecting(withDescription(await screen(), en['common.close']) ?? fail('no Close'),
+        (current) => Boolean(button(current, en['common.discard'])), 'the discard question');
+    check(nodes.some((node) => node.text === en['taskEdit.discardChanges']), '(i) Close with typed add-box text asks before it drops it');
+    nodes = await tapExpecting(button(nodes, en['common.cancel']) ?? fail('no Cancel'), (current) => inView(current) && !button(current, en['common.discard']), 'the View tab again');
+    check(tagged(nodes, 'view-checklist-add')?.text === names.pending, '(i) Cancel keeps the typed text in the add box');
+    const pendingSaves = commands('saveTaskDraft');
+    await tapExpecting(withDescription(await screen(), en['common.save']) ?? (await screen()).find((node) => node.text === en['common.save']) ?? fail('no Save'), (current) => !inEditor(current), 'the editor to close');
+    await waitFor('the save', () => commands('saveTaskDraft') === pendingSaves + 1, 15_000);
+    after = core('views').task;
+    check(after.rev === before.rev + 3 && after.checklist.at(-1)?.[0] === names.pending && after.checklist.at(-1)?.[1] === false,
+        `(i) Save added the typed item in one write (rev ${after.rev}): ${JSON.stringify(after.checklist)}`);
     console.log('Settings and editor device check passed');
 } catch (error) {
     evidenced(error);

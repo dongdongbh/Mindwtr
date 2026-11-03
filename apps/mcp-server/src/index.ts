@@ -15,6 +15,7 @@ import {
 } from '@mindwtr/core';
 import * as z from 'zod';
 
+import { listViewSectionsSchema, viewSectionIdsSchema } from './view-sections.js';
 import { createCloudService } from './cloud-service.js';
 import { createLocalApiService, validateLocalApiUrl } from './local-api-service.js';
 import { getMindwtrToolErrorCode, ReadOnlyError, ValidationError } from './errors.js';
@@ -34,11 +35,15 @@ import {
   normalizeNullableTaskRecurrence,
   normalizeNullableTaskRelativeStartOffset,
   normalizeNullableTaskRepeatReminderMinutes,
+  normalizeNullableTaskDueReminderLeadMinutes,
+  normalizeNullableTaskStartReminderLeadMinutes,
   normalizeNullableTaskTimeSpentMinutes,
   normalizeNullableTaskTokens,
   normalizeOptionalTaskRecurrence,
   normalizeOptionalTaskRelativeStartOffset,
   normalizeOptionalTaskRepeatReminderMinutes,
+  normalizeOptionalTaskDueReminderLeadMinutes,
+  normalizeOptionalTaskStartReminderLeadMinutes,
   normalizeOptionalTaskTimeSpentMinutes,
   normalizeOptionalTaskTokens,
   taskRecurrenceInputSchema,
@@ -52,7 +57,7 @@ import type {
   UpdateTaskInput,
 } from './queries.js';
 import { linkAttachmentsCreateSchema, linkAttachmentsUpdateSchema } from './link-attachments.js';
-import { buildTaskCreateFieldsShape, buildTaskUpdateFieldsShape } from './task-field-schemas.js';
+import { buildTaskCreateFieldsShape, buildTaskUpdateFieldsShape, nullableOptional } from './task-field-schemas.js';
 
 export { parseArgs, parseBooleanFlag } from './flags.js';
 export { isAuthorizedBearerToken, resolveHttpConfig, type HttpServerConfig } from './http-server.js';
@@ -65,7 +70,7 @@ const resolvePackageVersion = (): string => {
       return parsed.version;
     }
   } catch {
-    // Fall back to a valid implementation version if package metadata is unavailable.
+
   }
   return '0.0.0';
 };
@@ -81,9 +86,8 @@ type LogEntry = {
 };
 
 const writeLog = (entry: LogEntry) => {
-  // Everything this server writes goes through core's sanitizer, not only what the
-  // core bridge below forwards: a thrown error can carry a token or a secret-bearing
-  // path into the message, the context, or a stack frame.
+
+
   const sanitized: LogEntry = {
     ...entry,
     scope: sanitizeForLog(entry.scope),
@@ -276,9 +280,7 @@ export const resolveServerConfig = (
   };
 };
 
-// Derived from core's own TASK_STATUS_VALUES (task-status.ts) rather than hand-written, so
-// this can't drift from the status list core, the cloud API, and every other status check
-// share (server-validation.ts's asStatus/validateAppData use the same export).
+
 const taskStatusSchema = z.enum(TASK_STATUS_VALUES as [TaskStatus, ...TaskStatus[]]);
 const taskStatusOrAllSchema = z.enum(
   [...TASK_STATUS_VALUES, 'all'] as unknown as [TaskStatus | 'all', ...(TaskStatus | 'all')[]]
@@ -286,7 +288,7 @@ const taskStatusOrAllSchema = z.enum(
 const projectStatusSchema = z.enum(['active', 'someday', 'waiting', 'archived']);
 const taskPrioritySchema = z.enum(['low', 'medium', 'high', 'urgent']);
 const timeEstimateSchema = z.union([
-  // Same reason as the status enum above: core owns the list of pickable estimates.
+
   z.enum(TIME_ESTIMATE_OPTIONS as [TimeEstimate, ...TimeEstimate[]]),
   z.string().refine((value) => {
     const minutes = value.startsWith('custom:') ? value.slice('custom:'.length) : '';
@@ -315,7 +317,7 @@ const listTasksSchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional(),
 });
 
-// Note: Don't use .refine() as it breaks MCP SDK's JSON schema conversion
+
 export const addTaskSchema = z.object({
   title: z.string().max(MAX_TASK_TITLE_LENGTH).optional().describe('Task title'),
   quickAdd: z.string().optional().describe('Quick-add string with natural language parsing (e.g. "Buy milk @errands #shopping /due:tomorrow +ProjectName")'),
@@ -330,15 +332,13 @@ export const addTaskSchema = z.object({
   description: z.string().optional().describe('Task description/notes'),
   priority: taskPrioritySchema.optional().describe('Priority level: low, medium, high, urgent'),
   energyLevel: z.enum(['low', 'medium', 'high']).optional().describe('Energy level: low, medium, high'),
-  // Deliberately says status is untouched (#1253): the old wording, "assigned to or waiting for",
-  // read as if a person implied Waiting. A person on a Next task is a valid agenda item.
+
+
   assignedTo: z.string().optional().describe('Person this task involves: someone it is delegated to, or someone to talk to about it. Setting it does not change status; set status "waiting" for delegated work'),
   timeEstimate: timeEstimateSchema.optional().describe('Time estimate preset or custom:<positive minutes>'),
   attachments: linkAttachmentsCreateSchema.optional(),
-  // Every other create-writable Task field (checklist, areaId, reviewAt, isFocusedToday,
-  // taskMode, relativeStartOffset, location, ...) is derived from TASK_SYNC_FIELD_SCHEMA —
-  // see task-write-fields.ts/task-field-schemas.ts. Adding a synced field there needs no
-  // edit here.
+
+
   ...buildTaskCreateFieldsShape(),
 });
 const normalizeAddTaskInput = (data: z.infer<typeof addTaskSchema>) => {
@@ -356,11 +356,8 @@ const normalizeAddTaskInput = (data: z.infer<typeof addTaskSchema>) => {
   if (hasQuickAdd && data.quickAdd!.trim().length > MAX_TASK_QUICK_ADD_LENGTH) {
     throw new ValidationError(`Quick-add input too long (max ${MAX_TASK_QUICK_ADD_LENGTH} characters)`);
   }
-  // buildTaskCreateFieldsShape() returns a generic Record<string, ZodTypeAny>, so z.infer
-  // can't see the specific generated field names/types it spreads into addTaskSchema — cast
-  // once to the explicit parallel TS type (queries.ts) that names them. Zod validates these
-  // fields correctly at runtime regardless; this only restores static typing for the access
-  // below.
+
+
   const generated = data as unknown as Partial<TaskGeneratedCreateFields>;
   return {
     ...data,
@@ -370,6 +367,8 @@ const normalizeAddTaskInput = (data: z.infer<typeof addTaskSchema>) => {
     relativeStartOffset: normalizeOptionalTaskRelativeStartOffset(generated.relativeStartOffset),
     timeSpentMinutes: normalizeOptionalTaskTimeSpentMinutes(generated.timeSpentMinutes),
     repeatReminderMinutes: normalizeOptionalTaskRepeatReminderMinutes(generated.repeatReminderMinutes),
+    dueReminderLeadMinutes: normalizeOptionalTaskDueReminderLeadMinutes(generated.dueReminderLeadMinutes),
+    startReminderLeadMinutes: normalizeOptionalTaskStartReminderLeadMinutes(generated.startReminderLeadMinutes),
   };
 };
 
@@ -393,15 +392,13 @@ export const updateTaskSchema = z.object({
   assignedTo: z.string().nullable().optional(),
   timeEstimate: timeEstimateSchema.nullable().optional(),
   attachments: linkAttachmentsUpdateSchema.optional(),
-  // Every other patch-writable Task field (reviewAt, isFocusedToday, checklist, areaId,
-  // order, boardOrder, focusOrder, ...) is derived from TASK_SYNC_FIELD_SCHEMA — see
-  // task-write-fields.ts/task-field-schemas.ts. Adding a synced field there needs no edit
-  // here.
+
+
   ...buildTaskUpdateFieldsShape(),
 });
 
 const normalizeUpdateTaskInput = (data: z.infer<typeof updateTaskSchema>) => {
-  // See the matching comment in normalizeAddTaskInput.
+
   const generated = data as unknown as Partial<{ [K in keyof TaskGeneratedPatchFields]: TaskGeneratedPatchFields[K] | null }>;
   return {
     ...data,
@@ -411,6 +408,8 @@ const normalizeUpdateTaskInput = (data: z.infer<typeof updateTaskSchema>) => {
     relativeStartOffset: normalizeNullableTaskRelativeStartOffset(generated.relativeStartOffset),
     timeSpentMinutes: normalizeNullableTaskTimeSpentMinutes(generated.timeSpentMinutes),
     repeatReminderMinutes: normalizeNullableTaskRepeatReminderMinutes(generated.repeatReminderMinutes),
+    dueReminderLeadMinutes: normalizeNullableTaskDueReminderLeadMinutes(generated.dueReminderLeadMinutes),
+    startReminderLeadMinutes: normalizeNullableTaskStartReminderLeadMinutes(generated.startReminderLeadMinutes),
   };
 };
 
@@ -452,7 +451,9 @@ const getSectionSchema = z.object({
 });
 
 const addProjectSchema = z.object({
+  viewSectionIds: viewSectionIdsSchema.optional(),
   title: z.string().min(1).max(MAX_TASK_TITLE_LENGTH),
+  colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
   color: z.string().optional(),
   status: projectStatusSchema.optional(),
   cancelledAt: z.string().datetime({ offset: true }).nullable().optional().describe('Cancellation time; closes the project and its unfinished tasks while preserving completed work'),
@@ -466,8 +467,10 @@ const addProjectSchema = z.object({
   attachments: linkAttachmentsCreateSchema.optional(),
 });
 const updateProjectSchema = z.object({
+  viewSectionIds: nullableOptional(viewSectionIdsSchema),
   id: z.string(),
   title: z.string().min(1).max(MAX_TASK_TITLE_LENGTH).optional(),
+  colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
   color: z.string().nullable().optional(),
   status: projectStatusSchema.optional(),
   cancelledAt: z.string().datetime({ offset: true }).nullable().optional().describe('Cancellation time; closes the project and its unfinished tasks while preserving completed work'),
@@ -591,6 +594,11 @@ export const registerMindwtrTools = (
 
   if (!options.localApi) {
     server.registerTool(
+      'mindwtr_list_view_sections',
+      { description: 'List view section IDs, titles and order for Someday, Waiting or Focus. These are separate from project sections. Read-only; create or rename view sections in the app.', inputSchema: listViewSectionsSchema },
+      withMcpErrorHandling('mindwtr_list_view_sections', async (input) => createMcpTextResponse({ viewSections: await service.listViewSections(input) })),
+    );
+    server.registerTool(
       'mindwtr_list_sections',
       {
         description: 'List project sections from the configured Mindwtr backend. Optionally filter by projectId.',
@@ -665,10 +673,8 @@ export const registerMindwtrTools = (
     },
     withReadonlyMcpErrorHandling('mindwtr_add_task', async (input) => {
       const normalizedInput = normalizeAddTaskInput(input);
-      // buildTaskCreateFieldsShape()'s generic Record<string, ZodTypeAny> return type erases
-      // the specific generated field names from z.infer (see normalizeAddTaskInput above), so
-      // the merged object needs one cast back to the real shape at this boundary. Zod already
-      // validated every field's runtime shape.
+
+
       const task = await service.addTask({
         ...normalizedInput,
       } as AddTaskInput);
@@ -683,7 +689,7 @@ export const registerMindwtrTools = (
       inputSchema: options.localApi ? updateTaskSchema.omit({ attachments: true }).strict() : updateTaskSchema,
     },
     withReadonlyMcpErrorHandling('mindwtr_update_task', async (input) => {
-      // See the matching comment on mindwtr_add_task above.
+
       const task = await service.updateTask({
         ...normalizeUpdateTaskInput(input),
       } as UpdateTaskInput);
@@ -743,7 +749,7 @@ export const registerMindwtrTools = (
     'mindwtr_add_project',
     {
       description: options.localApi ? 'Add a project through the desktop Local API with title, color, status, areaId and isSequential.' : 'Add a project to the configured Mindwtr backend.',
-      inputSchema: options.localApi ? addProjectSchema.pick({ title: true, color: true, status: true, areaId: true, isSequential: true }).strict() : addProjectSchema,
+      inputSchema: options.localApi ? addProjectSchema.pick({ title: true, color: true, colorOverride: true, status: true, areaId: true, isSequential: true }).strict() : addProjectSchema,
     },
     withReadonlyMcpErrorHandling('mindwtr_add_project', async (input) => {
       const project = await service.addProject(input);
@@ -754,8 +760,10 @@ export const registerMindwtrTools = (
   server.registerTool(
     'mindwtr_update_project',
     {
-      description: options.localApi ? 'Update a project through the desktop Local API. Attachment replacement is unavailable.' : 'Update a project in the configured Mindwtr backend.',
-      inputSchema: options.localApi ? updateProjectSchema.pick({ id: true, title: true, color: true, status: true, areaId: true, isSequential: true }).extend({ color: z.string().trim().min(1).optional() }).strict() : updateProjectSchema,
+      description: options.localApi
+        ? 'Update a project through the desktop Local API. Attachment replacement is unavailable. Setting isSequential true makes a Per section project Sequential; perSectionFlow and section flow choices are managed by the apps and are read-only here.'
+        : 'Update a project in the configured Mindwtr backend. Setting isSequential true makes a Per section project Sequential; perSectionFlow and section flow choices are managed by the apps and are read-only here.',
+      inputSchema: options.localApi ? updateProjectSchema.pick({ id: true, title: true, color: true, colorOverride: true, status: true, areaId: true, isSequential: true }).extend({ color: z.string().trim().min(1).optional() }).strict() : updateProjectSchema,
     },
     withReadonlyMcpErrorHandling('mindwtr_update_project', async (input) => {
       const project = await service.updateProject(input);
@@ -916,11 +924,7 @@ export const registerMindwtrTools = (
   }
 };
 
-/**
- * Builds the McpServer + registered tool set shared by both the stdio path and the
- * per-request stateless HTTP path. Each HTTP POST /mcp request gets its own McpServer
- * instance (per the SDK's stateless pattern); the MindwtrService is shared across requests.
- */
+
 export const createMindwtrMcpServer = (service: MindwtrService, config: ServerConfig): McpServer => {
   const server = new McpServer({
     name: 'mindwtr-mcp',
@@ -950,10 +954,8 @@ const attachLifecycleHandlers = (service: MindwtrService, onShutdown?: () => voi
   };
 
   process.on('exit', () => {
-    // 'exit' handlers must run synchronously - Node stops the event loop right after this
-    // callback returns, so an awaited close here would never actually finish. This is only a
-    // best-effort backstop for a process.exit() called from somewhere else; SIGINT/SIGTERM
-    // below are what actually wait for the close (and its WAL checkpoint) before exiting.
+
+
     void closeService();
   });
   process.on('SIGINT', () => {
@@ -969,8 +971,7 @@ export async function startMcpServer(argv: string[] = process.argv.slice(2)) {
 
   const config = resolveServerConfig(flags);
 
-  // The core logger defaults to console.info (protocol stdout). Install the stderr
-  // bridge only when the server starts, before any local data can be loaded.
+
   installCoreLoggerBridge();
 
   const service = config.backend === 'cloud'

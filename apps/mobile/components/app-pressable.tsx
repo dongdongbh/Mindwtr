@@ -3,13 +3,12 @@ import { Platform, Pressable, StyleSheet, View, type GestureResponderEvent, type
 import { useThemeTokens } from '../hooks/use-theme-tokens';
 
 type AppPressableProps = PressableProps & {
-    /** Overlay color while pressed; defaults to a theme-aware dim layer. Useful
-     *  on saturated backgrounds (e.g. swipe action buttons) that need a fixed
-     *  darkening regardless of theme. */
+
+
     pressedColor?: string;
 };
 
-// Last-wins borderRadius lookup so the pressed overlay hugs rounded corners.
+
 const findBorderRadius = (style: StyleProp<ViewStyle>): number | undefined => {
     if (!style || typeof style !== 'object') return undefined;
     if (Array.isArray(style)) {
@@ -23,18 +22,12 @@ const findBorderRadius = (style: StyleProp<ViewStyle>): number | undefined => {
     return typeof radius === 'number' ? radius : undefined;
 };
 
-/**
- * The app's standard `Pressable`: every theme gets visible press feedback
- * (#818). Material 3 on Android keeps its ripple; everywhere else a pressed
- * overlay dims the control. The overlay is a separate layer instead of a
- * background swap so controls layered above other colors (task rows over
- * swipe actions) never flash what's underneath while pressed.
- */
+
 export function AppPressable({ style, children, pressedColor, onPressIn, onPressOut, ...rest }: AppPressableProps) {
     const { isMaterial, state, isDark } = useThemeTokens();
     const [pressed, setPressed] = useState(false);
     const hasRipple = isMaterial && Boolean(state.rippleColor);
-    // android_ripple is inert off Android, so the overlay covers those cases.
+
     const rippleHandlesFeedback = hasRipple && Platform.OS === 'android';
     const overlayColor = pressedColor
         ?? (isMaterial
@@ -59,8 +52,8 @@ export function AppPressable({ style, children, pressedColor, onPressIn, onPress
             onPressOut={handlePressOut}
             {...rest}
         >
-            {/* The cast keeps this portable across react-native versions whose
-                PressableStateCallbackType gained/lost optional members. */}
+            {
+                                                                           }
             {typeof children === 'function' ? children({ pressed } as PressableStateCallbackType) : children}
             {!rippleHandlesFeedback && pressed ? (
                 <View

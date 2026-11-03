@@ -344,9 +344,8 @@ describe('Reference prompt captured parser authority and old durable bytes', () 
                     value(await sqlite.host.commitPreparedProjectLifecycle(envelope as never)); }
                 const [receipt] = await sqlite.sql<{ method: string }>('SELECT method FROM native_request_receipts WHERE request_id=?', [kind === 'ordinaryUndo' ? WRITE : ORIGIN]);
                 if (kind === 'capture') {
-                    // Existing prepared capture is intentionally not a durable
-                    // request-receipt endpoint. Its unchanged default commit
-                    // remains task-ID replay; the new prompt never calls it.
+
+
                     expect(receipt).toBeUndefined();
                     expect(Object.keys((envelope as { prepared: object }).prepared).sort()).toEqual(['version','request','task','project','deviceIdToInitialize','result'].sort());
                 } else expect(receipt.method).toBe(`${prefix}:${uuid.deterministicHash128Hex(canonical([prefix, envelope]))}`);
@@ -493,8 +492,8 @@ describe('Reference prompt current durable origin proof', () => {
             else if (drift === 'method') await sqlite.client().run('UPDATE native_request_receipts SET method=? WHERE request_id=?', ['referenceTaskCompletion:00000000000000000000000000000000', ORIGIN]);
             else if (drift === 'reply') await sqlite.client().run('UPDATE native_request_receipts SET reply=? WHERE request_id=?', [JSON.stringify({ id: 'foreign' }), ORIGIN]);
             else await sqlite.client().run('UPDATE native_request_receipts SET saved_at=? WHERE request_id=?', ['not-an-instant', ORIGIN]);
-            // The old outcome cache still proves the landed origin, so this
-            // specifically tests new-family current durable authority.
+
+
             expect(value(sqlite.host.taskCompletionOutcome(proof.envelope))).not.toBeNull();
             const before = await raw(sqlite); const receipts = await sqlite.sql('SELECT * FROM native_request_receipts'); const beforeMutations = mutations;
             expect(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope as never)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -555,12 +554,54 @@ describe('Reference prompt transactional receipt prerequisite', () => {
                 [original.request_id, original.method, original.reply, original.saved_at]);
             value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope as never)); expect(await raw(sqlite)).toEqual(normal);
             expect(await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id')).toEqual(normalReceipts);
-            // Proven commit releases the prerequisite. An unrelated ordinary
-            // writer succeeds after original proof deletion, without checking it.
+
+
             await sqlite.client().run('DELETE FROM native_request_receipts WHERE request_id=?', [ORIGIN]);
             expect(await useTaskStore.getState().updateTask('candidate', { title: 'Later unrelated edit' })).toEqual({ success: true }); await flushPendingSave();
             expect(useTaskStore.getState()._tasksById.get('candidate')?.title).toBe('Later unrelated edit');
             const later = await raw(sqlite); value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope as never)); expect(await raw(sqlite)).toEqual(later);
         } finally { race = false; transactionReadFailure = false; await sqlite.close(); }
     }, 15_000);
+    it('creates the Add row under Skip as RN addTask does, and replays an earlier Send row unchanged', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const sqlite = await openSqliteHost(seed());
+        try { const proof = await origin(sqlite); const options = value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }))!;
+            const add = (requestId: string) => ({ requestId, origin: options.origin, promptRevision: options.promptRevision, action: 'add' as const, text: 'Reminder default', openAfterSave: false });
+            const sendRequest = add('00000000-0000-4000-8000-000000000195');
+            const sent = value(await sqlite.host.prepareReferenceProjectNextAction({ request: sendRequest, origin: proof })).prepared;
+            if (sent.operation.kind !== 'add') throw new Error('Expected Add');
+            expect(sent.operation.task.suppressMindwtrReminders).toBe(false);
+            await useTaskStore.getState().updateSettings({ taskReminderDefault: 'skip' }); await flushPendingSave();
+            const request = add(WRITE);
+            const prepared = value(await sqlite.host.prepareReferenceProjectNextAction({ request, origin: proof })).prepared;
+            if (prepared.operation.kind !== 'add') throw new Error('Expected Add');
+            expect(prepared.operation.task.suppressMindwtrReminders).toBe(true);
+            expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction({ request, prepared }))).toEqual(prepared.result);
+            expect(useTaskStore.getState()._tasksById.get(prepared.operation.task.id)?.suppressMindwtrReminders).toBe(true);
+            expect(value(sqlite.host.validatePreparedReferenceProjectNextAction({ request: sendRequest, prepared: sent }))).toEqual(sent.result);
+            const ordinary = await useTaskStore.getState().addTask('Reference', { projectId: 'project' });
+            expect(useTaskStore.getState()._tasksById.get(ordinary.id!)?.suppressMindwtrReminders).toBe(true);
+        } finally { await sqlite.close(); }
+    });
+    it('parses Add with the shared quick-add options: feature gates, time estimates and known people, as the RN prompt does', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const start = seed(); start.settings = { ...start.settings!, features: { priorities: false, timeEstimates: true } };
+        start.people = [{ id: 'person-john', name: 'John Smith', createdAt: NOW, updatedAt: NOW }];
+        const sqlite = await openSqliteHost(start);
+        try { const proof = await origin(sqlite); const options = value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }))!;
+            const prepare = async (requestId: string, text: string) => {
+                const request = { requestId, origin: options.origin, promptRevision: options.promptRevision, action: 'add' as const, text, openAfterSave: false };
+                const prepared = value(await sqlite.host.prepareReferenceProjectNextAction({ request, origin: proof })).prepared;
+                if (prepared.operation.kind !== 'add') throw new Error('Expected Add');
+                expect(value(sqlite.host.validatePreparedReferenceProjectNextAction({ request, prepared }))).toEqual(prepared.result);
+                return prepared.operation.creation.intent;
+            };
+            const gated = await prepare('00000000-0000-4000-8000-000000000196', 'Call /priority:high');
+            expect(gated.props.priority).toBeUndefined(); expect(gated.title).toBe('Call /priority:high');
+            const estimated = await prepare('00000000-0000-4000-8000-000000000197', 'Draft /estimate:30m');
+            expect(estimated.props.timeEstimate).toBe('30min'); expect(estimated.title).toBe('Draft');
+            const assigned = await prepare('00000000-0000-4000-8000-000000000198', 'Ask %John Smith');
+            expect(assigned.props.assignedTo).toBe('John Smith'); expect(assigned.title).toBe('Ask');
+        } finally { await sqlite.close(); }
+    });
 });

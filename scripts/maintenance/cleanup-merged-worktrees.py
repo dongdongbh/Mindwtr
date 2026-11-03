@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Conservatively retire clean, merged, inactive registered worktrees."""
-
 from __future__ import annotations
+COMMAND_DESCRIPTION = """Conservatively retire clean, merged, inactive registered worktrees."""
+
 
 import argparse
 import datetime as dt
@@ -39,7 +39,7 @@ GENERATED_PREFIXES = (
 
 
 class SafetyError(Exception):
-    """Contains a fixed public reason, never subprocess output."""
+    pass
 
 
 def sha256_stream(source) -> str:
@@ -53,7 +53,7 @@ def checked_path(value: str | Path, *, must_exist: bool = True) -> Path:
     path = Path(value)
     if not path.is_absolute() or ".." in path.parts:
         raise SafetyError("path_must_be_absolute_without_parent_traversal")
-    # Path normalizes every trailing slash before lstat, including alias///.
+
     for ancestor in [*reversed(path.parents), path]:
         try:
             info = ancestor.lstat()
@@ -69,7 +69,6 @@ def checked_path(value: str | Path, *, must_exist: bool = True) -> Path:
 
 
 def inside(path: Path, parent: Path) -> bool:
-    """Include filesystem aliases such as case differences on macOS."""
     for ancestor in [path, *path.parents]:
         try:
             if ancestor.samefile(parent):
@@ -112,7 +111,7 @@ def registrations(repo: Path) -> list[dict]:
         elif key in ("HEAD", "branch"):
             current[key.lower()] = value
         elif key in ("locked", "prunable"):
-            current[key] = True  # Never expose caller-supplied lock reasons.
+            current[key] = True
         elif key == "detached":
             current["detached"] = True
     if current:
@@ -160,7 +159,6 @@ def ignored_inventory(path: Path) -> tuple[list[str], bool]:
 
 
 def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None) -> int:
-    """Metadata only, no links followed; generated activity also prevents retirement."""
     newest = 0
     pending = [path]
     try:
@@ -177,8 +175,8 @@ def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None
                         group = generated_group(relative)
                         if group is None or group not in (allowed_generated_groups or []):
                             raise SafetyError("symlinked_worktree_content")
-                        # Proven ignored generated links are removed as links by
-                        # ordinary Git removal. Never scan or archive their target.
+
+
                         newest = max(newest, info.st_mtime_ns)
                         continue
                     if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
@@ -192,8 +190,8 @@ def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None
 
 
 def process_active(path: Path) -> bool:
-    # +D selects only this directory and descendants. Exit 1 with no output is
-    # lsof's documented no-match result; warnings or timeouts are uncertainty.
+
+
     try:
         result = subprocess.run(
             ["lsof", "-n", "-P", "-F0p", "+D", str(path)],
@@ -214,7 +212,6 @@ def process_active(path: Path) -> bool:
 
 
 def open_evidence_file(root: Path, relative: str):
-    """Open every evidence component with O_NOFOLLOW, including parent dirs."""
     descriptors: list[int] = []
     try:
         descriptors.append(os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
@@ -321,7 +318,7 @@ def atomic_json(path: Path, value: dict, *, replace: bool = False) -> None:
         if replace:
             os.replace(temporary, path)
         else:
-            os.link(temporary, path)  # Publish without overwriting any old receipt.
+            os.link(temporary, path)
             temporary.unlink()
         fsync_directory(path.parent)
     except OSError:
@@ -343,8 +340,8 @@ def validate_report_path(path: Path, archive_root: Path, *, apply: bool) -> None
         raise SafetyError("report_parent_missing")
     if not path.exists():
         return
-    # A designated name alone does not authorize overwriting a manually renamed
-    # archive/receipt. Accept only a prior bounded report produced by this CLI.
+
+
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 16 * 1024 * 1024:
         raise SafetyError("report_existing_content_not_report")
@@ -440,8 +437,8 @@ class Cleanup:
                 raise SafetyError("not_merged_into_origin_main")
             for entry in run_git(path, "ls-files", "-v", "-z").split(b"\0"):
                 if entry and (entry[:1] == b"S" or entry[0] in b"abcdefghijklmnopqrstuvwxyz"):
-                    # Git status/removal can trust these index hints and miss a
-                    # changed tracked file. Never clear hints or discard source.
+
+
                     raise SafetyError("hidden_index_flags")
             if run_git(path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"):
                 raise SafetyError("dirty_or_untracked")
@@ -463,8 +460,8 @@ class Cleanup:
     def archive(self, worktree: Path, head: str, manifest: list[dict]) -> tuple[Path | None, str | None]:
         if not any(item["kind"] == "file" for item in manifest):
             return None, None
-        # Include tar headers/padding and compression overhead even for many tiny
-        # files, then leave at least 512 MiB unused on the archive filesystem.
+
+
         total = 10240 + sum(1024 + ((item.get("size", 0) + 511) // 512) * 512 for item in manifest)
         estimate = total + (total + 99) // 100
         budget = estimate + max(ARCHIVE_RESERVE_BYTES, (estimate + 9) // 10)
@@ -498,8 +495,8 @@ class Cleanup:
                 raise SafetyError("evidence_changed")
             with temporary.open("rb") as source:
                 digest = sha256_stream(source)
-            # uuid + O_EXCL gives this invocation its own file; hard-link publish
-            # refuses collisions rather than replacing an older final archive.
+
+
             os.link(temporary, final)
             temporary.unlink()
             fsync_directory(self.archive_root)
@@ -523,8 +520,8 @@ class Cleanup:
                        "prepared_at_utc": dt.datetime.fromtimestamp(self.now(), dt.timezone.utc).isoformat()}
             atomic_json(receipt_path, receipt)
             result["receipt"] = str(receipt_path)
-            # Both archive and fsynced receipt preparation can take time. Do all
-            # final admission/evidence checks after those writes, then remove.
+
+
             current = next((item for item in registrations(self.repo) if item["path"] == str(path)), None)
             if current is None:
                 raise SafetyError("registration_changed")
@@ -581,7 +578,7 @@ class Cleanup:
 
 
 def subprocess_ancestor(repo: Path, head: str, origin_head: str) -> bool:
-    # Use an accepted nonzero exit solely for the ordinary not-an-ancestor case.
+
     env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_NO_REPLACE_OBJECTS="1")
     try:
         result = subprocess.run(["git", "--no-optional-locks", "-C", str(repo), "merge-base", "--is-ancestor", head, origin_head],
@@ -594,7 +591,7 @@ def subprocess_ancestor(repo: Path, head: str, origin_head: str) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=COMMAND_DESCRIPTION)
     parser.add_argument("--repo", required=True, type=Path)
     parser.add_argument("--worktree-root", required=True, type=Path)
     parser.add_argument("--archive-root", required=True, type=Path)

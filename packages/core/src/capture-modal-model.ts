@@ -1,18 +1,6 @@
-/**
- * The capture confirmation screen as one module: React Native's capture modal
- * (apps/mobile/app/capture-modal.tsx), the screen that capture links, shares,
- * assistant notes, a widget's or tile's quick capture (`capture-quick`) and
- * in-app openers show. It reads the route params each entry hands the screen,
- * builds what Save writes (one task, or one per line), the copilot chips, and
- * what the screen does after a save or on close. React Native keeps React
- * state, the keyboard, navigation, the AI request, the check that shared files
- * sit in its attachments folder, and logging; the native host contract serves
- * the same screen (native-host-contract-capture-modal.ts).
- *
- * The caller parses: React Native passes its own parseQuickAdd result for the
- * text, built with the screen's one parse-options bag, so the preview chips and
- * the save read the same parse.
- */
+
+
+
 import {
     planCaptureTask,
     prepareCaptureTask,
@@ -28,21 +16,22 @@ import { resolveFeatureFlags } from './resolve-feature-flags';
 import { isSandboxMode } from './sandbox';
 import type { StoreActionResult } from './store-types';
 import { sanitizeAttachmentUriForSyncMerge } from './sync-normalization';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { getUsedTaskTokens } from './task-token-usage';
 import type { AppSettings, Area, Attachment, Project, Task, TimeEstimate } from './types';
 
 export type CaptureModalParam = string | string[] | undefined;
 
-/** The screen's route params: what each entry hands it. */
+
 export type CaptureModalParams = {
-    /** Preset task props as URI-encoded JSON (description, tags, contexts, status, projectId, areaId, shared files). */
+
     initialProps?: CaptureModalParam;
     initialValue?: CaptureModalParam;
-    /** 'system' when a widget, tile, shortcut or notification opened the screen (#1169); 'share' for an iOS share. */
+
     origin?: CaptureModalParam;
-    /** A capture link's project: an id or a title. */
+
     project?: CaptureModalParam;
-    /** The app path to go to when nothing sits behind the screen. */
+
     returnTo?: CaptureModalParam;
     text?: CaptureModalParam;
     title?: CaptureModalParam;
@@ -66,7 +55,7 @@ const decodeSearchParam = (value: CaptureModalParam): string => {
     }
 };
 
-/** The `returnTo` param when it is an app path: no scheme, no protocol-relative host, no control characters. */
+
 export const sanitizeCaptureReturnToParam = (value: CaptureModalParam): string | null => {
     const decoded = decodeSearchParam(value).trim();
     if (!decoded || !decoded.startsWith('/') || decoded.startsWith('//')) return null;
@@ -105,11 +94,7 @@ const normalizeInitialTokenList = (value: unknown, prefix?: '@' | '#'): string[]
     return next.length > 0 ? next : undefined;
 };
 
-// Share-intent file captures arrive as attachment records in the route's
-// initialProps (the share handler already copied the bytes into the managed
-// attachments dir). Route params are attacker-reachable via deep links, so
-// only structurally valid file records survive here; capture request assembly
-// additionally drops any uri outside the managed attachments dir.
+
 const sanitizeInitialAttachments = (value: unknown): Attachment[] | undefined => {
     if (!Array.isArray(value)) return undefined;
     const next: Attachment[] = [];
@@ -143,12 +128,7 @@ const sanitizeInitialAttachments = (value: unknown): Attachment[] | undefined =>
     return next.length > 0 ? next : undefined;
 };
 
-/**
- * The preset props the `initialProps` param carries, as far as the screen
- * trusts them: shared files (not in sandbox mode), a non-blank description,
- * tags and contexts (prefixed, without repeats), a capture status, a project
- * that takes tasks, else a live area.
- */
+
 export function readCaptureModalInitialProps(
     value: CaptureModalParam,
     projects: readonly Project[],
@@ -188,45 +168,42 @@ export function readCaptureModalInitialProps(
     return next;
 }
 
-/** The title field's first text: `initialValue`, else `text`, else `title`. */
+
 export const readCaptureModalInitialText = (params: CaptureModalParams): string => (
     decodeSearchParam(params.initialValue)
     || decodeSearchParam(params.text)
     || decodeSearchParam(params.title)
 );
 
-/** A capture link's project param (an id or a title), trimmed. */
+
 export const readCaptureModalProjectParam = (params: CaptureModalParams): string => decodeSearchParam(params.project).trim();
 
-/** Who opened the screen: a system entry point (widget, tile, shortcut, notification), an iOS share, or neither. */
+
 export const readCaptureModalOrigin = (params: CaptureModalParams): 'system' | 'share' | null => {
     const origin = firstSearchParam(params.origin);
     return origin === 'system' || origin === 'share' ? origin : null;
 };
 
-// ---------------------------------------------------------------------------
-// The copilot
 
-/** What the AI suggested for the title. */
 export type CaptureModalCopilotSuggestion = { context?: string; timeEstimate?: TimeEstimate; tags?: string[] };
-/** The suggested parts the user applied; they are added to the saved task. */
+
 export type CaptureModalCopilotApplied = { context?: string; timeEstimate?: TimeEstimate; tags: string[] };
-/** One separately applicable piece of a suggestion. */
+
 export type CaptureModalCopilotPart = { kind: 'context' | 'timeEstimate' | 'tag'; value: string };
 
-/** Whether the screen asks the AI about this title: AI on, a key when one is required, and 4 characters or more. */
+
 export function shouldRequestCaptureModalCopilot(input: { aiEnabled: boolean; keyRequired: boolean; hasKey: boolean; title: string }): boolean {
     if (!input.aiEnabled || (input.keyRequired && !input.hasKey)) return false;
     return input.title.length >= 4;
 }
 
-/** The AI's answer as the screen keeps it: null when it holds nothing the screen can show. */
+
 export function keepCaptureModalCopilotSuggestion<T extends CaptureModalCopilotSuggestion>(suggestion: T, timeEstimatesEnabled: boolean): T | null {
     if (!suggestion.context && (!timeEstimatesEnabled || !suggestion.timeEstimate) && !suggestion.tags?.length) return null;
     return suggestion;
 }
 
-/** The suggestion's parts not applied yet, in the order the chips show them. */
+
 export function getCaptureModalCopilotParts(
     suggestion: CaptureModalCopilotSuggestion | null,
     applied: CaptureModalCopilotApplied,
@@ -246,7 +223,7 @@ export function getCaptureModalCopilotParts(
     return parts;
 }
 
-/** Apply chips (one, or all with "Apply all"). An estimate applies only while time estimates are on. */
+
 export function applyCaptureModalCopilotParts(
     applied: CaptureModalCopilotApplied,
     parts: readonly CaptureModalCopilotPart[],
@@ -262,7 +239,7 @@ export function applyCaptureModalCopilotParts(
     };
 }
 
-/** The "Applied …" line under the chips, or null when nothing was applied. */
+
 export function formatCaptureModalCopilotApplied(
     t: TranslateFn,
     applied: CaptureModalCopilotApplied,
@@ -273,35 +250,24 @@ export function formatCaptureModalCopilotApplied(
     return [t('copilot.applied'), applied.context, estimate, ...applied.tags].filter(Boolean).join(' ');
 }
 
-// ---------------------------------------------------------------------------
-// Saving
 
-/**
- * The capture transaction's input for one text (the whole field, or one line).
- * A capture link's `project` param is a best-effort fallback, not a typed
- * +Project token: with no project parsed from the text, a project with that id
- * or title (any case) is used when it takes tasks, skipped when it does not,
- * and created when none matches. The description field, which starts with the
- * entry's description, is the saved description; a /note: token in the text
- * follows it. Applied copilot parts are added.
- */
 export function buildCaptureModalRequest(input: {
-    /** parseQuickAdd(text, projects, now, areas, the screen's parse options). */
+
     parsed: QuickAddResult;
     text: string;
     projects: readonly Project[];
-    /** readCaptureModalInitialProps, its files limited to the ones the app manages. */
+
     initialProps: Partial<Task>;
-    /** readCaptureModalProjectParam. */
+
     projectParam: string;
-    /** resolveDefaultNewTaskAreaId. */
+
     defaultAreaId: string | undefined;
     description: string;
     copilot: CaptureModalCopilotApplied;
     timeEstimatesEnabled: boolean;
 }): { input: CaptureAssemblyInput; options: CaptureTransactionOptions } {
     const { parsed, copilot } = input;
-    // The description field shows the entry's description and owns it: what it holds is saved.
+
     const { description: _shown, ...surfaceProps } = input.initialProps;
     let fallbackProjectTitleToCreate: string | undefined;
     if (!parsed.props.projectId && !parsed.projectTitle && input.projectParam) {
@@ -353,21 +319,15 @@ type CaptureModalRequest = ReturnType<typeof buildCaptureModalRequest>;
 
 export type CaptureModalLinesOutcome =
     | { kind: 'saved'; count: number }
-    /** A line's date command could not be read: warn with these. Nothing was written. */
+
     | { kind: 'refused'; invalidDateCommands: string[] }
-    /**
-     * No task was written: a line gave no request ('validation-rejected'), a line
-     * could not be prepared ('prepare-failed'; a project an earlier line named may
-     * exist by then), or the store refused the batch ('transaction-rejected').
-     */
+
+
     | { kind: 'failed'; stage: 'validation-rejected' | 'prepare-failed' | 'transaction-rejected' };
 
 type BuildLineRequest = (line: string, projects: readonly Project[]) => Promise<CaptureModalRequest | null>;
 
-/**
- * Check every line before anything is written: a line without a request, or
- * with a date command it cannot read, refuses the whole batch. Null: all good.
- */
+
 export async function checkCaptureModalLines(input: {
     lines: readonly string[];
     projects: readonly Project[];
@@ -384,14 +344,7 @@ export async function checkCaptureModalLines(input: {
     return null;
 }
 
-/**
- * Create one task per line in one store write, as "Create tasks" does. Every
- * line is checked first (checkCaptureModalLines). Each line's request sees the
- * projects earlier lines created. Shared files stay on the first task only: the
- * records share ids, so copies would alias one file. Throws when a store action
- * or `buildRequest` throws; `onWrite` runs just before the batch write, so the
- * caller can tell a throw there apart.
- */
+
 export async function saveCaptureModalLines(input: {
     lines: readonly string[];
     projects: readonly Project[];
@@ -399,7 +352,7 @@ export async function saveCaptureModalLines(input: {
     actions: Pick<CaptureTransactionActions, 'addProject'> & {
         addTasks: (items: { title: string; initialProps: Partial<Task>; captureId?: string }[]) => Promise<StoreActionResult>;
     };
-    /** One capture UUID per line, for exact retries. */
+
     captureIds?: readonly string[];
     onWrite?: () => void;
 }): Promise<CaptureModalLinesOutcome> {
@@ -428,42 +381,30 @@ export async function saveCaptureModalLines(input: {
     return { kind: 'saved', count: items.length };
 }
 
-/** What a request would write, without writing (the project it would create included). */
+
 export const planCaptureModalRequest = (request: CaptureModalRequest) => planCaptureTask(request.input, request.options);
 
-// ---------------------------------------------------------------------------
-// Leaving the screen
 
-/** Where closing goes: back to the screen behind, else the safe `returnTo`, else the Inbox. */
 export const getCaptureModalCloseTarget = (canGoBack: boolean, returnTo: string | null): 'back' | string => (
     canGoBack ? 'back' : returnTo ?? '/inbox'
 );
 
-/**
- * The project a project screen's + button opened the screen from: the inverse
- * of React Native's buildProjectQuickCaptureReturnTo (projects-screen.utils.ts).
- */
+
 export const getProjectQuickCaptureReturnToProjectId = (returnTo: string | null | undefined): string | null => {
     if (!returnTo) return null;
     const match = returnTo.match(/^\/projects-screen\?projectId=([^&]+)$/);
     return match ? decodeURIComponent(match[1]) : null;
 };
 
-/** What the screen does after a save. */
+
 export type CaptureModalAfterSave =
-    /**
-     * Close (getCaptureModalCloseTarget). A system entry point's capture then puts
-     * the app behind the screen the user came from (#1169).
-     */
+
+
     | { kind: 'close'; returnToPreviousApp: boolean }
-    /**
-     * Save and edit from a project's own + button, the task still in that
-     * project: leave the editor request for the project screen, then close
-     * without leaving the app. Opening the project again would stack a
-     * duplicate of it (#938).
-     */
+
+
     | { kind: 'openInProject'; taskId: string; projectId: string }
-    /** Save and edit: replace the screen with the task's editor, so backing out never reopens the saved text (#1029). */
+
     | { kind: 'open'; taskId: string; projectId: string | undefined };
 
 export function resolveCaptureModalAfterSave(input: {
@@ -482,40 +423,37 @@ export function resolveCaptureModalAfterSave(input: {
     return { kind: 'close', returnToPreviousApp: input.origin === 'system' };
 }
 
-/** The question before creating one task per line: the capture popup's own. */
+
 export { getQuickCaptureBulkConfirm as getCaptureModalBulkConfirm } from './quick-capture-model';
 
-// ---------------------------------------------------------------------------
-// The whole screen, for a native host
 
-/** What the screen holds while it is open. */
 export type CaptureModalDraft = {
-    /** The title field. */
+
     text: string;
-    /** The description field. */
+
     description: string;
-    /** The syntax help is open. */
+
     showHelp: boolean;
-    /** The AI's kept answer for the current title (keepCaptureModalCopilotSuggestion), or null. */
+
     suggestion: CaptureModalCopilotSuggestion | null;
     applied: CaptureModalCopilotApplied;
-    /** The last save failed; the card says so until the next save starts. */
+
     failed: boolean;
 };
 
-/** What the screen's inputs and buttons change. Saving and closing are not edits. */
+
 export type CaptureModalEdit =
-    /** Typing in the title field. It clears the applied chips, and the suggestion once the screen would not ask. */
+
     | { type: 'setText'; value: string }
     | { type: 'setDescription'; value: string }
-    /** The ? button. */
+
     | { type: 'toggleHelp' }
-    /** A suggested chip, or "Apply all": only parts the screen shows. */
+
     | { type: 'applyCopilot'; parts: CaptureModalCopilotPart[] }
-    /** The AI's answer for `title`; an answer for another title than the field's is dropped, as a late answer is. */
+
     | { type: 'setSuggestion'; title: string; suggestion: CaptureModalCopilotSuggestion };
 
-/** A fresh screen: the entry's title and description. */
+
 export function createCaptureModalDraft(params: CaptureModalParams, initialProps: Partial<Task>): CaptureModalDraft {
     return {
         text: readCaptureModalInitialText(params),
@@ -527,11 +465,11 @@ export function createCaptureModalDraft(params: CaptureModalParams, initialProps
     };
 }
 
-/** What decides whether the screen asks the AI, and what an answer may add. */
+
 export type CaptureModalCopilotSettings = { aiEnabled: boolean; keyRequired: boolean; hasKey: boolean; timeEstimatesEnabled: boolean };
 const asksCopilot = (settings: CaptureModalCopilotSettings, title: string) => shouldRequestCaptureModalCopilot({ ...settings, title });
 
-/** Apply one edit. Null for an edit the screen cannot make (a part it does not show). */
+
 export function applyCaptureModalEdit(draft: CaptureModalDraft, edit: CaptureModalEdit, settings: CaptureModalCopilotSettings): CaptureModalDraft | null {
     switch (edit.type) {
         case 'setText':
@@ -561,50 +499,50 @@ export function applyCaptureModalEdit(draft: CaptureModalDraft, edit: CaptureMod
 }
 
 export type CaptureModalView = {
-    /** The sandbox workspace's banner, in sandbox mode. */
+
     sandboxCue: string | null;
     title: string;
-    /** The button that hides the keyboard, shown while it is up. */
+
     hideKeyboard: string;
     help: { toggle: string; text: string | null; edit: CaptureModalEdit };
     input: { value: string; placeholder: string };
-    /** The chips under the title field: what saving the text produces. */
+
     preview: QuickAddPreviewEntry[];
-    /** Shared files the capture carries. */
+
     attachments: { label: string; titles: string[] } | null;
-    /** Shown while the entry brought a description or the field holds one. */
+
     description: { label: string; placeholder: string; value: string } | null;
     copilot: {
-        /** What the screen asks the AI now (null without a key the provider needs); send the answer as setSuggestion. */
+
         request: { title: string; contexts: string[]; tags: string[] } | null;
         suggested: {
             label: string;
             parts: { label: string; edit: CaptureModalEdit }[];
-            /** Shown with two parts or more. */
+
             applyAll: { label: string; edit: CaptureModalEdit } | null;
             hint: string;
         } | null;
         applied: string | null;
     };
-    /** The failure the card shows after a save failed. */
+
     error: string | null;
     actions: { cancel: string; saveAndEdit: string; save: string };
 };
 
-/** The screen for this draft, with the exact edit on every control. */
+
 export function buildCaptureModalView(draft: CaptureModalDraft, context: {
     t: TranslateFn;
     settings: AppSettings;
     projects: readonly Project[];
     areas: readonly Area[];
-    /** The tasks whose contexts and tags the AI chooses from. */
+
     tasks: Task[];
-    /** readCaptureModalInitialProps. */
+
     initialProps: Partial<Task>;
-    /** The text's parse (as buildCaptureModalRequest takes it); ignored while the text is blank. */
+
     parsed: QuickAddResult;
     formatDate: DateFormatter;
-    /** Whether the provider needs an API key (isAIKeyRequired), and whether the host holds one. */
+
     aiKey: { required: boolean; available: boolean };
 }): CaptureModalView {
     const { t, settings } = context;
@@ -644,8 +582,9 @@ export function buildCaptureModalView(draft: CaptureModalDraft, context: {
             request: asksCopilot(copilotSettings, title)
                 ? {
                     title,
-                    contexts: getUsedTaskTokens(context.tasks, (task) => task.contexts, { prefix: '@' }),
-                    tags: getUsedTaskTokens(context.tasks, (task) => task.tags, { prefix: '#' }),
+
+                    contexts: Array.from(new Set([...getUsedTaskTokens(context.tasks, (task) => task.contexts, { prefix: '@' }), ...getSavedTaxonomyTokens(settings, 'context')])),
+                    tags: Array.from(new Set([...getUsedTaskTokens(context.tasks, (task) => task.tags, { prefix: '#' }), ...getSavedTaxonomyTokens(settings, 'tag')])),
                 }
                 : null,
             suggested: parts.length > 0

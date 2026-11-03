@@ -1,5 +1,5 @@
-import { fireEvent, render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, fireEvent, render } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
 import {
     SETTINGS_SEARCH_PAGE_IDS,
@@ -23,40 +23,34 @@ import { SettingsManagePage } from './SettingsManagePage';
 import { SettingsNotificationsPage } from './SettingsNotificationsPage';
 import { SettingsSyncPage } from './SettingsSyncPage';
 
-// Both directions of the search index contract (#884):
-//
-//   forwards  — every settings row that renders carries a `data-settings-key`
-//               listed in the core roster for its page. A row added without a
-//               roster entry is unfindable by search, which was the bug.
-//   backwards — every roster key still renders as a row, so no search result
-//               leads to a row that no longer exists.
-//
-// Pages are rendered with the props that reveal the most rows, and every
-// collapsed disclosure is opened first (the same click the search reveal makes
-// through `expandSettingsSection`). Rows behind a mutually exclusive choice — a
-// sync backend, an AI provider — get one render variant each.
+vi.mock('../../../lib/gmail-capture', async (original) => ({
+    ...(await original<typeof import('../../../lib/gmail-capture')>()),
+    getGmailCaptureConfig: async () => ({
+        available: true, connected: true, account: 'designated@example.test',
+        accountId: 'mailbox-hash', labelId: 'Label_1', enabled: false,
+    }),
+    getGmailCaptureLabels: async () => [{ id: 'Label_1', name: 'Mindwtr' }],
+}));
+
 
 const t = getEnglishSettingsLabels();
 const noop = () => undefined;
 const asyncNoop = async () => undefined;
 
-// Roster keys with no row of their own, each with the reason it cannot render
-// here. Empty today: every indexed setting reaches the DOM under the props and
-// variants below. Prefer another prop or variant over an entry here.
+
 const CONDITIONALLY_RENDERED: Record<string, string> = {};
 
-// A roster entry whose label IS the page title ("Sync" on the Sync page) is the
-// "take me to this page" result — selecting it navigates, and there is nothing
-// on the page to highlight. Derived rather than listed so adding a page can't
-// forget it.
+
 function isPageLevelEntry(pageId: SettingsSearchPageId, key: string): boolean {
     return resolveSettingsSearchI18nKey(key) === SETTINGS_SEARCH_PAGE_TITLE_KEYS[pageId];
 }
 
-function collectRenderedKeys(ui: ReactElement): Set<string> {
+async function collectRenderedKeys(ui: ReactElement, settleConnection: boolean): Promise<Set<string>> {
     const { container, unmount } = render(ui);
-    // Disclosure contents are absent from the DOM until opened, and a few
-    // disclosures nest, so keep opening until nothing is collapsed.
+
+    if (settleConnection) await act(async () => {});
+
+
     for (let pass = 0; pass < 6; pass += 1) {
         const collapsed = container.querySelectorAll<HTMLElement>('[aria-expanded="false"]');
         if (collapsed.length === 0) break;
@@ -92,7 +86,7 @@ const mainProps: Parameters<typeof SettingsMainPage>[0] = {
     dateFormat: 'system',
     onDateFormatChange: noop,
     calendarSystem: 'gregorian',
-    // Only offered for locales that use a non-Gregorian calendar.
+
     showCalendarSystem: true,
     onCalendarSystemChange: noop,
     timeFormat: 'system',
@@ -107,8 +101,8 @@ const gtdProps: Parameters<typeof SettingsGtdPage>[0] = {
     t,
     language: 'en',
     settings: {
-        // Pomodoro rows hang off the feature flag; the save-audio row needs the
-        // audio capture default and speech-to-text both on.
+
+
         features: { pomodoro: true },
         gtd: { defaultCaptureMethod: 'audio', taskEditor: { presentation: 'inline' } },
         ai: { speechToText: { enabled: true } },
@@ -224,7 +218,7 @@ const syncProps: Parameters<typeof SettingsSyncPage>[0] = {
     lastSyncDisplay: 'Never',
     lastSyncStatus: 'success',
     lastSyncStats: null,
-    // The history disclosure only exists once there is something to show.
+
     lastSyncHistory: [{
         at: '2026-07-30T09:00:00.000Z',
         status: 'success',
@@ -244,7 +238,7 @@ const syncProps: Parameters<typeof SettingsSyncPage>[0] = {
 
 const dataProps: Parameters<typeof SettingsDataPage>[0] = {
     t,
-    // Diagnostics is a Tauri-only section; the log path row needs logging on.
+
     isTauri: true,
     loggingEnabled: true,
     logPath: '/tmp/mindwtr.log',
@@ -280,7 +274,7 @@ const integrationsProps: Parameters<typeof SettingsIntegrationsPage>[0] = {
     newCalendarName: '',
     newCalendarUrl: '',
     calendarError: null,
-    // The subscription list only renders once a calendar is subscribed.
+
     externalCalendars: [{
         id: 'work',
         name: 'Work',
@@ -288,8 +282,8 @@ const integrationsProps: Parameters<typeof SettingsIntegrationsPage>[0] = {
         enabled: true,
         color: '#2563EB',
     }],
-    // System calendars are macOS/Linux only, and the target picker needs both
-    // the push toggle and granted permission.
+
+
     showSystemCalendarSection: true,
     systemCalendarPermission: 'granted',
     calendarPushEnabled: true,
@@ -385,12 +379,12 @@ const advancedProps: Parameters<typeof SettingsAdvancedPage>[0] = {
     onOpenHelp: noop,
     keybindingStyle: 'vim',
     onKeybindingStyleChange: noop,
-    // Window behavior only exists in the desktop shell (decorations are Linux).
+
     showWindowDecorations: true,
     showCloseBehavior: true,
     showLaunchAtStartup: true,
     showTrayToggle: true,
-    // Rendering and network sections, and the API token row, are Tauri-only.
+
     isTauri: true,
     localApiStatus: {
         enabled: true,
@@ -406,6 +400,8 @@ const advancedProps: Parameters<typeof SettingsAdvancedPage>[0] = {
     networkProxyUrl: '',
     desktopRenderingConfig: { disableHardwareAcceleration: false },
     desktopRenderingBusy: false,
+
+    appLockAvailability: { supported: true, available: true },
     onLocalApiToggle: noop,
     onLocalApiPortInputChange: noop,
     onLocalApiPortCommit: noop,
@@ -417,7 +413,7 @@ const advancedProps: Parameters<typeof SettingsAdvancedPage>[0] = {
 const aboutProps: Parameters<typeof SettingsAboutPage>[0] = {
     t,
     appVersion: '1.1.5',
-    // The channel row is omitted when the install source is unknown.
+
     installChannel: 'github-release',
     onOpenLink: noop,
     onCheckUpdates: noop,
@@ -428,8 +424,7 @@ const aboutProps: Parameters<typeof SettingsAboutPage>[0] = {
     onSubmitFeedback: asyncNoop,
 };
 
-// One entry per page id; several renders where a page can only show one branch
-// of an exclusive choice at a time.
+
 const PAGE_VARIANTS: Record<SettingsSearchPageId, ReactElement[]> = {
     main: [<SettingsMainPage key="main" {...mainProps} />],
     gtd: [<SettingsGtdPage key="gtd" {...gtdProps} />],
@@ -447,7 +442,7 @@ const PAGE_VARIANTS: Record<SettingsSearchPageId, ReactElement[]> = {
         />,
         <SettingsSyncPage key="dropbox" {...syncProps} syncBackend="cloud" cloudProvider="dropbox" />,
     ],
-    data: [<SettingsDataPage key="data" {...dataProps} />],
+    data: [<LanguageProvider key="data"><SettingsDataPage {...dataProps} /></LanguageProvider>],
     integrations: [<LanguageProvider key="integrations"><SettingsIntegrationsPage {...integrationsProps} /></LanguageProvider>],
     ai: [
         <SettingsAiPage key="openai" {...aiProps} />,
@@ -458,11 +453,17 @@ const PAGE_VARIANTS: Record<SettingsSearchPageId, ReactElement[]> = {
 };
 
 describe('desktop settings search coverage', () => {
-    it.each(SETTINGS_SEARCH_PAGE_IDS)('indexes every rendered row on the %s page', (pageId) => {
+    const collectPageKeys = async (pageId: SettingsSearchPageId): Promise<Set<string>> => {
+        const keys = new Set<string>();
+        for (const variant of PAGE_VARIANTS[pageId]) {
+            (await collectRenderedKeys(variant, pageId === 'integrations')).forEach((key) => keys.add(key));
+        }
+        return keys;
+    };
+
+    it.each(SETTINGS_SEARCH_PAGE_IDS)('indexes every rendered row on the %s page', async (pageId) => {
         const rosterKeys = new Set(getSettingsSearchEntryKeys(pageId));
-        const renderedKeys = new Set(
-            PAGE_VARIANTS[pageId].flatMap((variant) => [...collectRenderedKeys(variant)]),
-        );
+        const renderedKeys = await collectPageKeys(pageId);
 
         const unindexed = [...renderedKeys].filter((key) => !rosterKeys.has(key)).sort();
         expect(
@@ -474,10 +475,8 @@ describe('desktop settings search coverage', () => {
         ).toEqual([]);
     });
 
-    it.each(SETTINGS_SEARCH_PAGE_IDS)('renders a row for every indexed setting on the %s page', (pageId) => {
-        const renderedKeys = new Set(
-            PAGE_VARIANTS[pageId].flatMap((variant) => [...collectRenderedKeys(variant)]),
-        );
+    it.each(SETTINGS_SEARCH_PAGE_IDS)('renders a row for every indexed setting on the %s page', async (pageId) => {
+        const renderedKeys = await collectPageKeys(pageId);
 
         const missing = getSettingsSearchEntryKeys(pageId)
             .filter((key) => !renderedKeys.has(key))

@@ -7,10 +7,7 @@ export type TaskMetadataFilterVisibility = {
     timeEstimate: boolean;
 };
 
-// Both fields are resolved booleans (see resolveFeatureFlags), not raw
-// settings reads — this function no longer has a default-polarity opinion
-// of its own, so a caller can't silently disagree with resolveFeatureFlags
-// by omitting one.
+
 export type TaskMetadataFilterVisibilityOptions = {
     prioritiesEnabled: boolean;
     timeEstimatesEnabled: boolean;

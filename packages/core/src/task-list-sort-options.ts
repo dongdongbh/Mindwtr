@@ -1,9 +1,5 @@
-/**
- * Task-list sort rosters and their two feature-gated resolvers, shared by
- * every task-list surface on desktop and mobile. Kept as a sibling of
- * `resolveTaskSortByForFeatures` (task-utils.ts) rather than inside that
- * file because task-utils.ts is already large.
- */
+
+
 
 import type { AppSettings, SortField, TaskSortBy } from './types';
 import { resolveTaskSortByForFeatures } from './task-utils';
@@ -13,14 +9,19 @@ export const TASK_LIST_SORT_OPTIONS: readonly TaskSortBy[] = [
     'due',
     'start',
     'review',
+    'priority',
     'timeEstimate',
     'title',
     'created',
     'created-desc',
 ];
 
-// The Focus screens' own roster: no review/timeEstimate/title, plus priority.
-// Both screens hide 'priority' when the priority feature is off.
+
+export const PROJECT_TASK_SORT_OPTIONS: readonly TaskSortBy[] = TASK_LIST_SORT_OPTIONS.filter(
+    (option) => option !== 'priority',
+);
+
+
 export const FOCUS_SORT_OPTIONS: readonly SortField[] = [
     'default',
     'due',
@@ -30,13 +31,13 @@ export const FOCUS_SORT_OPTIONS: readonly SortField[] = [
     'created-desc',
 ];
 
+
 export const DONE_TASK_LIST_SORT_OPTIONS: readonly TaskSortBy[] = [
-    ...TASK_LIST_SORT_OPTIONS,
+    ...TASK_LIST_SORT_OPTIONS.filter((option) => option !== 'priority'),
     'completed',
 ];
 
-// `settings` is required, not optional: a view that forgets it would silently
-// keep sorting by a disabled feature's field (#1107).
+
 export function resolveNonDoneTaskSortBy(
     stored: TaskSortBy | undefined,
     settings: AppSettings | undefined,
@@ -53,4 +54,17 @@ export function resolveDoneTaskSortBy(
         viewSortBy ?? (stored === 'completed' ? 'completed' : 'default'),
         settings,
     );
+}
+
+
+export function getVisibleTaskSortOptions<Sort extends SortField>(
+    options: readonly Sort[],
+    settings: { features?: AppSettings['features'] } | null | undefined,
+): Sort[] {
+    return options.filter((option) => resolveTaskSortByForFeatures(option, settings) === option);
+}
+
+
+export function getTaskSortByLabel(sortBy: SortField, t: (key: string) => string): string {
+    return sortBy === 'priority' ? t('filters.priority') : t(`sort.${sortBy}`);
 }

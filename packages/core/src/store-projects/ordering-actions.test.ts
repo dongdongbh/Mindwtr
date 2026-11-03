@@ -191,7 +191,7 @@ describe('reorderProjectTasks', () => {
             _tasksById: new Map(tasks.map((task) => [task.id, task])),
         });
 
-        // task-2 dropped between orders 0 and 5: midpoint 2.5 must round to an integer.
+
         await useTaskStore.getState().reorderProjectTasks(project.id, ['task-0', 'task-2', 'task-1'], undefined, 'task-2');
 
         const moved = useTaskStore.getState()._allTasks.find((task) => task.id === 'task-2');
@@ -211,8 +211,7 @@ describe('reorderProjectTasks', () => {
             _tasksById: new Map(tasks.map((task) => [task.id, task])),
         });
 
-        // task-2 dropped between orders 3 and 4: no integer fits, so every task
-        // is renumbered instead of writing a fractional midpoint.
+
         await useTaskStore.getState().reorderProjectTasks(project.id, ['task-0', 'task-2', 'task-1'], undefined, 'task-2');
 
         const state = useTaskStore.getState()._allTasks;

@@ -65,7 +65,7 @@ export function restoreScrollSnapshot(snapshots: readonly ScrollSnapshot[]) {
             try {
                 window.scrollTo(snapshot.scrollLeft, snapshot.scrollTop);
             } catch {
-                // jsdom and some embedded webviews can expose scroll state without scrollTo.
+
             }
             return;
         }

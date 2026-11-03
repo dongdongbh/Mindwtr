@@ -17,7 +17,7 @@ import {
 const TOKEN = 'capture-webhook-test-token-1234567890';
 const AUTH = { Authorization: `Bearer ${TOKEN}` };
 
-// A short, real-looking audio payload. Nothing decodes it; the route stores bytes.
+
 const AUDIO_BYTES = new Uint8Array([
     0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70,
     0x4d, 0x34, 0x41, 0x20, 0x00, 0x00, 0x00, 0x00,
@@ -64,11 +64,7 @@ const postJsonCapture = (body: unknown): Promise<Response> => postCapture({
     body: JSON.stringify(body),
 });
 
-// The multipart body is assembled by hand rather than through FormData: Bun's
-// FormData serializer discards a Blob's own type and re-derives each part's
-// Content-Type from the filename (an .m4a part goes out as audio/x-m4a, a .webm
-// part as video/webm). Writing the wire bytes keeps these tests posting exactly
-// what a webhook sender posts, with the part Content-Type it actually chose.
+
 const BOUNDARY = 'mindwtr-capture-test-boundary';
 
 type CapturePart =
@@ -414,7 +410,7 @@ describe('POST /v1/capture', () => {
         expect(createdAtMs).toBeGreaterThanOrEqual(before);
         expect(createdAtMs).toBeLessThanOrEqual(Date.now());
 
-        // Inside the 5-minute skew window the recorded time is still honoured.
+
         const nearFuture = new Date(before + 60_000).toISOString();
         const skewed = await postJsonCapture({ transcription: 'Slightly fast clock', recordedAt: nearFuture });
         expect(((await skewed.json()) as { task: Task }).task.createdAt).toBe(nearFuture);
@@ -431,9 +427,7 @@ describe('POST /v1/capture', () => {
         expect(task.projectId).toBeUndefined();
     });
 
-    // A sender whose connection drops after the server committed cannot tell success from
-    // failure, so it retries. With a captureId the retry lands on the same task instead of
-    // creating a second one.
+
     const REPLAY_ID = '3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b';
 
     test('a retried multipart capture with the same captureId adds nothing', async () => {
@@ -471,8 +465,7 @@ describe('POST /v1/capture', () => {
         expect(await readStoredTasks()).toHaveLength(1);
     });
 
-    // A capture-only token must never be able to read tasks, so the replay reply carries
-    // the id and nothing that was stored.
+
     test('a replay reply never contains the stored text', async () => {
         await postJsonCapture({ transcription: 'Call Dave', captureId: REPLAY_ID });
 
@@ -485,7 +478,7 @@ describe('POST /v1/capture', () => {
         const first = await postJsonCapture({ transcription: 'Water the plants', captureId: REPLAY_ID });
         expect(first.status).toBe(201);
 
-        // The owner's device deletes the captured task and pushes that document back.
+
         const getResponse = await fetch(`${harness.url}/v1/data`, { headers: AUTH });
         const data = (await getResponse.json()) as AppData;
         const deletedAt = new Date().toISOString();
@@ -627,9 +620,8 @@ describe('POST /v1/capture', () => {
     });
 
     test('trusts the Content-Type the sender declared on the audio part', async () => {
-        // Bun's formData() re-derives File.type from the filename: `voicenote` would
-        // report no type at all and `clip.webm` would report video/webm. The type the
-        // sender actually declared is what decides the stored extension.
+
+
         const noExtension = await postFormCapture({
             transcription: 'No filename extension',
             audio: { bytes: AUDIO_BYTES, type: 'audio/mp4', name: 'voicenote' },
@@ -659,7 +651,7 @@ describe('POST /v1/capture', () => {
         expect(captureResponse.status).toBe(201);
         const { task, attachment } = (await captureResponse.json()) as { task: Task; attachment: Attachment };
 
-        // A phone that synced before the capture pushes its own snapshot back.
+
         const staleSnapshot: AppData = {
             tasks: [{
                 id: 'phone-only-task',
@@ -693,7 +685,7 @@ describe('POST /v1/capture', () => {
         expect(mergedCapture?.attachments?.[0].fileHash).toBe(attachment.fileHash);
         expect(merged.some((item) => item.id === 'phone-only-task')).toBe(true);
 
-        // The bytes are still downloadable after the merge, so the phone can fetch them.
+
         const download = await fetch(`${harness.url}/v1/${attachment.cloudKey}`, { headers: AUTH });
         expect(download.status).toBe(200);
         expect(new Uint8Array(await download.arrayBuffer()).byteLength).toBe(AUDIO_BYTES.byteLength);
@@ -962,12 +954,7 @@ describe('POST /v1/capture', () => {
         }
     });
 
-    // storeCaptureAudio publishes the audio bytes, then throwIfRequestAborted and
-    // writeCloudData run. A throw in that gap used to leave the just-published file
-    // orphaned on disk (no task ever ends up referencing its cloudKey). Calls
-    // handleCaptureRequest directly (not through the HTTP server) so a hand-rolled
-    // assertStorageRoot can fail deterministically right after the audio is durably
-    // on disk, without a real race.
+
     test('removes the just-published audio when the canonical document proves it unreferenced', async () => {
         const dataDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-capture-cleanup-'));
         try {
@@ -980,13 +967,8 @@ describe('POST /v1/capture', () => {
             const attachmentsDir = join(dataDir, key, 'attachments');
             let publishedAudioFilesAtFailure: string[] = [];
             let assertCalls = 0;
-            // storeCaptureAudio calls assertStorageRoot once up front (server-capture.ts),
-            // then publishPreparedFilePublication calls it three more times around the
-            // rename that actually publishes the file (server-storage.ts:732-742). Failing
-            // from the 5th call should land in writeCloudData after publication. Check
-            // the file at the injection point so a call-count change cannot hide a gap.
-            // The injected failure is one-shot: cleanup can reassert the same pinned
-            // root, reread the still-valid document, and prove the blob is unreferenced.
+
+
             const assertStorageRoot = () => {
                 assertCalls += 1;
                 if (assertCalls === 5) {
@@ -1024,14 +1006,13 @@ describe('POST /v1/capture', () => {
             expect(assertCalls).toBeGreaterThan(4);
             expect(publishedAudioFilesAtFailure).toHaveLength(1);
 
-            // Walk recursively so a file left anywhere under the attachments root is
-            // caught, not only one directly inside it (an empty parent dir is fine).
+
             const remainingAudioFiles = existsSync(attachmentsDir)
                 ? (readdirSync(attachmentsDir, { recursive: true }) as string[]).filter((name) => name.endsWith('.m4a'))
                 : [];
             expect(remainingAudioFiles).toEqual([]);
 
-            // The failed write never persisted the task either.
+
             const stored = JSON.parse(readFileSync(filePath, 'utf8')) as AppData;
             expect(stored.tasks).toHaveLength(0);
         } finally {
@@ -1060,7 +1041,7 @@ describe('capture field helpers', () => {
         const now = Date.parse('2026-09-03T12:00:00.000Z');
         expect(resolveCaptureCreatedAt(Date.parse('2026-09-03T11:00:00.000Z'), now))
             .toBe('2026-09-03T11:00:00.000Z');
-        // Four minutes ahead is inside the allowed clock skew.
+
         expect(resolveCaptureCreatedAt(now + 4 * 60 * 1000, now)).toBe('2026-09-03T12:04:00.000Z');
         expect(resolveCaptureCreatedAt(now + 6 * 60 * 1000, now)).toBe('2026-09-03T12:00:00.000Z');
         expect(resolveCaptureCreatedAt(null, now)).toBe('2026-09-03T12:00:00.000Z');

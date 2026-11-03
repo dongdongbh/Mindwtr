@@ -105,8 +105,8 @@ describe('prepared native Project Section delete', () => {
         });
         const input = request();
         const planned = prepare(input);
-        // CoreHost journals via JSONSerialization.sortedKeys, including dictionaries
-        // nested in attachment and checklist arrays.
+
+
         const swiftRoundTrip = <T>(value: T): T => JSON.parse(JSON.stringify(value, (_key, part) =>
             part && typeof part === 'object' && !Array.isArray(part)
                 ? Object.fromEntries(Object.entries(part).sort(([a], [b]) => a.localeCompare(b)))
@@ -139,7 +139,7 @@ describe('prepared native Project Section delete', () => {
     it('matches RN tombstone and detaches every linked Task, including deleted and wrong-project rows', async () => {
         vi.useFakeTimers(); vi.setSystemTime(new Date(NOW));
         const { request, prepare } = await open();
-        // Normal loading repairs this inconsistent link; keep it in the live store to test the RN writer.
+
         useTaskStore.setState((state) => ({ _allTasks: state._allTasks.map((row) => row.id === 'wrong-project'
             ? { ...row, sectionId: 'target' } : row) }));
         const input = request();

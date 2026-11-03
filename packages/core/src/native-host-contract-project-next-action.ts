@@ -18,9 +18,10 @@ import { normalizeProjectLifecycleFields } from './project-status';
 import { prepareTaskUpdatesForStore, planTaskUpdateEffects } from './store-tasks';
 import { projectLifecycleEffect } from './store-projects/project-actions';
 import { buildNewTask } from './task-creation';
-import { parseProjectNextActionInput, isNaturalLanguageDatesEnabled } from './quick-add';
-import { normalizeClockTimeInput } from './date';
-import { ensureDeviceId, getNextProjectOrder } from './store-helpers';
+import { getTaskReminderDefault } from './task-reminder-policy';
+import { buildQuickAddParseOptions, parseProjectNextActionInput } from './quick-add';
+import { ensureDeviceId, getNextProjectOrder, selectVisiblePeople, selectVisibleTasks } from './store-helpers';
+import { isTimeEstimate } from './native-host-contract-menu-views';
 import { countFocusedTasksBeforeBoundary, projectFocusDateValues, type FocusDateProjection } from './task-utils';
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { generateUUID } from './uuid';
@@ -135,15 +136,15 @@ const contextOf = (data: AppData, lists: Lists, origin: NativeReferenceProjectNe
 };
 const policyOf = (c: NativeProjectNextActionContext) => getProjectNextActionPromptData({ ...c.source, status: 'done' },
     c.tasks.map((r) => r.id === c.source.id ? { ...r, status: 'done' as const } : r), [projectProjection(c.project)]);
-// Only fields consumed by eligibility, candidate order, displayed row revision,
-// and the completed-source/container authority enter the page revision.
+
+
 const revisionContent = (c: NativeProjectNextActionContext) => canonical({ source: c.source, rawSource: c.rawSource,
     project: c.project, section: c.section, scope: c.scope, tasks: c.tasks.map((r) => ({ id: r.id, projectId: r.projectId,
         sectionId: r.sectionId, deletedAt: r.deletedAt, status: r.status, order: r.order, orderNum: r.orderNum,
         createdAt: r.createdAt, title: r.title, revision: taskRevisionOf(r) })) });
 const revisionOf = (c: NativeProjectNextActionContext): string => {
-    // Hash UTF-16 code units without platform encoder dependencies or Unicode
-    // normalization. The complete context remains independently bound below.
+
+
     const value = revisionContent(c); const bytes = new Uint8Array(value.length * 2);
     for (let i = 0; i < value.length; i++) { const unit = value.charCodeAt(i); bytes[i * 2] = unit >>> 8; bytes[i * 2 + 1] = unit & 255; }
     return `projectNextAction:${Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -190,8 +191,8 @@ const chooseEffect = (request: Extract<NativeReferenceProjectNextActionRequest, 
             recurringCandidate: null, recurringDuplicate: null, focusCount: fills ? count : null,
             focusLimit: fills ? limit : null, focusBoundary: fills ? op.clock.futureBoundary : null, autoArchiveDays: null } };
 };
-// Freeze only values actually consumed by Choose. First plan with the whole
-// normal RN state, then require that the smaller witness reproduces it exactly.
+
+
 const trimChooseOperation = (request: Extract<NativeReferenceProjectNextActionRequest, { action: 'choose' }>, op: ChooseOperation): ChooseOperation => {
     const source = op.effect.sourceBefore;
     const sections = op.lists.sections.filter((r) => r.id === source.sectionId);
@@ -209,7 +210,7 @@ const trimChooseOperation = (request: Extract<NativeReferenceProjectNextActionRe
 };
 const validDevice = (op: { deviceIdBefore: string | null; deviceIdToInitialize: string | null }) => op.deviceIdBefore === null
     ? typeof op.deviceIdToInitialize === 'string' && UUID.test(op.deviceIdToInitialize) : text(op.deviceIdBefore, 500) && op.deviceIdToInitialize === null;
-const creationKeys = ['status', 'projectId', 'sectionId', 'areaId', 'startTime', 'dueDate', 'reviewAt', 'description', 'contexts', 'tags', 'priority', 'energyLevel', 'assignedTo', 'attachments', 'isFocusedToday'];
+const creationKeys = ['status', 'projectId', 'sectionId', 'areaId', 'startTime', 'dueDate', 'reviewAt', 'description', 'contexts', 'tags', 'priority', 'energyLevel', 'assignedTo', 'attachments', 'isFocusedToday', 'timeEstimate'];
 const validResolvedDate = (v: unknown): boolean => iso(v) || typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
     && Number.isFinite(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 const validIntent = (v: unknown, context: NativeProjectNextActionContext): v is NativeProjectNextActionResolvedIntent => {
@@ -226,16 +227,20 @@ const validIntent = (v: unknown, context: NativeProjectNextActionContext): v is 
         || ['tags', 'contexts'].some((k) => p[k] !== undefined && (!Array.isArray(p[k]) || p[k].length > 1000 || !p[k].every((s: unknown) => text(s, 1000))))
         || p.priority !== undefined && !['low', 'medium', 'high', 'urgent'].includes(String(p.priority))
         || p.energyLevel !== undefined && !['low', 'medium', 'high'].includes(String(p.energyLevel))
+        || p.timeEstimate !== undefined && !isTimeEstimate(p.timeEstimate)
         || p.isFocusedToday !== undefined && p.isFocusedToday !== true) return false;
     return p.attachments === undefined || Array.isArray(p.attachments) && p.attachments.length <= 1000 && unique(p.attachments as { id: string }[])
         && p.attachments.every((a) => record(a) && exact(a, ['id', 'kind', 'title', 'uri', 'createdAt', 'updatedAt'])
             && typeof a.id === 'string' && UUID.test(a.id) && a.kind === 'link' && text(a.title, 100_000) && text(a.uri, 100_000)
             && iso(a.createdAt) && a.createdAt === a.updatedAt);
 };
-const addTask = (op: AddOperation): Task => {
+
+
+const frozenReminderDefault = (task: Task): 'send' | 'skip' => task.suppressMindwtrReminders === true ? 'skip' : 'send';
+const addTask = (op: AddOperation, taskReminderDefault = frozenReminderDefault(op.task)): Task => {
     const { creation: c } = op; const f = c.focus; const props = c.intent.props;
     const built = buildNewTask({ title: c.intent.title, initialTaskProps: props, id: op.task.id, now: op.updateAt,
-        deviceId: op.deviceIdBefore ?? op.deviceIdToInitialize!, state: { settings: {}, _allProjects: [c.containers.project],
+        deviceId: op.deviceIdBefore ?? op.deviceIdToInitialize!, state: { settings: { taskReminderDefault }, _allProjects: [c.containers.project],
             _allSections: c.containers.section ? [c.containers.section] : [], _allAreas: c.containers.areas },
         tasks: f?.lists.tasks ?? [], focusedCount: f?.focusCount ?? 0, focusTaskLimit: f?.focusLimit ?? 1,
         projectOrderReserver: (id) => { if (id !== c.projectOrder.projectId) throw new Error('Unknown creation order'); return c.projectOrder.max + 1; },
@@ -248,7 +253,7 @@ const rawBeforeOf = (data: AppData, tasks: { before: Task | null; after: Task }[
     sections: sections.map((r) => ({ id: r.after.id, before: r.before ? (data.sections ?? []).find((t) => t.id === r.after.id)! : null })),
 });
 
-/** One prompt coordinator; the existing three writers own all actual effects. */
+
 export function createReferenceProjectNextActionMethods(deps: { readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>; t: () => (key: string) => string; originMethods: OriginMethods }) {
     const readOrigin = (v: unknown): NativeReferenceProjectNextActionOrigin | null => {
@@ -411,8 +416,8 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                 if (existing.some((r) => ids.includes(r.id) || r.attachments?.some((a) => ids.includes(a.id)))) throw new Error('Creation ID exists');
                 if (c.focus) {
                     const f = c.focus;
-                    // Normal loading can consume local-day environment. Refuse an
-                    // unlanded stale intent conservatively; never reinterpret it.
+
+
                     if (new Date(at).getTimezoneOffset() !== f.preparedOffsetMinutes
                         || normalizeFocusTaskLimit(data.settings.gtd?.focusTaskLimit) !== f.focusLimit
                         || !same({ tasks: lists.tasks, projects: lists.projects, sections: lists.sections }, f.lists)) throw new Error('Focus creation context changed');
@@ -456,7 +461,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
     } });
     const diagnose = (r: NativeReferenceProjectNextActionResult) => {
         try { logInfo('Native Reference project next action confirmed', { scope: 'native-host', category: 'storage',
-            context: { releaseCheck: 'v1.3.4/ios-reference-project-next-action', outcome: r.action } }); } catch { /* ACK remains durable. */ }
+            context: { releaseCheck: 'v1.3.4/ios-reference-project-next-action', outcome: r.action } }); } catch {                            }
     };
     return {
         referenceProjectNextActionInput(input: string): NativeHostResult<{ canSave: boolean }> {
@@ -513,9 +518,8 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                     rawBefore = rawBeforeOf(data, op.effect.tasks, op.effect.projects, op.effect.sections);
                 } else if (request.action === 'add') {
                     const parsed = parseProjectNextActionInput(request.text, { projectId: context.project.id, sectionId: context.section?.id,
-                        projects: lists.projects, areas: lists.areas, parseOptions: {
-                            defaultScheduleTime: normalizeClockTimeInput(data.settings.gtd?.defaultScheduleTime) || undefined,
-                            preserveText: data.settings.quickAddAutoClean !== true, naturalLanguageDates: isNaturalLanguageDatesEnabled(data.settings) } });
+                        projects: lists.projects, areas: lists.areas, parseOptions: buildQuickAddParseOptions(data.settings,
+                            { tasks: selectVisibleTasks(lists.tasks), _allTasks: lists.tasks, people: selectVisiblePeople(data.people ?? []) }) });
                     const intent = { title: parsed.title, props: parsed.props };
                     if (!validIntent(intent, context)) return fail('INVALID_INPUT', 'Resolved next action cannot be represented safely');
                     const project = lists.projects.find((r) => r.id === intent.props.projectId)!;
@@ -530,7 +534,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                     const op: AddOperation = { kind: 'add', creation: { intent, containers: { project, section, areas },
                         projectOrder: { projectId: project.id, max: (getNextProjectOrder(project.id, lists.tasks) ?? 0) - 1 }, focus },
                         task: { id } as Task, ...deviceFields, updateAt: creationAt };
-                    op.task = addTask(op); operation = op; result = { action: 'add', id, openAfterSave: request.openAfterSave };
+                    op.task = addTask(op, getTaskReminderDefault(data.settings)); operation = op; result = { action: 'add', id, openAfterSave: request.openAfterSave };
                     rawBefore = { tasks: [{ id, before: null }], projects: [], sections: [] };
                 } else {
                     if (context.scope !== 'project') return fail('INVALID_INPUT', 'This section prompt cannot complete its project');

@@ -95,9 +95,7 @@ const sparseOrderForMove = (
     const previousOrder = previousId ? finiteOrder(orderById.get(previousId)) : undefined;
     const nextOrder = nextId ? finiteOrder(orderById.get(nextId)) : undefined;
 
-    // Orders must stay integers: fractional midpoints don't survive integer-typed
-    // storage layers (desktop SQLite bound orderNum as i64, CloudKit stores INT64),
-    // where they degrade to NULL/truncation and the task jumps after a sync (#784).
+
     if (!previousId && !nextId) return finiteOrder(orderById.get(movedId)) ?? 0;
     if (!previousId) return nextOrder === undefined ? 0 : Math.floor(nextOrder) - ORDER_STEP;
     if (previousOrder === undefined) return null;
@@ -137,7 +135,23 @@ const orderFromPlan = (plan: SparseOrderPlan, id: string): number | undefined =>
     plan.kind === 'single' ? (plan.id === id ? plan.order : undefined) : plan.orderById.get(id)
 );
 
-/** The same sparse task-order calculation used by RN and prepared native moves. */
+
+export const boardTaskOrderUpdates = (columnTasks: readonly Task[], orderedIds: string[], movedTaskId?: string): Map<string, number> => {
+    const validOrderedIds = uniqueValidIds(orderedIds, new Set(columnTasks.map((task) => task.id)));
+    if (!validOrderedIds.length) return new Map();
+    const currentIds = sortTasksByBoardOrder([...columnTasks]).map((task) => task.id);
+    const nextIds = boardOrderedIds(currentIds, validOrderedIds, movedTaskId);
+    const orderById = new Map(columnTasks.map((task) => [task.id, finiteOrder(task.boardOrder)]));
+    const plan = createSparseOrderPlan(currentIds, nextIds, orderById);
+    const updates = new Map<string, number>();
+    if (plan) for (const task of columnTasks) {
+        const nextOrder = orderFromPlan(plan, task.id);
+        if (Number.isFinite(nextOrder) && task.boardOrder !== nextOrder) updates.set(task.id, nextOrder!);
+    }
+    return updates;
+};
+
+
 export const projectTaskOrderUpdates = (tasks: readonly Task[], orderedIds: string[], movedTaskId?: string): Map<string, number> => {
     const validOrderedIds = uniqueValidIds(orderedIds, new Set(tasks.map((task) => task.id)));
     if (validOrderedIds.length === 0) return new Map();
@@ -157,7 +171,7 @@ export const projectTaskOrderUpdates = (tasks: readonly Task[], orderedIds: stri
     return updates;
 };
 
-/** The same sparse Section plan used by RN and native prepared writes. */
+
 export const projectSectionOrderUpdates = (sections: readonly Section[], orderedIds: string[]): Map<string, number> => {
     const sorted = [...sections].sort((a, b) => {
         const aOrder = Number.isFinite(a.order) ? a.order : Number.POSITIVE_INFINITY;
@@ -188,7 +202,7 @@ export const projectSectionOrderEffect = (sections: readonly Section[], orderedI
     })) };
 };
 
-/** Apply RN's drop destination and sparse order plan in one task-row effect. */
+
 export const projectTaskOrderEffect = (scope: PreparedProjectTaskOrder['scope'],
     request: PreparedProjectTaskOrder['request'], deviceId: string, now: string):
     { effect: PreparedProjectTaskOrder['effect']; result: PreparedProjectTaskOrder['result'] } | null => {
@@ -306,7 +320,7 @@ export const createOrderingActions = ({
                 if (allById.has(row.id)) duplicateIds.add(row.id);
                 allById.set(row.id, row);
             }
-            // A complete affected-row receipt wins before mutable parent and scope checks.
+
             if (pairs.length > 0 && affectedIds.size === pairs.length
                 && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
                 && pairs.every(({ after }) => {
@@ -428,27 +442,14 @@ export const createOrderingActions = ({
 
     reorderBoardTasks: async (status: TaskStatus, orderedIds: string[], movedTaskId?: string) => {
         if (!status || orderedIds.length === 0) return;
-        let orderPlan: SparseOrderPlan | null = null;
+        let updates = new Map<string, number>();
         await mutateTasks({ set, debouncedSave }, {
             selectTasks: (state) => {
                 const columnTasks = state._allTasks.filter((task) => task.status === status && !task.deletedAt);
-                const columnTaskIds = new Set(columnTasks.map((task) => task.id));
-                const validOrderedIds = uniqueValidIds(orderedIds, columnTaskIds);
-                if (validOrderedIds.length === 0) return [];
-                const currentIds = sortTasksByBoardOrder(columnTasks).map((task) => task.id);
-                const nextIds = boardOrderedIds(currentIds, validOrderedIds, movedTaskId);
-                const orderById = new Map(columnTasks.map((task) => [task.id, finiteOrder(task.boardOrder)]));
-                orderPlan = createSparseOrderPlan(currentIds, nextIds, orderById);
-                if (!orderPlan) return [];
-                return columnTasks.filter((task) => {
-                    const nextOrder = orderFromPlan(orderPlan!, task.id);
-                    return Number.isFinite(nextOrder) && task.boardOrder !== nextOrder;
-                });
+                updates = boardTaskOrderUpdates(columnTasks, orderedIds, movedTaskId);
+                return columnTasks.filter((task) => updates.has(task.id));
             },
-            buildUpdates: (task) => {
-                const nextOrder = orderFromPlan(orderPlan!, task.id);
-                return { boardOrder: nextOrder as number };
-            },
+            buildUpdates: (task) => ({ boardOrder: updates.get(task.id)! }),
         });
     },
 });

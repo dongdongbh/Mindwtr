@@ -20,6 +20,7 @@ const asyncStorageMock = vi.hoisted(() => ({
 }));
 
 const routeParams = vi.hoisted(() => ({ current: {} as Record<string, string> }));
+const areaModals = vi.hoisted(() => ({ props: null as React.ComponentProps<typeof import('../components/projects-screen/ProjectAreaModals').ProjectAreaModals> | null }));
 const detailModal = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
 const tagPicker = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
 const taskEditModal = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
@@ -104,8 +105,8 @@ const storeState: {
   setHighlightTask: vi.fn(),
   getDerivedState: () => ({
     focusedProjectCount: 0,
-    // Mirrors core's real computeTaskDerivedState output shape (#927) so the
-    // screen's live selector-driven wiring to ProjectRow is exercised.
+
+
     projectTaskSummaryById: new Map([
       [testProject.id, { activeTaskCount: 1, nextAction: testNextActionTask }],
     ]),
@@ -117,6 +118,8 @@ beforeEach(() => {
   filteringHarness.useRealHook = false;
   routeParams.current = {};
   detailModal.props = null;
+  areaModals.props = null;
+  storeState.areas = [];
   taskEditModal.props = null;
   focusEffect.callback = null;
   consumePendingCaptureTaskOpenMock.mockReset();
@@ -159,8 +162,8 @@ vi.mock('expo-router', async () => {
     useLocalSearchParams: () => routeParams.current,
     usePathname: () => '/projects-screen',
     useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-    // Captured so a test can fire it to stand in for the screen regaining
-    // focus; also run on mount the way a focused screen would.
+
+
     useFocusEffect: (callback: () => void | (() => void)) => {
       focusEffect.callback = callback;
       react.useEffect(callback, [callback]);
@@ -232,9 +235,9 @@ vi.mock('@/hooks/use-theme-colors', () => ({
 
 vi.mock('@/hooks/use-mobile-area-filter', () => ({
   useMobileAreaFilter: () => ({
-    areaById: new Map<string, Area>(),
+    areaById: new Map<string, Area>((storeState.areas ?? []).map((area: Area) => [area.id, area])),
     resolvedAreaFilter: { included: [], excluded: [] },
-    sortedAreas: [],
+    sortedAreas: storeState.areas ?? [],
   }),
 }));
 
@@ -301,7 +304,7 @@ vi.mock('@/components/projects-screen/use-project-attachments', () => ({
   }),
 }));
 
-vi.mock('@/components/projects-screen/ProjectAreaModals', () => ({ ProjectAreaModals: () => null }));
+vi.mock('@/components/projects-screen/ProjectAreaModals', () => ({ ProjectAreaModals: (props: NonNullable<typeof areaModals.props>) => { areaModals.props = props; return null; } }));
 vi.mock('@/components/projects-screen/ProjectDetailModal', () => ({
   ProjectDetailModal: (props: Record<string, any>) => {
     detailModal.props = props;
@@ -342,8 +345,8 @@ vi.mock('../lib/app-log', () => ({
 }));
 
 describe('ProjectsScreen project tag picker', () => {
-  // The picker's + adds the typed tag; a tag already on the project stays (it toggled before, so + removed it).
-  // Removing a tag is the tag chip's toggle.
+
+
   it('adds the typed tag with + and never removes one the project already has', async () => {
     const tagged = { ...testProject, tagIds: ['#work'] };
     storeState.projects = [tagged];
@@ -364,7 +367,7 @@ describe('ProjectsScreen project tag picker', () => {
 });
 
 describe('ProjectsScreen project edits on close', () => {
-  // Leaving the sheet writes only what the user changed since it opened: an area another device set meanwhile stays.
+
   it('keeps an area another device set while the sheet was open', async () => {
     const actualCore = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
     const remote = { ...testProject, areaId: 'area-remote', updatedAt: '2026-02-01T00:00:00.000Z' };
@@ -381,7 +384,7 @@ describe('ProjectsScreen project edits on close', () => {
       tree = create(<ProjectsScreen />);
       await Promise.resolve();
     });
-    // The sync lands while the sheet still shows the project as opened.
+
     storeState.projects = [remote];
     storeState._allProjects = [remote];
     await act(async () => { tree.update(<ProjectsScreen />); await Promise.resolve(); });
@@ -400,7 +403,7 @@ describe('ProjectsScreen project edits on close', () => {
     const remote = { ...padded, title: 'Remote name', updatedAt: '2026-02-01T00:00:00.000Z' };
     actualCore.resetForTests();
     actualCore.setStorageAdapter({ getData: async () => ({ tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} }), saveData: async () => undefined });
-    // The store holds the other device's rename; the sheet opens on the copy from before it.
+
     actualCore.useTaskStore.setState({ _allProjects: [remote], _allAreas: [testArea] });
     storeState.projects = [padded];
     storeState._allProjects = [padded];
@@ -424,10 +427,8 @@ describe('ProjectsScreen project edits on close', () => {
 });
 
 describe('ProjectsScreen project quick add', () => {
-  // The detail sheet is a native modal driven by selectedProject. Leaving it set
-  // while quick add pushes a route desyncs state from the native sheet, and
-  // re-tapping the project then sets identical state — no transition, so the
-  // sheet never comes back and the row reads as dead (#938).
+
+
   it('closes the open project on the way to quick add and restores it on focus', async () => {
     routeParams.current = { projectId: testProject.id, openToken: 'token-1' };
 
@@ -446,8 +447,7 @@ describe('ProjectsScreen project quick add', () => {
 
     expect(detailModal.props?.project).toBeNull();
 
-    // Returning to the screen re-runs the focus callback, which re-opens it and
-    // gives the native modal a real false -> true transition.
+
     await act(async () => {
       focusEffect.callback?.();
       await Promise.resolve();
@@ -481,9 +481,7 @@ describe('ProjectsScreen project quick add ordering', () => {
     return tree;
   };
 
-  // Presenting the capture route while UIKit is still dismissing the project
-  // sheet races two presentations on one presenter; a lost race left an
-  // invisible modal host over the Projects list that swallowed every touch.
+
   it('on iOS opens capture only after the project sheet reports dismissal', async () => {
     Platform.OS = 'ios';
     const tree = await openProjectAndQuickAdd();
@@ -502,8 +500,7 @@ describe('ProjectsScreen project quick add ordering', () => {
       returnTo: expect.any(String),
     }));
 
-    // A later dismissal (closing the reopened sheet by hand) must not open
-    // capture again.
+
     await act(async () => {
       detailModal.props?.onDismiss?.();
       await Promise.resolve();
@@ -515,9 +512,7 @@ describe('ProjectsScreen project quick add ordering', () => {
     });
   });
 
-  // Save & edit opens the editor and the project, two sibling sheets. iOS
-  // refuses the second presentation and left its invisible host over the list,
-  // so on iOS the project reopens only after the editor is dismissed.
+
   it('on iOS opens the Save & edit editor first and reopens the project after it closes', async () => {
     Platform.OS = 'ios';
     vi.useFakeTimers();
@@ -568,6 +563,19 @@ describe('ProjectsScreen project quick add ordering', () => {
 });
 
 describe('ProjectsScreen list controls', () => {
+  it('forwards saved unused tags to the project picker without adding unused tag filters', async () => {
+    filteringHarness.useRealHook = true;
+    const previousSettings = storeState.settings;
+    storeState.settings = { taxonomy: { tags: [{ token: '#unused', rev: 1, revBy: 'test', updatedAt: now }] } };
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ProjectsScreen />); await Promise.resolve(); });
+    expect(tagPicker.props?.projectTagOptions).toContain('#unused');
+    act(() => tree.root.findByProps({ testID: 'projects-tag-filter-toggle' }).props.onPress());
+    expect(tree.root.findAllByProps({ accessibilityLabel: '#unused' })).toHaveLength(0);
+    await act(async () => { tree.unmount(); });
+    storeState.settings = previousSettings;
+  });
+
   it('labels the empty raw tag and filters it separately from untagged projects', async () => {
     filteringHarness.useRealHook = true;
     storeState.projects = [
@@ -887,9 +895,61 @@ describe('ProjectsScreen view state hydration', () => {
     const projectRow = list.props.data.find((row: { type: string }) => row.type === 'project');
     expect(projectRow).toBeTruthy();
 
-    // renderItem returns the <ProjectRow /> element without needing FlatList's
-    // native windowing/layout, which react-test-renderer can't provide here.
+
     const rendered = list.props.renderItem({ item: projectRow, index: 0 });
     expect(rendered.props.taskSummary).toEqual({ activeTaskCount: 1, nextAction: testNextActionTask });
+  });
+});
+
+
+describe('ProjectsScreen management shortcuts', () => {
+  it.each(['active', 'deferred', 'archived'])('targets the real area without collapsing its %s header', async (sectionKind) => {
+    storeState.areas = [{ ...testArea, id: 'work', name: 'Work' }];
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ProjectsScreen />); });
+    const list = tree.root.findByType(FlatList);
+    const item = { type: 'area-header', areaId: 'work', title: 'Work', sectionKind, collapsed: false };
+    let header!: ReturnType<typeof create>;
+    act(() => { header = create(list.props.renderItem({ item, index: 0 })); });
+    asyncStorageMock.setItem.mockClear();
+    act(() => header.root.findByProps({ testID: `project-area-menu-${sectionKind}-work` }).props.onPress());
+    expect(areaModals.props?.managerAreaId).toBe('work');
+    expect(areaModals.props?.showAreaManager).toBe(true);
+    expect(asyncStorageMock.setItem).not.toHaveBeenCalled();
+    expect(header.root.findByProps({ testID: `project-area-header-${sectionKind}-work` }).props.accessibilityState).toEqual({ expanded: true });
+    let synthetic!: ReturnType<typeof create>;
+    act(() => { synthetic = create(list.props.renderItem({ item: { ...item, areaId: '__no_area__' }, index: 1 })); });
+    expect(synthetic.root.findAllByProps({ testID: `project-area-menu-${sectionKind}-__no_area__` })).toHaveLength(0);
+    act(() => { header.unmount(); synthetic.unmount(); tree.unmount(); });
+  });
+
+  it('opens the area picker directly and applies the picker result without opening project detail', async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ProjectsScreen />); });
+    const list = tree.root.findByType(FlatList);
+    const item = list.props.data.find((row: { type: string }) => row.type === 'project');
+    const row = list.props.renderItem({ item, index: 0 });
+    act(() => row.props.onMoveToArea());
+    expect(areaModals.props?.showAreaPicker).toBe(true);
+    expect(areaModals.props?.selectedProject?.id).toBe(testProject.id);
+    expect(detailModal.props?.project).toBeNull();
+    act(() => areaModals.props?.onSetSelectedProject({ ...testProject, areaId: 'work' }));
+    expect(detailModal.props?.project).toBeNull();
+    act(() => tree.unmount());
+  });
+
+  it('blocks the row shortcut if its project was archived or deleted after render', async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ProjectsScreen />); });
+    const list = tree.root.findByType(FlatList);
+    const item = list.props.data.find((row: { type: string }) => row.type === 'project');
+    const row = list.props.renderItem({ item, index: 0 });
+    for (const live of [[{ ...testProject, status: 'archived' }], []]) {
+      storeState._allProjects = live;
+      act(() => row.props.onMoveToArea());
+      expect(areaModals.props?.showAreaPicker).toBe(false);
+      expect(detailModal.props?.project).toBeNull();
+    }
+    act(() => tree.unmount());
   });
 });

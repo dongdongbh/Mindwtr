@@ -92,9 +92,7 @@ describe('useRootLayoutPomodoro', () => {
     act(() => tree.unmount());
   });
 
-  // Hydration credits a focus session that finished while the app was closed
-  // to its task (updateTask). On the startup snapshot that write would make
-  // core discard the SQLite load, so hydration waits for canonical data.
+
   it('does not hydrate or credit a task before canonical data, then credits it once', async () => {
     storeState.tasks = [{ id: 'task-1', title: 'Write', timeSpentMinutes: 5 }];
     vi.mocked(AsyncStorage.getItem).mockResolvedValueOnce(JSON.stringify({

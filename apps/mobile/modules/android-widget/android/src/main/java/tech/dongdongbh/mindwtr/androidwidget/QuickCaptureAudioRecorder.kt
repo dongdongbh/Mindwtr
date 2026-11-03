@@ -19,7 +19,7 @@ data class QuickCaptureAudioDraft(
   val dataBytes: Int,
 )
 
-/** The one audio format accepted by the local Whisper ingestion path. */
+
 object QuickCaptureWave {
   const val HEADER_SIZE = 44
   const val SAMPLE_RATE = 16_000
@@ -79,11 +79,7 @@ object QuickCaptureWave {
   }
 }
 
-/**
- * Foreground-only PCM recorder. Calling [start] only marks the recorder active
- * and launches a worker; AudioRecord initialization, reads, WAV writes and
- * finalization never run on the caller thread.
- */
+
 class QuickCaptureAudioRecorder(
   private val filesDir: File,
   private val sourceFactory: () -> PcmSource = { AndroidPcmSource() },
@@ -144,7 +140,7 @@ class QuickCaptureAudioRecorder(
     try {
       source?.stop()
     } catch (_: RuntimeException) {
-      // The worker owns final release; this call only unblocks a pending read.
+
     }
   }
 
@@ -187,12 +183,12 @@ class QuickCaptureAudioRecorder(
       try {
         source?.stop()
       } catch (_: RuntimeException) {
-        // Already stopped or never started.
+
       }
       try {
         source?.release()
       } catch (_: RuntimeException) {
-        // Release is best-effort after the terminal result is already known.
+
       }
     }
 

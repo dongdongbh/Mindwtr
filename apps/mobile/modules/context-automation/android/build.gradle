@@ -36,9 +36,7 @@ android {
 }
 
 dependencies {
-  // ContextAutomationReceiver/HeadlessService dispatch through React Native's
-  // HeadlessJsTaskService. expo-modules-core only depends on react-android as
-  // `implementation`, which Gradle does not expose transitively, so this
-  // module needs its own direct dependency to resolve those classes.
+
+
   implementation 'com.facebook.react:react-android'
 }

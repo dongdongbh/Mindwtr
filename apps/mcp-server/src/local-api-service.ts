@@ -10,6 +10,8 @@ import {
   normalizeNullableTaskRecurrence,
   normalizeNullableTaskRelativeStartOffset,
   normalizeNullableTaskRepeatReminderMinutes,
+  normalizeNullableTaskDueReminderLeadMinutes,
+  normalizeNullableTaskStartReminderLeadMinutes,
   normalizeNullableTaskTimeSpentMinutes,
   taskRecurrenceInputSchema,
 } from './input-validation.js';
@@ -17,6 +19,8 @@ import { buildLinkAttachments, linkAttachmentsCreateSchema } from './link-attach
 import type { Area, ListTasksInput, Project, Task, TaskStatus } from './queries.js';
 import type { MindwtrService } from './service.js';
 import { buildTaskCreateFieldsShape, buildTaskUpdateFieldsShape } from './task-field-schemas.js';
+
+import { logViewSectionWrite, normalizeViewSectionIds } from './view-sections.js';
 
 export type LocalApiServiceOptions = {
   url: string;
@@ -26,14 +30,14 @@ export type LocalApiServiceOptions = {
   logInfo?: (message: string, context?: Record<string, unknown>) => void;
 };
 
-/** Native project writes intentionally expose fewer fields than SQLite/Cloud. */
+
 export const LOCAL_API_UNSUPPORTED_PROJECT_FIELDS = [
-  'cancelledAt', 'isFocused', 'dueDate', 'startDate', 'reviewAt', 'supportNotes', 'attachments',
+  'viewSectionIds', 'cancelledAt', 'isFocused', 'dueDate', 'startDate', 'reviewAt', 'supportNotes', 'attachments',
 ] as const;
 
 export const validateLocalApiUrl = (value: string): string => {
-  // Check the spelling before WHATWG URL normalization: it accepts alternate IPv4
-  // spellings (127.1, integer/hex hosts) and normalizes them to 127.0.0.1.
+
+
   if (typeof value !== 'string' || !/^https?:\/\/(?:127\.0\.0\.1|\[::1\])(?::\d+)?\/?$/i.test(value.trim())) {
     throw new ValidationError('Local API URL must be an http(s) origin using literal 127.0.0.1 or [::1], without credentials, path, query, or fragment.');
   }
@@ -44,15 +48,14 @@ export const validateLocalApiUrl = (value: string): string => {
   }
 };
 
-// Keep the actual Rust allowlist explicit. A new generated MCP field must not
-// become writable here until local_api.rs implements it.
+
 const TASK_FIELDS = new Set([
   'title', 'status', 'projectId', 'sectionId', 'areaId', 'dueDate', 'startTime',
   'recurrence', 'contexts', 'tags', 'description', 'priority', 'energyLevel',
   'assignedTo', 'timeEstimate', 'taskMode', 'relativeStartOffset', 'showFutureRecurrence',
   'pushCount', 'checklist', 'textDirection', 'location', 'isFocusedToday',
-  'timeSpentMinutes', 'suppressMindwtrReminders', 'reminderPolicy', 'repeatReminderMinutes',
-  'reviewAt', 'cancelledAt', 'order', 'boardOrder', 'focusOrder', 'attachments',
+  'timeSpentMinutes', 'suppressMindwtrReminders', 'reminderPolicy', 'repeatReminderMinutes', 'dueReminderLeadMinutes', 'startReminderLeadMinutes',
+  'viewSectionIds', 'reviewAt', 'cancelledAt', 'order', 'boardOrder', 'focusOrder', 'attachments',
 ]);
 const taskStatusSchema = z.enum(TASK_STATUS_VALUES as [TaskStatus, ...TaskStatus[]]);
 const titleSchema = z.string().trim().min(1).max(MAX_TASK_TITLE_LENGTH);
@@ -90,6 +93,7 @@ patchTaskShape.id = z.string().min(1);
 const createTaskSchema = z.object(createTaskShape).strict();
 const patchTaskSchema = z.object(patchTaskShape).strict();
 const projectFieldsShape = {
+  colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
   color: z.string().refine((value) => value.trim().length > 0).optional(),
   status: z.enum(['active', 'someday', 'waiting', 'archived']).optional(),
   areaId: z.string().trim().min(1).nullable().optional(),
@@ -142,18 +146,21 @@ const assertTaskInputsSupported = (input: unknown, creating: boolean): void => {
 const assertProjectInputsSupported = (input: unknown): void => {
   const record = asRecord(input);
   if (record && LOCAL_API_UNSUPPORTED_PROJECT_FIELDS.some((name) => Object.hasOwn(record, name))) {
-    throw new ValidationError('Desktop Local API project writes support only title, color, status, areaId, and isSequential. Other project fields are unsupported.');
+    throw new ValidationError('Desktop Local API project writes support only title, color, colorOverride, status, areaId, and isSequential. Other project fields are unsupported.');
   }
 };
 const normalizeTaskProps = (input: Record<string, unknown>, creating: boolean): Record<string, unknown> => {
   const props: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(input)) {
     if (value === undefined || name === 'id' || (creating && name === 'title')) continue;
-    // Rust expects arrays, not null, when clearing tags or contexts.
+
     if (name === 'tags' || name === 'contexts') props[name] = value ?? [];
+    else if (name === 'viewSectionIds') props[name] = normalizeViewSectionIds(value, !creating);
     else if (name === 'recurrence') props[name] = normalizeNullableTaskRecurrence(value as Parameters<typeof normalizeNullableTaskRecurrence>[0]);
     else if (name === 'relativeStartOffset') props[name] = normalizeNullableTaskRelativeStartOffset(value as Parameters<typeof normalizeNullableTaskRelativeStartOffset>[0]);
     else if (name === 'timeSpentMinutes') props[name] = normalizeNullableTaskTimeSpentMinutes(value as number | null);
+    else if (name === 'dueReminderLeadMinutes') props[name] = normalizeNullableTaskDueReminderLeadMinutes(value as number | null) ?? 0;
+    else if (name === 'startReminderLeadMinutes') props[name] = normalizeNullableTaskStartReminderLeadMinutes(value as number | null) ?? 0;
     else if (name === 'repeatReminderMinutes') props[name] = normalizeNullableTaskRepeatReminderMinutes(value as number | null);
     else if (name === 'attachments') {
       try { props[name] = buildLinkAttachments(value as Parameters<typeof buildLinkAttachments>[0]); } catch {
@@ -202,8 +209,7 @@ const sortTasks = (tasks: Task[], input: ListTasksInput): Task[] => {
 };
 const unsupported = (label: string): never => { throw new ValidationError(`Desktop Local API does not support ${label}.`); };
 
-// This private class distinguishes sanitized errors we produced from fetch/JSON
-// errors whose message may include credentials, a raw URL, or response content.
+
 class LocalApiRequestError extends Error {
   constructor(message: string, readonly toolCode?: 'validation_error' | 'not_found') {
     super(message);
@@ -246,10 +252,10 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
       if (response.status === 401 || response.status === 403) throw new LocalApiRequestError('Desktop Local API token is invalid or expired. Check the token in desktop settings.', 'validation_error');
       if (response.status === 404) throw new LocalApiRequestError('Desktop Local API entity or endpoint not found.', 'not_found');
       if (!response.ok) {
-        // Only inspect the known machine code, never put a server body in an error.
+
         if (response.status === 409) {
           let code: unknown;
-          try { code = asRecord(await Promise.race([response.json(), timeout]))?.code; } catch { /* generic conflict below */ }
+          try { code = asRecord(await Promise.race([response.json(), timeout]))?.code; } catch {                              }
           if (code === 'recurrence_requires_app') throw new LocalApiRequestError('This recurrence requires completion in the desktop app.', 'validation_error');
           throw new LocalApiRequestError('Desktop Local API rejected a lifecycle conflict. Check the task or project in the app.', 'validation_error');
         }
@@ -266,12 +272,12 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
       if (!result) throw new LocalApiRequestError(`Desktop Local API returned an invalid response.${outcomeWarning}`);
       if (!loggedConnection) {
         loggedConnection = true;
-        try { options.logInfo?.('Desktop Local API authenticated connection succeeded', { extra: { releaseCheck: 'v1.3.4/mcp-local-api' } }); } catch { /* logging cannot change a completed request */ }
+        try { options.logInfo?.('Desktop Local API authenticated connection succeeded', { extra: { releaseCheck: 'v1.3.4/mcp-local-api' } }); } catch {                                                 }
       }
       return result;
     } catch (error) {
       if (timedOut) throw new Error(`Desktop Local API request timed out.${outcomeWarning}`);
-      // Preserve only errors constructed here, never fetch errors carrying a URL/token.
+
       if (error instanceof LocalApiRequestError) {
         if (error.toolCode === 'validation_error') throw new ValidationError(error.message);
         if (error.toolCode === 'not_found') throw new NotFoundError(error.message);
@@ -295,10 +301,8 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
   };
   const entityPath = (kind: 'tasks' | 'projects', id: string): string => {
     parseInput(z.string().min(1), id, 'entity ID');
-    // Native parse_request_target decodes the entire path before path_segments
-    // splits and decodes again. Slashes/percent sequences can alias another ID;
-    // '+' also becomes a space on that second decode. Reject them before any
-    // request instead of discovering a wrong target after a completed write.
+
+
     if (id === '.' || id === '..' || /[/\\%+\p{Cc}]/u.test(id)) {
       throw new ValidationError('Invalid Local API entity ID: path separators, percent escapes, plus signs, and control characters are unsupported.');
     }
@@ -321,8 +325,8 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
     listTasks: async (input) => {
       if (asRecord(input) && Object.hasOwn(input, 'view')) return unsupported('availability views because section and settings data are unavailable');
       parseInput(listTasksSchema, input, 'task list');
-      // The native filter (local_api.rs filter_tasks) only narrows what the Node filter below keeps; it never widens it.
-      // Projects and search stay here: the native API has no project filter, and its text query is not core search.
+
+
       const query = new URLSearchParams({ all: '1' });
       if (input.includeDeleted) query.set('deleted', '1');
       if (input.status && input.status !== 'all') query.set('status', input.status);
@@ -357,12 +361,16 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
     addTask: async (input) => {
       assertTaskInputsSupported(input, true);
       const parsed = parseInput(createTaskSchema, input, 'task creation');
-      return entity<Task>('POST', '/tasks', 'task', { title: parsed.title, props: normalizeTaskProps(parsed, true) });
+      const task = await entity<Task>('POST', '/tasks', 'task', { title: parsed.title, props: normalizeTaskProps(parsed, true) });
+      logViewSectionWrite(options.logInfo, 'task', 'create', input.viewSectionIds);
+      return task;
     },
     updateTask: async (input) => {
       assertTaskInputsSupported(input, false);
       const parsed = parseInput(patchTaskSchema, input, 'task update');
-      return entity<Task>('PATCH', entityPath('tasks', input.id), 'task', normalizeTaskProps(parsed, false), input.id);
+      const task = await entity<Task>('PATCH', entityPath('tasks', input.id), 'task', normalizeTaskProps(parsed, false), input.id);
+      logViewSectionWrite(options.logInfo, 'task', 'update', input.viewSectionIds);
+      return task;
     },
     completeTask: async (id) => entity<Task>('POST', `${entityPath('tasks', id)}/complete`, 'task', undefined, id),
     restoreTask: async (id) => entity<Task>('POST', `${entityPath('tasks', id)}/restore`, 'task', undefined, id),
@@ -378,6 +386,7 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
       return entity<Project>('PATCH', entityPath('projects', id), 'project', patch, id);
     },
     deleteProject: async (id) => deleteEntity<Project>('projects', id),
+    listViewSections: async () => unsupported('view section catalogue'),
     listSections: async () => unsupported('section tools'),
     getSection: async () => unsupported('section tools'),
     addSection: async () => unsupported('section tools'),

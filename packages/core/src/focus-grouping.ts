@@ -1,23 +1,14 @@
+import { getProjectAccentColor } from './task-accent-color';
 import type { Area, FocusGroupBy, Project, Task, TaskEnergyLevel, TaskPriority } from './types';
 import type { ProjectDeadlineBoost } from './task-utils';
 import { baseTextCollator } from './task-utils';
 import { DEFAULT_AREA_COLOR } from './color-constants';
 import { getContextColor } from './context-color';
 
-/**
- * Resolve an i18n key to text, falling back to the supplied English string when
- * the key is missing. Adapters pass `translateWithFallback(t, ...)` bound to
- * their platform's translate function.
- */
+
 export type FocusResolveText = (key: string, fallback: string) => string;
 
-/**
- * One assembled Today's Focus group. `key` is stable across renders (React key
- * and collapse-state identity); each platform renders `label`/`muted`/`tasks`
- * with its own markup. `dotColor` is a decorative bucket-color swatch, present
- * only on the project/area/context/tag axes' named buckets (never a none-bucket
- * or the person/energy/priority axes) — desktop `next-grouping` parity.
- */
+
 export type FocusTaskGroup = {
     key: string;
     label: string;
@@ -32,12 +23,11 @@ export type BuildFocusTaskGroupsParams = {
     projects: Project[];
     areas: Area[];
     resolveText: FocusResolveText;
-    /** Active theme, for the context/tag swatch palette only (#974). */
+
     theme?: string;
 };
 
-// Internal shape carrying the ordering key the single-assignment axes sort by.
-// The exported groups drop `sortOrder` — callers only need the ordered list.
+
 type OrderedGroupDescriptor = {
     key: string;
     label: string;
@@ -64,8 +54,7 @@ function stripSortOrder(descriptor: OrderedGroupDescriptor, tasks: Task[]): Focu
     return group;
 }
 
-// Single-assignment axes: every task lands in exactly one group, and groups are
-// ordered by `sortOrder` (unspecified sorts last) then label, case-insensitively.
+
 function buildOrderedGroups(
     tasks: Task[],
     resolveGroup: (task: Task) => OrderedGroupDescriptor,
@@ -93,9 +82,7 @@ function buildOrderedGroups(
         .map((descriptor) => stripSortOrder(descriptor, grouped.get(descriptor.key) ?? []));
 }
 
-// Multi-assignment axes (context, tag): a task with several tokens appears in
-// each token's group. The "none" bucket leads (muted); named buckets follow
-// alphabetically. No sortOrder — this mirrors the mobile token grouping exactly.
+
 function buildTokenGroups(
     tasks: Task[],
     selectToken: (task: Task) => string[] | undefined,
@@ -138,12 +125,7 @@ function buildTokenGroups(
     return groups;
 }
 
-/**
- * Assemble the grouped Next Actions sections for the Today's Focus surface. Pure
- * (no store, no clock): the axis switch, bucket ordering, and label wiring live
- * here so adding an axis or rewording a bucket is a one-place change. Callers
- * keep their own section rendering.
- */
+
 export function buildFocusTaskGroups({
     groupBy,
     tasks,
@@ -172,6 +154,7 @@ export function buildFocusTaskGroups({
                 theme,
             );
         case 'project': {
+            const areaById = new Map(areas.map((area) => [area.id, area]));
             const projectById = new Map(projects.map((project) => [project.id, project]));
             return buildOrderedGroups(tasks, (task) => {
                 const project = task.projectId ? projectById.get(task.projectId) : undefined;
@@ -187,7 +170,7 @@ export function buildFocusTaskGroups({
                     key: `project:${project.id}`,
                     label: project.title,
                     sortOrder: Number.isFinite(project.order) ? project.order : Number.POSITIVE_INFINITY,
-                    dotColor: project.color,
+                    dotColor: getProjectAccentColor(project, areaById) ?? DEFAULT_AREA_COLOR,
                 };
             });
         }
@@ -246,8 +229,8 @@ export function buildFocusTaskGroups({
                 return name
                     ? { key: `person:${name.toLowerCase()}`, label: name, sortOrder: 0 }
                     : {
-                        // Unassigned sorts after every named person (decided
-                        // 2026-07-21, matching desktop).
+
+
                         key: 'person:none',
                         label: resolveText('people.unassigned', 'Unassigned'),
                         muted: true,
@@ -278,10 +261,7 @@ function resolvePriorityLabel(priority: TaskPriority, resolveText: FocusResolveT
     return resolveText(`priority.${priority}`, PRIORITY_LABEL_FALLBACK[priority]);
 }
 
-/**
- * The overdue / due-today badge for a task whose project has a deadline boost.
- * Returns undefined when the task carries no boost.
- */
+
 export function getProjectDeadlineBoostLabel(
     boost: ProjectDeadlineBoost | undefined,
     resolveText: FocusResolveText,

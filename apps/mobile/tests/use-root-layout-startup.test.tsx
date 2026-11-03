@@ -74,12 +74,12 @@ vi.mock('expo-application', () => ({
 }));
 
 vi.mock('@mindwtr/core', async () => {
-  // hasActiveMobileNotificationFeature is a pure predicate (packages/core/src/schedule-utils.ts):
-  // passthrough the real implementation rather than re-stub it here.
+
+
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   const { hasActiveMobileNotificationFeature } = actual;
   return {
-    // The heartbeat's pure device fields (core's analytics-heartbeat.ts); its sends are stubbed.
+
     getMobileAnalyticsChannel: actual.getMobileAnalyticsChannel,
     getMobileDeviceClass: actual.getMobileDeviceClass,
     getMobileOsMajor: actual.getMobileOsMajor,
@@ -191,8 +191,7 @@ function TestHarness({ onReadyChange, onCanonicalChange, sandboxMode = false }: 
   return null;
 }
 
-// Core runs three relevance checks on a load it applies; the third runs in its
-// state producer, just before the result replaces the store.
+
 const runAppliedLoadChecks = (options?: { isResultStillRelevant?: () => boolean }) => {
   for (let check = 0; check < 3; check += 1) options?.isResultStillRelevant?.();
 };
@@ -372,8 +371,7 @@ describe('useRootLayoutStartup', () => {
     });
   });
 
-  // A local write during every load (core skips each result) must not loop
-  // forever: three attempts, then the old readiness plus a warning.
+
   it('stops after three skipped canonical loads and warns', async () => {
     storeHolder.state.lastDataChangeAt = 0;
     fetchData.mockImplementation(async (options) => {

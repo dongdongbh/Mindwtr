@@ -1,8 +1,6 @@
 import type { ThemeStatusPreset } from './theme-scheme';
 
-// One palette per theme with a bespoke color identity (theme-scheme.ts's
-// ThemeStatusPreset list). The mobile app draws its screens from it, and the
-// home-screen widget payload (widget-payload.ts) reads its colors from it.
+
 export type ThemePresetColor = `#${string}`;
 
 export type ThemePresetColors = {
@@ -61,8 +59,8 @@ export const THEME_PRESETS: Record<ThemeStatusPreset, ThemePresetColors> = {
         tabIconDefault: '#D8DEE9',
         tabIconSelected: '#88C0D0',
     },
-    // Surfaces climb the flavor's own base -> surface0 -> surface1 -> surface2
-    // ladder; mauve is Macchiato's default accent.
+
+
     'catppuccin-macchiato': {
         bg: '#24273A',
         cardBg: '#363A4F',
@@ -81,10 +79,8 @@ export const THEME_PRESETS: Record<ThemeStatusPreset, ThemePresetColors> = {
         tabIconDefault: '#A5ADCB',
         tabIconSelected: '#C6A0F6',
     },
-    // background / bgLight / bgLighter / selection from the reference Dracula
-    // theme. secondaryText is `comment` blended halfway to `foreground`:
-    // comment itself is 3:1 on the background, which is fine for the code
-    // comments it was drawn for but not for due dates and project names.
+
+
     dracula: {
         bg: '#282A36',
         cardBg: '#343746',
@@ -102,6 +98,46 @@ export const THEME_PRESETS: Record<ThemeStatusPreset, ThemePresetColors> = {
         icon: '#ADB5CB',
         tabIconDefault: '#ADB5CB',
         tabIconSelected: '#BD93F9',
+    },
+
+
+    'gruvbox-light': {
+        bg: '#F2E5BC',
+        cardBg: '#FBF1C7',
+        taskItemBg: '#FBF1C7',
+        text: '#3C3836',
+        secondaryText: '#665C54',
+        border: '#D5C4A1',
+        tint: '#076678',
+        onTint: '#FBF1C7',
+        inputBg: '#EBDBB2',
+        danger: '#9D0006',
+        success: '#79740E',
+        warning: '#AD3903',
+        filterBg: '#EBDBB2',
+        icon: '#7C6F64',
+        tabIconDefault: '#7C6F64',
+        tabIconSelected: '#076678',
+    },
+
+
+    'gruvbox-dark': {
+        bg: '#282828',
+        cardBg: '#32302F',
+        taskItemBg: '#32302F',
+        text: '#EBDBB2',
+        secondaryText: '#BDAE93',
+        border: '#504945',
+        tint: '#9EB9AE',
+        onTint: '#282828',
+        inputBg: '#3C3836',
+        danger: '#FB4934',
+        success: '#B8BB26',
+        warning: '#FABD2F',
+        filterBg: '#3C3836',
+        icon: '#A89984',
+        tabIconDefault: '#A89984',
+        tabIconSelected: '#9EB9AE',
     },
     sepia: {
         bg: '#F4ECD8',

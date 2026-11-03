@@ -1,6 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
-import { resolveFeatureFlags, useTaskStore, type TaskSortBy } from '@mindwtr/core';
+import { getTaskSortByLabel, getVisibleTaskSortOptions, useTaskStore, type TaskSortBy } from '@mindwtr/core';
 
 import { styles } from './task-list.styles';
 
@@ -12,6 +12,8 @@ type ThemeColors = {
 };
 
 type TaskListSortModalProps = {
+
+  inheritOption?: { label: string; selected: boolean; onSelect: () => void };
   onClose: () => void;
   onSelect: (option: TaskSortBy) => void;
   sortBy: TaskSortBy;
@@ -22,6 +24,7 @@ type TaskListSortModalProps = {
 };
 
 export function TaskListSortModal({
+  inheritOption,
   onClose,
   onSelect,
   sortBy,
@@ -30,14 +33,10 @@ export function TaskListSortModal({
   themeColors,
   visible,
 }: TaskListSortModalProps) {
-  // Gated here rather than at each caller (task list + project detail) so a new
-  // caller cannot leak a disabled feature's sort. Callers pass the resolved sort
-  // ('timeEstimate' reads as 'default' while the feature is off), so dropping the
-  // option can never hide the row that is actually selected (#1107).
-  const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
-  const visibleSortOptions = sortOptions.filter(
-    (option) => option !== 'timeEstimate' || timeEstimatesEnabled,
-  );
+
+
+  const features = useTaskStore((state) => state.settings?.features);
+  const visibleSortOptions = getVisibleTaskSortOptions(sortOptions, { features });
   return (
     <Modal
       visible={visible}
@@ -49,6 +48,20 @@ export function TaskListSortModal({
         <View style={[styles.modalCard, { backgroundColor: themeColors.cardBg }]}>
           <Text style={[styles.modalTitle, { color: themeColors.text }]}>{t('sort.label')}</Text>
           <View style={styles.sortList}>
+            {inheritOption ? (
+              <Pressable
+                onPress={inheritOption.onSelect}
+                testID="sort-option-inherit"
+                style={[
+                  styles.sortItem,
+                  inheritOption.selected && { backgroundColor: themeColors.filterBg },
+                ]}
+              >
+                <Text style={[styles.sortItemText, { color: themeColors.text }]}>
+                  {inheritOption.label}
+                </Text>
+              </Pressable>
+            ) : null}
             {visibleSortOptions.map((option) => (
               <Pressable
                 key={option}
@@ -56,11 +69,11 @@ export function TaskListSortModal({
                 testID={`sort-option-${option}`}
                 style={[
                   styles.sortItem,
-                  option === sortBy && { backgroundColor: themeColors.filterBg },
+                  !inheritOption?.selected && option === sortBy && { backgroundColor: themeColors.filterBg },
                 ]}
               >
                 <Text style={[styles.sortItemText, { color: themeColors.text }]}>
-                  {t(`sort.${option}`)}
+                  {getTaskSortByLabel(option, t)}
                 </Text>
               </Pressable>
             ))}

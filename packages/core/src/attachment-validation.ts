@@ -27,6 +27,11 @@ const DEFAULT_BLOCKED_MIME_TYPES = [
 
 const normalizeMimeType = (value?: string): string => (value || '').trim().toLowerCase();
 
+
+export const handleRemoteAttachmentNotFound = (attachment: Attachment, activationProbe: boolean): boolean => (
+    activationProbe ? markAttachmentUnrecoverable(attachment) : false
+);
+
 export const markAttachmentUnrecoverable = (attachment: Attachment): boolean => {
     const now = new Date().toISOString();
     let mutated = false;
@@ -53,9 +58,7 @@ export const markAttachmentUnrecoverable = (attachment: Attachment): boolean => 
     return mutated;
 };
 
-/** A refused replacement must retain both byte generations: `cloudKey` still names the
- * proven remote bytes, while the durable pending marker protects the edited local bytes and
- * keeps their unproven hash/revision out of the remote document. */
+
 export const preserveRefusedAttachmentContentUpload = (attachment: Attachment): boolean => (
     attachment.pendingContentUpload === true && attachment.cloudKey !== undefined
 );

@@ -5,6 +5,7 @@ import {
     createManagedAttachmentSourcePredicate,
     resolveFileBackendPath,
     writeFileSafelyAbsolute,
+    yieldToRenderer,
 } from './sync-service-utils';
 
 const sourceGuardMocks = vi.hoisted(() => ({
@@ -34,8 +35,8 @@ const createFs = (files: Record<string, Uint8Array>) => {
 
 describe('createLocalAttachmentFs managed-dir fallback', () => {
     it('recovers a stale portable path from the current managed dir', async () => {
-        // #1038: moving a portable profile leaves every stored URI pointing at
-        // the previous location while the file travelled inside attachments/.
+
+
         const bytes = new Uint8Array([1, 2, 3]);
         const { exists, readFile } = createFs({ [MANAGED_FILE]: bytes });
         const logSyncWarning = vi.fn();
@@ -147,11 +148,7 @@ describe('createLocalAttachmentFs managed-dir fallback', () => {
     });
 });
 
-// #1245 moved an installed Windows/macOS profile's managed folders from <root>/
-// down into <root>/data/. Unlike the relocated portable profile of #1038 the
-// stale path sits INSIDE the OS data dir, the one shape the old fallback skipped:
-// presence said "present" while stat and read still failed, which pins the
-// attachment as a pending upload and stops every remote write for the device.
+
 describe('createLocalAttachmentFs flat-root fallback after the profile folder move', () => {
     const OS_DATA_DIR = '/Roaming';
     const MOVED_ATTACHMENTS_DIR = '/Roaming/mindwtr/data/attachments';
@@ -229,9 +226,7 @@ describe('createLocalAttachmentFs flat-root fallback after the profile folder mo
     });
 });
 
-// R-1: an attachment `uri` arrives over sync, so the upload guard decides which local
-// files a hostile sync store can make this device publish. Only the folders desktop
-// ever wrote attachment bytes into may be read, never the OS data folder or config.
+
 describe('createManagedAttachmentSourcePredicate', () => {
     const guardFor = async (osDataDir: string, managedDataDir: string) => {
         sourceGuardMocks.dataDir.mockResolvedValue(osDataDir);
@@ -276,8 +271,8 @@ describe('createManagedAttachmentSourcePredicate', () => {
     });
 
     it('allows every folder desktop has written attachment bytes into', async () => {
-        // Windows/macOS after #1245: managed dir is <data>/mindwtr/data; files recorded
-        // before the move keep their flat-root path, and quick-add-images never moved.
+
+
         const migrated = await guardFor(
             'C:\\Users\\Alice\\AppData\\Roaming',
             'C:\\Users\\Alice\\AppData\\Roaming\\mindwtr\\data',
@@ -290,7 +285,7 @@ describe('createManagedAttachmentSourcePredicate', () => {
         }
         expect(migrated('file:///C:/Users/Alice/AppData/Roaming/mindwtr/data/attachments/a1.pdf')).toBe(true);
 
-        // Portable profile (#855): the profile's own folders, plus the installed copy's.
+
         const portable = await guardFor('/home/alice/.local/share', '/media/usb/Mindwtr/data');
         for (const path of [
             '/media/usb/Mindwtr/data/attachments/a1.pdf',
@@ -304,12 +299,12 @@ describe('createManagedAttachmentSourcePredicate', () => {
     });
 
     it('allows the old shared attachment folder in the OS data folder, and nothing else there', async () => {
-        // Before 02a9aafa2, sync downloads went to <OS data>/attachments with absolute URIs.
+
         const canUpload = await guardFor('C:\\Users\\Alice\\AppData\\Roaming', 'C:\\Users\\Alice\\AppData\\Roaming\\mindwtr\\data');
         const id = '3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b';
         expect(canUpload(`C:\\Users\\Alice\\AppData\\Roaming\\attachments\\${id}.pdf`)).toBe(true);
         expect(canUpload(`file:///C:/Users/Alice/AppData/Roaming/attachments/${id}.pdf`)).toBe(true);
-        // The folder name is generic: other apps' files there, or anything in a subfolder, stay refused.
+
         expect(canUpload('C:\\Users\\Alice\\AppData\\Roaming\\attachments\\a1.pdf')).toBe(false);
         expect(canUpload(`C:\\Users\\Alice\\AppData\\Roaming\\attachments\\other\\${id}.pdf`)).toBe(false);
         const linux = await guardFor('/home/alice/.local/share', '/home/alice/.local/share/mindwtr');
@@ -321,8 +316,8 @@ describe('createManagedAttachmentSourcePredicate', () => {
     });
 
     it('compares folders without case on Windows and macOS, with case on Linux', async () => {
-        // Windows and macOS file systems ignore case by default, so a stored URI may differ
-        // from the managed root only in case (drive letter, user name, folder name).
+
+
         const windows = await guardFor('C:\\Users\\Alice\\AppData\\Roaming', 'C:\\Users\\Alice\\AppData\\Roaming\\mindwtr\\data');
         expect(windows('file:///c:/Users/alice/AppData/Roaming/mindwtr/data/attachments/a1.pdf')).toBe(true);
         expect(windows('c:\\users\\alice\\appdata\\roaming\\Mindwtr\\Attachments\\a1.pdf')).toBe(true);
@@ -359,9 +354,7 @@ describe('resolveFileBackendPath', () => {
             .resolves.toBe('/sync/attachments/a1.pdf');
     });
 
-    // SEC-08: a cloudKey arrives over sync, so it is attacker-controlled input to a
-    // filesystem write/delete. Escaping the sync folder must fail loudly — both callers
-    // treat a rejection as a failed transfer, never as a completed one.
+
     it('refuses a cloudKey that escapes the sync folder', async () => {
         for (const hostile of ['attachments/../../escape.txt', 'attachments\\..\\..\\escape.txt', '../escape.txt', 'attachments/a\0.pdf']) {
             await expect(resolveFileBackendPath(join, '/sync', hostile)).rejects.toThrow(/outside the sync folder|invalid/i);
@@ -369,9 +362,7 @@ describe('resolveFileBackendPath', () => {
     });
 });
 
-// #1057: attachment downloads must be write-temp-then-rename so a cut connection
-// can never leave a truncated file at the real target path that a later sync would
-// mistake for new content.
+
 describe('writeFileSafelyAbsolute', () => {
     it('never touches the target path until the temp write has fully succeeded', async () => {
         const target = '/managed/attachments/a1.pdf';
@@ -390,7 +381,7 @@ describe('writeFileSafelyAbsolute', () => {
         await writeFileSafelyAbsolute(target, new Uint8Array([1, 2, 3]), { writeFile, rename, remove });
 
         expect(files.get(target)).toEqual(new Uint8Array([1, 2, 3]));
-        // The first writeFile call landed on a temp path, not the target.
+
         expect(writeFile.mock.calls[0]?.[0]).toMatch(
             /^\/managed\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/,
         );
@@ -412,10 +403,35 @@ describe('writeFileSafelyAbsolute', () => {
             writeFileSafelyAbsolute(target, new Uint8Array([1, 2, 3]), { writeFile, rename, remove }),
         ).rejects.toThrow(tempWriteError);
 
-        // The interrupted download never reached the rename step, so the file that
-        // was there before this sync pass is exactly as it was — never truncated,
-        // never partially overwritten.
+
         expect(files.get(target)).toEqual(previousBytes);
         expect(rename).not.toHaveBeenCalled();
+    });
+});
+
+describe('yieldToRenderer', () => {
+    it('continues on a timer when a hidden window never delivers an animation frame (#1392)', async () => {
+        vi.useFakeTimers();
+        const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);
+        try {
+            const result = yieldToRenderer();
+            await vi.advanceTimersByTimeAsync(100);
+            await expect(result).resolves.toBe('timer');
+        } finally {
+            raf.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
+    it('continues at the next frame when one arrives first', async () => {
+        const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+            callback(0);
+            return 1;
+        });
+        try {
+            await expect(yieldToRenderer()).resolves.toBe('frame');
+        } finally {
+            raf.mockRestore();
+        }
     });
 });

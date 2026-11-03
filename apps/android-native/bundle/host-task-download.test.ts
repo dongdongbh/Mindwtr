@@ -186,7 +186,7 @@ describe('selected Task Download private JS producer', () => {
         const f = fixture(); f.secret(null);
         const selected = createNativeTaskAttachmentPreparation(f.bindings, f.channels);
         await selected.prepareAttachmentAvailableDetailed(attachment());
-        await selected.prepareAttachmentAvailableDetailed(attachment()); // second callback is refused; reads remain cached
+        await selected.prepareAttachmentAvailableDetailed(attachment());
         expect(f.secretCalls).toEqual(['mindwtr_webdav_password']); expect(f.legacyCalls).toEqual(['@mindwtr_webdav_password']);
         await f.run(); expect(f.secretCalls).toEqual(['mindwtr_webdav_password', 'mindwtr_webdav_password']);
     });
@@ -204,11 +204,10 @@ describe('selected Task Download private JS producer', () => {
         expect(f.sources).toEqual([]); expect(f.requests).toEqual([]); expect(f.memory.read(MANAGED + 'baseline362.txt')).toEqual(BYTES);
     });
 
-    it('serializes terminal404 lifecycle removals without an installed/source claim', async () => {
+    it('answers a 404 as unavailable without an installed/source claim, and never removes the attachment', async () => {
+
         const f = fixture(); f.status(404); const result = await f.run(attachment({ fileHash: digest(BYTES) }));
-        expect(result.status).toBe('unrecoverable'); const resolved = JSON.parse((result as { attachmentJSON: string }).attachmentJSON);
-        expect(Object.hasOwn(resolved, 'cloudKey')).toBe(false); expect(Object.hasOwn(resolved, 'fileHash')).toBe(false);
-        expect(resolved.localStatus).toBe('missing'); expect(resolved.deletedAt).toBe(resolved.updatedAt); expect(f.sources).toEqual([]);
+        expect(result.status).toBe('unavailable'); expect(f.sources).toEqual([]); expect(f.memory.files.size).toBe(0);
     });
 
     it('refuses wrong plaintext integrity before the callback', async () => {

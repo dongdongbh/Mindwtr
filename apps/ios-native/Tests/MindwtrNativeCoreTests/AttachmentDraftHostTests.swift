@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Production JSC binding + native descriptor jobs + durable sidecar/checkpoint.
+
 final class AttachmentDraftHostTests: XCTestCase {
     private var root: URL!
     private var bundle: URL!
@@ -164,7 +164,7 @@ final class AttachmentDraftHostTests: XCTestCase {
         let boundaries: [AttachmentDraftBoundary] = [.afterIntent, .afterStageProof, .beforeFilled, .afterFilled, .beforePublication,
             .afterPublication, .afterPublicationProof, .beforeResult, .afterResult, .beforeCheckpoint, .afterCheckpoint, .beforeMarker, .afterMarker]
         for boundary in boundaries {
-            // Each boundary needs an independent library/session: no sidecar release API.
+
             let savedRoot = root!
             let sub = savedRoot.appendingPathComponent("boundary-\(UUID().uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true); root = sub
@@ -427,8 +427,8 @@ final class AttachmentDraftHostTests: XCTestCase {
         try await host.checkpointEditorDraft(before); try await begin(host, before)
         let evidence = try Data(contentsOf: store.url), checkpoint = try Data(contentsOf: editor.url)
         let request = try addRequest(before, source: source())
-        // Canonical after would be tiny. Retained pending Discard must still
-        // duplicate the larger exact before-half, so refuse before reservation.
+
+
         await fail { _ = try await host.addAttachmentDraft(requestJSON: request) }
         XCTAssertEqual(try Data(contentsOf: store.url), evidence)
         XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint)
@@ -512,8 +512,8 @@ final class AttachmentDraftHostTests: XCTestCase {
         hooks.configureJobs = { jobs in
             jobs.afterWork = { _, installer in if installer { entered.signal(); _ = release.wait(timeout: .now() + 10) } }
         }
-        // Jobs already exist after start, so configure through a boundary before
-        // first reservation via the existing hook on a new owner.
+
+
         await host.close()
         let writing = core(); try await writing.configureAttachmentHost(hooks); _ = try await writing.start()
         let operation = Task { try await writing.addAttachmentDraft(requestJSON: request) }
@@ -556,9 +556,8 @@ final class AttachmentDraftHostTests: XCTestCase {
         XCTAssertTrue(try savedTask().contains("Committed title"))
         await writing.close(); let cold = core()
         await fail { _ = try await cold.start() }
-        // Existing terminal recovery re-encodes the outer envelope before its
-        // cleanup gate. Pin every value, including the byte-exact request and
-        // terminal strings, without depending on JSONEncoder dictionary order.
+
+
         let beforeJournal = try object(String(decoding: journalBytes, as: UTF8.self))
         let afterJournal = try object(String(decoding: Data(contentsOf: journal), as: UTF8.self))
         XCTAssertEqual(try Data(json(afterJournal).utf8), try Data(json(beforeJournal).utf8))
@@ -575,8 +574,8 @@ final class AttachmentDraftHostTests: XCTestCase {
         faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Hold actual prepared editor journal") } }
         await fail { _ = try await writing.saveEditorDraft("saveDraft", argumentsJSON: arguments, expectedSession: snapshot.sessionID, expectedGeneration: snapshot.generation) }
         await writing.close()
-        // Use the actual frozen request/attempt from the failed invocation; only
-        // supply a controlled valid terminal-refusal fixture to exercise cleanup.
+
+
         var envelope = try object(String(decoding: Data(contentsOf: journal), as: UTF8.self))
         envelope["terminal"] = ["rejected": ["_0": "STALE_REVISION: Controlled terminal refusal"]]
         try Data(json(envelope).utf8).write(to: journal)

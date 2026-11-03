@@ -41,6 +41,18 @@ describe('parseWebdavAttachmentInventory', () => {
             .toEqual(['attachments/a.bin', 'attachments/z.bin']);
     });
 
+    it('accepts a collection href without the trailing slash (#1456)', () => {
+        const bare = '/mindwtr/attachments';
+        expect(parseWebdavAttachmentInventory(multistatusXml(
+            responseXml(bare, { collection: true }),
+        ), collectionUrl, parseXml)).toEqual([]);
+        expect(parseWebdavAttachmentInventory(multistatusXml(
+            responseXml(`https://dav.example.com:443${bare}`, { collection: true }),
+            responseXml(`${bare}/a.bin`),
+            responseXml(`${bare}/folder`, { collection: true }),
+        ), collectionUrl, parseXml)).toEqual(['attachments/a.bin']);
+    });
+
     it.each([
         ['malformed XML', '<d:multistatus xmlns:d="DAV:"><d:response>'],
         ['wrong namespace', '<d:multistatus xmlns:d="urn:not-dav"/>'],
@@ -63,6 +75,21 @@ describe('parseWebdavAttachmentInventory', () => {
             responseXml(collectionUrl, { collection: true }),
             responseXml(`${collectionUrl}a.bin`),
             responseXml(`${collectionUrl}a.bin`),
+        )],
+        ['collection listed with and without the slash', multistatusXml(
+            responseXml(collectionUrl, { collection: true }),
+            responseXml('/mindwtr/attachments', { collection: true }),
+        )],
+        ['bare collection href that is not a collection', multistatusXml(
+            responseXml('/mindwtr/attachments'),
+        )],
+        ['sibling sharing the collection prefix', multistatusXml(
+            responseXml(collectionUrl, { collection: true }),
+            responseXml('/mindwtr/attachments-old/a.bin'),
+        )],
+        ['other scheme on the same host', multistatusXml(
+            responseXml(collectionUrl, { collection: true }),
+            responseXml('http://dav.example.com/mindwtr/attachments/a.bin'),
         )],
         ['failed propstat', multistatusXml(
             responseXml(collectionUrl, { collection: true }),

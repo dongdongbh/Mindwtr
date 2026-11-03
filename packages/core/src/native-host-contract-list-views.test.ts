@@ -25,9 +25,11 @@ import { replayAfterRestart, value } from './screen-parity.replay';
 import { matchesPickerQuery, paramsKey } from './native-host-contract-menu-views';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { noopStorage } from './storage';
-import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup } from './task-row-meta';
+import { buildTaskRowMeta, getTaskRowMetaValidUntil, resolveTaskRowFeatures, resolveTaskRowLookup } from './task-row-meta';
 import { buildTrashTimeline } from './task-utils';
+import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import { generateUUID } from './uuid';
+import type { Project, Task } from './types';
 
 const fixture = loadListViewsFixture();
 const frozen = (observations: Record<string, unknown>[]) => observations.map(({ text: _text, ...rest }) => rest);
@@ -56,7 +58,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         vi.restoreAllMocks();
     });
 
-    // Revisions carry the minute; every test runs at the fixture's instant.
+
     const openHost = async (part: ListViewsPart, entry: ListViewsScenario, saveData?: (data: unknown) => Promise<void>) => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(part.now));
@@ -66,6 +68,49 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
         return { host, recorder };
     };
+
+    it('filters multiple unfinished Context statuses before matching and retains project/area boundaries on reopen', async () => {
+        const stamp = fixture.contexts.now;
+        const task = (id: string, patch: Partial<Task> = {}): Task => ({ id, title: id, status: 'next', contexts: ['@person/emma'],
+            tags: [], areaId: 'area-a', createdAt: stamp, updatedAt: stamp, ...patch });
+        const project = (id: string, patch: Partial<Project> = {}): Project => ({ id, title: id, status: 'active', color: '#111111',
+            order: 0, tagIds: [], areaId: 'area-a', createdAt: stamp, updatedAt: stamp, ...patch });
+        const criteria = { statuses: ['next', 'someday'] as Task['status'][], excludedProjects: ['excluded'], contexts: ['@person/emma'] };
+        const part: ListViewsPart = { ...fixture.contexts, tasks: [
+            task('next'), task('someday', { status: 'someday', startTime: '2099-01-01' }), task('waiting', { status: 'waiting' }),
+            task('excluded', { projectId: 'excluded' }), task('parked', { projectId: 'parked' }),
+            task('other-area', { areaId: 'area-b' }), task('deleted', { deletedAt: stamp }), task('reference', { status: 'reference' }),
+        ], projects: [project('excluded'), project('parked', { status: 'someday' })],
+        areas: ['area-a', 'area-b'].map((id, order) => ({ id, name: id, order, createdAt: stamp, updatedAt: stamp })),
+        settings: { contextFilters: { filters: { areaId: 'area-a' }, savedFilters: [{ id: 'emma', name: 'Emma', view: 'contexts', criteria,
+            createdAt: stamp, updatedAt: stamp }] } } };
+        const { host } = await openHost(part, { name: 'Context filters', settings: 'contextFilters', actions: [] });
+        const first = value(host.getContextsView({ tokens: ['@person/emma'], filters: { statuses: criteria.statuses, excludedProjects: criteria.excludedProjects }, offset: 0, limit: 100 }));
+        expect(first.rows.map((row) => row.id)).toEqual(['next', 'someday']);
+        expect(first.canSave).toBe(true);
+        expect(first.saveControls?.preservedCriteria).toMatchObject(criteria);
+        const searched = value(host.getContextsView({ tokens: ['@person/emma'], filters: { statuses: ['next', 'someday'], searchQuery: 'next' }, offset: 0, limit: 100 }));
+        expect(searched.rows.map((row) => row.id)).toEqual(['next']);
+        expect(searched.canSave).toBe(false);
+        expect(searched.saveControls).toBeNull();
+        expect(first.filters.statuses?.filter((option) => option.selected).map((option) => option.value)).toEqual(['next', 'someday']);
+        const reopened = value(host.getContextsView({ savedFilterId: 'emma', offset: 0, limit: 100 }));
+        expect(reopened.rows.map((row) => row.id)).toEqual(first.rows.map((row) => row.id));
+        const none = value(host.getContextsView({ tokens: ['@person/emma'], filters: { statuses: ['next'], projects: ['excluded'], excludedProjects: ['excluded'] }, offset: 0, limit: 100 }));
+        expect(none.total).toBe(0);
+        expect(none.rows).toEqual([]);
+        const legacy = value(host.getContextsView({ offset: 0, limit: 100 }));
+        expect(legacy.rows.map((row) => row.id)).toContain('reference');
+        const sheet = value(host.getContextsView({ filterSheetOpen: true, offset: 0, limit: 100 }));
+        expect(sheet.filters.state.statuses).toEqual(['inbox', 'next', 'waiting', 'someday']);
+        expect(sheet.rows.map((row) => row.id)).not.toContain('reference');
+        const clearedStatuses = value(host.getContextsView({ filterSheetOpen: true, filters: { statuses: ['someday'] }, filterEdit: { type: 'toggleStatus', value: 'someday' }, offset: 0, limit: 100 }));
+        expect(clearedStatuses.filters.state.statuses).toEqual([]);
+        const reread = value(host.getContextsView({ filterSheetOpen: true, filters: clearedStatuses.filters.state, offset: 0, limit: 100 }));
+        expect(reread.filters.state.statuses).toEqual([]);
+        expect(host.getContextsView({ filters: { excludedProjects: 'excluded' } as never, offset: 0, limit: 100 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(host.getContextsView({ filters: { statuses: ['future'] } as never, offset: 0, limit: 100 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
 
     it.each(fixture.contexts.scenarios.map((entry) => [entry.name, entry] as const))('Contexts: "%s" like mobile', async (name, entry) => {
         const { host, recorder } = await openHost(fixture.contexts, entry);
@@ -81,7 +126,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
 
     it.each(fixture.trash.scenarios.map((entry) => [entry.name, entry] as const))('Trash: "%s" like mobile', async (name, entry) => {
         const { host, recorder } = await openHost(fixture.trash, entry);
-        // The mobile capture pinned the device locale.
+
         expect(await host.setLanguage({ storedLanguage: null, systemLocale: 'en-US' })).toMatchObject({ ok: true, value: { language: 'en' } });
         expect(await replayTrash(createTrashContractBackend(host, generateUUID), entry, recorder))
             .toEqual(frozen(fixture.trash.observations[name]));
@@ -109,12 +154,13 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const now = new Date();
         const meta = (id: string) => {
             const task = state._tasksById.get(id)!;
-            return buildTaskRowMeta({
+
+            return { validUntil: getTaskRowMetaValidUntil(task, now, resolveTaskRowFeatures(state.settings)), ...buildTaskRowMeta({
                 task, lookup: resolveTaskRowLookup(task, state.projects, state.areas, state._sectionsById),
                 features: resolveTaskRowFeatures(state.settings), language: 'en',
                 dateFormatting: { language: 'en', dateFormat: state.settings.dateFormat, calendarSystem: state.settings.calendarSystem, timeFormat: state.settings.timeFormat, systemLocale: null },
                 t: getTranslator('en'), now,
-            });
+            }) };
         };
         expect(first.value.total).toBe(model.tasks.length);
         expect(first.value.rows.map((row) => [row.id, row.meta])).toEqual(model.tasks.slice(0, 2).map((task) => [task.id, meta(task.id)]));
@@ -122,6 +168,34 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(second.ok && second.value.rows.map((row) => row.id)).toEqual(model.tasks.slice(2, 4).map((task) => task.id));
         expect(host.getContextsView({ offset: 2, limit: 2 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(host.getContextsView({ offset: 0, limit: 101 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+
+    it('offers Contexts the shared list sort, with Priority while Priorities is on', async () => {
+        const { host } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const read = () => {
+            const result = host.getContextsView({ offset: 0, limit: 100 });
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        const selected = () => read().sort.options.filter((option) => option.selected).map((option) => option.value);
+        expect(read().sort.options.map((option) => option.value)).toContain('priority');
+        expect(read().sort.options.find((option) => option.value === 'priority')?.label).toBe('Priority');
+        expect(selected()).toEqual([resolveNonDoneTaskSortBy(useTaskStore.getState().settings.taskSortBy, useTaskStore.getState().settings)]);
+
+        expect(await host.setTaskListSort({ sortBy: 'priority' })).toMatchObject({ ok: true, value: { sortBy: 'priority' } });
+        expect(selected()).toEqual(['priority']);
+        expect(read().sort.accessibilityLabel).toBe('Sort: Priority');
+        const state = useTaskStore.getState();
+        const ranked = buildContextsViewModel({ index: buildContextsTokenIndex(state.tasks), settings: state.settings, selectedTokens: [], matchMode: 'all', searchQuery: '' });
+        expect(ranked.sortBy).toBe('priority');
+
+        const rows = read().rows.map((row) => row.id);
+        expect(rows).toEqual(ranked.tasks.map((task) => task.id).filter((id) => rows.includes(id)));
+
+        await useTaskStore.getState().updateSettings({ features: { ...useTaskStore.getState().settings.features, priorities: false } });
+        expect(read().sort.options.map((option) => option.value)).not.toContain('priority');
+        expect(selected()).toEqual(['default']);
     });
 
     it('builds Archive groups and rows with core\'s functions and the host date formatter', async () => {
@@ -282,7 +356,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(recorder.log).toHaveLength(1);
         expect(useTaskStore.getState()._tasksById.get('c-call')).toBe(written);
         expect((saveData.mock.lastCall?.[0] as { tasks: { id: string; status: string }[] }).tasks.find(({ id }) => id === 'c-sink')?.status).toBe('someday');
-        // A lost reply repeats the request: no write, no save.
+
         const saves = saveData.mock.calls.length;
         expect(await host.runContextsAction(input)).toEqual(retried);
         expect(saveData).toHaveBeenCalledTimes(saves);
@@ -292,7 +366,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
     });
 
     it('retries a Contexts status change whose store save failed after it landed: one write', async () => {
-        // Reopening a task of an archived project reactivates the project and saves at once.
+
         const archivedAt = '2026-09-08T09:00:00.000Z';
         const part = {
             ...fixture.contexts,
@@ -310,7 +384,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const input = { requestId: generateUUID(), action: { type: 'setTaskStatus' as const, taskId: 'c-reopen', status: 'next' as const, taskRevision: taskRevisionOf(useTaskStore.getState()._tasksById.get('c-reopen')!) } };
         saveData.mockRejectedValue(new Error('disk unavailable'));
         expect(await host.runContextsAction(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
-        // The store changed the task and its project in memory before its save failed.
+
         expect(useTaskStore.getState()._projectsById.get('p-shelved')?.status).toBe('active');
         const reopened = useTaskStore.getState()._tasksById.get('c-reopen');
         saveData.mockResolvedValue(undefined);
@@ -320,6 +394,34 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const saved = saveData.mock.lastCall?.[0] as { tasks: { id: string; status: string }[]; projects: { id: string; status: string }[] };
         expect(saved.tasks.find(({ id }) => id === 'c-reopen')?.status).toBe('next');
         expect(saved.projects.find(({ id }) => id === 'p-shelved')?.status).toBe('active');
+    });
+
+
+    it('labels a token chip\'s additive press Add or Remove filter, and gives All and No context none', async () => {
+        const { host } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const view = value(host.getContextsView({ tokens: ['@phone'], offset: 0, limit: 100 }));
+        const chip = (id: string) => view.chips.find((entry) => entry.id === id)!;
+        expect(chip('all').additive).toBeUndefined();
+        expect(chip('none').additive).toBeUndefined();
+        expect(chip('@phone').additive).toEqual({ label: 'Remove filter', next: { tokens: [], matchMode: 'all' } });
+        expect(chip('#work').additive).toEqual({ label: 'Add', next: { tokens: ['@phone', '#work'], matchMode: 'all' } });
+        expect(chip('#work').next).toEqual({ tokens: ['#work'], matchMode: 'all' });
+    });
+
+    it('forwards saved unused tokens to Contexts Add and keeps Remove selected-only', async () => {
+        const { host } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const stamp = '2026-10-20T00:00:00.000Z';
+        useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, taxonomy: {
+            contexts: [{ token: '@unused', rev: 1, revBy: 'test', updatedAt: stamp }],
+            tags: [{ token: '#unused', rev: 1, revBy: 'test', updatedAt: stamp }],
+        } } });
+        const view = value(host.getContextsView({ selectedIds: ['c-call'], offset: 0, limit: 100 }));
+        for (const [field, token] of [['contexts', '@unused'], ['tags', '#unused']] as const) {
+            expect(view.bulk?.tokenActions.find((action) => action.field === field && action.mode === 'add')?.tokens).toContain(token);
+            expect(view.bulk?.tokenActions.find((action) => action.field === field && action.mode === 'remove')?.tokens)
+                .toEqual(useTaskStore.getState()._tasksById.get('c-call')![field]);
+            expect(view.chips.map((chip) => chip.id)).not.toContain(token);
+        }
     });
 
     it('searches the bulk bar\'s token pickers as mobile\'s token picker does, one window at a time under the view\'s revision', async () => {
@@ -333,7 +435,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const state = useTaskStore.getState();
         const model = buildContextsViewModel({ index: buildContextsTokenIndex(state.tasks), settings: state.settings, selectedTokens: [], matchMode: 'all', searchQuery: '' });
         const tasksById = Object.fromEntries(state.tasks.map((task) => [task.id, task]));
-        // TokenPickerModal's filter, as mobile's Contexts screen runs it.
+
         const mobileFilter = (tokens: string[], query: string) => {
             const normalized = query.trim().toLowerCase();
             return normalized ? tokens.filter((token) => token.toLowerCase().includes(normalized)) : tokens;
@@ -342,18 +444,18 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
             const { tokens } = getContextsTokenPicker({ field, action: mode, activeTasks: model.activeTasks, selectedIds, tasksById, t });
             const view = read({ field, mode, query });
             expect(view.bulk?.picker).toEqual({ field, mode, total: mobileFilter(tokens, query).length, items: mobileFilter(tokens, query) });
-            // The Inbox tokens' rule.
+
             expect(view.bulk?.picker?.items).toEqual(tokens.filter((token) => matchesPickerQuery(token, query)));
         }
         expect(read({ field: 'tags', mode: 'add', query: ' WOR' }).bulk?.picker?.items).toContain('#work');
-        // Without a picker, or without a selection, there is none.
+
         expect(read({ field: 'tags', mode: 'add' }).bulk?.tokenActions).toHaveLength(4);
         const plain = host.getContextsView({ selectedIds, offset: 0, limit: 1 });
         expect(plain.ok && plain.value.bulk?.picker).toBeNull();
         const unselected = host.getContextsView({ picker: { field: 'tags', mode: 'add' }, offset: 0, limit: 1 });
         expect(unselected.ok && unselected.value.bulk).toBeNull();
 
-        // One window at a time, under the view's revision.
+
         const all = read({ field: 'contexts', mode: 'add' });
         const total = all.bulk!.picker!.total;
         expect(total).toBeGreaterThan(1);
@@ -418,7 +520,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const state = useTaskStore.getState();
         expect(state._tasksById.get('tt-call')).toMatchObject({ deletedAt: expect.any(String), purgedAt: expect.any(String) });
         expect(state._allProjects.find((project) => project.id === 'tp-home')).toMatchObject({ purgedAt: expect.any(String) });
-        // Items outside the filtered view are untouched.
+
         expect(state._tasksById.get('tt-report')?.purgedAt).toBeUndefined();
     });
 
@@ -453,7 +555,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
 
     it('never deletes forever or restores an item that is not in Trash', async () => {
         const { host, recorder } = await openHost(fixture.trash, scenario(fixture.trash, 'timeline, summary and retention hint'));
-        // As the journaling Android host: each write must carry its replay tokens.
+
         setNativeReplayTokens('required');
         const run = (action: unknown) => host.runTrashAction({ requestId: generateUUID(), action: action as never });
         const revision = (id: string) => taskRevisionOf(useTaskStore.getState()._tasksById.get(id)!);
@@ -465,7 +567,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(await run({ type: 'restoreItems', taskIds: [], projectIds: [], taskRevisions: {}, projectRevisions: {} })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await run({ type: 'purgeItems', taskIds: ['tt-report', 'tt-report'], projectIds: [], taskRevisions: { 'tt-report': revision('tt-report') }, projectRevisions: {} }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // A selection's revisions name exactly its items.
+
         expect(await run({ type: 'purgeItems', taskIds: ['tt-report'], projectIds: [], taskRevisions: {}, projectRevisions: {} })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await run({ type: 'purgeItem', kind: 'task', id: 'tt-report' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await host.runTrashAction({ requestId: 'not-a-uuid', action: { type: 'purgeItem', kind: 'task', id: 'tt-report', revision: revision('tt-report') } }))
@@ -478,7 +580,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
 
     it('checks each Contexts and Archive action before writing', async () => {
         const { host, recorder } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'));
-        // As the journaling Android host: each write must carry its replay tokens.
+
         setNativeReplayTokens('required');
         const archive = (action: unknown) => host.runArchiveAction({ requestId: generateUUID(), action: action as never });
         const contexts = (action: unknown) => host.runContextsAction({ requestId: generateUUID(), action: action as never });
@@ -489,7 +591,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(await archive({ type: 'moveToInbox', taskId: 'ar-gone', taskRevision: revision('ar-gone') })).toMatchObject({ ok: false, error: { code: 'TASK_NOT_FOUND' } });
         expect(await archive({ type: 'trashProject', projectId: 'p-gone', projectRevision: revisionOf(useTaskStore.getState()._allProjects.find((entry) => entry.id === 'p-gone')!) }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // Every write names the revision the view showed.
+
         expect(await archive({ type: 'moveToInbox', taskId: 'ar-milk' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await archive({ type: 'moveTasksToInbox', taskIds: ['ar-milk', 'ar-nodate'], taskRevisions: { 'ar-milk': revision('ar-milk') } })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await archive({ type: 'reactivateProject', projectId: 'p-report' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -539,7 +641,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const cleared = archiveView(host, { filters: any.filters.state, filterEdit: any.filters.clearEdit, offset: 0, limit: 100 });
         expect(cleared.filters.state).toEqual(EMPTY_LIST_FILTER_STATE);
 
-        // Mobile's Archive sheet has no project filter: a project selection never filters it.
+
         const project = archiveView(host, { filters: { projects: ['p-launch'] }, offset: 0, limit: 100 });
         expect(project.filters).toMatchObject({ projects: null, activeCount: 0, state: { projects: [] } });
         expect(host.getArchiveView({ filterEdit: { type: 'toggleToken', value: '' } as never, offset: 0, limit: 1 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -556,7 +658,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         } });
         expect(host.getArchiveFilterTokens({ params, offset: 2, limit: 2, revision: view.revision }))
             .toMatchObject({ ok: true, value: { total: all.length, items: all.slice(2, 4) } });
-        // A closed sheet offers only the chosen tokens.
+
         expect(host.getArchiveFilterTokens({ params: { filters: { tokens: ['#home'] } }, offset: 0, limit: 100, revision: view.revision }))
             .toMatchObject({ ok: true, value: { total: 1, items: [{ value: '#home', state: 'included' }] } });
         const invalid = { ok: false, error: { code: 'INVALID_INPUT' } };
@@ -570,7 +672,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
 
     it('selects every Archive row on screen, less the ones deselected, and moves exactly those', async () => {
         const { host, recorder } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'));
-        // A folded heading hides its rows from Select all, as on mobile.
+
         const base = { groupBy: 'project' as const, collapsedGroupIds: ['project:p-launch'] };
         const view = archiveView(host, { ...base, selectAll: { except: ['ar-milk', 'ar-gone'] }, offset: 0, limit: 100 });
         const shown = taskIds(view);
@@ -596,7 +698,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(await run({ type: 'moveTasksToInbox', selectAll: { ...selectAll, params: { ...selectAll.params, filterEdit: { type: 'clear' } } } })).toMatchObject(invalid);
         expect(await run({ type: 'trashTasks', selectAll: { params: selectAll.params } })).toMatchObject(invalid);
         expect(recorder.log).toEqual([]);
-        // A change to a row the fold hides leaves the rows shown as they were: it does not refuse.
+
         expect((await useTaskStore.getState().updateTask('ar-report', { title: 'Renamed' })).success).toBe(true);
         recorder.log.length = 0;
         expect(await run({ type: 'moveTasksToInbox', selectAll })).toEqual({ ok: true, value: { changed: true, toast: null } });
@@ -624,7 +726,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         saveData.mockRejectedValue(new Error('disk unavailable'));
         expect(await host.runArchiveAction(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
         saveData.mockResolvedValue(undefined);
-        // The rows shown changed with the landed move; the retry only saves it.
+
         expect(await host.runArchiveAction(input)).toEqual({ ok: true, value: { changed: true, toast: null } });
         expect(recorder.log).toEqual([['batchMoveTasks', ids, 'inbox']]);
         const saved = saveData.mock.lastCall?.[0] as { tasks: { id: string; status: string }[] };
@@ -650,7 +752,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const saveData = vi.fn().mockResolvedValue(undefined);
         const { host, recorder } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'), saveData);
         const view = archiveView(host, { offset: 0, limit: 100 });
-        // ar-alpha completed at 09:00Z: 05:00 on the fixture's New York clock.
+
         expect(view.items.find((item) => item.type === 'task' && item.row.id === 'ar-alpha')).toMatchObject({ completedAtPicker: { day: '2026-09-23', time: '05:00' } });
         expect(view.items.find((item) => item.type === 'task' && item.row.id === 'ar-call')).toMatchObject({ cancelled: true, completedAtPicker: null });
         const alpha = view.items.find((item) => item.type === 'task' && item.row.id === 'ar-alpha');
@@ -662,11 +764,11 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(await host.runArchiveAction(input)).toEqual({ ok: true, value: { changed: true, toast: null } });
         expect(recorder.log).toEqual([['updateTask', 'ar-alpha', { completedAt: '2026-09-20T18:30:00.000Z' }]]);
         const run = (action: unknown) => host.runArchiveAction({ requestId: generateUUID(), action: action as never });
-        // Target state: the same time again writes nothing, in either form.
-        // Target state, checked before the revision: the same time again writes nothing, in either form.
+
+
         expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', day: '2026-09-20', time: '14:30', taskRevision })).toEqual({ ok: true, value: { changed: false, toast: null } });
         expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', completedAt: '2026-09-20T18:30:00.000Z', taskRevision })).toEqual({ ok: true, value: { changed: false, toast: null } });
-        // Another time on the revision the view showed before the write is stale.
+
         expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', day: '2026-09-21', time: '14:30', taskRevision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         const invalid = { ok: false, error: { code: 'INVALID_INPUT' } };
         expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', day: '2026-02-30', time: '14:30', taskRevision })).toMatchObject(invalid);
@@ -677,14 +779,13 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(recorder.log).toHaveLength(1);
     });
 
-    // The native app journals each write and replays it after process death. A new host
-    // holds no receipts, so a replay after a later change must write nothing wrong.
+
     type Host = ReturnType<typeof createNativeHostContract>;
     const store = () => useTaskStore.getState();
     const stored = (id: string) => store()._tasksById.get(id)!;
     const storedProject = (id: string) => store()._allProjects.find((entry) => entry.id === id)!;
     const stale = { ok: false, error: { code: 'STALE_REVISION' } };
-    /** Runs the request, lets `change` touch its rows, then replays it on a new host: nothing may be written. */
+
     const replayAfterChange = async <T,>(
         host: Host, recorder: { log: unknown[][] }, run: (host: Host) => Promise<NativeHostResult<T>>, change: () => Promise<unknown>,
     ) => {
@@ -724,7 +825,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const view = value(host.getContextsView({ selectedIds: ['c-call', 'c-email'], offset: 0, limit: 100 }));
         const trashed = value(await host.runContextsAction({ requestId: generateUUID(), action: { type: 'trashTasks', taskIds: ['c-call', 'c-email'], taskRevisions: view.taskRevisions } }));
         const undo = trashed.toast!.undo!.action;
-        // The Undo carries the revisions its write left.
+
         expect(undo).toEqual({ type: 'restoreTasks', taskIds: ['c-call', 'c-email'], taskRevisions: { 'c-call': taskRevisionOf(stored('c-call')), 'c-email': taskRevisionOf(stored('c-email')) } });
         const input = { requestId: generateUUID(), action: undo };
         const change = () => store().batchDeleteTasks(['c-call', 'c-email']);
@@ -789,7 +890,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
 
     it('refuses an Archive Select all once a row synced to a revision the old 32-bit token could not tell apart', async () => {
         const { host, recorder } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'));
-        // Two revisions of ar-milk whose old token (the count and a 32-bit FNV hash) was the same.
+
         const first = { rev: 1, revBy: 'd', updatedAt: '2026-09-24T00:03:26.283Z' };
         const second = { rev: 1, revBy: 'd', updatedAt: '2026-09-24T00:11:45.726Z' };
         expect(paramsKey([`ar-milk@${revisionOf(first)}`])).toBe(paramsKey([`ar-milk@${revisionOf(second)}`]));
@@ -799,14 +900,14 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         sync(first);
         const view = value(host.getArchiveView({ filters: { ...EMPTY_LIST_FILTER_STATE, searchQuery: 'milk' }, selectAll: {}, offset: 0, limit: 100 }));
         expect(view.selectedCount).toBe(1);
-        // Another device's version of the row arrives.
+
         sync(second);
         recorder.log.length = 0;
         expect(await host.runArchiveAction({ requestId: generateUUID(), action: { type: 'trashTasks', selectAll: view.selectAll! } })).toMatchObject(stale);
         expect(recorder.log).toEqual([]);
     });
 
-    // A replay of a request that landed finds its target held: changed: false, before any revision compare.
+
     const landed = { ok: true, value: { changed: false, toast: null } };
     it.each([
         ['setTaskStatus', (view: NativeContextsView): NativeContextsAction => ({ type: 'setTaskStatus', taskId: 'c-call', status: 'done', taskRevision: contextsRow(view, 'c-call') })],
@@ -817,7 +918,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const input = { requestId: generateUUID(), action: request(view) };
         expect(await host.runContextsAction(input)).toMatchObject({ ok: true, value: { changed: true } });
         recorder.log.length = 0;
-        // A bulk move answers mobile's toast for it; one task's status change shows none.
+
         const toast = name === 'moveTasks' ? { tone: 'success', title: 'Done', message: '2 tasks', undo: null } : null;
         expect(await replayAfterRestart((current) => current.runContextsAction(input))).toEqual({ result: { ok: true, value: { changed: false, toast } }, wrote: false });
         expect(recorder.log).toEqual([]);
@@ -838,11 +939,11 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const { host, recorder } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
         const view = value(host.getContextsView({ selectedIds: ['c-call', 'c-email'], offset: 0, limit: 100 }));
         const input = { requestId: generateUUID(), action: { type: 'moveTasks' as const, taskIds: ['c-call', 'c-email'], status: 'someday' as const, taskRevisions: view.taskRevisions } };
-        // The request never ran; another device files c-call under Someday.
+
         await store().updateTask('c-call', { status: 'someday' });
         recorder.log.length = 0;
         expect(await replayAfterRestart((current) => current.runContextsAction(input))).toMatchObject({ result: { ok: true, value: { changed: true } } });
-        // Mobile's call: every selected row.
+
         expect(recorder.log).toEqual([['batchMoveTasks', ['c-call', 'c-email'], 'someday']]);
         expect(stored('c-email').status).toBe('someday');
     });
@@ -889,7 +990,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         }, async () => { await store().deleteTask('tt-report'); await store().deleteProject('tp-home'); }, () => expect(stored('tt-report').deletedAt).toEqual(expect.any(String))],
     ] as const)('Trash %s: a replay after a restart never undoes a later change', async (_name, request, change, check) => {
         const { host, recorder } = await openHost(fixture.trash, scenario(fixture.trash, 'timeline, summary and retention hint'));
-        // As the journaling Android host: the Trash selection carries the revisions its actions send back.
+
         setNativeReplayTokens('required');
         const input = { requestId: generateUUID(), action: request(host) };
         expect(await replayAfterChange(host, recorder, (current) => current.runTrashAction(input), change)).toMatchObject(stale);
@@ -904,16 +1005,16 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         }],
     ] as const)('Trash %s: a replay after a restart deletes nothing it did not show', async (_name, request) => {
         const { host, recorder } = await openHost(fixture.trash, scenario(fixture.trash, 'timeline, summary and retention hint'));
-        // As the journaling Android host: the Trash selection carries the revisions its actions send back.
+
         setNativeReplayTokens('required');
-        // The request never ran: the item was restored and trashed again after the view showed it.
+
         const stalled = { requestId: generateUUID(), action: request(host) };
         await store().restoreTask('tt-report');
         await store().deleteTask('tt-report');
         recorder.log.length = 0;
         expect(await replayAfterRestart((current) => current.runTrashAction(stalled))).toMatchObject({ result: stale, wrote: false });
         expect(stored('tt-report').purgedAt).toBeUndefined();
-        // A request that landed finds its item gone for good.
+
         const input = { requestId: generateUUID(), action: request(host) };
         expect(await host.runTrashAction(input)).toEqual({ ok: true, value: { changed: true, toast: null } });
         recorder.log.length = 0;

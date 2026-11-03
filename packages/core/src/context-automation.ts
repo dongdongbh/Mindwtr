@@ -1,12 +1,6 @@
-// Context automation (#1015): an automation app (Tasker, MacroDroid, a
-// location or Wi-Fi trigger) tells Mindwtr a context became active, and Mindwtr
-// answers with one notification listing that context's next actions.
-// Deactivation does nothing yet. It arrives as a `mindwtr://` link or as the
-// Android broadcast `tech.dongdongbh.mindwtr.action.ACTIVATE_CONTEXT` /
-// `DEACTIVATE_CONTEXT`. Moved from React Native's
-// `apps/mobile/lib/context-automation.ts` and `context-automation-handler.ts`
-// so the native app answers the same way; the host keeps the receiver and
-// posts the notification. Nothing here writes the store.
+
+
+
 import { formatI18nTemplate } from './i18n';
 import { matchesHierarchicalToken } from './hierarchy-utils';
 import { isTaskInActiveProject } from './project-utils';
@@ -128,7 +122,7 @@ export function parseContextAutomationUrl(rawUrl: string): ContextAutomationPayl
   return { action, context };
 }
 
-/** What the Android receiver hands on: the broadcast's `url`, or its `action` and `context` extras. */
+
 export type ContextAutomationHeadlessTaskData = {
   action?: unknown;
   context?: unknown;
@@ -147,7 +141,7 @@ const normalizeText = (value: unknown): string | null => {
   return normalized ? normalized : null;
 };
 
-/** A parseable `url` wins; otherwise both extras are needed. The extras' context is kept as sent. */
+
 export const parseContextAutomationHeadlessTaskData = (
   data: ContextAutomationHeadlessTaskData | null | undefined
 ): ContextAutomationPayload | null => {
@@ -193,9 +187,7 @@ export function selectContextNextActions(
     });
   });
 
-  // Every other sortFocusNextActions caller passes the flag; omitting it here
-  // meant the context notification listed next actions in an order that
-  // ignored priority even while the feature was on.
+
   return sortFocusNextActions(matchingTasks, {
     now,
     prioritizeByPriority: resolveFeatureFlags(settings).priorities,
@@ -243,14 +235,11 @@ export type ResolveContextAutomationText = (key: string, fallback: string) => st
 export const defaultContextAutomationText: ResolveContextAutomationText = (_key, fallback) => fallback;
 
 export type ContextAutomationNotification = ContextAutomationNotificationCopy & {
-  /** The notification's data; opening it shows the context (`kind` 'context-automation'). */
+
   data: { kind: typeof CONTEXT_AUTOMATION_NOTIFICATION_KIND; context: string };
 };
 
-/**
- * The notification an automation trigger posts, or null: deactivation, and a
- * context with no next action, post nothing.
- */
+
 export function buildContextAutomationNotification(
   payload: ContextAutomationPayload,
   input: {
@@ -274,32 +263,19 @@ export function buildContextAutomationNotification(
     manyTasksTitle: resolveText('contextAutomation.manyNextActionsTitle', '{{count}} {{context}} next actions'),
     moreTasksLine: resolveText('contextAutomation.moreTasksLine', '+{{count}} more'),
   });
-  // The receiver's extras keep the context as sent ('home'); the Contexts screen
-  // the notification opens matches the token ('@home') only.
+
+
   return { ...copy, data: { kind: CONTEXT_AUTOMATION_NOTIFICATION_KIND, context: normalizeContextToken(payload.context) } };
 }
 
 const RECENT_CONTEXT_AUTOMATION_TTL_MS = 10_000;
 
-// The Android receiver is open to every automation app by design, and each
-// accepted trigger wakes a headless run that loads the whole store. The
-// per-key dedupe below is defeated by simply varying the context, so the number
-// of starts is capped per window regardless of what the payload says.
-//
-// Two accepted ceilings on this budget, both fine for the receiver's threat model
-// (a hostile automation app on-device) but worth knowing about:
-// - The counter is global, not per-source: the user's own foreground deep-link
-//   path (e.g. tapping a context:// link) and the Android broadcast receiver's
-//   headless wake (open to any automation app) share one throttle. A flood from
-//   the receiver can exhaust the window and block the user's own foreground
-//   automation for up to CONTEXT_AUTOMATION_RATE_WINDOW_MS.
-// - The counter lives in memory, not persisted: a wake that follows process
-//   death starts counting from zero again rather than continuing the prior window.
+
 export const CONTEXT_AUTOMATION_RATE_WINDOW_MS = 60_000;
 export const CONTEXT_AUTOMATION_MAX_STARTS_PER_WINDOW = 12;
 
 export type ContextAutomationThrottle = {
-  /** True when this trigger must be dropped: the same one ran within 10 s, or the window's starts are used up. Otherwise counts it. */
+
   wasRecentlyHandled(payload: ContextAutomationPayload, nowMs?: number): boolean;
 };
 
@@ -314,7 +290,7 @@ export function createContextAutomationThrottle(): ContextAutomationThrottle {
         }
       }
 
-      // The receiver's extras keep the context as sent ('home'); a link carries the token ('@home').
+
       const key = `${payload.action}:${normalizeContextToken(payload.context)}`;
       const previousHandledAtMs = recentlyHandled.get(key);
       if (previousHandledAtMs !== undefined && nowMs - previousHandledAtMs <= RECENT_CONTEXT_AUTOMATION_TTL_MS) {

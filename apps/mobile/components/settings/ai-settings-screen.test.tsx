@@ -86,7 +86,7 @@ vi.mock('./settings.shell', () => ({
     SettingsTopBar: () => React.createElement('SettingsTopBar'),
 }));
 
-// The cards only need to expose the option arrays the pickers render.
+
 vi.mock('./ai-settings-assistant-card', () => ({
     AiSettingsAssistantCard: (props: Record<string, any>) => {
         captured.assistant.push(props);
@@ -98,8 +98,7 @@ vi.mock('./ai-settings-speech-card', () => ({
     AiSettingsSpeechCard: () => null,
 }));
 
-// The fetch effects debounce, and a key that arrives asynchronously only
-// schedules its timer on the render after it lands — hence two passes.
+
 const settle = async () => {
     for (let pass = 0; pass < 2; pass += 1) {
         await act(async () => {
@@ -128,7 +127,7 @@ describe('AISettingsScreen live model lists', () => {
         aiConfigMocks.loadAIKey.mockResolvedValue('sk-test');
         aiConfigMocks.saveAIKey.mockResolvedValue(undefined);
         coreMocks.fetchProviderModelsCached.mockResolvedValue([]);
-        // This device agreed to every provider (the consent question's own tests are the parity harness's).
+
         storage.values = { 'mindwtr-ai-provider-consent-v1': JSON.stringify({ openai: true, gemini: true, anthropic: true }) };
     });
 
@@ -156,7 +155,7 @@ describe('AISettingsScreen live model lists', () => {
             baseUrl: '',
             kind: 'chat',
         });
-        // Whisper is a local sha256-pinned catalog.
+
         expect(coreMocks.fetchProviderModelsCached).not.toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({ kind: 'transcription' }),
@@ -233,7 +232,7 @@ describe('AISettingsScreen live model lists', () => {
         expect(latest().aiModelOptions).toEqual(['qwen3:8b']);
     });
 
-    // Review C1 3: a key or an endpoint saved while AI is off must not reach the provider before this device agreed.
+
     it('never lists a provider\'s models before this device agreed to it, unless AI is on with that provider', async () => {
         storage.values = {};
         await renderScreen({
@@ -241,7 +240,7 @@ describe('AISettingsScreen live model lists', () => {
         });
         expect(coreMocks.fetchProviderModelsCached).not.toHaveBeenCalled();
 
-        // The synced AI switch carries the consent given where it was turned on (maintainer ruling, 09-29).
+
         await renderScreen({
             ai: { enabled: true, provider: 'openai', baseUrl: 'http://10.0.0.5:11434/v1', speechToText: localWhisperSpeech },
         });

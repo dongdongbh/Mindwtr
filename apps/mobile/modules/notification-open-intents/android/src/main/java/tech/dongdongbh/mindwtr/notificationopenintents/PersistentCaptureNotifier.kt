@@ -13,9 +13,7 @@ object PersistentCaptureNotifier {
   const val CHANNEL_ID = "mindwtr-persistent-capture"
   const val NOTIFICATION_ID = 41120
 
-  // Same target as CaptureTileService and the widget's "+": the native
-  // quick-capture dialog (modules/android-widget, #1169) saves to the Inbox
-  // queue and closes without bringing the app forward.
+
   private const val QUICK_CAPTURE_ACTIVITY = "tech.dongdongbh.mindwtr.androidwidget.QuickCaptureActivity"
   private const val CONTENT_REQUEST_CODE = NOTIFICATION_ID
   private const val DISMISS_REQUEST_CODE = NOTIFICATION_ID + 1
@@ -24,19 +22,14 @@ object PersistentCaptureNotifier {
   const val EXTRA_TEXT = "tech.dongdongbh.mindwtr.persistentCapture.text"
   const val EXTRA_CHANNEL_NAME = "tech.dongdongbh.mindwtr.persistentCapture.channelName"
 
-  // Device-local mirror of the last posted state so the notification can be
-  // re-pinned from any process start (alarm receivers, widgets, activity
-  // launches) without waiting for React to boot. OEMs remove the app's
-  // notifications when they kill its process, and that removal fires no
-  // dismiss intent (#819).
+
   private const val PREFS_NAME = "mindwtr-persistent-capture"
   private const val PREF_ENABLED = "enabled"
   private const val PREF_TITLE = "title"
   private const val PREF_TEXT = "text"
   private const val PREF_CHANNEL_NAME = "channelName"
 
-  // Every post, removal and process-start restore holds this object's lock, so a removal never lands between a restore's
-  // read of the mirror and its post (which would pin it again and turn the mirror back on).
+
   @Synchronized
   fun post(context: Context, title: String, text: String, channelName: String) {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
@@ -49,9 +42,8 @@ object PersistentCaptureNotifier {
       context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      // Recreate unconditionally: for an existing channel Android applies only the
-      // safe fields (name/description), which keeps the user-visible channel label
-      // in sync with the app language while preserving the user's own overrides.
+
+
       val channel = NotificationChannel(CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_LOW)
       channel.description = channelName
       channel.enableLights(false)
@@ -73,9 +65,7 @@ object PersistentCaptureNotifier {
     }
     val contentIntent = PendingIntent.getActivity(context, CONTENT_REQUEST_CODE, openIntent, pendingFlags)
 
-    // Android 14+ lets users swipe away "ongoing" notifications. Re-post on
-    // dismissal so the capture handle stays pinned while the setting is on;
-    // the settings toggle cancels via cancel(), which does not fire this intent.
+
     val dismissIntent = Intent(context, PersistentCaptureDismissReceiver::class.java).apply {
       putExtra(EXTRA_TITLE, title)
       putExtra(EXTRA_TEXT, text)
@@ -108,7 +98,7 @@ object PersistentCaptureNotifier {
 
   @Synchronized
   fun cancel(context: Context) {
-    // clear() writes an empty file when none exists yet: an off with nothing mirrored (every start, by default) writes nothing.
+
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     if (prefs.all.isNotEmpty()) prefs.edit().clear().apply()
     val notificationManager =
@@ -116,11 +106,7 @@ object PersistentCaptureNotifier {
     notificationManager?.cancel(NOTIFICATION_ID)
   }
 
-  /**
-   * Re-post the notification from the mirrored state if the toggle is on.
-   * Same-id notify on the silent channel is an invisible in-place update, so
-   * calling this on every process start is safe.
-   */
+
   @Synchronized
   fun restoreOnProcessStart(context: Context) {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

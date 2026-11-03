@@ -28,8 +28,7 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean) {
 
 afterEach(async () => { await flushPendingSave(); resetForTests(); });
 
-// Project details' journaled edit (the user's intent, written first): options, preparation and commit run inside it, so a
-// boot replay or a retry redoes the whole edit, and a replayed edit already applied writes nothing more.
+
 describe('runProjectEdit', () => {
     it('applies a typed title once, and a replay of the same edit writes nothing', async () => {
         const { host, stored, saves } = await open();
@@ -56,7 +55,7 @@ describe('runProjectEdit', () => {
         expect(await host.runProjectEdit({ requestId: uuid(2), projectId: 'p', kind: 'notes', text: 'Typed notes' }))
             .toEqual({ ok: true, value: { id: 'p', kind: 'notes', outcome: 'saved' } });
         expect(stored()).toMatchObject({ supportNotes: 'Typed notes', tagIds: ['#home', '#synced'] });
-        // The first preparation met the sync (STALE_REVISION); the edit was read and prepared again.
+
         expect(spy).toHaveBeenCalledTimes(2);
     });
 
@@ -73,7 +72,7 @@ describe('runProjectEdit', () => {
         expect(await run(8, { kind: 'tag', tag: '#home', present: false })).toMatchObject({ ok: true, value: { outcome: 'saved' } });
         expect(await run(8, { kind: 'tag', tag: '#home', present: false })).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
         expect(await run(9, { kind: 'date', field: 'dueDate', value: '2026-10-20', opened: null })).toMatchObject({ ok: true, value: { outcome: 'saved' } });
-        // A review day picked on Android: core makes the instant, at the hour and minute the picker opened on.
+
         expect(await run(16, { kind: 'date', field: 'reviewAt', value: '2026-11-20', opened: '2026-10-04T21:23:37.456Z' }))
             .toMatchObject({ ok: true, value: { outcome: 'saved' } });
         expect(stored().reviewAt).toMatch(/^2026-11-20T\d{2}:23:00\.000Z$/);
@@ -115,5 +114,435 @@ describe('runProjectEdit', () => {
         failing = false;
         expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true });
         expect(data().projects.find((item) => item.id === 'p')?.supportNotes).toBe('Kept');
+    });
+});
+
+
+describe('runProjectEdit project actions', () => {
+    const task = (id: string) => ({ id, title: id, status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at });
+
+    it('completes, reactivates and cancels the project, and a replay writes nothing', async () => {
+        const { host, stored, saves } = await open();
+        const run = (n: number, action: string) => host.runProjectEdit({ requestId: uuid(n), projectId: 'p', kind: 'lifecycle', action } as never);
+        expect(await run(20, 'complete')).toEqual({ ok: true, value: { id: 'p', kind: 'lifecycle', outcome: 'saved' } });
+        expect(stored()).toMatchObject({ status: 'archived' });
+        expect(stored().cancelledAt).toBeUndefined();
+        const count = saves();
+        expect(await run(20, 'complete')).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+        expect(await run(21, 'reactivate')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject({ status: 'active' });
+        expect(await run(22, 'cancel')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject({ status: 'archived' });
+        expect(stored().cancelledAt).toEqual(expect.any(String));
+        expect(await run(22, 'cancel')).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+    });
+
+    it('duplicates the project and answers the copy and RN\'s toast words', async () => {
+        const { host, data } = await open();
+        const reply = await host.runProjectEdit({ requestId: uuid(23), projectId: 'p', kind: 'duplicate' } as never);
+        expect(reply).toMatchObject({ ok: true, value: { id: 'p', kind: 'duplicate', outcome: 'saved', reply: { id: expect.any(String), message: 'Project duplicated' } } });
+        const copy = (reply as { value: { reply: { id: string } } }).value.reply.id;
+        expect(copy).not.toBe('p');
+        expect(data().projects.find((item) => item.id === copy)).toMatchObject({ title: expect.stringContaining('Kitchen') });
+    });
+
+    it('moves the project to Trash with RN\'s Undo, and the Undo restores it and its tasks\' links', async () => {
+        const { host, stored, data } = await open({ tasks: [task('t1'), task('t2')] as never });
+        const deleted = await host.runProjectEdit({ requestId: uuid(24), projectId: 'p', kind: 'delete' } as never);
+        expect(deleted).toMatchObject({ ok: true, value: { kind: 'delete', outcome: 'saved',
+            reply: { deletion: { message: expect.any(String), undoLabel: 'Undo' } } } });
+        expect(stored().deletedAt).toEqual(expect.any(String));
+        expect(data().tasks.filter((row) => row.projectId === 'p')).toHaveLength(0);
+        expect(await host.runProjectEdit({ requestId: uuid(24), projectId: 'p', kind: 'delete' } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        const undo = { requestId: uuid(25), projectId: 'p', kind: 'deleteUndo', deleteRequestId: uuid(24) } as never;
+        expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { kind: 'deleteUndo', outcome: 'saved' } });
+        expect(stored().deletedAt).toBeUndefined();
+        expect(data().tasks.filter((row) => row.projectId === 'p').map((row) => row.id).sort()).toEqual(['t1', 't2']);
+        expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+    });
+});
+
+
+describe('project to section', () => {
+    const task = { id: 't1', title: 'Wash', status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at };
+    const projects = [project('p', { tagIds: [] }), project('d', { tagIds: [], title: 'Home' }), project('archived', { status: 'archived' })];
+
+    it('answers the sheet row, the destinations and the preview in the app language', async () => {
+        const { host } = await open({ projects, tasks: [task] as never });
+        const none = host.getProjectToSectionOptions({ projectId: 'p', destinationId: null, title: 'Kitchen' });
+        expect(none).toMatchObject({ ok: true, value: { row: { label: 'Convert to section…', eligible: true, blocked: null },
+            destinations: [{ id: 'd', title: 'Home' }], preview: null, blocked: null } });
+        const picked = host.getProjectToSectionOptions({ projectId: 'p', destinationId: 'd', title: ' Kitchen ' });
+        expect(picked).toMatchObject({ ok: true, value: { blocked: null, preview: { named: 'New section: Kitchen',
+            lines: expect.arrayContaining(['Move 1 tasks (0 done, 0 archived) from Kitchen into Home.', 'The source project moves to Trash. Already-deleted tasks stay in Trash.']) } } });
+        const { host: tagged } = await open({ projects: [project('p'), project('d')] });
+        expect(tagged.getProjectToSectionOptions({ projectId: 'p', destinationId: null, title: 'Kitchen' }))
+            .toMatchObject({ ok: true, value: { row: { eligible: false, blocked: 'Remove this project’s tags first.' }, destinations: [] } });
+    });
+
+    it('converts once, with RN\'s Undo toast, and the Undo puts the project and its task back', async () => {
+        const { host, data } = await open({ projects, tasks: [task] as never });
+        const shown = host.getProjectToSectionOptions({ projectId: 'p', destinationId: 'd', title: ' Kitchen ' }) as { value: { preview: { token: string } } };
+        const convert = { requestId: uuid(30), projectId: 'p', kind: 'toSection', destinationProjectId: 'd', title: ' Kitchen ', expected: shown.value.preview.token } as never;
+        expect(await host.runProjectEdit(convert)).toMatchObject({ ok: true, value: { kind: 'toSection', outcome: 'saved',
+            reply: { destinationProjectId: 'd', message: 'Project converted to section.', undoLabel: 'Undo' } } });
+        expect(data().projects.find((row) => row.id === 'p')?.deletedAt).toEqual(expect.any(String));
+        expect(data().sections.find((row) => row.id === uuid(30))).toMatchObject({ projectId: 'd', title: 'Kitchen' });
+        expect(data().tasks.find((row) => row.id === 't1')).toMatchObject({ projectId: 'd', sectionId: uuid(30) });
+        expect(await host.runProjectEdit(convert)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        const undo = { requestId: uuid(31), projectId: 'p', kind: 'toSectionUndo', convertRequestId: uuid(30) } as never;
+        expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { kind: 'toSectionUndo', outcome: 'saved' } });
+        expect(data().projects.find((row) => row.id === 'p')?.deletedAt).toBeUndefined();
+        expect(data().tasks.find((row) => row.id === 't1')?.projectId).toBe('p');
+        expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+    });
+});
+
+
+describe('project actions: retries, replays and refused Undos', () => {
+    const task = (id: string) => ({ id, title: id, status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at });
+    const restart = async () => {
+        const host = createNativeHostContract();
+        expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+        return host;
+    };
+    const copies = (data: AppData) => data.projects.filter((row) => row.title === 'Kitchen (Copy)');
+
+    it('a Duplicate retried after its save failed answers its copy and toast once; a replay after a restart writes no second copy', async () => {
+        let failing = false;
+        const { host, data } = await open({}, () => failing);
+        const edit = { requestId: uuid(40), projectId: 'p', kind: 'duplicate' } as never;
+        failing = true;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        const retried = await host.runProjectEdit(edit);
+        expect(retried).toMatchObject({ ok: true, value: { reply: { id: expect.any(String), message: 'Project duplicated' } } });
+        expect(copies(data())).toHaveLength(1);
+        const replayed = await (await restart()).runProjectEdit(edit);
+        expect(replayed).toMatchObject({ ok: true, value: { outcome: 'unchanged', reply: { id: (retried as { value: { reply: { id: string } } }).value.reply.id } } });
+        await flushPendingSave();
+        expect(copies(data())).toHaveLength(1);
+    });
+
+    it('a Delete retried after its save failed answers RN\'s toast again, and its Undo still restores it', async () => {
+        let failing = false;
+        const { host, stored } = await open({ tasks: [task('t1')] as never }, () => failing);
+        const edit = { requestId: uuid(41), projectId: 'p', kind: 'delete' } as never;
+        failing = true;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { reply: { deletion: { undoLabel: 'Undo' } } } });
+        expect(await host.runProjectEdit({ requestId: uuid(42), projectId: 'p', kind: 'deleteUndo', deleteRequestId: uuid(41) } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored().deletedAt).toBeUndefined();
+    });
+
+    it('refuses an Undo after a restart (its Delete is gone) and writes nothing', async () => {
+        const { host, saves } = await open({ tasks: [task('t1')] as never });
+        expect(await host.runProjectEdit({ requestId: uuid(43), projectId: 'p', kind: 'delete' } as never)).toMatchObject({ ok: true });
+        const restarted = await restart();
+        const count = saves();
+        expect(await restarted.runProjectEdit({ requestId: uuid(44), projectId: 'p', kind: 'deleteUndo', deleteRequestId: uuid(43) } as never))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(saves()).toBe(count);
+    });
+
+    it('refuses an Undo after a sync changed the deleted project, and writes nothing', async () => {
+        const { host, saves, stored } = await open({ tasks: [task('t1')] as never });
+        expect(await host.runProjectEdit({ requestId: uuid(45), projectId: 'p', kind: 'delete' } as never)).toMatchObject({ ok: true });
+
+        const synced = { ...useTaskStore.getState()._projectsById.get('p')!, title: 'Synced', rev: 99, updatedAt: '2026-10-02T00:00:00.000Z' };
+        useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((row) => row.id === 'p' ? synced : row),
+            _projectsById: new Map(state._projectsById).set('p', synced) }) as never);
+        const count = saves();
+        expect(await host.runProjectEdit({ requestId: uuid(46), projectId: 'p', kind: 'deleteUndo', deleteRequestId: uuid(45) } as never))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(saves()).toBe(count);
+        expect(useTaskStore.getState()._projectsById.get('p')?.deletedAt).toEqual(expect.any(String));
+        expect(stored()).toBeDefined();
+    });
+
+    it('converts only what the preview showed: a task added since refuses with RN\'s message and writes nothing', async () => {
+        const projects = [project('p', { tagIds: [] }), project('d', { tagIds: [], title: 'Home' })];
+        const { host, saves } = await open({ projects, tasks: [task('t1')] as never });
+        const shown = host.getProjectToSectionOptions({ projectId: 'p', destinationId: 'd', title: 'Kitchen' });
+        const expected = (shown as { value: { preview: { token: string } } }).value.preview.token;
+        expect(expected).toEqual(expect.any(String));
+        await useTaskStore.getState().addTask('Synced task', { projectId: 'p', status: 'next' });
+        const count = saves();
+        expect(await host.runProjectEdit({ requestId: uuid(47), projectId: 'p', kind: 'toSection', destinationProjectId: 'd', title: 'Kitchen', expected } as never))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION', message: expect.stringContaining('The project changed. Review the conversion again.') } });
+        expect(saves()).toBe(count);
+    });
+});
+
+
+describe('runProjectEdit sort', () => {
+    it('stores the chosen sort once, a replay writes nothing, and a filed project refuses it', async () => {
+        const { host, stored, saves } = await open();
+        const options = host.getProjectTaskSortOptions({ projectId: 'p' });
+        expect(options).toMatchObject({ ok: true, value: { canEdit: true, choices: expect.arrayContaining([expect.objectContaining({ id: 'default', selected: true })]) } });
+        const edit = { requestId: uuid(60), projectId: 'p', kind: 'sort', sortBy: 'title' } as never;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { kind: 'sort', outcome: 'saved' } });
+        expect(stored().taskSortBy).toBe('title');
+        const count = saves();
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+        expect(await host.runProjectEdit({ requestId: uuid(61), projectId: 'archived', kind: 'sort', sortBy: 'title' } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'blocked' } });
+        expect(await host.runProjectEdit({ requestId: uuid(62), projectId: 'p', kind: 'sort', sortBy: 'nonsense' } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+});
+
+
+describe('runProjectEdit task order', () => {
+    const task = (id: string, order: number) => ({ id, title: id, status: 'next', projectId: 'p', order, orderNum: order, tags: [], contexts: [], createdAt: at, updatedAt: at });
+
+    it('moves a task to the top once, a replay writes nothing, and a stale order refuses', async () => {
+        const { host, data, saves } = await open({ tasks: [task('t1', 0), task('t2', 1), task('t3', 2)] as never });
+        const view = host.getProjectTaskOrderView({ projectId: 'p', offset: 0, limit: 50, showCompleted: false, filters: {} });
+        expect(view).toMatchObject({ ok: true, value: { canReorder: true, orderToken: expect.any(String) } });
+        const expectedOrder = (view as { value: { orderToken: string } }).value.orderToken;
+        const move = { requestId: uuid(70), projectId: 'p', kind: 'taskOrder', taskId: 't3', after: null, showCompleted: false, filters: {}, expectedOrder } as never;
+        expect(await host.runProjectEdit(move)).toMatchObject({ ok: true, value: { kind: 'taskOrder', outcome: 'saved' } });
+        const order = () => data().tasks.filter((row) => row.projectId === 'p').sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((row) => row.id);
+        expect(order()).toEqual(['t3', 't1', 't2']);
+        const count = saves();
+        expect(await host.runProjectEdit(move)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+        const stale = { requestId: uuid(71), projectId: 'p', kind: 'taskOrder', taskId: 't1', after: { type: 'task', id: 't2' }, showCompleted: false, filters: {}, expectedOrder } as never;
+        expect(await host.runProjectEdit(stale)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(order()).toEqual(['t3', 't1', 't2']);
+    });
+
+    it('moves a task in a project whose order token passes 100,000 characters, as the view offers reorder up to its byte cap', async () => {
+        const archived = Array.from({ length: 1_600 }, (_, i) => ({ ...task(`archived-${i}`, 10 + i), status: 'archived' }));
+        const { host, data } = await open({ tasks: [task('t1', 0), task('t2', 1), task('t3', 2), ...archived] as never });
+        const view = host.getProjectTaskOrderView({ projectId: 'p', offset: 0, limit: 50, showCompleted: false, filters: {} });
+        expect(view).toMatchObject({ ok: true, value: { canReorder: true } });
+        const expectedOrder = (view as { value: { orderToken: string } }).value.orderToken;
+        expect(expectedOrder.length).toBeGreaterThan(100_000);
+        const move = { requestId: uuid(72), projectId: 'p', kind: 'taskOrder', taskId: 't3', after: null, showCompleted: false, filters: {}, expectedOrder } as never;
+        expect(await host.runProjectEdit(move)).toMatchObject({ ok: true, value: { kind: 'taskOrder', outcome: 'saved' } });
+        const live = data().tasks.filter((row) => row.projectId === 'p' && row.status === 'next').sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        expect(live.map((row) => row.id)).toEqual(['t3', 't1', 't2']);
+    });
+});
+
+
+describe('runProjectEdit flow mode (#1429)', () => {
+    const perSection = { isSequential: false, perSectionFlow: true };
+    const flowRead = (host: Awaited<ReturnType<typeof open>>['host']) =>
+        (host.getProjectFlowOptions({ projectId: 'p', flowMode: true } as never) as { value: { flowMode: string } }).value.flowMode;
+
+    it('reads a Per section project as Per section for Android\'s Flow Mode', async () => {
+        const { host } = await open({ projects: [project('p', perSection)] });
+        expect(flowRead(host)).toBe('perSection');
+    });
+
+
+    it('gives undecided sections their current flow on entering Per section and keeps a stored choice (review N5)', async () => {
+        const choice = (id: string, order: number, isSequential: boolean) => ({ ...section(id, order), isSequential });
+        const fromParallel = await open({ sections: [section('s1', 0), choice('kept', 1, true)] });
+        expect(await fromParallel.host.runProjectEdit({ requestId: uuid(76), projectId: 'p', kind: 'flowMode', mode: 'perSection' } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(fromParallel.data().sections.map((row) => [row.id, row.isSequential])).toEqual([['s1', false], ['kept', true]]);
+        const fromWithin = await open({ projects: [project('p', { isSequential: true, sequentialScope: 'section' })], sections: [section('s1', 0), choice('kept', 1, false)] });
+        expect(await fromWithin.host.runProjectEdit({ requestId: uuid(77), projectId: 'p', kind: 'flowMode', mode: 'perSection' } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(fromWithin.data().sections.map((row) => [row.id, row.isSequential])).toEqual([['s1', true], ['kept', false]]);
+    });
+
+    it('stores exactly the mode picked, each once, and a replay writes nothing', async () => {
+        const { host, stored, saves } = await open({ projects: [project('p', perSection)], sections: [section('s1', 0)] });
+        const run = (n: number, mode: string) => host.runProjectEdit({ requestId: uuid(n), projectId: 'p', kind: 'flowMode', mode } as never);
+        expect(await run(80, 'perSection')).toEqual({ ok: true, value: { id: 'p', kind: 'flowMode', outcome: 'unchanged' } });
+        expect(await run(81, 'sequential')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject({ isSequential: true, perSectionFlow: false });
+        expect(flowRead(host)).toBe('sequential');
+        expect(await run(82, 'parallel')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject({ isSequential: false, perSectionFlow: false });
+        expect(flowRead(host)).toBe('parallel');
+        expect(await run(83, 'perSection')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject(perSection);
+        expect(flowRead(host)).toBe('perSection');
+        const count = saves();
+        expect(await run(83, 'perSection')).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+    });
+
+    it('refuses a mode for an archived project', async () => {
+        const { host } = await open();
+        expect(await host.runProjectEdit({ requestId: uuid(84), projectId: 'archived', kind: 'flowMode', mode: 'perSection' } as never))
+            .toEqual({ ok: true, value: { id: 'archived', kind: 'flowMode', outcome: 'blocked' } });
+    });
+
+    it('refuses a section\'s flow in an archived Per section project and writes nothing (review N5)', async () => {
+        const { host, data, saves } = await open({ projects: [project('p', { ...perSection, status: 'archived' })], sections: [section('s1', 0)] });
+        const count = saves();
+        const reply = await host.runProjectEdit({ requestId: uuid(89), projectId: 'p', kind: 'sectionFlow', sectionId: 's1', sequential: true } as never);
+        expect(reply).toMatchObject({ ok: true, value: { outcome: 'blocked' } });
+        expect(data().sections[0].isSequential).toBeUndefined();
+        expect(saves()).toBe(count);
+    });
+
+    it('stores a section\'s Parallel or Sequential choice in a Per section project, and shows it on the manager rows', async () => {
+        const { host, data } = await open({ projects: [project('p', perSection)], sections: [section('s1', 0), section('s2', 1)] });
+        const rows = () => (host.getProjectSectionOrderOptions({ projectId: 'p', sectionFlow: true } as never) as { value: { sections: Array<{ id: string; sequential: boolean | null }> } })
+            .value.sections.map(({ id, sequential }) => ({ id, sequential }));
+        expect(rows()).toEqual([{ id: 's1', sequential: false }, { id: 's2', sequential: false }]);
+        const edit = { requestId: uuid(86), projectId: 'p', kind: 'sectionFlow', sectionId: 's1', sequential: true } as never;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { kind: 'sectionFlow', outcome: 'saved' } });
+        expect(data().sections.find((row) => row.id === 's1')?.isSequential).toBe(true);
+        expect(data().sections.find((row) => row.id === 's2')?.isSequential).toBeUndefined();
+        expect(rows()).toEqual([{ id: 's1', sequential: true }, { id: 's2', sequential: false }]);
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(await host.runProjectEdit({ requestId: uuid(87), projectId: 'p', kind: 'sectionFlow', sectionId: 's1', sequential: false } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(data().sections.find((row) => row.id === 's1')?.isSequential).toBe(false);
+    });
+
+    it('offers no section choice and writes none while the project is not Per section', async () => {
+        const { host, data } = await open({ sections: [section('s1', 0)] });
+        expect((host.getProjectSectionOrderOptions({ projectId: 'p', sectionFlow: true } as never) as { value: { sections: Array<{ sequential: unknown }> } }).value.sections[0].sequential).toBeNull();
+        expect(await host.runProjectEdit({ requestId: uuid(88), projectId: 'p', kind: 'sectionFlow', sectionId: 's1', sequential: true } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'blocked' } });
+        expect(data().sections[0].isSequential).toBeUndefined();
+    });
+});
+
+
+describe('iOS-read shapes stay exact (review B1, B2)', () => {
+    it('keeps getProjectFlowOptions at revision, project and canChange unless Android asks for flowMode', async () => {
+        const { host } = await open({ projects: [project('p', { isSequential: false, perSectionFlow: true })], sections: [section('s1', 0)] });
+        const ios = host.getProjectFlowOptions({ projectId: 'p' }) as { ok: true; value: Record<string, unknown> };
+        expect(Object.keys(ios.value).sort()).toEqual(['canChange', 'project', 'revision']);
+        expect(Object.keys(ios.value.project as object).sort()).toEqual(['id', 'isSequential', 'rev', 'revBy', 'sequentialScope', 'status', 'title', 'updatedAt']);
+        const android = host.getProjectFlowOptions({ projectId: 'p', flowMode: true } as never) as { ok: true; value: Record<string, unknown> };
+        expect(android.value).toEqual({ ...ios.value, flowMode: 'perSection' });
+    });
+
+    it('keeps each section order row at id, title, canMoveUp and canMoveDown unless Android asks for the section flow', async () => {
+        const { host } = await open({ projects: [project('p', { isSequential: false, perSectionFlow: true })], sections: [section('s1', 0), section('s2', 1)] });
+        const ios = host.getProjectSectionOrderOptions({ projectId: 'p' }) as { ok: true; value: Record<string, unknown> & { sections: object[] } };
+        expect(Object.keys(ios.value).sort()).toEqual(['canReorder', 'project', 'revision', 'sections', 'token']);
+        for (const row of ios.value.sections) expect(Object.keys(row).sort()).toEqual(['canMoveDown', 'canMoveUp', 'id', 'title']);
+        const android = host.getProjectSectionOrderOptions({ projectId: 'p', sectionFlow: true } as never) as typeof ios;
+        expect(android.value.sections.map((row) => (row as { sequential: unknown }).sequential)).toEqual([false, false]);
+    });
+});
+
+
+describe('runProjectEdit move (#1263)', () => {
+    const ordered = (id: string, order: number, extra: Partial<Project> = {}) => project(id, { title: id, order, ...extra });
+    const fixture = () => ({ projects: [ordered('p1', 0, { areaId: 'a' }), ordered('p2', 1, { areaId: 'a' }), ordered('p3', 2, { areaId: 'a' }),
+        ordered('star', 3, { areaId: 'a', isFocused: true }), ordered('q1', 0), ordered('q2', 1)] });
+    const group = (host: Awaited<ReturnType<typeof open>>['host'], areaId: string | null) => {
+        const view = host.getProjects();
+        if (!view.ok) throw new Error(view.error.message);
+        return view.value.active.find((entry) => entry.areaId === areaId)!.projects.map((row) => row.id);
+    };
+    const move = (n: number, projectId: string, direction: 'up' | 'down', order: string[]) =>
+        ({ requestId: uuid(n), projectId, kind: 'move', direction, order }) as never;
+
+    it('swaps a project with its shown neighbour in its area once, and a replay writes nothing', async () => {
+        const { host, saves } = await open(fixture());
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p2', 'p3']);
+        expect(await host.runProjectEdit(move(90, 'p3', 'up', ['star', 'p1', 'p2', 'p3']))).toMatchObject({ ok: true, value: { kind: 'move', outcome: 'saved' } });
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p3', 'p2']);
+        expect(group(host, null)).toEqual(['q1', 'q2']);
+        const count = saves();
+        expect(await host.runProjectEdit(move(90, 'p3', 'up', ['star', 'p1', 'p2', 'p3']))).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+        expect(await host.runProjectEdit(move(91, 'q1', 'down', ['q1', 'q2']))).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(group(host, null)).toEqual(['q2', 'q1']);
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p3', 'p2']);
+    });
+
+    it('refuses a move at an area\'s edge and past a starred project, as RN offers none', async () => {
+        const { host, saves } = await open(fixture());
+        const count = saves();
+        const shown = ['star', 'p1', 'p2', 'p3'];
+        for (const [n, id, direction] of [[92, 'p3', 'down'], [93, 'p1', 'up'], [94, 'star', 'down']] as const) {
+            expect(await host.runProjectEdit(move(n, id, direction, shown))).toMatchObject({ ok: true, value: { outcome: 'blocked' } });
+        }
+        expect(group(host, 'a')).toEqual(shown);
+        expect(saves()).toBe(count);
+    });
+
+    it('owes a failed save, and the retry moves the project once (review NOTE 4)', async () => {
+        let failing = false;
+        const { host, data } = await open(fixture(), () => failing);
+        failing = true;
+        const edit = move(98, 'p3', 'up', ['star', 'p1', 'p2', 'p3']);
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true });
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p3', 'p2']);
+        const stored = data().projects.filter((row) => row.areaId === 'a').sort((x, y) => (x.order ?? 0) - (y.order ?? 0)).map((row) => row.id);
+        expect(stored.indexOf('p3')).toBeLessThan(stored.indexOf('p2'));
+        expect(stored.indexOf('p1')).toBeLessThan(stored.indexOf('p3'));
+    });
+
+    it('plans and writes in one step: an order synced after the read is refused, never overwritten (review NOTE 2)', async () => {
+        const { host } = await open(fixture());
+        const read = host.getProjects.bind(host);
+        let reads = 0;
+
+        vi.spyOn(host, 'getProjects').mockImplementation((...args) => {
+            reads += 1;
+            if (reads === 2) void useTaskStore.getState().reorderProjects(['p2', 'p1', 'p3', 'star'], 'a');
+            return read(...args);
+        });
+        expect(await host.runProjectEdit(move(99, 'p3', 'up', ['star', 'p1', 'p2', 'p3']))).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        vi.restoreAllMocks();
+        expect(group(host, 'a')).toEqual(['star', 'p2', 'p1', 'p3']);
+    });
+
+
+    it('keeps getProjects at its five keys unless Android asks for the moves', async () => {
+        const { host } = await open(fixture());
+        const ios = host.getProjects() as { ok: true; value: Record<string, unknown> };
+        expect(Object.keys(ios.value).sort()).toEqual(['active', 'archived', 'deferred', 'revision', 'version']);
+        const android = host.getProjects({ moves: true }) as { ok: true; value: { moves: Record<string, unknown> } };
+        expect(android.value.moves.p2).toEqual({ up: true, down: true });
+        expect(android.value.moves.star).toEqual({ up: false, down: false });
+    });
+
+    it('refuses an order that changed since it was shown, and writes nothing', async () => {
+        const { host, saves } = await open(fixture());
+        const count = saves();
+        expect(await host.runProjectEdit(move(95, 'p2', 'up', ['star', 'p2', 'p1', 'p3']))).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await host.runProjectEdit(move(96, 'p2', 'up', ['p1', 'p2']))).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p2', 'p3']);
+        expect(saves()).toBe(count);
+        expect(await host.runProjectEdit({ requestId: uuid(97), projectId: 'p2', kind: 'move', direction: 'left', order: [] } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+});
+
+
+describe('Manage areas sheet Delete (#1263 review 2a)', () => {
+    it('refuses a sheet Delete once a live project uses the area, and deletes it while none does', async () => {
+        const { host, data, saves } = await open();
+        const read = host.getProjectAreaManager();
+        if (!read.ok) throw new Error(read.error.message);
+        const row = read.value.areas[0];
+        expect(row).toMatchObject({ id: 'a', inUse: false });
+        await useTaskStore.getState().updateProject('p', { areaId: 'a' });
+        await flushPendingSave();
+        const count = saves();
+        expect(await host.deleteManageItem({ requestId: uuid(200), target: row.delete, ifUnused: true }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(saves()).toBe(count);
+        expect(data().areas.find((item) => item.id === 'a')?.deletedAt).toBeUndefined();
+        expect(data().projects.find((item) => item.id === 'p')?.areaId).toBe('a');
+        await useTaskStore.getState().updateProject('p', { areaId: undefined });
+        expect(await host.deleteManageItem({ requestId: uuid(201), target: row.delete, ifUnused: true })).toEqual({ ok: true, value: { changed: true } });
+        await flushPendingSave();
+        expect(data().areas.find((item) => item.id === 'a')?.deletedAt).toBeDefined();
     });
 });

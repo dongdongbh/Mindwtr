@@ -1,13 +1,5 @@
-// The mobile apps' sync-encryption API (#1056 phase 2). Every function dispatches on the
-// configured backend and then delegates to the transition orchestration in
-// sync-encryption.ts with a remote port — the ordering, verify-before-delete, and resume
-// semantics all live there, in one place, for File Sync, WebDAV and Dropbox alike.
-//
-// The host supplies its location, state store, crypto, fetch, XML parser and backend config
-// through `SyncEncryptionServiceDeps`; File Sync's folder IO and lock stay behind the host's
-// `fileSync` port. React Native, the native hosts and desktop (WebDAV and Dropbox only) bind it.
-//
-// Out of scope by design: CloudKit and self-hosted mindwtr-cloud.
+
+
 
 import { runSerializedSyncDocumentOperation } from './data-transfer-transaction';
 import {
@@ -96,9 +88,7 @@ type TransitionRemotePort = SyncEncryptionRemotePort & {
     acquireRemoteMutationFence?: () => Promise<SyncRemoteMutationFenceLease>;
 };
 
-/** The transition and durable local commit completed, but the conditional remote
- * fence cleanup did not. Callers must refresh/close as success and show a bounded
- * cleanup warning; retrying the already-completed transition is the wrong remedy. */
+
 export class SyncEncryptionCleanupDeferredError<T = void> extends Error {
     readonly retryAfterMs: number;
 
@@ -141,17 +131,13 @@ const assertManagedRemoteArtifactName = (name: string): string => {
 
 export type SyncEncryptionProgressCallback = (progress: SyncEncryptionTransitionProgress) => void;
 
-/** Phase-3 API. `appData` is the caller's current local document — it supplies the
- *  attachment worklist. Transitions never write to it; local data is untouched by
- *  design (backward-compat requirement #4). */
+
 export type SyncEncryptionTransitionOptions = {
     appData?: AppData | null;
     onProgress?: SyncEncryptionProgressCallback;
 };
 
-/** Maps a thrown transition failure onto the fixed outcome vocabulary. Anything unrecognised
- *  stays `error` and carries the error NAME plus a clamped, sanitized message — never a
- *  passphrase, which no transition error message contains. */
+
 const transitionOutcomeForError = (error: unknown): SyncEncryptionTransitionOutcome => {
     if (error instanceof SyncEncryptionRemoteConflictError) return 'conflict';
     const message = error instanceof Error ? error.message : String(error ?? '');
@@ -162,12 +148,7 @@ const transitionOutcomeForError = (error: unknown): SyncEncryptionTransitionOutc
     return 'error';
 };
 
-/**
- * Start/end lines around one transition (#1056 diagnostics trail), plus a per-phase progress
- * line when a phase completes. Deliberately NOT one line per artifact: a folder with hundreds of
- * attachments would push the rest of the cycle out of the rotated log for no extra diagnosis.
- * Exported for desktop's File Sync transitions, which run in Rust outside this service.
- */
+
 export const runSyncEncryptionTransitionWithDiagnostics = async <T>(
     logEvent: SyncEncryptionStateStore['logSyncEncryptionEvent'],
     kind: SyncEncryptionTransitionLogKind,
@@ -180,15 +161,14 @@ export const runSyncEncryptionTransitionWithDiagnostics = async <T>(
         void logEvent(
             SYNC_ENCRYPTION_LOG_EVENTS.transition,
             buildSyncEncryptionTransitionExtra(input),
-            // Transitions rewrite every artifact at the sync location. Their outcome must be in
-            // the shareable log whether or not Debug logging happened to be on at the time.
+
+
             { level: input.outcome && input.outcome !== 'ok' ? 'warn' : 'info', force: true },
         );
     };
     logTransition({ kind, backend, phase: 'start' });
-    // Core reports BEFORE it increments its counter, so `completed` never reaches `total`
-    // inside the callback. A phase is finished when the NEXT phase reports (its `completed`
-    // is exactly what the finished phase got through) or when the run returns.
+
+
     let last: SyncEncryptionTransitionProgress | undefined;
     const logPhase = (phase: string, planned: number, done: number) => {
         logTransition({ kind, backend, phase: 'artifact', artifact: phase, planned, done });
@@ -218,16 +198,7 @@ export const runSyncEncryptionTransitionWithDiagnostics = async <T>(
     }
 };
 
-/**
- * The artifact set a transition covers, derived from authoritative provider enumeration
- * plus the remote document. The provider list includes unreferenced files; the document
- * keeps referenced-but-missing keys in the inventory so a peer creation is also detected.
- *
- * Both the plaintext and `.enc` names are listed for every document: core uses the `.enc`
- * entries to resume (re-deriving the key from an already-written header) and the plain
- * entries as the migration worklist, and its port reads return `null` for whichever side
- * does not exist.
- */
+
 const buildTransitionEntries = (appData: AppData | null): SyncEncryptionRemoteEntry[] => {
     const entries: SyncEncryptionRemoteEntry[] = [
         { name: SYNC_FILE_NAME, kind: 'document' },
@@ -278,7 +249,7 @@ const createAuthorizedDropboxFencePort = (
     };
 };
 
-/** The state store members the service reads and writes. */
+
 export type SyncEncryptionServiceStatePort = Pick<
     SyncEncryptionStateStore,
     | 'loadSyncEncryptionLocalState'
@@ -304,22 +275,20 @@ export type SyncEncryptionDropboxConfig = {
     fetcher: typeof fetch;
 };
 
-/** File Sync's folder, held by the host's folder lock. */
+
 export type SyncEncryptionFileSyncPort<Lease> = {
-    /** Takes the same folder lock an ordinary sync takes. */
+
     acquireLease(syncPath: string): Promise<Lease>;
-    /** Opens the folder's artifacts as a transition remote, or `null` when the folder cannot
-     *  be opened. Runs while the lease is held, after the host has recovered any attachment
-     *  publication this device left unfinished. */
+
+
     openRemotePort(syncPath: string): Promise<SyncEncryptionRemotePort | null>;
     revalidateLease(lease: Lease): Promise<void>;
     releaseLease(lease: Lease): Promise<void>;
-    /** True for the release error that means the lock file was replaced under us. */
+
     isLeaseIdentityLostError(error: unknown): boolean;
 };
 
-/** Where this device syncs, as the service needs it. `off`: no durable backend yet (a
- *  typed-but-unproven config persists nothing until its activation probe passes). */
+
 export type SyncEncryptionLocationTarget =
     | { backend: 'off' }
     | { backend: 'file'; syncPath: string | null }
@@ -329,14 +298,14 @@ export type SyncEncryptionLocationTarget =
 
 export type SyncEncryptionLocationPort = {
     readTarget(): Promise<SyncEncryptionLocationTarget>;
-    /** The persisted location's scope (`buildSyncLocationScope`), or `null`. */
+
     readLocationScope(): Promise<string | null>;
-    /** Forgets every completed-cycle proof (fast-sync state, then the attachment presence
-     *  stamp). Rejects while one of them could not be removed. */
+
+
     invalidateCycleProofs(): Promise<void>;
 };
 
-/** The location over the mobile key-value store's sync keys. */
+
 export const createStorageSyncEncryptionLocation = (
     storage: Pick<SyncKeyValueStoragePort, 'getItem' | 'removeItem'>,
 ): SyncEncryptionLocationPort => ({
@@ -357,34 +326,34 @@ export const createStorageSyncEncryptionLocation = (
     },
 });
 
-/** The diagnostics backend name: the stored backend value, which says `cloud` for Dropbox. */
+
 const backendLabel = (target: SyncEncryptionLocationTarget | null): string =>
     !target ? 'off' : target.backend === 'dropbox' ? 'cloud' : target.backend;
 
 export type SyncEncryptionServiceDeps<Lease> = {
-    /** Host WebDAV transport cap; omitted for RN and other backends. */
+
     maxEncryptedArtifactBytes?: number;
-    /** Written into the remote mutation fence; peers name the holder by it. */
+
     fenceOwnerId?: string;
     state: SyncEncryptionServiceStatePort;
     crypto: SyncCryptoPrimitives;
-    /** The default fetcher for provider inventory, Dropbox and fence requests. */
+
     fetch: typeof fetch;
     parseWebdavXml: WebdavXmlParser;
     loadWebDavConfig(): Promise<SyncEncryptionWebDavConfig | null>;
     webDavRequestOptions(allowInsecureHttp?: boolean): WebDavOptions;
     getDropboxClientId(): Promise<string>;
-    /** Runs `operation` with a valid access token, refreshing once on an unauthorized error. */
+
     runDropboxAuthorized<T>(clientId: string, operation: (accessToken: string) => Promise<T>): Promise<T>;
-    /** Absent on a host without File Sync; the backend then reports unsupported. */
+
     fileSync?: SyncEncryptionFileSyncPort<Lease>;
 } & (
     | { location: SyncEncryptionLocationPort; storage?: never }
-    // The native hosts still pass their key-value store; core maps its sync keys.
+
     | { storage: Pick<SyncKeyValueStoragePort, 'getItem' | 'removeItem'>; location?: never }
 );
 
-/** What a location holds: no ciphertext, only ciphertext, or both (an encryption change cut off there). */
+
 export type SyncLocationCiphertext = 'plaintext' | 'encrypted' | 'mixed';
 
 type BackendTarget<Lease> =
@@ -435,7 +404,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
             headers.Authorization = `Basic ${bytesToBase64(new TextEncoder().encode(`${options.username}:${options.password}`))}`;
         }
         const fetcher = options.fetcher ?? deps.fetch;
-        // `null` = the collection itself answered 404.
+
         const propfind = (): Promise<string[] | null> => fetchWithTimeoutAndConsume(
             collectionUrl,
             { method: 'PROPFIND', headers, body: DAV_PROPFIND_BODY, signal: options.signal },
@@ -453,9 +422,8 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         );
         const keys = await propfind();
         if (keys) return keys;
-        // A sync root that never held an attachment has no `attachments/` collection yet (#1250).
-        // A bare 404 is not proof of an empty inventory, so create the collection and list it
-        // again: only the server's own listing of it counts, and a second 404 still fails closed.
+
+
         await webdavMakeDirectory(collectionUrl, { ...options, fetcher });
         const created = await propfind();
         if (!created) throw new Error('WebDAV attachment inventory PROPFIND failed (404)');
@@ -517,9 +485,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         return null;
     };
 
-    /** Reads every managed document once, derives the attachment worklist from those exact
-     * bytes, and returns the document generations alongside the entries. Core reuses this
-     * snapshot for CAS instead of opening a list-to-preflight race with a second document read. */
+
     const captureTransitionInventory = async (
         read: (name: string) => Promise<SyncEncryptionRemoteRead>,
         listAttachmentKeys: () => Promise<string[]>,
@@ -593,7 +559,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
                 },
                 write: async (name, bytes, expectedVersion) => {
                     await assertHeld();
-                    await remote.write(name, bytes, expectedVersion);
+                    return remote.write(name, bytes, expectedVersion);
                 },
                 remove: async (name, expectedVersion) => {
                     await assertHeld();
@@ -631,18 +597,15 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
                 await assertHeld();
                 await flushSyncEncryptionLocalState();
                 await assertHeld();
-                // Native release performs the final lock-path identity validation before
-                // dropping the stable authority. Keep it inside the material transaction:
-                // a legacy peer that replaces `.mindwtr.lock` in the last await gap must
-                // restore the recovery journal/key instead of leaving enabled state behind.
+
+
                 await releaseLocalFileFence?.();
                 return result;
             } catch (primaryError) {
                 if (!localMaterialTouched) throw primaryError;
                 try {
-                    // The retained stable authority remains held even when the compatibility
-                    // lock path was replaced. Restore the durable journal/state before the
-                    // independent SecureStore domain, then surface the lock loss.
+
+
                     await syncEncryptionLocalState.write(stateBeforeFinalCommit);
                     await flushSyncEncryptionLocalState();
                     if (previousKey) await syncEncryptionKeyCache.setKey(previousKey);
@@ -704,7 +667,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
             },
             write: async (name, bytes, expectedVersion) => {
                 await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
-                await remote.write(name, bytes, expectedVersion);
+                return remote.write(name, bytes, expectedVersion);
             },
             remove: async (name, expectedVersion) => {
                 await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
@@ -783,8 +746,8 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
             try {
                 retryAfterMs = lease.retryAfterMs();
             } catch {
-                // The cleanup failure remains bounded by the lease protocol even if
-                // the adapter cannot provide a more precise remaining duration.
+
+
             }
             throw new SyncEncryptionCleanupDeferredError(result, cleanupError, retryAfterMs);
         }
@@ -801,13 +764,13 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
             username: config.username,
             password: config.password,
         };
-        // Documents sit at the sync root; attachment entry names are already the `cloudKey`
-        // (`attachments/<id><ext>`), which is root-relative too.
+
+
         const urlFor = (name: string): string => `${baseSyncUrl}/${assertManagedRemoteArtifactName(name)}`;
         const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
             webdavGetFileVersioned(urlFor(name), requestOptions);
-        // The first bytes only (a ranged GET); a server that ignores the range sends the whole file, read whole within the
-        // download limit.
+
+
         const readHead = async (name: string): Promise<Uint8Array | null> => {
             const head = await webdavGetFileVersioned(urlFor(name), {
                 ...requestOptions, headers: { Range: 'bytes=0-63' }, maxBytes: 1024 * 1024, treatOversizeAsAbsent: true,
@@ -820,8 +783,8 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         return {
             maxEncryptedArtifactBytes: deps.maxEncryptedArtifactBytes,
             acquireRemoteMutationFence: async () => {
-                // The fence is a versioned write like every transition write: a server without strong ETags is refused
-                // here, before the fence file is written (it could never be read back or removed there).
+
+
                 try {
                     await assertWebdavStrongEtagSupport(urlFor(SYNC_FILE_NAME), requestOptions);
                 } catch (error) {
@@ -888,13 +851,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         };
     };
 
-    /**
-     * Whether the location holds ciphertext beside plaintext: 'mixed' when an encryption change was cut off there. Not
-     * serialized and takes no fence, so a cycle may ask it (WebDAV and Dropbox; File Sync takes the folder's lock, which a
-     * running cycle already holds). `sample` (the default) reads the first and the last attachment in name order: a
-     * transition seals or opens attachments one at a time in that order, so one it cut off leaves the first sealed and the
-     * last not (enable) or the other way round (disable). `full` reads every artifact.
-     */
+
     const probeSyncLocationCiphertext = async (
         options: { full?: boolean; webdav?: SyncEncryptionWebDavConfig; dropbox?: SyncEncryptionDropboxConfig } = {},
     ): Promise<SyncLocationCiphertext> => {
@@ -918,7 +875,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
             const picked = options.full ? attachments : Array.from(new Set([attachments[0], attachments[attachments.length - 1]]))
                 .filter((name): name is string => Boolean(name));
             for (const name of picked) note(port.readHead ? await port.readHead(name) : (await port.read(name)).bytes);
-            // A sample reads attachments only; the cycle asking already read the document as plaintext.
+
             if (!options.full) return encrypted ? 'mixed' : 'plaintext';
             return encrypted && plaintext ? 'mixed' : encrypted ? 'encrypted' : 'plaintext';
         });
@@ -926,19 +883,16 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
 
     const resolveTransitionTarget = async (appData: AppData | null): Promise<BackendTarget<Lease>> => {
         const target = await location.readTarget();
-        // No durable backend yet (a typed-but-unproven config persists nothing until its
-        // activation probe passes). Enable/disable stay available as local-only key
-        // management so the passphrase can be set BEFORE the first sync uploads a byte
-        // (#1001); anything that must read remote artifacts rejects instead.
+
+
         if (target.backend === 'off') return { kind: 'local-only' };
         if (target.backend === 'file') {
             const fileSync = deps.fileSync;
             if (!fileSync) return { kind: 'unsupported' };
             const syncPath = target.syncPath;
             if (!syncPath) throw new Error('No sync folder configured');
-            // Acquire before the port opens the directory and snapshots artifact
-            // generations. A transition must not authenticate or preflight bytes
-            // captured before it owned the same folder lock as ordinary sync.
+
+
             const fileSyncLease = await fileSync.acquireLease(syncPath);
             try {
                 const port = await fileSync.openRemotePort(syncPath);
@@ -985,8 +939,8 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         let releaseCleanupError: unknown;
         const releaseFence = async (): Promise<void> => {
             if (leaseSettled) throw new SyncFileLockUnavailableError();
-            // The native module consumes the token before validating and closing, so
-            // an error still means this lease cannot be released a second time.
+
+
             leaseSettled = true;
             try {
                 await fileSync.releaseLease(fileSyncLease);
@@ -1055,20 +1009,6 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
             ), assertLocalFileFenceHeld, releaseLocalFileFence);
     };
 
-    // Every mutating transition below runs through the SAME serialized queue a sync cycle's
-    // `MobileSyncRun.run()` uses. That queue is a strict FIFO chain
-    // (`createSerializedAsyncQueue` — the next entry's callback does not start until the
-    // previous one's promise, awaits included, has fully settled), so a transition and a sync
-    // cycle can never interleave: whichever one is enqueued first runs to completion —
-    // including its write — before the other starts. This is what closes the race a
-    // mid-transition `getSyncEncryptionMaterial()` read could otherwise hit (a cycle that
-    // resolved `material = null` moments before encryption was enabled, then writing a
-    // plaintext `data.json` after the transition finished): that cycle either finishes
-    // (plaintext write included) entirely before the transition begins, or is queued behind
-    // it and re-resolves `material` fresh, after enable, once it actually starts. Mutual
-    // exclusion at the primitive that already guards every other complete-document
-    // read/replace is the correct fix for a "must never interleave" hazard — strictly
-    // stronger than detecting the interleaving after the fact.
 
     const enableSyncEncryption = async (
         passphrase: string,
@@ -1137,7 +1077,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         options: SyncEncryptionTransitionOptions = {},
     ): Promise<void> => runSerializedSyncDocumentOperation(async () => {
         await state.loadSyncEncryptionLocalState();
-        // Resolved inside the diagnostics so a refusal (no backend yet) gets its end line.
+
         await withTransitionDiagnostics('change-passphrase', options, async (onProgress) => {
             const target = await requireTransitionTarget(options.appData ?? null);
             await runWithFileTransitionLease(target, (port, releaseFence) =>
@@ -1154,9 +1094,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         });
     });
 
-    /** `'no-encrypted-remote'` (#1138): this location holds nothing encrypted, so the no-key
-     *  state it was carrying described somewhere else (or a folder since emptied). Core clears
-     *  the state back to off; the card tells the user encryption is now off here. */
+
     const provideSyncEncryptionPassphrase = async (
         passphrase: string,
     ): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> => runSerializedSyncDocumentOperation(async () => {
@@ -1179,21 +1117,21 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
 
     return {
         getSyncEncryptionStatus: (): Promise<SyncEncryptionStatus> => state.getSyncEncryptionStatus(),
-        /** True while no durable sync backend exists — enable/disable then run local-only. */
+
         isSyncEncryptionBackendPending: async (): Promise<boolean> =>
             (await location.readTarget()).backend === 'off',
         enableSyncEncryption,
         disableSyncEncryption,
         changeSyncEncryptionPassphrase,
         provideSyncEncryptionPassphrase,
-        /** "Not now". Re-affirms the persisted no-key state; automatic and background sync stay
-         *  off for this backend until a passphrase actually validates. */
+
+
         declineSyncEncryptionPassphrase: async (): Promise<void> => {
             await state.loadSyncEncryptionLocalState();
             reaffirmRemoteEncryptionNoKey(state.syncEncryptionLocalState);
             await state.flushSyncEncryptionLocalState();
         },
-        /** "Abandon setup" (sync-encryption.ts runAbandonSyncEncryptionTransition): on the sync queue, local only. */
+
         abandonSyncEncryptionTransition: (): Promise<SyncEncryptionTransitionKind | null> => runSerializedSyncDocumentOperation(async () => {
             await state.loadSyncEncryptionLocalState();
             const abandoned = await runAbandonSyncEncryptionTransition(
@@ -1211,17 +1149,14 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
             return abandoned;
         }),
         probeSyncLocationCiphertext,
-        /**
-         * "Check this location again" for a location this device holds as partly encrypted: every artifact, whole
-         * (documents) or by its first bytes (attachments). Whole again (all plaintext, or all encrypted) clears the mark and
-         * sync resumes (an encrypted location is then found and locked as ever); still mixed keeps it. On the sync queue.
-         */
+
+
         recheckPartlyEncryptedLocation: (): Promise<SyncLocationCiphertext> => runSerializedSyncDocumentOperation(async () => {
             const current = await state.loadSyncEncryptionLocalState();
             const found = await probeSyncLocationCiphertext({ full: true });
             if (found !== 'mixed' && current?.partlyEncryptedScope) {
-                // Old completed cycles cannot establish the newly rechecked encryption posture.
-                // Invalidate both durable proofs before admitting the next discovery cycle.
+
+
                 await location.invalidateCycleProofs();
                 await state.syncEncryptionLocalState.write(null);
                 await state.flushSyncEncryptionLocalState();
@@ -1230,7 +1165,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
                         kind: 'recheck', phase: 'end', outcome: 'ok',
                         releaseCheck: 'v1.3.5/encryption-recheck-posture',
                     }, { level: 'info', force: true });
-                } catch { /* A diagnostic cannot fail the durable quarantine exit. */ }
+                } catch {                                                             }
             }
             const backend = backendLabel(await location.readTarget().catch(() => null));
             state.logSyncEncryptionEvent(SYNC_ENCRYPTION_LOG_EVENTS.transition, {

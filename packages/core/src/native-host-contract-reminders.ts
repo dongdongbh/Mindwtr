@@ -1,57 +1,6 @@
-/**
- * The native host contract for reminder alarms and notification taps, from core's
- * mobile-reminder-alarms.ts and mobile-notification-open.ts. Kept in its own file and
- * spread into createNativeHostContract. The host does the platform IO (AlarmManager, the
- * notification, storing one string); every decision is core's.
- *
- * - planReminderAlarms: the alarms to cancel and to make for the store now, against the
- *   stored alarm map (the `alarms` string this method returned last time, or null). Apply
- *   it in this order: store `writeAhead` when it is not null, cancel each `cancel` id, make
- *   each `schedule` alarm (an alarm made under a held id replaces it), then store `alarms`.
- *   A cancel whose `reason` is `withdrawn`, and a schedule `replacing` a withdrawn alarm,
- *   first removes the notification that alarm delivered; an `expired` one keeps it.
- *   A stop anywhere in between is safe: the next plan, from whichever string was stored,
- *   makes each pending alarm again under the same id and cancels the ones no longer
- *   requested, so no alarm is made twice or left behind. A pending alarm that replaces a
- *   held one keeps the held one's signature in `writeAhead`, so the replay still knows
- *   what that alarm delivered and whether it was withdrawn. Plan again after `topUpDelayMs`,
- *   and REMINDER_STORE_RESCHEDULE_DELAY_MS after the last store change that
- *   shouldRescheduleReminderAlarms accepts. Without notification permission, every alarm
- *   is cancelled and `clearDelivered` asks the host to remove delivered reminders too.
- *   The map lives under React Native's key, with each signature marked as the native
- *   host's: a React Native build installed over the native app (a recovery build) holds
- *   none of these alarms, finds no signature of its own, and makes every alarm again.
- *   A task or project reminder whose alarm expires (its time passed, so it may sit in the
- *   tray) is remembered in the native host's own state (`storedState`, stored with `alarms`)
- *   while it is in the tray (the host's `shown`; without one, for up to 30 days), by core's
- *   rule for a held alarm: once its task or project would no
- *   longer give it (done, gone, moved, its reminders off), a cancel `withdrawn` removes what
- *   it delivered. Its id stays taken meanwhile.
- * - completeReminderTask: Done. Completes the task through the store once per request
- *   UUID (native-request-receipts.ts). On the native host the receipt commits with the
- *   task's change, so a replay after a restart answers from the first reply and writes
- *   nothing, even if the task was reopened since: a recurring task gets one next instance.
- * - snoozeReminder: Snooze. The fired alarm's details again, `snooze_interval` minutes
- *   after the tap, as an alarm of its own that turning reminders off does not cancel. The
- *   request UUID names it, and its first reply is a receipt, so a replay after a restart
- *   returns the same alarm. planReminderSnooze then says whether to make it, against the
- *   native state: stored as not yet made (`stateAhead`), made, then stored as made
- *   (`state`); a request already made is never made again, so a retry after it fired
- *   shows nothing twice, and none is made without permission or for a task or project
- *   done, gone or archived (a replay after a plan withdrew it). Each plan then keeps it: one never made is made (unless a day
- *   late), a reboot's remake makes it again while its time is ahead, and no permission or
- *   its task or project done, gone or archived, or effective Skip on a task-date reminder, withdraws it, as React Native's start does
- *   with a Snooze of such a task. It is forgotten 30 days after its time.
- * - `remake: 'all'` (a reboot, a clock change, exact alarms just allowed, the first plan of
- *   a process) plans every held alarm as not made yet, so each is made again under its id.
- *   `remake: [key]` does so for one: a daily or weekly alarm that just fired, which core
- *   makes again at its next time (or cancels, when it was turned off meanwhile).
- * - routeNotificationOpen: what a tap opens (Review, a task, a project, a context, Daily
- *   or Weekly Review), or `complete` for Done, or nothing for Dismiss and Snooze.
- *
- * Only functions read this module's imports from native-host-contract.ts, so the import
- * cycle between the two files is safe.
- */
+
+
+
 import { loadTranslations } from './i18n/i18n-loader';
 import type { Language } from './i18n/i18n-types';
 import { logInfo, logWarn } from './logger';
@@ -84,37 +33,37 @@ import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { useTaskStore } from './store';
 import { getDigestSchedule } from './schedule-utils';
 import { shouldSendTaskReminders } from './task-reminder-policy';
-import type { NotificationSettings, Task } from './types';
+import type { NotificationSettings, Project, Task } from './types';
 
 export type NativeReminderAlarm = {
     key: string;
-    /** The alarm's request code: a held key keeps its id, so making it again replaces it. */
+
     id: number;
     fireAtMs: number;
-    /** `daily` and `weekly` alarms fire again at the same local time. */
+
     repeat: 'once' | 'daily' | 'weekly';
-    /** iOS recurring local wall-clock slot; Sunday is 0, independent of the first fire date's DST adjustment. */
+
     calendar?: { hour: number; minute: number; weekday?: number };
-    /** What the notification shows and carries (React Native's alarm details: title, message, channel, buttons, data). */
+
     details: Record<string, unknown>;
-    /** The held alarm this one replaces goes for this reason; null when none is held. */
+
     replacing: ReminderAlarmCancelReason | null;
 };
 
 export type NativeReminderAlarmPlan = {
     mode: ReminderAlarmPlan['mode'];
-    /** `withdrawn`: remove what the alarm delivered too. `expired`: keep it. */
+
     cancel: { key: string; id: number; reason: ReminderAlarmCancelReason }[];
     schedule: NativeReminderAlarm[];
-    /** Store before applying: the held alarms plus each alarm about to be made, marked pending. Null when nothing is made. */
+
     writeAhead: string | null;
-    /** Store after applying. */
+
     alarms: string;
-    /** The native host's own reminder state (delivered reminders it may still withdraw): store with `alarms`. */
+
     state: string;
-    /** Plan again after this long so the capped one-shot window tops up; null when no one-shot is armed. */
+
     topUpDelayMs: number | null;
-    /** No notification permission: remove every delivered reminder notification too. */
+
     clearDelivered: boolean;
 };
 
@@ -128,7 +77,7 @@ type ReminderDeps = {
     reminderPlatform: 'android' | 'ios';
 };
 
-// Reminder alarms take ids in [1, 2^30), snoozed alarms in [2^30, 2^31 - 1), so the two never meet.
+
 const ID_SPAN = 2 ** 30 - 1;
 const REMINDER_ID_BASE = 1;
 const SNOOZE_ID_BASE = 2 ** 30;
@@ -185,13 +134,10 @@ const snoozeRequest = (input: unknown): ReminderSnoozeRequest | null => {
 const snoozePayload = (request: ReminderSnoozeRequest) => JSON.stringify(['reminderSnooze', request.requestedAt, request.details]);
 const unknownSnooze = () => fail('STALE_REVISION', 'Reminder Snooze is unconfirmed; no changes were replayed');
 
-/**
- * Marks each signature in the stored map as the native host's. React Native's planner keeps a
- * held alarm only when its signature matches, so it keeps none of these.
- */
+
 const NATIVE_SIGNATURE_MARK = 'native:';
 
-/** The stored map, with only the native host's signatures; one without the mark is made again. Throws on unreadable JSON. */
+
 const readNativeAlarmMap = (raw: string | null): Map<string, ReminderAlarmEntry> => new Map(Array.from(readReminderAlarmMap(raw), ([key, entry]) => {
     const { signature, ...rest } = entry;
     return [key, signature?.startsWith(NATIVE_SIGNATURE_MARK) ? { ...rest, signature: signature.slice(NATIVE_SIGNATURE_MARK.length) } : rest];
@@ -201,19 +147,19 @@ const writeNativeAlarmMap = (map: ReadonlyMap<string, ReminderAlarmEntry>): stri
     [key, entry.signature === undefined ? entry : { ...entry, signature: `${NATIVE_SIGNATURE_MARK}${entry.signature}` }]
 ))));
 
-/** RKStorage key of the native host's own reminder state; React Native never reads it. */
+
 export const NATIVE_REMINDER_STATE_STORAGE_KEY = 'mindwtr:native:reminders:v1';
 const DELIVERED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 const SNOOZE_LATE_LIMIT_MS = 24 * 60 * 60 * 1000;
 
-/** A task or project reminder whose alarm expired: what it delivered may still be in the tray, under `id`. */
+
 type DeliveredReminder = { kind: 'delivered'; id: number; signature?: string; firedAtMs: number };
-/** A Snooze's alarm (snoozeReminder's reply); `armed` once the host made it. */
+
 type SnoozeReminder = { kind: 'snooze'; id: number; fireAtMs: number; details: Record<string, unknown>; armed: boolean };
 type NativeReminderState = Map<string, DeliveredReminder | SnoozeReminder>;
 
-/** The stored state; an unreadable one is empty (it names only notifications that may be gone already, and Snoozes). */
+
 const readNativeReminderState = (raw: string | null | undefined): NativeReminderState => {
     const state: NativeReminderState = new Map();
     if (!raw) return state;
@@ -239,7 +185,7 @@ const snoozeAlarm = (key: string, entry: SnoozeReminder): NativeReminderAlarm =>
     { key, id: entry.id, fireAtMs: entry.fireAtMs, repeat: 'once', details: entry.details, replacing: null }
 );
 
-/** The task or project key a Snooze reminds of again (its fired alarm's `alarmKey`). */
+
 const snoozedKey = (entry: SnoozeReminder): string => {
     const data = entry.details.data;
     return isObjectRecord(data) && typeof data.alarmKey === 'string' ? data.alarmKey : '';
@@ -249,9 +195,9 @@ const isSnoozedTaskSkipped = (entry: SnoozeReminder, tasks: ReadonlyMap<string, 
     const key = snoozedKey(entry);
     if (!key.startsWith('task:') || !isObjectRecord(entry.details.data)) return false;
     const kind = entry.details.data.kind;
-    // Old task Snoozes omit kind; an explicit review Snooze remains independent.
-    if (kind !== undefined && kind !== 'task-start' && kind !== 'task-due' && kind !== 'task-reminder') return false;
-    const task = tasks.get(key.slice('task:'.length).replace(/:r\d+$/, ''));
+
+    if (kind !== undefined && kind !== 'task-start' && kind !== 'task-due' && kind !== 'task-due-advance' && kind !== 'task-start-advance' && kind !== 'task-reminder') return false;
+    const task = tasks.get(key.slice('task:'.length).replace(/:(?:r\d+|s?a\d+:-?\d+)$/, ''));
     return Boolean(task && !shouldSendTaskReminders(task, settings));
 };
 
@@ -264,7 +210,7 @@ const signedFireAtMs = (signature: string | undefined): number | null => {
     }
 };
 
-/** A stable id for a key (FNV-1a), stepping past ids already taken. */
+
 const allocateAlarmId = (key: string, taken: Set<number>, base: number): number => {
     let hash = 0x811c9dc5;
     for (let index = 0; index < key.length; index += 1) {
@@ -276,7 +222,7 @@ const allocateAlarmId = (key: string, taken: Set<number>, base: number): number 
     return id;
 };
 
-/** The original shared Snooze derivation, also used by the pure strict preview. */
+
 const buildNativeReminderSnooze = (input: ReminderSnoozeRequest): NativeReminderAlarm | null => {
     const key = `snooze:${input.requestId.toLowerCase()}`;
     const snooze = buildReminderSnooze(input.details, input.requestedAt, key);
@@ -315,13 +261,13 @@ export function createReminderMethods(deps: ReminderDeps) {
     let taskOpenSequence = 0;
 
     const methods = {
-        /** The alarms to cancel and make now, from the stored alarm map (see the file comment for the order). */
+
         async planReminderAlarms(input: {
             storedAlarms: string | null;
             permissionGranted: boolean;
             storedState?: string | null;
             remake?: 'all' | string[];
-            /** The host's ledger (Android): ids of alarms that showed, and of reminder notifications still in the tray. */
+
             fired?: number[];
             shown?: number[];
         }): Promise<NativeHostResult<NativeReminderAlarmPlan>> {
@@ -337,7 +283,7 @@ export function createReminderMethods(deps: ReminderDeps) {
             try {
                 held = readNativeAlarmMap(input.storedAlarms);
             } catch {
-                // As on React Native: an unreadable map is replaced, since nothing in it can be cancelled.
+
                 void logWarn('Stored reminder alarm map unreadable; starting from none', { scope: 'notifications' });
                 held = new Map();
             }
@@ -347,50 +293,62 @@ export function createReminderMethods(deps: ReminderDeps) {
                 const entry = held.get(key);
                 if (entry) held.set(key, { ...entry, pending: true });
             }
-            // The texts first: the store and the clock are read after the last await, so a change meanwhile is judged too.
+
             const translations = await loadTranslations(deps.language());
             const state = useTaskStore.getState();
             const digest = deps.reminderPlatform === 'ios' ? getDigestSchedule(state.settings) : null;
+            const storedState = readNativeReminderState(input.storedState);
+
+
+            const snoozeSlots = deps.reminderPlatform === 'ios' ? [...storedState.values()].filter((entry) =>
+                entry.kind === 'snooze' && (entry.fireAtMs > Date.now() || !entry.armed)).length : 0;
+            if (snoozeSlots > 0) logInfo('Native iOS reminder one-shot cap reduced for Snoozes', { scope: 'notifications',
+                context: { releaseCheck: 'v1.3.7/ios-reminder-snooze-capacity', count: snoozeSlots } });
             const plan = planReminderAlarms({
                 settings: state.settings,
                 tasks: state.tasks,
                 projects: state.projects,
                 now: new Date(),
                 translations,
-                maxOneShotReminders: MAX_PENDING_ONE_SHOT_REMINDER_ALARMS[deps.reminderPlatform],
+                maxOneShotReminders: Math.max(0, MAX_PENDING_ONE_SHOT_REMINDER_ALARMS[deps.reminderPlatform] - snoozeSlots),
                 alarms: held,
                 permissionGranted: input.permissionGranted,
             });
             const requests = new Map([...plan.recurring, ...plan.oneShot].map((request) => [request.key, request]));
             const nowMs = Date.now();
-            // Delivered reminders it remembers: withdrawn by core's rule for a held alarm, else kept (up to 30 days), their ids taken.
+
+
+            let taskById: Map<string, Task> | null = null;
+            let projectById: Map<string, Project> | null = null;
+            const tasksById = () => taskById ??= new Map(state.tasks.map((task) => [task.id, task]));
+            const projectsById = () => projectById ??= new Map(state.projects.map((project) => [project.id, project]));
             const judge = plan.mode === 'active'
-                ? { settings: state.settings, diagnostics: plan.diagnostics, tasks: new Map(state.tasks.map((task) => [task.id, task])), projects: new Map(state.projects.map((project) => [project.id, project])) }
+                ? { settings: state.settings, diagnostics: plan.diagnostics, get tasks() { return tasksById(); }, get projects() { return projectsById(); } }
                 : null;
             const remembered: NativeReminderState = new Map();
             const withdrawnDelivered: NativeReminderAlarmPlan['cancel'] = [];
             const snoozes: NativeReminderAlarm[] = [];
-            const owners = { tasks: new Map(state.tasks.map((task) => [task.id, task])), projects: new Map(state.projects.map((project) => [project.id, project])) };
-            // The host's ledger, when it has one (Android): the alarms that showed, and the notifications still in the tray.
+            const owners = { get tasks() { return tasksById(); }, get projects() { return projectsById(); } };
+
             const fired = new Set(input.fired ?? []);
             const shown = input.shown ? new Set(input.shown) : null;
             const stillShown = (id: number, sinceMs: number) => (shown ? shown.has(id) : nowMs - sinceMs <= DELIVERED_RETENTION_MS);
-            for (const [key, entry] of readNativeReminderState(input.storedState)) {
+            for (const [key, entry] of storedState) {
                 if (entry.kind === 'snooze') {
                     const late = entry.fireAtMs < nowMs - SNOOZE_LATE_LIMIT_MS;
                     if (plan.mode === 'revoked' || isReminderOwnerGone(snoozedKey(entry), owners.tasks, owners.projects)
                         || isSnoozedTaskSkipped(entry, owners.tasks, state.settings)) {
                         withdrawnDelivered.push({ key, id: entry.id, reason: 'withdrawn' });
                     } else if (fired.has(entry.id)) {
-                        // It showed: never made again; kept while it may be in the tray, so its task's completion withdraws it.
+
                         if (stillShown(entry.id, entry.fireAtMs)) remembered.set(key, { ...entry, armed: true });
                         else withdrawnDelivered.push({ key, id: entry.id, reason: 'expired' });
                     } else if (late && (!entry.armed || input.fired)) {
-                        // Never made, or made but never shown, more than a day ago (RN's 24 h window): it expires.
+
                         withdrawnDelivered.push({ key, id: entry.id, reason: 'expired' });
                     } else if (entry.fireAtMs >= nowMs - DELIVERED_RETENTION_MS) {
-                        // Made now: one never made; at a process start, one ahead (a reboot dropped it) or one the phone missed while
-                        // off (made but not shown; it shows once, now). Only a host with a ledger knows one was not shown.
+
+
                         const missed = Boolean(input.fired) && entry.fireAtMs <= nowMs;
                         if (!entry.armed || (remakeAll && (entry.fireAtMs > nowMs || missed))
                             || (remake.has(key) && entry.fireAtMs > nowMs)) snoozes.push(snoozeAlarm(key, entry));
@@ -459,7 +417,7 @@ export function createReminderMethods(deps: ReminderDeps) {
             };
         },
 
-        /** Done on a task reminder. Reuse `requestId` to retry; a replay after a restart writes nothing. */
+
         async completeReminderTask(input: { requestId: string; taskId: string }): Promise<NativeHostResult<ReminderCompletion>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -475,7 +433,7 @@ export function createReminderMethods(deps: ReminderDeps) {
             });
         },
 
-        /** Snooze on a fired reminder: its details as the plan gave them, and when the tap happened. */
+
         async snoozeReminder(input: { requestId: string; requestedAt: number; details: Record<string, unknown> }): Promise<NativeHostResult<NativeReminderAlarm>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -490,10 +448,7 @@ export function createReminderMethods(deps: ReminderDeps) {
             ));
         },
 
-        /**
-         * Whether to make a Snooze's alarm (snoozeReminder's reply) now, against the stored native state: store `stateAhead`,
-         * make each `schedule` alarm, then store `state`. Nothing when it was made already (a retry, a replay after a restart).
-         */
+
         planReminderSnooze(input: { storedState: string | null; alarm: NativeReminderAlarm; permissionGranted: boolean; fired?: number[] }): NativeHostResult<{
             schedule: NativeReminderAlarm[];
             stateAhead: string | null;
@@ -510,12 +465,12 @@ export function createReminderMethods(deps: ReminderDeps) {
             const nothing = { ok: true as const, value: { schedule: [], stateAhead: null, state: null } };
             if (held?.kind === 'snooze' && held.armed) return nothing;
             const entry: SnoozeReminder = { kind: 'snooze', id, fireAtMs, details, armed: false };
-            // A replay after withdrawal must not make the Snooze again before the next reconciliation.
+
             const { tasks, projects, settings } = useTaskStore.getState();
             const tasksById = new Map(tasks.map((task) => [task.id, task]));
             if (!input.permissionGranted || isReminderOwnerGone(snoozedKey(entry), tasksById,
                 new Map(projects.map((project) => [project.id, project]))) || isSnoozedTaskSkipped(entry, tasksById, settings)) return nothing;
-            // Made by an earlier try that stopped before storing it as made, and it showed already: store it as made, make nothing.
+
             if (held?.kind === 'snooze' && input.fired?.includes(id)) {
                 return { ok: true, value: { schedule: [], stateAhead: null, state: writeNativeReminderState(new Map(state).set(key, { ...entry, armed: true })) } };
             }
@@ -523,7 +478,7 @@ export function createReminderMethods(deps: ReminderDeps) {
             return { ok: true, value: { schedule: [snoozeAlarm(key, entry)], stateAhead, state: writeNativeReminderState(new Map(state).set(key, { ...entry, armed: true })) } };
         },
 
-        /** What a notification tap, or one of its buttons, opens or does. */
+
         routeNotificationOpen(payload: Record<string, unknown>): NativeHostResult<NotificationOpenRoute> {
             if (!isObjectRecord(payload)) return fail('INVALID_INPUT', 'A notification payload object is required');
             return {
@@ -548,7 +503,7 @@ export function createReminderMethods(deps: ReminderDeps) {
     };
     return {
         ...methods,
-        /** Pure derivation: frozen journal validation must not consult changed eligibility or readiness. */
+
         previewReminderSnooze: previewSnooze,
         async commitReminderSnooze(input: unknown): Promise<NativeHostResult<NativeReminderAlarm>> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
@@ -568,21 +523,21 @@ export function createReminderMethods(deps: ReminderDeps) {
             return savedSnooze(request, expected.value) ?? snoozeResult(await receipts.run<NativeReminderAlarm>(
                 request.requestId, snoozePayload(request), async () => unknownSnooze()), expected.value);
         },
-        /** A newly admitted typed action; the legacy method remains the single task writer. */
+
         async commitReminderCompletion(input: unknown): Promise<NativeHostResult<ReminderCompletion>> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const request = completionRequest(input);
             if (!request) return fail('INVALID_INPUT', 'A bounded reminder completion request is required');
             return savedCompletion(request) ?? completionResult(await methods.completeReminderTask(request));
         },
-        /** Cold recovery only reads the exact original receipt, never the current task state. */
+
         probeReminderCompletionOutcome(input: unknown): NativeHostResult<ReminderCompletion> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const request = completionRequest(input);
             if (!request) return fail('INVALID_INPUT', 'A bounded reminder completion request is required');
             return savedCompletion(request) ?? unknownCompletion();
         },
-        /** Warm recovery joins an existing run or finishes its owed save; an unknown request cannot write. */
+
         async retryReminderCompletion(input: unknown): Promise<NativeHostResult<ReminderCompletion>> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const request = completionRequest(input);

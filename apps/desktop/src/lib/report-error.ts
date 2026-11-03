@@ -8,7 +8,7 @@ type ReportErrorOptions = {
     scope?: string;
     step?: string;
     toast?: boolean;
-    /** Localized, user-safe copy. The label and raw error remain diagnostic-only. */
+
     userMessage?: string;
 };
 

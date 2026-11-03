@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderSvgToPng, saveShareCardPng } from "./share-card-export";
 
+import "./native-dialog";
+
 const mocks = vi.hoisted(() => ({
     isTauriRuntime: vi.fn(() => false),
     logInfo: vi.fn(async () => null),

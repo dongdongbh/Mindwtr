@@ -44,8 +44,7 @@ const legacyFileSystemMocks = vi.hoisted(() => {
   };
 });
 
-// Real sanitizers on purpose: identity stubs meant this suite could not catch a
-// regression in the redaction this log path exists to perform.
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const { mockCore } = await import('../test-support/mock-core');
   return mockCore(importOriginal, () => storeState, {

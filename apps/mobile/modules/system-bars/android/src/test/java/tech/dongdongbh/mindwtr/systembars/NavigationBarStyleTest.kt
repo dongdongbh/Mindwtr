@@ -38,8 +38,8 @@ class NavigationBarStyleTest {
     val navigation = WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
     controller.setSystemBarsAppearance(status, status)
     NavigationBarStyle.apply(window, "#F6F7FB", true)
-    // Android 15 also owns appearance bits for transparent/contrast handling.
-    // Assert the icon bits we control without assuming all OS-owned bits are zero.
+
+
     assertEquals(status or navigation, controller.systemBarsAppearance and (status or navigation))
     assertFalse(window.isNavigationBarContrastEnforced)
     NavigationBarStyle.apply(window, "#151718", false)

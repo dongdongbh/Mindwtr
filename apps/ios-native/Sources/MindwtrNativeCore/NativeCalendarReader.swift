@@ -8,7 +8,7 @@ enum NativeCalendarReadError: Error {
     case denied, unavailable
 }
 
-/// Only plain values cross the calendar worker; reads never request permission.
+
 protocol NativeCalendarReading: AnyObject {
     func permissions() throws -> NativeCalendarPermission
     func calendars() throws -> [[String: Any]]
@@ -19,9 +19,14 @@ protocol NativeCalendarRecoveryReading: NativeCalendarReading {
     func event(eventID: String, calendarID: String) throws -> [String: Any]?
 }
 
+
+protocol NativeCalendarNotesSuffixClearing {
+    func clearNotesSuffix(eventID: String, calendarID: String, suffix: String) throws
+}
+
 enum NativeCalendarIDs {
     static func selected(_ requested: [String], available: [String]) -> Set<Data> {
-        // Swift String equality folds canonically equivalent Unicode IDs.
+
         Set(requested.map { Data($0.utf8) }).intersection(available.map { Data($0.utf8) })
     }
 }
@@ -30,7 +35,7 @@ enum NativeCalendarIDs {
 import EventKit
 import CoreGraphics
 
-/// Created, used and released by NativeCalendarJobs' one serial worker.
+
 final class NativeCalendarReader: NativeCalendarWriteWitnessing, NativeCalendarRecoveryReading {
     private var ownedStore: EKEventStore?
     private let formatter: DateFormatter = {
@@ -91,7 +96,7 @@ final class NativeCalendarReader: NativeCalendarWriteWitnessing, NativeCalendarR
         let calendars = store.calendars(for: .event)
         let ids = NativeCalendarIDs.selected(calendarIds, available: calendars.map { $0.calendarIdentifier })
         let selected = calendars.filter { ids.contains(Data($0.calendarIdentifier.utf8)) }
-        // EventKit's nil/empty predicate can select every calendar.
+
         guard !selected.isEmpty else { return [] }
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: selected)
         return store.events(matching: predicate).sorted { $0.startDate < $1.startDate }.map(eventValue)
@@ -186,7 +191,7 @@ final class NativeCalendarReader: NativeCalendarWriteWitnessing, NativeCalendarR
     }
 }
 
-/// A per-call view of the reader's retained store, used only on its serial worker.
+
 private final class EventKitCalendarWriteProvider: NativeCalendarWriteProviding {
     private let retainedStore: () -> EKEventStore
     private var store: EKEventStore { retainedStore() }
@@ -226,7 +231,7 @@ private final class EventKitCalendarWriteProvider: NativeCalendarWriteProviding 
         let matches = store.events(matching: predicate).filter {
             NativeCalendarWriteValidation.equalID($0.calendarItemIdentifier, eventID)
         }
-        // A lookup that exists but cannot be confirmed is uncertainty, not absence.
+
         guard !matches.isEmpty else { throw NativeCalendarWriteError.invalid }
         return matches
     }
@@ -256,7 +261,7 @@ private final class EventKitCalendarWriteProvider: NativeCalendarWriteProviding 
     private func apply(_ details: NativeCalendarEventDetails, to event: EKEvent) {
         event.title = details.title; event.startDate = details.start; event.endDate = details.end
         event.isAllDay = details.allDay; event.notes = details.notes; event.location = details.location
-        // Expo iOS has one event timeZone and ignores endTimeZone; both were validated.
+
         if let zone = details.timeZone { event.timeZone = TimeZone(identifier: zone) }
         if let url = details.url { event.url = URL(string: url) }
         event.alarms = []
@@ -273,6 +278,17 @@ private final class EventKitCalendarWriteProvider: NativeCalendarWriteProviding 
         try store.save(event, span: .thisEvent, commit: true)
     }
     func deleteEvent(_ event: EKEvent) throws { try store.remove(event, span: .thisEvent, commit: true) }
+}
+
+extension NativeCalendarReader: NativeCalendarNotesSuffixClearing {
+    func clearNotesSuffix(eventID: String, calendarID: String, suffix: String) throws {
+        guard let event = try NativeCalendarWritePolicy.existingEvent(eventID: eventID, calendarID: calendarID, using: writeProvider()),
+              let notes = event.notes, !suffix.isEmpty, notes.utf8.count >= suffix.utf8.count,
+              notes.utf8.suffix(suffix.utf8.count).elementsEqual(suffix.utf8) else { return }
+
+        event.notes = String(decoding: notes.utf8.dropLast(suffix.utf8.count), as: UTF8.self)
+        try store.save(event, span: .thisEvent, commit: true)
+    }
 }
 #else
 final class NativeCalendarReader: NativeCalendarWriteWitnessing, NativeCalendarRecoveryReading {

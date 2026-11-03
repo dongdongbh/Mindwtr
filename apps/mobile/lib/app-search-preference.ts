@@ -1,14 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MOBILE_APP_SEARCH_WIPE_OWED_STORAGE_KEY } from '@mindwtr/core';
 import { Platform } from 'react-native';
 
-// Device-local preference (#1017): whether this device's task/project/area
-// index is mirrored into Android's AppSearch PlatformStorage for system
-// search. This is a device capability, not user data — it must never enter
-// the synced settings document (a laptop or an iPhone has no such switch).
+
 const STORAGE_KEY = 'mindwtr:appSearchIndexingEnabled';
 
-// PlatformStorage's system-search integration is only available from
-// Android 12 (API 31); below that the setting is hidden entirely, per #1017.
+
+const WIPE_OWED_KEY = MOBILE_APP_SEARCH_WIPE_OWED_STORAGE_KEY;
+
+
 const MIN_SUPPORTED_SDK = 31;
 
 export function isAppSearchSupported(): boolean {
@@ -30,9 +30,41 @@ export async function writeAppSearchIndexingEnabled(enabled: boolean): Promise<v
         if (enabled) {
             await AsyncStorage.setItem(STORAGE_KEY, 'true');
         } else {
+
+
+            await markAppSearchWipeOwed();
             await AsyncStorage.removeItem(STORAGE_KEY);
         }
     } catch {
-        // storage unavailable — the toggle simply won't persist across restarts
+
+    }
+}
+
+export async function readAppSearchWipeOwed(): Promise<boolean> {
+    if (!isAppSearchSupported()) return false;
+    try {
+        return (await AsyncStorage.getItem(WIPE_OWED_KEY)) === 'true';
+    } catch {
+        return false;
+    }
+}
+
+
+export async function markAppSearchWipeOwed(): Promise<void> {
+    if (!isAppSearchSupported()) return;
+    try {
+        await AsyncStorage.setItem(WIPE_OWED_KEY, 'true');
+    } catch {
+
+    }
+}
+
+
+export async function clearAppSearchWipeOwed(): Promise<void> {
+    if (!isAppSearchSupported()) return;
+    try {
+        await AsyncStorage.removeItem(WIPE_OWED_KEY);
+    } catch {
+
     }
 }

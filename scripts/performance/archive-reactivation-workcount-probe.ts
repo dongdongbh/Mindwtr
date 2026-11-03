@@ -1,5 +1,5 @@
-// Run from this checkout so the production store imports resolve to the same source.
-// Keep host timings isolated from builds and other tests; the map visit counts are deterministic.
+
+
 import { strict as assert } from 'node:assert';
 import { buildEntityMap } from '../../packages/core/src/store-helpers';
 import { consoleLogger, setLogger } from '../../packages/core/src/logger';

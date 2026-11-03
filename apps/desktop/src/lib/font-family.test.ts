@@ -17,8 +17,7 @@ import {
     resolveDesktopFontStack,
 } from './font-family';
 
-/** Stands in for the canvas: every family gets a width per weight, and anything not
- *  listed measures like the fallback font, the way an unresolved family really does. */
+
 function measuringCanvas(widths: Record<string, Record<number, number>>) {
     const fallback: Record<number, number> = { 400: 100, 700: 111 };
     const context = {
@@ -72,15 +71,15 @@ describe('font-family (#1244)', () => {
     });
 
     it('tells a real bold face from one the renderer fakes', () => {
-        // Faking a bold moves nothing, so the fake measures the same at both weights.
+
         const canvas = measuringCanvas({
             Liberation: { 400: 211, 700: 227 },
             Caskaydia: { 400: 190, 700: 190 },
         });
         expect(checkBoldFace('Liberation')).toBe('real');
         expect(checkBoldFace('Caskaydia')).toBe('synthesized');
-        // A family the renderer cannot find measures like the fallback, which has its own
-        // bold face and would otherwise be read as a real one.
+
+
         expect(checkBoldFace('Uninstalled')).toBe('fallback');
         expect(checkBoldFace('')).toBe('unknown');
         canvas.mockRestore();

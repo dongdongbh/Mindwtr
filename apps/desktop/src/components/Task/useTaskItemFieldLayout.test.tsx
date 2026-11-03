@@ -221,7 +221,7 @@ describe('useTaskItemFieldLayout', () => {
             draft: { status: 'reference' },
         })));
 
-        expect(result.current.basicFields).not.toContain('status');
+        expect(result.current.basicFields).toContain('status');
         expect(result.current.basicFields).not.toContain('dueDate');
         expect(result.current.schedulingFields).toEqual([]);
         expect(result.current.basicFields).not.toContain('contexts');
@@ -234,7 +234,7 @@ describe('useTaskItemFieldLayout', () => {
         expect(result.current.detailsFields).not.toContain('location');
     });
 
-    it('keeps an empty reference list hidden even when checklist is enabled in the editor layout', () => {
+    it('keeps an empty Reference checklist available when enabled in the editor layout', () => {
         const { result } = renderHook(() => useTaskItemFieldLayout(buildParams({
             settings: {
                 gtd: {
@@ -247,7 +247,7 @@ describe('useTaskItemFieldLayout', () => {
             draft: { status: 'reference' },
         })));
 
-        expect(result.current.detailsFields).not.toContain('checklist');
+        expect(result.current.detailsFields).toContain('checklist');
     });
 
     it('uses the draft status rather than the persisted task status for field visibility', () => {

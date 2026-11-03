@@ -311,7 +311,7 @@ describe('SyncConfigurationSection', () => {
         expect(queryByText('Calendar subscription')).toBeInTheDocument();
         expect(queryByText('Anyone with this URL can read the feed.')).toBeInTheDocument();
         expect(queryByText('No feed published yet.')).toBeInTheDocument();
-        // Nothing to copy or revoke until a feed exists.
+
         expect(queryByRole('button', { name: 'Copy URL' })).not.toBeInTheDocument();
         expect(queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
 
@@ -360,8 +360,8 @@ describe('SyncConfigurationSection', () => {
         expect(getByText(/Redirect URI:/i)).toBeInTheDocument();
         expect(getByText(baseProps.dropboxRedirectUri)).toBeInTheDocument();
     });
-    // Both URL errors were hardcoded English even though mobile already shows
-    // the translated `settings.invalidUrlHttp` for the same validation.
+
+
     it('shows the translated URL error for the self-hosted and WebDAV fields', () => {
         const selfHosted = render(
             <SyncConfigurationSection {...baseProps} syncBackend="cloud" cloudProvider="selfhosted" cloudUrlError />
@@ -374,9 +374,8 @@ describe('SyncConfigurationSection', () => {
         );
         expect(webdav.getByText('Invalid URL. Use http/https.')).toBeInTheDocument();
     });
-    // Dropbox, WebDAV and the sync folder all have a Test handler; the
-    // self-hosted panel had Save only, so a wrong token surfaced only after the
-    // full verification sync.
+
+
     it('offers a self-hosted connection test', () => {
         const onTestCloudConnection = vi.fn();
         const { getByRole } = render(

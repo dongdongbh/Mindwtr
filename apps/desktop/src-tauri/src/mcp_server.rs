@@ -1,4 +1,3 @@
-//! Opt-in in-process MCP. REST and MCP invoke the same native operations.
 use crate::config::read_config_verified;
 use crate::local_api::{
     self, ApiRequest, ApiResponse, LocalApiAccess, LocalApiHandle, LocalApiServerState,
@@ -169,7 +168,7 @@ fn config_from_toml(config: &AppConfigToml) -> Result<McpConfig, McpError> {
         enabled: enabled(config.mcp_enabled.as_ref()),
         allow_write,
         allow_archive: enabled(config.mcp_allow_archive.as_ref()),
-        // Old Allow changes granted deletion; preserve that existing grant.
+
         allow_delete: config
             .mcp_allow_delete
             .as_ref()
@@ -204,17 +203,12 @@ fn apply_config(config: &mut AppConfigToml, next: &McpConfig) {
 }
 
 fn read_mcp_config(app: &tauri::AppHandle) -> Result<McpConfig, McpError> {
-    // read_config can migrate legacy secrets and publish a repaired pair.
-    // Protect that possible write from concurrent settings transactions too.
     let _guard = lock_config_read_modify_write().map_err(|_| McpError::ConfigFailed)?;
     read_config_verified(app)
         .map_err(|_| McpError::ConfigFailed)
         .and_then(|config| config_from_toml(&config))
 }
 
-/// The outer RMW lock remains held across read, token creation, and publication;
-/// unrelated Local API/sync/settings fields cannot be overwritten by a stale
-/// snapshot. Persistence always precedes starting a new listener.
 fn update_config(
     app: &tauri::AppHandle,
     requested: Option<McpConfigRequest>,
@@ -233,7 +227,7 @@ fn update_config_with(
     write: impl FnOnce(&AppConfigToml) -> Result<(), String>,
 ) -> Result<McpConfig, McpError> {
     let mut stored = read().map_err(|_| McpError::ConfigFailed)?;
-    // A valid explicit port can repair malformed stored configuration.
+
     if let Some(port) = requested.and_then(|request| request.port) {
         stored.mcp_port = Some(normalize_port(port)?.to_string());
     }

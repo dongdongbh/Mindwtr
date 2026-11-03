@@ -11,12 +11,7 @@ import tech.dongdongbh.mindwtr.attachmentfileinstaller.InterruptedInstallRecover
 import tech.dongdongbh.mindwtr.attachmentfileinstaller.SHA256_HEX_PATTERN
 import java.io.File
 
-/**
- * RN's attachment installer (AttachmentFileInstallerCore.kt, compiled as it is) as core's native installer port
- * (NativeAttachmentFileInstaller): install and hash answer what RN's Expo module answers, and its journal recovery runs at boot
- * ([recover], ProcessCoreHost) before any attachment write. File Sync's immutable publication is not on this host yet (S5).
- * [call] runs on HostIo's files thread, in order with the attachment file port's calls.
- */
+
 class HostInstaller internal constructor(
     private val filesDir: File,
     private val cacheDir: File,
@@ -27,10 +22,10 @@ class HostInstaller internal constructor(
     private fun installer(ops: AttachmentInstallerFileOps = this.ops()) =
         AttachmentFileInstallerCore(targetRoot = File(filesDir, "attachments"), sourceRoots = listOf(filesDir, cacheDir), ops = ops)
 
-    /** Every install journal under files/attachments, finished or rolled back by RN's rules; one it cannot prove stays. */
+
     internal fun recover(): List<InterruptedInstallRecovery> = installer().recoverInterruptedInstalls()
 
-    /** `{ op: "install", staged, target, expected: { kind, sha256? }, expectedDownloadSha256 }` or `{ op: "hash", path }`. */
+
     fun call(json: String, @Suppress("UNUSED_PARAMETER") bytes: ByteArray? = null): HostFiles.Reply {
         val request = JSONObject(json)
         return when (val op = request.getString("op")) {
@@ -65,7 +60,7 @@ class HostInstaller internal constructor(
         }
     }
 
-    /** RN's fileFromPath: a plain path or a `file://` URI; anything else is refused. */
+
     private fun file(value: String): File {
         require(value.isNotBlank()) { "Attachment path is required" }
         return when {
@@ -78,10 +73,7 @@ class HostInstaller internal constructor(
     private fun sha256(value: String): String = value.trim().lowercase().also { require(SHA256_HEX_PATTERN.matches(it)) { "SHA-256 is invalid" } }
 }
 
-/**
- * Debug builds only (check-attachments-device.mjs): with `debug.mindwtr.native.install_stop=journal`, the process dies once an
- * install's first journal is on disk, before any generation moves, so the next boot's [HostInstaller.recover] must roll it back.
- */
+
 private class StopAfterJournal(private val delegate: AttachmentInstallerFileOps) : AttachmentInstallerFileOps by delegate {
     override fun writeUtf8Durably(file: File, content: String) {
         delegate.writeUtf8Durably(file, content)

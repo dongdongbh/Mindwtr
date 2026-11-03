@@ -32,6 +32,7 @@ vi.mock('@tauri-apps/plugin-notification', () => pluginMock);
 vi.mock('./app-log', () => logMock);
 
 import { setNativeInvokeTransport } from './tauri-invoke';
+import { resetAppLockStoreForTests } from './app-lock';
 import {
     buildDesktopTaskNotificationBody,
     resolveDesktopReminderGates,
@@ -58,6 +59,120 @@ const translations = {
     'settings.reviewAtNotifications': 'Review date reminders',
     'settings.notifications': 'Notifications',
 };
+
+describe('desktop advance reminders', () => {
+    const initial = useTaskStore.getState();
+    const tick = new Date('2026-06-17T09:00:00Z');
+    const advanceTask: Task = { ...baseTask, dueDate: '2026-06-17T10:01:00Z', dueReminderLeadMinutes: 60 };
+    let delivered: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(tick);
+        delivered = vi.fn();
+        vi.stubGlobal('Notification', Object.assign(function (...args: unknown[]) { delivered(...args); }, { permission: 'granted' }));
+        useTaskStore.setState({ _allTasks: [advanceTask], _allProjects: [], settings: { notificationsEnabled: true } });
+    });
+    afterEach(() => {
+        stopDesktopNotifications();
+        useTaskStore.setState(initial, true);
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it('waits until the fire time, sends once, and retains the original due alert', async () => {
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+        expect(delivered.mock.calls[0][1]).toMatchObject({ tag: 'mindwtr-reminder:task:task-1' });
+        expect(logMock.logInfo).toHaveBeenCalledWith('Advance reminder delivered', expect.objectContaining({
+            extra: { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'delivered' },
+        }));
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(60 * 60_000);
+        expect(delivered).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not catch up a prealert that was already past when configured', async () => {
+        useTaskStore.setState({ _allTasks: [{ ...advanceTask, dueReminderLeadMinutes: 0 }] });
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(65_000);
+        useTaskStore.setState({ _allTasks: [advanceTask], lastDataChangeAt: Date.now() });
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).not.toHaveBeenCalled();
+    });
+
+    it('discards a changed deadline and admits the new future occurrence independently', async () => {
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(30_000);
+        useTaskStore.setState({ _allTasks: [{ ...advanceTask, dueDate: '2026-06-17T10:02:00Z' }], lastDataChangeAt: Date.now() });
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('desktop start advance reminders', () => {
+    const initial = useTaskStore.getState();
+    const tick = new Date('2026-06-17T09:00:00Z');
+    const advanceTask: Task = { ...baseTask, startTime: '2026-06-17T10:01:00Z', startReminderLeadMinutes: 60 };
+    let delivered: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(tick);
+        delivered = vi.fn();
+        vi.stubGlobal('Notification', Object.assign(function (...args: unknown[]) { delivered(...args); }, { permission: 'granted' }));
+        useTaskStore.setState({ _allTasks: [advanceTask], _allProjects: [], settings: { notificationsEnabled: true } });
+    });
+    afterEach(() => {
+        stopDesktopNotifications();
+        useTaskStore.setState(initial, true);
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it('waits until the fire time, sends once, and retains the original start alert', async () => {
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+        expect(delivered.mock.calls[0][1]).toMatchObject({ tag: 'mindwtr-reminder:task:task-1' });
+        expect(logMock.logInfo).toHaveBeenCalledWith('Advance reminder delivered', expect.objectContaining({
+            extra: { releaseCheck: 'v1.3.8/start-advance-reminder', outcome: 'delivered' },
+        }));
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(60 * 60_000);
+        expect(delivered).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not catch up a prealert that was already past when configured', async () => {
+        useTaskStore.setState({ _allTasks: [{ ...advanceTask, startReminderLeadMinutes: 0 }] });
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(65_000);
+        useTaskStore.setState({ _allTasks: [advanceTask], lastDataChangeAt: Date.now() });
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).not.toHaveBeenCalled();
+    });
+
+    it('discards a changed start and admits the new future occurrence independently', async () => {
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(30_000);
+        useTaskStore.setState({ _allTasks: [{ ...advanceTask, startTime: '2026-06-17T10:02:00Z' }], lastDataChangeAt: Date.now() });
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+    });
+});
 
 describe('desktop notification service', () => {
     it('includes the reminder type before the task description', () => {
@@ -106,7 +221,7 @@ describe('resolveDueRepeatToFire', () => {
     });
 
     it('fires the occurrence just reached, within one poll window', () => {
-        // due+20min occurrence (index 2), now is 5s past it -> within the 15s catch-up
+
         const now = new Date('2026-06-17T09:20:05.000Z');
         expect(resolveDueRepeatToFire(repeatTask, now, undefined, opts)).toEqual({
             key: '2026-06-17T09:00:00.000Z#2',
@@ -123,7 +238,7 @@ describe('resolveDueRepeatToFire', () => {
     it('invalidates dedup when the due time changes', () => {
         const moved = { ...repeatTask, dueDate: '2026-06-17T10:00:00.000Z' };
         const now = new Date('2026-06-17T10:20:05.000Z');
-        // old key was for the 09:00 dueISO; the new dueISO must still fire
+
         expect(resolveDueRepeatToFire(moved, now, '2026-06-17T09:00:00.000Z#2', opts)).toEqual({
             key: '2026-06-17T10:00:00.000Z#2',
             index: 2,
@@ -132,19 +247,19 @@ describe('resolveDueRepeatToFire', () => {
     });
 
     it('returns null before the first repeat occurrence', () => {
-        const now = new Date('2026-06-17T09:05:00.000Z'); // < due + 10min
+        const now = new Date('2026-06-17T09:05:00.000Z');
         expect(resolveDueRepeatToFire(repeatTask, now, undefined, opts)).toBeNull();
     });
 
     it('skips an occurrence missed beyond the poll window (desktop was not polling)', () => {
-        // due+10min occurrence is 30s stale (> 15s catch-up), due+20min not yet reached
+
         const now = new Date('2026-06-17T09:10:30.000Z');
         expect(resolveDueRepeatToFire(repeatTask, now, undefined, opts)).toBeNull();
     });
 
     it('fires an occurrence missed inside a widened poll window (throttled tab)', () => {
-        // Same 30s-stale occurrence as above, but this poll is answerable for the
-        // last minute because the previous one was throttled that far back.
+
+
         const now = new Date('2026-06-17T09:10:30.000Z');
         expect(resolveDueRepeatToFire(repeatTask, now, undefined, { ...opts, catchUpMs: 60_000 })).toEqual({
             key: '2026-06-17T09:00:00.000Z#1',
@@ -165,10 +280,7 @@ describe('resolveDueRepeatToFire', () => {
     });
 });
 
-// The poll loop is a 15s setInterval, but a browser tab that is not in the foreground
-// gets its timers throttled to roughly one a minute, so consecutive polls are not 15s
-// apart and a reminder can land between two of them (#962). The window each poll is
-// answerable for has to follow the real gap.
+
 describe('resolvePollCatchUpMs', () => {
     const nowMs = new Date('2026-06-17T09:20:00.000Z').getTime();
 
@@ -189,9 +301,7 @@ describe('resolvePollCatchUpMs', () => {
     });
 });
 
-// The desktop poll loop schedules task reminders via core's getNextScheduledAt with all
-// three sources enabled. These guard that the loop's inputs honor the per-task opt-out
-// (#885): start/due reminders drop, but review reminders still fire (mobile parity).
+
 describe('desktop next-reminder scheduling honors suppressMindwtrReminders', () => {
     const allOn = { includeStartTime: true, includeDueDate: true, includeReviewAt: true };
     const now = new Date('2026-06-17T08:00:00.000Z');
@@ -227,10 +337,7 @@ describe('desktop next-reminder scheduling honors suppressMindwtrReminders', () 
     });
 });
 
-// Cross-platform parity: desktop's poll-loop gates (resolveDesktopReminderGates) and mobile's
-// pre-arm gates (buildReminderSchedule's diagnostics/digest requests) must enable the same
-// reminder kinds for the same settings. Includes the notifications-off + weekly-review-on row
-// desktop used to break by killing all four categories behind one early return.
+
 describe('desktop/mobile reminder-kind parity', () => {
     const now = new Date('2026-07-30T12:00:00.000Z');
 
@@ -275,9 +382,7 @@ describe('desktop/mobile reminder-kind parity', () => {
     });
 });
 
-// Drives the real checkDueAndNotify poll loop end to end (not just its gating helper) so a
-// regression at the actual bug site -- re-adding the notificationsEnabled early return -- is
-// caught here, not only in a parity comparison of two derivations of the same predicates.
+
 describe('startDesktopNotifications sends the weekly review while notificationsEnabled is off (#reminder-window)', () => {
     const initialStoreState = useTaskStore.getState();
 
@@ -289,7 +394,7 @@ describe('startDesktopNotifications sends the weekly review while notificationsE
     });
 
     it('constructs one notification for the weekly review slot', async () => {
-        const fixedNow = new Date(2026, 6, 31, 18, 0, 0, 0); // a Friday, local time
+        const fixedNow = new Date(2026, 6, 31, 18, 0, 0, 0);
         vi.useFakeTimers();
         vi.setSystemTime(fixedNow);
 
@@ -314,9 +419,7 @@ describe('startDesktopNotifications sends the weekly review while notificationsE
     });
 });
 
-// #1232: Linux bypasses the notification plugin because its sync notify-rust call nests a Tokio
-// runtime after the IPC request has already returned success. Native delivery is awaited, and a
-// failed or ambiguously timed-out request must not be blindly resent through another backend.
+
 describe('Linux native notification path (#1232)', () => {
     const initialStoreState = useTaskStore.getState();
 
@@ -426,10 +529,7 @@ describe('Linux native notification path (#1232)', () => {
     });
 });
 
-// #1146: on a Microsoft Store (MSIX) install the notification plugin passes a foreign
-// application id, Windows rejects the notifier and the plugin discards the error, so no toast
-// ever appears. The renderer must try the packaged Rust command first on Windows and fall back
-// to the plugin when the process is not packaged.
+
 describe('Windows packaged notification path (#1146)', () => {
     const initialStoreState = useTaskStore.getState();
 
@@ -500,8 +600,7 @@ describe('Windows packaged notification path (#1146)', () => {
     });
 });
 
-// #1146: a Store user whose toasts never appear needs the log to separate "the scheduler never
-// fired" from "the send failed". One line per fired reminder, carrying no task text.
+
 describe('fired reminders are logged (#1146)', () => {
     const initialStoreState = useTaskStore.getState();
 
@@ -548,7 +647,7 @@ describe('fired reminders are logged (#1146)', () => {
         vi.useFakeTimers();
         vi.setSystemTime(fixedNow);
 
-        // `tasks` is derived: the store contract wants the write on `_allTasks`.
+
         useTaskStore.setState({
             _allTasks: [{ ...baseTask, dueDate: fixedNow.toISOString() }],
             _allProjects: [],
@@ -574,9 +673,7 @@ describe('fired reminders are logged (#1146)', () => {
     });
 });
 
-// A repeat reminder used to add one notification per occurrence: six an hour at a 10-minute
-// interval. Every reminder of a task now carries the task's tag, so each platform replaces the
-// task's notification (and alerts again) instead of stacking another one.
+
 describe('a task\'s reminders replace its notification', () => {
     const initialStoreState = useTaskStore.getState();
     const tag = 'mindwtr-reminder:task:task-1';
@@ -594,7 +691,7 @@ describe('a task\'s reminders replace its notification', () => {
         runtimeMock.isMacRuntime.mockReturnValue(false);
     });
 
-    // The module dedupes each reminder it sent, so every test fires its own day.
+
     function captureInvokes(...rejected: string[]) {
         const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
         setNativeInvokeTransport(async (command: string, args?: Record<string, unknown>) => {
@@ -616,6 +713,23 @@ describe('a task\'s reminders replace its notification', () => {
         await startDesktopNotifications();
         await vi.advanceTimersByTimeAsync(10 * 60_000);
     }
+
+    it('fires a reminder while the privacy lock is on with no task text, keeping its tag (#1472)', async () => {
+        runtimeMock.isTauriRuntime.mockReturnValue(true);
+        runtimeMock.isMacRuntime.mockReturnValue(true);
+        resetAppLockStoreForTests({ enabled: true, locked: true });
+        try {
+            const calls = captureInvokes();
+            await fireDueThenRepeat(new Date(2026, 7, 9, 9, 0, 0, 0));
+            const replaced = calls.filter((call) => call.command === 'send_replacing_notification');
+            expect(replaced.length).toBeGreaterThanOrEqual(1);
+            expect(replaced.every((call) => call.args.tag === tag)).toBe(true);
+            expect(replaced.every((call) => call.args.title === 'Mindwtr reminder' && call.args.body === undefined)).toBe(true);
+            expect(JSON.stringify(calls)).not.toContain('Prepare report');
+        } finally {
+            resetAppLockStoreForTests();
+        }
+    });
 
     it('passes the task\'s tag with the due reminder and its repeats on Linux', async () => {
         runtimeMock.isTauriRuntime.mockReturnValue(true);
@@ -647,7 +761,7 @@ describe('a task\'s reminders replace its notification', () => {
         runtimeMock.isMacRuntime.mockReturnValue(true);
         let calls = captureInvokes('send_windows_packaged_notification');
         await sendDesktopImmediateNotification('Prepare report');
-        // An immediate notification has no task: no replacing command.
+
         expect(calls.map((call) => call.command)).not.toContain('send_replacing_notification');
         expect(pluginMock.sendNotification).toHaveBeenCalledTimes(1);
         pluginMock.sendNotification.mockClear();
@@ -670,7 +784,7 @@ describe('a task\'s reminders replace its notification', () => {
         runtimeMock.isWindowsRuntime.mockReturnValue(true);
         let calls = captureInvokes('send_windows_packaged_notification');
         await sendDesktopImmediateNotification('Prepare report');
-        // An immediate notification has no task: no replacing command.
+
         expect(calls.map((call) => call.command)).not.toContain('send_replacing_notification');
         expect(pluginMock.sendNotification).toHaveBeenCalledTimes(1);
         pluginMock.sendNotification.mockClear();
@@ -689,7 +803,7 @@ describe('a task\'s reminders replace its notification', () => {
     });
 
     it('tags the web notification and alerts again', async () => {
-        // A fresh module: an earlier test's Tauri plugin stays cached in the shared one.
+
         vi.resetModules();
         const core = await import('@mindwtr/core');
         const service = await import('./notification-service');

@@ -1,12 +1,6 @@
-/**
- * React Native's Archive screen, replayed against the `archive` part of the list
- * views parity fixture that core's archive-view-model and the native host contract
- * are tested against. MINDWTR_CAPTURE_LIST_VIEWS=1 rewrites that part.
- *
- * Each scenario renders the real screen with the real core store, uses its menus,
- * search, filter sheet, rows and bulk bar, and records what a user sees and what
- * the store is asked to write.
- */
+
+
+
 import React from 'react';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -302,7 +296,7 @@ async function seedStore(settings: AppSettings, tasks: Task[]) {
   } as never);
   await useTaskStore.getState().fetchData({ throwOnError: true });
   await flushPendingSave();
-  // Only the screen's own calls: batchMoveTasks calls batchUpdateTasks inside the store.
+
   let moving = 0;
   useTaskStore.setState(Object.fromEntries(RECORDED.map((name) => [name, async (...args: unknown[]) => {
     if (!(name === 'batchUpdateTasks' && moving > 0)) writeLog.push([name, ...encodeArgs(args)]);
@@ -634,8 +628,7 @@ describe('React Native Archive parity fixture', () => {
     await flushPendingSave();
   });
 
-  // One home: Archive, TaskList and Someday all group through core; the mobile
-  // module only re-exports it.
+
   it('groups through core: the mobile grouping module re-exports it', () => {
     expect([...ARCHIVE_TASK_GROUP_OPTIONS]).toEqual([...ARCHIVED_LIST_GROUP_OPTIONS]);
     expect(buildTaskGroupSections).toBe(buildCoreTaskGroupSections);

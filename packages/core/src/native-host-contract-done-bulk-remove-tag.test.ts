@@ -324,8 +324,8 @@ describe('guarded Done bulk Remove tag', () => {
             await changed.restart(undefined, { recoveryLoad: true });
             expect(value(await methods().commitPreparedArchivedTasksRestore(command))).toEqual({ count: 1, changed: true });
             expect(rows()).toEqual(expected); expect(await raw(changed)).toEqual(expectedRaw);
-            // #959 only activates for an explicit completedAt patch. This tag
-            // write preserves both Done and the newer setting, as real RN does.
+
+
             expect(rows().tasks.find((row) => row.id === 'b')?.status).toBe('done'); expect(useTaskStore.getState().settings.gtd?.autoArchiveDays).toBe(1);
         } finally { await changed.close(); }
     });
@@ -344,7 +344,7 @@ describe('guarded Done bulk Remove tag', () => {
         const sqlite = await setup();
         try {
             const command = await prepare(); const before = await raw(sqlite); value(await methods().commitPreparedArchivedTasksRestore(command)); const actual = await raw(sqlite);
-            expect(actual).not.toEqual(expectedRaw); // Strict legacy all-nine raw equality remains FAIL.
+            expect(actual).not.toEqual(expectedRaw);
             const differences = [];
             for (const table of Object.keys(actual)) {
                 const left = expectedRaw![table] as Array<Record<string, unknown>>; const right = actual[table] as Array<Record<string, unknown>>; expect(left).toHaveLength(right.length);

@@ -11,12 +11,12 @@ import {
 import { TaskList, type TaskListProjectOptions } from '../task-list';
 import type { TaskListBulkBarProps } from '../task-list/TaskListBulkBar';
 
-// The policy lives in core so the native host shows the same project list.
+
 export { getProjectDetailTaskListOptions };
 
 export interface ProjectTaskListProps {
     project: Project;
-    /** The project's own tasks; without them the list falls back to the store's pool. */
+
     tasks?: Task[];
     showCompletedTasks: boolean;
     sortBy: TaskSortBy;
@@ -24,23 +24,18 @@ export interface ProjectTaskListProps {
     sequenceCueLabels: Record<ProjectSequenceTaskCue, string>;
     reorderMode: boolean;
     onReorderModeChange: (active: boolean) => void;
-    /** Details and notes, scrolling away with the rows inside the virtualized list. */
+
     listHeaderComponent: React.ReactElement | null;
     listRef: React.Ref<FlatList>;
     onListScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
     contentPaddingBottom: number;
-    /** The workspace draws the bulk bar itself, pinned above its own toolbar. */
+
     onBulkBarPropsChange: (props: TaskListBulkBarProps | null) => void;
     filterOpenSignal: number;
     onFilterStateChange: (state: { activeCount: number; hasActive: boolean }) => void;
 }
 
-/**
- * The task list as the project workspace uses it: sections, sequence cues, task
- * order, the Completed and Reference piles, and chrome the workspace draws
- * itself. Everything project-specific is configured here so the three status
- * screens never see it.
- */
+
 export function ProjectTaskList({
     contentPaddingBottom,
     filterOpenSignal,
@@ -58,8 +53,8 @@ export function ProjectTaskList({
     sortBy,
     tasks,
 }: ProjectTaskListProps) {
-    // TaskList is React.memo'd on the hottest render path, so this is the one
-    // place the grouped prop gets its identity — see the note on TaskListProps.
+
+
     const projectOptions = React.useMemo<TaskListProjectOptions>(() => {
         const options = getProjectDetailTaskListOptions(project, showCompletedTasks);
         return {
@@ -107,7 +102,7 @@ export function ProjectTaskList({
             listRef={listRef}
             onFilterStateChange={onFilterStateChange}
             onListScroll={onListScroll}
-            // Header, sort and filter controls all live in the workspace toolbar.
+
             showHeader={false}
             showFilterButton={false}
             showSort={false}

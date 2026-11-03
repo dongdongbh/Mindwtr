@@ -36,13 +36,7 @@ export type Person = CorePerson;
 export type Section = CoreSection;
 export type ProjectRef = Pick<CoreProject, 'id' | 'title'>;
 
-// Deliberately parses without a QuickAddParseOptions bag, unlike every capture
-// surface in the apps: building one needs the full task list plus people, which
-// here means a whole-library SQLite scan on every call. The cost is that
-// multi-word `@Some Context` and `%Jim Smith` tokens split at the space instead
-// of resolving against known values — acceptable for a scripted caller that can
-// quote or hyphenate, not acceptable for a person typing. Pass a bag through if
-// this ever backs an interactive surface.
+
 export const parseQuickAdd = (input: string, projects: ProjectRef[]): { title: string; props: Partial<Task> } => {
   const parsed = parseQuickAddCore(input, projects as CoreProject[]);
   return {
@@ -61,17 +55,15 @@ export type ListTasksInput = {
   dueDateFrom?: string;
   dueDateTo?: string;
   isFocusedToday?: boolean;
-  /** GTD availability, via core getTaskFocusEligibility. */
+
   view?: 'available' | 'deferred' | 'blocked';
   sortBy?: 'updatedAt' | 'createdAt' | 'dueDate' | 'title' | 'priority';
   sortOrder?: 'asc' | 'desc';
 };
 
-// Task fields shared 1:1 between AddTaskInput/UpdateTaskInput and core's own Task type — these
-// are exactly the fields task-write-fields.ts derives from TASK_SYNC_FIELD_SCHEMA (everything
-// generated, minus the hand-typed ones above that need a different pre-normalization shape:
-// recurrence's raw TaskRecurrenceInput vs Task's normalized Recurrence).
+
 export type TaskGeneratedCreateFields = Pick<CoreTask,
+  | 'viewSectionIds'
   | 'taskMode'
   | 'relativeStartOffset'
   | 'showFutureRecurrence'
@@ -85,6 +77,8 @@ export type TaskGeneratedCreateFields = Pick<CoreTask,
   | 'suppressMindwtrReminders'
   | 'reminderPolicy'
   | 'repeatReminderMinutes'
+  | 'dueReminderLeadMinutes'
+  | 'startReminderLeadMinutes'
   | 'reviewAt'
   | 'cancelledAt'
 >;
@@ -146,6 +140,7 @@ type SectionSqliteRow = Record<string, unknown> & {
   description?: string | null;
   orderNum?: number | null;
   isCollapsed?: number | null;
+  isSequential?: number | null;
   rev?: number | null;
   revBy?: string | null;
   createdAt: string;
@@ -174,10 +169,7 @@ type PersonSqliteRow = Record<string, unknown> & {
   deletedAt?: string | null;
 };
 
-// MCP writes go through the core-backed adapter, but reads are intentionally
-// kept as direct SQL so list/search tools stay fast and read-only. Row mapping
-// is delegated to core; keep this projection in sync with core SQLite columns
-// whenever task columns are added or renamed.
+
 const BASE_TASK_COLUMNS = [...TASK_SQLITE_COLUMNS];
 
 const taskColumnsCache = new WeakMap<DbClient, { hasOrderNum: boolean; insertColumns: string[]; selectColumns: string[] }>();
@@ -202,10 +194,6 @@ const getTaskColumns = (db: DbClient) => {
 };
 
 
-// `priority` is a TEXT column, so sorting it directly is lexicographic ('high' sorts after
-// 'medium' and 'urgent' descending). Rank it through a CASE built from the shared
-// PRIORITY_RANK map so this can't drift from the cloud adapter's JS sort (cloud-service.ts).
-// A task with no priority falls through to 0, matching the cloud side's `?? 0`.
 const PRIORITY_SQL_CASE = `CASE priority ${Object.entries(PRIORITY_RANK)
   .map(([priority, rank]) => `WHEN '${priority}' THEN ${rank}`)
   .join(' ')} ELSE 0 END`;
@@ -225,14 +213,12 @@ function mapTaskRow(row: TaskSqliteRow): TaskRow {
 export function listTasks(db: DbClient, input: ListTasksInput): TaskRow[] {
   const { selectColumns } = getTaskColumns(db);
 
-  // A database predating this column cannot contain a focused row. Keep `true`
-  // narrow while treating every pre-column row as not focused for `false`.
+
   if (input.isFocusedToday === true && !selectColumns.includes('isFocusedToday')) {
     return [];
   }
-  // mindwtr_list_tasks has no default done/archived hiding (unlike the cloud REST
-  // API's GET /v1/tasks) - opt out of buildTaskWhere's archived default explicitly
-  // via includeArchived rather than special-casing this surface's own default.
+
+
   const { sql: coreWhere, params: coreParams } = buildTaskWhere({
     status: input.status,
     projectId: input.projectId,
@@ -255,43 +241,33 @@ export function listTasks(db: DbClient, input: ListTasksInput): TaskRow[] {
   const limit = Number.isFinite(input.limit) ? Math.max(1, Math.min(MAX_TASK_LIST_LIMIT, input.limit as number)) : 200;
   const offset = Number.isFinite(input.offset) ? Math.max(0, input.offset as number) : 0;
 
-  // Validate and apply sorting
+
   const validSortColumns = ['updatedAt', 'createdAt', 'dueDate', 'title', 'priority'];
   const sortBy = validSortColumns.includes(input.sortBy ?? '') ? input.sortBy : 'updatedAt';
   const sortOrder = input.sortOrder === 'asc' ? 'ASC' : 'DESC';
 
   const orderExpr = sortBy === 'priority' ? PRIORITY_SQL_CASE : sortBy;
-  // `id ASC` is a stable tie-break for equal sort keys and, like the cloud adapter's
-  // `id.localeCompare`, never flips direction with sortOrder.
+
+
   const selectSql = `SELECT ${selectColumns.join(', ')} FROM tasks ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${orderExpr} ${sortOrder}, id ASC`;
 
   if (input.search || input.view) {
-    // The documented operator language (status:/context:/due:<=7d/negation/quotes) lives in
-    // core and cannot be expressed in SQL, so the non-search filters run in the database and
-    // the query runs over that result. filterTasksBySearch, NOT searchAll: searchAll caps at
-    // SEARCH_RESULT_LIMIT (200) before any caller paginates, which would silently strand
-    // every match past the 200th. Here limit/offset apply to the whole match set.
-    // ponytail: reads the pre-search matches into memory; push down only if a real database
-    // ever grows enough for it to show up.
+
+
     const projects = listProjects(db) as unknown as CoreProject[];
     const rows = db.prepare(selectSql).all<TaskSqliteRow>(...params).map(mapTaskRow) as unknown as CoreTask[];
     let matched = input.search ? filterTasksBySearch(rows, projects, input.search) : rows;
 
     if (input.view) {
-      // GTD availability is core's, not re-derived here: getTaskFocusEligibility already
-      // answers eligible / deferred (start date in the future) / sequential (an earlier step
-      // in a sequential project still holds the slot).
-      //
-      // Which task holds a sequential project's slot depends on the WHOLE library, so the base
-      // set must be every task — not a listTasks() page, whose 200 default (and 1000 cap) made
-      // step 1 invisible on big libraries and reported blocked tasks as available (D2).
+
+
       const allWhere = buildTaskWhere({ includeDeleted: input.includeDeleted, includeArchived: true });
       const all = db
         .prepare(`SELECT ${selectColumns.join(', ')} FROM tasks${allWhere.sql ? ` WHERE ${allWhere.sql}` : ''}`)
         .all<TaskSqliteRow>(...allWhere.params)
         .map(mapTaskRow) as unknown as CoreTask[];
-      // Once, not per candidate: the sequential-chain scan is O(all), so deriving it inside the
-      // filter was O(matched x all) — 10s at 10k tasks, minutes at 50k (V2).
+
+
       const context = buildTaskFocusEligibilityContext({ tasks: all, projects, sections: listSections(db) });
       const wanted = input.view === 'blocked' ? 'sequential' : input.view === 'deferred' ? 'deferred' : 'eligible';
       matched = matched.filter((task) => getTaskFocusEligibility(task, { tasks: all, ...context }).reason === wanted);
@@ -377,6 +353,7 @@ const BASE_SECTION_COLUMNS = [
   'description',
   'orderNum',
   'isCollapsed',
+  'isSequential',
   'rev',
   'revBy',
   'createdAt',
@@ -393,12 +370,14 @@ const getSectionColumns = (db: DbClient) => {
     const columns = db.prepare('PRAGMA table_info(sections)').all<ColumnInfoRow>();
     const names = new Set<string>(columns.map((col) => String(col.name)));
     const hasOrderNum = names.has('orderNum');
-    const selectColumns = BASE_SECTION_COLUMNS.filter((name) => hasOrderNum || name !== 'orderNum');
+
+    const selectColumns = BASE_SECTION_COLUMNS.filter((name) => (hasOrderNum || name !== 'orderNum')
+      && (name !== 'isSequential' || names.has(name)));
     const resolved = { hasOrderNum, selectColumns };
     sectionColumnsCache.set(db, resolved);
     return resolved;
   } catch {
-    const fallback = { hasOrderNum: true, selectColumns: BASE_SECTION_COLUMNS };
+    const fallback = { hasOrderNum: true, selectColumns: BASE_SECTION_COLUMNS.filter((name) => name !== 'isSequential') };
     sectionColumnsCache.set(db, fallback);
     return fallback;
   }
@@ -544,8 +523,7 @@ export function getPerson(db: DbClient, input: GetPersonInput): Person {
   return personFromSqliteRow(row);
 }
 
-// Booleans have no "clear it" state distinct from false (see task-field-schemas.ts), so they
-// stay plain-optional here rather than nullable like every other generated patch field.
+
 type NullableExceptBooleans<T> = { [K in keyof T]?: T[K] extends boolean | undefined ? T[K] : T[K] | null };
 
 export type UpdateTaskInput = {

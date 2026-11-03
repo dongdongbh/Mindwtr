@@ -5,8 +5,7 @@ import {
     type SyncSecretVault,
 } from '@mindwtr/core/sync-secret-storage';
 
-/** expo-secure-store as core's keystore port. The accessibility class is read at write time:
- *  a caller only ever needs the one it writes with. */
+
 export const secureSecretStorage: SyncSecretStoragePort = {
     isAvailable: () => SecureStore.isAvailableAsync(),
     getItem: (key) => SecureStore.getItemAsync(key),
@@ -18,7 +17,7 @@ export const secureSecretStorage: SyncSecretStoragePort = {
     deleteItem: (key) => SecureStore.deleteItemAsync(key),
 };
 
-/** One vault per process, shared by secure-config, dropbox-auth and ai-config. */
+
 export const secureSecretVault: SyncSecretVault = createSyncSecretVault(secureSecretStorage);
 
 export const isSecureStoreAvailable = (): Promise<boolean> => secureSecretVault.isSecureStoreAvailable();

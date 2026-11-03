@@ -7,16 +7,13 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * CoreHost's order for journaled writes (D9a review): a write starts only after the write before it answered, its I/O included,
- * so the database commits writes in the journal's order; reads start at once.
- */
+
 class WriteQueueTest {
     private data class Call(val method: String, val write: Boolean)
 
     @Test fun aWriteWaitsForTheWriteBeforeItWhileReadsStartAtOnce() {
         val queue = WriteQueue<Call> { it.write }
-        // Codex's sequence: attachmentAddFile waits on the file bridge, then attachmentLinks comes.
+
         val addFile = Call("attachmentAddFile", write = true)
         val links = Call("attachmentLinks", write = true)
         val read = Call("window", write = false)

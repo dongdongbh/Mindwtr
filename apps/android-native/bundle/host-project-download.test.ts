@@ -86,7 +86,7 @@ describe('private selected Project plaintext producer', () => {
         expect(f.secrets).toEqual(['mindwtr_webdav_password']); expect(f.sources).toHaveLength(1); expect(f.memory.files.size).toBe(0);
         expect(original.fileHash).toBeUndefined(); expect(original.size).toBeUndefined();
     });
-    it('returns the exact WebDAV shared 404 copy without source or publication work', async () => {
+    it('answers a WebDAV 404 as unavailable without source or publication work, and never removes the attachment', async () => {
         const f = fixture(), original = attachment();
         globalThis.fetch = (async (url, init) => {
             f.requests.push(String(url)); expect(init?.method).toBe('GET');
@@ -94,12 +94,8 @@ describe('private selected Project plaintext producer', () => {
             return new Response(null, { status: 404 });
         }) as typeof fetch;
         const result = await f.run(original, { backend: 'webdav', provider: undefined, username: 'synthetic', url: 'https://synthetic.invalid/v1/data.json' });
-        expect(result.status).toBe('unrecoverable');
-        if (result.status !== 'unrecoverable') throw new Error('Expected shared terminal404');
-        const copy = JSON.parse(result.attachmentJSON);
-        expect(copy.deletedAt).toBe(copy.updatedAt); expect(new Date(copy.updatedAt).toISOString()).toBe(copy.updatedAt);
-        const expected = { ...original, deletedAt: copy.updatedAt, updatedAt: copy.updatedAt }; delete expected.cloudKey; delete expected.fileHash;
-        expect(copy).toEqual(expected); expect(original.deletedAt).toBeUndefined(); expect(original.cloudKey).toBe(`attachments/${ID}.txt`);
+        expect(result.status).toBe('unavailable');
+        expect(original.deletedAt).toBeUndefined(); expect(original.cloudKey).toBe(`attachments/${ID}.txt`);
         expect(f.sources).toEqual([]); expect(f.memory.files.size).toBe(0); expect(f.requests).toHaveLength(1);
     });
 

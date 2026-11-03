@@ -34,7 +34,7 @@ const fixture = (platform = 'ios') => {
     class Controller extends AbortController {
         constructor() { super(); if (cancelNext) { cancelNext = false; this.abort(); } }
     }
-    // The fixture owns a closed VM; any unexpected bridge access fails the case.
+
     const state = {
         MindwtrHost: undefined as unknown as { boot(first: string, second: string): string; poll(ticket: string): string | null;
             iosReadReminderPlan(grant: unknown): string; abort(ticket: string): void },

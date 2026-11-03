@@ -67,7 +67,7 @@ class QuickCaptureAudioTest {
     val draft = stageDraft(filesDir)
 
     val note = "  @home #literal\nKeep this note  "
-    val queued = PendingCaptureWriter.publishAudio(filesDir, draft, "  Call Alex  ", note)
+    val queued = PendingCaptureWriter.publishAudio(filesDir, draft, "  Call Alex  ", note, "waiting", "inbox")
 
     val finalAudio = File(File(filesDir, PendingCaptureWriter.AUDIO_DIRECTORY), "${draft.id}.wav")
     assertTrue(finalAudio.isFile)
@@ -83,6 +83,8 @@ class QuickCaptureAudioTest {
     assertEquals("1970-01-01T00:00:00.000Z", json.getString("createdAt"))
     assertEquals("Call Alex", json.getString("title"))
     assertEquals(note, json.getString("note"))
+    assertEquals("waiting", json.getString("defaultStatus"))
+    assertEquals("inbox", json.getString("status"))
   }
 
   @Test
@@ -94,10 +96,10 @@ class QuickCaptureAudioTest {
     val note = "  Note retained across\npublication failure  "
 
     try {
-      PendingCaptureWriter.publishAudio(filesDir, draft, "Prefix", note)
+      PendingCaptureWriter.publishAudio(filesDir, draft, "Prefix", note, "someday", "next")
       fail("Expected JSON publication to fail")
     } catch (_: IOException) {
-      // Expected: the WAV is already durable and remains retryable.
+
     }
 
     val finalAudio = File(File(filesDir, PendingCaptureWriter.AUDIO_DIRECTORY), "${draft.id}.wav")
@@ -106,10 +108,12 @@ class QuickCaptureAudioTest {
     assertFalse(File(queueDirectory, "${draft.id}.json").exists())
 
     assertTrue(blockingTempDirectory.delete())
-    val queued = PendingCaptureWriter.publishAudio(filesDir = filesDir, draft = draft, rawTitle = "Prefix", note = note)
+    val queued = PendingCaptureWriter.publishAudio(filesDir = filesDir, draft = draft, rawTitle = "Prefix", note = note, defaultStatus = "someday", status = "next")
     assertTrue(queued.isFile)
     assertEquals(expoFileUri(finalAudio), JSONObject(queued.readText()).getString("audioPath"))
     assertEquals(note, JSONObject(queued.readText()).getString("note"))
+    assertEquals("someday", JSONObject(queued.readText()).getString("defaultStatus"))
+    assertEquals("next", JSONObject(queued.readText()).getString("status"))
   }
 
   @Test
@@ -146,7 +150,7 @@ class QuickCaptureAudioTest {
       PendingCaptureWriter.publishAudio(filesDir, draft, "Prefix")
       fail("Expected distinct existing queue JSON to be rejected")
     } catch (_: IOException) {
-      // Expected.
+
     }
     assertEquals(distinct, queued.readText())
   }
@@ -166,7 +170,7 @@ class QuickCaptureAudioTest {
       PendingCaptureWriter.publishAudio(filesDir, foreign, "")
       fail("Expected foreign draft to be rejected")
     } catch (_: IOException) {
-      // Expected.
+
     }
 
     assertTrue(outside.isFile)

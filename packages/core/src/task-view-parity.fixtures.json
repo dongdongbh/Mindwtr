@@ -1,7 +1,7 @@
 {
  "provenance": {
   "command": "cd apps/mobile && MINDWTR_CAPTURE_TASK_VIEW=1 TZ=UTC bunx vitest run components/task-edit/TaskEditViewTab.parity.test.tsx",
-  "capturedAt": "86b3958c2de3d0c5e0d34e41f700f392cb00bef7",
+  "capturedAt": "bc518c30e770c21ba728cfe0ce7e6c9440d2959f",
   "sourceState": "Every file under apps/ and packages/ was at HEAD except this harness and this fixture.",
   "rendering": "react-test-renderer over the apps/mobile react-native shim (host elements by name). Styles passed as props and theme colors are named markers; markdown-text.tsx keeps its own styles. Lucide icons render as Icon elements with their name. generateUUID returns uuid-1, uuid-2, ... from each fresh render. The clock is pinned to `now`, TZ is UTC, strings are English."
  },
@@ -3308,7 +3308,7 @@
     ]
    },
    "reference": {
-    "tree": "{\"type\":\"ScrollView\",\"props\":{\"ref\":{\"current\":{}},\"style\":{\"$style\":\"content\"},\"contentContainerStyle\":[{\"$style\":\"contentContainer\"},null],\"keyboardShouldPersistTaps\":\"handled\",\"keyboardDismissMode\":\"none\",\"scrollEventThrottle\":16,\"nestedScrollEnabled\":true},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Title\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewTitleValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Manual\"]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Assigned To\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Sam\"]}]},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}],\"accessibilityRole\":\"button\",\"accessibilityLabel\":\"Open project Launch\"},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Project\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Launch\"]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Project section\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Phase 1\"]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Area\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Home\"]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Tags\"]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewPillRow\"}},\"children\":[{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"viewPill\"},{\"borderColor\":\"tc.border\",\"backgroundColor\":\"tc.inputBg\"}],\"accessibilityRole\":\"button\",\"accessibilityLabel\":\"Open tag #docs\"},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewPillText\"},{\"color\":\"tc.text\"}]},\"children\":[\"#docs\"]}]}]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Description\"]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewCard\"},{\"borderColor\":\"tc.border\",\"backgroundColor\":\"tc.inputBg\"}]},\"children\":[{\"type\":\"View\",\"props\":{\"style\":{\"gap\":6}},\"children\":[{\"type\":\"Text\",\"props\":{\"selectable\":true,\"style\":[{\"fontSize\":13,\"lineHeight\":18},{\"color\":\"tc.text\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Read me\"]}]}]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"List\"]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewChecklist\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewChecklistItem\"},{\"alignItems\":\"flex-start\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":{\"color\":\"tc.secondaryText\",\"fontSize\":18,\"lineHeight\":20},\"accessible\":false},\"children\":[\"•\"]},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"viewChecklistText\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"}],{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Page \",{\"type\":\"Text\",\"props\":{\"style\":{\"fontWeight\":\"700\"}},\"children\":[\"one\"]}]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewChecklistItem\"},{\"alignItems\":\"flex-start\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":{\"color\":\"tc.secondaryText\",\"fontSize\":18,\"lineHeight\":20},\"accessible\":false},\"children\":[\"•\"]},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"viewChecklistText\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"}],{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Page two\"]}]}]}]}]}",
+    "tree": "{\"type\":\"ScrollView\",\"props\":{\"ref\":{\"current\":{}},\"style\":{\"$style\":\"content\"},\"contentContainerStyle\":[{\"$style\":\"contentContainer\"},null],\"keyboardShouldPersistTaps\":\"handled\",\"keyboardDismissMode\":\"none\",\"scrollEventThrottle\":16,\"nestedScrollEnabled\":true},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Title\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewTitleValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Manual\"]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Assigned To\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Sam\"]}]},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}],\"accessibilityRole\":\"button\",\"accessibilityLabel\":\"Open project Launch\"},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Project\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Launch\"]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Project section\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Phase 1\"]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Area\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Home\"]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Tags\"]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewPillRow\"}},\"children\":[{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"viewPill\"},{\"borderColor\":\"tc.border\",\"backgroundColor\":\"tc.inputBg\"}],\"accessibilityRole\":\"button\",\"accessibilityLabel\":\"Open tag #docs\"},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewPillText\"},{\"color\":\"tc.text\"}]},\"children\":[\"#docs\"]}]}]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Description\"]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewCard\"},{\"borderColor\":\"tc.border\",\"backgroundColor\":\"tc.inputBg\"}]},\"children\":[{\"type\":\"View\",\"props\":{\"style\":{\"gap\":6}},\"children\":[{\"type\":\"Text\",\"props\":{\"selectable\":true,\"style\":[{\"fontSize\":13,\"lineHeight\":18},{\"color\":\"tc.text\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Read me\"]}]}]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"List\"]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewChecklist\"}},\"children\":[{\"type\":\"TouchableOpacity\",\"props\":{\"style\":{\"$style\":\"viewChecklistItem\"},\"accessibilityRole\":\"checkbox\",\"accessibilityState\":{\"checked\":true},\"accessibilityLabel\":\"Page **one**\"},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":18,\"color\":\"tc.tint\",\"strokeWidth\":2,\"name\":\"CheckSquare\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"viewChecklistText\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"}],{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Page \",{\"type\":\"Text\",\"props\":{\"style\":{\"fontWeight\":\"700\"}},\"children\":[\"one\"]}]}]},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":{\"$style\":\"viewChecklistItem\"},\"accessibilityRole\":\"checkbox\",\"accessibilityState\":{\"checked\":false},\"accessibilityLabel\":\"Page two\"},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":18,\"color\":\"tc.secondaryText\",\"strokeWidth\":2,\"name\":\"Square\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"viewChecklistText\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"}],{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Page two\"]}]},{\"type\":\"TextInput\",\"props\":{\"ref\":{\"current\":{}},\"value\":\"\",\"placeholder\":\"+ Add Item\",\"placeholderTextColor\":\"tc.secondaryText\",\"style\":[{\"$style\":\"viewChecklistAddInput\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"}],\"accessibilityLabel\":\"Add Item\",\"returnKeyType\":\"done\",\"blurOnSubmit\":false,\"submitBehavior\":\"submit\"},\"children\":null}]}]}]}",
     "read": [
      [
       "title",
@@ -3386,8 +3386,8 @@
       "List",
       [
        [
-        "static",
-        "•",
+        "tap",
+        "CheckSquare",
         [
          [
           "text",
@@ -3398,22 +3398,27 @@
           "one"
          ]
         ],
-        null,
-        null,
-        null
+        "Page **one**",
+        "checkbox",
+        true
        ],
        [
-        "static",
-        "•",
+        "tap",
+        "Square",
         [
          [
           "text",
           "Page two"
          ]
         ],
-        null,
-        null,
-        null
+        "Page two",
+        "checkbox",
+        false
+       ],
+       [
+        "input",
+        "+ Add Item",
+        "Add Item"
        ]
       ]
      ]
@@ -3421,7 +3426,7 @@
     "actions": []
    },
    "read-only done task": {
-    "tree": "{\"type\":\"ScrollView\",\"props\":{\"ref\":{\"current\":{}},\"style\":{\"$style\":\"content\"},\"contentContainerStyle\":[{\"$style\":\"contentContainer\"},null],\"keyboardShouldPersistTaps\":\"handled\",\"keyboardDismissMode\":\"none\",\"scrollEventThrottle\":16,\"nestedScrollEnabled\":true},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Title\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewTitleValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Done task\"]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Status\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Done\"]}]},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}],\"accessibilityRole\":\"button\",\"accessibilityLabel\":\"Open project Launch\"},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Project\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Launch\"]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Checklist\"]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewChecklist\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewChecklistItem\"},null],\"accessibilityLabel\":\"Step. Done\"},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":18,\"color\":\"tc.tint\",\"strokeWidth\":2,\"name\":\"CheckSquare\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"viewChecklistText\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"}],{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Step\"]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewChecklistItem\"},null],\"accessibilityLabel\":\"Other. Active\"},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":18,\"color\":\"tc.secondaryText\",\"strokeWidth\":2,\"name\":\"Square\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"viewChecklistText\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"}],{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Other\"]}]}]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Attachments\"]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewAttachmentGrid\"}},\"children\":[{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"viewAttachmentCard\"},{\"borderColor\":\"tc.border\",\"backgroundColor\":\"tc.cardBg\"}],\"disabled\":false},\"children\":[{\"type\":\"View\",\"props\":{},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewAttachmentText\"},{\"color\":\"tc.text\"}],\"numberOfLines\":2},\"children\":[\"doc.pdf\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewAttachmentSubtext\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Missing file\"]},{\"type\":\"AttachmentProgressIndicator\",\"props\":{\"attachmentId\":\"a-doc-missing\"},\"children\":null}]}]}]}]}]}",
+    "tree": "{\"type\":\"ScrollView\",\"props\":{\"ref\":{\"current\":{}},\"style\":{\"$style\":\"content\"},\"contentContainerStyle\":[{\"$style\":\"contentContainer\"},null],\"keyboardShouldPersistTaps\":\"handled\",\"keyboardDismissMode\":\"none\",\"scrollEventThrottle\":16,\"nestedScrollEnabled\":true},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Title\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewTitleValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Done task\"]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Status\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Done\"]}]},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"viewRow\"},{\"backgroundColor\":\"tc.inputBg\",\"borderColor\":\"tc.border\"}],\"accessibilityRole\":\"button\",\"accessibilityLabel\":\"Open project Launch\"},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Project\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewValue\"},{\"color\":\"tc.text\"}]},\"children\":[\"Launch\"]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Checklist\"]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewChecklist\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewChecklistItem\"},\"accessibilityLabel\":\"Step. Done\"},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":18,\"color\":\"tc.tint\",\"strokeWidth\":2,\"name\":\"CheckSquare\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"viewChecklistText\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"}],{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Step\"]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewChecklistItem\"},\"accessibilityLabel\":\"Other. Active\"},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":18,\"color\":\"tc.secondaryText\",\"strokeWidth\":2,\"name\":\"Square\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"viewChecklistText\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"}],{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"}]},\"children\":[\"Other\"]}]}]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewSection\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewLabel\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Attachments\"]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"viewAttachmentGrid\"}},\"children\":[{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"viewAttachmentCard\"},{\"borderColor\":\"tc.border\",\"backgroundColor\":\"tc.cardBg\"}],\"disabled\":false},\"children\":[{\"type\":\"View\",\"props\":{},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewAttachmentText\"},{\"color\":\"tc.text\"}],\"numberOfLines\":2},\"children\":[\"doc.pdf\"]},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"viewAttachmentSubtext\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Missing file\"]},{\"type\":\"AttachmentProgressIndicator\",\"props\":{\"attachmentId\":\"a-doc-missing\"},\"children\":null}]}]}]}]}]}",
     "read": [
      [
       "title",
@@ -4503,7 +4508,7 @@
     ]
    },
    "reference list": {
-    "tree": "{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"formGroup\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"checklistHeader\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"flexDirection\":\"row\",\"alignItems\":\"center\",\"gap\":6,\"marginBottom\":8},{\"flex\":1,\"marginBottom\":0}]},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":16,\"color\":\"tc.secondaryText\",\"aria-hidden\":true,\"accessible\":false,\"pointerEvents\":\"none\",\"name\":\"ListChecks\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"label\"},{\"$style\":\"checklistHeaderLabel\"},{\"color\":\"tc.secondaryText\"}],{\"marginBottom\":0}]},\"children\":[\"List\"]}]},{\"type\":\"TouchableOpacity\",\"props\":{\"accessibilityRole\":\"button\",\"accessibilityLabel\":\"Reorder\",\"style\":[{\"$style\":\"checklistHeaderButton\"},{\"borderColor\":\"tc.border\",\"backgroundColor\":\"tc.filterBg\"}],\"testID\":\"mobile-checklist-order-toggle\"},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"checklistHeaderButtonText\"},{\"color\":\"tc.tint\"}]},\"children\":[\"Reorder\"]}]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checklistContainer\"},{\"backgroundColor\":\"tc.cardBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checklistItem\"},{\"borderBottomColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":{\"width\":28,\"color\":\"tc.secondaryText\",\"fontSize\":18,\"lineHeight\":24,\"textAlign\":\"center\"},\"accessible\":false},\"children\":[\"•\"]},{\"type\":\"TextInput\",\"props\":{\"style\":[{\"$style\":\"checklistInput\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"},false],\"value\":\"First\",\"placeholder\":\"Item name\",\"placeholderTextColor\":\"tc.secondaryText\",\"accessibilityLabel\":\"List 1\",\"accessibilityHint\":\"Item name\",\"returnKeyType\":\"next\",\"blurOnSubmit\":false},\"children\":null},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":{\"$style\":\"deleteBtn\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"deleteBtnText\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"×\"]}]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checklistItem\"},{\"borderBottomColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":{\"width\":28,\"color\":\"tc.secondaryText\",\"fontSize\":18,\"lineHeight\":24,\"textAlign\":\"center\"},\"accessible\":false},\"children\":[\"•\"]},{\"type\":\"TextInput\",\"props\":{\"style\":[{\"$style\":\"checklistInput\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"},false],\"value\":\"Second\",\"placeholder\":\"Item name\",\"placeholderTextColor\":\"tc.secondaryText\",\"accessibilityLabel\":\"List 2\",\"accessibilityHint\":\"Item name\",\"returnKeyType\":\"next\",\"blurOnSubmit\":false},\"children\":null},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":{\"$style\":\"deleteBtn\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"deleteBtnText\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"×\"]}]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checklistItem\"},{\"borderBottomColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":{\"width\":28,\"color\":\"tc.secondaryText\",\"fontSize\":18,\"lineHeight\":24,\"textAlign\":\"center\"},\"accessible\":false},\"children\":[\"•\"]},{\"type\":\"TextInput\",\"props\":{\"style\":[{\"$style\":\"checklistInput\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"},false],\"value\":\"**Third**\",\"placeholder\":\"Item name\",\"placeholderTextColor\":\"tc.secondaryText\",\"accessibilityLabel\":\"List 3\",\"accessibilityHint\":\"Item name\",\"returnKeyType\":\"next\",\"blurOnSubmit\":false},\"children\":null},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":{\"$style\":\"deleteBtn\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"deleteBtnText\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"×\"]}]}]},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"addChecklistBtn\"},{\"backgroundColor\":\"tc.cardBg\",\"borderColor\":\"tc.border\"}],\"testID\":\"mobile-checklist-add-item\"},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":14,\"color\":\"tc.tint\",\"accessible\":false,\"name\":\"Plus\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"addChecklistText\"},{\"color\":\"tc.tint\"}]},\"children\":[\"Add Item\"]}]}]}]}",
+    "tree": "{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"formGroup\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"checklistHeader\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"flexDirection\":\"row\",\"alignItems\":\"center\",\"gap\":6,\"marginBottom\":8},{\"flex\":1,\"marginBottom\":0}]},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":16,\"color\":\"tc.secondaryText\",\"aria-hidden\":true,\"accessible\":false,\"pointerEvents\":\"none\",\"name\":\"ListChecks\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[[{\"$style\":\"label\"},{\"$style\":\"checklistHeaderLabel\"},{\"color\":\"tc.secondaryText\"}],{\"marginBottom\":0}]},\"children\":[\"List\"]}]},{\"type\":\"TouchableOpacity\",\"props\":{\"accessibilityRole\":\"button\",\"accessibilityLabel\":\"Reorder\",\"style\":[{\"$style\":\"checklistHeaderButton\"},{\"borderColor\":\"tc.border\",\"backgroundColor\":\"tc.filterBg\"}],\"testID\":\"mobile-checklist-order-toggle\"},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"checklistHeaderButtonText\"},{\"color\":\"tc.tint\"}]},\"children\":[\"Reorder\"]}]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checklistContainer\"},{\"backgroundColor\":\"tc.cardBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checklistItem\"},{\"borderBottomColor\":\"tc.border\"}]},\"children\":[{\"type\":\"TouchableOpacity\",\"props\":{\"accessibilityRole\":\"checkbox\",\"accessibilityLabel\":\"First\",\"accessibilityState\":{\"checked\":true},\"style\":{\"$style\":\"checkboxTouch\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checkbox\"},{\"borderColor\":\"tc.tint\"},{\"backgroundColor\":\"tc.tint\"}]},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":12,\"color\":\"tc.onTint\",\"strokeWidth\":3,\"name\":\"Check\"},\"children\":null}]}]},{\"type\":\"TextInput\",\"props\":{\"style\":[{\"$style\":\"checklistInput\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.secondaryText\"},{\"$style\":\"completedText\"}],\"value\":\"First\",\"placeholder\":\"Item name\",\"placeholderTextColor\":\"tc.secondaryText\",\"accessibilityLabel\":\"List 1\",\"accessibilityHint\":\"Item name\",\"returnKeyType\":\"next\",\"blurOnSubmit\":false},\"children\":null},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":{\"$style\":\"deleteBtn\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"deleteBtnText\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"×\"]}]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checklistItem\"},{\"borderBottomColor\":\"tc.border\"}]},\"children\":[{\"type\":\"TouchableOpacity\",\"props\":{\"accessibilityRole\":\"checkbox\",\"accessibilityLabel\":\"Second\",\"accessibilityState\":{\"checked\":false},\"style\":{\"$style\":\"checkboxTouch\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checkbox\"},{\"borderColor\":\"tc.tint\"},false]},\"children\":null}]},{\"type\":\"TextInput\",\"props\":{\"style\":[{\"$style\":\"checklistInput\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"},false],\"value\":\"Second\",\"placeholder\":\"Item name\",\"placeholderTextColor\":\"tc.secondaryText\",\"accessibilityLabel\":\"List 2\",\"accessibilityHint\":\"Item name\",\"returnKeyType\":\"next\",\"blurOnSubmit\":false},\"children\":null},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":{\"$style\":\"deleteBtn\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"deleteBtnText\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"×\"]}]}]},{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checklistItem\"},{\"borderBottomColor\":\"tc.border\"}]},\"children\":[{\"type\":\"TouchableOpacity\",\"props\":{\"accessibilityRole\":\"checkbox\",\"accessibilityLabel\":\"**Third**\",\"accessibilityState\":{\"checked\":false},\"style\":{\"$style\":\"checkboxTouch\"}},\"children\":[{\"type\":\"View\",\"props\":{\"style\":[{\"$style\":\"checkbox\"},{\"borderColor\":\"tc.tint\"},false]},\"children\":null}]},{\"type\":\"TextInput\",\"props\":{\"style\":[{\"$style\":\"checklistInput\"},{\"writingDirection\":\"ltr\",\"textAlign\":\"left\"},{\"color\":\"tc.text\"},false],\"value\":\"**Third**\",\"placeholder\":\"Item name\",\"placeholderTextColor\":\"tc.secondaryText\",\"accessibilityLabel\":\"List 3\",\"accessibilityHint\":\"Item name\",\"returnKeyType\":\"next\",\"blurOnSubmit\":false},\"children\":null},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":{\"$style\":\"deleteBtn\"}},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"deleteBtnText\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"×\"]}]}]},{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"addChecklistBtn\"},{\"backgroundColor\":\"tc.cardBg\",\"borderColor\":\"tc.border\"}],\"testID\":\"mobile-checklist-add-item\"},\"children\":[{\"type\":\"Icon\",\"props\":{\"size\":14,\"color\":\"tc.tint\",\"accessible\":false,\"name\":\"Plus\"},\"children\":null},{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"addChecklistText\"},{\"color\":\"tc.tint\"}]},\"children\":[\"Add Item\"]}]},{\"type\":\"View\",\"props\":{\"style\":{\"$style\":\"checklistActions\"}},\"children\":[{\"type\":\"TouchableOpacity\",\"props\":{\"style\":[{\"$style\":\"checklistActionButton\"},{\"backgroundColor\":\"tc.cardBg\",\"borderColor\":\"tc.border\"}]},\"children\":[{\"type\":\"Text\",\"props\":{\"style\":[{\"$style\":\"checklistActionText\"},{\"color\":\"tc.secondaryText\"}]},\"children\":[\"Reset checklist\"]}]}]}]}]}",
     "read": {
      "label": "List",
      "orderToggle": [
@@ -4513,20 +4518,24 @@
      "items": [
       [
        [
-        "bullet",
-        "•"
+        "checkbox",
+        "First",
+        true,
+        true
        ],
        "First",
-       "tc.text",
-       false,
+       "tc.secondaryText",
+       true,
        "List 1",
        "Item name",
        "×"
       ],
       [
        [
-        "bullet",
-        "•"
+        "checkbox",
+        "Second",
+        false,
+        false
        ],
        "Second",
        "tc.text",
@@ -4537,8 +4546,10 @@
       ],
       [
        [
-        "bullet",
-        "•"
+        "checkbox",
+        "**Third**",
+        false,
+        false
        ],
        "**Third**",
        "tc.text",
@@ -4548,7 +4559,8 @@
        "×"
       ]
      ],
-     "add": "Add Item"
+     "add": "Add Item",
+     "reset": "Reset checklist"
     },
     "actions": [
      [
@@ -4574,7 +4586,7 @@
          {
           "id": "uuid-1",
           "title": "b",
-          "isCompleted": false
+          "isCompleted": true
          },
          {
           "id": "uuid-2",
@@ -4609,7 +4621,7 @@
          {
           "id": "uuid-1",
           "title": "done",
-          "isCompleted": false
+          "isCompleted": true
          },
          {
           "id": "k2",
@@ -4707,7 +4719,7 @@
        "order": [
         [
          "First",
-         "tc.text",
+         "tc.secondaryText",
          [
           "Move up: First",
           true,

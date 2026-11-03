@@ -43,7 +43,7 @@ const readRequest = (value: unknown): NativeProjectRenameRequest | null => {
         && iso(expected.updatedAt) ? input as NativeProjectRenameRequest : null;
 };
 
-/** Pure cold-journal validation before SQLite opens. */
+
 const readPrepared = (value: unknown): NativePreparedProjectRename | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

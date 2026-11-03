@@ -67,8 +67,7 @@ function buildTask(id: string, title: string, status: TaskStatus, projectId: str
 
 type ProjectTaskSummary = { activeTaskCount: number; nextAction?: Task; hasWaitingAction?: boolean };
 
-// Mirrors core's projectTaskSummaryById shape (store-helpers.ts computeTaskDerivedState):
-// one open-task count and lowest-order 'next' task per project.
+
 function buildProjectTaskSummaryById(tasksByProject: Record<string, Task[]>): Map<string, ProjectTaskSummary> {
     const summaries = new Map<string, ProjectTaskSummary>();
     for (const [projectId, tasks] of Object.entries(tasksByProject)) {

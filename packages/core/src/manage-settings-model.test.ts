@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildManagePersonRow, getManageDeleteConfirm, getManageEditorText, isManageAreaNameTaken, isManageEditorSaveDisabled, type ManageUntranslatedText } from './manage-settings-model';
+import { buildManagePersonRow, getManageDeleteConfirm, getManageEditorText, getManageEditorDraft, planManageEditorSave, isManageAreaNameTaken, isManageEditorSaveDisabled, type ManageUntranslatedText } from './manage-settings-model';
 import type { Area, Person } from './types';
 
 const t = (key: string) => ({ 'common.tasks': 'tasks', 'list.countTaskSingular': 'task' }[key] ?? key);
@@ -31,7 +31,7 @@ describe('a new area with a name an area already has', () => {
         expect(isManageEditorSaveDisabled('newArea', 'home', areas)).toBe(true);
         expect(isManageEditorSaveDisabled('newArea', 'Garden', areas)).toBe(false);
         expect(isManageEditorSaveDisabled('newArea', '  ', areas)).toBe(true);
-        // Renaming an area into another one merges them, as before; only a new area is refused.
+
         expect(isManageEditorSaveDisabled('area', 'home', areas)).toBe(false);
         const text = (type: 'newArea' | 'area') => getManageEditorText((key) => key, type, {} as ManageUntranslatedText).nameTaken;
         expect(text('newArea')).toBe('An area with this name already exists.');
@@ -55,5 +55,21 @@ describe('Manage deletion confirmation', () => {
         expect(calls).not.toContain('people.deleteConfirm');
         expect(getManageDeleteConfirm(translate, 'Work', 'areas.deleteConfirm').message).toBe('Original Area confirmation');
         expect(getManageDeleteConfirm((key) => key, 'Alex', 'people.deleteConfirm').message).toBe('Delete "Alex"?');
+    });
+});
+
+
+describe('saved context and tag creation', () => {
+    it.each([
+        ['newContext', 'addContext', 'New context'],
+        ['newTag', 'addTag', 'New tag'],
+    ] as const)('plans %s without assigning a task', (type, kind, title) => {
+        const target = { type };
+        const draft = getManageEditorDraft(target);
+        expect(draft.name).toBe('');
+        expect(getManageEditorText((key) => key, type, {} as ManageUntranslatedText).title).toBe(title);
+        expect(planManageEditorSave(target, { ...draft, name: '  Garden  ' }, {})).toEqual([{ kind, name: 'Garden' }]);
+        expect(planManageEditorSave(target, { ...draft, name: '  ' }, {})).toBeNull();
+        expect(isManageEditorSaveDisabled(type, '  ', [])).toBe(true);
     });
 });

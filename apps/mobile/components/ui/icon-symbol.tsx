@@ -3,9 +3,7 @@ import type { StyleProp, TextStyle } from 'react-native';
 
 type IconSymbolName = keyof typeof MAPPING;
 
-/**
- * Add your SF Symbols to emoji mappings here.
- */
+
 const MAPPING = {
   'house.fill': 'home',
   'paperplane.fill': 'paper-plane',
@@ -31,10 +29,7 @@ const MAPPING = {
   'questionmark.circle.fill': 'help-circle',
 } as const;
 
-/**
- * An icon component that uses emoji to avoid font loading issues.
- * Icon `name`s are based on SF Symbols and mapped to emoji.
- */
+
 export function IconSymbol({
   name,
   size = 24,

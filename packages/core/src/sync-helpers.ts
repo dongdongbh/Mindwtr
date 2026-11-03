@@ -134,7 +134,7 @@ export const findPendingAttachmentUploads = (data: AppData): PendingAttachmentUp
 
     for (const task of data.tasks) {
         if (task.deletedAt) continue;
-        // One push per upload: QuickJS (native Android) refuses a call with more than 65535 arguments.
+
         for (const upload of collectPendingUploads('task', task.id, task.attachments)) pending.push(upload);
     }
 
@@ -182,15 +182,12 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
         ? { ...settings.syncPreferencesUpdatedAt }
         : undefined;
     if (isSettingsSyncGroupEnabled(prefs, 'gtd')) {
-        // Current clients treat a missing GTD preference as enabled. Materialize
-        // that effective value only in the wire snapshot so RC.2 peers, which
-        // require explicit true, do not strip the synced GTD fields on upload.
+
+
         remotePrefs.gtd = true;
         if (prefs.gtd === undefined) {
-            // RC.2 merges the whole preference map before deciding whether GTD
-            // fields may upload. Advance the wire-only true one deterministic
-            // tick past both relevant generations so an equal copied timestamp
-            // cannot deadlock, without advancing the persisted setting.
+
+
             const materializedAt = advanceLatestSyncTimestamp(
                 remotePrefsUpdatedAt?.preferences,
                 remotePrefsUpdatedAt?.gtd,
@@ -204,8 +201,9 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
         syncPreferences: remotePrefs,
         syncPreferencesUpdatedAt: remotePrefsUpdatedAt,
     };
-    // Not preference groups: the dataset id and the support-prompt cooldown
-    // must reach every device regardless of what the user chose to sync.
+
+
+    if (settings.taxonomy !== undefined) next.taxonomy = settings.taxonomy;
     if (isNonEmptyString(settings.analyticsProfileId)) {
         next.analyticsProfileId = settings.analyticsProfileId;
     }
@@ -217,7 +215,7 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
         next.theme = settings.theme;
         next.appearance = settings.appearance ? { ...settings.appearance } : settings.appearance;
         next.keybindingStyle = settings.keybindingStyle;
-        // Desktop global shortcut registration is local runtime behavior and should never sync.
+
         next.globalQuickAddShortcut = undefined;
     }
 
@@ -253,8 +251,8 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
         next.ai = {
             ...settings.ai,
             apiKey: undefined,
-            // Device-local, like apiKey: the endpoint the key is sent to and the
-            // extra request body never leave this device.
+
+
             baseUrl: undefined,
             openAIExtraBodyParams: undefined,
             speechToText: settings.ai.speechToText
@@ -272,7 +270,7 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
 
 export const sanitizeAppDataForRemote = (data: AppData): AppData => runToEnd(sanitizeAppDataForRemotePass(data));
 
-/** {@link sanitizeAppDataForRemote} as a cooperative pass (cooperative.ts): it only reads [data] and returns new objects. */
+
 export function* sanitizeAppDataForRemotePass(data: AppData): CooperativePass<AppData> {
     const hasNonEmptyValue = (value: unknown): boolean => (
         typeof value === 'string' && value.trim().length > 0
@@ -304,12 +302,8 @@ export function* sanitizeAppDataForRemotePass(data: AppData): CooperativePass<Ap
                 ...attachment,
                 uri: '',
                 localStatus: undefined,
-                // #1057 (review B1): recorded mtime/size describe THIS device's disk file
-                // and must never travel — two devices holding byte-identical content would
-                // otherwise carry permanently different values for a field the merge (and
-                // the fast unchanged-check) both compare, causing a remote write every cycle
-                // forever. Only `contentRev`/`fileHash` are synced content-identity; each
-                // device re-derives its own stat locally after its own upload/download.
+
+
                 contentMtimeMs: undefined,
                 contentSize: undefined,
                 pendingContentUpload: undefined,
@@ -343,10 +337,7 @@ const isIdKeyed = (item: unknown): item is { id: string } => (
 
 type SyncPropertyOrder = { original: string[]; sorted: string[] };
 
-// Most entities share a handful of field layouts. Reuse only their property
-// order, never values or serialized entities. The small cache belongs to one
-// comparison traversal, so edits, new fields and subsequent calls cannot see
-// stale data. Exact enumeration-order matching also avoids delimiter collisions.
+
 const getSortedSyncProperties = (value: object, orders: SyncPropertyOrder[]): string[] => {
     const properties = Object.keys(value);
     for (const order of orders) {
@@ -361,20 +352,7 @@ const getSortedSyncProperties = (value: object, orders: SyncPropertyOrder[]): st
     return sorted;
 };
 
-// Lists of id-keyed records (entities, attachments, checklist items) compare
-// by content, not position. A merge emits the local side's order first, so two
-// devices that added records concurrently hold the same set in different
-// orders forever; comparing positionally made every fingerprint differ, every
-// cycle upload, and the self-hosted server report a merge each time (#1136).
-// Entities and attachments carry an explicit order field, so ignoring list
-// position here is free — the field is what's compared. `ChecklistItem`
-// (types.ts) has no order field of its own; its order is purely positional.
-// Sorting it out of the comparison is safe only because every checklist
-// reorder goes through `updateTask`, which bumps the owning task's
-// `rev`/`updatedAt` in the same write, so the fingerprint still changes even
-// though this comparison can no longer see the position change directly. A
-// hypothetical path that reordered checklist items without touching the
-// owning task would NOT sync — nothing here would notice.
+
 const sortIdKeyed = (items: unknown[]): unknown[] => {
     if (items.length > 1 && items.every(isIdKeyed)) {
         items.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
@@ -403,10 +381,7 @@ export const areSyncPayloadsEqual = (left: AppData, right: AppData): boolean =>
 export const toStableSyncJson = (value: unknown): string =>
     JSON.stringify(normalizeForSyncComparison(value));
 
-/**
- * {@link toStableSyncJson} as a cooperative pass (cooperative.ts): the same JSON, with a yield point every few records of a
- * top-level list (a sync document's tasks). It only reads [value].
- */
+
 export function* toStableSyncJsonPass(value: unknown): CooperativePass<string> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return toStableSyncJson(value);
     const orders: SyncPropertyOrder[] = [];
@@ -437,12 +412,12 @@ function* hashStableSyncJsonPass(value: string): CooperativePass<string> {
     return `${(left >>> 0).toString(16).padStart(8, '0')}${(right >>> 0).toString(16).padStart(8, '0')}`;
 }
 
-/** The fingerprint of stable JSON already made by {@link toStableSyncJson}, as a cooperative pass over its characters. */
+
 export function* fingerprintStableSyncJsonPass(json: string): CooperativePass<string> {
     return `stable-v2:${json.length}:${yield* hashStableSyncJsonPass(json)}`;
 }
 
-/** The fingerprint of stable JSON already made by {@link toStableSyncJson}. */
+
 export const fingerprintStableSyncJson = (json: string): string => runToEnd(fingerprintStableSyncJsonPass(json));
 
 export const computeStableValueFingerprint = (value: unknown): string => fingerprintStableSyncJson(toStableSyncJson(value));
@@ -450,12 +425,7 @@ export const computeStableValueFingerprint = (value: unknown): string => fingerp
 export const computeSyncPayloadFingerprint = (data: AppData): string =>
     computeStableValueFingerprint(sanitizeAppDataForRemote(data));
 
-/**
- * Sync's own status bookkeeping fields. Writes to these never mark the store
- * dirty (store-settings builds its non-mutating list from this), and the
- * covered-settings fingerprint below ignores them because the sync cycle
- * itself rewrites them while it runs.
- */
+
 export const SYNC_STATUS_BOOKKEEPING_SETTINGS_KEYS = [
     'lastSyncAt',
     'lastSyncStatus',
@@ -467,14 +437,7 @@ export const SYNC_STATUS_BOOKKEEPING_SETTINGS_KEYS = [
     'lastSyncHistory',
 ] as const satisfies readonly (keyof AppData['settings'])[];
 
-/**
- * Fingerprint of the settings a sync apply would overwrite, including the
- * device-local fields that sanitizeSettingsForRemote strips from the payload
- * (e.g. `filters`, the sidebar area selection). The payload fingerprint alone
- * cannot see those fields, so a covered-snapshot check that trusts it would
- * let the cycle's finalize revert a device-local change made mid-sync (#316).
- * Sync status bookkeeping is excluded — the running cycle mutates it.
- */
+
 export const computeCoveredSettingsFingerprint = (settings: AppData['settings']): string => {
     const comparable: Record<string, unknown> = { ...(settings ?? {}) };
     for (const key of SYNC_STATUS_BOOKKEEPING_SETTINGS_KEYS) {
@@ -483,14 +446,7 @@ export const computeCoveredSettingsFingerprint = (settings: AppData['settings'])
     return computeStableValueFingerprint(comparable);
 };
 
-/**
- * JSON-value equality with no intermediate object graph and an exit at the
- * first difference — the cheap way to ask "are these two documents the same"
- * when the answer is usually no. A missing key and an explicitly-undefined one
- * compare equal, matching what a stable serialize emits: the sync merge
- * normalizers deliberately emit explicit-undefined keys (#766), which must not
- * read as a difference against a JSON round-tripped twin.
- */
+
 export const isDeepJsonEqual = (left: unknown, right: unknown): boolean => {
     if (left === right) return true;
     if (left === null || right === null) return false;
@@ -530,16 +486,7 @@ const withoutSyncStatusBookkeeping = (settings: AppData['settings']): Record<str
     return comparable;
 };
 
-/**
- * True when persisting `candidate` over `stored` would change nothing durable.
- *
- * Everything a local write persists is compared, not just the transport
- * payload: `sanitizeAppDataForRemote` strips attachment `uri`, `localStatus`,
- * the recorded content stats, `pendingContentUpload`, the uncompacted half of
- * a purged tombstone and every device-local setting, all of which are real
- * local content that a skipped write would silently drop. Only the sync
- * bookkeeping the running cycle rewrites by design is excluded.
- */
+
 export const isLocalPersistEquivalent = (candidate: AppData, stored: AppData): boolean => {
     if (candidate === stored) return true;
     if (!isDeepJsonEqual(
@@ -573,22 +520,10 @@ function* appendEntityRevisions(parts: string[], entities: readonly RevisionedEn
     }
 }
 
-/**
- * Cheap "did anything sync-worthy change since last time" fingerprint.
- *
- * computeSyncPayloadFingerprint answers the same question, but it deep clones,
- * sanitizes, key-sorts and hashes the whole library — measured at ~5 s per
- * store change on a 5k-task Android library, blocking every tap behind it
- * (#766). Every synced write bumps rev/updatedAt, and that same tuple is what
- * reconcileEntityCollection already trusts when it decides an in-memory entity
- * is unchanged, so digesting the tuples plus the (small) sanitized settings
- * answers the change question at a fraction of the cost. Use the payload
- * fingerprint when the bytes themselves matter (remote comparison); use this
- * one when the only question is whether to schedule work.
- */
+
 export const computeSyncChangeFingerprint = (data: AppData): string => runToEnd(computeSyncChangeFingerprintPass(data));
 
-/** {@link computeSyncChangeFingerprint} as a cooperative pass (cooperative.ts): it only reads [data]. */
+
 export function* computeSyncChangeFingerprintPass(data: AppData): CooperativePass<string> {
     const parts: string[] = [];
     yield* appendEntityRevisions(parts, data.tasks);

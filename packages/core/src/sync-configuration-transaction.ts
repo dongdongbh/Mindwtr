@@ -1,19 +1,17 @@
 import type { CloudProvider } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
 
-/** Candidate transport values for a configuration the caller has already proven
- *  with an activation probe. Platform-neutral: every field a platform cannot
- *  express stays undefined and is never written. */
+
 export type SyncConfigurationCandidate = {
     backend: SyncBackend;
     syncPath?: string;
-    /** iOS security-scoped bookmark for `syncPath`. Desktop leaves it undefined. */
+
     syncPathBookmark?: string | null;
     webdav?: CandidateWebDavConfiguration;
     cloudProvider?: CloudProvider;
     cloud?: CandidateCloudConfiguration;
-    /** Opaque handle for a Dropbox OAuth result that has not replaced the durable
-     *  credential bundle yet. Token bytes never enter this module. */
+
+
     dropboxCredentialHandle?: string;
 };
 
@@ -67,7 +65,7 @@ export type SyncConfigurationSecretRequirements = {
 export type PersistedSyncConfiguration = {
     backend: SyncBackend;
     syncPath: string;
-    /** Undefined on platforms without security-scoped bookmarks; compared as null. */
+
     syncPathBookmark?: string | null;
     webdav: PersistedWebDavConfiguration;
     cloudProvider: CloudProvider;
@@ -100,8 +98,7 @@ export type SyncConfigurationCommitResult = {
     handleFinalized: boolean;
 };
 
-/** Thrown when the previous configuration could not be restored and
- *  reactivated, so sync has deliberately been left disabled. */
+
 export class SyncConfigurationDisabledError extends Error {
     readonly syncRemainsDisabled = true;
 
@@ -131,13 +128,7 @@ const createTouchedTransportFields = (): TouchedTransportFields => ({
     cloudProvider: false,
 });
 
-// The prior secret is only needed when the candidate has none of its own to
-// write: `writeCandidateTransport` carries it forward. Demanding a readable
-// prior for a candidate that replaces it made re-entering credentials
-// impossible once the secret authority went away — the exact dead end #1043
-// reported on a keyring-less sandbox ("I re-enter my username and password,
-// but the error persists"). The post-write verification below still requires
-// the new secret to read back exactly.
+
 const getCandidateSecretRequirements = (
     candidate: SyncConfigurationCandidate,
     previous: PersistedSyncConfiguration,
@@ -263,9 +254,7 @@ const restoreLastProvenConfiguration = async (
         }
     };
 
-    // Rollback itself is staged behind the same activation flag. Do not mutate
-    // credentials or transports unless native persistence first proves the
-    // backend is off.
+
     try {
         await ensureBackendDisabled(dependencies, {});
     } catch (error) {
@@ -275,9 +264,7 @@ const restoreLastProvenConfiguration = async (
         );
     }
 
-    // Only restore fields whose candidate write was attempted. Untouched
-    // opaque secret slots stay natively authoritative and are never rewritten
-    // as concrete empty values.
+
     if (options.touched.syncPath) {
         if (previous.syncPath) {
             await attempt('restore file path', async () => {
@@ -366,8 +353,8 @@ const restoreLastProvenConfiguration = async (
     }
 
     if (failures.length > 0) {
-        // Never reactivate a snapshot that was only partly restored. This final
-        // write is deliberately last even when an earlier disable failed.
+
+
         await attempt('keep sync disabled', () => dependencies.writeBackend('off'));
         throw new SyncConfigurationDisabledError(`Previous sync settings could not be fully restored; sync remains disabled. ${failures.join('; ')}`);
     }
@@ -454,9 +441,7 @@ const writeCandidateTransport = async (
         return { ...previous, backend: 'off', cloudProvider: provider };
     }
 
-    // Backends that own no provider of their own still need the provider slot
-    // written: a stale one must be cleared, and an adapter may persist its own
-    // representation there that the canonical value cannot express.
+
     if (candidate.cloudProvider) {
         touched.cloudProvider = true;
         await dependencies.writeCloudProvider(candidate.cloudProvider);
@@ -465,12 +450,7 @@ const writeCandidateTransport = async (
     return { ...previous, backend: 'off' };
 };
 
-/**
- * Commits a transport only after its activation probe has succeeded. The
- * backend is an activation flag: an existing backend is disabled before any
- * credential/path mutation, and the prior complete snapshot is restored and
- * verified after every failed write.
- */
+
 export async function commitProvenSyncConfiguration(
     candidate: SyncConfigurationCandidate,
     dependencies: SyncConfigurationPort,
@@ -482,9 +462,8 @@ export async function commitProvenSyncConfiguration(
     ) {
         throw new Error('A staged Dropbox credential can only activate the Dropbox backend');
     }
-    // A reload can leave a native promotion journal that changes the durable
-    // provider/backend snapshot. Settle it before reading or mutating any sync
-    // configuration. A current staged handle owns its own transaction instead.
+
+
     if (!credentialHandle) {
         await dependencies.recoverDropboxCredentialsBeforeConfiguration();
     }
@@ -499,10 +478,8 @@ export async function commitProvenSyncConfiguration(
     let credentialPromotionAttempted = false;
 
     try {
-        // The `off` write can commit even when its verification read (or the
-        // IPC response carrying that read) fails. Mark the potential mutation
-        // before awaiting so that uncertainty enters the contained rollback
-        // path instead of returning as though persistence were untouched.
+
+
         candidateMutationStarted = true;
         const initialDisabled = await ensureBackendDisabled(dependencies, requirements);
         const expectedInitialDisabled = { ...previous, backend: 'off' as const };
@@ -537,8 +514,8 @@ export async function commitProvenSyncConfiguration(
         }
 
     } catch (commitError) {
-        // A staged-but-unpromoted handle contains no durable mutation and can
-        // be discarded without touching the active credential slot.
+
+
         let credentialCleanupError: unknown = null;
         if (credentialHandle && !credentialPromotionAttempted) {
             try {
@@ -560,10 +537,8 @@ export async function commitProvenSyncConfiguration(
             await ensureBackendDisabled(dependencies, {});
         } catch (disableError) {
             rollbackDisableError = disableError;
-            // A failed read-back may still follow a successful `off` write.
-            // Make one last best-effort write before asking native rollback,
-            // whose own raw-config guard refuses to touch credentials unless
-            // the backend is actually off.
+
+
             try {
                 await dependencies.writeBackend('off');
             } catch (bestEffortDisableError) {
@@ -593,13 +568,11 @@ export async function commitProvenSyncConfiguration(
 
         try {
             await restoreLastProvenConfiguration(previous, dependencies, {
-                // Reusing the old Dropbox backend is unsafe until its previous
-                // credential bundle has also been restored successfully.
+
+
                 reactivatePreviousBackend: credentialRollbackError === null,
-                // Candidate/touched secrets require exact readback while being
-                // proven, but rollback must verify against the prior snapshot's
-                // own authority. A clean opaque prior remains intentionally
-                // non-strict after its empty identity is restored.
+
+
                 requirements,
                 touched,
             });
@@ -628,9 +601,7 @@ export async function commitProvenSyncConfiguration(
         throw commitError;
     }
 
-    // The exact active snapshot above is the commit point. Finalization only
-    // removes the now-obsolete rollback material, so an IPC/lost-response
-    // failure here must never enter the pre-commit rollback path.
+
     if (!credentialHandle) {
         return { committed: true, cleanupPending: false, handleFinalized: true };
     }

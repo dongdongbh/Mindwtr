@@ -22,7 +22,7 @@ export function AdaptiveWindowContextProvider({
   );
 }
 
-/** Dimension-only safety fallback for consumers rendered without the app's root provider. */
+
 export function useAdaptiveWindow(): AdaptiveWindowLayout {
   const context = React.useContext(AdaptiveWindowContext);
   const dimensions = useWindowDimensions();

@@ -1,8 +1,7 @@
 import CloudKit
 import Foundation
 
-/// Wraps CKFetchRecordZoneChangesOperation for incremental sync.
-/// The change token is serialized to/from a base64 string for JS storage.
+
 enum CloudKitChangeTracker {
 
     struct ChangeResult {
@@ -12,7 +11,7 @@ enum CloudKitChangeTracker {
         var moreComing: Bool = false
     }
 
-    /// Fetch changes since the given change token (base64 string, or nil for full fetch).
+
     static func fetchChanges(
         database: CKDatabase,
         zoneID: CKRecordZone.ID,
@@ -28,8 +27,7 @@ enum CloudKitChangeTracker {
         op.qualityOfService = .userInitiated
         CloudKitOperationTimeouts.apply(to: op)
 
-        // CloudKit dispatches callbacks on arbitrary queues. Serialize all
-        // mutations to shared state through a serial queue to prevent races.
+
         let callbackQueue = DispatchQueue(label: "tech.dongdongbh.mindwtr.changetracker")
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -59,7 +57,7 @@ enum CloudKitChangeTracker {
                         result.newChangeToken = serializeToken(serverChangeToken)
                         result.moreComing = moreComing
                     case .failure(let error):
-                        // Token expiry is reported per-zone, not in the overall completion.
+
                         if let ckError = error as? CKError, ckError.code == .changeTokenExpired {
                             tokenExpired = true
                         } else {
@@ -72,7 +70,7 @@ enum CloudKitChangeTracker {
 
             op.fetchRecordZoneChangesResultBlock = { overallResult in
                 callbackQueue.sync {
-                    // Check zone-level token expiry first — it's the authoritative signal.
+
                     if tokenExpired {
                         continuation.resume(throwing: ChangeTokenExpiredError())
                         return
@@ -85,7 +83,7 @@ enum CloudKitChangeTracker {
                     case .success:
                         continuation.resume(returning: result)
                     case .failure(let error):
-                        // Fallback: overall completion may also report token expiry
+
                         if let ckError = error as? CKError, ckError.code == .changeTokenExpired {
                             continuation.resume(throwing: ChangeTokenExpiredError())
                         } else {
@@ -99,7 +97,6 @@ enum CloudKitChangeTracker {
         }
     }
 
-    // MARK: - Token Serialization
 
     static func serializeToken(_ token: CKServerChangeToken?) -> String? {
         guard let token = token else { return nil }
@@ -124,7 +121,7 @@ enum CloudKitChangeTracker {
     }
 }
 
-/// Thrown when the server change token has expired and a full re-fetch is needed.
+
 struct ChangeTokenExpiredError: Error {
     var localizedDescription: String { "CloudKit change token expired; full fetch required" }
 }

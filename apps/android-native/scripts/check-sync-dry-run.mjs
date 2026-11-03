@@ -1,14 +1,6 @@
-// Sync without a phone: the real native bundle (core-host.js) as two devices in Node VMs (sync-harness.mjs hostDevice, bound
-// as the Android host binds it), against a local WebDAV folder and the real self-hosted cloud on 127.0.0.1.
-//
-//   node apps/android-native/scripts/build-bundle.mjs
-//   node apps/android-native/scripts/check-sync-dry-run.mjs
-//
-// It runs check-sync-device.mjs's story device to device: WebDAV Save proves then stores RN's keys (the password only in the
-// secret store); the second device joins; an emoji title round-trips; a data change syncs by itself; the server down (503)
-// fails an automatic sync on the status line and changes no data; failing writes keep their retry, which succeeds by itself
-// once the server takes writes again; the self-hosted cloud converges both ways; the cloud stopped reads as offline and loses
-// nothing. Exit 0 = pass, 1 = fail. About four minutes: core's retries and cooldowns run in real time.
+
+
+
 import { randomInt } from 'node:crypto';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';

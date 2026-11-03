@@ -6,7 +6,7 @@ fn has_windows_package_identity() -> bool {
     use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
 
     let mut package_name_len: u32 = 0;
-    // Per Win32 docs, packaged apps return ERROR_INSUFFICIENT_BUFFER on a size probe.
+
     let status = unsafe { GetCurrentPackageFullName(&mut package_name_len, std::ptr::null_mut()) };
     if status == APPMODEL_ERROR_NO_PACKAGE {
         return false;
@@ -74,9 +74,6 @@ pub(crate) fn current_package_family_name() -> Option<String> {
     String::from_utf16(&buf[..end]).ok().filter(|s| !s.is_empty())
 }
 
-// MSIX file-system virtualization silently redirects the app's writes under
-// Roaming AppData into the package's LocalCache, so a path computed from the
-// OS data dir names a file that does not exist there (#1135).
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn local_cache_redirected_path(
     path: &Path,
@@ -95,8 +92,6 @@ fn local_cache_redirected_path(
     )
 }
 
-/// For MS Store installs, the LocalCache path where MSIX virtualization
-/// actually lands `path`; `None` when the real path is the right one to show.
 #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 pub(crate) fn windows_store_display_path(path: &Path) -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
@@ -108,8 +103,7 @@ pub(crate) fn windows_store_display_path(path: &Path) -> Option<PathBuf> {
         let roaming = dirs::data_dir()?;
         let local = dirs::data_local_dir()?;
         let candidate = local_cache_redirected_path(path, &roaming, &local, &family)?;
-        // If write virtualization is off the redirected copy never exists;
-        // keep showing the real path then.
+
         let exists = candidate.exists() || candidate.parent().is_some_and(|dir| dir.exists());
         exists.then_some(candidate)
     }
@@ -198,7 +192,7 @@ fn is_scoop_install_path(path_lowercase: &str, scoop_root_lowercase: Option<&str
     if path_lowercase.contains("\\scoop\\apps\\") || path_lowercase.contains("/scoop/apps/") {
         return true;
     }
-    // Custom Scoop roots (SCOOP env var) can live anywhere, e.g. D:\tools.
+
     if let Some(root) = scoop_root_lowercase {
         let root = root.trim_end_matches(['\\', '/']);
         if !root.is_empty() {
@@ -264,8 +258,6 @@ fn command_output_lowercase(cmd: &str, args: &[&str]) -> Option<String> {
     Some(combined)
 }
 
-// The App Store build is the only sandboxed one: its bundle carries the
-// store receipt, which DMG and Homebrew installs never have.
 #[cfg(target_os = "macos")]
 pub(crate) fn is_mac_app_store_build() -> bool {
     env::current_exe()
@@ -312,8 +304,7 @@ fn detect_install_source() -> String {
         if is_windows_store_install() {
             return "microsoft-store".to_string();
         }
-        // Scoop extracts whatever the manifest ships (portable zip or setup
-        // archive) under scoop\apps, so this must win over the portable check.
+
         if is_scoop_install() {
             return "scoop".to_string();
         }
@@ -333,8 +324,7 @@ fn detect_install_source() -> String {
                 return "winget".to_string();
             }
         }
-        // Chocolatey wraps the regular installer, so the exe path looks like a
-        // direct install; the package record in the choco lib dir is the tell.
+
         if is_chocolatey_install() {
             return "chocolatey".to_string();
         }
@@ -407,8 +397,6 @@ fn detect_install_source() -> String {
             command_succeeds("pacman", &["-Qq", "mindwtr-bin"]),
             command_succeeds("pacman", &["-Qq", "mindwtr"]),
         ) {
-            // Check the binary package first so packages that provide `mindwtr`
-            // still report as `aur-bin` instead of collapsing into `aur-source`.
             return source.to_string();
         }
         if command_succeeds("dpkg-query", &["-W", "mindwtr"]) {
@@ -488,7 +476,6 @@ pub(crate) fn parse_os_release_value(raw: &str) -> String {
         .unwrap_or_else(|| raw.trim().trim_matches('"').trim_matches('\'').to_string())
 }
 
-// fs::read_to_string("/etc/os-release") — pure read, no shared state (B1).
 #[tauri::command(async)]
 pub(crate) fn get_linux_distro() -> Option<LinuxDistroInfo> {
     if !cfg!(target_os = "linux") {

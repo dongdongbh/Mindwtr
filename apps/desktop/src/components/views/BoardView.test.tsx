@@ -1,5 +1,5 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, within } from '@testing-library/react';
+import { fireEvent, render, waitFor, within } from '@testing-library/react';
 import { KeyboardSensor } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { BoardView } from './BoardView';
@@ -250,7 +250,7 @@ describe('BoardView', () => {
         const inboxCard = getByText('Inbox thought').closest('[role="listitem"]') as HTMLElement;
         expect(inboxCard.querySelector('[data-focus-star-pinned]')).not.toBeInTheDocument();
 
-        // The indicator is not a control: starring stays in the quick-actions menu.
+
         expect(queryByRole('button', { name: 'Remove from focus' })).not.toBeInTheDocument();
         expect(queryByRole('button', { name: "Add to today's focus" })).not.toBeInTheDocument();
     });
@@ -314,6 +314,24 @@ describe('BoardView', () => {
 
         expect(getByText('Work task')).toBeInTheDocument();
         expect(queryByText('Home task')).not.toBeInTheDocument();
+    });
+
+    it('never shows a later sequential step when a filter hides the current one', async () => {
+        const at = '2026-05-18T12:00:00.000Z';
+        const step = (id: string, title: string, order: number, contexts: string[]): Task => ({
+            id, title, status: 'next', projectId: 'trip', order, contexts, tags: [], createdAt: at, updatedAt: at,
+        });
+        setBoardStoreState({
+            tasks: [step('find-site', 'Find campsite', 1, ['@home']), step('reserve-site', 'Reserve campsite', 2, ['@work'])],
+            projects: [{ id: 'trip', title: 'Camping Trip', status: 'active', color: '#123456', order: 0, tagIds: [],
+                isSequential: true, createdAt: at, updatedAt: at }],
+        });
+        useUiStore.setState({ boardFilters: { criteria: { contexts: ['@work'] } } });
+
+        const { queryByText } = renderWithProviders();
+
+        await waitFor(() => expect(queryByText('Reserve campsite')).not.toBeInTheDocument());
+        expect(queryByText('Find campsite')).not.toBeInTheDocument();
     });
 
     it('filters board tasks by the selected due-date preset', () => {
@@ -434,8 +452,8 @@ describe('BoardView', () => {
         const matchGroup = getByRole('group', { name: /context match/i });
         expect(within(matchGroup).getByRole('button', { name: 'Any' })).toHaveAttribute('aria-pressed', 'true');
         expect(within(matchGroup).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false');
-        // "Any" is what the board filters with: a card carrying only one of the
-        // two selected contexts stays on the board.
+
+
         expect(getByText('Work task')).toBeInTheDocument();
         expect(getByText('Both task')).toBeInTheDocument();
     });
@@ -474,7 +492,7 @@ describe('BoardView', () => {
         fireEvent.click(getByRole('button', { name: '@work' }));
         expect(useUiStore.getState().boardFilters.criteria.contexts).toEqual(['@work']);
 
-        // Included → excluded: the token switches sides, never sitting on both.
+
         fireEvent.click(getByRole('button', { name: '@work' }));
         const excludedCriteria = useUiStore.getState().boardFilters.criteria;
         expect(excludedCriteria.excludedContexts).toEqual(['@work']);
@@ -485,7 +503,7 @@ describe('BoardView', () => {
         expect(getByText('Home task')).toBeInTheDocument();
         expect(queryByText('Work task')).not.toBeInTheDocument();
 
-        // Excluded → neutral.
+
         fireEvent.click(excludedChip);
         expect(useUiStore.getState().boardFilters.criteria.excludedContexts).toBeUndefined();
         expect(getByText('Work task')).toBeInTheDocument();

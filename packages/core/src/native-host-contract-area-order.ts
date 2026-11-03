@@ -7,6 +7,9 @@ import { areaOrderEffect, sameAreaAdditionRow } from './store-projects/area-acti
 import type { PreparedAreaOrder } from './store-types';
 import { taskEditValuesEqual } from './store-tasks';
 import type { Area } from './types';
+import { AREA_PRESET_COLORS } from './color-constants';
+import { countLiveProjectsByArea } from './area-project-usage';
+import { revisionOf } from './native-request-receipts';
 
 export type NativeAreaOrderToken = { id: string; name: string; color: string | null; order: number;
     rev: number | null; revBy: string | null; updatedAt: string };
@@ -15,6 +18,8 @@ export type NativeAreaOrderRequest = { requestId: string; intent: AreaOrderInten
 export type NativeAreaOrderResult = { orderedIds: string[] };
 export type NativePreparedAreaOrder = PreparedAreaOrder & { version: 1; request: NativeAreaOrderRequest;
     result: NativeAreaOrderResult };
+
+export type NativeAreaOrderRun = { requestId: string; intent: AreaOrderIntent; order: string[] };
 export type NativeAreaOrderPreparation = { kind: 'noop'; result: NativeAreaOrderResult }
     | { kind: 'prepared'; prepared: NativePreparedAreaOrder };
 
@@ -80,7 +85,7 @@ const validArea = (value: unknown): value is Area => record(value)
     && (value.revBy === undefined || typeof value.revBy === 'string' && value.revBy.length <= 500)
     && iso(value.createdAt) && iso(value.updatedAt) && value.deletedAt === undefined;
 
-/** Pure cold-journal validation before SQLite opens. */
+
 const readPrepared = (value: unknown): NativePreparedAreaOrder | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -120,13 +125,28 @@ export function createAreaOrderMethods(deps: {
     revision: () => string;
     sortedAreas: () => Area[];
 }) {
-    return {
+    const methods = {
         getAreaOrderOptions(): NativeHostResult<{ revision: string; areas: NativeAreaOrderToken[] }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const value = { revision: deps.revision(), areas: deps.sortedAreas().filter((area) => !area.deletedAt).map(token) };
             return isNativeJsonWithinBytes(value) ? { ok: true, value }
                 : fail('INVALID_INPUT', 'Area order options exceed the bounded native response');
+        },
+
+
+        getProjectAreaManager(): NativeHostResult<{ revision: string; colors: string[]; newArea: { type: 'newArea' };
+            areas: Array<{ id: string; name: string; color: string | null; inUse: boolean; delete: { type: 'area'; id: string; revision: string } }> }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const usage = countLiveProjectsByArea(useTaskStore.getState().projects);
+
+            const value = { revision: deps.revision(), colors: [...AREA_PRESET_COLORS], newArea: { type: 'newArea' as const },
+                areas: deps.sortedAreas().filter((area) => !area.deletedAt).map((area) => ({ id: area.id, name: area.name,
+                    color: area.color ?? null, inUse: (usage.get(area.id) ?? 0) > 0,
+                    delete: { type: 'area' as const, id: area.id, revision: revisionOf(area) } })) };
+            return isNativeJsonWithinBytes(value) ? { ok: true, value }
+                : fail('INVALID_INPUT', 'Area manager exceeds the bounded native response');
         },
         probeAreaOrderOutcome(input: NativeAreaOrderRequest): NativeHostResult<NativeAreaOrderResult> {
             const ready = deps.readiness();
@@ -177,5 +197,55 @@ export function createAreaOrderMethods(deps: {
             const saved = await deps.save();
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
+
+
+        async runAreaOrder(input: NativeAreaOrderRun): Promise<NativeHostResult<{ outcome: 'saved' | 'unchanged'; orderedIds: string[] }>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const order = record(input) && exact(input, ['requestId', 'intent', 'order']) && Array.isArray(input.order)
+                && input.order.length <= 100_000 && input.order.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 500)
+                && new Set(input.order).size === input.order.length ? input.order : null;
+            if (!order || !readRequest({ requestId: input.requestId, intent: input.intent, expectedAreas: [] }))
+                return fail('INVALID_INPUT', 'A bounded Area order request is required');
+            try {
+                if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
+            } catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
+            const unchanged = async (orderedIds: string[]) => {
+                const saved = await deps.save();
+                return saved.ok ? { ok: true as const, value: { outcome: 'unchanged' as const, orderedIds } } : saved;
+            };
+            let stale = 'Areas changed; refresh before reordering';
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+                const options = methods.getAreaOrderOptions();
+                if (!options.ok) return options;
+                const areas = options.value.areas;
+                const ids = areas.map((area) => area.id);
+                if (!same(ids, order)) {
+                    const byId = new Map(areas.map((area) => [area.id, area]));
+                    const shown = order.map((id) => byId.get(id));
+                    const target = order.length === ids.length && shown.every(Boolean)
+                        ? areaOrderIdsForIntent(shown as NativeAreaOrderToken[], input.intent) : null;
+                    return target && same(target, ids) ? unchanged(ids)
+                        : fail('STALE_REVISION', 'The Areas changed since they were shown');
+                }
+                const target = areaOrderIdsForIntent(areas, input.intent);
+                if (!target) return fail('STALE_REVISION', 'Area cannot move up; refresh before reordering');
+                if (same(target, ids)) return unchanged(ids);
+                const request = { requestId: input.requestId, intent: input.intent, expectedAreas: areas };
+                const prepared = methods.prepareAreaOrder(request);
+                if (!prepared.ok) {
+                    if (prepared.error.code !== 'STALE_REVISION') return prepared;
+                    stale = prepared.error.message;
+                    continue;
+                }
+                if (prepared.value.kind === 'noop') return unchanged(ids);
+                const committed = await methods.commitPreparedAreaOrder({ request, prepared: prepared.value.prepared });
+                if (committed.ok) return { ok: true, value: { outcome: 'saved', orderedIds: committed.value.orderedIds } };
+                if (committed.error.code !== 'STALE_REVISION') return committed;
+                stale = committed.error.message;
+            }
+            return fail('STALE_REVISION', stale);
+        },
     };
+    return methods;
 }

@@ -7,6 +7,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QuickCapturePayloadAudioTest {
+  @Test fun destinationLabelsAndGenericPromptUseLocalizedPayloadWithLegacyFallbacks() {
+    val labels = JSONObject().put("statusLabel", "Destination localized")
+      .put("statusLabels", JSONObject().put("inbox", "Inbox localized"))
+      .put("placeholder", "Add localized")
+      .put("queued", "Queued localized")
+    val payload = WidgetPayload.parse(JSONObject().put("quickCapture", labels).toString())!!
+    assertEquals("Destination localized", payload.quickCapture.statusLabel)
+    assertEquals("Inbox localized", payload.quickCapture.statusLabels["inbox"])
+    assertEquals("Next Actions", payload.quickCapture.statusLabels["next"])
+    assertEquals("Add localized", payload.quickCapture.placeholder)
+    assertEquals("Queued localized", payload.quickCapture.queued)
+  }
+
   @Test
   fun legacyPayloadKeepsAudioHiddenWithSafeEnglishDefaults() {
     val payload = WidgetPayload.parse("""{"headerTitle":"Focus"}""")!!

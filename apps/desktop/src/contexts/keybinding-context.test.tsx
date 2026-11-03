@@ -125,8 +125,7 @@ const scopedTask = (id: string): Task => ({
     updatedAt: '2026-01-01T00:00:00.000Z',
 } as Task);
 
-// Stands in for any view that registers the shared scope over its own ordered
-// visible-task array (Focus, Board, Projects, Search, Contexts, Review).
+
 const ScopedTaskList = ({
     tasks,
     onEdit,
@@ -169,8 +168,7 @@ const ScopedTaskList = ({
     );
 };
 
-// A registered list scope that exposes focusSelected the way useListSelection
-// does: entering the list focuses the selected task's title toggle (#890).
+
 const ListWithFocusSelected = () => {
     const { registerTaskListScope } = useKeybindings();
     const [selectedIndex, setSelectedIndex] = useState(0);
@@ -636,8 +634,7 @@ describe('KeybindingProvider (vim)', () => {
         expect(onNavigate).toHaveBeenCalledWith('settings');
     });
 
-    // Trash can be hidden from the sidebar (#1115) and global search never
-    // returns views, so the go-to chord is its only keyboard route back.
+
     it.each([
         {
             style: 'vim' as const,
@@ -942,11 +939,10 @@ describe('KeybindingProvider (vim)', () => {
         );
 
         fireEvent.keyDown(window, { key: 'A', shiftKey: false });
-        // Quick add firing on the 'A' itself proves the chord was not armed.
+
         expect(quickAddListener).toHaveBeenCalledTimes(1);
 
-        // The follow-up digit is picked up by the bare-digit area shortcut
-        // (in the real app the open quick-add dialog gates it out).
+
         fireEvent.keyDown(window, { key: '1', code: 'Digit1' });
         await waitFor(() => {
             expect(useTaskStore.getState().settings?.filters?.areaId).toBe('area-home');
@@ -1065,7 +1061,7 @@ describe('KeybindingProvider (vim)', () => {
                 });
                 return () => registerTaskListScope(null);
             }, [registerTaskListScope]);
-            // Same shape as the global search / quick add overlays.
+
             return <div role="dialog" aria-modal="true" />;
         };
 
@@ -1077,9 +1073,7 @@ describe('KeybindingProvider (vim)', () => {
             </LanguageProvider>
         );
 
-        // Focus is nowhere interactive (e.g. after clicking a non-focusable
-        // element inside the dialog) — the exact state that used to let Enter
-        // and action keys reach the task list behind the dialog.
+
         (document.activeElement as HTMLElement | null)?.blur?.();
         fireEvent.keyDown(window, { key: 'ArrowDown' });
         fireEvent.keyDown(window, { key: 'Enter' });
@@ -1287,12 +1281,11 @@ describe('KeybindingProvider (vim)', () => {
 
         const toggles = document.querySelectorAll('[data-task-view-toggle]');
 
-        // Entering the list highlights/focuses the FIRST task — not the
-        // container, and not off-by-one to the second row.
+
         fireEvent.keyDown(window, { key: 'ArrowRight' });
         expect(document.activeElement).toBe(toggles[0]);
 
-        // The first ArrowDown then moves exactly one row.
+
         fireEvent.keyDown(window, { key: 'ArrowDown' });
         expect(document.activeElement).toBe(toggles[1]);
     });

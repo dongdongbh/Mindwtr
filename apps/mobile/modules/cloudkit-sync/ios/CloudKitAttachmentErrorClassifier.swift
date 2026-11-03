@@ -1,8 +1,7 @@
 import CloudKit
 import Foundation
 
-/// Classifies only CloudKit attachment states that cannot become downloadable by retrying.
-/// Provider, authentication, throttling, and network failures deliberately remain transient.
+
 enum CloudKitAttachmentErrorClassifier {
     static let mindwtrErrorDomain = "MindwtrCloudKit"
     static let recordNotFoundCode = 1002

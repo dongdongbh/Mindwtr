@@ -9,12 +9,7 @@ import { requestRowId } from './native-request-receipts';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppSettings, Area, Project, Task } from './types';
 
-/**
- * React Native's capture confirmation screen, frozen by
- * apps/mobile/tests/capture-modal.parity.test.tsx, replayed through the native
- * host contract: the host keeps what React Native keeps outside core (the
- * route params, the draft, the open question, where it can go back to).
- */
+
 type Action =
     | ['type', string] | ['description', string] | ['help'] | ['save'] | ['saveAndEdit'] | ['cancel'] | ['back']
     | ['confirmBulk'] | ['cancelBulk'] | ['applyCopilot', string] | ['applyAllCopilot'] | ['refuseWrites', boolean];
@@ -41,14 +36,12 @@ type Fixture = {
 
 const fixture = JSON.parse(readFileSync(new URL('./capture-modal-parity.fixtures.json', import.meta.url), 'utf8')) as Fixture;
 
-// ---------------------------------------------------------------------------
-// The store, recorded as the React Native harness records it
 
 type Real = Pick<ReturnType<typeof useTaskStore.getState>, 'addTask' | 'addTasks' | 'addProject'>;
 let real: Real | null = null;
 const createdIds = new Map<string, string>();
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (key, entry) => (
-    // The native host's items carry their capture UUID; React Native's carry none.
+
     key === 'captureId' ? undefined : entry === undefined ? '<undefined>' : entry
 )).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, (match) => createdIds.get(match) ?? '<uuid>'));
 const encode = (args: unknown[]) => normalize(args.map((arg) => (
@@ -91,7 +84,7 @@ async function openReplayHost(settings: AppSettings, refuse: () => boolean) {
             return result;
         },
         addProject: async (title, color, props) => {
-            // The native host names a capture's project by its request (requestRowId); React Native's store picks the id.
+
             const { id: _requestDerived, ...shown } = props ?? {};
             log.push(['addProject', ...encode([title, color, Object.keys(shown).length > 0 ? shown : undefined]) as unknown[]]);
             const created = await actions.addProject(title, color, props);
@@ -102,8 +95,6 @@ async function openReplayHost(settings: AppSettings, refuse: () => boolean) {
     return { host, log };
 }
 
-// ---------------------------------------------------------------------------
-// The screen as React Native lays it out, from the view
 
 type Question = Extract<NativeCaptureModalSubmitResult, { kind: 'confirmLines' }>['confirm'];
 
@@ -134,13 +125,13 @@ function screenOf(view: NativeCaptureModalView, question: Question | null): Scre
             view.help.toggle,
             ...(copilot.suggested ? [...copilot.suggested.parts.map((part) => part.label), ...(copilot.suggested.applyAll ? [copilot.suggested.applyAll.label] : [])] : []),
             view.actions.cancel, view.actions.saveAndEdit, view.actions.save,
-            // The question's Cancel and Create tasks, then its backdrop.
+
             ...(question ? [question.cancelLabel, question.confirmLabel, question.cancelLabel] : []),
         ].map((label) => ({ label, disabled: false })),
     };
 }
 
-/** Shared files wait for the attachments pass on the native host: React Native's are left out of its observations. */
+
 function withoutSharedFiles(observation: Observation): Observation {
     const drop = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (key, entry) => (key === 'attachments' ? undefined : entry)));
     const screen = observation.screen;
@@ -173,7 +164,7 @@ async function replay(scenario: Scenario): Promise<Observation[]> {
         draft = result.draft;
         view = result.view;
     };
-    // React Native asks the AI when the screen opens and whenever the title changes.
+
     const askAI = () => {
         const request = view.copilot.request;
         if (!request) return;
@@ -215,7 +206,7 @@ async function replay(scenario: Scenario): Promise<Observation[]> {
                     if (result.value.kind === 'confirmLines') question = result.value.confirm;
                     break;
                 }
-                // A save starts: the card's failure clears, and returns when this one fails.
+
                 draft = { ...draft, failed: !result.ok };
                 if (!result.ok) break;
                 const saved = result.value;
@@ -263,15 +254,12 @@ async function replay(scenario: Scenario): Promise<Observation[]> {
     return observations;
 }
 
-/**
- * The AI at a local OpenAI-compatible endpoint, which needs no key. The fixture's React
- * Native screen held a key for its provider; this host keeps no AI key until pass AI1.
- */
+
 const withLocalAIEndpoint = (settings: AppSettings): AppSettings => (
     settings.ai?.enabled ? { ...settings, ai: { ...settings.ai, baseUrl: 'http://127.0.0.1:11434/v1' } } : settings
 );
 
-/** A capture link naming a note, a tag and a project no project carries. */
+
 const linkParams: CaptureModalParams = {
     initialValue: 'Plan%20trip',
     initialProps: encodeURIComponent(JSON.stringify({ description: 'Book flights', tags: ['#travel'] })),
@@ -302,15 +290,13 @@ describe('native host contract: the capture confirmation screen', () => {
         }
     }, 120_000);
 
-    // -----------------------------------------------------------------------
-    // Crash safety: every command, replayed on a new host after a restart
 
     const data = { tasks: fixture.tasks, projects: fixture.projects, areas: fixture.areas, settings: fixture.settings.ai };
     const storeData = () => {
         const state = useTaskStore.getState();
         return [state._allTasks, state._allProjects, state._allSections, state._allAreas, state._allPeople, state.settings];
     };
-    /** Runs a command on a new host, as after a restart, and says whether the store changed. */
+
     const afterRestart = async <T,>(run: (host: Awaited<ReturnType<typeof restartScreenHost>>) => Promise<T> | T) => {
         const host = await restartScreenHost();
         const before = storeData();
@@ -333,11 +319,33 @@ describe('native host contract: the capture confirmation screen', () => {
             value(restarted.editCaptureModal({ params: linkParams, draft: opened.draft, edit: opened.view.help.edit })),
             value(restarted.discardCaptureModal({ params: linkParams })),
         ]);
-        // The views' revision names the data and the minute; the rest must be equal.
+
         const unrevised = (value: unknown) => JSON.parse(JSON.stringify(value, (key, entry) => (key === 'revision' ? undefined : entry)));
         expect(replayed.wrote).toBe(false);
         expect(unrevised(replayed.result)).toEqual(unrevised([opened, opened.view, help, discarded]));
         expect(log).toEqual([]);
+    });
+
+    it("names the project a project's + opened the screen from, so the host opens it again on close, also after a restart", async () => {
+        const fromProject = (projectId: string): CaptureModalParams => ({
+            initialProps: JSON.stringify({ projectId, status: 'next' }),
+            returnTo: `/projects-screen?projectId=${encodeURIComponent(projectId)}`,
+        });
+        const host = await openScreenHost({ data, record: { addTask: 2 }, log: [] });
+        const params = fromProject('p-launch');
+        const opened = value(host.openCaptureModal({ params }));
+        expect(value(host.discardCaptureModal({ params }))).toEqual({ close: { returnTo: params.returnTo, returnToPreviousApp: false, returnToProjectId: 'p-launch' } });
+
+        const restarted = await restartScreenHost();
+        const saved = value(await restarted.submitCaptureModal({ params, draft: { ...opened.draft, text: 'Order parts' }, captureId: requestId() }));
+        expect(saved).toMatchObject({ kind: 'saved', projectId: 'p-launch', next: 'close', close: { returnToProjectId: 'p-launch' } });
+        expect(useTaskStore.getState()._tasksById.get((saved as { taskId: string }).taskId)).toMatchObject({ title: 'Order parts', projectId: 'p-launch', status: 'next' });
+
+        expect(value(await restarted.submitCaptureModal({ params, draft: { ...opened.draft, text: 'Call shop' }, captureId: requestId(), openAfterSave: true })))
+            .toMatchObject({ next: 'openInProject', projectId: 'p-launch' });
+
+        expect(value(restarted.discardCaptureModal({ params: fromProject('p-gone') })).close).toEqual({ returnTo: '/projects-screen?projectId=p-gone', returnToPreviousApp: false });
+        expect(value(restarted.discardCaptureModal({ params: linkParams })).close).toEqual({ returnTo: null, returnToPreviousApp: false });
     });
 
     it('saves under the capture UUID; a retry, or a replay after a restart, writes nothing more', async () => {
@@ -360,14 +368,14 @@ describe('native host contract: the capture confirmation screen', () => {
         expect(task).toMatchObject({ title: 'Plan trip', description: 'Book flights', tags: ['#travel'] });
         expect(useTaskStore.getState()._allProjects.filter((project) => project.title === 'Shopping')).toHaveLength(1);
 
-        // The same UUID with another draft is another capture.
+
         const other = await afterRestart((restarted) => restarted.submitCaptureModal({ ...input, draft: { ...draft, text: 'Plan a different trip' } }));
         expect(other).toMatchObject({ result: { ok: false, error: { code: 'INVALID_INPUT' } }, wrote: false });
     });
 
-    // Review blocker 1: a capture UUID reused after a restart with another draft (same title) answered saved.
+
     it('without a receipt on disk, a reused capture UUID answers saved only for the draft that made its task', async () => {
-        // On a Thursday, /start:tomorrow and /start:friday are the same request.
+
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(fixture.now));
         const host = await openScreenHost({ data, record: {}, log: [] });
@@ -421,7 +429,7 @@ describe('native host contract: the capture confirmation screen', () => {
             confirm: { title: 'Create 2 tasks?', message: 'Buy eggs\nCall plumber +Plumbing', confirmLabel: 'Create tasks', cancelLabel: 'Cancel' },
         });
         const input = { params, draft, captureIds: [requestId(), requestId()] };
-        // The store refuses the batch: its line's project landed, its tasks did not.
+
         expect(await host.submitCaptureModalLines(input)).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
         expect(log.map(([name]) => name)).toEqual(['addProject', 'addTasks']);
 
@@ -458,6 +466,19 @@ describe('native host contract: the capture confirmation screen', () => {
         expect(value(await host.submitCaptureModalLines({ ...lines, draft: { ...draft, text: 'Plan beds\nPay rent' } }))).toMatchObject({ kind: 'saved', taskIds: ids });
     });
 
+    it.each([
+        [{ areaId: 'a-work' }, 'a-work'],
+        [{}, '<undefined>'],
+    ])('files a capture in the active area filter %j when new tasks follow it (#1460)', async (filters, areaId) => {
+        const log: unknown[][] = [];
+        const settings = { ...fixture.settings.ai, gtd: { ...fixture.settings.ai.gtd, defaultAreaMode: 'active' as const }, filters };
+        const host = await openScreenHost({ data: { ...data, settings }, record: { addTask: 2 }, log });
+        const params = { initialValue: 'Call plumber' };
+        const opened = value(host.openCaptureModal({ params }));
+        value(await host.submitCaptureModal({ params, draft: opened.draft, captureId: requestId() }));
+        expect(log).toEqual([['addTask', 'Call plumber', { status: 'inbox', areaId }]]);
+    });
+
     it('leaves shared files out, and checks what the host sends', async () => {
         const log: unknown[][] = [];
         const host = await openScreenHost({ data, record: { addTask: 2 }, log });
@@ -483,7 +504,7 @@ describe('native host contract: the capture confirmation screen', () => {
         expect(invalid.map((result) => (result.ok ? 'ok' : result.error.code))).toEqual(Array(5).fill('INVALID_INPUT'));
     });
 
-    // Review should-fix 4: React Native asks the AI only with a key, or with a provider that needs none.
+
     it('asks the AI as React Native does: never for a provider that needs a key this host does not hold', async () => {
         const params = { initialValue: 'Call%20the%20bank' };
         const keyed = await openScreenHost({ data, record: {}, log: [] });
@@ -492,12 +513,12 @@ describe('native host contract: the capture confirmation screen', () => {
         const answered = value(keyed.editCaptureModal({ params, draft: opened.draft, edit: { type: 'setSuggestion', title: 'Call the bank', suggestion: { tags: ['#finance'] } } }));
         expect(answered.draft.suggestion).toBeNull();
 
-        // An OpenAI-compatible endpoint needs no key (React Native's isAIKeyRequired, now core's).
+
         const local = await openScreenHost({ data: { ...data, settings: withLocalAIEndpoint(data.settings) }, record: {}, log: [] });
         expect(value(local.openCaptureModal({ params })).view.copilot.request).toMatchObject({ title: 'Call the bank' });
     });
 
-    // Pass C1: a host that binds AI asks requestAICopilot, which loads the key itself and answers null without one.
+
     it('asks the AI for any provider on a host that binds AI: requestAICopilot checks the key', async () => {
         const params = { initialValue: 'Call%20the%20bank' };
         const ai = {
@@ -523,7 +544,7 @@ describe('native host contract: the capture confirmation screen', () => {
     });
 });
 
-/** The native host over a real SQLite file with its receipts, booted as the app boots it; `replay` is a replay after process death. */
+
 describe('native host contract: the capture confirmation screen over SQLite', () => {
     let env: Awaited<ReturnType<typeof openSqliteHost>> | null = null;
     const open = async () => {
@@ -547,7 +568,7 @@ describe('native host contract: the capture confirmation screen over SQLite', ()
             .toMatchObject({ result: { ok: false, error: { code: 'INVALID_INPUT' } }, wrote: false, receipts: false });
     });
 
-    // Review blocker 2: a batch saved under [A, B], retried after a restart under a changed list, made a duplicate line.
+
     it('a batch retried after process death under a changed UUID list is refused and writes nothing', async () => {
         const env = await open();
         const params = { initialValue: 'First%0ASecond' };
@@ -565,7 +586,7 @@ describe('native host contract: the capture confirmation screen over SQLite', ()
             .toEqual([a, b].sort());
     });
 
-    /** Runs `write` while the store refuses to add tasks, as a task write that fails after its project landed. */
+
     const withTaskWritesRefused = async <T,>(write: () => Promise<T>): Promise<T> => {
         const { addTask, addTasks } = useTaskStore.getState();
         useTaskStore.setState({
@@ -581,7 +602,7 @@ describe('native host contract: the capture confirmation screen over SQLite', ()
     };
     const store = () => useTaskStore.getState();
 
-    // Review blocker 3: a project that landed while its task failed was made again by a replay after a rename.
+
     it.each([
         ['a link\'s project param', linkParams, 'shopping'],
         ['a typed +Project', { initialValue: 'Plan%20beds%20%2BGarden' }, 'garden'],

@@ -216,8 +216,8 @@ it('uses a frozen existing project ID after a harmless rename and refuses a chan
     const next = value(await host.prepareCalendarComposerCreate({ requestId: nextID, composer: composer(host, 'Paint +Another') }));
     expect(next.kind).toBe('prepared');
     if (next.kind !== 'prepared') return;
-    // A generated project's order is a factory input, not an excuse to reorder
-    // unrelated rows during a stale commit.
+
+
     await useTaskStore.getState().addProject('Order moved', '#94a3b8');
     await flushPendingSave();
     saveData.mockClear();
@@ -271,4 +271,22 @@ it('returns no-write refusal for empty, malformed date and start-after-due title
     }
     expect(saveData).not.toHaveBeenCalled();
     expect(useTaskStore.getState()._tasksById.has(requestId)).toBe(false);
+});
+
+it('creates the composer task under Skip as RN addTask does, and keeps an earlier Send journal valid', async () => {
+    const host = await open();
+    const sent = value(await host.prepareCalendarComposerCreate({ requestId: '7475c779-e751-42d3-a2ea-85abffb3be73', composer: composer(host, 'Sent') }));
+    if (sent.kind !== 'prepared') throw new Error('Expected a prepared creation');
+    expect(sent.prepared.task.suppressMindwtrReminders).toBe(false);
+    useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault: 'skip' } }));
+    const prepared = value(await host.prepareCalendarComposerCreate({ requestId, composer: composer(host, 'Skipped') }));
+    if (prepared.kind !== 'prepared') throw new Error('Expected a prepared creation');
+    expect(prepared.prepared.task.suppressMindwtrReminders).toBe(true);
+    expect(value(await host.commitPreparedCalendarComposerCreate({ request: prepared.prepared.request, prepared: prepared.prepared })))
+        .toEqual(prepared.prepared.result);
+    expect(useTaskStore.getState()._tasksById.get(requestId)?.suppressMindwtrReminders).toBe(true);
+    expect(value(host.validatePreparedCalendarComposerCreate({ request: sent.prepared.request, prepared: sent.prepared })))
+        .toEqual(sent.prepared.result);
+    const ordinary = await useTaskStore.getState().addTask('Reference', { status: 'next' });
+    expect(useTaskStore.getState()._tasksById.get(ordinary.id!)?.suppressMindwtrReminders).toBe(true);
 });

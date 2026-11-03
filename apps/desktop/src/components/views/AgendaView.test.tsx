@@ -10,8 +10,7 @@ import { selectToolbarOption } from '../../test/toolbar-select';
 import { expectScrolledEndGap } from '../../test/list-end-gap';
 import { holdSyncSave } from '../../test/hold-sync-save';
 
-// Capture the focus-drag handler so tests can drive a drop without a real
-// pointer gesture; dnd-kit contexts render as passthroughs (see BoardView.test).
+
 let capturedFocusDndProps: { onDragEnd?: (event: unknown) => void } = {};
 vi.mock('@dnd-kit/core', () => ({
     DndContext: ({ children, onDragEnd }: { children: React.ReactNode; onDragEnd?: (event: unknown) => void }) => {
@@ -136,9 +135,8 @@ describe('AgendaView', () => {
     });
 
     it('shows a starred task even when its project is not active (counted slot must be visible)', () => {
-        // A starred task inside a someday project used to vanish from Today's
-        // Focus while still consuming a focus-limit slot — "I can only star 4
-        // when the limit is 5", unfixable by any filter change.
+
+
         const somedayProject = {
             id: 'proj-someday',
             title: 'Parked project',
@@ -496,13 +494,13 @@ describe('AgendaView', () => {
         expect(upcomingSection).toContainElement(star);
         expect(star).not.toBeDisabled();
         expect(getByLabelText('This task is deferred; change its start date before focusing it.')).toBeDisabled();
-        // The reveal date is the section's purpose, so it renders on the row.
+
         expect(upcomingSection).toContainElement(getByText(safeFormatDate(inThreeDays, 'P')));
     });
 
     it('shows a start-deferred upcoming date once, not as a duplicate appears-on chip', () => {
         const now = new Date();
-        // Date-only start, like the report: chip and appears-on label format identically.
+
         const inThreeDays = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
         const dateOnlyStart = `${inThreeDays.getFullYear()}-${String(inThreeDays.getMonth() + 1).padStart(2, '0')}-${String(inThreeDays.getDate()).padStart(2, '0')}`;
         const deferredTask: Task = {
@@ -526,7 +524,7 @@ describe('AgendaView', () => {
             settings: {},
             highlightTaskId: null,
         });
-        // Details on: the row renders its own start chip for the same day.
+
         useUiStore.setState((state) => ({
             listOptions: { ...state.listOptions, showDetails: true },
         }));
@@ -535,8 +533,8 @@ describe('AgendaView', () => {
 
         const upcomingSection = document.getElementById('agenda-section-upcoming');
         expect(upcomingSection).not.toBeNull();
-        // The date renders exactly once — the start chip. The appears-on badge
-        // yields to it instead of duplicating the same day (Discord report).
+
+
         expect(getAllByText(safeFormatDate(inThreeDays, 'P'))).toHaveLength(1);
     });
 
@@ -827,14 +825,14 @@ describe('AgendaView', () => {
         expect(getByRole('heading', { name: /^later today$/i })).toBeInTheDocument();
         const appearsAtLabel = safeFormatDate(new Date(2026, 1, 28, 17, 0, 0, 0), 'p');
         expect(scheduleSection).toContainElement(getByText(appearsAtLabel));
-        // Planning the 17:00 task for today is legitimate, so the star must not
-        // pick up Upcoming's disabled-for-deferred gating.
+
+
         const star = getByLabelText("Add to today's focus");
         expect(scheduleSection).toContainElement(star);
         expect(star).toBeEnabled();
 
         act(() => {
-            vi.advanceTimersByTime(5 * 60 * 60 * 1000 + 50); // scheduled reveal at 17:00
+            vi.advanceTimersByTime(5 * 60 * 60 * 1000 + 50);
         });
 
         expect(queryByText(appearsAtLabel)).not.toBeInTheDocument();
@@ -908,9 +906,7 @@ describe('AgendaView', () => {
 
         const { getByText, queryByRole, queryByText } = renderAgenda();
 
-        // The task previews under Upcoming (#1061) — never in Today/Next, and
-        // still with no visibility toggle: the list-view showFutureStarts
-        // setting has no lever here.
+
         const upcomingSection = document.getElementById('agenda-section-upcoming');
         expect(upcomingSection).not.toBeNull();
         expect(upcomingSection).toContainElement(getByText('Future start next task'));
@@ -943,14 +939,14 @@ describe('AgendaView', () => {
         });
 
         const { getByText } = renderAgenda();
-        // Still tomorrow's task: visible only as an Upcoming preview.
+
         expect(document.getElementById('agenda-section-upcoming')).toContainElement(getByText('Starts tomorrow'));
 
         act(() => {
             vi.advanceTimersByTime(200);
         });
 
-        // Midnight passed: the task graduates out of Upcoming into Today.
+
         expect(getByText('Starts tomorrow')).toBeInTheDocument();
         expect(document.getElementById('agenda-section-upcoming')).toBeNull();
     });
@@ -980,7 +976,7 @@ describe('AgendaView', () => {
         });
 
         const { getByText } = renderAgenda();
-        // Still tomorrow's task: visible only as an Upcoming preview.
+
         expect(document.getElementById('agenda-section-upcoming')).toContainElement(getByText('Starts tomorrow'));
 
         vi.setSystemTime(new Date(2026, 2, 3, 10, 0, 0));
@@ -1074,8 +1070,7 @@ describe('AgendaView', () => {
 
         const { getByText, queryByText } = renderAgenda();
 
-        // The deferred first action previews under Upcoming; the follower stays
-        // sequentially blocked and appears nowhere.
+
         expect(document.getElementById('agenda-section-upcoming')).toContainElement(getByText('Future first'));
         expect(queryByText('Following next')).not.toBeInTheDocument();
     });
@@ -1862,17 +1857,17 @@ describe('AgendaView', () => {
 
         fireEvent.click(getByRole('button', { name: /^Filters$/i }));
         fireEvent.click(getByRole('button', { name: 'Contexts & tags' }));
-        // Neutral → included: only tasks carrying #waiting remain.
+
         fireEvent.click(getByRole('button', { name: '#waiting' }));
         expect(getByText('Waiting task')).toBeInTheDocument();
         expect(queryByText('Desk task')).not.toBeInTheDocument();
 
-        // Included → excluded: the same chip (still named '#waiting') advances.
+
         fireEvent.click(getByRole('button', { name: '#waiting' }));
         expect(queryByText('Waiting task')).not.toBeInTheDocument();
         expect(getByText('Desk task')).toBeInTheDocument();
 
-        // Excluded → neutral: the chip now exposes its excluded state in the name.
+
         fireEvent.click(getByRole('button', { name: '#waiting (Excluded)' }));
         expect(getByText('Waiting task')).toBeInTheDocument();
         expect(getByText('Desk task')).toBeInTheDocument();
@@ -2199,7 +2194,7 @@ describe('AgendaView', () => {
 
         fireEvent.click(getByRole('button', { name: 'More options: Desk' }));
         fireEvent.click(getByRole('menuitem', { name: 'Delete saved filter Desk' }));
-        // A sync save holds the gate while the user confirms, then publishes another device's delete of Phone.
+
         const deletedAt = '2026-02-28T13:00:00.000Z';
         const finish = holdSyncSave(() => useTaskStore.setState({
             settings: { savedFilters: [desk, { ...phone, updatedAt: deletedAt, deletedAt }] },
@@ -2278,7 +2273,7 @@ describe('AgendaView', () => {
             createdAt: nowIso,
             updatedAt: nowIso,
         };
-        // A newer app's field and criterion on a Focus filter this build can show.
+
         const stored = {
             id: 'filter-desk',
             name: 'Desk',
@@ -2823,7 +2818,7 @@ describe('AgendaView', () => {
         });
 
         it('orders focused rows by focusOrder in the default sort', () => {
-            // Provided out of order; sortTasksByFocusOrder must surface B (0) before A (1).
+
             const taskA = focusTask('task-a', 'Focus A', 1);
             const taskB = focusTask('task-b', 'Focus B', 0);
             const tasks = [taskA, taskB];
@@ -2845,9 +2840,41 @@ describe('AgendaView', () => {
             const titleB = section.querySelector('[data-task-id="task-b"]')!;
             expect(titleB.compareDocumentPosition(titleA) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-            // Default sort exposes a drag handle per focused row.
+
             const handles = getAllByRole('button', { name: 'Reorder' });
             expect(handles).toHaveLength(2);
+        });
+
+        it('preserves hidden slots across statuses before any manual Focus order exists', async () => {
+            const tasks = [
+                { ...focusTask('hidden', 'Home waiting'), status: 'waiting' as const, areaId: 'home' },
+                { ...focusTask('task-a', 'Focus A'), areaId: 'work' },
+                { ...focusTask('task-b', 'Focus B'), areaId: 'work' },
+            ];
+            const areas = ['work', 'home'].map((id, order) => ({
+                id, name: id, order, createdAt: nowIso, updatedAt: nowIso,
+            }));
+            setAgendaTasks(tasks);
+            useTaskStore.setState({ areas, _allAreas: areas, settings: { deviceId: 'test-device' } });
+            const { getByTestId } = renderAgenda();
+            const rowIds = () => Array.from(getByTestId('todays-focus-section').querySelectorAll('[data-task-id]'))
+                .map((row) => row.getAttribute('data-task-id'));
+            expect(rowIds()).toEqual(['hidden', 'task-a', 'task-b']);
+
+            act(() => {
+                useTaskStore.setState({ settings: { deviceId: 'test-device', filters: { areaIds: ['work'] } } });
+            });
+            expect(rowIds()).toEqual(['task-a', 'task-b']);
+            await act(async () => {
+                capturedFocusDndProps.onDragEnd?.({ active: { id: 'task-a' }, over: { id: 'task-b' } });
+            });
+            expect(rowIds()).toEqual(['task-b', 'task-a']);
+            act(() => {
+                useTaskStore.setState({ settings: { deviceId: 'test-device', filters: {} } });
+            });
+            expect(rowIds()).toEqual(['hidden', 'task-b', 'task-a']);
+            expect(useTaskStore.getState().tasks.map(({ id, status, isFocusedToday }) => ({ id, status, isFocusedToday })))
+                .toEqual(tasks.map(({ id, status, isFocusedToday }) => ({ id, status, isFocusedToday })));
         });
 
         it('commits a drop through reorderFocusedTasks with the new id order', () => {
@@ -2901,9 +2928,8 @@ describe('AgendaView', () => {
         });
 
         it('renders no drag affordance while a search query narrows the focus list', () => {
-            // Default sort, but a search query means focusedTasks is a subset;
-            // dragging must be gated so a reorder cannot write 0..n over the
-            // visible rows while hidden focused tasks keep their focusOrder.
+
+
             const tasks = [focusTask('task-a', 'Focus A', 0), focusTask('task-b', 'Focus B', 1)];
             useTaskStore.setState({
                 tasks,
@@ -2922,7 +2948,7 @@ describe('AgendaView', () => {
             fireEvent.click(getByRole('button', { name: /^Filters$/i }));
             fireEvent.change(getByPlaceholderText('Search task titles'), { target: { value: 'Focus A' } });
 
-            // The matching row still renders, but without any drag handle.
+
             expect(getByText('Focus A')).toBeInTheDocument();
             expect(queryByRole('button', { name: 'Reorder' })).toBeNull();
         });
@@ -2953,8 +2979,8 @@ describe('AgendaView', () => {
             expect(queryByRole('button', { name: 'Reorder' })).toBeNull();
         });
     });
-    // The star dropped the store result: a refused write left the row unstarred
-    // with no explanation, unlike every other star surface (TaskItem toasts).
+
+
     it('reports a failed focus-star write', async () => {
         const updateTask = vi.fn().mockResolvedValue({ success: false, error: 'Disk full' });
         useTaskStore.setState({ updateTask } as never);

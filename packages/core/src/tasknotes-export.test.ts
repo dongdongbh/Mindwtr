@@ -25,7 +25,7 @@ const data = (tasks: Task[], projects: AppData['projects'] = []): AppData => ({
     settings: {},
 });
 
-// The export is only right if our own vault importer reads it back unchanged.
+
 const parseBack = (file: { path: string; content: string }) => parseTaskNotesFile(file.content, {
     vaultName: 'vault',
     vaultPath: '/vault',
@@ -66,7 +66,7 @@ describe('serializeTaskNotesExport', () => {
             timeEstimateMinutes: 30,
             bodyPreview: 'She asked about the trip.',
         });
-        // The 'task' marker tag is written but filtered back out on import.
+
         expect(files[0].content).toContain('- task');
         expect(parsed.task?.tags).toEqual(['family']);
     });
@@ -83,7 +83,7 @@ describe('serializeTaskNotesExport', () => {
         const { files } = serializeTaskNotesExport(data(statuses.map(([status], index) => task(`t${index}00000000`, { status }))));
         expect(files).toHaveLength(statuses.length);
         files.forEach((file, index) => {
-            // Archive-status files parse only when archived files are included.
+
             const parsed = parseTaskNotesFile(file.content, {
                 vaultName: 'vault',
                 vaultPath: '/vault',

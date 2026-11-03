@@ -1,13 +1,8 @@
-// Adding or changing a `cloudKit` mapping below (a non-null TaskCloudKitFieldSpec)
-// also requires a decision in packages/core/src/cloudkit-production-schema.json:
-// list the field's cloudKit.key under `records.MindwtrTask.pendingProduction`
-// until the CloudKit Dashboard's Production container actually has it, then move
-// it to that record's `deployed` list.
-// scripts/check-synced-field-parity.ts fails if a mapped key is missing from both
-// lists (or in both, or stale), and `--release-gate` (wired into the stable release
-// workflow only) additionally fails while anything is still pending. RCs may ship
-// with a field pending; stable releases may not.
+
+
+
 import schemaFixture from './task-sync-schema.fixture.json';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './due-reminder-lead';
 import type { Task } from './types';
 import { normalizeTaskStatus } from './task-status';
 import { normalizeTaskReminderPolicy } from './task-reminder-policy';
@@ -62,18 +57,11 @@ export type TaskSyncFieldSpec = {
     sqliteColumn: string | null;
     cloudKit: TaskCloudKitFieldSpec | null;
     cloudWrite: TaskCloudWriteSemantics;
-    /**
-     * Position of `sqliteColumn` in TASK_SQLITE_COLUMNS / the upsert clause /
-     * the ensureTaskColumns migration list. Required whenever sqliteColumn is
-     * set (multiple fields, e.g. `order`/`orderNum`, may share a column and
-     * therefore the same position — the generator dedupes by column name).
-     * SQL column order is load-bearing for row-building call sites that zip
-     * TASK_SQLITE_COLUMNS with taskToSqliteRow's positional values.
-     */
+
+
     sqliteOrder: number | null;
-    /** SQL type for the ensureTaskColumns ALTER TABLE migration. Null for the
-     *  three base columns (id/title/status) that ship in the CREATE TABLE
-     *  itself and therefore never appear in the migration list. */
+
+
     sqliteType: TaskSqliteColumnType | null;
 };
 
@@ -91,20 +79,7 @@ export const TASK_SYNC_SCHEMA_VERSION_POLICY = schema.sinceVersionPolicy;
 export const TASK_SYNC_FIELD_SCHEMA: readonly TaskSyncFieldSpec[] = schema.fields;
 export const TASK_SYNC_SCHEMA_FIXTURE: Task = schema.fixture;
 
-// Generated SQLite column list + ensureTaskColumns migration list, both derived from
-// TASK_SYNC_FIELD_SCHEMA above. This lives here (not in sqlite-adapter.ts, which
-// re-exports TASK_SQLITE_COLUMNS for its existing consumers and builds
-// TASK_UPSERT_UPDATE_CLAUSE from it) because scripts/check-synced-field-parity.ts imports
-// these two directly, and that script's "native-schema" CI job runs `bun run schema:check`
-// on a fresh macOS checkout with no `bun install` step — nothing it imports may pull in a
-// real npm dependency. sqlite-adapter.ts fails that bar (it transitively imports
-// `date-fns` via recurrence.ts/saved-filters.ts); this file and its fixture JSON don't.
-//
-// Column ORDER here is load-bearing: sqlite-adapter.ts's taskToSqliteRow returns values
-// positionally zipped against TASK_SQLITE_COLUMNS, and the upsert update clause derives
-// from it too. Each field's `sqliteOrder` pins its position; fields that share a
-// `sqliteColumn` (`order`/`orderNum` both write the same `orderNum` column) collapse to
-// one entry, keeping the position of whichever field is declared first in the schema.
+
 type TaskSqliteColumnEntry = {
     column: string;
     order: number;
@@ -129,14 +104,12 @@ const TASK_SQLITE_COLUMN_ENTRIES: TaskSqliteColumnEntry[] = deriveTaskSqliteColu
 
 export const TASK_SQLITE_COLUMNS: readonly string[] = TASK_SQLITE_COLUMN_ENTRIES.map((entry) => entry.column);
 
-// The migration list ensureTaskColumns() runs at startup: every synced column
-// except the three (id/title/status) that ship in the base CREATE TABLE.
+
 export const TASK_SQLITE_MIGRATION_COLUMNS: readonly { name: string; sql: string }[] = TASK_SQLITE_COLUMN_ENTRIES
     .filter((entry) => entry.sqlType !== null)
     .map((entry) => ({ name: entry.column, sql: `ALTER TABLE tasks ADD COLUMN ${entry.column} ${entry.sqlType}` }));
 
-// Task-only: filters/shapes checklist items on read. (toAttachments is shared with Project and
-// lives in entity-sync-schema.ts; checklist has no equivalent on any other entity.)
+
 const toChecklist = (value: unknown): Task['checklist'] => {
     if (!Array.isArray(value)) return undefined;
     const cleaned = value
@@ -150,20 +123,7 @@ const toChecklist = (value: unknown): Task['checklist'] => {
     return cleaned.length > 0 ? cleaned : undefined;
 };
 
-// Row codec pair — see the equivalent comment in project-sync-schema.ts for the "keyed by
-// column name, not array position" rationale. taskToSqliteRow replaces the previous
-// hand-written positional literal in sqlite-adapter.ts (byte-for-byte identical output).
-//
-// taskFromSqliteRow is intentionally *not* the full task-status/recurrence/relative-start-offset
-// normalization mapSqliteTaskRow (sqlite-adapter.ts) applies — normalizeTaskStatus,
-// normalizeRecurrenceForLoad, and normalizeRelativeStartOffset all transitively import
-// date-fns (via recurrence.ts / date.ts), which this file may not pull in (see the
-// zero-dependency header comment above). Those three fields come back here as the plain
-// decoded value (a raw string / parsed JSON); sqlite-adapter.ts's mapSqliteTaskRow layers the
-// three normalizers on top of this function's output, so the final, exported mapper's
-// behaviour is unchanged. For a fixture already in canonical form (as TASK_SYNC_SCHEMA_FIXTURE
-// is), the un-normalized and normalized values are identical, so the round-trip test in
-// sync-schema-row-codec.test.ts holds against either function.
+
 const taskColumnValues = (task: Task): Record<string, unknown> => {
     const taskOrder = Number.isFinite(task.order) ? task.order : task.orderNum;
     return {
@@ -181,6 +141,8 @@ const taskColumnValues = (task: Task): Record<string, unknown> => {
         showFutureRecurrence: toBool(task.showFutureRecurrence),
         pushCount: task.pushCount ?? null,
         repeatReminderMinutes: task.repeatReminderMinutes ?? null,
+        dueReminderLeadMinutes: normalizeDueReminderLeadMinutes(task.dueReminderLeadMinutes) ?? null,
+        startReminderLeadMinutes: normalizeStartReminderLeadMinutes(task.startReminderLeadMinutes) ?? null,
         tags: toJson(task.tags ?? []),
         contexts: toJson(task.contexts ?? []),
         checklist: toJson(toChecklist(task.checklist)),
@@ -192,9 +154,8 @@ const taskColumnValues = (task: Task): Record<string, unknown> => {
         sectionId: task.sectionId ?? null,
         viewSectionIds: toJson(task.viewSectionIds),
         areaId: task.areaId ?? null,
-        // `order` and `orderNum` are the same SQLite column (legacy alias); a plain object
-        // literal can't have two entries for one key, so this naturally collapses them the
-        // same way deriveTaskSqliteColumnEntries collapses the schema's two field entries.
+
+
         orderNum: Number.isFinite(taskOrder) ? taskOrder : null,
         boardOrder: Number.isFinite(task.boardOrder) ? task.boardOrder : null,
         focusOrder: Number.isFinite(task.focusOrder) ? task.focusOrder : null,
@@ -239,12 +200,14 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         relativeStartOffset: fromJson<unknown>(row.relativeStartOffset, undefined) as Task['relativeStartOffset'],
         dueDate: fromOptional(row.dueDate as string | null),
         recurrence,
-        // `true` only with recurrence, otherwise absent — see sync-normalization.ts.
+
         showFutureRecurrence: recurrence ? fromPresentBool(row.showFutureRecurrence) : undefined,
         pushCount: row.pushCount === null || row.pushCount === undefined ? undefined : Number(row.pushCount),
         repeatReminderMinutes: row.repeatReminderMinutes === null || row.repeatReminderMinutes === undefined
             ? undefined
             : Number(row.repeatReminderMinutes),
+        dueReminderLeadMinutes: normalizeDueReminderLeadMinutes(row.dueReminderLeadMinutes),
+        startReminderLeadMinutes: normalizeStartReminderLeadMinutes(row.startReminderLeadMinutes),
         tags: toStringArray(fromJson<unknown>(row.tags, [])),
         contexts: toStringArray(fromJson<unknown>(row.contexts, [])),
         checklist: toChecklist(fromJson<unknown>(row.checklist, undefined)),
@@ -268,15 +231,11 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         suppressMindwtrReminders: fromBool(row.suppressMindwtrReminders),
         reminderPolicy: normalizeTaskReminderPolicy(row.reminderPolicy),
         reviewAt: fromOptional(row.reviewAt as string | null),
-        // Canonical only when the status is done/archived, else absent — the
-        // same rule normalizeTaskForLoad applies on every load/merge
-        // (task-status.ts). A row can carry a stale completedAt when a caller
-        // patches the field directly without a status transition (e.g. MCP
-        // `completedAt` on a task that is not done); that stale byte would
-        // otherwise pass the reader unnormalized until the next load/merge.
+
+
         completedAt: (() => {
-            // Compare the normalized status: mapSqliteTaskRow normalizes it AFTER this
-            // codec runs, so a stored 'Done' must not lose its completion date here.
+
+
             const status = normalizeTaskStatus(String(row.status ?? ''));
             return status === 'done' || status === 'archived'
                 ? fromOptional(row.completedAt as string | null)
@@ -285,10 +244,8 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         cancelledAt: fromOptional(row.cancelledAt as string | null),
         archivedAt: fromOptional(row.archivedAt as string | null),
         statusBeforeProjectArchive: fromOptional(row.statusBeforeProjectArchive as Task['statusBeforeProjectArchive'] | null),
-        // NULL reads as absent even though the type allows `null`: SQLite stores absent and
-        // null in the same column, the desktop's Rust reader already drops NULL, and a phone
-        // that read these two back as `null` on every task carried 81 extra bytes per task
-        // that the merge winner never had, so the local persist differed every cycle (#1156).
+
+
         completedAtBeforeProjectArchive: fromOptional(row.completedAtBeforeProjectArchive as string | null),
         isFocusedTodayBeforeProjectArchive: fromOptional(fromNullableBool(row.isFocusedTodayBeforeProjectArchive) ?? null),
         projectArchivedAt: fromOptional(row.projectArchivedAt as string | null),

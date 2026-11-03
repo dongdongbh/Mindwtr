@@ -245,9 +245,8 @@ describe('omnifocus import', () => {
     });
 
     it('rejects an OmniFocus JSON export with more tasks than the archive-wide entity budget allows (SEC-14)', () => {
-        // 100_001 minimal task entities exceeds DEFAULT_IMPORT_ARCHIVE_BUDGET_LIMITS.maxEntities
-        // (100_000); the JSON path used to build the full hierarchy/checklist maps over this
-        // uncapped array instead of rejecting it up front.
+
+
         const tasks = Array.from({ length: 100_001 }, (_, index) => ({
             id: `task-${index}`,
             name: `Task ${index}`,

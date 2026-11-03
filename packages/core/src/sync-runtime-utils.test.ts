@@ -84,7 +84,7 @@ describe('sync-runtime-utils', () => {
         expect(parseCloudKitRetryAfterMs('CloudKit error: Network Failure')).toBeNull();
         expect(parseCloudKitRetryAfterMs('[retryAfter=0]')).toBeNull();
         expect(parseCloudKitRetryAfterMs('[retryAfter=-5]')).toBeNull();
-        // Never park sync for a whole session on one absurd value.
+
         expect(parseCloudKitRetryAfterMs('[retryAfter=999999]')).toBe(60 * 60 * 1000);
     });
 
@@ -93,22 +93,20 @@ describe('sync-runtime-utils', () => {
         const maxMs = 600_000;
         const throttled = 'CloudKit error: Request Rate Limited [retryAfter=5]';
 
-        // The first wait is exactly what was asked for, even when that is
-        // shorter than the fixed cooldown this replaced.
+
         expect(resolveSyncFailureCooldownMs({ error: throttled, consecutiveFailures: 1, baseMs, maxMs })).toBe(5_000);
 
-        // CloudKit repeats the same number when it throttles again, so obeying
-        // it verbatim retried every 5s forever and never escaped the limit.
+
         expect(resolveSyncFailureCooldownMs({ error: throttled, consecutiveFailures: 2, baseMs, maxMs })).toBe(10_000);
         expect(resolveSyncFailureCooldownMs({ error: throttled, consecutiveFailures: 4, baseMs, maxMs })).toBe(40_000);
         expect(resolveSyncFailureCooldownMs({ error: throttled, consecutiveFailures: 99, baseMs, maxMs })).toBe(maxMs);
 
-        // A delay longer than maxMs still wins: never retry sooner than asked.
+
         const patient = 'CloudKit error: Service Unavailable [retryAfter=1800]';
         expect(resolveSyncFailureCooldownMs({ error: patient, consecutiveFailures: 1, baseMs, maxMs })).toBe(1_800_000);
         expect(resolveSyncFailureCooldownMs({ error: patient, consecutiveFailures: 9, baseMs, maxMs })).toBe(1_800_000);
 
-        // Without one, grow instead of retrying on the same interval forever.
+
         expect(resolveSyncFailureCooldownMs({ error: 'offline', consecutiveFailures: 1, baseMs, maxMs })).toBe(60_000);
         expect(resolveSyncFailureCooldownMs({ error: 'offline', consecutiveFailures: 3, baseMs, maxMs })).toBe(240_000);
         expect(resolveSyncFailureCooldownMs({ error: 'offline', consecutiveFailures: 99, baseMs, maxMs })).toBe(maxMs);

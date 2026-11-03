@@ -31,8 +31,7 @@ struct NativeBackupOperationRead: Sendable {
     let snapshot: NativeBackupSnapshotReference
 }
 
-/// Opaque, immutable domain bytes. CoreHost's exclusive library lock and serial
-/// queue own all calls, including cleanup. Only the caller proves a SQL outcome.
+
 final class NativeBackupOperationFiles {
     static let maximumPlanBytes = 512 * 1024 * 1024
     static let maximumSnapshotBytes = 128 * 1024 * 1024
@@ -64,7 +63,7 @@ final class NativeBackupOperationFiles {
 
     init(libraryRoot: URL) { root = Self.normalized(libraryRoot) }
 
-    /// Read only: the name is reserved exclusively by prepare, not this lookup.
+
     func nextSnapshotName(at date: Date) throws -> String {
         try safe {
             guard date.timeIntervalSince1970.isFinite else { throw failure() }
@@ -94,7 +93,7 @@ final class NativeBackupOperationFiles {
                  existingSnapshot: NativeBackupSnapshotReference?) throws -> NativeBackupOperationReference {
         try safe {
             guard Self.isUUID(id), (newSnapshot == nil) != (existingSnapshot == nil) else { throw failure() }
-            // Measure UTF-8 before making another full-size allocation.
+
             guard planJSON.utf8.count <= Self.maximumPlanBytes else { throw NativeBackupOperationFilesError.planTooLarge }
             if let newSnapshot {
                 guard Self.isSnapshotName(newSnapshot.name) else { throw failure() }
@@ -183,9 +182,7 @@ final class NativeBackupOperationFiles {
         }
     }
 
-    /// Metadata promotion must be durable before the caller clears its journal.
-    /// An error after rename is retryable: an already-completed snapshot is synced
-    /// again before success. Pruning is strictly subsequent and best effort.
+
     func complete(_ reference: NativeBackupOperationReference) throws {
         try safe {
             let parent = try openRoot()
@@ -203,7 +200,7 @@ final class NativeBackupOperationFiles {
             if !metadata.completed {
                 try promoteMetadata(directory, Metadata(version: 1, snapshot: manifest.snapshot, completed: true))
             } else {
-                // Also finishes a previous promotion whose directory sync failed.
+
                 try syncFile(directory, "metadata.json")
                 try syncDirectory(directory)
             }
@@ -212,8 +209,7 @@ final class NativeBackupOperationFiles {
         }
     }
 
-    /// Call only after a proven terminal outcome and durable journal removal.
-    /// Existing Undo sources and completed recovery snapshots are never deleted.
+
     func discard(_ reference: NativeBackupOperationReference, provenRejected: Bool) throws {
         try safe {
             let parent = try openRoot()
@@ -226,7 +222,7 @@ final class NativeBackupOperationFiles {
             _ = try snapshotBytes(snapshots, manifest.snapshot)
             let metadata = try snapshotMetadata(snapshots, manifest.snapshot)
             guard metadata.completed || !manifest.createdSnapshotBool || provenRejected else { throw failure() }
-            // Other operation ownership is checked before removing a pending file.
+
             if provenRejected && manifest.createdSnapshotBool && !metadata.completed {
                 let protected = try operationSnapshots(operations, excluding: [reference.id])
                 guard !protected.contains(manifest.snapshot.id) else { throw failure() }
@@ -236,8 +232,7 @@ final class NativeBackupOperationFiles {
         }
     }
 
-    /// Startup after lock + known, valid journal. The caller must skip this when
-    /// journal ownership is unknown. All retained plans are verified before IO.
+
     func discardUnreferencedOperations(retaining ids: Set<String>) throws {
         try safe {
             guard ids.allSatisfy(Self.isUUID) else { throw failure() }
@@ -253,11 +248,11 @@ final class NativeBackupOperationFiles {
                 _ = try snapshotBytes(snapshots, manifest.snapshot)
             }
             for id in try names(operations) where Self.isUUID(id) && !ids.contains(id) {
-                // Strict known-family removal also handles interrupted preparation;
-                // it never follows links or recurses into unknown child content.
+
+
                 try? removeKnownDirectory(operations, id, allowed: ["plan.json", "manifest.json"])
             }
-            // Unknown/malformed surviving operations stop snapshot deletion.
+
             let protected = try operationSnapshots(operations)
             for metadata in try validSnapshots(snapshots) where !metadata.completed && !protected.contains(metadata.snapshot.id) {
                 try? removeSnapshot(snapshots, metadata.snapshot, allowIncomplete: false)
@@ -271,7 +266,7 @@ final class NativeBackupOperationFiles {
         let id = UUID().uuidString.lowercased()
         let bytes = Data(content.utf8)
         let reference = NativeBackupSnapshotReference(id: id, name: name, sha256: digest(bytes), byteCount: bytes.count)
-        // A regular, bounded O_EXCL reservation binds the display name to this UUID.
+
         try writeExclusive(snapshots, reservationName(name), bytes: Data(id.utf8))
         var completed = false
         var createdDirectory = false
@@ -280,7 +275,7 @@ final class NativeBackupOperationFiles {
                 if createdDirectory {
                     try? removeSnapshot(snapshots, reference, allowIncomplete: true)
                 } else {
-                    // mkdir failure never grants ownership of an existing UUID.
+
                     if (try? readFile(snapshots, reservationName(name), maximum: 36)) == Data(id.utf8) {
                         _ = Darwin.unlinkat(snapshots, reservationName(name), 0)
                         try? syncDirectory(snapshots)
@@ -357,7 +352,7 @@ final class NativeBackupOperationFiles {
                 guard metadata.snapshot.id == id else { continue }
                 _ = try snapshotBytes(snapshots, metadata.snapshot)
                 result.append(metadata)
-            } catch { continue } // Roster exposes only complete, verified ownership.
+            } catch { continue }
         }
         return result
     }
@@ -365,7 +360,7 @@ final class NativeBackupOperationFiles {
     private func operationSnapshots(_ operations: Int32, excluding ids: Set<String> = []) throws -> Set<String> {
         var result = Set<String>()
         for id in try names(operations) where !ids.contains(id) {
-            // Even an unknown family might carry ownership; refuse pruning.
+
             guard Self.isUUID(id) else { throw failure() }
             let reference = try referenceForOperation(operations, id)
             let (manifest, _) = try readOperation(operations, reference)
@@ -384,14 +379,14 @@ final class NativeBackupOperationFiles {
 
     private func removeSnapshot(_ snapshots: Int32, _ reference: NativeBackupSnapshotReference, allowIncomplete: Bool) throws {
         try validate(reference)
-        // A failed creation may have only a reservation; never remove a foreign one.
+
         guard try readFile(snapshots, reservationName(reference.name), maximum: 36) == Data(reference.id.utf8) else { throw failure() }
         if let directory = try optionalChildDirectory(snapshots, reference.id) {
             defer { Darwin.close(directory) }
             guard try knownChildren(directory, allowed: [reference.name, "metadata.json"], allowPending: true) else { throw failure() }
             if !allowIncomplete { _ = try snapshotBytes(snapshots, reference) }
             if allowIncomplete, isRegular(directory, "metadata.json") {
-                // Cleanup of failed preparation cannot retract a promoted snapshot.
+
                 let metadata = try decode(Metadata.self, readFile(directory, "metadata.json", maximum: Self.maximumMetadataBytes))
                 guard metadata.version == 1, metadata.snapshot == reference, !metadata.completed else { throw failure() }
             }
@@ -408,18 +403,18 @@ final class NativeBackupOperationFiles {
                   let bytes = try? readFile(snapshots, reservation, maximum: 36),
                   let id = String(data: bytes, encoding: .utf8), Self.isUUID(id), !protected.contains(id) else { continue }
             do {
-                // A reservation alone cannot prove it wasn't tampered to another
-                // canonical UUID. Preserve it even when that UUID has no directory.
+
+
                 guard let directory = try optionalChildDirectory(snapshots, id) else { continue }
                 defer { Darwin.close(directory) }
-                // Matching known partial creation without metadata is pending;
-                // malformed metadata is unknown and deliberately preserved.
+
+
                 guard try knownChildren(directory, allowed: [name, "metadata.json"], allowPending: true) else { continue }
                 var info = stat()
                 let found = Darwin.fstatat(directory, "metadata.json", &info, AT_SYMLINK_NOFOLLOW)
                 guard found != 0 && errno == ENOENT else { continue }
                 try removeKnownDirectory(snapshots, id, allowed: [name, "metadata.json"])
-                // Recheck reservation ownership after directory cleanup.
+
                 guard try readFile(snapshots, reservation, maximum: 36) == bytes else { continue }
                 guard Darwin.unlinkat(snapshots, reservation, 0) == 0 else { throw failure() }
                 try syncDirectory(snapshots)
@@ -434,7 +429,7 @@ final class NativeBackupOperationFiles {
         #if DEBUG
         try beforeMetadataPromote?()
         #endif
-        // Only a verified, known metadata inode may be replaced.
+
         guard isRegular(directory, "metadata.json"),
               Darwin.renameat(directory, pending, directory, "metadata.json") == 0 else { throw failure() }
         #if DEBUG
@@ -463,8 +458,8 @@ final class NativeBackupOperationFiles {
     }
 
     private func writeExclusive(_ directory: Int32, _ name: String, bytes: Data) throws {
-        // Children inherit this supported Foundation policy before their inode
-        // is created. Payload IO itself remains descriptor-relative throughout.
+
+
         try protectDirectory(directory)
         let fd = Darwin.openat(directory, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
         guard fd >= 0 else { throw failure() }
@@ -492,17 +487,16 @@ final class NativeBackupOperationFiles {
         let path = String(cString: buffer)
         try verifyProtectionDirectory(directory, path: path)
         let protection = FileProtectionType.completeUntilFirstUserAuthentication
-        // Foundation's protection API is path-based. CoreHost's exclusive owner
-        // prevents same-sandbox renames during this attribute operation; this is
-        // not a claim of resistance to a hostile concurrent rename in that call.
+
+
         try FileManager.default.setAttributes([.protectionKey: protection], ofItemAtPath: path)
         try verifyProtectionDirectory(directory, path: path)
         let attributes = try FileManager.default.attributesOfItem(atPath: path)
         let actual = (attributes[.protectionKey] as? FileProtectionType)?.rawValue
             ?? (attributes[.protectionKey] as? String)
         #if targetEnvironment(simulator)
-        // Simulator Foundation accepts the policy but omits protection readback;
-        // a reported conflicting policy still refuses. Devices require proof.
+
+
         guard actual == nil || actual == protection.rawValue else { throw failure() }
         #else
         guard actual == protection.rawValue else { throw failure() }
@@ -645,7 +639,7 @@ final class NativeBackupOperationFiles {
     }
 
     private func names(_ fd: Int32) throws -> [String] {
-        // An independent description avoids dup's shared directory offset.
+
         let copied = Darwin.openat(fd, ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard copied >= 0 else { throw failure() }
         guard let stream = Darwin.fdopendir(copied) else { Darwin.close(copied); throw failure() }
@@ -703,8 +697,8 @@ final class NativeBackupOperationFiles {
     }
     private func decode<T: Codable>(_ type: T.Type, _ bytes: Data) throws -> T {
         let value = try JSONDecoder().decode(type, from: bytes)
-        // Local records have one exact encoding; reject unknown/duplicate members,
-        // padding, and noncanonical records even with a newly forged digest.
+
+
         guard try encode(value) == bytes else { throw failure() }
         return value
     }

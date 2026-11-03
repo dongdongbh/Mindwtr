@@ -9,13 +9,14 @@ import {
     safeFormatDate,
     safeParseDate,
     setTaskDraftDate,
+    setTaskDraftReviewTime,
     setTaskDraftTime,
     type TaskEditorDateField,
 } from '@mindwtr/core';
 import type { TaskDraft, TaskDraftField, TaskDraftSetter } from '@mindwtr/core/task-draft';
 
 
-type TaskEditDatePickerMode = 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end';
+type TaskEditDatePickerMode = 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'review-time' | 'recurrence-end';
 
 type UseTaskEditDatesParams = {
     draft: TaskDraft | null;
@@ -24,14 +25,13 @@ type UseTaskEditDatesParams = {
     setDraftField: TaskDraftSetter;
     setPendingDueDate: React.Dispatch<React.SetStateAction<Date | null>>;
     setPendingStartDate: React.Dispatch<React.SetStateAction<Date | null>>;
-    setShowDatePicker: React.Dispatch<React.SetStateAction<'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end' | null>>;
-    showDatePicker: 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end' | null;
+    setShowDatePicker: React.Dispatch<React.SetStateAction<'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'review-time' | 'recurrence-end' | null>>;
+    showDatePicker: 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'review-time' | 'recurrence-end' | null;
     defaultScheduleTime?: string;
     t: (key: string) => string;
 };
 
-// Core's date edit writes each field in order; a due date moves a relative start
-// through the draft's cascade.
+
 const applyDateEdit = (setDraftField: TaskDraftSetter, field: TaskEditorDateField, value: string) => {
     for (const [key, fieldValue] of Object.entries(getTaskDraftDateEdit(field, value))) {
         setDraftField(key as TaskDraftField, fieldValue as never);
@@ -40,8 +40,7 @@ const applyDateEdit = (setDraftField: TaskDraftSetter, field: TaskEditorDateFiel
 
 const pickedTime = (selectedDate: Date) => ({ hours: selectedDate.getHours(), minutes: selectedDate.getMinutes() });
 
-// The picker's day for the time picker that may follow: the written value when it
-// has a time, else the picked day.
+
 const pendingDateFor = (value: string, selectedDate: Date): Date => (
     hasTimeComponent(value) ? safeParseDate(value) ?? new Date(selectedDate) : new Date(selectedDate)
 );
@@ -87,6 +86,12 @@ export function useTaskEditDates({
 
         if (currentMode === 'review') {
             applyDateEdit(setDraftField, 'reviewAt', setTaskDraftDate('reviewAt', draft?.reviewAt, selectedDate, dateOptions));
+            if (closePicker) setShowDatePicker(null);
+            return;
+        }
+
+        if (currentMode === 'review-time') {
+            applyDateEdit(setDraftField, 'reviewAt', setTaskDraftReviewTime(draft?.reviewAt, pickedTime(selectedDate), safeFormatDate));
             if (closePicker) setShowDatePicker(null);
             return;
         }

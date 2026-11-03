@@ -25,8 +25,11 @@ test('Contexts combines tokens with All/Any and keeps the compact selector usabl
     await page.goto('/');
     await page.locator('[data-sidebar-item][data-view="contexts"]').click();
 
-    await page.getByRole('button', { name: '@alice (2)' }).click();
+
     await page.getByRole('button', { name: '#bob (2)' }).click();
+    await page.getByRole('button', { name: '@alice (2)' }).click();
+    await expect(page.getByText('Bob only', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: '#bob (2)' }).click({ modifiers: ['ControlOrMeta'] });
     await expect(page.getByText('Alice and Bob', { exact: true })).toBeVisible();
     await expect(page.getByText('Alice only', { exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Any', exact: true }).click();

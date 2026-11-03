@@ -67,10 +67,10 @@ describe('Upcoming widget', () => {
             task('already-returned', { recurrence: { rule: 'weekly' }, dueDate: '2026-10-17T22:00:00Z' }),
         ]);
         expect(upcoming(source).items.map(({ id, upcomingDate, upcomingLabel, dueLabel }) => ({ id, upcomingDate, upcomingLabel, dueLabel }))).toEqual([
-            { id: 'due', upcomingDate: '2026-10-19', upcomingLabel: 'Returns', dueLabel: 'Returns 2026-10-19' },
-            { id: 'review', upcomingDate: '2026-10-20T08:30:00.000Z', upcomingLabel: 'Returns', dueLabel: 'Returns 2026-10-20 08:30' },
-            { id: 'start', upcomingDate: '2026-10-22', upcomingLabel: 'Starts', dueLabel: 'Starts 2026-10-22' },
-            { id: 'bad-start', upcomingDate: '2026-10-23', upcomingLabel: 'Returns', dueLabel: 'Returns 2026-10-23' },
+            { id: 'due', upcomingDate: '2026-10-19', upcomingLabel: 'Returns', dueLabel: 'Returns Mon' },
+            { id: 'review', upcomingDate: '2026-10-20T08:30:00.000Z', upcomingLabel: 'Returns', dueLabel: 'Returns Tue 08:30' },
+            { id: 'start', upcomingDate: '2026-10-22', upcomingLabel: 'Starts', dueLabel: 'Starts Thu' },
+            { id: 'bad-start', upcomingDate: '2026-10-23', upcomingLabel: 'Returns', dueLabel: 'Returns Fri' },
         ]);
         for (const item of source.tasks) {
             const raw = getTaskDeferUntilSource(item);
@@ -85,7 +85,7 @@ describe('Upcoming widget', () => {
         const payload = buildWidgetPayload(source, 'en', { listIds: ['upcoming', 'filter:all'] });
         const preview = payload.lists.upcoming.items[0];
         expect(preview).not.toHaveProperty('completionToken');
-        expect(preview).toMatchObject({ upcomingDate: '2026-10-18', dueLabel: 'Starts 2026-10-18', dueTone: 'normal', dueEmphasis: false, openUri: 'mindwtr://open?task=shared' });
+        expect(preview).toMatchObject({ upcomingDate: '2026-10-18', dueLabel: 'Starts Tomorrow', dueTone: 'normal', dueEmphasis: false, openUri: 'mindwtr://open?task=shared' });
         expect(payload.lists['filter:all'].items[0].completionToken).toBeTruthy();
         expect(payload.lists['filter:all'].items[0]).not.toHaveProperty('upcomingDate');
         expect(projection.build().items).toEqual([]);
@@ -122,20 +122,20 @@ describe('Upcoming widget', () => {
         ]);
         const list = upcoming(source);
         expect(list.items.map((item) => item.id)).toEqual(['date-only', 'offset-tomorrow', 'local', 'last-day']);
-        expect(list.items[0]).toMatchObject({ upcomingDate: '2026-11-02', dueLabel: 'Starts 2026-11-02' });
-        expect(list.items[2]).toMatchObject({ upcomingDate: '2026-11-02T08:30:00.000', dueLabel: 'Starts 2026-11-02 08:30' });
+        expect(list.items[0]).toMatchObject({ upcomingDate: '2026-11-02', dueLabel: 'Starts Tomorrow' });
+        expect(list.items[2]).toMatchObject({ upcomingDate: '2026-11-02T08:30:00.000', dueLabel: 'Starts Tomorrow 08:30' });
         vi.setSystemTime(new Date('2026-11-02T05:00:00Z'));
         expect(upcoming(source).items.map((item) => item.id)).toEqual(['last-day', 'too-far']);
     });
 
     it.each([
-        ['2026-10-18T08:30:00+0000', '2026-10-18T08:30:00.000Z', 'Starts 2026-10-18 04:30'],
-        ['2026-10-18T08:30:00.123456Z', '2026-10-18T08:30:00.123Z', 'Starts 2026-10-18 04:30'],
-        ['2026-10-18T08:30Z', '2026-10-18T08:30:00.000Z', 'Starts 2026-10-18 04:30'],
-        ['2026-10-18T08:30+0530', '2026-10-18T03:00:00.000Z', 'Starts 2026-10-17 23:00'],
-        ['2026-10-18', '2026-10-18', 'Starts 2026-10-18'],
-        ['2026-10-18T08:30', '2026-10-18T08:30:00.000', 'Starts 2026-10-18 08:30'],
-        ['2026-10-18T08:30:00.123', '2026-10-18T08:30:00.123', 'Starts 2026-10-18 08:30'],
+        ['2026-10-18T08:30:00+0000', '2026-10-18T08:30:00.000Z', 'Starts Sun 04:30'],
+        ['2026-10-18T08:30:00.123456Z', '2026-10-18T08:30:00.123Z', 'Starts Sun 04:30'],
+        ['2026-10-18T08:30Z', '2026-10-18T08:30:00.000Z', 'Starts Sun 04:30'],
+        ['2026-10-18T08:30+0530', '2026-10-18T03:00:00.000Z', 'Starts Tomorrow 23:00'],
+        ['2026-10-18', '2026-10-18', 'Starts Sun'],
+        ['2026-10-18T08:30', '2026-10-18T08:30:00.000', 'Starts Sun 08:30'],
+        ['2026-10-18T08:30:00.123', '2026-10-18T08:30:00.123', 'Starts Sun 08:30'],
     ])('normalizes native metadata for imported %s without altering task data', (startTime, expectedDate, dueLabel) => {
         process.env.TZ = 'America/New_York';
         vi.setSystemTime(new Date('2026-10-16T16:00:00Z'));
@@ -161,12 +161,31 @@ describe('Upcoming widget', () => {
         }
     });
 
-    it('localizes the absolute label with the app settings even without Intl', () => {
+    it('localizes the relative label with the app settings even without Intl', () => {
         const source = data([task('timed', { startTime: '2026-10-18T21:30:00Z' })]);
         const spy = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(() => { throw new Error('No Intl'); });
         const payload = buildWidgetPayload(source, 'de', { listIds: ['upcoming'], systemLocale: 'de-DE' });
-        expect(payload.lists.upcoming.items[0]).toMatchObject({ upcomingLabel: 'Beginnt', dueLabel: 'Beginnt 2026-10-18 21:30' });
+        expect(payload.lists.upcoming.items[0]).toMatchObject({ upcomingLabel: 'Beginnt', dueLabel: 'Beginnt Morgen 21:30' });
         spy.mockRestore();
+    });
+
+    it('uses the Next Actions day rule: Tomorrow, weekday within six days, then a numeric date in the setting order (#1455)', () => {
+        const source = data([
+            task('tomorrow', { startTime: '2026-10-18T09:30:00Z' }),
+            task('weekday', { startTime: '2026-10-23' }),
+            task('week-out', { startTime: '2026-10-24T08:00:00Z' }),
+            task('returns', { recurrence: { rule: 'weekly' }, dueDate: '2026-10-19' }),
+        ]);
+        const labels = () => Object.fromEntries(upcoming(source).items.map((item) => [item.id, item.dueLabel]));
+        expect(labels()).toEqual({
+            tomorrow: 'Starts Tomorrow 09:30', weekday: 'Starts Fri', 'week-out': 'Starts 10/24 08:00', returns: 'Returns Mon',
+        });
+        source.settings = { ...source.settings, dateFormat: 'dmy' };
+        expect(labels()['week-out']).toBe('Starts 24/10 08:00');
+        expect(buildWidgetPayload(source, 'de', { listIds: ['upcoming'] }).upcomingDays).toEqual({
+            today: 'Heute', tomorrow: 'Morgen', weekdays: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'], dayFirst: true,
+        });
+        expect(buildWidgetPayload(source, 'en')).not.toHaveProperty('upcomingDays');
     });
 
     it('opens the full live Upcoming list and applies the same Focus filter', () => {

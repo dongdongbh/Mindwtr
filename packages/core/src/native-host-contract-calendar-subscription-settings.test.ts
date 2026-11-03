@@ -148,7 +148,7 @@ describe('prepared calendar subscription metadata with real SQLite receipts', ()
             expected: options.expected } as CalendarSubscriptionSettingRequest;
         let preparation: ReturnType<typeof env.methods.prepareCalendarSubscriptionSetting> | null = null;
         await expect(runSyncStoreSave(async () => {
-            // A sync save's open transaction already holds the subscription off on the shared connection.
+
             await env.client.run('BEGIN IMMEDIATE');
             await env.client.run('INSERT INTO settings (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',
                 [JSON.stringify({ ...initial().settings, externalCalendars: [{ ...feed, enabled: false }] })]);

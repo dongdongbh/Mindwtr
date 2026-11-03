@@ -1,6 +1,124 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    private var task586Application: XCUIApplication?
+    private var task601Application: XCUIApplication?
+    private var task680Application: XCUIApplication?
+    private var task701Application: XCUIApplication?
+
+    private func task578App(_ suffix: String, flags: [String] = [], largest: Bool = false) throws -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", try task371Library(suffix, prefix: "MINDWTR_REMINDERS_UI_"),
+            "--native-apple-reminders-fixture", "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"] + flags
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-AppleInterfaceStyle", "Dark"] }
+        app.launch(); task578Open(app); return app
+    }
+    private func task578Open(_ app: XCUIApplication) {
+        task371OpenSync(app, openFlow: false, backend: "off")
+        revealPagedElement(app, app.buttons["sync-apple-reminders"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-apple-reminders")
+        boardEnabled(app.buttons["apple-reminders-list"], timeout: 30)
+    }
+    private func task578Choose(_ app: XCUIApplication) {
+        revealPagedElement(app, app.buttons["apple-reminders-list"], in: app.scrollViews["apple-reminders-screen"])
+        boardTap(app, "apple-reminders-list")
+        boardEnabled(app.buttons["apple-reminders-list-0"], timeout: 30)
+        boardTap(app, "apple-reminders-list-0")
+    }
+    private func task578Status(_ app: XCUIApplication, _ text: String) {
+        let status = app.staticTexts["apple-reminders-status"]
+        revealPagedElement(app, status, in: app.scrollViews["apple-reminders-screen"])
+        expectation(for: NSPredicate { _, _ in status.exists && status.label.contains(text) }, evaluatedWith: status)
+        waitForExpectations(timeout: 30)
+    }
+    private func task578Import(_ app: XCUIApplication) {
+        revealPagedElement(app, app.buttons["apple-reminders-import"], in: app.scrollViews["apple-reminders-screen"])
+        boardEnabled(app.buttons["apple-reminders-import"]); boardTap(app, "apple-reminders-import")
+    }
+    private func task578RoundTrip(_ suffix: String, largest: Bool) throws {
+        let app = try task578App(suffix, largest: largest)
+        task578Choose(app)
+        boardEnabled(app.buttons["apple-reminders-list"])
+        XCTAssertTrue(app.buttons["apple-reminders-list"].label.contains("Capture List"))
+        let toggle = app.switches["apple-reminders-auto"]
+        for desired in ["1", "0"] {
+            revealPagedElement(app, toggle, in: app.scrollViews["apple-reminders-screen"])
+            boardEnabled(toggle); toggle.tap()
+            expectation(for: NSPredicate { _, _ in toggle.value as? String == desired && toggle.isEnabled }, evaluatedWith: toggle)
+            waitForExpectations(timeout: 30)
+        }
+        let deletion = app.switches["apple-reminders-delete"]
+        XCTAssertTrue(deletion.waitForExistence(timeout: 10))
+        XCTAssertEqual(deletion.value as? String, "0"); XCTAssertTrue(deletion.isEnabled)
+        task578Import(app); task578Status(app, "Imported 2 reminder(s)")
+        task578Import(app); task578Status(app, "Imported 0 reminder(s)")
+        app.terminate(); app.launch(); task578Open(app)
+        XCTAssertTrue(app.buttons["apple-reminders-list"].label.contains("Capture List"))
+        task578Import(app); task578Status(app, "Imported 0 reminder(s)")
+    }
+    private func task579DeleteRoundTrip(_ suffix: String, largest: Bool) throws {
+        let app = try task578App(suffix, largest: largest); task578Choose(app)
+        let toggle = app.switches["apple-reminders-delete"]
+        revealPagedElement(app, toggle, in: app.scrollViews["apple-reminders-screen"])
+        boardEnabled(toggle); toggle.tap()
+        expectation(for: NSPredicate { _, _ in toggle.value as? String == "1" && toggle.isEnabled }, evaluatedWith: toggle)
+        waitForExpectations(timeout: 30)
+        task578Import(app); task578Status(app, "Imported 2 reminder(s)")
+        task578Status(app, "Deleted 2 imported reminder(s)")
+        task578Import(app); task578Status(app, "Imported 0 reminder(s)")
+        app.terminate(); app.launch(); task578Open(app)
+        XCTAssertEqual(app.switches["apple-reminders-delete"].value as? String, "1")
+        task578Import(app); task578Status(app, "Imported 0 reminder(s)")
+        XCTAssertFalse(app.staticTexts["apple-reminders-status"].label.contains("Deleted"))
+    }
+    func testTask579RemindersDeleteAfterSavedImport() throws { try task579DeleteRoundTrip("DELETE", largest: false) }
+    func testTask579RemindersDeleteLargestText() throws { try task579DeleteRoundTrip("DELETE_LARGEST", largest: true) }
+    func testTask578RemindersSettingsManualImportAndColdDedupe() throws { try task578RoundTrip("NORMAL", largest: false) }
+    func testTask578RemindersLargestTextManualImportAndColdDedupe() throws { try task578RoundTrip("LARGEST", largest: true) }
+    func testTask578RemindersDeniedPermissionLeavesSettingsUsable() throws {
+        let app = try task578App("DENIED", flags: ["--native-apple-reminders-denied"])
+        boardTap(app, "apple-reminders-list")
+        XCTAssertTrue(app.staticTexts["apple-reminders-error"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["apple-reminders-list-0"].exists)
+        boardEnabled(app.buttons["apple-reminders-back"])
+    }
+    func testTask578RemindersPreferenceExactWarmRetry() throws {
+        let app = try task578App("RETRY", flags: ["--native-apple-reminders-preference-failure-once"])
+        task578Choose(app)
+        boardEnabled(app.buttons["apple-reminders-picker-retry"], timeout: 30)
+        XCTAssertFalse(app.buttons["apple-reminders-picker-cancel"].isEnabled)
+        boardTap(app, "apple-reminders-picker-retry")
+        boardEnabled(app.buttons["apple-reminders-list"])
+        XCTAssertTrue(app.buttons["apple-reminders-list"].label.contains("Capture List"))
+        task578Import(app); task578Status(app, "Imported 2 reminder(s)")
+    }
+    func testTask578RemindersPreferenceColdReadDoesNotReplay() throws {
+        let app = try task578App("COLD", flags: ["--native-apple-reminders-preference-failure-once"])
+        task578Choose(app); boardEnabled(app.buttons["apple-reminders-picker-retry"], timeout: 30)
+        app.terminate(); app.launchArguments.removeAll { $0 == "--native-apple-reminders-preference-failure-once" }
+        app.launch(); task578Open(app)
+        XCTAssertTrue(app.buttons["apple-reminders-list"].label.contains("Capture List"))
+        XCTAssertFalse(app.buttons["apple-reminders-retry"].exists)
+        task578Import(app); task578Status(app, "Imported 2 reminder(s)")
+    }
+    func testTask578RemindersOptInColdStartupAndForegroundThrottle() throws {
+        let app = try task578App("AUTO")
+        task578Choose(app); boardEnabled(app.switches["apple-reminders-auto"])
+        app.switches["apple-reminders-auto"].tap()
+        expectation(for: NSPredicate { _, _ in app.switches["apple-reminders-auto"].value as? String == "1" && app.switches["apple-reminders-auto"].isEnabled }, evaluatedWith: app)
+        waitForExpectations(timeout: 30)
+        app.terminate(); let started = Date(); app.launch()
+        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "task-title-", "Literal @home /due:tomorrow")).firstMatch
+        let second = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "task-title-", "Second reminder")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 30))
+        XCTAssertTrue(second.waitForExistence(timeout: 30))
+        for _ in 0..<2 { XCUIDevice.shared.press(.home); app.activate(); boardEnabled(app.buttons["tab-menu"], timeout: 15) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 25, "Throttle evidence must stay within the 30-second window")
+        XCTAssertTrue(first.exists)
+        XCTAssertTrue(second.exists)
+    }
+
     private func task496App(_ suffix: String, largest: Bool = false) throws -> XCUIApplication {
         let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_PUSH_UI_")
         continueAfterFailure = false
@@ -89,7 +207,7 @@ final class FoundationUITests: XCTestCase {
         task496Command(app, "busy")
         task496Wait(app) { ($0["cancelled"] as? Int) == 1 && ($0["draining"] as? Bool) == false && ($0["owner"] as? Bool) == false }
         XCTAssertEqual((task496State(app)["runs"] as? [Any])?.count, 2)
-        // The real shared task writer saves while Stop has retired the watcher; there is no App due callback.
+
         task496Command(app, "save")
         task496Wait(app) { ($0["saves"] as? Int) == 1 && ($0["busy"] as? Bool) == true }
         task496Command(app, "idle")
@@ -193,9 +311,9 @@ final class FoundationUITests: XCTestCase {
         task442Reveal(app, toggle, in: app.scrollViews["calendar-settings-scroll"])
         XCTAssertEqual(toggle.value as? String, "0")
         XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
-        // A separate accepted target edit is held, then cancelled through the actual App button.
+
         app.terminate(); app.launch()
-        // Reopening the fixture deliberately starts from its in-memory enabled model.
+
         task496OpenSettings(app)
         task496Command(app, "hold")
         let target = app.buttons["calendar-push-target-0"]
@@ -314,7 +432,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
     }
 
-    // Warm fixed inputs exercise deferred model ingress; cold cases use the actual OS URL callback.
+
     private func task454App(_ suffix: String, delivery: String = "") throws -> XCUIApplication {
         let library = try task371Library(suffix, prefix: "MINDWTR_ENTITY_UI_")
         continueAfterFailure = false
@@ -421,7 +539,7 @@ final class FoundationUITests: XCTestCase {
         for _ in 0..<2 {
             boardEnabled(app.buttons["tab-menu"], timeout: 40)
             boardTap(app, "tab-menu")
-            // Holding More beyond the echo window makes the next identical event a fresh delivery.
+
             XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 2))
             boardTap(app, "menu-dismiss")
             task454Preview(app, title: "Task454 first preview")
@@ -457,10 +575,10 @@ final class FoundationUITests: XCTestCase {
         try task454Open(app, "mindwtr-native-dev://open?task=task454-a"); defer { app.terminate() }
         boardEnabled(app.buttons["tab-menu"], timeout: 40)
         let title = app.staticTexts.matching(identifier: "task-view-task-title").firstMatch
-        // A retry triggered by its own busy release would exhaust both failures and open here.
+
         XCTAssertFalse(title.waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
-        // Each of the two injected failures may need its own external foreground wake.
+
         for _ in 0..<2 {
             XCUIDevice.shared.press(.home); app.activate()
             if title.waitForExistence(timeout: 3) { break }
@@ -513,7 +631,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(failure.waitForExistence(timeout: 3))
         boardTap(app, "menu-dismiss")
         XCTAssertTrue(failure.waitForExistence(timeout: 40))
-        // Two injected reads fail. A self-wake would immediately succeed on the third and erase this error.
+
         let disappeared = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: failure)
         disappeared.isInverted = true
         waitForExpectations(timeout: 3)
@@ -580,7 +698,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
     }
 
-    // The harness stages only isolated libraries and durable synthetic inbox records while the app is stopped.
+
     func testNativeReminderResponseColdOpenUsesPreviewAndDoesNotReplayFinishedOpen() throws {
         let library = try task371Library("TASK", prefix: "MINDWTR_RESPONSE_UI_")
         continueAfterFailure = false
@@ -617,8 +735,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["review-guide-close"].exists)
     }
 
-    // These cases require a saved-WebDAV library in the flow's state, staged externally
-    // through the real settings writer. No backend address or credential lives here.
+
     private func task371Library(_ suffix: String, prefix: String = "MINDWTR_UNLOCK_UI_") throws -> String {
         guard let raw = ProcessInfo.processInfo.environment[prefix + suffix + "_LIBRARY"] else {
             throw XCTSkip("An externally staged WebDAV library in the requested state is required")
@@ -842,8 +959,8 @@ final class FoundationUITests: XCTestCase {
         }
         revealPagedElement(app, app.buttons["sync-encryption-enable"], in: app.scrollViews["sync-screen"])
         boardTap(app, "sync-encryption-enable")
-        // Root's one-shot HTTP failure must leave a real unfinished transition.
-        // A normally completed Enable has no Abandon opener and fails this check.
+
+
         boardEnabled(app.buttons["sync-encryption-open-abandon"], timeout: 60)
         for name in encryptionFields("enable") {
             let field = app.secureTextFields["sync-encryption-" + name]
@@ -858,7 +975,7 @@ final class FoundationUITests: XCTestCase {
         revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
         boardTap(app, "sync-encryption-cancel")
         boardEnabled(app.buttons["sync-encryption-open-abandon"], timeout: 30)
-        // Preserve the unfinished journal and bytes for root's external snapshot.
+
     }
 
     func testNativeEncryptionAbandonCancelAndMixedRecheckKeepLocationPaused() throws {
@@ -905,7 +1022,7 @@ final class FoundationUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch(); defer { app.terminate() }
-        // Root has conditionally finished the peer's canonical ciphertext before launch.
+
         task371OpenSync(app, openFlow: false)
         let recheck = app.buttons["sync-encryption-recheck"]
         boardEnabled(recheck, timeout: 30)
@@ -921,7 +1038,7 @@ final class FoundationUITests: XCTestCase {
         for id in ["open-enable", "open-change", "open-disable"] {
             XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
         }
-        // Leave Unlock unsubmitted so root can verify discovery wrote no plaintext.
+
     }
 
     func testNativeEncryptionLocalEnableSurvivesColdRestartWithoutBackend() throws {
@@ -1133,7 +1250,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["sync-reload"].isEnabled)
         for name in fields { XCTAssertTrue(app.secureTextFields["sync-encryption-" + name].waitForNonExistence(timeout: 10)) }
         XCTAssertFalse(app.staticTexts["synthetic-background-371"].exists)
-        // No editable reload/new operation may replace the retained delayed owner.
+
         if app.buttons["sync-reload"].exists { XCTAssertFalse(app.buttons["sync-reload"].isEnabled) }
         task371Restart(app)
         app.terminate()
@@ -1238,8 +1355,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse((token.value as? String ?? "").isEmpty); XCTAssertNotEqual(token.value as? String, token.placeholderValue)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", typed + "!", typed + "!")).firstMatch.exists)
 
-        // An explicitly edited empty token is accepted by the shared form for
-        // unauthenticated servers; it must not be treated as untouched authority.
+
         revealPagedElement(app, token, in: app.scrollViews["sync-screen"])
         token.tap(); token.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count + 1))
         boardEnabled(app.buttons["sync-save"], timeout: 30)
@@ -1265,7 +1381,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "sync-option-selfhosted"); boardEnabled(token, timeout: 30)
         XCTAssertTrue((token.value as? String ?? "").isEmpty || (token.value as? String) == token.placeholderValue)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", typed, typed)).firstMatch.exists)
-        // Save/Sync/Test are never invoked; this case requires no server.
+
     }
 
     func testNativeSelfHostedMaintainedServerTestSaveAndColdTokenReuse() throws {
@@ -1290,7 +1406,7 @@ final class FoundationUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication(), title = "Native self-hosted round trip 402"
         app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        // The private test-runner configuration is never copied into app arguments/environment.
+
         app.launchEnvironment = [:]
         app.launch(); defer { app.terminate() }
         func stageForm() {
@@ -1346,7 +1462,7 @@ final class FoundationUITests: XCTestCase {
         completed("Connection OK\nSelf-hosted endpoint is reachable.")
         XCTAssertTrue(app.buttons["sync-option-selfhosted"].isSelected, "Test keeps the selected form staged")
         boardTap(app, "sync-back"); task322OpenSync(app)
-        // Reopening reads stored Off: connection Test did not activate the staged form.
+
         XCTAssertTrue(app.buttons["sync-option-off"].isSelected); XCTAssertFalse(app.secureTextFields["sync-token"].exists)
         stageForm()
         revealPagedElement(app, app.buttons["sync-save"], in: app.scrollViews["sync-screen"])
@@ -1364,11 +1480,11 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["sync-status"].exists, "The later completion must come from this explicit Sync")
         boardEnabled(app.buttons["sync-now"], timeout: 30)
         revealPagedElement(app, app.buttons["sync-now"], in: app.scrollViews["sync-screen"])
-        // No token setter or typing occurs after cold reopening: shared null-token reuse owns this Sync.
+
         boardTap(app, "sync-now"); completed("Success\nSync completed!")
         XCTAssertTrue(app.buttons["sync-option-selfhosted"].isSelected)
         XCTAssertEqual(importedTaskIdentity(), acceptedIdentity)
-        // Root independently verifies the original seeded ID, phone SQLite and maintained server bytes/receipts.
+
     }
 
     func testNativeSelfHostedProjectDownloadOpenColdAndArchived() throws {
@@ -1476,8 +1592,8 @@ final class FoundationUITests: XCTestCase {
             boardEnabled(button, timeout: 30)
             XCTAssertEqual(button.label, "Download")
             button.tap()
-            // Missing becomes available only after the owned download's row refresh.
-            // A previously enabled Open/Back alone cannot prove this transition.
+
+
             XCTAssertTrue(button.waitForNonExistence(timeout: 60))
             ready(id)
             XCTAssertFalse(app.buttons["Close"].firstMatch.exists, "Download must not automatically open its file")
@@ -1488,7 +1604,7 @@ final class FoundationUITests: XCTestCase {
             let file = app.buttons["project-attachment-open-" + id]
             revealPagedElement(app, file, in: scroll, outerEdge: true)
             boardEnabled(file, timeout: 30); file.tap()
-            // Project text documents use the existing system Share presentation.
+
             let close = app.buttons["Close"].firstMatch
             boardEnabled(close, timeout: 20)
             var previousFrame: CGRect?
@@ -1512,12 +1628,12 @@ final class FoundationUITests: XCTestCase {
         projects(); open(false); download(active); view(active)
         boardTap(app, "project-back")
         app.terminate(); app.launch(); projects(); open(false)
-        // No Save, token edit, Sync or Download occurs in the cold active-file phase.
+
         ready(active); view(active); boardTap(app, "project-back")
         open(true); ready(archived); archivedControls(); download(archived)
         archivedControls(); view(archived); archivedControls(); boardTap(app, "project-back")
         boardEnabled(app.textFields["projects-create-title"], timeout: 30)
-        // Root independently verifies GET receipts, exact hashes/rows and cold no-GET.
+
     }
 
     func testNativeSelfHostedProjectDownloadColdRetryAndStop() throws {
@@ -1582,22 +1698,21 @@ final class FoundationUITests: XCTestCase {
             let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
             app.launchArguments = arguments + ["--native-project-download-stop-after-filled-once"]
             app.launch()
-            // Preflight the stopped library with scripts/check-project-download-fixture.py (README).
-            // Root stages only synthetic SQLite/config in this fresh library; no files or journal.
-            // The isolated filled-stage flag starts at Projects to avoid automatic Sync prefetch.
+
+
             openActiveProject()
             let download = app.buttons["project-attachment-download-" + fileID]
             revealPagedElement(app, download, in: scroll, outerEdge: true)
             boardEnabled(download, timeout: 30); XCTAssertEqual(download.label, "Download")
             download.tap()
-            // The approved hook fails only after this invocation durably fills its real stage.
+
             pending()
             for id in ["project-back", "project-attachment-open-" + fileID] {
                 let button = app.buttons[id]
                 XCTAssertTrue(button.exists); XCTAssertFalse(button.isEnabled)
             }
             app.terminate()
-            app.launchArguments = arguments // Cold recovery must not rearm the filled-stage hook.
+            app.launchArguments = arguments
             app.launch()
             pending()
             XCTAssertFalse(app.buttons["tab-menu"].exists)
@@ -1608,13 +1723,13 @@ final class FoundationUITests: XCTestCase {
             checkpoint.lifetime = .keepAlways; add(checkpoint)
             boardTap(app, stop ? "project-file-download-stop" : "project-file-download-retry")
             XCTAssertTrue(panel.waitForNonExistence(timeout: 60))
-            // This cold phase performs no Save, Sync or Download; root verifies zero GETs.
+
             openActiveProject(); ready()
             if stop {
                 let missing = app.buttons["project-attachment-download-" + fileID]
                 revealPagedElement(app, missing, in: scroll, outerEdge: true)
                 boardEnabled(missing, timeout: 30); XCTAssertEqual(missing.label, "Download")
-                noViewer() // Stop preserves the original missing attachment; no follow-up download.
+                noViewer()
             } else {
                 XCTAssertFalse(app.buttons["project-attachment-download-" + fileID].exists)
                 let file = app.buttons["project-attachment-open-" + fileID]
@@ -1642,7 +1757,7 @@ final class FoundationUITests: XCTestCase {
             boardEnabled(app.textFields["projects-create-title"], timeout: 30)
             app.terminate()
         }
-        // Root independently requires exactly two filled-source GETs and zero cold GETs.
+
     }
 
     private func task416OpenProject404(_ app: XCUIApplication, expectFile: Bool) {
@@ -1665,7 +1780,7 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
         boardEnabled(app.buttons["project-attachment-add-link"], timeout: 30)
         let fileID = "40600000-1111-4111-8111-111111111111"
-        // RN terminal 404 soft-deletes this broken reference; it stays in SQLite.
+
         for action in ["open", "download", "remove"] {
             XCTAssertFalse(app.buttons["project-attachment-" + action + "-" + fileID].exists)
         }
@@ -1689,9 +1804,8 @@ final class FoundationUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchEnvironment = [:]
         defer { app.terminate() }
-        // Root stages only the 406 active Project and saved synthetic WebDAV;
-        // its cloudKey names an absent remote file, with no local bytes/journal.
-        // The unchanged filled hook selects Projects and cannot fire for a 404.
+
+
         app.launchArguments = task350Arguments(normal, hook: "--native-project-download-stop-after-filled-once")
         app.launch(); task416OpenProject404(app, expectFile: true)
         task350TapProject(app, "project-attachment-download-40600000-1111-4111-8111-111111111111")
@@ -1702,7 +1816,7 @@ final class FoundationUITests: XCTestCase {
         let dismiss = alert.buttons["project-attachment-open-dismiss"]
         boardEnabled(dismiss); dismiss.tap(); XCTAssertTrue(alert.waitForNonExistence(timeout: 15))
         task416TerminalProject404(app)
-        app.terminate(); app.launch() // Same normal library; no remote-capable file remains.
+        app.terminate(); app.launch()
         task416OpenProject404(app, expectFile: false); task416TerminalProject404(app)
         app.terminate()
 
@@ -1718,15 +1832,15 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["project-back"].exists); XCTAssertFalse(app.buttons["project-back"].isEnabled)
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
         XCTAssertFalse(app.alerts.firstMatch.exists); task350NoFilePresentation(app)
-        // End before Retry so root can capture the actual device-created,
-        // version2 metadata-only intent and exact unchanged before rows/files.
+
+
     }
 
     func testNativeWebDAVProject404ColdRetryAcknowledgesTerminalResult() throws {
         let library = try task371Library("COLD", prefix: "MINDWTR_PROJECT_404_PHONE_")
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchEnvironment = [:]
-        app.launchArguments = task350Arguments(library) // Do not rearm afterIntent.
+        app.launchArguments = task350Arguments(library)
         app.launch(); defer { app.terminate() }
         let panel = app.descendants(matching: .any).matching(identifier: "project-file-download-recovery").firstMatch
         XCTAssertTrue(panel.waitForExistence(timeout: 60))
@@ -1738,17 +1852,17 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(panel.waitForNonExistence(timeout: 60))
         task416OpenProject404(app, expectFile: false); task416TerminalProject404(app)
         app.terminate()
-        // Only the old filled selector is used to reopen at Projects. No source
-        // exists and no Download is issued, so neither fault can fire here.
+
+
         app.launchArguments = task350Arguments(library, hook: "--native-project-download-stop-after-filled-once")
         app.launch(); task416OpenProject404(app, expectFile: false); task416TerminalProject404(app)
-        // Root independently verifies exactly one 404 per library, zero cold
-        // requests, exact RN tombstone effects, and no files or retained journal.
+
+
     }
 
     func testNativeWebDAVProject404CompletesAndColdRetriesInOneInvocation() throws {
-        // Separate XCTest invocations can reinstall the app and change its
-        // container identity. Keep the real terminate/relaunch in one invocation.
+
+
         try testNativeWebDAVProject404CompletesAndCreatesColdRetryIntent()
         try testNativeWebDAVProject404ColdRetryAcknowledgesTerminalResult()
     }
@@ -1764,8 +1878,8 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons["sync-back"], timeout: 30)
         task322Type(app, "sync-username", "fixture-322")
         task322Type(app, "sync-password", "synthetic-invalid-draft-322", secure: true)
-        // The shared reveal helper requires an enabled target. Use Reload as
-        // the anchor, then inspect disabled actions without trying to tap them.
+
+
         revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
         for id in ["sync-save", "sync-now", "sync-test"] {
             let action = app.buttons[id]
@@ -1788,8 +1902,8 @@ final class FoundationUITests: XCTestCase {
         #if targetEnvironment(simulator)
         XCUIDevice.shared.press(.home)
         #else
-        // On the iPhone 12, the synthetic Home button leaves this form foreground.
-        // Use its actual Home gesture, then require observed background state.
+
+
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
             .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
         #endif
@@ -1826,8 +1940,8 @@ final class FoundationUITests: XCTestCase {
         let app = XCUIApplication(), library = UUID().uuidString.lowercased()
         app.launchArguments = ["--native-ui-test-library", library, "--native-sync-command-throw-once", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         #if targetEnvironment(simulator)
-        // Existing simulator authentication hook only; physical devices retain
-        // their real security state and run this test with the fresh AppLock off.
+
+
         app.launchArguments += ["--native-app-lock-auth", "success,cancel,success"]
         #endif
         app.launch(); defer { app.terminate() }
@@ -1842,7 +1956,7 @@ final class FoundationUITests: XCTestCase {
         task322Type(app, "sync-username", "fixture-322")
         task322Type(app, "sync-password", "synthetic-unknown-draft-322", secure: true)
         revealPagedElement(app, app.buttons["sync-test"], in: app.scrollViews["sync-screen"])
-        boardTap(app, "sync-test") // DEBUG throws before any actual HTTP call.
+        boardTap(app, "sync-test")
         task322RestartGate(app)
         #if targetEnvironment(simulator)
         XCUIDevice.shared.press(.home); app.activate(); task102Gate(app)
@@ -1871,17 +1985,17 @@ final class FoundationUITests: XCTestCase {
         print("Task337 cold startup gate isolated library: " + library)
         app.launchArguments = arguments + ["--native-startup-sync-command-throw-once"]
         app.launch(); defer { app.terminate() }
-        // The startup-only hook fires before the stored native command. No
-        // Settings action, form input, credential, or network is involved.
+
+
         task322RestartGate(app)
         app.terminate()
-        app.launchArguments = arguments // The same library, without the hook.
+        app.launchArguments = arguments
         app.launch()
         boardEnabled(app.buttons["tab-inbox"], timeout: 30)
         boardEnabled(app.buttons["capture-open"], timeout: 30)
         task337NoRestartGate(app, timeout: 5)
 
-        // Prove that ordinary Inbox editing is available after cold settlement.
+
         boardTap(app, "capture-open")
         let capture = app.textViews["capture-input"]
         boardEnabled(capture); capture.tap(); capture.typeText("Task337 cold editable")
@@ -1894,7 +2008,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(title.value as? String, "Task337 cold editable saved")
         boardTap(app, "task-editor-save")
         boardEnabled(app.buttons["Task337 cold editable saved"], timeout: 30)
-        task322OpenSync(app) // A fresh library still presents stored Off.
+        task322OpenSync(app)
         XCTAssertTrue(app.buttons["sync-option-off"].isSelected)
     }
 
@@ -1921,8 +2035,8 @@ final class FoundationUITests: XCTestCase {
 
         app.launchArguments = arguments + ["--native-startup-sync-command-throw-once"]
         app.launch()
-        // Existing recovery auto-resumes a valid protected draft. Its exact
-        // editor state is the positive proof; the gate need not stay onscreen.
+
+
         boardEnabled(title, timeout: 30)
         XCTAssertEqual(title.value as? String, draft)
         boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
@@ -1932,15 +2046,14 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
         task337NoRestartGate(app)
 
-        // Keep for later hides the editor, not its durable ownership. Ordinary
-        // Inbox/read actions and idle completion must not mint a new intent.
+
         boardTap(app, "tab-inbox")
         boardTap(app, "search-open"); boardEnabled(app.textFields["search-input"], timeout: 30)
         boardTap(app, "search-close")
         boardEnabled(app.buttons[original], timeout: 30)
         boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
         task337NoRestartGate(app, timeout: 5)
-        app.terminate(); app.launch() // The startup hook remains armed on this cold launch.
+        app.terminate(); app.launch()
         boardEnabled(title, timeout: 30)
         XCTAssertEqual(title.value as? String, draft, "Keep for later must preserve the exact unsaved title on disk")
         boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
@@ -1951,8 +2064,8 @@ final class FoundationUITests: XCTestCase {
         #if targetEnvironment(simulator)
         XCUIDevice.shared.press(.home)
         #else
-        // The actual Home gesture is required on the iPhone 12; the synthetic
-        // Home button does not reliably leave the current app foreground.
+
+
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
             .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
         #endif
@@ -1973,14 +2086,14 @@ final class FoundationUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         boardEnabled(app.buttons["tab-inbox"], timeout: 30)
         boardEnabled(app.buttons["capture-open"], timeout: 30)
-        // A clean cold launch invokes only startup. The resume-only hook must
-        // remain armed until a real background-to-foreground episode occurs.
+
+
         task337NoRestartGate(app, timeout: 5)
         task344BackgroundAndActivate(app)
-        task322RestartGate(app) // No Settings visit, credentials, or HTTP.
+        task322RestartGate(app)
 
         app.terminate()
-        app.launchArguments = arguments // Same storage, without the hook.
+        app.launchArguments = arguments
         app.launch()
         boardEnabled(app.buttons["tab-inbox"], timeout: 30)
         boardEnabled(app.buttons["capture-open"], timeout: 30)
@@ -2031,8 +2144,7 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons[original], timeout: 30)
         boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
 
-        // A hidden kept draft retains its disk ownership. Actual resume and
-        // ordinary reads cannot create a delayed Sync after the editor closes.
+
         task344BackgroundAndActivate(app)
         boardEnabled(app.buttons[original], timeout: 30)
         boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
@@ -2044,7 +2156,7 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
         task337NoRestartGate(app, timeout: 5)
 
-        app.terminate(); app.launch() // Same storage; the resume-only hook remains armed.
+        app.terminate(); app.launch()
         boardEnabled(title, timeout: 30)
         XCTAssertEqual(title.value as? String, draft, "The exact unsaved title must survive kept-draft cold recovery")
         boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
@@ -2133,16 +2245,16 @@ final class FoundationUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication(), library = "474dc5da-dc25-476a-a08b-2a151facc3b1"
         let first = "Task350 Notes before known Off refusal", final = first + " and still editable"
-        // Root stages the existing Task121 missing-cloud-file fixture in this
-        // fresh isolated library with stored Off, no credential or local bytes.
+
+
         app.launchArguments = task350Arguments(library)
         app.launch(); defer { app.terminate() }
         task350OpenProject(app); task350EditNotes(app, first)
         task350TapProject(app, "project-attachment-download-task121-file")
         task350KnownOffRefusal(app)
         XCTAssertEqual(app.textViews["project-notes-input"].value as? String, first)
-        // Notes changed the Project revision before dispatch. The known reply
-        // must leave the current Notes options usable, without an auto Open.
+
+
         task350EditNotes(app, final)
         task350TapProject(app, "project-attachment-download-task121-file")
         task350KnownOffRefusal(app)
@@ -2171,8 +2283,8 @@ final class FoundationUITests: XCTestCase {
             app.launch(); defer { app.terminate() }
             task350OpenProject(app); task350EditNotes(app, notes)
             task350TapProject(app, "project-attachment-download-task121-file")
-            // Throw is before dispatch; malformed substitutes non-null Project
-            // update only after the actual native Off refusal has returned.
+
+
             task322RestartGate(app)
             for id in ["project-back", "project-attachment-download-task121-file", "project-attachment-open-task121-file",
                        "project-attachment-add-file", "project-notes-mode-edit"] {
@@ -2207,9 +2319,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["project-attachment-open-task121-file"].isEnabled)
         XCTAssertFalse(app.textViews["project-notes-input"].isEnabled)
 
-        // The hook delays App delivery after a real native Off reply; it is
-        // not a held network transfer. Require actual background/activation
-        // inside its eight-second window rather than accept vacuous coverage.
+
         task344BackgroundAndActivate(app)
         XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - began, 8,
             "Automation must background and reactivate before the delayed reply can settle")
@@ -2226,7 +2336,7 @@ final class FoundationUITests: XCTestCase {
         task350NoFilePresentation(app)
         task350EditNotes(app, final)
         task350TapProject(app, "project-attachment-download-task121-file")
-        task350KnownOffRefusal(app) // Explicit new dispatch works after drainage.
+        task350KnownOffRefusal(app)
         task350ColdNotes(app, library: library, text: final)
     }
 
@@ -2238,8 +2348,8 @@ final class FoundationUITests: XCTestCase {
 
     private func task364RevealTitle(_ app: XCUIApplication) {
         let title = task364Title(app), scroll = app.scrollViews["task-editor-scroll"]
-        // Reuse the existing topward gutter gesture, with the editor's actual
-        // type-agnostic title lookup (the control may be a multiline text view).
+
+
         for _ in 0..<8 {
             if title.exists && title.isHittable && scroll.frame.contains(title.frame) { return }
             let frame = scroll.frame.intersection(app.frame)
@@ -2287,8 +2397,8 @@ final class FoundationUITests: XCTestCase {
     private func task364NoFilePresentation(_ app: XCUIApplication) {
         XCTAssertFalse(app.buttons["task-attachment-preview-done"].exists)
         XCTAssertFalse(app.otherElements["task-audio-player"].exists)
-        // The Task editor itself has a Close label, with task-view-close ID.
-        // Check the system viewer identifier rather than that shared label.
+
+
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier == %@", "Close")).firstMatch.exists)
     }
 
@@ -2331,8 +2441,8 @@ final class FoundationUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication(), library = "bfa04966-0c33-4c1a-bd13-6f29f47e79a7"
         let title = "Task364 Off draft saved", notes = "Task364 Notes before Off refusal", checklist = "Task364 checklist before Download"
-        // Root stages a saved mutable Task with one real RN remote-only file,
-        // stored Off, no credential, local bytes, or owned attachment history.
+
+
         app.launchArguments = task350Arguments(library); app.launch(); defer { app.terminate() }
         task364OpenEditor(app)
         task364EditDraft(app, title: title, notes: notes, checklist: checklist)
@@ -2356,7 +2466,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(note.value as? String, notes)
         revealPagedElement(app, item, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
         XCTAssertEqual(item.value as? String, checklist)
-        _ = task364Download(app) // Off refusal never claims installed availability.
+        _ = task364Download(app)
         task364NoFilePresentation(app)
     }
 
@@ -2371,8 +2481,8 @@ final class FoundationUITests: XCTestCase {
             task364OpenEditor(app)
             task364EditDraft(app, title: title, notes: notes, checklist: checklist)
             task364Download(app).tap()
-            // Throw runs before native dispatch; malformed substitutes only
-            // after the real Off refusal. Neither path may retry a fresh UUID.
+
+
             task322RestartGate(app)
             for id in ["task-view-close", "task-editor-save", "task-attachment-download-" + task364AttachmentID,
                        "task-attachment-open-" + task364AttachmentID, "task-attachment-add-file", "task-attachment-add-link"] {
@@ -2409,7 +2519,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["task-attachment-open-" + task364AttachmentID].isEnabled)
         XCTAssertFalse(app.buttons["task-editor-save"].isEnabled)
         XCTAssertFalse(app.buttons["task-view-close"].isEnabled)
-        // This holds App delivery after a real Off reply, not a network task.
+
         task344BackgroundAndActivate(app)
         XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - began, 8,
             "Actual background and reactivation must occur inside the reply-delay window")
@@ -2724,6 +2834,11 @@ final class FoundationUITests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
         }
+        task601Application?.terminate(); task601Application = nil
+        task680Application?.terminate(); task680Application = nil
+        task701Application?.terminate(); task701Application = nil
+        task586Application?.terminate()
+        task586Application = nil
         try super.tearDownWithError()
     }
 
@@ -3139,7 +3254,7 @@ final class FoundationUITests: XCTestCase {
     func testSavedSearchWriteLargestText() { savedSearchWriteFlow(library: "b43325de-3d8f-432f-bb65-607ae71f5f7e") }
 
     private func replaceSavedSearchName(_ field: XCUIElement, with name: String) {
-        // The dialog focuses its newly initialized field at the end. Avoid the OS's large-text selection menu.
+
         let count = (field.value as? String ?? "").count
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: count) + name)
         XCTAssertEqual(field.value as? String, name)
@@ -3419,7 +3534,7 @@ final class FoundationUITests: XCTestCase {
             let link = app.links.matching(NSPredicate(format: "label == %@", title)).firstMatch
             revealPagedElement(app, link, in: app.scrollViews["task-editor-scroll"])
             XCTAssertTrue(link.exists); link.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
-            // A minute boundary can invalidate the rendered view while scrolling.
+
             let retry = app.buttons["task-reference-retry"]
             if retry.waitForExistence(timeout: 1) {
                 revealPagedElement(app, retry, in: app.scrollViews["task-editor-scroll"])
@@ -3755,8 +3870,8 @@ final class FoundationUITests: XCTestCase {
             tap("project-attachment-open-task121-web"); browser()
             tap("project-attachment-open-task121-desktop"); dismiss("another device")
             tap("project-attachment-open-task121-unsupported"); dismiss("Could not open")
-            // This retained fixture URI is foreign: the new file button must
-            // refuse safely and release its Open claim, including when archived.
+
+
             tap("project-attachment-open-task121-file"); dismiss("This file could not be opened")
             boardEnabled(app.buttons["project-attachment-open-task121-file"])
             let shot = XCTAttachment(screenshot: app.screenshot())
@@ -3774,8 +3889,8 @@ final class FoundationUITests: XCTestCase {
     func testTask285ArchivedProjectFilesOpenInSystemViewersAndReleaseClaims() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        // Root seeds real, hash-bound files externally. Run the same test with
-        // current URIs and again after installation without rebinding old URIs.
+
+
         app.launchArguments = ["--native-ui-test-library", "fd3b763c-9eca-4018-ba4f-753e58d7ad04"]
         let audio = "812b5574-f88a-412e-90d1-f53e0cc51f5e"
         let image = "5084fe92-57aa-4a08-a3c7-9224f1d20f1d"
@@ -3793,8 +3908,8 @@ final class FoundationUITests: XCTestCase {
             XCTAssertFalse(app.otherElements["task-audio-player"].exists)
             XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
             XCTAssertFalse(app.alerts.firstMatch.exists)
-            // The scroll helper requires enabled controls. Reveal the nearby
-            // Notes anchor, then inspect archived Add controls without tapping.
+
+
             revealPagedElement(app, app.buttons["project-notes-toggle"], in: scroll, outerEdge: true)
             let viewport = scroll.frame.intersection(app.frame)
             for id in ["project-attachment-add-file", "project-attachment-add-link"] {
@@ -3815,8 +3930,8 @@ final class FoundationUITests: XCTestCase {
             file(id).tap()
             let close = app.buttons["Close"].firstMatch
             boardEnabled(close, timeout: 20)
-            // UIKit can expose Share's Close before its presentation settles.
-            // Require observed readiness before the single dismissal tap.
+
+
             var previousFrame: CGRect?
             var stableSince: TimeInterval?
             let closeReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -3833,8 +3948,8 @@ final class FoundationUITests: XCTestCase {
                 return false
             }, object: close)
             XCTAssertEqual(XCTWaiter.wait(for: [closeReady], timeout: 10), .completed)
-            // Project audio follows its existing system Share plan, rather
-            // than the Task-only player introduced by Task284.
+
+
             XCTAssertFalse(app.otherElements["task-audio-player"].exists)
             XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
             XCTAssertFalse(app.alerts.firstMatch.exists)
@@ -3960,8 +4075,8 @@ final class FoundationUITests: XCTestCase {
         if app.buttons["project-notes-mode-edit"].isEnabled { tap("project-notes-mode-edit") }
         let input = app.textViews["project-notes-input"]
         boardEnabled(input); input.tap(); input.typeText(notes)
-        // The retained Task121 file is missing and foreign. Metadata Remove
-        // must complete after Notes flush without requiring local byte access.
+
+
         tap("project-attachment-remove-task121-file")
         let file = app.buttons["project-attachment-open-task121-file"]
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: file)
@@ -4041,8 +4156,8 @@ final class FoundationUITests: XCTestCase {
         tap("project-attachment-add-file")
         let cancel = app.navigationBars.buttons["Cancel"].firstMatch
         boardEnabled(cancel, timeout: 20)
-        // Kill while the real picker is still presented: Notes must already be
-        // durable, and no Project/Task attachment owner exists before selection.
+
+
         app.terminate(); app.launch(); projects(); open("task121-active")
         unchangedAttachments()
         tap("project-notes-toggle")
@@ -4172,7 +4287,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "task-audio-toggle")
         task284Wait { app.buttons["task-audio-toggle"].label == "Pause"
             && (self.task284Clock(app)?.elapsed ?? -1) > pausedElapsed }
-        // Wait for this real12-second clip's end, not a simulated callback.
+
         task284Wait(timeout: 16) { app.buttons["task-audio-toggle"].label == "Play"
             && self.task284Clock(app)?.elapsed == 12 }
         boardTap(app, "task-audio-toggle")
@@ -4219,7 +4334,7 @@ final class FoundationUITests: XCTestCase {
         revealAttachmentTestTitle(app)
         boardEnabled(app.textFields["task-editor-title"])
         XCTAssertEqual(app.textFields["task-editor-title"].value as? String, "Task284 audio")
-        // A successful Open after the error also proves the busy/claim was released.
+
         task284OpenAudio(app); task284AssertPlaying(app); task284ClosePlayer(app)
         boardTap(app, "task-view-close")
         boardEnabled(app.buttons["task-title-task284-audio"], timeout: 30)
@@ -4340,7 +4455,7 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(add); XCTAssertEqual(add.label, "Add file")
         XCTAssertGreaterThanOrEqual(add.frame.height, 44)
         add.tap()
-        // The system document picker owns this Cancel, not editor Discard.
+
         let cancel = app.navigationBars.buttons["Cancel"].firstMatch
         boardEnabled(cancel, timeout: 30); cancel.tap()
         revealAttachmentTestTitle(app)
@@ -4380,7 +4495,7 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(add); XCTAssertEqual(add.label, "Add photo")
         XCTAssertGreaterThanOrEqual(add.frame.height, 44)
         add.tap()
-        // This is the actual selected-access Photos picker, not editor Discard.
+
         let cancel = app.navigationBars.buttons["Cancel"].firstMatch
         boardEnabled(cancel, timeout: 30); cancel.tap()
         revealAttachmentTestTitle(app)
@@ -4420,7 +4535,7 @@ final class FoundationUITests: XCTestCase {
         let add = app.buttons["task-attachment-add-file"]
         revealPagedElement(app, add, in: scroll, outerEdge: true)
         boardEnabled(add); add.tap()
-        // Begin owns an empty owned draft before the picker; Cancel submits no Add.
+
         let cancel = app.navigationBars.buttons["Cancel"].firstMatch
         boardEnabled(cancel, timeout: 30); cancel.tap()
         revealAttachmentTestTitle(app)
@@ -4506,8 +4621,8 @@ final class FoundationUITests: XCTestCase {
     private func revealAttachmentTestTitle(_ app: XCUIApplication) {
         let title = app.textFields["task-editor-title"]
         let scroll = app.scrollViews["task-editor-scroll"]
-        // The lazy stack omits the title after scrolling to Attachments;
-        // return toward the known top instead of searching further down.
+
+
         for _ in 0..<8 {
             if title.exists && title.isHittable && scroll.frame.contains(title.frame) { return }
             let frame = scroll.frame.intersection(app.frame)
@@ -4651,7 +4766,7 @@ final class FoundationUITests: XCTestCase {
         let title = app.textFields["task-editor-title"]
         let note = app.textViews["task-editor-note"]
         func reveal(_ field: XCUIElement) {
-            // Off-screen SwiftUI input frames may be infinite. The title precedes Notes.
+
             for _ in 0..<25 {
                 let viewport = scroll.frame.intersection(app.frame)
                 let bottom = app.keyboards.firstMatch.exists ? app.keyboards.firstMatch.frame.minY : viewport.maxY
@@ -4772,8 +4887,8 @@ final class FoundationUITests: XCTestCase {
         waitForExpectations(timeout: 20)
         boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 15)
         XCTAssertFalse(app.staticTexts["task-assignedTo-error"].exists)
-        // RN still offers creation for an exact name omitted from suggestions;
-        // the shared Person writer must reuse it without another row or revision.
+
+
         boardEnabled(create)
         revealPagedElement(app, create, in: scroll, outerEdge: true)
         create.tap()
@@ -4796,7 +4911,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate(); app.launch()
         boardEnabled(app.buttons[savedTitle], timeout: 30)
         XCTAssertFalse(app.buttons["task-recovery-open"].exists)
-        app.terminate() // The external oracle compares all nine saved tables and the created Person.
+        app.terminate()
     }
 
     func testTaskDraftRecoveryExternalUnrelatedSeed() {
@@ -4820,7 +4935,7 @@ final class FoundationUITests: XCTestCase {
         title.typeText(" draft")
         XCTAssertEqual(title.value as? String, "Task116 Recovery draft")
         boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 15)
-        app.terminate() // Root changes the isolated saved task before the finish test.
+        app.terminate()
     }
 
     func testTaskDraftRecoveryExternalUnrelatedFinish() {
@@ -4836,7 +4951,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate(); app.launch()
         boardEnabled(app.buttons["Task116 Recovery draft"], timeout: 30)
         XCTAssertFalse(app.buttons["task-recovery-open"].exists)
-        app.terminate() // Root checks the external description and all nine tables.
+        app.terminate()
     }
 
     func testTaskDraftRecoveryExternalOwnedFinish() {
@@ -5056,7 +5171,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root stages this isolated 103-item fixture; the first and last legacy IDs repeat.
+
     func testPagedChecklistGlobalIndexesSaveAndRestart() throws {
         let app = XCUIApplication()
         let library = "df4c1bdd-13ca-44e7-b660-e510bb5d0732"
@@ -5103,10 +5218,10 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(task)
     }
 
-    func testReferenceChecklistUsesBulletsAndPersists() {
+    func testReferenceChecklistTogglesResetsAndPersists() {
         let app = XCUIApplication()
         let library = UUID().uuidString.lowercased()
-        app.launchArguments = ["--native-ui-test-library", library]
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
         print("Reference checklist isolated library: " + library)
         app.launch()
         boardEnabled(app.buttons["capture-open"], timeout: 30)
@@ -5119,8 +5234,8 @@ final class FoundationUITests: XCTestCase {
             boardEnabled(app.buttons["Reference checklist"])
             app.buttons["Reference checklist"].tap()
         }
-        // RN reveals Reference checklists only when they already contain items.
-        // Create the checklist in Inbox, then file that task as Reference.
+
+
         boardEnabled(app.buttons["Reference checklist"])
         app.buttons["Reference checklist"].tap()
         boardTap(app, "task-mode-edit")
@@ -5150,12 +5265,17 @@ final class FoundationUITests: XCTestCase {
         openReference()
         boardTap(app, "task-mode-edit")
         showChecklist()
-        XCTAssertFalse(app.buttons["task-checklist-toggle-0"].exists)
-        XCTAssertFalse(app.buttons["task-checklist-toggle-1"].exists)
-        XCTAssertFalse(app.buttons["task-checklist-reset"].exists)
+        boardEnabled(app.buttons["task-checklist-toggle-0"])
+        boardEnabled(app.buttons["task-checklist-toggle-1"])
+        boardEnabled(app.buttons["task-checklist-reset"])
+        editorTap("task-checklist-toggle-0")
+        boardEnabled(app.buttons["task-editor-save"])
+        XCTAssertEqual(app.buttons["task-checklist-toggle-0"].value as? String, "Done")
         boardTap(app, "task-mode-view")
-        XCTAssertFalse(app.buttons["task-view-checklist-toggle-0"].exists)
-        XCTAssertFalse(app.textFields["task-view-checklist-append"].exists)
+        boardEnabled(app.buttons["task-view-checklist-toggle-0"])
+        XCTAssertEqual(app.buttons["task-view-checklist-toggle-0"].value as? String, "Done")
+        editorTap("task-view-checklist-toggle-1")
+        boardEnabled(app.textFields["task-view-checklist-append"])
         boardTap(app, "task-mode-edit")
         showChecklist()
         editorTap("task-checklist-add")
@@ -5166,16 +5286,33 @@ final class FoundationUITests: XCTestCase {
         app.terminate(); app.launch()
         boardEnabled(app.buttons["tab-menu"], timeout: 30)
         openReference()
-        XCTAssertFalse(app.buttons["task-view-checklist-toggle-0"].exists)
+        boardEnabled(app.buttons["task-view-checklist-toggle-0"])
+        XCTAssertEqual(app.buttons["task-view-checklist-toggle-0"].value as? String, "Done")
+        boardEnabled(app.buttons["task-view-checklist-toggle-1"])
+        XCTAssertEqual(app.buttons["task-view-checklist-toggle-1"].value as? String, "Done")
         boardTap(app, "task-mode-edit")
         showChecklist()
         for (index, expected) in ["Reference first", "Reference second", "Reference third"].enumerated() {
             let field = app.textFields["task-checklist-input-\(index)"]
             revealPagedElement(app, field, in: scroll)
             XCTAssertEqual(field.value as? String, expected)
-            XCTAssertFalse(app.buttons["task-checklist-toggle-\(index)"].exists)
+            boardEnabled(app.buttons["task-checklist-toggle-\(index)"])
+            XCTAssertEqual(app.buttons["task-checklist-toggle-\(index)"].value as? String, index < 2 ? "Done" : "Active")
         }
-        XCTAssertFalse(app.buttons["task-checklist-reset"].exists)
+        editorTap("task-checklist-reset")
+        boardEnabled(app.buttons["task-editor-save"])
+        boardTap(app, "task-view-close")
+        XCTAssertFalse(app.buttons["task-editor-discard"].exists)
+        boardEnabled(app.buttons["Reference checklist"])
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        openReference()
+        boardTap(app, "task-mode-edit")
+        showChecklist()
+        for index in 0..<3 {
+            revealPagedElement(app, app.buttons["task-checklist-toggle-\(index)"], in: scroll)
+            XCTAssertEqual(app.buttons["task-checklist-toggle-\(index)"].value as? String, "Active")
+        }
         boardTap(app, "task-view-close")
         XCTAssertFalse(app.buttons["task-editor-discard"].exists)
         boardEnabled(app.buttons["Reference checklist"])
@@ -5211,8 +5348,8 @@ final class FoundationUITests: XCTestCase {
         }
         func setItem(_ index: Int, _ title: String) {
             revealPagedElement(app, input(index), in: scroll)
-            // Add focuses this blank single-line field; type without tapping
-            // its far-right edge beside the Remove button.
+
+
             app.typeText(title)
             XCTAssertEqual(input(index).value as? String, title)
         }
@@ -5227,7 +5364,7 @@ final class FoundationUITests: XCTestCase {
         input(0).typeText("\n")
         boardEnabled(input(1))
         assertFocusedRowVisible(1)
-        // Return inserts and focuses the new row; typing needs no second tap.
+
         input(1).typeText("Second action")
         XCTAssertEqual(input(1).value as? String, "Second action")
         editorTap("task-checklist-toggle-0")
@@ -5244,7 +5381,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "task-mode-edit")
         let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
         func revealTitle() {
-            // Lazy form rows above the viewport can be absent from the AX tree.
+
             for _ in 0..<12 {
                 if title.exists && title.isHittable && title.frame.minY >= scroll.frame.minY
                     && title.frame.maxY <= scroll.frame.maxY { break }
@@ -5287,7 +5424,7 @@ final class FoundationUITests: XCTestCase {
         for index in 0..<3 {
             XCTAssertNotEqual(app.buttons["task-checklist-toggle-\(index)"].value as? String, "Done")
         }
-        // Checklist-only edits must prompt on Close and disappear on Discard.
+
         editorTap("task-checklist-toggle-0")
         boardTap(app, "task-view-close")
         boardTap(app, "task-editor-discard")
@@ -5301,7 +5438,7 @@ final class FoundationUITests: XCTestCase {
         app.buttons["Checklist saved"].tap()
         boardTap(app, "task-mode-edit")
         showChecklist()
-        // Reset also clears a completed task's stored date and rebases its draft.
+
         editorTap("task-checklist-reset")
         boardEnabled(app.buttons["task-view-close"])
         XCTAssertFalse(app.staticTexts["task-view-error"].exists)
@@ -5309,6 +5446,77 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["task-editor-discard"].exists)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["Checklist saved"])
         waitForExpectations(timeout: 10)
+    }
+
+    func testProcessInboxUndoNormalPublicDecisionsAndColdRead() throws {
+        try processInboxUndoPublicDecisions("NORMAL", largest: false)
+    }
+
+    func testProcessInboxUndoLargestPublicDecisionsAndColdRead() throws {
+        try processInboxUndoPublicDecisions("LARGEST", largest: true)
+    }
+
+    private func processInboxUndoPublicDecisions(_ role: String, largest: Bool) throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let library = try task371Library(role, prefix: "MINDWTR_PROCESS_UNDO_UI_")
+        app.launchArguments = ["--native-ui-test-library", library,
+            "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-AppleInterfaceStyle", "Light"]
+        if largest {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        app.launch()
+        boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+        let titles = ["Undo filed original", "Undo completed original", "Undo discarded original", "Undo expired original"]
+        for title in titles {
+            boardTap(app, "capture-open")
+            app.textViews["capture-input"].typeText(title)
+            boardTap(app, "capture-save")
+            expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.textViews["capture-input"])
+            waitForExpectations(timeout: 15)
+        }
+        boardTap(app, "inbox-process-primary")
+        boardTap(app, "process-inbox-mode")
+        let title = app.textViews["process-inbox-title"]
+        let scroll = app.scrollViews["process-inbox-scroll"]
+        for (index, choice) in ["reference", "done", "trash"].enumerated() {
+            boardEnabled(title)
+            XCTAssertEqual(title.value as? String, titles[index])
+            if index == 0 {
+                replaceTextView(title, with: "Undo filed edited")
+            }
+            let button = app.buttons["process-inbox-choice-" + choice]
+            revealPagedElement(app, button, in: scroll)
+            boardTap(app, button.identifier)
+            let undo = app.buttons["process-inbox-undo"]
+            XCTAssertTrue(undo.waitForExistence(timeout: 3))
+            XCTAssertTrue(undo.isEnabled)
+            XCTAssertTrue(undo.isHittable, "Undo stays visible above the scrolling next task")
+            undo.tap()
+            expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: undo)
+            waitForExpectations(timeout: 10)
+            XCTAssertFalse(app.staticTexts["process-inbox-error"].exists)
+            expectation(for: NSPredicate(format: "value == %@", titles[index + 1]), evaluatedWith: title)
+            waitForExpectations(timeout: 15)
+        }
+        let reference = app.buttons["process-inbox-choice-reference"]
+        revealPagedElement(app, reference, in: scroll)
+        boardTap(app, reference.identifier)
+        let undo = app.buttons["process-inbox-undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 3), "The final decision still offers Undo")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: undo)
+        waitForExpectations(timeout: 8)
+        XCTAssertFalse(app.staticTexts["process-inbox-error"].exists)
+        boardTap(app, "process-inbox-close")
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["inbox-process-primary"], timeout: 30)
+        boardTap(app, "inbox-process-primary")
+        boardEnabled(title)
+        XCTAssertEqual(title.value as? String, titles[0], "Filed Undo restores the original title through cold load")
+        XCTAssertEqual(app.staticTexts["process-inbox-progress"].label, "0/3 tasks")
+        XCTAssertFalse(app.buttons["process-inbox-undo"].exists, "Cold startup cannot recreate a transient Undo offer")
+        boardTap(app, "process-inbox-close")
+        app.terminate()
     }
 
     func testProcessInboxEditsSkipConversionAndReviewReturn() {
@@ -5330,13 +5538,13 @@ final class FoundationUITests: XCTestCase {
         }
         boardTap(app, "inbox-process-primary")
         let scroll = app.scrollViews["process-inbox-scroll"]
-        let title = app.textFields["process-inbox-title"]
+        let title = app.textViews["process-inbox-title"]
         func processTap(_ id: String) {
             revealPagedElement(app, app.buttons[id], in: scroll)
             boardTap(app, id)
         }
         func processText(_ id: String, _ value: String) {
-            let field = app.textFields[id]
+            let field = ["process-inbox-title", "process-inbox-notes"].contains(id) ? app.textViews[id] : app.textFields[id]
             revealPagedElement(app, field, in: scroll)
             replaceTextView(field, with: value)
         }
@@ -5349,7 +5557,7 @@ final class FoundationUITests: XCTestCase {
         processText("process-inbox-title", "Process edited final")
         processTap("process-inbox-notes-toggle")
         processText("process-inbox-notes", "Saved notes final")
-        // Skip must flush the last keystroke before advancing the original queue.
+
         boardTap(app, "process-inbox-skip")
         expectation(for: NSPredicate(format: "value == %@", second), evaluatedWith: title)
         waitForExpectations(timeout: 15)
@@ -5376,7 +5584,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(title.value as? String, "Process edited final")
         XCTAssertEqual(app.staticTexts["process-inbox-progress"].label, "0/4 tasks")
         processTap("process-inbox-notes-toggle")
-        XCTAssertEqual(app.textFields["process-inbox-notes"].value as? String, "Saved notes final")
+        XCTAssertEqual(app.textViews["process-inbox-notes"].value as? String, "Saved notes final")
         processText("process-inbox-title", "Unsaved close draft")
         boardTap(app, "process-inbox-close")
         boardEnabled(app.buttons["inbox-process-primary"])
@@ -5465,7 +5673,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "mind-sweep-close")
         XCTAssertEqual(guideStep(), firstStep)
         XCTAssertNotEqual(countLabel.label, countBefore)
-        // Closing and reopening the nested sheet leaves the guide checkpoint intact.
+
         openSweep(at: "inbox")
         XCTAssertTrue(app.buttons["mind-sweep-scope-all"].isSelected)
         boardTap(app, "mind-sweep-close")
@@ -5637,7 +5845,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["task-mode-view"].isSelected)
         boardTap(app, "task-view-close")
         revealPagedElement(app, original, in: scroll)
-        // A taller viewport can fit all five columns without any scroll range.
+
         if app.staticTexts["board-column-done"].frame.maxY > scroll.frame.maxY {
             let originalY = original.frame.minY
             original.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.05,
@@ -5647,7 +5855,7 @@ final class FoundationUITests: XCTestCase {
             XCTAssertEqual(cards.count, 1)
             revealPagedElement(app, original, in: scroll)
         }
-        // A short horizontal drag must not duplicate, trash, or open the editor.
+
         let shortStart = original.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
         shortStart.press(forDuration: 0.05, thenDragTo: shortStart.withOffset(CGVector(dx: 45, dy: 0)))
         XCTAssertFalse(app.buttons["task-view-close"].exists)
@@ -5692,6 +5900,810 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(cards.count, 1)
     }
 
+    func testBoardCrossColumnDragNormalAndColdRead() throws {
+        try boardCrossColumnRoundTrip("NORMAL")
+    }
+
+    func testBoardCrossColumnDragLargestTextAndColdRead() throws {
+        try boardCrossColumnRoundTrip("LARGEST", largest: true)
+    }
+
+    private let boardCrossSource = "board-cross-source"
+    private let boardCrossPeer = "board-cross-peer"
+
+    private func boardCrossBody(_ app: XCUIApplication, _ status: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "board-drop-" + status).firstMatch
+    }
+
+    private func boardCrossAssert(_ app: XCUIApplication, status: String, completionOffer: Bool = false) {
+        boardEnabled(app.buttons["board-filter-open"])
+        if completionOffer { boardEnabled(app.buttons["task-completion-undo"], timeout: 5) }
+        for column in ["inbox", "next", "waiting", "someday", "done"] {
+            let expected = (column == status ? 1 : 0) + (column == "waiting" ? 1 : 0)
+            XCTAssertEqual(app.staticTexts["board-count-" + column].label, String(expected))
+            XCTAssertEqual(boardCrossBody(app, column).buttons["board-task-" + boardCrossSource].exists, column == status)
+        }
+        XCTAssertTrue(boardCrossBody(app, "waiting").buttons["board-task-" + boardCrossPeer].exists)
+        XCTAssertFalse(app.buttons["task-view-close"].exists)
+        XCTAssertEqual(app.buttons["task-completion-undo"].exists, completionOffer)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+    }
+
+    private func boardCrossDrag(_ app: XCUIApplication, from source: String, to destination: String, completionOffer: Bool = false) throws {
+        let handle = app.images["board-drag-" + boardCrossSource]
+        let body = boardCrossBody(app, destination)
+        let scroll = app.scrollViews["board-scroll"]
+        boardEnabled(handle); boardEnabled(body)
+        func finite(_ frame: CGRect) -> Bool {
+            [frame.minX, frame.minY, frame.width, frame.height, frame.maxX, frame.maxY].allSatisfy { $0.isFinite }
+                && frame.width > 0 && frame.height > 0
+        }
+        func targetPoint(_ sourceFrame: CGRect, _ target: CGRect) -> CGPoint {
+            let inset = min(CGFloat(24), target.height / 2)
+            return CGPoint(x: target.midX, y: sourceFrame.midY < target.midY ? target.minY + inset : target.maxY - inset)
+        }
+
+        for _ in 0..<8 {
+            let viewport = app.frame.intersection(scroll.frame), sourceFrame = handle.frame, target = body.frame
+            guard finite(viewport), finite(sourceFrame), finite(target) else {
+                XCTFail("Cross-column drag requires finite measured source, body and viewport")
+                throw CocoaError(.coderReadCorrupt)
+            }
+            let point = targetPoint(sourceFrame, target)
+            let required = sourceFrame.union(CGRect(x: point.x - 1, y: point.y - 1, width: 2, height: 2))
+            guard required.height < viewport.height, required.minX >= viewport.minX, required.maxX <= viewport.maxX else {
+                XCTFail("The externally seeded adjacent source and destination must fit at this text size")
+                throw CocoaError(.coderReadCorrupt)
+            }
+            if viewport.contains(sourceFrame), viewport.contains(point) { break }
+            let shift = viewport.midY - required.midY, distance = min(abs(shift), viewport.height * 0.4)
+            let start = CGPoint(x: viewport.minX + 4, y: viewport.minY + viewport.height * (shift > 0 ? 0.3 : 0.7))
+            let end = CGPoint(x: start.x, y: start.y + (shift > 0 ? distance : -distance))
+            try task735Coordinate(app, start).press(forDuration: 0.05, thenDragTo: task735Coordinate(app, end),
+                withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        var prior: [CGRect] = []
+        let stable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let viewport = app.frame.intersection(scroll.frame), frames = [handle.frame, body.frame, viewport]
+            let settled = prior == frames; prior = frames
+            return settled && frames.allSatisfy(finite) && viewport.contains(handle.frame)
+                && viewport.contains(targetPoint(handle.frame, body.frame)) && handle.isHittable
+        }, object: nil)
+        guard XCTWaiter.wait(for: [stable], timeout: 10) == .completed else {
+            XCTFail("Cross-column source and destination must settle before admission")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let origin = try task735Coordinate(app, CGPoint(x: handle.frame.midX, y: handle.frame.midY))
+        let target = try task735Coordinate(app, targetPoint(handle.frame, body.frame))
+        origin.press(forDuration: 0.8, thenDragTo: target, withVelocity: .slow, thenHoldForDuration: 0.2)
+        let moved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !self.boardCrossBody(app, source).buttons["board-task-" + self.boardCrossSource].exists
+                && self.boardCrossBody(app, destination).buttons["board-task-" + self.boardCrossSource].exists
+                && app.buttons["board-filter-open"].isEnabled
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [moved], timeout: 20), .completed)
+        boardCrossAssert(app, status: destination, completionOffer: completionOffer)
+    }
+
+    func testBoardDoneCrossDropPublicUndoNormalAndColdRead() throws {
+        try boardDoneCrossDropRoundTrip("NORMAL")
+    }
+
+    func testBoardDoneCrossDropPublicUndoLargestTextAndColdRead() throws {
+        try boardDoneCrossDropRoundTrip("LARGEST", largest: true)
+    }
+
+    private func boardDoneCrossDropRoundTrip(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_BOARD_DONE_UI_" + role + "_LIBRARY"] else {
+            throw XCTSkip("An externally staged isolated Board Done drag library is required")
+        }
+        guard UUID(uuidString: library)?.uuidString.lowercased() == library else {
+            XCTFail("The isolated library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let app = XCUIApplication(); defer { app.terminate() }
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US",
+            "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardSelectAllAreas(app); boardOpen(app); boardCrossAssert(app, status: "someday")
+        try boardCrossDrag(app, from: "someday", to: "done", completionOffer: true)
+        boardTap(app, "task-completion-undo")
+        boardCrossAssert(app, status: "someday")
+        try boardCrossDrag(app, from: "someday", to: "done", completionOffer: true)
+        let expired = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+            object: app.buttons["task-completion-undo"])
+        XCTAssertEqual(XCTWaiter.wait(for: [expired], timeout: 8), .completed)
+        boardCrossAssert(app, status: "done")
+        try boardCrossDrag(app, from: "done", to: "someday")
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); boardCrossAssert(app, status: "someday")
+        XCTAssertFalse(app.staticTexts["task-completion-notice"].exists)
+    }
+
+    private func boardCrossColumnRoundTrip(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_BOARD_CROSS_COLUMN_UI_" + role + "_LIBRARY"] else {
+            throw XCTSkip("An externally staged isolated Board cross-column library is required")
+        }
+        guard UUID(uuidString: library)?.uuidString.lowercased() == library else {
+            XCTFail("The isolated library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let app = XCUIApplication(); defer { app.terminate() }
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US",
+            "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardSelectAllAreas(app); boardOpen(app); boardCrossAssert(app, status: "next")
+
+        var source = "next"
+        for destination in ["waiting", "someday", "waiting", "next", "inbox", "next"] {
+            try boardCrossDrag(app, from: source, to: destination); source = destination
+        }
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); boardCrossAssert(app, status: "next")
+    }
+
+    func testBoardDragNormalRoundTripAndColdRead() throws {
+        try task735RoundTrip("NORMAL")
+    }
+
+    func testBoardDragLargestTextRoundTripAndColdRead() throws {
+        try task735RoundTrip("LARGEST", largest: true)
+    }
+
+    private let task735IDs = ["board-order-first", "board-order-middle", "board-order-last"]
+
+    private func task735App(_ role: String, largest: Bool = false) throws -> XCUIApplication {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_BOARD_DRAG_UI_" + role + "_LIBRARY"] else {
+            throw XCTSkip("An externally staged isolated Board drag library is required")
+        }
+        guard let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            XCTFail("The Board drag library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US",
+            "-AppleInterfaceStyle", "Light"]
+        if largest {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardSelectAllAreas(app); boardOpen(app)
+        try task735RevealGroup(app, task735IDs)
+        task735AssertOrder(app, task735IDs)
+        return app
+    }
+
+    private func task735AssertOrder(_ app: XCUIApplication, _ ids: [String]) {
+        task733AssertOrder(app, ids)
+        XCTAssertFalse(app.buttons["task-view-close"].exists, "A drag must not also open a task")
+        XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+    }
+
+    private func task735VisibleFrame(_ app: XCUIApplication, _ element: XCUIElement) throws -> CGRect {
+        boardEnabled(element)
+        let frame = element.frame, viewport = app.frame.intersection(app.scrollViews["board-scroll"].frame)
+        guard [frame.minX, frame.minY, frame.width, frame.height,
+               viewport.minX, viewport.minY, viewport.width, viewport.height].allSatisfy({ $0.isFinite }),
+              frame.width > 0, frame.height > 0, viewport.width > 0, viewport.height > 0,
+              element.isHittable, viewport.contains(frame) else {
+            XCTFail("The measured drag source/target must be finite, hittable and fully inside the Board viewport: frame=\(frame), viewport=\(viewport), hittable=\(element.isHittable)")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return frame
+    }
+
+    private func task735RevealGroup(_ app: XCUIApplication, _ ids: [String]) throws {
+        boardEnabled(app.buttons["board-filter-open"])
+        let first = try XCTUnwrap(ids.first), last = try XCTUnwrap(ids.last)
+        XCTAssertEqual(Set(ids).count, ids.count)
+        let scroll = app.scrollViews["board-scroll"]
+
+        for id in [first, last] {
+            revealPagedElement(app, app.buttons["board-task-" + id], in: scroll, outerEdge: true)
+        }
+        let cards = ids.map { app.buttons["board-task-" + $0] }
+        for card in cards { boardEnabled(card) }
+        func finite(_ frame: CGRect) -> Bool {
+            [frame.minX, frame.minY, frame.width, frame.height].allSatisfy({ $0.isFinite }) && frame.width > 0 && frame.height > 0
+        }
+        for _ in 0..<8 {
+            let viewport = app.frame.intersection(scroll.frame), frames = cards.map(\.frame)
+            guard finite(viewport), frames.allSatisfy(finite) else {
+                XCTFail("The Board group requires finite positive frames: frames=\(frames), viewport=\(viewport)")
+                throw CocoaError(.coderReadCorrupt)
+            }
+            let group = frames.dropFirst().reduce(frames[0]) { $0.union($1) }
+            guard group.height <= viewport.height, group.minX >= viewport.minX, group.maxX <= viewport.maxX else {
+                XCTFail("The required Board group must fit fully inside the viewport: frames=\(frames), viewport=\(viewport)")
+                throw CocoaError(.coderReadCorrupt)
+            }
+            if viewport.contains(group) { break }
+            let shift = viewport.midY - group.midY, distance = min(abs(shift), viewport.height * 0.4)
+
+            let start = CGPoint(x: viewport.minX + 4, y: viewport.minY + viewport.height * (shift > 0 ? 0.3 : 0.7))
+            let end = CGPoint(x: start.x, y: start.y + (shift > 0 ? distance : -distance))
+            let origin = try task735Coordinate(app, start), destination = try task735Coordinate(app, end)
+            origin.press(forDuration: 0.05, thenDragTo: destination, withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        var previousFrames: [CGRect] = []
+        var previousViewport: CGRect?
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let viewport = app.frame.intersection(scroll.frame), frames = cards.map(\.frame)
+            let stable = frames == previousFrames && viewport == previousViewport
+            previousFrames = frames; previousViewport = viewport
+            return stable && finite(viewport) && cards.allSatisfy({ $0.isHittable })
+                && frames.allSatisfy({ finite($0) && viewport.contains($0) })
+        }, object: nil)
+        guard XCTWaiter.wait(for: [settled], timeout: 10) == .completed else {
+            XCTFail("The Board group must settle fully inside the viewport: frames=\(cards.map(\.frame)), viewport=\(app.frame.intersection(scroll.frame))")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        for id in ids { _ = try task735VisibleFrame(app, app.buttons["board-task-" + id]) }
+    }
+
+    private func task735Coordinate(_ app: XCUIApplication, _ point: CGPoint) throws -> XCUICoordinate {
+        let frame = app.frame
+        guard [frame.minX, frame.minY, frame.width, frame.height, point.x, point.y].allSatisfy({ $0.isFinite }),
+              frame.width > 0, frame.height > 0, frame.contains(point) else {
+            XCTFail("The measured gesture point must be inside the application frame")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return app.coordinate(withNormalizedOffset: CGVector(dx: (point.x - frame.minX) / frame.width,
+            dy: (point.y - frame.minY) / frame.height))
+    }
+
+    private func task735Drag(_ app: XCUIApplication, source: String, target: String, below: Bool) throws {
+        try task735Drag(app, source: source, target: target, below: below, measuredIDs: task735IDs)
+    }
+
+    private func task735Drag(_ app: XCUIApplication, source: String, target: String, below: Bool, measuredIDs: [String]) throws {
+        XCTAssertEqual(Set(measuredIDs).count, measuredIDs.count)
+        let frames = try measuredIDs.map { try task735VisibleFrame(app, app.buttons["board-task-" + $0]) }
+        XCTAssertTrue(frames.allSatisfy { $0.height >= 44 })
+        let sorted = frames.sorted { $0.minY < $1.minY }
+        XCTAssertTrue(zip(sorted, sorted.dropFirst()).allSatisfy { $0.0.maxY < $0.1.minY })
+        let sourceIndex = try XCTUnwrap(measuredIDs.firstIndex(of: source))
+        let targetIndex = try XCTUnwrap(measuredIDs.firstIndex(of: target))
+        XCTAssertNotEqual(sourceIndex, targetIndex)
+        let sourceFrame = try task735VisibleFrame(app, app.images["board-drag-" + source]), targetFrame = frames[targetIndex]
+        XCTAssertGreaterThanOrEqual(sourceFrame.width, 44); XCTAssertGreaterThanOrEqual(sourceFrame.height, 44)
+        let start = CGPoint(x: sourceFrame.midX, y: sourceFrame.midY)
+        let end = CGPoint(x: targetFrame.midX, y: targetFrame.minY + targetFrame.height * (below ? 0.75 : 0.25))
+        print("Task735 measured drag source=\(source) sourceFrame=\(sourceFrame) target=\(target) targetFrame=\(targetFrame) below=\(below) point=\(end)")
+        let origin = try task735Coordinate(app, start), destination = try task735Coordinate(app, end)
+        origin.press(forDuration: 0.8, thenDragTo: destination, withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+
+    private func task735RoundTrip(_ role: String, largest: Bool = false) throws {
+        let app = try task735App(role, largest: largest); defer { app.terminate() }
+        if largest {
+            let frames = try task735IDs.map { try task735VisibleFrame(app, app.buttons["board-task-" + $0]) }
+            XCTAssertTrue(frames.contains { abs($0.height - frames[0].height) > 1 }, "Largest fixture must exercise variable-height cards")
+        }
+        try task735Drag(app, source: task735IDs[2], target: task735IDs[0], below: false)
+        try task735RevealGroup(app, [task735IDs[2], task735IDs[0], task735IDs[1]])
+        task735AssertOrder(app, [task735IDs[2], task735IDs[0], task735IDs[1]])
+        try task735Drag(app, source: task735IDs[2], target: task735IDs[1], below: true)
+        try task735RevealGroup(app, task735IDs)
+        task735AssertOrder(app, task735IDs)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); try task735RevealGroup(app, task735IDs); task735AssertOrder(app, task735IDs)
+    }
+
+    func testBoardDragCancellationAndPassiveDrop() throws {
+        let app = try task735App("CANCEL"); defer { app.terminate() }
+        let source = try task735VisibleFrame(app, app.images["board-drag-" + task735IDs[2]])
+        XCTAssertGreaterThanOrEqual(source.width, 44); XCTAssertGreaterThanOrEqual(source.height, 44)
+        let header = try task735VisibleFrame(app, app.staticTexts["board-column-next"])
+        let start = try task735Coordinate(app, CGPoint(x: source.midX, y: source.midY))
+        let outside = try task735Coordinate(app, CGPoint(x: header.midX, y: header.midY))
+        print("Task735 cancellation before drop on measured column header")
+        start.press(forDuration: 0.8, thenDragTo: outside, withVelocity: .slow, thenHoldForDuration: 0.2)
+        task735AssertOrder(app, task735IDs)
+        print("Task735 cancelled drop settled; no ordering submission expected")
+        boardTap(app, "board-task-" + task735IDs[0])
+        boardEnabled(app.buttons["task-mode-view"]); XCTAssertTrue(app.buttons["task-mode-view"].isSelected)
+        boardTap(app, "task-view-close"); task735AssertOrder(app, task735IDs)
+        print("Task735 passive same-position drop begins; submission may be a no-op")
+        try task735Drag(app, source: task735IDs[1], target: task735IDs[0], below: true)
+        task735AssertOrder(app, task735IDs)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); task735AssertOrder(app, task735IDs)
+    }
+
+    private func task735DismissMenu(_ app: XCUIApplication, _ choice: XCUIElement) throws {
+        let title = app.staticTexts["board-title"], frame = title.frame
+        let point = CGPoint(x: frame.midX, y: frame.midY)
+        guard title.exists, [frame.minX, frame.minY, frame.width, frame.height].allSatisfy({ $0.isFinite }),
+              frame.width > 0, frame.height > 0, app.frame.contains(frame),
+              app.collectionViews.buttons.allElementsBoundByIndex.allSatisfy({ !$0.frame.contains(point) }) else {
+            XCTFail("Menu dismissal requires the measured Board title outside every menu choice")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        try task735Coordinate(app, point).tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: choice)
+        waitForExpectations(timeout: 10)
+    }
+
+    func testBoardDragExistingGestureInteractions() throws {
+        let app = try task735App("GESTURES"); defer { app.terminate() }
+        let first = app.buttons["board-task-" + task735IDs[0]], scroll = app.scrollViews["board-scroll"]
+        boardTap(app, first.identifier)
+        boardEnabled(app.buttons["task-mode-view"]); XCTAssertTrue(app.buttons["task-mode-view"].isSelected)
+        boardTap(app, "task-view-close"); task735AssertOrder(app, task735IDs)
+
+        let frame = try task735VisibleFrame(app, first), viewport = app.frame.intersection(scroll.frame)
+        XCTAssertGreaterThan(app.staticTexts["board-column-done"].frame.maxY, viewport.maxY, "Fixture must provide real vertical scroll range")
+        let start = CGPoint(x: frame.midX, y: frame.midY)
+        let end = CGPoint(x: frame.midX, y: viewport.minY + frame.height * 0.25)
+        XCTAssertLessThan(end.y, start.y)
+        let origin = try task735Coordinate(app, start), destination = try task735Coordinate(app, end)
+        origin.press(forDuration: 0.05, thenDragTo: destination, withVelocity: .slow, thenHoldForDuration: 0)
+        expectation(for: NSPredicate { _, _ in first.frame.minY < frame.minY - 1 }, evaluatedWith: first)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.buttons["task-view-close"].exists)
+        revealPagedElement(app, first, in: scroll); task735AssertOrder(app, task735IDs)
+
+        let stationary = task733OrderMenu(app, taskID: task735IDs[1], direction: "up", enabled: true)
+        try task735DismissMenu(app, stationary); task735AssertOrder(app, task735IDs)
+        task733OrderMenu(app, taskID: task735IDs[1], direction: "up", enabled: true).tap()
+        try task735RevealGroup(app, [task735IDs[1], task735IDs[0], task735IDs[2]])
+        task735AssertOrder(app, [task735IDs[1], task735IDs[0], task735IDs[2]])
+        task733OrderMenu(app, taskID: task735IDs[1], direction: "down", enabled: true).tap()
+        try task735RevealGroup(app, task735IDs)
+        task735AssertOrder(app, task735IDs)
+        for (id, direction) in [(task735IDs[0], "up"), (task735IDs[2], "down")] {
+            let boundary = task733OrderMenu(app, taskID: id, direction: direction, enabled: false)
+            try task735DismissMenu(app, boundary)
+        }
+
+        try task735RevealGroup(app, task735IDs)
+        let original = try task735VisibleFrame(app, first)
+        let duplicateStart = try task735Coordinate(app, CGPoint(x: original.minX + original.width * 0.2, y: original.midY))
+        let duplicateEnd = try task735Coordinate(app, CGPoint(x: original.minX + original.width * 0.8, y: original.midY))
+        duplicateStart.press(forDuration: 0.05, thenDragTo: duplicateEnd)
+        boardEnabled(app.buttons["task-mode-edit"]); XCTAssertTrue(app.buttons["task-mode-edit"].isSelected)
+        boardTap(app, "task-view-close")
+        boardEnabled(app.buttons["board-filter-open"])
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "board-task-"))
+        expectation(for: NSPredicate { _, _ in cards.count == 4 }, evaluatedWith: app); waitForExpectations(timeout: 10)
+        let originals = Set(task735IDs.map { "board-task-" + $0 })
+        let copies = cards.allElementsBoundByIndex.filter { !originals.contains($0.identifier) }
+        XCTAssertEqual(copies.count, 1)
+        let discoveredCopy = try XCTUnwrap(copies.first), copyID = String(discoveredCopy.identifier.dropFirst("board-task-".count))
+        XCTAssertNotNil(UUID(uuidString: copyID))
+        let copy = app.buttons["board-task-" + copyID]
+        let identity = XCTAttachment(string: copyID); identity.name = "Task735 swipe duplicate ID"; identity.lifetime = .keepAlways; add(identity)
+        revealPagedElement(app, copy, in: scroll); boardTap(app, copy.identifier)
+        boardEnabled(app.buttons["task-mode-view"]); XCTAssertTrue(app.buttons["task-mode-view"].isSelected)
+        boardTap(app, "task-view-close"); revealPagedElement(app, copy, in: scroll)
+        let copied = try task735VisibleFrame(app, copy)
+        let trashStart = try task735Coordinate(app, CGPoint(x: copied.minX + copied.width * 0.8, y: copied.midY))
+        let trashEnd = try task735Coordinate(app, CGPoint(x: copied.minX + copied.width * 0.2, y: copied.midY))
+        trashStart.press(forDuration: 0.05, thenDragTo: trashEnd)
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: copy); waitForExpectations(timeout: 10)
+        revealPagedElement(app, first, in: scroll); task735AssertOrder(app, task735IDs)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); task735AssertOrder(app, task735IDs); XCTAssertFalse(app.buttons["board-task-" + copyID].exists)
+    }
+
+    func testBoardDragFilteredPagedVisibleAnchorsAndColdRead() throws {
+        continueAfterFailure = false
+        let library = try task371Library("FILTERED", prefix: "MINDWTR_BOARD_DRAG_UI_")
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US",
+            "-AppleInterfaceStyle", "Light"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardSelectAllAreas(app); boardOpen(app)
+        let shown = (1...53).map { String(format: "drag-page-%03d", $0) }
+        let scroll = app.scrollViews["board-scroll"]
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "board-task-"))
+        func selectContext() {
+            boardTap(app, "board-filter-open"); boardTap(app, "board-picker-tokens")
+            let context = app.buttons["board-filter-token-@drag735"]
+            revealPagedElement(app, context, in: app.scrollViews["board-filter-scroll"])
+            if !context.isSelected { context.tap(); boardEnabled(context) }
+            XCTAssertTrue(context.isSelected)
+            boardTap(app, "board-filter-close"); boardEnabled(app.buttons["board-filter-open"])
+        }
+        func assertLoaded(_ expected: [String]) {
+            expectation(for: NSPredicate { _, _ in
+                cards.allElementsBoundByIndex.map(\.identifier) == expected.map { "board-task-" + $0 }
+            }, evaluatedWith: app)
+            waitForExpectations(timeout: 10)
+            XCTAssertEqual(app.staticTexts["board-count-next"].label, "53")
+            for status in ["inbox", "waiting", "someday", "done"] {
+                XCTAssertEqual(app.staticTexts["board-count-" + status].label, "0")
+            }
+            XCTAssertFalse(app.buttons["board-task-drag-hidden-before"].exists)
+            XCTAssertFalse(app.buttons["board-task-drag-hidden-after"].exists)
+            XCTAssertFalse(app.buttons["task-view-close"].exists)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+        }
+        func visibleOrder(_ ids: [String]) throws {
+            let frames = try ids.map { try task735VisibleFrame(app, app.buttons["board-task-" + $0]) }
+            XCTAssertTrue(zip(frames, frames.dropFirst()).allSatisfy { $0.0.maxY < $0.1.minY })
+        }
+        selectContext(); assertLoaded(Array(shown.prefix(50)))
+        XCTAssertTrue(app.buttons["board-more-next"].exists)
+        for id in shown.suffix(3) { XCTAssertFalse(app.buttons["board-task-" + id].exists) }
+        let moved = "drag-page-048", pageEnd = "drag-page-050", predecessor = "drag-page-047"
+        let firstGroup = [moved, "drag-page-049", pageEnd]
+        revealPagedElement(app, app.buttons["board-task-" + pageEnd], in: scroll)
+        try visibleOrder(firstGroup)
+        try task735Drag(app, source: moved, target: pageEnd, below: true, measuredIDs: firstGroup)
+        var reordered = shown.filter { $0 != moved }
+        reordered.insert(moved, at: try XCTUnwrap(reordered.firstIndex(of: pageEnd)) + 1)
+        assertLoaded(Array(reordered.prefix(50)))
+        XCTAssertTrue(app.buttons["board-more-next"].exists)
+        XCTAssertFalse(app.buttons["board-task-drag-page-051"].exists)
+
+        revealPagedElement(app, app.buttons["board-more-next"], in: scroll); boardTap(app, "board-more-next")
+        assertLoaded(reordered); XCTAssertFalse(app.buttons["board-more-next"].exists)
+        revealPagedElement(app, app.buttons["board-task-drag-page-053"], in: scroll)
+        try visibleOrder([moved, "drag-page-051", "drag-page-052", "drag-page-053"])
+        let viewport = app.frame.intersection(scroll.frame)
+        let visible = cards.allElementsBoundByIndex.filter { element in
+            let frame = element.frame
+            return element.isHittable && frame.width > 0 && frame.height > 0 && viewport.contains(frame)
+        }.sorted { $0.frame.minY < $1.frame.minY }
+        let firstVisible = try XCTUnwrap(visible.first)
+        let firstID = String(firstVisible.identifier.dropFirst("board-task-".count))
+        let firstIndex = try XCTUnwrap(reordered.firstIndex(of: firstID))
+        XCTAssertGreaterThan(firstIndex, 0, "Scrolled first-visible is not the complete shown head")
+        XCTAssertGreaterThan(visible.count, 1); XCTAssertNotEqual(firstID, "drag-page-053")
+        let clippedPredecessor = app.buttons["board-task-" + reordered[firstIndex - 1]]
+        let predecessorFrame = clippedPredecessor.frame
+        XCTAssertTrue(clippedPredecessor.exists)
+        XCTAssertTrue([predecessorFrame.minX, predecessorFrame.minY, predecessorFrame.width, predecessorFrame.height].allSatisfy({ $0.isFinite }))
+        XCTAssertGreaterThan(predecessorFrame.width, 0); XCTAssertGreaterThan(predecessorFrame.height, 0)
+        XCTAssertFalse(viewport.contains(predecessorFrame))
+        let visibleIDs = visible.map { String($0.identifier.dropFirst("board-task-".count)) }
+        XCTAssertTrue(visibleIDs.contains("drag-page-053"))
+        print("Task735 false-head refusal firstVisible=\(firstID) viewport=\(viewport)")
+        try task735Drag(app, source: "drag-page-053", target: firstID, below: false, measuredIDs: visibleIDs)
+        assertLoaded(reordered)
+
+        let reverseGroup = [predecessor, "drag-page-049", pageEnd, moved]
+        revealPagedElement(app, app.buttons["board-task-" + predecessor], in: scroll)
+        try visibleOrder(reverseGroup)
+        try task735Drag(app, source: moved, target: predecessor, below: true, measuredIDs: reverseGroup)
+        assertLoaded(shown)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); selectContext(); assertLoaded(Array(shown.prefix(50)))
+        XCTAssertTrue(app.buttons["board-more-next"].exists)
+        revealPagedElement(app, app.buttons["board-more-next"], in: scroll); boardTap(app, "board-more-next")
+        assertLoaded(shown); XCTAssertFalse(app.buttons["board-more-next"].exists)
+    }
+
+    func testBoardOrderUpDownBoundariesAndColdRead() throws {
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_BOARD_ORDER_UI_NORMAL_LIBRARY"] else {
+            throw XCTSkip("An externally staged isolated Board order library is required")
+        }
+        guard let id = UUID(uuidString: library), id.uuidString.lowercased() == library else {
+            XCTFail("The Board order library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardSelectAllAreas(app); boardOpen(app)
+        let first = "board-order-first", middle = "board-order-middle", last = "board-order-last"
+        task733AssertOrder(app, [first, middle, last])
+        task733OrderMenu(app, taskID: middle, direction: "up", enabled: true).tap()
+        task733AssertOrder(app, [middle, first, last])
+        task733OrderMenu(app, taskID: middle, direction: "down", enabled: true).tap()
+        task733AssertOrder(app, [first, middle, last])
+        for (taskID, direction) in [(first, "up"), (last, "down")] {
+            let boundary = task733OrderMenu(app, taskID: taskID, direction: direction, enabled: false)
+            XCTAssertFalse(boundary.isEnabled, "A boundary action must not issue an ordering request")
+
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.95)).tap()
+            expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: boundary)
+            waitForExpectations(timeout: 10)
+            task733AssertOrder(app, [first, middle, last])
+        }
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); task733AssertOrder(app, [first, middle, last])
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+        XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+    }
+
+    private func task733OrderMenu(_ app: XCUIApplication, taskID: String, direction: String, enabled: Bool) -> XCUIElement {
+        let card = app.buttons["board-task-" + taskID]
+        revealPagedElement(app, card, in: app.scrollViews["board-scroll"]); boardEnabled(card)
+        XCTAssertGreaterThanOrEqual(card.frame.height, 44 - 0.001)
+        card.press(forDuration: 1)
+        let choices = app.collectionViews.buttons.matching(NSPredicate(format: "label == %@", direction == "up" ? "Move up" : "Move down"))
+        let choice = choices.firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 10)); XCTAssertEqual(choices.count, 1)
+        XCTAssertEqual(choice.isEnabled, enabled)
+        if enabled { XCTAssertTrue(choice.isHittable); XCTAssertTrue(app.frame.contains(choice.frame)) }
+        return choice
+    }
+
+    private func task733AssertOrder(_ app: XCUIApplication, _ ids: [String]) {
+        let ordered = NSPredicate { _, _ in
+            let cards = ids.map { app.buttons["board-task-" + $0] }
+            guard cards.allSatisfy({ $0.exists && $0.isEnabled && $0.isHittable }) else { return false }
+            return zip(cards, cards.dropFirst()).allSatisfy { $0.0.frame.minY < $0.1.frame.minY }
+        }
+        expectation(for: ordered, evaluatedWith: app); waitForExpectations(timeout: 10)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "board-task-")).count, 3)
+        for status in ["inbox", "next", "waiting", "someday", "done"] {
+            XCTAssertEqual(app.staticTexts["board-count-" + status].label, status == "next" ? "3" : "0")
+        }
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+    }
+
+    func testBoardCompletePublicUndoAndColdRead() throws {
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_BOARD_COMPLETE_UI_NORMAL_LIBRARY"] else {
+            throw XCTSkip("An externally staged isolated Board Complete library is required")
+        }
+        guard let id = UUID(uuidString: library), id.uuidString.lowercased() == library else {
+            XCTFail("The Board Complete library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardSelectAllAreas(app); boardOpen(app); task730AssertStatus(app, "next")
+        let card = app.buttons["board-task-n-draft"]
+        revealPagedElement(app, card, in: app.scrollViews["board-scroll"]); boardEnabled(card)
+        XCTAssertGreaterThanOrEqual(card.frame.height, 44 - 0.001)
+        card.press(forDuration: 1)
+
+        let choices = app.collectionViews.buttons.matching(NSPredicate(format: "label == %@", "Done"))
+        let complete = choices.firstMatch
+        boardEnabled(complete); XCTAssertEqual(choices.count, 1)
+        XCTAssertEqual(complete.label, "Done"); XCTAssertTrue(complete.isHittable)
+        XCTAssertTrue(app.frame.contains(complete.frame)); complete.tap()
+        let undo = app.buttons.matching(identifier: "task-completion-undo").firstMatch
+        boardEnabled(undo, timeout: 30)
+        XCTAssertEqual(app.buttons.matching(identifier: "task-completion-undo").count, 1)
+        XCTAssertFalse(app.staticTexts["task-completion-notice"].label.isEmpty)
+        task730AssertStatus(app, "done")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+        XCTAssertTrue(undo.isHittable); undo.tap()
+        task730AssertStatus(app, "next")
+        XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); task730AssertStatus(app, "next")
+        XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+        XCTAssertFalse(app.staticTexts["task-completion-notice"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+    }
+
+    func testBoardDoneReactivateAndColdRead() throws {
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_BOARD_REACTIVATE_UI_NORMAL_LIBRARY"] else {
+            throw XCTSkip("An externally staged isolated Board Reactivate library is required")
+        }
+        guard let id = UUID(uuidString: library), id.uuidString.lowercased() == library else {
+            XCTFail("The Board Reactivate library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardSelectAllAreas(app); boardOpen(app); task730AssertStatus(app, "done")
+        XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+        XCTAssertFalse(app.staticTexts["task-completion-notice"].exists)
+        let card = app.buttons["board-task-n-draft"]
+        revealPagedElement(app, card, in: app.scrollViews["board-scroll"]); boardEnabled(card)
+        XCTAssertGreaterThanOrEqual(card.frame.height, 44 - 0.001)
+        card.press(forDuration: 1)
+        XCTAssertFalse(app.collectionViews.buttons.matching(NSPredicate(format: "label == %@", "Done")).firstMatch.exists)
+        let menus = app.collectionViews.buttons.matching(NSPredicate(format: "label == %@", "Move to…"))
+        let menu = menus.firstMatch
+        boardEnabled(menu); XCTAssertEqual(menus.count, 1)
+        XCTAssertTrue(app.frame.contains(menu.frame)); menu.tap()
+        for status in ["inbox", "next", "waiting", "someday"] {
+            let choice = app.buttons["board-move-" + status]
+            boardEnabled(choice); XCTAssertFalse(choice.label.isEmpty)
+            XCTAssertTrue(choice.isHittable); XCTAssertTrue(app.frame.contains(choice.frame))
+        }
+        for status in ["done", "reference", "archived"] {
+            XCTAssertFalse(app.buttons["board-move-" + status].exists)
+        }
+        boardTap(app, "board-move-next"); task730AssertStatus(app, "next")
+        XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+        XCTAssertFalse(app.staticTexts["task-completion-notice"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); task730AssertStatus(app, "next")
+        XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+        XCTAssertFalse(app.staticTexts["task-completion-notice"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+    }
+
+    func testBoardMoveToNonterminalDestinationsAndColdRead() throws {
+        try task730MoveRoundTrip("NORMAL")
+    }
+
+    func testBoardMoveToLargestTextAndColdRead() throws {
+        try task730MoveRoundTrip("LARGEST", largest: true)
+    }
+
+    func testBoardMoveToFailedCommitExactRetry() throws { try task730MoveRetry(cold: false) }
+    func testBoardMoveToFailedCommitColdRecovery() throws { try task730MoveRetry(cold: true) }
+
+
+    private func task730App(_ role: String, largest: Bool = false, flags: [String] = []) throws -> XCUIApplication {
+        let name = "MINDWTR_BOARD_MOVE_UI_" + role + "_LIBRARY"
+        guard let library = ProcessInfo.processInfo.environment[name] else {
+            throw XCTSkip("An externally staged isolated Board library is required")
+        }
+        guard let id = UUID(uuidString: library), id.uuidString.lowercased() == library else {
+            XCTFail("The Board library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"] + flags
+        if largest {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-AppleInterfaceStyle", "Dark"]
+        }
+        app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardSelectAllAreas(app); boardOpen(app); if !largest { task730Search(app) }
+        task730AssertStatus(app, "next")
+        return app
+    }
+
+    func testBoardSearchLargestTextFocusAndFilter() throws {
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_BOARD_SEARCH_UI_LARGEST_LIBRARY"] else {
+            throw XCTSkip("An externally staged isolated Board search library is required")
+        }
+        guard let id = UUID(uuidString: library), id.uuidString.lowercased() == library else {
+            XCTFail("The Board search library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-AppleInterfaceStyle", "Dark"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardSelectAllAreas(app); boardOpen(app)
+        let ids = ["board-order-first", "board-order-middle", "board-order-last"]
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "board-task-"))
+        func assertCards(_ expected: [String]) {
+            expectation(for: NSPredicate(format: "label == %@", String(expected.count)), evaluatedWith: app.staticTexts["board-count-next"])
+            waitForExpectations(timeout: 10)
+            XCTAssertEqual(cards.count, expected.count)
+            for id in ids { XCTAssertEqual(app.buttons["board-task-" + id].exists, expected.contains(id)) }
+            for status in ["inbox", "waiting", "someday", "done"] {
+                XCTAssertEqual(app.staticTexts["board-count-" + status].label, "0")
+            }
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+        }
+        assertCards(ids)
+        let title = "Middle Next task"
+        task730Search(app, searchText: title)
+        XCTAssertEqual(app.textFields["board-search"].value as? String, title)
+        assertCards(["board-order-middle"])
+        boardTap(app, "board-search-clear"); assertCards(ids)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); assertCards(ids)
+    }
+
+    private func task730Search(_ app: XCUIApplication, searchText: String = "Draft launch post") {
+        if app.buttons["board-search-clear"].exists { boardTap(app, "board-search-clear") }
+        let query = app.textFields["board-search"]; boardEnabled(query)
+        XCTAssertTrue(query.isHittable)
+        let frame = query.frame
+        func captureFocus(_ stage: String) {
+            guard app.launchArguments.contains("UICTContentSizeCategoryAccessibilityXXXL") else { return }
+            let exists = query.exists
+            let queryFrame = exists ? query.frame : .zero
+            let frames = app.keyboards.allElementsBoundByIndex.map { String(describing: $0.frame) }
+            let area = app.staticTexts["area-title"], dismiss = app.buttons["area-dismiss"]
+            print("Task730 Largest search focus stage=\(stage) queryFrame=\(queryFrame) appFrame=\(app.frame)"
+                + " queryExists=\(exists) queryEnabled=\(exists && query.isEnabled) queryHittable=\(exists && query.isHittable)"
+                + " keyboardFrames=\(frames) areaTitleVisible=\(area.exists && area.isHittable)"
+                + " areaDismissVisible=\(dismiss.exists && dismiss.isHittable)")
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Task730 Largest search focus " + stage
+            shot.lifetime = .keepAlways; add(shot)
+        }
+        captureFocus("before-tap")
+        let appFrame = app.frame
+        XCTAssertGreaterThan(appFrame.width, 0); XCTAssertGreaterThan(appFrame.height, 0)
+        app.coordinate(withNormalizedOffset: CGVector(dx: (frame.minX + frame.width * 0.15 - appFrame.minX) / appFrame.width,
+            dy: (frame.midY - appFrame.minY) / appFrame.height)).tap()
+        let keyboardAppeared = app.keyboards.firstMatch.waitForExistence(timeout: 10)
+        captureFocus("after-keyboard-wait")
+        XCTAssertTrue(keyboardAppeared)
+        query.typeText(searchText + "\n")
+        boardEnabled(app.buttons["board-filter-open"])
+    }
+
+    private func task730AssertStatus(_ app: XCUIApplication, _ status: String) {
+        boardEnabled(app.buttons["board-filter-open"], timeout: 30)
+        for column in ["inbox", "next", "waiting", "someday", "done"] {
+            let count = app.staticTexts["board-count-" + column]
+            expectation(for: NSPredicate(format: "label == %@", column == status ? "1" : "0"), evaluatedWith: count)
+        }
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "board-task-")).count, 1)
+        XCTAssertTrue(app.buttons["board-task-n-draft"].exists, "Move preserves the original task identity")
+        XCTAssertFalse(app.buttons["task-view-close"].exists, "Move does not open an editor")
+    }
+
+    private func task730Choose(_ app: XCUIApplication, from source: String, to target: String) {
+        let row = app.buttons["board-task-n-draft"]
+        revealPagedElement(app, row, in: app.scrollViews["board-scroll"]); boardEnabled(row)
+        XCTAssertGreaterThanOrEqual(row.frame.height, 44 - 0.001)
+        row.press(forDuration: 1)
+        let menus = app.collectionViews.buttons.matching(NSPredicate(format: "label == %@", "Move to…"))
+        let menu = menus.firstMatch
+        boardEnabled(menu); XCTAssertEqual(menus.count, 1)
+        XCTAssertEqual(menu.label, "Move to…"); menu.tap()
+        for status in ["inbox", "next", "waiting", "someday"] where status != source {
+            let choice = app.buttons["board-move-" + status]
+            boardEnabled(choice); XCTAssertFalse(choice.label.isEmpty)
+            XCTAssertTrue(choice.isHittable); XCTAssertTrue(app.frame.contains(choice.frame))
+        }
+        XCTAssertFalse(app.buttons["board-move-" + source].exists)
+        XCTAssertFalse(app.buttons["board-move-done"].exists)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Board Move to destinations"; shot.lifetime = .keepAlways; add(shot)
+        boardTap(app, "board-move-" + target)
+    }
+
+    private func task730MoveRoundTrip(_ role: String, largest: Bool = false) throws {
+        let app = try task730App(role, largest: largest); defer { app.terminate() }
+        var source = "next"
+        for target in ["waiting", "someday", "inbox", "next"] {
+            task730Choose(app, from: source, to: target)
+            task730AssertStatus(app, target); source = target
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        }
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); if !largest { task730Search(app) }; task730AssertStatus(app, "next")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    private func task730MoveRetry(cold: Bool) throws {
+        let flag = "--native-board-move-commit-failure-once"
+        let app = try task730App(cold ? "COLD" : "RETRY", flags: [flag]); defer { app.terminate() }
+        task730Choose(app, from: "next", to: "waiting")
+        let retry = app.buttons["persistence-retry"]; boardEnabled(retry, timeout: 30)
+        XCTAssertEqual(app.staticTexts["board-count-next"].label, "1")
+        XCTAssertEqual(app.staticTexts["board-count-waiting"].label, "0")
+        XCTAssertFalse(app.textFields["board-search"].isEnabled)
+        XCTAssertFalse(app.buttons["board-task-n-draft"].isEnabled)
+        if cold {
+            app.terminate(); app.launchArguments.removeAll { $0 == flag }; app.launch()
+            boardEnabled(app.buttons["tab-menu"], timeout: 40)
+            boardOpen(app); task730Search(app)
+        } else {
+            boardTap(app, "persistence-retry")
+        }
+        task730AssertStatus(app, "waiting")
+        XCTAssertFalse(retry.exists)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardOpen(app); task730Search(app); task730AssertStatus(app, "waiting")
+        XCTAssertFalse(retry.exists)
+    }
+
     func testBoardSearchFiltersEditorDiscardAndReturn() {
         let app = XCUIApplication()
         app.launch()
@@ -5719,7 +6731,7 @@ final class FoundationUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["board-column-" + status].exists)
             XCTAssertEqual(app.staticTexts["board-count-" + status].label, count)
         }
-        // Exercise search recovery through transient Area/Menu presentation.
+
         query.tap(); query.typeText(" next")
         app.buttons["area-open"].tap()
         boardEnabled(app.buttons["area-option-__all__"])
@@ -5819,8 +6831,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["board-count-next"].label, "1")
     }
 
-    /// Root stages the existing, read-only 103-task Contexts fixture on the simulator.
-    /// No fixture data is created or edited by this paging regression.
+
     func testBoardExistingContextsFixturePagesAndReturn() throws {
         let app = XCUIApplication()
         app.launch()
@@ -5839,7 +6850,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "board-picker-tokens")
         let fixtureToken = app.buttons["board-filter-token-@native-contexts-page"]
         let picker = app.scrollViews["board-filter-scroll"]
-        // The fixture supplies 104 context choices, so More must cross page zero.
+
         let more = app.buttons["board-more-tokens"]
         revealPagedElement(app, more, in: picker)
         XCTAssertTrue(more.exists)
@@ -5925,16 +6936,22 @@ final class FoundationUITests: XCTestCase {
             return frame
         }
         func fullyVisible(_ item: XCUIElement) -> Bool {
-            guard item.exists, item.isHittable else { return false }
+            guard item.exists else { return false }
             let frame = visibleViewport()
-            // Accessibility frames can differ by floating-point rounding at a shared edge.
+
             return item.frame.minY >= frame.minY - 0.001 && item.frame.maxY <= frame.maxY + 0.001
         }
         for _ in 0..<120 {
             if fullyVisible(element) { break }
             let next = app.buttons[more]
             if !element.exists && !more.isEmpty && fullyVisible(next) {
-                boardEnabled(next); next.tap()
+                boardEnabled(next)
+                if !next.isHittable {
+                    expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: next)
+                    waitForExpectations(timeout: 10)
+                }
+                XCTAssertTrue(next.isHittable)
+                next.tap()
                 boardEnabled(ready ?? (app.buttons["board-filter-close"].exists ? app.buttons["board-filter-clear"] : app.buttons["board-filter-open"]))
                 continue
             }
@@ -5947,13 +6964,17 @@ final class FoundationUITests: XCTestCase {
             let distance = min(max(44, needed + 24), frame.height * (exists ? 0.4 : 0.7))
             let endY = startY + (above ? distance : -distance)
             let origin = app.coordinate(withNormalizedOffset: .zero)
-            // The leading gutter avoids both controls and the trailing scroll indicator hit area.
+
             let x = outerEdge ? frame.minX + 4 : frame.midX
             origin.withOffset(CGVector(dx: x, dy: startY)).press(forDuration: 0.05,
                 thenDragTo: origin.withOffset(CGVector(dx: x, dy: endY)),
                 withVelocity: .slow, thenHoldForDuration: 0.2)
         }
         boardEnabled(element)
+        if !element.isHittable {
+            expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: element)
+            waitForExpectations(timeout: 10)
+        }
         XCTAssertTrue(element.isHittable, element.identifier)
         XCTAssertTrue(fullyVisible(element), "\(element.identifier): row \(element.frame), viewport \(scroll.frame)")
     }
@@ -6108,7 +7129,7 @@ final class FoundationUITests: XCTestCase {
         composerTap("calendar-composer-save")
         XCTAssertTrue(app.staticTexts["calendar-composer-error"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["calendar-composer-title"].exists)
-        // Shared RN composer rounds a 45-minute typed interval to its supported 60-minute estimate.
+
         composerText(end, "10:45", normalizedValue: "11:00")
         composerTap("calendar-composer-duration-30")
         composerTap("calendar-composer-duration-60")
@@ -6133,7 +7154,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(viewTitle.waitForExistence(timeout: 10)); XCTAssertTrue(viewTitle.label.hasSuffix(title))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Start Date", "10:00")).firstMatch.exists)
         boardTap(app, "task-view-close")
-        // Finish this test's own task so repeat runs do not reserve the same Calendar slot.
+
         boardTap(app, "search-complete-" + taskID)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["search-complete-" + taskID])
         waitForExpectations(timeout: 10)
@@ -6180,7 +7201,7 @@ final class FoundationUITests: XCTestCase {
         let choices = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "calendar-week-add-")).allElementsBoundByIndex
         let itemFrames = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "calendar-item-"))
             .allElementsBoundByIndex.filter(\.exists).map(\.frame)
-        // The pinned hour gutter covers part of a horizontally clipped day column.
+
         let gutterRight = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "calendar-hour-label-"))
             .allElementsBoundByIndex.filter(\.exists).map { $0.frame.maxX }.max() ?? week.frame.minX
         let columnsViewport = CGRect(x: max(week.frame.minX, gutterRight), y: week.frame.minY,
@@ -6317,7 +7338,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Start Date", "2:00 PM")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Due Date")).firstMatch.exists)
         boardTap(app, "task-view-close")
-        // Finish this test's own task so repeat runs do not reserve the same Calendar slot.
+
         boardTap(app, "search-complete-" + taskID)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["search-complete-" + taskID])
         waitForExpectations(timeout: 10)
@@ -6401,7 +7422,7 @@ final class FoundationUITests: XCTestCase {
         tap("calendar-details-close")
         let monthGrid = app.scrollViews["calendar-month-grid"]
         var checkedLeadingBlanks = false
-        // Use a rendered core date key and native cell geometry; no fixture date or weekday assumption.
+
         for _ in 0..<3 {
             let renderedDay = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "calendar-day-")).firstMatch
             XCTAssertTrue(renderedDay.waitForExistence(timeout: 10))
@@ -7149,8 +8170,8 @@ final class FoundationUITests: XCTestCase {
         }
         for kind in ["daily", "weekly"] {
             startGuide(kind)
-            // Existing device-local sessions may be on any step. Navigate using
-            // only exposed Back/Finish controls, then test a fresh first step.
+
+
             if app.buttons["review-guide-finish"].exists {
                 tap("review-guide-finish")
                 enabled(app.buttons["review-start"])
@@ -7188,7 +8209,7 @@ final class FoundationUITests: XCTestCase {
             app.terminate()
             app.launch()
             openReview()
-            // Overview state is session-only, while the opaque guide resumes.
+
             selected("review-scope-due")
             XCTAssertEqual(app.buttons["review-expand-cycle"].label, initialCycle)
             startGuide(kind)
@@ -7204,7 +8225,7 @@ final class FoundationUITests: XCTestCase {
             tap("review-guide-close")
             enabled(app.buttons["review-start"])
         }
-        // Complete only the task this test created, then check the due row is gone.
+
         tap("review-expand-cycle")
         tap("review-expand-cycle")
         _ = revealTask(title + " changed")
@@ -7341,7 +8362,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    // Root stages and restores a copied RN library and the app preference domain.
+
     func testFocusLegacyDetailsTrueAndLocalFalseOverride() { focusLegacyDetails(expected: true) }
     func testFocusLegacyDetailsInvalidDefaultsFalse() { focusLegacyDetails(expected: false) }
 
@@ -7439,8 +8460,8 @@ final class FoundationUITests: XCTestCase {
             let element = app.buttons.matching(identifier: id).firstMatch
             enabled(element)
             if id.hasPrefix("focus-filter-token-") {
-                // XCTest misreports selected picker rows with the keyboard open.
-                // Use a real onscreen tap; every following assertion checks the state transition.
+
+
                 let center = CGPoint(x: element.frame.midX, y: element.frame.midY)
                 XCTAssertTrue(app.scrollViews["focus-filter-picker-list"].frame.contains(center))
                 XCTAssertTrue(app.frame.contains(center))
@@ -7477,7 +8498,7 @@ final class FoundationUITests: XCTestCase {
         tap("focus-filter-token-" + first)
         expectation(for: NSPredicate(format: "selected == false AND value == %@", ""), evaluatedWith: app.buttons["focus-filter-token-" + first])
         waitForExpectations(timeout: 10)
-        // Consecutive accepted taps are applied against successive core states.
+
         tap("focus-filter-token-" + first)
         tap("focus-filter-token-" + second)
         selected("focus-filter-token-" + first)
@@ -7565,7 +8586,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["focus-error"].exists)
         for id in ["tab-focus", "tab-inbox", "tab-review", "tab-projects", "tab-menu", "capture-open"] {
             let background = app.buttons[id]
-            // XCTest can retain hidden SwiftUI descendants in its query tree.
+
             XCTAssertFalse(background.exists && background.isEnabled, "Background action enabled under Focus panel: " + id)
             XCTAssertFalse(background.isHittable, "Background action hittable under Focus panel: " + id)
         }
@@ -7592,8 +8613,8 @@ final class FoundationUITests: XCTestCase {
         }
         func reveal(_ element: XCUIElement) {
             enabled(element)
-            // Only scroll the filter body for its offscreen location/priority
-            // fields. Fixed header/footer actions must already be hittable.
+
+
             let body = app.scrollViews.firstMatch
             for _ in 0..<4 where !element.isHittable {
                 if element.frame.minY < body.frame.minY { body.swipeDown() }
@@ -7624,8 +8645,8 @@ final class FoundationUITests: XCTestCase {
         location.typeText(refused)
         waitForFailure()
         XCTAssertTrue(app.buttons["focus-filter-clear"].exists)
-        // Keep a different accepted edit behind the refused location. Its
-        // selected state must survive the explicit location correction.
+
+
         let low = app.buttons["focus-filter-priority-low"]
         reveal(low)
         low.tap()
@@ -7636,8 +8657,7 @@ final class FoundationUITests: XCTestCase {
         waitForRecovery()
         XCTAssertEqual(location.value as? String, "Home")
 
-        // Clear must also supersede a definite refusal, and remain reachable
-        // even when a failed first location has no published active chip.
+
         replace(location, with: refused)
         waitForFailure()
         let high = app.buttons["focus-filter-priority-high"]
@@ -7695,11 +8715,14 @@ final class FoundationUITests: XCTestCase {
         enabled(app.buttons[title])
         let id = String(app.buttons[title].identifier.dropFirst("task-title-".count))
         searchChips("missing-" + suffix)
-        // Contexts search filters chips only; a selected task is still visible.
+
         enabled(app.buttons[title])
-        XCTAssertFalse(app.buttons["contexts-chip-" + first].exists)
+        XCTAssertTrue(app.buttons["contexts-chip-" + first].exists)
+        XCTAssertFalse(app.buttons["contexts-chip-" + second].exists)
         searchChips(second)
-        tap("contexts-chip-" + second)
+
+        enabled(app.buttons["contexts-chip-" + second])
+        app.buttons["contexts-chip-" + second].press(forDuration: 1)
         selected("contexts-chip-" + second)
         selected("contexts-match-all")
         tap("contexts-match-any")
@@ -7708,7 +8731,7 @@ final class FoundationUITests: XCTestCase {
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["contexts-match-any"])
         waitForExpectations(timeout: 10)
         searchChips(first)
-        // Accept a control immediately after text input, including focus resignation.
+
         tap("contexts-chip-all")
         selected("contexts-chip-all")
         tap("contexts-chip-" + first)
@@ -7837,7 +8860,7 @@ final class FoundationUITests: XCTestCase {
         enabled(app.buttons[title + " changed"])
         tap("history-tab-archived")
         let archiveQuery = app.textFields["archive-search"]
-        // Core hides Archive search for an empty library until a filter is active.
+
         let archiveHasSearch = archiveQuery.waitForExistence(timeout: 5)
         if archiveHasSearch {
             archiveQuery.tap()
@@ -7931,7 +8954,7 @@ final class FoundationUITests: XCTestCase {
         enabled(app.buttons["tab-menu"], timeout: 30)
         tap("tab-menu")
         tap("menu-reference")
-        // A large Reference library may place the new task beyond the first window.
+
         tap("reference-overflow-button")
         tap("reference-filter-action")
         XCTAssertTrue(filter.waitForExistence(timeout: 5))
@@ -8088,7 +9111,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Run before the cold-recovery test on the same staged library.
+
     func testSomedaySectionCreateSaveFailureKeepsExactRequest() {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "bef50510-7440-4897-8be6-6056fddf6182"]
@@ -8115,7 +9138,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root disarms the fixture's SQLite failure trigger while retaining its pending journal.
+
     func testSomedaySectionCreateColdRecovery() {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "bef50510-7440-4897-8be6-6056fddf6182"]
@@ -8215,7 +9238,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Run before cold recovery; root disarms the SQLite trigger but retains the exact pending journal.
+
     func testSomedaySectionTaskSaveFailureKeepsExactRequest() {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "8db707bb-ee0b-4e46-92d0-f74f3fe90e83"]
@@ -8319,7 +9342,7 @@ final class FoundationUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Someday moved with Undo"; shot.lifetime = .keepAlways; add(shot)
         task81NoticeGone(app)
-        // Selecting the existing assignment must not write or offer another Undo.
+
         task81OpenMove(app); task81Choose(app, title: "No section")
         boardEnabled(app.buttons["someday-overflow-button"])
         XCTAssertFalse(app.buttons["someday-section-move-undo"].exists)
@@ -8350,7 +9373,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "task-status-task81-move")
         XCTAssertTrue(app.buttons["task-complete"].waitForExistence(timeout: 5))
         let moveAction = app.buttons["task-move-section-task81-move"]
-        // Some iOS versions omit disabled confirmation-dialog actions entirely.
+
         XCTAssertTrue(!moveAction.exists || !moveAction.isEnabled)
         if app.buttons["Cancel"].exists { app.buttons["Cancel"].tap() }
         else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).tap() }
@@ -8575,7 +9598,7 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons["someday-section-move-undo"], timeout: 30)
         task81NoticeGone(app)
         XCTAssertFalse(app.staticTexts["someday-section-move-error"].exists)
-        // Root's full-table fixture check proves the returned ID beyond page 100 was assigned.
+
         app.terminate(); app.launch(); task79OpenSomeday(app)
         XCTAssertFalse(app.buttons["someday-section-move-undo"].exists)
         app.terminate()
@@ -8601,7 +9624,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Run before the paired cold test; root's fixture rejects Create SQLite writes until disarmed.
+
     func testSomedayNestedCreateSaveFailureKeepsExactRequest() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -8623,7 +9646,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root disarms the Create trigger while retaining its pending journal.
+
     func testSomedayNestedCreateColdRecoveryLeavesTaskUnmoved() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -8639,7 +9662,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Run before the paired cold test; root's fixture permits Create then rejects Move SQLite writes.
+
     func testSomedayNestedMoveSaveFailureKeepsExactRequest() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -8660,7 +9683,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root disarms the Move trigger while retaining its pending journal.
+
     func testSomedayNestedMoveColdRecoveryDoesNotRepeatCreate() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -8796,7 +9819,7 @@ final class FoundationUITests: XCTestCase {
     }
 
     private func task84AlertButton(_ alert: XCUIElement, id: String, label: String) -> XCUIElement {
-        // Native alerts can expose nested buttons with the same identifier.
+
         let identified = alert.buttons.matching(identifier: id).firstMatch
         return identified.exists ? identified : alert.buttons.matching(identifier: label).firstMatch
     }
@@ -8996,7 +10019,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Run before the paired cold test while the fixture rejects the intended settings update.
+
     func testSomedayManageRenameFailedSaveKeepsExactRequest() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -9020,7 +10043,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root disarms the failure trigger but retains the same pending journal.
+
     func testSomedayManageRenameColdRecovery() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -9130,7 +10153,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Run before the paired cold test while the isolated fixture rejects target removal.
+
     func testSomedayManageDeleteFailedSaveKeepsExactRequest() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -9152,7 +10175,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root disarms only the failure trigger and retains this library's pending journal.
+
     func testSomedayManageDeleteColdRecovery() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -9328,7 +10351,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Run before the paired cold test while the isolated SQLite trigger rejects Area removal.
+
     func testManageAreaDeleteFailedSaveKeepsExactRequest() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -9348,7 +10371,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root disarms only the failure trigger, preserving this library's pending journal.
+
     func testManageAreaDeleteColdRecovery() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -9548,7 +10571,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Run before the paired cold test while the isolated SQLite trigger rejects Person deletion.
+
     func testManagePersonDeleteFailedSaveKeepsExactRequest() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -9568,7 +10591,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root disarms only the failure trigger, preserving this library's pending journal.
+
     func testManagePersonDeleteColdRecovery() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -9804,7 +10827,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["general-picker-cancel"].waitForExistence(timeout: 10))
         XCTAssertGreaterThanOrEqual(app.buttons["general-picker-cancel"].frame.height, 44 - 0.001)
         if ["theme", "language"].contains(type) {
-            // A full swipe expands the native sheet before precise row-sized scrolls.
+
             app.scrollViews.containing(.button, identifier: "general-option-" + (type == "language" ? "en" : "system")).firstMatch.swipeUp()
         }
     }
@@ -9821,7 +10844,7 @@ final class FoundationUITests: XCTestCase {
         }
     }
 
-    // This regression must also reveal disabled dependency rows without waiting for enabled state.
+
     private func task442Reveal(_ app: XCUIApplication, _ element: XCUIElement, in scroll: XCUIElement, requireEnabled: Bool = true) {
         XCTAssertTrue(scroll.waitForExistence(timeout: 10))
         func viewport() -> CGRect { scroll.frame.intersection(app.frame) }
@@ -9843,7 +10866,7 @@ final class FoundationUITests: XCTestCase {
             let needed = exists ? (above ? visible.minY - element.frame.minY : element.frame.maxY - visible.maxY) + 4 : visible.height * 0.7
             let distance = min(max(44, needed + 24), visible.height * (exists ? 0.4 : 0.7))
             let origin = app.coordinate(withNormalizedOffset: .zero)
-            // Keep drags off the switches and away from the trailing scroll indicator.
+
             let start = origin.withOffset(CGVector(dx: visible.minX + visible.width * 0.2, dy: startY))
             start.press(forDuration: 0.05,
                 thenDragTo: origin.withOffset(CGVector(dx: visible.minX + visible.width * 0.2, dy: startY + (above ? distance : -distance))),
@@ -9854,8 +10877,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(fullyVisible(), "\(element.identifier): row \(element.frame), viewport \(scroll.frame)")
     }
 
-    // Externally stage an isolated library: task master OFF, weekly ON/day Sunday,
-    // morning/evening digest ON, App Lock OFF. These cases never enable a toggle or request permission.
+
     private func task442Notifications(_ suffix: String, largest: Bool) throws {
         let library = try task371Library(suffix, prefix: "MINDWTR_NOTIFICATIONS_UI_")
         continueAfterFailure = false
@@ -9914,8 +10936,7 @@ final class FoundationUITests: XCTestCase {
     func testNativeNotificationsSettingsNormalDrafts() throws { try task442Notifications("NORMAL", largest: false) }
     func testNativeNotificationsSettingsLargestDrafts() throws { try task442Notifications("LARGEST", largest: true) }
 
-    // Root stages an isolated library with device calendars OFF and App Lock OFF.
-    // Opening and reopening stay passive; these cases never request OS access.
+
     private func task464CalendarSettings(_ suffix: String, largest: Bool) throws {
         let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_SETTINGS_UI_")
         continueAfterFailure = false
@@ -9934,7 +10955,7 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(advanced, timeout: 30); advanced.tap()
         XCTAssertEqual(app.staticTexts["advanced-title"].label, "Advanced")
         XCTAssertTrue(app.buttons["settings-ai"].exists)
-        XCTAssertFalse(app.buttons["settings-ai"].isEnabled)
+        XCTAssertTrue(app.buttons["settings-ai"].isEnabled)
         for _ in 0..<2 {
             let row = app.buttons["settings-calendar"]
             task442Reveal(app, row, in: app.scrollViews["advanced-scroll"])
@@ -9961,10 +10982,167 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["tab-menu"].exists)
     }
 
+
+    private func task594OpenAI(_ app: XCUIApplication, overlapSearch: Bool = false) {
+        boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+        let settings = app.buttons["menu-settings"]
+        if !settings.isHittable {
+            task442Reveal(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+        }
+        boardTap(app, "menu-settings")
+        if overlapSearch {
+            let search = app.textFields["settings-search"]
+            boardEnabled(search, timeout: 30); search.tap()
+            search.typeText("a")
+            search.typeText(XCUIKeyboardKey.delete.rawValue)
+            search.typeText("b")
+            search.typeText(XCUIKeyboardKey.delete.rawValue)
+            let returnKey = app.keyboards.buttons["Return"]
+            if returnKey.exists && returnKey.isHittable { returnKey.tap() }
+        }
+        let advanced = app.buttons["settings-advanced"]
+        task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"])
+        boardEnabled(advanced, timeout: 30); advanced.tap()
+        if app.launchArguments.contains("--native-ai-summary-proof") { task603Phase(app, "baseline") }
+        task594EnterAI(app)
+    }
+
+    private func task603Phase(_ app: XCUIApplication, _ phase: String) {
+        let control = app.buttons["ai-summary-proof-" + phase]
+        task442Reveal(app, control, in: app.scrollViews["advanced-scroll"])
+        boardEnabled(control, timeout: 30); control.tap()
+        let state = app.staticTexts["ai-summary-proof-state"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", phase + "-ready"), object: state)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 40), .completed,
+                       "Checkpoint must observe natural preferences persistence and actual read-task drain")
+        XCTAssertEqual(state.label, phase + "-ready")
+        let observation = XCTAttachment(string: state.label)
+        observation.name = "AI summary checkpoint " + phase + " admitted"
+        observation.lifetime = .keepAlways; add(observation)
+    }
+    private func task603Final(_ app: XCUIApplication) {
+        guard app.launchArguments.contains("--native-ai-summary-proof") else { return }
+        boardTap(app, "ai-summary-back")
+        XCTAssertTrue(app.staticTexts["advanced-title"].exists)
+        task603Phase(app, "final")
+    }
+
+    private func task594EnterAI(_ app: XCUIApplication) {
+        let row = app.buttons["settings-ai"]
+        task442Reveal(app, row, in: app.scrollViews["advanced-scroll"])
+        boardEnabled(row, timeout: 30); row.tap()
+        XCTAssertTrue(app.staticTexts["ai-summary-title"].waitForExistence(timeout: 10))
+    }
+
+    private func task594AI(_ role: String, provider: String = "OpenAI", enabled: String = "Off", seconds: Int = 30,
+                           largest: Bool = false, retirement: String? = nil, fail: Bool = false, overlapSearch: Bool = false) throws {
+        let library = try task371Library(role, prefix: "MINDWTR_AI_SUMMARY_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if role != "HOST" { app.launchArguments += ["--native-ai-summary-proof"] }
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        if retirement != nil { app.launchArguments += ["--native-ai-summary-delay-once"] }
+        if fail { app.launchArguments += ["--native-ai-summary-read-failure-once"] }
+        addTeardownBlock { app.terminate() }
+        app.launch()
+        task594OpenAI(app, overlapSearch: overlapSearch)
+        if let retirement {
+            XCTAssertTrue(app.staticTexts["ai-summary-test-held"].waitForExistence(timeout: 10))
+            XCTAssertFalse(app.staticTexts["ai-summary-provider"].exists)
+            switch retirement {
+            case "back": boardTap(app, "ai-summary-back")
+            case "background":
+                #if targetEnvironment(simulator)
+                XCUIDevice.shared.press(.home)
+                #else
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
+                    .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+                #endif
+                let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    app.state == .runningBackground || app.state == .runningBackgroundSuspended
+                }, object: app)
+                XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed)
+                app.activate()
+            case "lock": boardTap(app, "ai-summary-test-lock")
+            case "host": boardTap(app, "ai-summary-test-host")
+            default: XCTFail("Unknown retirement fixture")
+            }
+            expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["ai-summary-title"])
+            waitForExpectations(timeout: 15)
+            XCTAssertFalse(app.staticTexts["ai-summary-provider"].exists)
+            XCTAssertFalse(app.staticTexts["ai-summary-error"].exists)
+            if retirement == "lock" {
+
+                boardEnabled(app.buttons["app-lock-read-retry"], timeout: 20)
+                boardTap(app, "app-lock-read-retry")
+            }
+            if retirement == "host" {
+
+                let advanced = app.buttons["settings-advanced"]
+                task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"])
+                boardEnabled(advanced, timeout: 30); advanced.tap()
+            }
+            XCTAssertTrue(app.staticTexts["advanced-title"].waitForExistence(timeout: 20))
+            for name in ["ai-summary-title", "ai-summary-provider", "ai-summary-enabled", "ai-summary-timeout", "ai-summary-error"] {
+                XCTAssertFalse(app.staticTexts[name].exists, "Retired AI content must remain absent after foreground/unlock")
+            }
+            task594EnterAI(app)
+        }
+        if fail {
+            XCTAssertTrue(app.staticTexts["ai-summary-error"].waitForExistence(timeout: 10))
+            XCTAssertFalse(app.staticTexts["ai-summary-provider"].exists)
+            boardTap(app, "ai-summary-retry")
+        }
+        XCTAssertTrue(app.staticTexts["ai-summary-provider"].waitForExistence(timeout: 20))
+        for _ in 0..<2 {
+            XCTAssertEqual(app.staticTexts["ai-summary-provider"].label, provider)
+            XCTAssertEqual(app.staticTexts["ai-summary-enabled"].label, enabled)
+            let timeout = app.staticTexts["ai-summary-timeout"]
+            task442Reveal(app, timeout, in: app.scrollViews["ai-summary-scroll"], requireEnabled: false)
+            XCTAssertEqual(timeout.label, "\(seconds) seconds")
+            XCTAssertTrue(app.staticTexts["ai-summary-note"].label.contains("AI requests are not available"))
+            XCTAssertEqual(app.scrollViews["ai-summary-scroll"].switches.count, 0)
+            XCTAssertEqual(app.scrollViews["ai-summary-scroll"].textFields.count, 0)
+            XCTAssertFalse(app.staticTexts["ai-summary-error"].exists)
+            XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Task594-private-sentinel")).firstMatch.exists)
+            boardTap(app, "ai-summary-back")
+            XCTAssertTrue(app.staticTexts["advanced-title"].exists)
+            task594EnterAI(app)
+            XCTAssertTrue(app.staticTexts["ai-summary-provider"].waitForExistence(timeout: 20))
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "AI saved settings \(role)"; shot.lifetime = .keepAlways; add(shot)
+        task603Final(app)
+
+        app.terminate(); app.launch(); task594OpenAI(app, overlapSearch: overlapSearch)
+        if fail {
+            XCTAssertTrue(app.staticTexts["ai-summary-error"].waitForExistence(timeout: 10))
+            boardTap(app, "ai-summary-retry")
+        }
+        XCTAssertTrue(app.staticTexts["ai-summary-provider"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts["ai-summary-provider"].label, provider)
+        XCTAssertEqual(app.staticTexts["ai-summary-enabled"].label, enabled)
+        task603Final(app)
+    }
+
+    func testNativeAISummaryDefaultReadOnly() throws { try task594AI("DEFAULT") }
+    func testNativeAISummaryOpenAIReadOnly() throws { try task594AI("OPENAI", enabled: "On", seconds: 120) }
+    func testNativeAISummaryGeminiReadOnly() throws { try task594AI("GEMINI", provider: "Gemini", enabled: "On", seconds: 300) }
+    func testNativeAISummaryAnthropicLargestReadOnly() throws { try task594AI("ANTHROPIC", provider: "Anthropic (Claude)", enabled: "On", seconds: 60, largest: true) }
+    func testNativeAISummaryFailureRetry() throws { try task594AI("FAILURE", fail: true) }
+    func testNativeAISummaryBackRetiresRead() throws { try task594AI("BACK", retirement: "back") }
+    func testNativeAISummaryBackgroundRetiresRead() throws { try task594AI("BACKGROUND", retirement: "background") }
+    func testNativeAISummaryLockRetiresRead() throws { try task594AI("LOCK", retirement: "lock") }
+    func testNativeAISummaryHostReplacementRetiresRead() throws { try task594AI("HOST", retirement: "host") }
+
+    func testNativeAISummaryCheckpointSearchDrainAndColdPreferences() throws {
+        try task594AI("DEFAULT", overlapSearch: true)
+    }
+
     func testNativeCalendarSettingsNormalPassiveOpen() throws { try task464CalendarSettings("NORMAL", largest: false) }
     func testNativeCalendarSettingsLargestPassiveOpen() throws { try task464CalendarSettings("LARGEST", largest: true) }
 
-    // Existing subscriptions only; device access stays off and no URL is fetched.
+
     private func task470CalendarSubscriptions(_ suffix: String, largest: Bool, recovery: Bool = false) throws {
         let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_SUBSCRIPTION_UI_")
         continueAfterFailure = false
@@ -10154,7 +11332,7 @@ final class FoundationUITests: XCTestCase {
         let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_LOCAL_FILE_UI_")
         continueAfterFailure = false
         let app = XCUIApplication()
-        // Isolated seeded selection exercises the real callback/capture/Add, not the system Files picker.
+
         app.launchArguments = ["--native-ui-test-library", library, "--native-calendar-local-file-picker-fixture",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         if cancel { app.launchArguments += ["--native-calendar-local-file-picker-cancel-once"] }
@@ -10345,7 +11523,7 @@ final class FoundationUITests: XCTestCase {
     func testNativeCalendarSettingsTestCancel() throws { try task471CalendarSettingsTest("CANCEL") }
     func testNativeCalendarSettingsTestBackground() throws { try task471CalendarSettingsTest("BACKGROUND") }
 
-    // Root stages an actual prepared turn-on journal in this isolated library; no prompt is requested.
+
     func testNativeCalendarSettingsStartupRecoveryPassiveOpen() throws {
         let library = try task371Library("RECOVERY", prefix: "MINDWTR_CALENDAR_SETTINGS_UI_")
         continueAfterFailure = false
@@ -10407,8 +11585,7 @@ final class FoundationUITests: XCTestCase {
         return frame
     }
 
-    // Geometry-only reveal also works for intentionally disabled external rows. It never
-    // taps/enables them, and keeps the established keyboard-aware viewport calculation.
+
     private func task467Reveal(_ app: XCUIApplication, _ element: XCUIElement, in scroll: XCUIElement,
                                horizontal: Bool = false, requireHittable: Bool = true) {
         XCTAssertTrue(scroll.waitForExistence(timeout: 10))
@@ -10442,8 +11619,8 @@ final class FoundationUITests: XCTestCase {
                     XCTFail(state)
                     return
                 }
-                // Geometry already fits. Wait for settling without repeatedly dragging a
-                // different owner; the real focus/edit assertions remain required below.
+
+
                 let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
                 _ = XCTWaiter.wait(for: [hittable], timeout: 1)
                 continue
@@ -10458,8 +11635,8 @@ final class FoundationUITests: XCTestCase {
                 : before ? viewport.minY - row.minY : row.maxY - viewport.maxY) + 4 : extent * 0.7
             var gestureViewport = viewport
             if scroll.identifier == "calendar-layout-scroll" {
-                // A drag that starts in a nested grid/list belongs to that child. The
-                // exposed header gutter is owned by the outer layout, even after it moves.
+
+
                 let childIDs = ["calendar-month-grid", "calendar-month-columns", "calendar-details",
                     "calendar-week-columns", "calendar-week-timeline", "calendar-day-timeline", "calendar-schedule"]
                 let starts = childIDs.compactMap { id -> CGFloat? in
@@ -10525,7 +11702,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(second.frame.midX - first.frame.midX, first.frame.width, accuracy: 1)
     }
 
-    // Root stages isolated shared storage and actual HTTPS ICS fixtures; device calendars stay OFF.
+
     private func task465CalendarFeed(_ suffix: String, largest: Bool, partial: Bool, eventCount: Int = 1) throws {
         let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_FEED_UI_")
         continueAfterFailure = false
@@ -10560,7 +11737,7 @@ final class FoundationUITests: XCTestCase {
             } else { XCTAssertFalse(app.staticTexts["calendar-feed-message"].exists) }
         }
         expectEvent("month")
-        // Exercise the event action before the longer mode survey reaches the periodic refresh.
+
         let details = app.scrollViews["calendar-details"], layout = app.scrollViews["calendar-layout-scroll"]
         if layout.exists { task467Reveal(app, details, in: layout, requireHittable: false) }
         task467Reveal(app, event, in: details, requireHittable: false)
@@ -10583,14 +11760,14 @@ final class FoundationUITests: XCTestCase {
             boardTap(app, "calendar-feed-retry")
             expectEvent("month after partial-feed retry")
         }
-        // The rejected preparation checks the actual external busy interval without writing a task.
+
         let query = app.textFields["calendar-query"]
         task467Reveal(app, query, in: details, requireHittable: false)
         task467Contained(app, query, in: details)
         boardEnabled(query)
         if !query.isHittable {
-            // On an isolated synthetic library, retain the actual hierarchy before a
-            // standard element tap. Typed value and real filtering prove interaction.
+
+
             print("Calendar query interaction probe: enabled=\(query.isEnabled), hittable=\(query.isHittable), frame=\(query.frame), viewport=\(task467Viewport(app, details))")
             print(app.debugDescription)
         }
@@ -10650,7 +11827,7 @@ final class FoundationUITests: XCTestCase {
         func read() -> Result<Data, NSError>? { lock.lock(); defer { lock.unlock() }; return result }
     }
 
-    // Test-runner HTTP controls only the synthetic fixture server; it never reaches App configuration.
+
     private func task465Control(_ base: URL, _ operation: String, method: String = "GET") throws -> [String: Any] {
         var request = URLRequest(url: base.appendingPathComponent(operation), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
         request.httpMethod = method
@@ -10659,7 +11836,7 @@ final class FoundationUITests: XCTestCase {
             if error == nil, let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode), let data {
                 box.store(.success(data))
             } else {
-                // Keep the random fixture token and endpoint out of test diagnostics.
+
                 box.store(.failure(NSError(domain: "Task465Fixture", code: 1,
                     userInfo: [NSLocalizedDescriptionKey: "Synthetic calendar fixture control failed"])))
             }
@@ -10680,7 +11857,7 @@ final class FoundationUITests: XCTestCase {
             let count = (status["requests"] as? NSNumber)?.intValue ?? 0
             if count > requests, (status["waiting"] as? NSNumber)?.intValue ?? 0 > 0,
                status["released"] as? Bool == false { return count }
-            // A cancelled range may finish inside the shared throttle; Retry deliberately restarts it.
+
             let retry = app.buttons["calendar-feed-retry"]
             if retry.exists && retry.isEnabled && retry.isHittable { retry.tap() }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -10826,14 +12003,14 @@ final class FoundationUITests: XCTestCase {
             task442Reveal(app, calendar, in: app.scrollViews.containing(.button, identifier: "menu-calendar").firstMatch)
         }
         boardTap(app, "menu-calendar"); task465Tap(app, "calendar-mode-month")
-        // Copy-owner fixtures select a settled ready feed; held-feed navigation has its separate regression.
+
         task468Ready(app)
         let targetDay = app.buttons["calendar-day-" + day]
         print("Calendar settled-day selection probe: \(targetDay.debugDescription)")
         let before = XCTAttachment(screenshot: app.screenshot())
         before.name = "Calendar settled Month before selecting " + day; before.lifetime = .keepAlways; add(before)
         task465Tap(app, "calendar-day-" + day)
-        // The first selection also changes grid geometry. Await the shared selected trait before changing mode.
+
         expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: targetDay)
         waitForExpectations(timeout: 15)
         let selected = XCTAttachment(screenshot: app.screenshot())
@@ -10875,7 +12052,7 @@ final class FoundationUITests: XCTestCase {
             task467Reveal(app, event, in: timeline, requireHittable: false)
         }
         if allDay && (mode == "day" || mode == "week") && !event.isHittable {
-            // The existing all-day band has a distinct per-day vertical owner.
+
             let owners = app.scrollViews.containing(.button, identifier: event.identifier).allElementsBoundByIndex
                 .filter { $0.frame.width > 0 && $0.frame.height > 0 }
             guard let owner = owners.min(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else {
@@ -10887,8 +12064,8 @@ final class FoundationUITests: XCTestCase {
     }
 
     private func task468CopiedRows(_ app: XCUIApplication, title: String, count: Int) {
-        // Month/timed Day use task UUIDs directly. CalendarDayItem-backed lanes retain their shared kind prefix.
-        // Fixture tasks have stable non-UUID IDs; count distinct copy UUIDs, even across repeated rendered lanes.
+
+
         let copies = app.buttons.matching(NSPredicate(format: "identifier MATCHES %@ AND label CONTAINS %@",
             "calendar-item-(?:scheduled-|deadline-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", title))
         func copyIDs() -> Set<String> { Set(copies.allElementsBoundByIndex.map { String($0.identifier.suffix(36)) }) }
@@ -10929,7 +12106,7 @@ final class FoundationUITests: XCTestCase {
                 "Two Week columns render the same immutable event tuple")
             XCTAssertTrue(app.buttons["calendar-week-day-2026-10-05"].exists, "The canonical Monday week start is used")
         }
-        // Sunday is a later displayed day of the Saturday-starting event. Shared acknowledgment owns its original date.
+
         let event = repeatedWeek ? events.element(boundBy: 1) : events.firstMatch
         let eventID = event.identifier
         task468RevealEvent(app, event: event, mode: mode, allDay: allDay)
@@ -10985,11 +12162,11 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
         let withdrawn = try task465Control(control, "recovery-withdraw", method: "POST")
         XCTAssertEqual(withdrawn["withdrawn"] as? Bool, true)
-        // Real startup consumes the accepted journal before the one-shot App inventory read fails.
+
         app.launchArguments = arguments + ["--native-startup-inventory-read-failure-once"]
         app.launch()
-        // Normal activation/notification lifecycle may retry startup automatically on this same host.
-        // Root's offline audit requires the isolated post-start failure marker before this acknowledgment.
+
+
         task468Created(app, title: "Task465 timed event", mode: "schedule", count: 1, expectFeedFailure: true)
         XCTAssertFalse(app.buttons.matching(identifier: sourceEventID).firstMatch.exists,
             "Accepted recovery must not require the withdrawn original provider event")
@@ -11013,7 +12190,7 @@ final class FoundationUITests: XCTestCase {
         task468OpenEventSheet(app, event: event, title: "Task465 spanning event")
         task468EventAction(app, "createTask")
         if predispatch {
-            // This state is reached only after the real feed drain, immediately before host dispatch.
+
             expectation(for: NSPredicate(format: "value == %@", "held"), evaluatedWith: app.staticTexts["calendar-item-title"])
             waitForExpectations(timeout: 20)
             XCTAssertFalse(app.buttons["persistence-retry"].exists)
@@ -11039,8 +12216,8 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["calendar-action-createTask"].exists)
         XCTAssertFalse(app.staticTexts["calendar-item-error"].exists)
         task468Ready(app)
-        // The accepted warm copy is due Oct10 and is intentionally absent from preserved DayOct11.
-        // Root's exact offline audit requires one row for warm Retry and zero for pre-dispatch cancellation.
+
+
         task468CopiedRows(app, title: "Task465 spanning event", count: 0)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = predispatch ? "Calendar retired pre-dispatch copy leaves the current day" : "Calendar retired warm acknowledgment leaves the current day"
@@ -11356,7 +12533,7 @@ final class FoundationUITests: XCTestCase {
             XCTAssertTrue(option.isSelected)
         }
         boardTap(app, "general-picker-cancel")
-        let values = allChoices ? ["system", "system-oled", "light", "dark", "material3-light", "material3-dark", "eink", "nord", "catppuccin-macchiato", "dracula", "sepia", "oled"] : ["material3-dark", "oled"]
+        let values = allChoices ? ["system", "system-oled", "light", "dark", "material3-light", "material3-dark", "eink", "nord", "catppuccin-macchiato", "dracula", "gruvbox-light", "gruvbox-dark", "sepia", "oled"] : ["material3-dark", "oled"]
         for value in values {
             task97Picker(app, "theme"); task97Choose(app, value)
             task97Picker(app, "theme")
@@ -11700,7 +12877,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
         if selectAll { replaceProjectNotesText(input, with: text) }
         else {
-            // These short fixtures fit the field; tap past the text inside its padding.
+
             replaceTextView(input, with: text, tapOffset: CGVector(dx: 0.9, dy: 0.5))
         }
         XCTAssertEqual(input.value as? String, text)
@@ -11798,7 +12975,7 @@ final class FoundationUITests: XCTestCase {
         let input = task90OpenEdit(largest, index: 0, name: "Task90 Area largest")
         task90ReplaceName(largest, input, with: "Task90 Edited largest", selectAll: true)
         task90SelectBlue(largest)
-        // A full native swipe brings the sheet’s bottom controls into view.
+
         largest.scrollViews["manage-area-edit-scroll"].swipeUp(velocity: .slow)
         let shot = XCTAttachment(screenshot: largest.screenshot())
         shot.name = "Largest Manage Area editor"; shot.lifetime = .keepAlways; add(shot)
@@ -11867,7 +13044,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Run before the paired cold test while the isolated SQLite trigger rejects this edit.
+
     func testManageAreaEditFailedSaveKeepsExactRequest() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -11888,7 +13065,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root disarms only the failure trigger, preserving this library's pending journal.
+
     func testManageAreaEditColdRecovery() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -11924,7 +13101,7 @@ final class FoundationUITests: XCTestCase {
 
     private func task85Arrow(_ app: XCUIApplication, index: Int, up: Bool) -> XCUIElement {
         let arrow = app.buttons.matching(identifier: "manage-someday-\(up ? "up" : "down")-\(index)").firstMatch
-        // A boundary arrow is intentionally disabled; reveal its row via an enabled sibling.
+
         let rename = app.buttons.matching(identifier: "manage-someday-rename-\(index)").firstMatch
         revealPagedElement(app, rename, in: app.scrollViews["manage-someday-scroll"],
             more: "manage-someday-more", ready: app.buttons["manage-back"])
@@ -12030,7 +13207,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root disarms the fixture's failed-save trigger before the paired cold test.
+
     func testSomedayManageOrderFailedSaveKeepsExactRequest() {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "fcf4a43e-02c8-41fd-9766-279c9a4c197d"]
@@ -12406,9 +13583,9 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["project-flow-scope-project"].exists)
         tap("project-flow-type"); type("Sequential")
         selected("project")
-        tap("project-flow-scope-project") // Materialize the missing raw scope once.
+        tap("project-flow-scope-project")
         boardTap(app, "project-back"); open(targetID); tap("project-details-toggle"); selected("project")
-        tap("project-flow-scope-project") // The repeated exact scope is a no-op.
+        tap("project-flow-scope-project")
         boardTap(app, "project-back"); open(targetID); tap("project-details-toggle"); selected("project")
         tap("project-flow-scope-section")
         selected("section")
@@ -12770,7 +13947,7 @@ final class FoundationUITests: XCTestCase {
         let notes = app.textViews["project-notes-input"]
         revealPagedElement(app, notes, in: app.scrollViews["project-sections-scroll"].exists ? app.scrollViews["project-sections-scroll"] : app.scrollViews.firstMatch)
         replaceProjectNotesText(notes, with: "Notes before Sections\n")
-        tap("project-sections-open") // First tap must join the dirty Notes save.
+        tap("project-sections-open")
         boardEnabled(app.buttons["project-section-add"])
         XCTAssertFalse(app.buttons["project-back"].isHittable)
         XCTAssertEqual(rows.count, 0)
@@ -12787,7 +13964,7 @@ final class FoundationUITests: XCTestCase {
         tap("project-section-add")
         revealPagedElement(app, title, in: app.scrollViews["project-sections-scroll"].exists ? app.scrollViews["project-sections-scroll"] : app.scrollViews.firstMatch)
         title.tap(); title.typeText("Native Section")
-        tap("project-section-save") // Duplicate titles are allowed by RN.
+        tap("project-section-save")
         saved(2)
         let identifiers = rows.allElementsBoundByIndex.map(\.identifier).sorted()
         XCTAssertEqual(Set(identifiers).count, 2)
@@ -13277,7 +14454,7 @@ final class FoundationUITests: XCTestCase {
             tapButton(app.buttons[id], towardTop: ["project-tags-add", "project-tags-close"].contains(id))
         }
         func tag(_ value: String) -> XCUIElement {
-            // Lazy rows enter the accessibility tree when scrolled into view.
+
             let candidate = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
                 "project-tags-choice-", value)).firstMatch
             revealProjectTagControl(app, candidate)
@@ -13329,7 +14506,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(tag("bare").isSelected)
         tap("project-tags-add"); XCTAssertFalse(app.buttons["project-tags-create-save"].isEnabled)
         tap("project-tags-create-cancel")
-        addTag("   ") // RN blank input is a no-op; do not rewrite duplicate legacy tags.
+        addTag("   ")
         tap("project-tags-open"); XCTAssertTrue(tag("#Keep").isSelected)
         addTag("  Added Tag  ")
         tap("project-tags-open"); XCTAssertTrue(tag("#Added Tag").isSelected)
@@ -13338,7 +14515,7 @@ final class FoundationUITests: XCTestCase {
         tap("project-tags-open"); XCTAssertTrue(tag("#Option-29").isSelected)
         tap("project-tags-clear"); closed()
         tap("project-tags-open"); XCTAssertFalse(tag("#Option-29").isSelected)
-        tap("project-tags-clear"); closed() // Already empty must not add a revision.
+        tap("project-tags-clear"); closed()
         tap("project-tags-open"); addTag("Final Tag")
         XCTAssertEqual(app.staticTexts["project-detail-meta-tags"].label, "#Final Tag")
         let capture = XCTAttachment(screenshot: app.screenshot())
@@ -13666,13 +14843,13 @@ final class FoundationUITests: XCTestCase {
         app.activate()
         boardEnabled(app.buttons["project-area-none"])
         XCTAssertTrue(app.buttons["project-area-none"].isSelected)
-        select("project-area-none") // Same canonical selection does not write.
+        select("project-area-none")
         revealPagedElement(app, app.buttons["project-notes-toggle"], in: app.scrollViews.firstMatch, outerEdge: true)
         boardTap(app, "project-notes-toggle"); boardEnabled(notes)
         revealPagedElement(app, notes, in: app.scrollViews.firstMatch)
         notes.tap(); revealPagedElement(app, notes, in: app.scrollViews.firstMatch, outerEdge: true)
         replaceProjectNotesText(notes, with: "Notes before Area opens\n")
-        tap("project-area-open"); select(choice) // First tap flushes Notes before opening.
+        tap("project-area-open"); select(choice)
         XCTAssertEqual(app.staticTexts["project-detail-meta-area"].label, "Metadata Area")
         tap("project-area-open"); XCTAssertTrue(app.buttons[choice].isSelected); select(choice)
         tap("project-area-open"); select("project-area-none")
@@ -13822,7 +14999,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "project-notes-toggle"); boardEnabled(notes)
         revealPagedElement(app, notes, in: app.scrollViews.firstMatch)
         notes.tap()
-        // Reveal the editor above the keyboard without scrolling inside its text.
+
         revealPagedElement(app, notes, in: app.scrollViews.firstMatch, outerEdge: true)
         replaceProjectNotesText(notes, with: "Notes before Review Date opens\n")
         tap("project-review-date-open"); day("28"); close("project-date-done")
@@ -13975,18 +15152,18 @@ final class FoundationUITests: XCTestCase {
         let draft = app.textFields["projects-create-title"]
         draft.tap(); draft.typeText("Retained date Project draft")
         open()
-        // Opening/cancelling must preserve the fixture's legacy timed start date.
+
         tap("project-start-date-open"); changeDay(); sheetTap("project-date-cancel"); closed()
         tap("project-notes-toggle"); boardEnabled(notes)
         replaceProjectNotesText(notes, with: "Notes before date opens\n")
-        tap("project-start-date-open") // One tap joins Notes persistence and presents the wheel.
+        tap("project-start-date-open")
         changeDay(); sheetTap("project-date-done"); closed()
         boardEnabled(app.buttons["project-start-date-open"])
         XCTAssertTrue(app.buttons["project-start-date-open"].isHittable,
                       "Saving a date must retain the scrolled Project Details position")
         tap("project-start-date-open")
         let selected = picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }
-        sheetTap("project-date-done"); closed() // Same literal day is a no-op.
+        sheetTap("project-date-done"); closed()
         tap("project-start-date-open"); changeDay(); sheetTap("project-date-cancel"); closed()
         tap("project-start-date-open")
         XCTAssertEqual(picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }, selected)
@@ -13994,7 +15171,7 @@ final class FoundationUITests: XCTestCase {
         tap("project-due-date-open"); sheetTap("project-date-done"); closed()
         revealPagedElement(app, notes, in: app.scrollViews.firstMatch)
         replaceProjectNotesText(notes, with: "Notes before date clears\n")
-        tap("project-start-date-clear") // Dirty Notes must not swallow the first Clear action.
+        tap("project-start-date-clear")
         XCTAssertFalse(app.buttons["project-start-date-clear"].exists)
         tap("project-due-date-clear")
         XCTAssertFalse(app.buttons["project-due-date-clear"].exists)
@@ -14067,11 +15244,11 @@ final class FoundationUITests: XCTestCase {
         open(); status("Active"); tap("project-notes-toggle")
         boardEnabled(notes)
         replaceProjectNotesText(notes, with: "Notes before status opens\n")
-        tap("project-status-open") // One tap joins the Notes save and opens the selector.
+        tap("project-status-open")
         boardEnabled(app.buttons["project-status-waiting"])
         revealPagedElement(app, notes, in: app.scrollViews.firstMatch)
         replaceProjectNotesText(notes, with: "Notes before status changes\n")
-        tap("project-status-waiting") // A second Notes save must retain this requested choice.
+        tap("project-status-waiting")
         status("Waiting")
         XCTAssertFalse(app.buttons["project-status-someday"].exists)
         XCTAssertEqual(notes.value as? String, "Notes before status changes\n")
@@ -14083,9 +15260,9 @@ final class FoundationUITests: XCTestCase {
         open(); status("Waiting")
         tap("project-status-open"); tap("project-status-someday"); status("Someday")
         tap("project-status-open"); tap("project-status-active"); status("Active")
-        tap("project-status-open"); tap("project-status-active") // Exact same-status no-op.
+        tap("project-status-open"); tap("project-status-active")
         XCTAssertFalse(app.buttons["project-status-waiting"].exists)
-        tap("project-status-open"); tap("project-status-open") // RN header re-tap closes without a write.
+        tap("project-status-open"); tap("project-status-open")
         XCTAssertFalse(app.buttons["project-status-waiting"].exists)
         tap("project-notes-toggle")
         XCTAssertEqual(notes.value as? String, "Notes before status changes\n")
@@ -14141,7 +15318,7 @@ final class FoundationUITests: XCTestCase {
             selectAll.tap()
             input.typeText(XCUIKeyboardKey.delete.rawValue)
         }
-        // Text fields expose their placeholder as the value after clearing.
+
         XCTAssertTrue((input.value as? String ?? "").isEmpty || input.value as? String == input.placeholderValue)
         if !text.isEmpty { input.typeText(text) }
         XCTAssertTrue(input.value as? String == text || (text.isEmpty && input.value as? String == input.placeholderValue))
@@ -14191,7 +15368,7 @@ final class FoundationUITests: XCTestCase {
         revealPagedElement(app, heading, in: app.scrollViews.firstMatch)
         XCTAssertTrue(heading.exists)
         tap("project-notes-mode-edit"); raw(first)
-        boardTap(app, "project-back") // Unchanged raw Notes must not write.
+        boardTap(app, "project-back")
         open(); raw(first)
         edit("Back saves once\n"); boardTap(app, "project-back")
         boardEnabled(app.textFields["projects-create-title"])
@@ -14402,7 +15579,7 @@ final class FoundationUITests: XCTestCase {
         toggle(); value("tags", "#home, #project-details-long-tag")
     }
 
-    /// Root stages two deferred Projects in this isolated simulator library.
+
     func testDeferredProjectRenameOpensOnFirstTap() throws {
         let app = XCUIApplication()
         let library = "83bae1d1-a6d7-450f-ae93-3f3bd398338d"
@@ -14590,7 +15767,7 @@ final class FoundationUITests: XCTestCase {
                 && element.frame.maxY <= viewport.maxY { return }
             let downward = element.exists && element.frame.minY < viewport.minY
             if keyboard.exists && keyboard.frame.intersects(scroll.frame) {
-                // Swipe inside the visible content, not the keyboard covering the scroll view.
+
                 let top = app.coordinate(withNormalizedOffset: .zero).withOffset(
                     CGVector(dx: viewport.midX, dy: viewport.minY + viewport.height * 0.2))
                 let bottom = app.coordinate(withNormalizedOffset: .zero).withOffset(
@@ -14619,7 +15796,7 @@ final class FoundationUITests: XCTestCase {
     private func projectManagerTap(_ app: XCUIApplication, _ id: String) {
         let button = app.buttons[id]
         if id == "area-manager-close" {
-            // The fixed header is outside the manager's scrollable content.
+
             XCTAssertTrue(button.waitForExistence(timeout: 10))
         } else if app.scrollViews["area-manager-scroll"].exists {
             revealAreaRenameControl(app, button)
@@ -14629,7 +15806,7 @@ final class FoundationUITests: XCTestCase {
                                outerEdge: !app.scrollViews["projects-scroll"].exists)
         }
         boardEnabled(button)
-        // AX converts frame coordinates through CGFloat; allow rounding noise only.
+
         XCTAssertGreaterThanOrEqual(button.frame.height, 44 - 0.001)
         XCTAssertGreaterThanOrEqual(button.frame.width, 44 - 0.001)
         button.coordinate(withNormalizedOffset: .zero)
@@ -14843,7 +16020,7 @@ final class FoundationUITests: XCTestCase {
     private func projectFilterTap(_ app: XCUIApplication, _ id: String) {
         let button = app.buttons[id]
         if id.hasPrefix("project-filter-token-") {
-            // This flow searches for a single token; XCTest performs its own scroll-to-hit.
+
             boardEnabled(button)
             print("Filtered token: " + button.debugDescription)
             XCTAssertGreaterThanOrEqual(button.frame.height, 44 - 0.001)
@@ -14945,7 +16122,7 @@ final class FoundationUITests: XCTestCase {
         revealPagedElement(app, input, in: app.scrollViews["project-filter-overview-scroll"])
         boardEnabled(input); input.tap(); input.typeText(String(repeating: "x", count: 501))
         boardEnabled(app.buttons["project-filter-retry"])
-        // Keep the caret at the end while correcting the rejected value.
+
         input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 501) + "Office\n")
         XCTAssertEqual(input.value as? String, "Office")
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["project-filter-retry"])
@@ -15024,7 +16201,7 @@ final class FoundationUITests: XCTestCase {
                 }
                 if selectAll.exists { selectAll.tap() }
                 else {
-                    // A long single word may already be fully selected by the press.
+
                     XCTAssertTrue(app.menuItems["Cut"].exists || app.buttons["Cut"].exists)
                 }
                 query.typeText(XCUIKeyboardKey.delete.rawValue)
@@ -15070,7 +16247,7 @@ final class FoundationUITests: XCTestCase {
         project.tap(); boardEnabled(project); XCTAssertTrue(project.isSelected)
         search(String(repeating: "x", count: 501), submit: false)
         XCTAssertTrue(app.staticTexts["board-error"].waitForExistence(timeout: 10))
-        // Correct the rejected query while its caret is still at the end.
+
         query.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 501) + "task78 project 102\n"); boardEnabled(project); XCTAssertTrue(project.isSelected)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Board searched Project picker"; shot.lifetime = .keepAlways; add(shot)
         boardTap(app, "board-filter-close"); boardEnabled(app.buttons["board-filter-open"])
@@ -15311,7 +16488,7 @@ final class FoundationUITests: XCTestCase {
     private func referenceFold(_ app: XCUIApplication, _ id: String, open: Bool, toggle: Bool = false) {
         let identifier = "reference-section-" + id
         let matches = app.buttons.matching(identifier: identifier)
-        // XCTest's identifier matcher uses Unicode equivalence; core IDs do not.
+
         let button = matches.allElementsBoundByIndex.first { $0.identifier.utf8.elementsEqual(identifier.utf8) } ?? matches.firstMatch
         revealPagedElement(app, button, in: app.descendants(matching: .any).matching(identifier: "reference-scroll").firstMatch)
         boardEnabled(button); XCTAssertEqual(button.value as? String, open ? "Collapse" : "Expand")
@@ -15646,7 +16823,7 @@ final class FoundationUITests: XCTestCase {
         if !largest { boardTap(app, "focus-saved-task71-filter") }
         boardTap(app, "focus-view-options")
         if !largest {
-            focusGroupChoice(app, "area") // Same effective grouping still detaches the saved filter.
+            focusGroupChoice(app, "area")
             boardTap(app, "focus-controls-close")
             XCTAssertFalse(app.buttons["focus-saved-task71-filter"].isSelected)
             boardTap(app, "focus-view-options")
@@ -15655,7 +16832,7 @@ final class FoundationUITests: XCTestCase {
         for value in largest ? ["project", "tag", "none", "project"] : ["context", "energy", "priority", "person", "tag", "none", "project"] {
             focusGroupChoice(app, value)
         }
-        focusGroupChoice(app, "project") // Repeating the selected value must not write.
+        focusGroupChoice(app, "project")
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = largest ? "Largest Focus grouping" : "Focus grouping choices"
         shot.lifetime = .keepAlways; add(shot)
@@ -16037,7 +17214,7 @@ final class FoundationUITests: XCTestCase {
         revealPagedElement(app, reopened, in: app.scrollViews["projects-scroll"])
         reopened.tap(); boardEnabled(app.buttons["project-details-toggle"])
         first("d55f6859-cf8e-4643-a1ad-eff6db59262e")
-        sort("title", choose: "title") // Same choice must not add a revision.
+        sort("title", choose: "title")
         tap("project-task-view-options-button"); tap("project-view-completed-option")
         boardEnabled(app.buttons["project-completed-toggle"])
         tap("project-completed-toggle")
@@ -16367,7 +17544,7 @@ final class FoundationUITests: XCTestCase {
         draft.tap(); draft.typeText("Retained tag filter Project draft")
         choose("projects-create-area-" + home)
         tap(toggle); selected("projects-tag-filter-all")
-        choose("projects-tag-filter-4") // #work, inventory sorted by shared JS policy.
+        choose("projects-tag-filter-4")
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         XCTAssertEqual(draft.value as? String, "Retained tag filter Project draft")
         XCTAssertTrue(app.buttons["projects-create-area-" + home].isSelected)
@@ -16380,22 +17557,22 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.buttons[toggle].label.contains("#work"))
         tap(toggle); selected("projects-tag-filter-4")
 
-        choose("projects-tag-filter-2") // composed Unicode
+        choose("projects-tag-filter-2")
         _ = row(target)
         XCTAssertFalse(app.buttons["project-open-" + destination].exists)
-        choose("projects-tag-filter-1") // canonically equivalent, distinct raw tag
+        choose("projects-tag-filter-1")
         _ = row(destination)
         XCTAssertFalse(app.buttons["project-open-" + target].exists)
         choose("projects-tag-filter-none")
         _ = row("120596fd-e02e-4187-8403-c70bcd0fb35a")
         XCTAssertEqual(app.buttons["projects-tag-filter-0"].label, "Empty tag")
-        choose("projects-tag-filter-0") // existing empty raw tag is not No tags.
+        choose("projects-tag-filter-0")
         _ = row("60b46b37-77c2-40c0-b3ce-17faf3217f1e")
         XCTAssertFalse(app.buttons["project-open-120596fd-e02e-4187-8403-c70bcd0fb35a"].exists)
         choose("projects-tag-filter-4")
         area(source)
         selected("projects-tag-filter-4")
-        XCTAssertTrue(app.buttons["projects-tag-filter-3"].exists) // global #home inventory survives Area filtering.
+        XCTAssertTrue(app.buttons["projects-tag-filter-3"].exists)
         choose("projects-tag-filter-3")
         XCTAssertTrue(app.staticTexts["projects-empty"].waitForExistence(timeout: 10))
         choose("projects-tag-filter-4"); _ = row(target)
@@ -16465,7 +17642,7 @@ final class FoundationUITests: XCTestCase {
             XCTAssertEqual(createdChoice.count, 1)
             XCTAssertFalse(createdChoice.firstMatch.isSelected)
             XCTAssertTrue(app.buttons["project-area-choice-170c1eab-65ec-4a38-931d-3f03399b7d17"].isSelected)
-            // Refresh offers the durable Area without silently changing the Project.
+
             boardTap(app, "project-area-close")
         } else {
             XCTAssertTrue(app.staticTexts["project-area-read-error"].exists)
@@ -16560,7 +17737,7 @@ final class FoundationUITests: XCTestCase {
             let button = app.buttons[id]
             revealAreaRenameControl(app, button); boardEnabled(button)
             if id.hasPrefix("area-rename-") {
-                // The native medium sheet scales its 48pt layout; check the screen-space hit region.
+
                 XCTAssertGreaterThanOrEqual(button.frame.height, 44)
                 XCTAssertGreaterThanOrEqual(button.frame.width, 44)
             }
@@ -17121,8 +18298,8 @@ final class FoundationUITests: XCTestCase {
         enabled(app.buttons["capture-save"])
         app.buttons["capture-save"].tap()
         openOwnedTask()
-        // Tomorrow and Next week coincide on Sundays; tapping a selected
-        // quick chip clears it. Choose an unselected chip from the current UI.
+
+
         let quickDateID = ["today", "next_week", "next_month"].map { "task-date-dueDate-quick-" + $0 }
             .first { !app.buttons[$0].isSelected }!
         tap(quickDateID)
@@ -17142,7 +18319,7 @@ final class FoundationUITests: XCTestCase {
         amount.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         amount.typeText(XCUIKeyboardKey.delete.rawValue + "5")
-        // A unit change must read the pending amount, not the previous core reply.
+
         tap("task-start-relative-unit-week")
         assertValue(amount, "5")
         if !app.buttons["task-editor-priority-urgent"].exists { tap("task-editor-section-organization") }
@@ -17153,9 +18330,8 @@ final class FoundationUITests: XCTestCase {
         reveal(amount)
         amount.tap()
         amount.typeText(XCUIKeyboardKey.delete.rawValue)
-        // A zero-offset start label proves the blank edit's core reply arrived.
-        // Keep the raw field empty while focused instead of feeding normalized 0
-        // back into UIKit between Delete and the next digit.
+
+
         assertValue(app.buttons["task-editor-startTime"], dueLabel)
         let rawAmount = amount.value as? String ?? ""
         XCTAssertTrue(rawAmount.isEmpty || rawAmount == amount.placeholderValue,
@@ -17166,7 +18342,7 @@ final class FoundationUITests: XCTestCase {
         openOwnedTask()
         showScheduling()
         assertValue(amount, "2")
-        // Retain the original same-call Delete + digit + immediate Save path too.
+
         amount.tap()
         amount.typeText(XCUIKeyboardKey.delete.rawValue + "2")
         app.buttons["task-editor-save"].tap()
@@ -17183,7 +18359,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(startLabel.isEmpty)
         if !app.buttons["task-editor-priority-urgent"].exists { tap("task-editor-section-organization") }
         XCTAssertTrue(app.buttons["task-editor-priority-urgent"].isSelected)
-        // Date-only, review date and clear remain unsaved through Preview/discard.
+
         tap("task-date-dueDate-date-only", upward: false)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["task-date-dueDate-date-only"])
         waitForExpectations(timeout: 10)
@@ -17268,8 +18444,8 @@ final class FoundationUITests: XCTestCase {
         interval.typeText(XCUIKeyboardKey.delete.rawValue + "5")
         assertValue(interval, "5")
         interval.typeText(XCUIKeyboardKey.delete.rawValue)
-        // The existing title field is disabled while the shared draft queue
-        // runs. Its re-enable observes the normalized blank reply without blur.
+
+
         enabled(app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch)
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         let blank = interval.value as? String ?? ""
@@ -17286,7 +18462,7 @@ final class FoundationUITests: XCTestCase {
         reveal(app.buttons[monday])
         let initialMonday = app.buttons[monday].isSelected
         let initialTuesday = app.buttons[tuesday].isSelected
-        // Three ordered toggles must not collapse into one stale draft snapshot.
+
         app.buttons[monday].tap()
         app.buttons[tuesday].tap()
         app.buttons[monday].tap()
@@ -17313,7 +18489,7 @@ final class FoundationUITests: XCTestCase {
         selected("task-recurrence-strategy")
         assertValue(future, "1")
 
-        // Preview and discard must leave the complete saved recurrence tuple.
+
         tap("task-recurrence-ends-never", upward: false)
         tap("task-recurrence-strategy")
         reveal(future)
@@ -17384,8 +18560,8 @@ final class FoundationUITests: XCTestCase {
         selected("task-recurrence-rule-none")
         XCTAssertFalse(interval.exists)
         XCTAssertFalse(future.exists)
-        // The real draft boundary refuses numeric input over 200 characters.
-        // A failed pure edit must remain discardable without a successful read.
+
+
         tap("task-recurrence-rule-daily")
         reveal(interval)
         interval.tap()
@@ -17475,7 +18651,7 @@ final class FoundationUITests: XCTestCase {
         tags.typeText("tag" + suffix)
         tap("task-tags-suggestion-" + tag)
         XCTAssertTrue(app.keyboards.firstMatch.exists)
-        // Save directly from a focused raw buffer, with no Done/blur normalization wait.
+
         tags.typeText(String(lastTag.dropFirst()))
         tap("task-editor-save")
         _ = inboxTask(title)
@@ -17488,7 +18664,7 @@ final class FoundationUITests: XCTestCase {
         if !app.buttons["task-editor-priority-urgent"].exists { tap("task-editor-section-organization") }
         XCTAssertTrue(app.buttons["task-editor-priority-urgent"].isSelected)
         assertValue(app.textFields["task-editor-tags"], tag + ", " + lastTag)
-        // Preview resolves both buffers but does not persist them; discard restores saved tokens.
+
         let editContexts = app.textFields["task-editor-contexts"]
         for _ in 0..<8 where !editContexts.isHittable { app.swipeDown() }
         enabled(editContexts)
@@ -17842,13 +19018,13 @@ final class FoundationUITests: XCTestCase {
             let untouched = openBackdate()!
             XCTAssertEqual(untouched.value as? String, "17")
             finishBackdate(confirm: false)
-            close() // Opening and cancelling the dialog did not dirty the draft.
+            close()
 
             open("task115-done", title: "Task115 Done")
             _ = openBackdate()
             finishBackdate(confirm: true)
             XCTAssertTrue(app.buttons["task-editor-status-done"].isSelected)
-            boardTap(app, "task-editor-save") // Root's persisted oracle checks the original .678 milliseconds.
+            boardTap(app, "task-editor-save")
             boardEnabled(app.textFields["search-input"])
             boardTap(app, "search-close")
             restart()
@@ -17921,7 +19097,7 @@ final class FoundationUITests: XCTestCase {
         func convert() {
             boardTap(app, "task-more")
             let action = app.buttons["task-reference-action-menu"]; boardEnabled(action)
-            XCTAssertTrue(action.isHittable) // Native Menu owns its row metrics.
+            XCTAssertTrue(action.isHittable)
             let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Reference action menu"; shot.lifetime = .keepAlways; add(shot)
             action.tap()
             boardTap(app, "task-mode-edit")
@@ -17931,7 +19107,7 @@ final class FoundationUITests: XCTestCase {
         open(); convert()
         boardTap(app, "task-view-close"); boardTap(app, "task-editor-discard")
         app.terminate(); app.launch()
-        open(); convert() // Discard retained Reference, so the menu action exists again.
+        open(); convert()
         boardTap(app, "task-editor-save")
         boardEnabled(app.textFields["search-input"])
         app.terminate(); app.launch(); open()
@@ -17992,7 +19168,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(status("next").isHittable, "Parent editor is excluded while the prompt is open")
         boardTap(app, "task-waiting-cancel")
         XCTAssertTrue(status("next").isSelected)
-        close() // Cancel leaves no dirty draft or discard confirmation.
+        close()
 
         open("Focus"); choose("waiting")
         boardEnabled(input); input.tap(); input.typeText("Person113 A")
@@ -18080,7 +19256,7 @@ final class FoundationUITests: XCTestCase {
             let input = assignment(); input.tap()
             boardEnabled(app.keyboards.firstMatch)
             reveal(input)
-            // One text-field paragraph: triple-tap selects all without a floating menu.
+
             input.tap(withNumberOfTaps: 3, numberOfTouches: 1)
             input.typeText(XCUIKeyboardKey.delete.rawValue)
             XCTAssertTrue((input.value as? String ?? "").isEmpty || input.value as? String == input.placeholderValue)
@@ -18115,7 +19291,7 @@ final class FoundationUITests: XCTestCase {
         restart(); openTask("task112-waiting", title: "Task112 Waiting")
         let cleared = assignment(); XCTAssertEqual(cleared.value as? String, cleared.placeholderValue)
         boardTap(app, "task-view-close"); boardTap(app, "search-close")
-        // A bounded suggestions query must not truncate a longer free-text assignment.
+
         openTask("task112-next", title: "Task112 Next")
         let long = String(repeating: "Q", count: 2001)
         let next = assignment(); next.tap(); next.typeText(long)
@@ -18265,7 +19441,7 @@ final class FoundationUITests: XCTestCase {
         titleInput.typeText(" changed")
         tap("task-mode-view")
         tap("task-mode-edit")
-        // Metadata is revealed by its captured value, preserving the default hidden-field preference.
+
         if !app.buttons["task-editor-priority-urgent"].exists { tap("task-editor-section-organization") }
         tap("task-editor-priority-urgent")
         tap("task-editor-energyLevel-high")
@@ -18430,7 +19606,7 @@ final class FoundationUITests: XCTestCase {
             waitForExpectations(timeout: timeout)
         }
         func closeArea() {
-            // The RN-style dismissal target is the backdrop above the sheet.
+
             app.buttons["area-dismiss"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
             expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["area-title"])
             waitForExpectations(timeout: 10)
@@ -18498,7 +19674,7 @@ final class FoundationUITests: XCTestCase {
         waitEnabled(noArea)
         XCTAssertEqual(noArea.value as? String, excluded)
 
-        // Finish the core cycle, then exercise All from a non-default selection.
+
         noArea.tap()
         expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: all)
         waitForExpectations(timeout: 10)
@@ -18518,7 +19694,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(area.value as? String, allLabel)
         XCTAssertTrue(task.waitForExistence(timeout: 10))
 
-        // Remove only this test's own task. Leave scope at All for the other tests.
+
         let titleID = task.identifier
         XCTAssertTrue(titleID.hasPrefix("task-title-"))
         let status = app.buttons["task-status-" + String(titleID.dropFirst("task-title-".count))]
@@ -18542,7 +19718,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(input.waitForExistence(timeout: 5))
         let title = "iOS Focus " + UUID().uuidString
         input.typeText(title + " /next")
-        // Keep this task visible independently of the existing Next list's size.
+
         let star = app.buttons["capture-focus"]
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: star)
         waitForExpectations(timeout: 10)
@@ -18560,7 +19736,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(task.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["focus-date"].exists)
 
-        // A tab change refreshes its own surface without changing the default launch tab.
+
         let inbox = app.buttons["tab-inbox"]
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: inbox)
         waitForExpectations(timeout: 10)
@@ -18657,8 +19833,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.buttons[title].waitForExistence(timeout: 30))
         XCTAssertTrue(app.staticTexts["@" + token].exists)
 
-        // The saved context is now a core suggestion: selecting and clearing it
-        // uses the same picker edits without persisting a second task.
+
         capture.tap()
         app.buttons["capture-contexts"].tap()
         XCTAssertTrue(query.waitForExistence(timeout: 5))
@@ -18706,8 +19881,8 @@ final class FoundationUITests: XCTestCase {
         let status = app.buttons["task-status-" + String(titleID.dropFirst("task-title-".count))]
         XCTAssertTrue(status.exists)
         status.tap()
-        // SwiftUI's confirmation dialog also exposes a nested button with the
-        // same identifier on iOS 27. Tap its first (accessible) outer control.
+
+
         app.buttons.matching(identifier: "task-complete").firstMatch.tap()
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons[title])
         waitForExpectations(timeout: 10)
@@ -18768,7 +19943,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "manage-unassigned-color-cancel")
         task86OpenColorEditor(app)
         XCTAssertFalse(app.buttons["manage-unassigned-color-option-1"].isSelected)
-        boardTap(app, "manage-unassigned-color-save") // Exact imported custom color: no-op.
+        boardTap(app, "manage-unassigned-color-save")
         task86WaitForColorEditorClose(app)
         task86OpenColorEditor(app)
         task86SelectGreen(app)
@@ -18835,7 +20010,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "manage-unassigned-color-cancel"); app.terminate()
     }
 
-    /// Root checks the same pending journal bytes after each retry and disarms its failure trigger before the cold test.
+
     func testManageUnassignedAreaColorSaveFailure() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -19102,7 +20277,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["manage-area-create-error"].waitForExistence(timeout: 20))
         let save = app.buttons["manage-area-create-save"]
         let scroll = app.scrollViews.containing(.textField, identifier: "manage-area-create-name").firstMatch
-        // Use a full upward swipe to reveal the longer error state.
+
         scroll.swipeUp()
         revealPagedElement(app, save, in: scroll)
         boardEnabled(save)
@@ -19236,7 +20411,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root checks the restored metadata and the entire Tasks table, including the deleted assigned Task.
+
     func testManagePersonCreateRestore() {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "399138de-da0a-465d-a619-aafe4fa200b5"]
@@ -19294,7 +20469,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Root arms the existing save-failure hook and verifies both retries retain the original journal UUID.
+
     func testManagePersonCreateSaveFailure() {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "fd51b5a3-23f3-4d7b-8805-ecb79d8f183b"]
@@ -19317,7 +20492,7 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Paired with SaveFailure: root disarms the hook while retaining the same library and journal.
+
     func testManagePersonCreateColdRecovery() {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "fd51b5a3-23f3-4d7b-8805-ecb79d8f183b"]
@@ -19379,7 +20554,7 @@ final class FoundationUITests: XCTestCase {
         reference.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
         revealPagedElement(app, reference, in: scroll)
-        // Select the whole single-line paragraph, including the horizontally scrolled suffix.
+
         reference.tap(withNumberOfTaps: 3, numberOfTouches: 1)
         reference.typeText("obsidian://task94/reference")
         XCTAssertEqual(reference.value as? String, "obsidian://task94/reference")
@@ -19575,7 +20750,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["app-lock-unlock"].exists, "Successful enable keeps this session unlocked")
         XCUIDevice.shared.press(.home); app.activate()
         task102Gate(app)
-        // Once the automatic attempt was cancelled, it stays concealed until explicit retry.
+
         XCTAssertTrue(app.staticTexts["Mindwtr is still locked."].exists)
         boardTap(app, "app-lock-unlock")
         boardEnabled(app.buttons["general-back"], timeout: 20)
@@ -20105,13 +21280,13 @@ final class FoundationUITests: XCTestCase {
         replaceTextView(input, with: "930", tapOffset: CGVector(dx: 0.5, dy: 0.5))
         task106Open(app); task106Pick(app, "capture106-area-a")
         XCTAssertTrue(app.buttons["gtd-default-area"].label.contains("Capture area A"))
-        task106Pick(app, "capture106-area-a") // Stored same choice is a no-op.
+        task106Pick(app, "capture106-area-a")
         boardTap(app, "gtd-default-area")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Capture default area choices"; shot.lifetime = .keepAlways; add(shot)
         boardTap(app, "gtd-area-cancel")
         app.terminate(); app.launch(); task106Capture(app, area: "Capture area A")
         task106Open(app); task106Pick(app, "")
-        task106Capture(app, area: "Capture area A") // Closing preserves the existing capture draft.
+        task106Capture(app, area: "Capture area A")
         app.terminate(); app.launch(); task106Capture(app, area: "No Area")
         task106Open(app); task106Pick(app, "__active-area__"); task106Pick(app, "")
         boardTap(app, "gtd-capture-back"); boardEnabled(app.buttons["gtd-back"])
@@ -20182,7 +21357,7 @@ final class FoundationUITests: XCTestCase {
     private func task109Pick(_ app: XCUIApplication, _ value: String) {
         let option = app.buttons["gtd-taskEditorPreset-" + value]
         let scroll = app.scrollViews["gtd-taskEditor-scroll"]
-        // LazyVGrid drops off-screen buttons; presets are above the section controls.
+
         for _ in 0..<8 where !option.exists { scroll.swipeDown() }
         revealPagedElement(app, option, in: scroll)
         boardEnabled(option); option.tap()
@@ -20951,7 +22126,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "capture-close"); task106Open(app)
         task107Toggle(app, "quickAddAutoClean", on: true)
         task107Toggle(app, "naturalLanguageDates", on: false)
-        capture(due: true, fill: false) // The retained draft owns its original parse settings.
+        capture(due: true, fill: false)
         boardTap(app, "capture-close"); app.terminate(); app.launch()
         capture(due: false, fill: true)
         boardTap(app, "capture-close"); task106Open(app)
@@ -21146,18 +22321,19 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "task-view-close"); boardTap(app, "search-close")
     }
 
-    func testTrashTaskRestoreSwipeOnly() {
+    func testTrashTaskRestoreSwipeOnly() throws {
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", "65bbce86-d72b-44f3-952b-e6f7b2ca8084"]
+        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", try task371Library("SWIPE", prefix: "MINDWTR_TRASH_TASK_RESTORE_UI_")]
         app.launch(); task149OpenTrash(app); _ = task149RevealRestore(app)
         XCTAssertFalse(app.buttons["task-view-close"].exists, "A Trash row does not open the editor")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Trash Restore requires a tap"; shot.lifetime = .keepAlways; add(shot)
         app.terminate()
     }
 
-    private func task149RestoreFlow(_ library: String) {
+    private func task149RestoreFlow(_ library: String, largest: Bool = false) {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", library]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launch(); task149OpenTrash(app); task149RevealRestore(app).tap()
         let row = app.descendants(matching: .any).matching(identifier: "trash-task-task149-task").firstMatch
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: row); waitForExpectations(timeout: 30)
@@ -21165,12 +22341,12 @@ final class FoundationUITests: XCTestCase {
         app.terminate(); app.launch(); task149OpenTrash(app); task149Restored(app); app.terminate()
     }
 
-    func testTrashTaskRestoreNormal() { task149RestoreFlow("a1bc4ceb-57b5-48f2-bb5c-ab1fb080533a") }
-    func testTrashTaskRestoreLargest() { task149RestoreFlow("4fc168a7-3b68-4026-b424-9ecad0b6e129") }
+    func testTrashTaskRestoreNormal() throws { task149RestoreFlow(try task371Library("NORMAL", prefix: "MINDWTR_TRASH_TASK_RESTORE_UI_")) }
+    func testTrashTaskRestoreLargest() throws { task149RestoreFlow(try task371Library("LARGEST", prefix: "MINDWTR_TRASH_TASK_RESTORE_UI_"), largest: true) }
 
-    func testTrashTaskRestoreFailedSave() {
+    func testTrashTaskRestoreFailedSave() throws {
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", "e42c775b-1f7e-4ef3-8791-4b10400213b0"]
+        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", try task371Library("RETRY", prefix: "MINDWTR_TRASH_TASK_RESTORE_UI_")]
         app.launch(); task149OpenTrash(app); task149RevealRestore(app).tap()
         for _ in 0..<2 {
             let retry = app.buttons["trash-retry"]; boardEnabled(retry, timeout: 30)
@@ -21181,9 +22357,9 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons["trash-retry"], timeout: 30); app.terminate()
     }
 
-    func testTrashTaskRestoreColdRecovery() {
+    func testTrashTaskRestoreColdRecovery() throws {
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", "e42c775b-1f7e-4ef3-8791-4b10400213b0"]
+        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", try task371Library("RETRY", prefix: "MINDWTR_TRASH_TASK_RESTORE_UI_")]
         app.launch(); XCTAssertTrue(app.staticTexts["trash-title"].waitForExistence(timeout: 30)); task149Restored(app)
         app.terminate(); app.launch(); task149OpenTrash(app); task149Restored(app); app.terminate()
     }
@@ -21230,18 +22406,19 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "task-view-close"); boardTap(app, "search-close")
     }
 
-    func testTrashProjectRestoreSwipeOnly() {
+    func testTrashProjectRestoreSwipeOnly() throws {
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", "ca5b39db-5e6b-4c89-abca-d872679a209a"]
+        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", try task371Library("SWIPE", prefix: "MINDWTR_TRASH_PROJECT_RESTORE_UI_")]
         app.launch(); task149OpenTrash(app); _ = task150RevealRestore(app)
         XCTAssertFalse(app.buttons["task-view-close"].exists, "A Trash row does not open the editor")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Trash Restore requires a tap"; shot.lifetime = .keepAlways; add(shot)
         app.terminate()
     }
 
-    private func task150RestoreFlow(_ library: String) {
+    private func task150RestoreFlow(_ library: String, largest: Bool = false) {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", library]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launch(); task149OpenTrash(app); task150RevealRestore(app).tap()
         let row = app.descendants(matching: .any).matching(identifier: "trash-project-task150-project").firstMatch
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: row); waitForExpectations(timeout: 30)
@@ -21249,12 +22426,12 @@ final class FoundationUITests: XCTestCase {
         app.terminate(); app.launch(); task149OpenTrash(app); task150Restored(app); app.terminate()
     }
 
-    func testTrashProjectRestoreNormal() { task150RestoreFlow("86cba5e6-ab45-4925-997b-7ff0d476267f") }
-    func testTrashProjectRestoreLargest() { task150RestoreFlow("1fd8cab7-17aa-4833-acd2-d0bbf6f392d7") }
+    func testTrashProjectRestoreNormal() throws { task150RestoreFlow(try task371Library("NORMAL", prefix: "MINDWTR_TRASH_PROJECT_RESTORE_UI_")) }
+    func testTrashProjectRestoreLargest() throws { task150RestoreFlow(try task371Library("LARGEST", prefix: "MINDWTR_TRASH_PROJECT_RESTORE_UI_"), largest: true) }
 
-    func testTrashProjectRestoreFailedSave() {
+    func testTrashProjectRestoreFailedSave() throws {
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", "0b17ead4-bca6-479d-a000-75cf85fe4315"]
+        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", try task371Library("RETRY", prefix: "MINDWTR_TRASH_PROJECT_RESTORE_UI_")]
         app.launch(); task149OpenTrash(app); task150RevealRestore(app).tap()
         for _ in 0..<2 {
             let retry = app.buttons["trash-retry"]; boardEnabled(retry, timeout: 30)
@@ -21265,9 +22442,9 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons["trash-retry"], timeout: 30); app.terminate()
     }
 
-    func testTrashProjectRestoreColdRecovery() {
+    func testTrashProjectRestoreColdRecovery() throws {
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", "0b17ead4-bca6-479d-a000-75cf85fe4315"]
+        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", try task371Library("RETRY", prefix: "MINDWTR_TRASH_PROJECT_RESTORE_UI_")]
         app.launch(); XCTAssertTrue(app.staticTexts["trash-title"].waitForExistence(timeout: 30)); task150Restored(app)
         app.terminate(); app.launch(); task149OpenTrash(app); task150Restored(app); app.terminate()
     }
@@ -21832,8 +23009,8 @@ final class FoundationUITests: XCTestCase {
         func reveal(_ id: String, survivorMovedAbove: Bool = false) {
             let title = app.buttons["task-title-" + id]
             if survivorMovedAbove {
-                // After removing the first row, a lazy survivor can be above
-                // the current viewport. Search upward before paging downward.
+
+
                 for _ in 0..<6 where !title.exists { scroll.swipeDown() }
             }
             revealPagedElement(app, title, in: scroll)
@@ -21893,8 +23070,8 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(scroll.waitForExistence(timeout: 30))
 
         func reveal(_ element: XCUIElement, movedAbove: Bool = false) -> XCUICoordinate {
-            // At largest text a group can be taller than this viewport. Its
-            // visible portion is tappable even though the full row cannot fit.
+
+
             func viewport() -> CGRect { scroll.frame.intersection(app.frame).insetBy(dx: 4, dy: 8) }
             func intersection() -> CGRect { element.frame.intersection(viewport()) }
             func enoughVisible() -> Bool {
@@ -21906,8 +23083,8 @@ final class FoundationUITests: XCTestCase {
             for _ in 0..<24 {
                 if enoughVisible() { break }
                 let frame = viewport()
-                // Lazy offscreen rows can report a stale/clipped frame while
-                // still existing. The test knows its traversal direction.
+
+
                 let above = movedAbove
                 let origin = app.coordinate(withNormalizedOffset: .zero)
                 let start = origin.withOffset(CGVector(dx: frame.minX + 8, dy: frame.minY + frame.height * (above ? 0.25 : 0.75)))
@@ -22114,8 +23291,7 @@ final class FoundationUITests: XCTestCase {
         assertTask("task162-second", title: "Task162 Second", priority: "Low")
         XCTAssertFalse(app.buttons["task-title-task162-other"].exists)
 
-        // RN token taps are additive. Clear the selected chip before choosing
-        // another token, so the default All match mode does not form an AND.
+
         tapChip("@task162-common"); selected("all")
         tapChip("@task162-other"); selected("@task162-other")
         assertTask("task162-other", title: "Task162 Other", priority: "Medium")
@@ -22454,8 +23630,8 @@ final class FoundationUITests: XCTestCase {
 
         app.launch()
         openTask()
-        // Old production identifies this saved last-weekday rule as the day-of-month choice.
-        // Stop here on the old build, before changing a draft or touching the database.
+
+
         assertMonthlyCustom()
         screenshot("Task167 saved monthly custom selection")
 
@@ -22471,7 +23647,7 @@ final class FoundationUITests: XCTestCase {
         assertCustom("2")
         boardTap(app, "task-recurrence-custom-cancel")
 
-        // Apply changed only the editor draft. Discard restores the complete saved rule.
+
         boardTap(app, "task-view-close")
         boardTap(app, "task-editor-discard")
         openTask()
@@ -23538,8 +24714,8 @@ final class FoundationUITests: XCTestCase {
         let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", "5d8711a5-4be1-45c9-a3c2-5bb650d32bf4"]
         app.launch(); task172OpenArchive(app); boardTap(app, "archive-select-toggle")
         boardEnabled(app.buttons["archive-bulk-select-all"], timeout: 15)
-        // The displayed revision includes its clock minute. Cross that boundary
-        // deliberately; selecting rows must refresh once without writing data.
+
+
         let nextMinute = (floor(Date().timeIntervalSince1970 / 60) + 1) * 60 + 0.5
         while Date().timeIntervalSince1970 < nextMinute { Thread.sleep(forTimeInterval: 0.2) }
         boardTap(app, "archive-bulk-select-all")
@@ -23555,8 +24731,8 @@ final class FoundationUITests: XCTestCase {
     private func task182Filter(_ app: XCUIApplication, _ query: String = "Task182 batch") {
         boardTap(app, "done-overflow-button"); boardTap(app, "done-filter-action")
         let input = app.textFields["done-filter-search"]; boardEnabled(input, timeout: 15)
-        // XCTest27 reports this padded field as non-hittable although its
-        // visible center accepts an ordinary touch (captured UI1221).
+
+
         if input.value as? String != query {
             let center = input.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             center.tap()
@@ -23622,7 +24798,7 @@ final class FoundationUITests: XCTestCase {
         let first = app.descendants(matching: .any).matching(identifier: "task-title-task182-batch-01").firstMatch
         if restored { XCTAssertTrue(first.waitForExistence(timeout: 15)) }
         else { XCTAssertTrue(first.waitForNonExistence(timeout: 15)) }
-        // RN hides Done rows under archived parents; they remain in SQLite.
+
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "task-title-task182-readonly").firstMatch.exists)
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
     }
@@ -23958,8 +25134,8 @@ final class FoundationUITests: XCTestCase {
                 if more.isHittable { break }
                 scroll.swipeUp(velocity: .fast)
             }
-            // Crossing a minute can refresh a stale page back to offset zero.
-            // Keep the final-page assertion; only repeat the visible readonly More action.
+
+
             for _ in 0..<3 {
                 XCTAssertTrue(more.isHittable); boardEnabled(more); more.tap()
                 if task185Option(app, "#page129").waitForExistence(timeout: 3) { break }
@@ -24051,8 +25227,8 @@ final class FoundationUITests: XCTestCase {
         let actual = previous == input.placeholderValue ? "" : previous
         if actual != query {
             if selectAllBeforeReplacing && !actual.isEmpty {
-                // Task193 searches can overflow at XXXL. Select all instead of
-                // deleting from a caret placed in the middle of the old query.
+
+
                 input.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 1)
                 let allLabels = ["Select All", "تحديد الكل"]
                 let nextLabels = ["Next Page", "الصفحة التالية", "التالي"]
@@ -24343,8 +25519,8 @@ final class FoundationUITests: XCTestCase {
         let cancel = app.buttons.matching(identifier: "reference-status-cancel").firstMatch
         if cancel.exists { boardEnabled(cancel); cancel.tap() }
         else {
-            // iOS 27 presents this confirmation dialog as a popover, whose
-            // standard outside-dismiss region replaces the Cancel button.
+
+
             let dismiss = app.otherElements.matching(identifier: "PopoverDismissRegion").firstMatch
             XCTAssertTrue(dismiss.waitForExistence(timeout: 10))
             dismiss.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.6)).tap()
@@ -24633,8 +25809,8 @@ extension FoundationUITests {
     private func task189ChangeMinute(_ app: XCUIApplication, _ suffix: String) {
         let picker = app.datePickers["reference-backdate-picker"]
         revealPagedElement(app, picker, in: app.scrollViews["reference-backdate-scroll"])
-        // Native wheel order is combined date, hour, minute, then optional AM/PM.
-        // Read the actual value rather than assuming a fixture's completion time.
+
+
         let minute = app.pickerWheels.element(boundBy: 2)
         guard let original = minute.value as? String,
               let match = original.range(of: "[0-9]+", options: .regularExpression),
@@ -24648,8 +25824,8 @@ extension FoundationUITests {
         let input = app.textFields["reference-backdate-time-spent"], scroll = app.scrollViews["reference-backdate-scroll"]
         boardEnabled(input)
         revealPagedElement(app, input, in: scroll, outerEdge: true)
-        // The visible field may report false isHittable while already focused;
-        // retain the measured viewport guard before tapping its trailing edge.
+
+
         XCTAssertGreaterThanOrEqual(input.frame.minY, scroll.frame.minY - 1)
         XCTAssertLessThanOrEqual(input.frame.maxY, scroll.frame.maxY + 1)
         input.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
@@ -24676,8 +25852,8 @@ extension FoundationUITests {
         if edge { button.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap() } else { button.tap() }
         XCTAssertTrue(app.datePickers["reference-backdate-picker"].waitForNonExistence(timeout: 30))
         if save && suffix == "plain" {
-            // This specific historical fixture is the sole active-project source.
-            // Task191 now offers its normal-session prompt after the backdate ACK.
+
+
             let description = app.staticTexts["reference-project-next-action-description"]
             XCTAssertTrue(description.waitForExistence(timeout: 20))
             XCTAssertTrue(description.label.contains("Task189 Active Project"))
@@ -24730,8 +25906,8 @@ extension FoundationUITests {
         app.launch(); task186Open(app); task186Filter(app, "Task189 action", rtl: true); referenceGroup(app, "none")
         task189Open(app, "focused", showMinutes: true, rtl: true)
         XCTAssertNotEqual(app.datePickers["reference-backdate-picker"].label, "Completion time")
-        // Untouched local wheel: root binds the independently recorded minute
-        // and opening/tap wall-clock window; exact milliseconds are host-tested.
+
+
         task189Minutes(app, "45"); task189Finish(app, "focused", save: true)
         app.terminate(); app.launch(); task186Open(app); task186Filter(app, "Task189 action", rtl: true)
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "task-title-task189-focused").firstMatch.exists)
@@ -24801,8 +25977,8 @@ extension FoundationUITests {
     private func task190Reveal(_ app: XCUIApplication, _ row: XCUIElement) {
         let list = app.descendants(matching: .any).matching(identifier: "reference-scroll").firstMatch
         XCTAssertTrue(list.waitForExistence(timeout: 10))
-        // List virtualizes offscreen rows. Scan both directions with measured,
-        // slow drags so a tall card is not skipped by a flick or retained index.
+
+
         for upward in [false, true] {
             for _ in 0..<12 {
                 let viewport = list.frame.intersection(app.frame)
@@ -24826,7 +26002,7 @@ extension FoundationUITests {
     private func task190StatusAction(_ app: XCUIApplication, _ id: String, rtl: Bool = false) {
         let identifier = "task-title-" + id
         let rows = app.descendants(matching: .any).matching(identifier: identifier)
-        // Keep a live query while List cells are recycled during large-text scrolling.
+
         let row = rows.firstMatch
         task190Reveal(app, row)
         XCTAssertFalse(app.buttons["task-status-" + id].exists)
@@ -24843,7 +26019,7 @@ extension FoundationUITests {
         XCTAssertTrue(app.buttons.matching(identifier: "reference-status-reference").firstMatch.label.hasPrefix("✓ "))
     }
 
-    // XCUI frames can report 43.99999999999997 for a 44-point target.
+
     private func task190Open(_ app: XCUIApplication, _ suffix: String, rtl: Bool = false) {
         task190StatusAction(app, "task190-" + suffix, rtl: rtl)
         let action = app.buttons.matching(identifier: "reference-status-destination").firstMatch
@@ -24906,8 +26082,8 @@ extension FoundationUITests {
     }
 
     private func task190Filter(_ app: XCUIApplication, _ query: String) {
-        // Clear through the real search chip: tapping a large-text field can
-        // place its insertion point mid-string, so backspaces cannot replace it.
+
+
         let searchChip = app.buttons["reference-chip-search"]
         if searchChip.exists {
             boardEnabled(searchChip); searchChip.tap()
@@ -24928,8 +26104,8 @@ extension FoundationUITests {
             ("same", "Task190 Active Project", ["kind": "project", "id": "task190-active"], "Task190 Active Project"),
             ("unicode", "Cafe", ["kind": "project", "id": "task190-cafe\u{0301}"], "Task190 Cafe\u{0301} NFD")
         ] {
-            // Search targets the row at maximum text size; the normal flow
-            // separately covers the multi-row grouped list and retained folds.
+
+
             if isolateRows { task190Filter(app, "Task190 action " + suffix) }
             task190Open(app, suffix)
             if !query.isEmpty { task190Query(app, query) }
@@ -25096,9 +26272,8 @@ extension FoundationUITests {
     private func task191Reveal(_ app: XCUIApplication, _ element: XCUIElement, scrollable: Bool = true) -> CGRect {
         if scrollable { XCTAssertTrue(app.scrollViews[task191Prefix + "-scroll"].waitForExistence(timeout: 20)) }
         XCTAssertTrue(element.waitForExistence(timeout: 20))
-        // XCTest can report false hittability for these visible Task191 prompt
-        // controls even when a real tap and exact outcome succeed. Reveal by
-        // measured occlusion only; this does not establish broader AX acceptance.
+
+
         for _ in 0..<(scrollable ? 32 : 0) {
             let viewport = task191Viewport(app, scrollable: scrollable), frame = element.frame
             if task191Inside(frame, viewport: viewport) { break }
@@ -25244,8 +26419,8 @@ extension FoundationUITests {
         boardEnabled(app.buttons["task-completion-undo"], timeout: 5)
         XCTAssertFalse(task191Prompt(app).exists)
         boardTap(app, "task-completion-undo")
-        // The Reference recurrence child stays Reference. RN still offers the
-        // project prompt, with the same transient completion Undo above it.
+
+
         task191OpenPrompt(app, suffix: "recurring")
         let recurringUndo = app.buttons.matching(identifier: "task-completion-undo").firstMatch
         boardEnabled(recurringUndo, timeout: 5); XCTAssertEqual(app.buttons.matching(identifier: "task-completion-undo").count, 1)
@@ -25305,12 +26480,12 @@ extension FoundationUITests {
 
 }
 
-// Task194 requires saved preview contents, not merely a sheet with no Save button.
+
 extension FoundationUITests {
     func testTask194ArchivedReferenceTaskSavedPreviewAndPaging() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        // Root stages an isolated rich archived-project Reference fixture here.
+
         app.launchArguments = task192Arguments("3a67825a-e2b8-45c3-accf-02c3c6fecd70")
         app.launch()
         task186Open(app)
@@ -25390,7 +26565,7 @@ extension FoundationUITests {
     }
 }
 
-// Task192 exercises the shared Reference selection scope through real controls.
+
 extension FoundationUITests {
     private var task192Batch: [String] { (1...4).map { String(format: "task192-batch-%02d", $0) } }
 
@@ -25402,8 +26577,8 @@ extension FoundationUITests {
 
     private func task192Exact(_ app: XCUIApplication, _ id: String, buttons: Bool = false) -> XCUIElement {
         let matches = buttons ? app.buttons.matching(identifier: id) : app.descendants(matching: .any).matching(identifier: id)
-        // ASCII selectors remain live during List virtualization. Only Unicode
-        // twins need enumeration, since XCTest matches canonical equivalents.
+
+
         if id.utf8.allSatisfy({ $0 < 128 }) { return matches.firstMatch }
         return matches.allElementsBoundByIndex.first { $0.identifier.utf8.elementsEqual(id.utf8) } ?? matches.element(boundBy: matches.count)
     }
@@ -25434,8 +26609,8 @@ extension FoundationUITests {
                     thenDragTo: origin.withOffset(CGVector(dx: x + (left ? distance : -distance), dy: viewport.midY)),
                     withVelocity: .slow, thenHoldForDuration: 0.15)
             } else {
-                // Use List content, not its non-scrolling outer gutter. Slow,
-                // measured drags keep large multi-line rows from flicking past.
+
+
                 if frame.isEmpty {
                     let visibleRows = list.buttons.allElementsBoundByIndex.compactMap { row -> String? in
                         let rect = row.frame
@@ -25467,13 +26642,12 @@ extension FoundationUITests {
         let button = task192Reveal(app, id, buttons: true, scrollID: scrollID, horizontal: horizontal, scans: scans, forwardOnly: forwardOnly)
         boardEnabled(button, timeout: 20)
         XCTAssertGreaterThanOrEqual(button.frame.height, 44 - 0.01); XCTAssertGreaterThanOrEqual(button.frame.width, 44 - 0.01)
-        // Task191 demonstrated false XCTest isHittable for some fully visible
-        // custom controls. Record it, then prove the actual tap's exact outcome.
+
+
         print("Task192 tap \(id) frame=\(button.frame) enabled=\(button.isEnabled) hittable=\(button.isHittable)")
         if id == "reference-more" {
-            // SwiftUI exposes the full List cell as this Button's AX frame.
-            // UI1364's screenshot places the visible LTR capsule at x16...70;
-            // tap its center, not the empty middle of the 402-point cell.
+
+
             XCTAssertGreaterThanOrEqual(button.frame.width, 88)
             let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Task192 visible More"; shot.lifetime = .keepAlways; add(shot)
             button.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
@@ -25592,7 +26766,7 @@ extension FoundationUITests {
         task186Filter(app, "Task192 Page"); task192Count(app, 1)
         task192Tap(app, "reference-bulk-exit")
         referenceGroup(app, "tag"); task186Filter(app, "Task192 batch")
-        // Both groups expose the same IDs, but the shared selected count is one.
+
         task192Start(app, "task192-batch-01")
         for group in ["Task192 A", "Task192 B"] {
             let duplicate = task192Reveal(app, "reference-select-tag:#" + group + "-task192-batch-01", buttons: true)
@@ -25671,8 +26845,6 @@ extension FoundationUITests {
 }
 
 
-// Task195 stages a fresh rich Reference fixture. Root verifies raw no-op/cancel
-// equality and the actual RN changed-task result independently of this UI test.
 extension FoundationUITests {
     private var task195TagInput: String { "  ###Task195 café 🧭  " }
 
@@ -25725,7 +26897,7 @@ extension FoundationUITests {
         task195OpenTag(app)
         XCTAssertFalse((app.textFields["reference-bulk-tag-input"].value as? String ?? "").contains("canceled input"))
         XCTAssertFalse(app.buttons["reference-bulk-tag-save"].isEnabled)
-        task195TypeTag(app, "###") // Shared canSave permits it; the RN builder produces no updates.
+        task195TypeTag(app, "###")
         boardEnabled(app.buttons["reference-bulk-tag-save"], timeout: 20)
         task195Observe(app, library: library, tag: "###", operation: "addTag-noop")
         boardTap(app, "reference-bulk-tag-save")
@@ -25809,8 +26981,8 @@ extension FoundationUITests {
     func testTask195ReferenceBulkAddTagOriginalJournalColdRecovery() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = task192Arguments("a6a0c147-cae4-4525-a4bc-4a3f94adad90")
-        // Native owner stages the actual failure DB and byte-exact original
-        // pending journal here, not a freshly synthesized target state.
+
+
         for launch in 0..<2 {
             app.launch()
             if launch == 0 { boardEnabled(app.buttons["reference-overflow-button"], timeout: 30) }
@@ -25826,8 +26998,7 @@ extension FoundationUITests {
     }
 }
 
-// Task193 keeps the Task192 measured viewport controls and exercises all shared
-// Reference status choices against fresh task-owned libraries staged by root.
+
 extension FoundationUITests {
     private var task193Statuses: [String] { ["inbox", "next", "waiting", "someday", "done"] }
     private func task193IDs(_ status: String) -> [String] { (1...4).map { String(format: "task193-%@-%02d", status, $0) } }
@@ -25840,13 +27011,13 @@ extension FoundationUITests {
         let chips = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "reference-chip-"))
         func hasRequestedScope() -> Bool {
             if query.isEmpty { return !search.exists && archived.exists && chips.count == 1 }
-            // Core/native build the localized label as Remove: Search: query.
-            // Read the entire query from AX, including text outside the viewport.
+
+
             return search.exists && search.label.components(separatedBy: ": ").dropFirst(2).joined(separator: ": ").utf8.elementsEqual(query.utf8)
                 && archived.exists && chips.count == 2
         }
-        // Viewer close refreshes this same scope. Reopening its filter panel
-        // immediately adds a redundant touch during the dismissal transition.
+
+
         if !hasRequestedScope() { task186Filter(app, query, rtl: rtl, selectAllBeforeReplacing: true) }
         let ready = NSPredicate { _, _ in hasRequestedScope() && (query.isEmpty || search.isEnabled) && archived.isEnabled }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 20), .completed)
@@ -26082,8 +27253,6 @@ extension FoundationUITests {
 }
 
 
-// Task196 Reference Remove uses fresh root-staged fixtures and exact UTF-8 AX
-// identities. Core/RN and raw snapshots independently prove persisted effects.
 extension FoundationUITests {
     private var task196Picks: [String] {
         ["#Task196 café 🧭", "#Task196 cafe\u{301} 🧭", "#Task196 CASE", "#Task196 imported " + String(repeating: "x", count: 2_001)]
@@ -26100,7 +27269,7 @@ extension FoundationUITests {
     private func task196Control(_ app: XCUIApplication, _ id: String, field: Bool = false) -> XCUIElement {
         let element = field ? app.textFields[id] : app.buttons[id]
         if field || ["reference-bulk-remove-tag-save", "reference-bulk-remove-tag-cancel"].contains(id) {
-            // Search and actions remain outside the scrolling option list.
+
             boardEnabled(element, timeout: 20)
             XCTAssertTrue(task192Inside(element.frame, app.frame))
             if app.keyboards.firstMatch.exists { XCTAssertFalse(element.frame.intersects(app.keyboards.firstMatch.frame)) }
@@ -26143,7 +27312,7 @@ extension FoundationUITests {
         }
         let current = input.value as? String ?? "", old = current == input.placeholderValue ? "" : current
         if keyboardProbe {
-            // Exercise actual software keys independently of typeText injection.
+
             XCTAssertTrue(old.isEmpty); XCTAssertEqual(text, "caf")
             var expected = ""
             for letter in ["c", "a", "f"] {
@@ -26195,8 +27364,8 @@ extension FoundationUITests {
 
     private func task196Pick(_ app: XCUIApplication, _ value: String) {
         let chip = task196ExactChip(app, value), scroll = app.scrollViews["reference-bulk-remove-tag-scroll"]
-        // Imported full labels can be taller than the viewport. Tap only a
-        // measured visible intersection, preserving the full value and AX label.
+
+
         var visible = CGRect.zero
         for _ in 0..<24 {
             var viewport = scroll.frame.intersection(app.frame)
@@ -26267,8 +27436,8 @@ extension FoundationUITests {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Task196 visible Done before coordinate tap"
         shot.lifetime = .keepAlways; add(shot)
         print("Task196 visible Done coordinate frame=" + String(describing: visibleDone) + " fixture=" + library)
-        // Element tap interruption handling cancels this app-owned modal.
-        // Use the same measured app-coordinate pattern as the token chips.
+
+
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
             dx: visibleDone.midX - app.frame.minX, dy: visibleDone.midY - app.frame.minY)).tap()
         XCTAssertTrue(app.alerts["reference-bulk-remove-tag-dialog"].exists)
@@ -26286,7 +27455,7 @@ extension FoundationUITests {
         app.launch(); task186Open(app); referenceGroup(app, "none"); task193Range(app, status: "inbox", rtl: rtl)
         task196OpenRemove(app)
         if largest {
-            // Exercise keyboard dismissal/refocus before the long paged union.
+
             let input = task196Control(app, "reference-bulk-remove-tag-input", field: true)
             input.tap()
             let keyboard = app.keyboards.firstMatch
@@ -26314,8 +27483,8 @@ extension FoundationUITests {
             _ = task196Control(app, "reference-bulk-remove-tag-input", field: true)
             print("Task196 largest keyboard hide/refocus exact query PASS fixture=" + library)
         }
-        // Unfiltered union is210. Two actual More actions publish100/100/10;
-        // the real-host suite independently checks every value and revision.
+
+
         XCTAssertTrue(app.buttons["reference-bulk-remove-tag-option-99"].exists)
         XCTAssertFalse(app.buttons["reference-bulk-remove-tag-option-100"].exists)
         for boundary in [199, 209] {
@@ -26491,7 +27660,7 @@ extension FoundationUITests {
     func testTask196ReferenceBulkRemoveTagOriginalJournalColdRecovery() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = task192Arguments("bcd47dde-a273-4e68-b705-c8b61933b7ae")
-        // Stage only the accepted failure DB plus its actual final pending bytes.
+
         for launch in 0..<2 {
             app.launch()
             if launch == 0 { boardEnabled(app.buttons["reference-overflow-button"], timeout: 30) }
@@ -26750,7 +27919,7 @@ extension FoundationUITests {
         app.launchArguments = task192Arguments(library, rtl: rtl, largest: largest)
         app.launch()
         if rtl {
-            // Arabic requires the shared explicit Language setting, not a system-locale hint.
+
             task97Open(app); task97Picker(app, "language"); task97Choose(app, "ar")
             task197Observe(app, "Arabic Language setup settled")
             boardTap(app, "general-back"); boardTap(app, "settings-back")
@@ -26853,7 +28022,7 @@ extension FoundationUITests {
 
 }
 
-// Task423: static About navigation never launches an external site in UI tests.
+
 extension FoundationUITests {
     private func task423Settings(_ app: XCUIApplication) {
         boardEnabled(app.buttons["tab-menu"], timeout: 30)
@@ -26938,7 +28107,7 @@ extension FoundationUITests {
     }
 }
 
-// Task427's fixed unavailable fixture never contacts Apple or opens the store.
+
 extension FoundationUITests {
     func testTask427AboutManualUpdateAndRatingUnavailableLargestAndCold() {
         continueAfterFailure = false
@@ -26987,7 +28156,7 @@ extension FoundationUITests {
     }
 }
 
-// Blank endpoint reaches the actual fail-closed configuration API; this case sends no feedback.
+
 extension FoundationUITests {
     private func task433OpenFeedback(_ app: XCUIApplication) {
         if !app.buttons["about-back"].exists {
@@ -27008,8 +28177,8 @@ extension FoundationUITests {
 
     private func task433Reveal(_ app: XCUIApplication, _ element: XCUIElement) {
         let scroll = app.scrollViews["feedback-scroll"]
-        // Lazy locations lose their AX element offscreen; the non-lazy heading
-        // supplies an existing frame so the shared helper can first scroll up.
+
+
         let whereHeading = app.staticTexts["Where did this happen?"]
         if element.exists && element.identifier == "feedback-message" && element.frame.isEmpty {
             revealPagedElement(app, app.staticTexts["Message"], in: scroll, ready: app.buttons["feedback-back"], outerEdge: true)
@@ -27095,5 +28264,3055 @@ extension FoundationUITests {
         task433Reveal(app, diagnostics); XCTAssertEqual(diagnostics.value as? String, "0")
         XCTAssertFalse(app.staticTexts["feedback-error"].exists); XCTAssertFalse(app.staticTexts["feedback-sent"].exists)
         boardTap(app, "feedback-back"); boardTap(app, "about-back"); boardTap(app, "settings-back"); app.terminate()
+    }
+
+    private func task497App(_ suffix: String, mode: String = "", largest: Bool = false, retry: Bool = false) throws -> XCUIApplication {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CAPTURE_SAVE_EDIT_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-capture-save-edit-fixture", "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        if retry { app.launchArguments.append("--native-capture-terminal-failure-once") }
+        app.launchEnvironment["MINDWTR_CAPTURE_SAVE_EDIT_DELIVERY"] = mode
+        app.launch(); boardEnabled(app.buttons["capture-open"], timeout: 30)
+        return app
+    }
+    private func task497Capture(_ app: XCUIApplication, title: String) {
+        boardTap(app, "capture-open")
+        let input = app.textViews["capture-input"]; boardEnabled(input); input.typeText(title)
+        boardEnabled(app.buttons["capture-save-edit"])
+    }
+    private func task497Editor(_ app: XCUIApplication, title: String, readRetry: Bool = false) {
+        let input = app.textFields["task-editor-title"]
+        boardEnabled(input, timeout: 30)
+        XCTAssertEqual(input.value as? String, title)
+        XCTAssertTrue(app.buttons["task-editor-save"].exists)
+        XCTAssertFalse(app.textViews["capture-input"].exists)
+        XCTAssertEqual(app.buttons["persistence-retry"].exists, readRetry)
+    }
+    private func task497State(_ app: XCUIApplication) -> [String: Any] {
+        guard let bytes = app.staticTexts["capture-save-edit-fixture-state"].label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return value
+    }
+    private func task497Held(_ app: XCUIApplication) {
+        let state = app.staticTexts["capture-save-edit-fixture-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate { [weak self] _, _ in self?.task497State(app)["held"] as? Bool == true }, evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+        XCTAssertEqual(task497State(app)["submissions"] as? Int, 1)
+    }
+    private func task497SavedOnce(_ app: XCUIApplication, title: String) {
+        boardTap(app, "tab-inbox")
+        let task = app.buttons[title]; XCTAssertTrue(task.waitForExistence(timeout: 30))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@ AND identifier BEGINSWITH %@", title, "task-title-")).count, 1)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["capture-open"], timeout: 30)
+        XCTAssertTrue(app.buttons[title].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+    }
+    private func task497Normal(_ suffix: String, largest: Bool) throws {
+        let app = try task497App(suffix, largest: largest); defer { app.terminate() }
+        boardTap(app, "tab-focus")
+        let title = "Task497 full captured task " + suffix
+        task497Capture(app, title: title + " @home #capture497")
+        let addAnother = app.switches["capture-add-another"]
+        if addAnother.value as? String != "1" { boardEnabled(addAnother); addAnother.tap() }
+        boardTap(app, "capture-options")
+        let note = app.descendants(matching: .any).matching(identifier: "capture-note").firstMatch
+        boardEnabled(note); note.tap(); note.typeText("Task497 full note")
+        let save = app.buttons["capture-save-edit"]; boardEnabled(save)
+        XCTAssertTrue(save.isHittable); XCTAssertGreaterThanOrEqual(save.frame.height, 44 - 0.01)
+        XCTAssertGreaterThanOrEqual(app.buttons["capture-save"].frame.height, 44 - 0.01)
+        save.tap(); task497Editor(app, title: title)
+        let editorScroll = app.scrollViews["task-editor-scroll"]
+        let details = app.buttons["task-editor-section-details"]
+        if details.exists {
+            revealPagedElement(app, details, in: editorScroll, outerEdge: true)
+            if details.value as? String == "Expand" { details.tap() }
+        }
+        let editorNote = app.textViews["task-editor-note"]
+        revealPagedElement(app, editorNote, in: editorScroll, outerEdge: true)
+        XCTAssertEqual(editorNote.value as? String, "Task497 full note")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Task497 save edit " + suffix
+        shot.lifetime = .keepAlways; add(shot)
+        boardTap(app, "task-view-close")
+        XCTAssertFalse(app.buttons[title].exists, "New Inbox task should remain outside the Focus projection")
+        task497SavedOnce(app, title: title)
+    }
+    func testTask497SaveEditOverridesAddAnotherFromFilteredSurfaceNormal() throws { try task497Normal("NORMAL", largest: false) }
+    func testTask497SaveEditOverridesAddAnotherFromFilteredSurfaceLargest() throws { try task497Normal("LARGEST", largest: true) }
+    func testTask497ActualTerminalFailureExactRetryOpensAcknowledgedTaskOnce() throws {
+        let app = try task497App("RETRY", retry: true); defer { app.terminate() }
+        let title = "Task497 exact retry"
+        task497Capture(app, title: title); boardTap(app, "capture-save-edit")
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30)
+        XCTAssertEqual(app.textViews["capture-input"].value as? String, title)
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        XCTAssertFalse(app.buttons["capture-save-edit"].isEnabled)
+        boardTap(app, "persistence-retry"); task497Editor(app, title: title)
+        boardTap(app, "task-view-close"); task497SavedOnce(app, title: title)
+    }
+    func testTask497PostcommitProjectionFailureOpensWithoutResubmitting() throws {
+        let app = try task497App("READ", mode: "read-failure"); defer { app.terminate() }
+        let title = "Task497 acknowledged read failure"
+        task497Capture(app, title: title); boardTap(app, "capture-save-edit")
+        task497Editor(app, title: title, readRetry: true); boardTap(app, "task-view-close")
+
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["persistence-retry"])
+        waitForExpectations(timeout: 30)
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        boardTap(app, "capture-open")
+        XCTAssertEqual(task497State(app)["submissions"] as? Int, 1)
+        boardTap(app, "capture-close")
+        task497SavedOnce(app, title: title)
+    }
+    func testTask497DuplicatePressAndOldReplyCannotDismissNewSheet() throws {
+        let app = try task497App("SHEET", mode: "hold"); defer { app.terminate() }
+        let title = "Task497 old sheet task"
+        task497Capture(app, title: title); app.buttons["capture-save-edit"].doubleTap(); task497Held(app)
+        XCTAssertFalse(app.buttons["capture-save-edit"].isEnabled)
+        boardTap(app, "capture-save-edit-fixture-new-sheet")
+        XCTAssertEqual(app.textViews["capture-input"].value as? String, "Task497 newer draft")
+        boardTap(app, "capture-save-edit-fixture-release")
+        boardEnabled(app.buttons["capture-save-edit"], timeout: 30)
+        XCTAssertEqual(app.textViews["capture-input"].value as? String, "Task497 newer draft")
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        XCTAssertEqual(task497State(app)["submissions"] as? Int, 1)
+        boardTap(app, "capture-close"); task497SavedOnce(app, title: title)
+    }
+    func testTask497HostReplacementRetiresOldAcknowledgement() throws {
+        let app = try task497App("HOST", mode: "hold"); defer { app.terminate() }
+        let title = "Task497 old host task"
+        task497Capture(app, title: title); boardTap(app, "capture-save-edit"); task497Held(app)
+        boardTap(app, "capture-save-edit-fixture-host")
+        expectation(for: NSPredicate { [weak self] _, _ in self?.task497State(app)["replaced"] as? Bool == true }, evaluatedWith: app.staticTexts["capture-save-edit-fixture-state"])
+        waitForExpectations(timeout: 30)
+        boardTap(app, "capture-save-edit-fixture-release")
+        boardEnabled(app.buttons["capture-save-edit"], timeout: 30)
+        XCTAssertEqual(app.textViews["capture-input"].value as? String, "Task497 replacement draft")
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["capture-open"], timeout: 30)
+        XCTAssertTrue(app.buttons[title].waitForExistence(timeout: 30)); XCTAssertFalse(app.buttons["task-editor-save"].exists)
+    }
+    func testTask497BackgroundRetiresEditNavigationWhileSaveRemainsDurable() throws {
+        let app = try task497App("BACKGROUND", mode: "hold"); defer { app.terminate() }
+        let title = "Task497 background saved task"
+        task497Capture(app, title: title); boardTap(app, "capture-save-edit"); task497Held(app)
+        XCUIDevice.shared.press(.home); app.activate()
+        boardTap(app, "capture-save-edit-fixture-release")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.textViews["capture-input"])
+        waitForExpectations(timeout: 30)
+        XCTAssertFalse(app.buttons["task-editor-save"].exists); task497SavedOnce(app, title: title)
+    }
+    func testTask497BackgroundAfterAcknowledgementRetiresClosedSheetHandoff() throws {
+        let app = try task497App("ACK_BACKGROUND", mode: "hold-read"); defer { app.terminate() }
+        let title = "Task497 post acknowledgement background task"
+        task497Capture(app, title: title); boardTap(app, "capture-save-edit"); task497Held(app)
+        XCTAssertEqual(task497State(app)["readHeld"] as? Bool, true)
+        XCTAssertEqual(task497State(app)["retry"] as? Bool, false)
+        XCTAssertFalse(app.textViews["capture-input"].exists, "The acknowledgement already closed CaptureSheet")
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        XCUIDevice.shared.press(.home); app.activate()
+        boardTap(app, "capture-save-edit-fixture-release")
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        task497SavedOnce(app, title: title)
+    }
+    func testTask497PriorDraftGateProtectsDraftAndConsumesNewNavigation() throws {
+        let app = try task497App("DRAFT"); defer { app.terminate() }
+        let oldTitle = "Task497 prior task", draftTitle = "Task497 protected prior draft", newTitle = "Task497 saved behind draft gate"
+        task497Capture(app, title: oldTitle); boardTap(app, "capture-save")
+        boardEnabled(app.buttons[oldTitle], timeout: 30); app.buttons[oldTitle].tap()
+        if !app.textFields["task-editor-title"].exists { boardTap(app, "task-mode-edit") }
+        boardEnabled(app.textFields["task-editor-title"])
+        replaceProjectNotesText(app.textFields["task-editor-title"], with: draftTitle)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-keep-for-later")
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task497Capture(app, title: newTitle); boardTap(app, "capture-save-edit")
+        boardEnabled(app.buttons["task-recovery-resume"], timeout: 30)
+        XCTAssertEqual(app.staticTexts["task-recovery-title"].label, draftTitle)
+        boardTap(app, "task-recovery-keep")
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        XCTAssertTrue(app.buttons[newTitle].waitForExistence(timeout: 30))
+        boardTap(app, "task-recovery-open"); boardTap(app, "task-recovery-resume")
+        task497Editor(app, title: draftTitle)
+    }
+    func testTask497NormalSaveStillKeepsAddAnotherDraft() throws {
+        let app = try task497App("SAVE"); defer { app.terminate() }
+        let title = "Task497 ordinary add another"
+        task497Capture(app, title: title)
+        let addAnother = app.switches["capture-add-another"]
+        if addAnother.value as? String != "1" { boardEnabled(addAnother); addAnother.tap() }
+        boardTap(app, "capture-save")
+        expectation(for: NSPredicate(format: "value == %@ OR value == %@", "", app.textViews["capture-input"].label), evaluatedWith: app.textViews["capture-input"])
+        waitForExpectations(timeout: 30)
+        XCTAssertTrue(app.textViews["capture-input"].exists); XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        boardTap(app, "capture-close"); task497SavedOnce(app, title: title)
+    }
+
+    private func task500App(_ suffix: String, paste: String = "basic", mode: String = "", largest: Bool = false, retry: Bool = false) throws -> XCUIApplication {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CAPTURE_LINES_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-capture-lines-fixture", "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        if retry { app.launchArguments.append("--native-capture-terminal-failure-once") }
+        app.launchEnvironment["MINDWTR_CAPTURE_LINES_DELIVERY"] = mode
+        app.launchEnvironment["MINDWTR_CAPTURE_LINES_PASTE"] = paste
+        app.launch(); boardEnabled(app.buttons["capture-open"], timeout: 30)
+        return app
+    }
+
+    private func task500Capture(_ app: XCUIApplication) {
+        boardTap(app, "capture-open"); boardTap(app, "capture-lines-fixture-paste")
+        boardEnabled(app.buttons["capture-save"], timeout: 30)
+    }
+
+    private func task500Question(_ app: XCUIApplication, edit: Bool = false, count: Int = 2,
+                                 title: String? = nil, createLabel: String = "Create tasks", cancelLabel: String = "Cancel") {
+        boardTap(app, edit ? "capture-save-edit" : "capture-save")
+        let create = app.buttons["capture-lines-create"]
+        boardEnabled(create, timeout: 30)
+        XCTAssertEqual(app.staticTexts["capture-lines-title"].label, title ?? "Create \(count) tasks?")
+        XCTAssertEqual(create.label, createLabel)
+        XCTAssertEqual(app.buttons["capture-lines-cancel"].label, cancelLabel)
+        XCTAssertEqual(app.alerts.count, 0, "The confirmation belongs to the Capture sheet")
+        XCTAssertFalse(app.textViews["capture-input"].exists, "Underlying controls must be hidden from accessibility")
+        let scroll = app.scrollViews["capture-lines-scroll"]
+        if !create.isHittable && scroll.exists { revealPagedElement(app, create, in: scroll) }
+        XCTAssertTrue(create.isHittable)
+        XCTAssertGreaterThanOrEqual(create.frame.height, 44 - 0.01)
+        XCTAssertGreaterThanOrEqual(app.buttons["capture-lines-cancel"].frame.height, 44 - 0.01)
+    }
+
+    private func task500Held(_ app: XCUIApplication) -> [String] {
+        let state = app.staticTexts["capture-save-edit-fixture-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate { [weak self] _, _ in self?.task497State(app)["held"] as? Bool == true }, evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+        XCTAssertEqual(task497State(app)["linesSubmissions"] as? Int, 1)
+        let ids = task497State(app)["linesIds"] as? [String] ?? []
+        XCTAssertEqual(ids.count, 2); XCTAssertEqual(Set(ids).count, 2)
+        return ids
+    }
+
+    private func task500Rows(_ app: XCUIApplication, expected: [String] = []) -> [String] {
+        boardTap(app, "tab-inbox")
+        let ids = ["Task500 first", "Task500 second"].map { title -> String in
+            let rows = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier BEGINSWITH %@", title, "task-title-"))
+            XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 30))
+            XCTAssertEqual(rows.count, 1, title)
+            return String(rows.firstMatch.identifier.dropFirst("task-title-".count))
+        }
+        XCTAssertEqual(Set(ids).count, 2)
+        if !expected.isEmpty { XCTAssertEqual(ids, expected) }
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        return ids
+    }
+
+    private func task500SavedOnce(_ app: XCUIApplication, expected: [String] = []) {
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.textViews["capture-input"])
+        waitForExpectations(timeout: 30)
+        let ids = task500Rows(app, expected: expected)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--native-capture-terminal-failure-once" }
+        app.launch(); boardEnabled(app.buttons["capture-open"], timeout: 30)
+        _ = task500Rows(app, expected: ids)
+        XCTAssertFalse(app.textViews["capture-input"].exists, "Cold launch does not recreate an old Capture intent")
+    }
+
+    private func task500Normal(_ suffix: String, largest: Bool, edit: Bool) throws {
+        let app = try task500App(suffix, largest: largest); defer { app.terminate() }
+        boardTap(app, "tab-focus"); task500Capture(app)
+        let addAnother = app.switches["capture-add-another"]
+        if addAnother.value as? String != "1" { boardEnabled(addAnother); addAnother.tap() }
+        task500Question(app, edit: edit)
+        XCTAssertEqual(app.staticTexts["capture-lines-message"].label, "Task500 first @home\nTask500 second")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Task500 confirmation " + suffix
+        shot.lifetime = .keepAlways; add(shot)
+        boardTap(app, "capture-lines-create")
+        task500SavedOnce(app)
+    }
+
+    func testTask500OrdinarySaveBulkClosesAddAnotherFromFocusNormal() throws { try task500Normal("NORMAL", largest: false, edit: false) }
+    func testTask500SaveEditBulkClosesAddAnotherFromFocusLargest() throws { try task500Normal("LARGEST", largest: true, edit: true) }
+
+    func testTask500CancelHeaderBackdropPreserveDraftWithoutSubmitting() throws {
+        let app = try task500App("CANCEL"); defer { app.terminate() }
+        task500Capture(app); boardTap(app, "capture-options")
+        let note = app.descendants(matching: .any).matching(identifier: "capture-note").firstMatch
+        boardEnabled(note); note.tap(); note.typeText("Task500 retained note")
+        for control in ["capture-lines-cancel", "capture-lines-close", "capture-lines-backdrop"] {
+            task500Question(app)
+            if control == "capture-lines-backdrop" {
+                app.buttons[control].coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)).tap()
+            } else { boardTap(app, control) }
+            boardEnabled(app.buttons["capture-save"])
+            XCTAssertEqual(app.textViews["capture-input"].value as? String, "Task500 first @home\nTask500 second")
+            XCTAssertEqual(note.value as? String, "Task500 retained note")
+            XCTAssertEqual(task497State(app)["linesSubmissions"] as? Int, 0)
+            XCTAssertEqual(task497State(app)["linesIds"] as? [String], [])
+        }
+        boardTap(app, "capture-close"); boardTap(app, "tab-inbox")
+        XCTAssertFalse(app.buttons["Task500 first"].exists); XCTAssertFalse(app.buttons["Task500 second"].exists)
+        boardTap(app, "capture-open"); boardEnabled(app.buttons["capture-save"])
+        XCTAssertEqual(app.textViews["capture-input"].value as? String, "Task500 first @home\nTask500 second")
+        task500Question(app); boardTap(app, "capture-lines-create"); task500SavedOnce(app)
+    }
+
+    func testTask500ParagraphUsesSharedSingleCaptureClassification() throws {
+        let app = try task500App("PARAGRAPH", paste: "paragraph"); defer { app.terminate() }
+        task500Capture(app); boardTap(app, "capture-save-edit")
+        boardEnabled(app.textFields["task-editor-title"], timeout: 30)
+        XCTAssertFalse(app.buttons["capture-lines-create"].exists)
+        XCTAssertTrue((app.textFields["task-editor-title"].value as? String ?? "").contains("Task500 paragraph first"))
+        XCTAssertFalse(app.textViews["capture-input"].exists)
+    }
+
+    func testTask500InvalidLaterDateRetainsDraftWithoutCreatingRowsOrProject() throws {
+        let app = try task500App("INVALID", paste: "invalid"); defer { app.terminate() }
+        task500Capture(app); task500Question(app); boardTap(app, "capture-lines-create")
+        boardEnabled(app.buttons["capture-save"], timeout: 30)
+        XCTAssertTrue(app.staticTexts["capture-notice"].label.contains("/due:whenever"))
+        XCTAssertEqual(app.textViews["capture-input"].value as? String, "Task500 planned +Task500 project\nTask500 bad /due:whenever")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        boardTap(app, "capture-close"); boardTap(app, "tab-inbox")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@", "task-title-", "Task500")).count, 0)
+        boardTap(app, "tab-menu"); boardTap(app, "menu-projects")
+        XCTAssertTrue(app.staticTexts["projects-empty"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "project-open-")).count, 0)
+    }
+
+    func testTask500CountAndPreparedByteBoundsRetainEditableDraft() throws {
+        let countApp = try task500App("COUNT", paste: "count")
+        defer { countApp.terminate() }
+
+        task97Open(countApp); task97Picker(countApp, "language"); task97Choose(countApp, "zh")
+        task97Picker(countApp, "language")
+        let selected = countApp.buttons["general-option-zh"]
+        revealPagedElement(countApp, selected, in: countApp.scrollViews.containing(.button, identifier: "general-option-zh").firstMatch)
+        XCTAssertTrue(selected.isSelected)
+        boardTap(countApp, "general-picker-cancel"); boardTap(countApp, "general-back"); boardTap(countApp, "settings-back")
+        task500Capture(countApp)
+        task500Question(countApp, count: 1001, title: "创建 1001 个任务？", createLabel: "创建任务", cancelLabel: "取消")
+        boardTap(countApp, "capture-lines-create")
+        boardEnabled(countApp.buttons["capture-save"])
+        XCTAssertEqual(countApp.staticTexts["capture-notice"].label, "无法创建全部任务。\n≤ 1000 个任务")
+        XCTAssertFalse(countApp.staticTexts["capture-notice"].label.contains("Create up to"))
+        XCTAssertEqual(task497State(countApp)["linesSubmissions"] as? Int, 0)
+        XCTAssertEqual(task497State(countApp)["linesIds"] as? [String], [])
+        XCTAssertTrue((countApp.textViews["capture-input"].value as? String ?? "").contains("Task500 row 1000"))
+        countApp.terminate()
+        let byteApp = try task500App("BYTES", paste: "bytes"); defer { byteApp.terminate() }
+        task500Capture(byteApp); task500Question(byteApp, count: 500); boardTap(byteApp, "capture-lines-create")
+        boardEnabled(byteApp.buttons["capture-save"], timeout: 30)
+        XCTAssertFalse(byteApp.buttons["capture-lines-create"].exists)
+        XCTAssertTrue(byteApp.staticTexts["persistence-error"].exists || byteApp.staticTexts["capture-notice"].exists)
+        XCTAssertTrue(byteApp.buttons["capture-save"].isEnabled, "A definite size refusal leaves an editable draft")
+        XCTAssertTrue((byteApp.textViews["capture-input"].value as? String ?? "").contains("Task500 row 499"))
+        boardTap(byteApp, "capture-options")
+        XCTAssertEqual(byteApp.descendants(matching: .any).matching(identifier: "capture-note").firstMatch.value as? String, String(repeating: "é", count: 10_000))
+        boardTap(byteApp, "capture-close"); boardTap(byteApp, "tab-inbox")
+        XCTAssertFalse(byteApp.buttons["Task500 row 0"].exists); XCTAssertFalse(byteApp.buttons["Task500 row 499"].exists)
+    }
+
+    func testTask500DoubleConfirmAndOldReplyPreserveNewerSheet() throws {
+        let app = try task500App("SHEET", mode: "hold"); defer { app.terminate() }
+        task500Capture(app); task500Question(app)
+        app.buttons["capture-lines-create"].doubleTap(); let ids = task500Held(app)
+        boardTap(app, "capture-save-edit-fixture-new-sheet")
+        boardTap(app, "capture-save-edit-fixture-release"); boardEnabled(app.buttons["capture-save"], timeout: 30)
+        XCTAssertEqual(app.textViews["capture-input"].value as? String, "Task497 newer draft")
+        XCTAssertEqual(task497State(app)["linesSubmissions"] as? Int, 1)
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        boardTap(app, "capture-close"); task500SavedOnce(app, expected: ids)
+    }
+
+    func testTask500HostReplacementRetiresOldBatchPresentation() throws {
+        let app = try task500App("HOST", mode: "hold"); defer { app.terminate() }
+        task500Capture(app); task500Question(app); boardTap(app, "capture-lines-create"); let ids = task500Held(app)
+        boardTap(app, "capture-save-edit-fixture-host")
+        expectation(for: NSPredicate { [weak self] _, _ in self?.task497State(app)["replaced"] as? Bool == true }, evaluatedWith: app.staticTexts["capture-save-edit-fixture-state"])
+        waitForExpectations(timeout: 30)
+        boardTap(app, "capture-save-edit-fixture-release"); boardEnabled(app.buttons["capture-save"], timeout: 30)
+        XCTAssertEqual(app.textViews["capture-input"].value as? String, "Task497 replacement draft")
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["capture-open"], timeout: 30)
+        _ = task500Rows(app, expected: ids)
+    }
+
+    func testTask500ActualTerminalFailureRetriesExactBatchOnce() throws {
+        let app = try task500App("RETRY", retry: true); defer { app.terminate() }
+        task500Capture(app); task500Question(app, edit: true); boardTap(app, "capture-lines-create")
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30)
+        let ids = task497State(app)["linesIds"] as? [String] ?? []
+        XCTAssertEqual(ids.count, 2); XCTAssertEqual(task497State(app)["linesSubmissions"] as? Int, 1)
+        XCTAssertEqual(app.textViews["capture-input"].value as? String, "Task500 first @home\nTask500 second")
+        XCTAssertFalse(app.buttons["capture-save"].isEnabled)
+        boardTap(app, "persistence-retry"); task500SavedOnce(app, expected: ids)
+    }
+
+    func testTask500ColdTerminalRecoveryCreatesExactRowsWithoutCaptureIntent() throws {
+        let app = try task500App("COLD", retry: true); defer { app.terminate() }
+        task500Capture(app); task500Question(app, edit: true); boardTap(app, "capture-lines-create")
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30)
+        let ids = task497State(app)["linesIds"] as? [String] ?? []; XCTAssertEqual(ids.count, 2)
+        app.terminate()
+
+        app.launchArguments.removeAll { $0 == "--native-capture-terminal-failure-once" }
+        app.launch(); boardEnabled(app.buttons["capture-open"], timeout: 30)
+        XCTAssertFalse(app.textViews["capture-input"].exists); XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        task500SavedOnce(app, expected: ids)
+    }
+
+    func testTask500PostreceiptReadRetryDoesNotResubmitBatch() throws {
+        let app = try task500App("READ", mode: "read-failure"); defer { app.terminate() }
+        task500Capture(app); task500Question(app); boardTap(app, "capture-lines-create")
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30)
+        XCTAssertFalse(app.textViews["capture-input"].exists); XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        boardTap(app, "persistence-retry")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["persistence-retry"])
+        waitForExpectations(timeout: 30); task500SavedOnce(app)
+    }
+
+    func testTask500BackgroundRetiresQuestionAndKeepsAcceptedBatchDurable() throws {
+        let questionApp = try task500App("QUESTION_BACKGROUND")
+        task500Capture(questionApp); task500Question(questionApp)
+        XCUIDevice.shared.press(.home); questionApp.activate()
+        boardEnabled(questionApp.buttons["capture-save"], timeout: 30)
+        XCTAssertFalse(questionApp.buttons["capture-lines-create"].exists)
+        XCTAssertEqual(questionApp.textViews["capture-input"].value as? String, "Task500 first @home\nTask500 second")
+        XCTAssertEqual(task497State(questionApp)["linesSubmissions"] as? Int, 0)
+        boardTap(questionApp, "capture-close"); boardTap(questionApp, "tab-inbox")
+        XCTAssertFalse(questionApp.buttons["Task500 first"].exists); questionApp.terminate()
+        let acceptedApp = try task500App("ACCEPTED_BACKGROUND", mode: "hold"); defer { acceptedApp.terminate() }
+        task500Capture(acceptedApp); task500Question(acceptedApp); boardTap(acceptedApp, "capture-lines-create")
+        let ids = task500Held(acceptedApp)
+        XCUIDevice.shared.press(.home); acceptedApp.activate()
+        boardTap(acceptedApp, "capture-save-edit-fixture-release"); task500SavedOnce(acceptedApp, expected: ids)
+    }
+
+
+    private func task503App(_ suffix: String, mode: String = "", largest: Bool = false,
+                            terminal: Bool = false, language: String = "en-US") throws -> XCUIApplication {
+        let library = try task371Library(suffix, prefix: "MINDWTR_TRASH_BULK_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-trash-bulk-fixture",
+            "-AppleLanguages", "(" + language + ")", "-AppleLocale", language.replacingOccurrences(of: "-", with: "_")]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        if terminal { app.launchArguments.append("--native-capture-terminal-failure-once") }
+        app.launchEnvironment["MINDWTR_TRASH_BULK_DELIVERY"] = mode
+        app.launch(); task149OpenTrash(app)
+        boardEnabled(app.buttons["trash-select-toggle"], timeout: 30)
+        return app
+    }
+
+    private func task503State(_ app: XCUIApplication) -> [String: Any] {
+        guard let bytes = app.staticTexts["trash-bulk-fixture-state"].label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return value
+    }
+
+    private func task503Wait(_ app: XCUIApplication, _ predicate: @escaping ([String: Any]) -> Bool) {
+        let state = app.staticTexts["trash-bulk-fixture-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate { [weak self] _, _ in predicate(self?.task503State(app) ?? [:]) }, evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+    }
+
+    private func task503TapRow(_ app: XCUIApplication, _ id: String) {
+        let row = app.buttons[id]
+        let list = app.descendants(matching: .any).matching(identifier: "trash-scroll").firstMatch
+        revealPagedElement(app, row, in: list)
+        let selectedCount = (task503State(app)["selectedCount"] as? Int ?? -1) + (row.isSelected ? -1 : 1)
+        for attempt in 0..<2 {
+            boardTap(app, id)
+            task503Wait(app) { $0["busy"] as? Bool == false }
+            if task503State(app)["selectedCount"] as? Int == selectedCount { return }
+
+            guard attempt == 0, app.staticTexts["trash-error"].exists,
+                  app.staticTexts["trash-error"].label.hasPrefix("STALE_REVISION:") else { break }
+            revealPagedElement(app, row, in: list)
+        }
+        XCTAssertEqual(task503State(app)["selectedCount"] as? Int, selectedCount, "Trash selection did not settle for " + id)
+    }
+
+    private func task503Count(_ app: XCUIApplication, _ count: Int) {
+        task503Wait(app) { $0["selectedCount"] as? Int == count }
+        let label = app.staticTexts["trash-bulk-count"]; XCTAssertTrue(label.exists)
+        XCTAssertTrue(label.label.contains(String(count)), label.label)
+    }
+
+    private func task503SelectAll(_ app: XCUIApplication, count: Int = 140) {
+        boardTap(app, "trash-select-toggle")
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].isEnabled)
+        boardTap(app, "trash-bulk-select-all"); task503Count(app, count)
+        XCTAssertFalse(app.buttons["trash-bulk-select-all"].isEnabled)
+        boardEnabled(app.buttons["trash-bulk-restore"], timeout: 30)
+    }
+
+    private func task503Restored(_ app: XCUIApplication, count: Int = 140, requestID: String? = nil) {
+        XCTAssertTrue(app.staticTexts["trash-empty"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+        task503Wait(app) { $0["pending"] as? Bool == false && $0["confirmedCount"] as? Int == count }
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 1)
+        if let requestID { XCTAssertEqual(task503State(app)["requestId"] as? String, requestID) }
+    }
+
+    func testTask503MixedSelectionDoneAndStaticRows() throws {
+        let app = try task503App("MANUAL"); defer { app.terminate() }
+        let staticRow = app.descendants(matching: .any).matching(identifier: "trash-task-task503-child").firstMatch
+        boardEnabled(staticRow); staticRow.tap()
+        XCTAssertFalse(app.buttons["task-view-close"].exists)
+        boardTap(app, "trash-select-toggle")
+        let child = app.buttons["trash-select-task-task503-child"], parent = app.buttons["trash-select-project-task503-project"]
+        task503TapRow(app, child.identifier); task503Count(app, 1); XCTAssertTrue(child.isSelected)
+        task503TapRow(app, parent.identifier); task503Count(app, 2); XCTAssertTrue(parent.isSelected)
+        XCTAssertTrue(child.label.hasPrefix("Select "))
+        XCTAssertFalse(app.buttons["trash-restore-task503-child"].exists)
+        task503TapRow(app, child.identifier); task503Count(app, 1); XCTAssertFalse(child.isSelected)
+        boardTap(app, "trash-select-toggle"); XCTAssertFalse(app.buttons["trash-bulk-restore"].exists)
+        boardTap(app, "trash-select-toggle"); task503Count(app, 0)
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].isEnabled)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+    }
+
+    func testTask503FullFilteredSelectAllRestoresBeyondLoadedPages() throws {
+        let app = try task503App("NORMAL"); defer { app.terminate() }
+        XCTAssertEqual(task503State(app)["loaded"] as? Int, 50)
+        task503SelectAll(app); XCTAssertEqual(task503State(app)["loaded"] as? Int, 50)
+        for id in ["trash-select-toggle", "trash-bulk-select-all", "trash-bulk-restore"] {
+            XCTAssertGreaterThanOrEqual(app.buttons[id].frame.height, 44 - 0.001)
+        }
+        boardTap(app, "trash-bulk-restore"); XCTAssertFalse(app.alerts.firstMatch.exists)
+        task503Restored(app)
+        app.terminate(); app.launch(); task149OpenTrash(app)
+        XCTAssertTrue(app.staticTexts["trash-empty"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].exists)
+    }
+
+    func testTask503LargestLocalizedDarkRestoreControls() throws {
+        let app = try task503App("LOCALIZED", largest: true, language: "zh-Hans"); defer { app.terminate() }
+        XCTAssertEqual(app.buttons["trash-select-toggle"].label, "选择")
+        task503SelectAll(app)
+        XCTAssertEqual(app.buttons["trash-bulk-restore"].label, "恢复")
+        for id in ["trash-select-toggle", "trash-bulk-select-all", "trash-bulk-restore"] {
+            let action = app.buttons[id]; XCTAssertTrue(action.isHittable)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44 - 0.001)
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Task503 largest localized Trash selection"
+        shot.lifetime = .keepAlways; add(shot)
+        boardTap(app, "trash-bulk-restore"); XCTAssertFalse(app.alerts.firstMatch.exists); task503Restored(app)
+    }
+
+    func testTask503SelectedChildAndDeletedParentRestoreAsOneAction() throws {
+        let app = try task503App("OVERLAP"); defer { app.terminate() }
+        boardTap(app, "trash-select-toggle")
+        task503TapRow(app, "trash-select-task-task503-child"); task503TapRow(app, "trash-select-project-task503-project")
+        task503Count(app, 2); boardTap(app, "trash-bulk-restore")
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        task503Wait(app) { $0["confirmedCount"] as? Int == 2 && $0["pending"] as? Bool == false && $0["busy"] as? Bool == false }
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].exists)
+        for id in ["trash-task-task503-child", "trash-project-task503-project", "trash-task-task503-cascade"] {
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: id).firstMatch.exists)
+        }
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "trash-task-task503-independent").firstMatch.exists)
+        XCTAssertEqual(task503State(app)["total"] as? Int, 137, "Only the selected pair plus its matching unselected cascade leave Trash")
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 1)
+    }
+
+    func testTask503LargestRTLSelectionRemainsAccessibleAndNonMutating() throws {
+        let app = try task503App("RTL", largest: true, language: "ar"); defer { app.terminate() }
+        XCTAssertEqual(app.buttons["trash-select-toggle"].label, "يختار")
+        task503SelectAll(app)
+        XCTAssertEqual(app.buttons["trash-bulk-restore"].label, "استعادة")
+        for id in ["trash-select-toggle", "trash-bulk-select-all", "trash-bulk-restore"] {
+            let action = app.buttons[id]; XCTAssertTrue(action.isHittable)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44 - 0.001)
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Task503 largest RTL Trash selection"
+        shot.lifetime = .keepAlways; add(shot)
+        boardTap(app, "trash-select-toggle")
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].exists)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+    }
+
+    func testTask503AreaPrunesOffpageSelectionWithoutSelectingNewRows() throws {
+        let app = try task503App("AREA"); defer { app.terminate() }
+        task503SelectAll(app)
+        boardTap(app, "area-open"); boardTap(app, "area-option-task503-area-a")
+        boardEnabled(app.buttons["area-option-task503-area-a"])
+        app.buttons["area-dismiss"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        task503Count(app, 67)
+        boardTap(app, "area-open"); boardTap(app, "area-option-__all__")
+        boardEnabled(app.buttons["area-option-__all__"])
+        app.buttons["area-dismiss"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        task503Count(app, 67)
+        XCTAssertTrue(app.buttons["trash-bulk-select-all"].isEnabled)
+        XCTAssertEqual(task503State(app)["total"] as? Int, 140)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        boardTap(app, "trash-select-toggle"); boardTap(app, "trash-select-toggle"); task503Count(app, 0)
+    }
+
+    func testTask503ActualTerminalFailureRetainsSelectionAndExactRetry() throws {
+        let app = try task503App("RETRY", terminal: true); defer { app.terminate() }
+        task503SelectAll(app); app.buttons["trash-bulk-restore"].doubleTap()
+        boardEnabled(app.buttons["trash-retry"], timeout: 30); task503Count(app, 140)
+        let before = task503State(app), id = try XCTUnwrap(before["requestId"] as? String)
+        XCTAssertEqual(UUID(uuidString: id)?.uuidString.lowercased(), id)
+        XCTAssertEqual(before["submissions"] as? Int, 1); XCTAssertEqual(before["pending"] as? Bool, true)
+        XCTAssertFalse(app.buttons["trash-back"].isEnabled); XCTAssertFalse(app.buttons["trash-select-toggle"].isEnabled)
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].isEnabled); XCTAssertFalse(app.staticTexts["trash-empty"].exists)
+        boardTap(app, "trash-retry"); task503Restored(app, requestID: id)
+        XCTAssertEqual(task503State(app)["requestBytes"] as? Int, before["requestBytes"] as? Int)
+    }
+
+    func testTask503ColdTerminalReplayProjectsTrashWithoutSelectionOrResubmit() throws {
+        let app = try task503App("COLD", terminal: true); defer { app.terminate() }
+        task503SelectAll(app); boardTap(app, "trash-bulk-restore"); boardEnabled(app.buttons["trash-retry"], timeout: 30)
+        XCTAssertEqual(task503State(app)["pending"] as? Bool, true)
+        app.terminate(); app.launchArguments.removeAll { $0 == "--native-capture-terminal-failure-once" }; app.launch()
+        XCTAssertTrue(app.staticTexts["trash-title"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["trash-empty"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].exists); XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        app.terminate(); app.launch(); task149OpenTrash(app)
+        XCTAssertTrue(app.staticTexts["trash-empty"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    func testTask503AcknowledgedRestoreReadFailureRetriesOnlyProjection() throws {
+        let app = try task503App("READ", mode: "read-failure"); defer { app.terminate() }
+        task503SelectAll(app); boardTap(app, "trash-bulk-restore"); boardEnabled(app.buttons["trash-retry"], timeout: 30)
+        let before = task503State(app)
+        XCTAssertEqual(before["pending"] as? Bool, false); XCTAssertEqual(before["confirmedCount"] as? Int, 140)
+        XCTAssertEqual(before["readFailed"] as? Bool, true); XCTAssertEqual(before["submissions"] as? Int, 1)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists); XCTAssertFalse(app.buttons["trash-bulk-restore"].exists)
+        boardTap(app, "trash-retry"); task503Restored(app, requestID: before["requestId"] as? String)
+    }
+
+    private func task503BackgroundAndReturn(_ app: XCUIApplication) {
+        XCUIDevice.shared.press(.home)
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    func testTask503BackgroundRetiresHeldSelectAllAdoption() throws {
+        let app = try task503App("SELECTION_BACKGROUND", mode: "hold-selection"); defer { app.terminate() }
+        boardTap(app, "trash-select-toggle"); boardTap(app, "trash-bulk-select-all")
+        task503Wait(app) { $0["held"] as? Bool == true }
+        XCTAssertEqual(task503State(app)["selectedCount"] as? Int, 0)
+        task503BackgroundAndReturn(app); boardTap(app, "trash-bulk-fixture-release")
+        boardEnabled(app.buttons["trash-bulk-select-all"], timeout: 30); task503Count(app, 0)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        boardTap(app, "trash-bulk-select-all"); task503Count(app, 140)
+        boardTap(app, "trash-select-toggle"); boardTap(app, "trash-select-toggle"); task503Count(app, 0)
+    }
+
+    func testTask503ReplacementHostRefusesHeldOldSelection() throws {
+        let app = try task503App("HOST", mode: "hold-selection"); defer { app.terminate() }
+        boardTap(app, "trash-select-toggle"); boardTap(app, "trash-bulk-select-all")
+        task503Wait(app) { $0["held"] as? Bool == true }; boardTap(app, "trash-bulk-fixture-host")
+        task503Wait(app) { $0["replaced"] as? Bool == true && $0["busy"] as? Bool == false }
+        boardEnabled(app.buttons["trash-select-toggle"], timeout: 30)
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].exists)
+        XCTAssertEqual(task503State(app)["selectedCount"] as? Int, 0)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        boardTap(app, "trash-select-toggle"); task503Count(app, 0)
+        boardTap(app, "trash-bulk-select-all"); task503Count(app, 140)
+    }
+
+    func testTask503BackgroundKeepsAcceptedHeldAcknowledgmentOwned() throws {
+        let app = try task503App("ACK_BACKGROUND", mode: "hold-ack"); defer { app.terminate() }
+        task503SelectAll(app); boardTap(app, "trash-bulk-restore")
+        task503Wait(app) { $0["held"] as? Bool == true }
+        let before = task503State(app)
+        XCTAssertEqual(before["pending"] as? Bool, true); XCTAssertEqual(before["submissions"] as? Int, 1)
+        task503BackgroundAndReturn(app)
+        XCTAssertEqual(task503State(app)["pending"] as? Bool, true)
+        boardTap(app, "trash-bulk-fixture-release"); task503Restored(app, requestID: before["requestId"] as? String)
+    }
+
+    func testTask503SelectionBoundsRefuseWithoutTruncationAndDoneRemainsAvailable() throws {
+        for suffix in ["COUNT", "BYTES"] {
+            let app = try task503App(suffix)
+            boardTap(app, "trash-select-toggle"); boardEnabled(app.buttons["trash-retry"], timeout: 30)
+            XCTAssertTrue(app.staticTexts["trash-error"].exists)
+            XCTAssertFalse(app.buttons["trash-bulk-restore"].isEnabled)
+            XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+            boardTap(app, "trash-select-toggle"); boardEnabled(app.buttons["trash-select-toggle"], timeout: 30)
+            XCTAssertFalse(app.buttons["trash-bulk-restore"].exists)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists); app.terminate()
+        }
+    }
+
+
+    private func task508App(_ suffix: String, mode: String = "", largest: Bool = false,
+                            terminal: Bool = false, language: String = "en-US") throws -> XCUIApplication {
+        let library = try task371Library(suffix, prefix: "MINDWTR_TRASH_PURGE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-trash-purge-fixture",
+            "-AppleLanguages", "(" + language + ")", "-AppleLocale", language.replacingOccurrences(of: "-", with: "_")]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        if terminal { app.launchArguments.append("--native-capture-terminal-failure-once") }
+        app.launchEnvironment["MINDWTR_TRASH_BULK_DELIVERY"] = mode
+        app.launch(); task149OpenTrash(app)
+        boardEnabled(app.buttons["trash-clear"], timeout: 30)
+        return app
+    }
+
+    private func task508Alert(_ app: XCUIApplication, message: String? = nil) {
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.alerts.firstMatch.buttons.matching(identifier: "trash-purge-cancel").firstMatch.exists)
+        XCTAssertTrue(app.alerts.firstMatch.buttons.matching(identifier: "trash-purge-confirm").firstMatch.exists)
+        if let message { XCTAssertTrue(app.alerts.firstMatch.staticTexts[message].exists, message) }
+    }
+
+    private func task508Settled(_ app: XCUIApplication, count: Int, total: Int, submissions: Int = 1) {
+        task503Wait(app) {
+            $0["pending"] as? Bool == false && $0["busy"] as? Bool == false
+                && $0["confirmedCount"] as? Int == count && $0["total"] as? Int == total
+        }
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, submissions)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+        XCTAssertFalse(app.buttons["task-view-close"].exists)
+    }
+
+    private func task508FrozenRequest(_ app: XCUIApplication) throws -> [String: Any] {
+        let text = try XCTUnwrap(task503State(app)["requestJSON"] as? String)
+        return try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+    }
+
+    func testTask508SingleTaskAndProjectPurgeCancelThenConfirm() throws {
+        for (suffix, identity, action) in [
+            ("SINGLE_TASK", "trash-task-task503-child", "trash-purge-task-task503-child"),
+            ("SINGLE_PROJECT", "trash-project-task503-project", "trash-purge-project-task503-project"),
+        ] {
+            let app = try task508App(suffix); defer { app.terminate() }
+            let row = app.descendants(matching: .any).matching(identifier: identity).firstMatch
+            boardEnabled(row); row.swipeLeft(); boardTap(app, action)
+            task508Alert(app, message: "This action cannot be undone.")
+            boardTap(app, "trash-purge-cancel")
+            XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+            XCTAssertTrue(row.exists)
+            row.swipeLeft(); boardTap(app, action); task508Alert(app)
+            boardTap(app, "trash-purge-confirm"); task508Settled(app, count: 1, total: 139)
+            XCTAssertFalse(row.exists)
+            if suffix == "SINGLE_PROJECT" {
+                XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "trash-task-task503-child").firstMatch.exists)
+                XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "trash-task-task503-cascade").firstMatch.exists)
+            }
+        }
+    }
+
+    func testTask508MixedSelectedPurgeCancelAndDuplicateConfirm() throws {
+        let app = try task508App("MIXED"); defer { app.terminate() }
+        boardTap(app, "trash-select-toggle")
+        task503TapRow(app, "trash-select-task-task503-child"); task503TapRow(app, "trash-select-project-task503-project")
+        task503Count(app, 2); boardTap(app, "trash-bulk-purge"); task508Alert(app)
+        boardTap(app, "trash-purge-cancel"); task503Count(app, 2)
+        XCTAssertTrue(app.buttons["trash-select-task-task503-child"].isSelected)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        boardTap(app, "trash-bulk-purge"); task508Alert(app)
+        app.alerts.firstMatch.buttons.matching(identifier: "trash-purge-confirm").firstMatch.doubleTap(); task508Settled(app, count: 2, total: 138)
+        XCTAssertFalse(app.buttons["trash-bulk-purge"].exists)
+        for id in ["task503-cascade", "task503-independent"] {
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "trash-task-" + id).firstMatch.exists)
+        }
+        let request = try task508FrozenRequest(app)
+        XCTAssertEqual(request["taskIds"] as? [String], ["task503-child"])
+        XCTAssertEqual(request["projectIds"] as? [String], ["task503-project"])
+    }
+
+    func testTask508ClearFullFilteredTrashBeyondLoadedPageInBothModes() throws {
+        for suffix in ["CLEAR", "CLEAR_SELECTED"] {
+            let app = try task508App(suffix); defer { app.terminate() }
+            XCTAssertEqual(task503State(app)["loaded"] as? Int, 50)
+            if suffix == "CLEAR_SELECTED" {
+                boardTap(app, "trash-select-toggle")
+                task503TapRow(app, "trash-select-task-task503-child"); task503TapRow(app, "trash-select-project-task503-project")
+                task503Count(app, 2)
+            }
+            boardTap(app, "trash-clear")
+            task508Alert(app, message: "This will permanently delete all trashed tasks and projects.")
+            boardTap(app, "trash-purge-confirm"); task508Settled(app, count: 140, total: 0)
+            XCTAssertTrue(app.staticTexts["trash-empty"].exists)
+            let request = try task508FrozenRequest(app)
+            XCTAssertEqual((request["taskIds"] as? [String])?.count, 138)
+            XCTAssertEqual((request["projectIds"] as? [String])?.count, 2)
+            XCTAssertFalse(app.buttons["trash-clear"].exists)
+        }
+    }
+
+    func testTask508NarrowedIncludedAndExcludedAreaClearCounts() throws {
+        for suffix in ["AREA_INCLUDED", "AREA_EXCLUDED"] {
+            let app = try task508App(suffix); defer { app.terminate() }
+            boardTap(app, "area-open"); boardTap(app, "area-option-task503-area-a")
+            boardEnabled(app.buttons["area-option-task503-area-a"])
+            if suffix == "AREA_EXCLUDED" {
+                boardTap(app, "area-option-task503-area-a"); boardEnabled(app.buttons["area-option-task503-area-a"])
+            }
+            app.buttons["area-dismiss"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+            boardEnabled(app.buttons["trash-clear"], timeout: 30)
+            boardTap(app, "trash-clear")
+            let count = suffix == "AREA_INCLUDED" ? 67 : 73
+            task508Alert(app, message: "\(count - 1) tasks · 1 project\nThis action cannot be undone.")
+            boardTap(app, "trash-purge-confirm"); task508Settled(app, count: count, total: 0)
+            boardTap(app, "area-open"); boardTap(app, "area-option-__all__")
+            boardEnabled(app.buttons["area-option-__all__"])
+            app.buttons["area-dismiss"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+            task503Wait(app) { $0["total"] as? Int == 140 - count && $0["busy"] as? Bool == false }
+            let retained = suffix == "AREA_INCLUDED" ? "task503-other-project" : "task503-project"
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "trash-project-" + retained).firstMatch.exists)
+        }
+    }
+
+    func testTask508LargestLocalizedAndRTLPermanentControls() throws {
+        for (suffix, language, deleteLabel, clearLabel) in [
+            ("LOCALIZED", "zh-Hans", "永久删除", "清空垃圾桶"),
+            ("RTL", "ar", "حذف نهائيا", "مسح سلة المهملات"),
+        ] {
+            let app = try task508App(suffix, largest: true, language: language); defer { app.terminate() }
+            XCTAssertEqual(app.buttons["trash-clear"].label, clearLabel)
+            task503SelectAll(app)
+            XCTAssertEqual(app.buttons["trash-bulk-purge"].label, deleteLabel)
+            for id in ["trash-select-toggle", "trash-clear", "trash-bulk-select-all", "trash-bulk-restore", "trash-bulk-purge"] {
+                let action = app.buttons[id]; XCTAssertTrue(action.isHittable)
+                XCTAssertGreaterThanOrEqual(action.frame.height, 44 - 0.001)
+            }
+            boardTap(app, "trash-bulk-purge"); task508Alert(app)
+            for id in ["trash-purge-cancel", "trash-purge-confirm"] {
+                let action = app.alerts.firstMatch.buttons.matching(identifier: id).firstMatch
+                let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: action)
+                XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed)
+            }
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Task508 largest " + language + " permanent confirmation"
+            shot.lifetime = .keepAlways; add(shot)
+            boardTap(app, "trash-purge-cancel"); task503Count(app, 140)
+            XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        }
+    }
+
+    func testTask508AlertOpenSavedArrivalSurvivesFrozenClear() throws {
+        let app = try task508App("ARRIVAL", mode: "arrival"); defer { app.terminate() }
+        boardTap(app, "trash-clear"); task508Alert(app)
+
+        boardEnabled(app.alerts.firstMatch.buttons.matching(identifier: "trash-purge-confirm").firstMatch, timeout: 30)
+        boardTap(app, "trash-purge-confirm"); task508Settled(app, count: 140, total: 1)
+        XCTAssertEqual(task503State(app)["mutationCompleted"] as? Bool, true)
+        XCTAssertEqual(task503State(app)["mutationError"] as? String, "")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "trash-task-task508-arrival").firstMatch.exists)
+        let request = try task508FrozenRequest(app)
+        XCTAssertEqual((request["taskIds"] as? [String])?.count, 138)
+        XCTAssertFalse((request["taskIds"] as? [String] ?? []).contains("task508-arrival"))
+    }
+
+    func testTask508OrdinaryRefreshPreservesOpenFrozenPurgeConfirmation() throws {
+        let app = try task508App("ALERT_REFRESH", mode: "ordinary-refresh"); defer { app.terminate() }
+        boardTap(app, "trash-clear"); task508Alert(app)
+
+
+        task503Wait(app) { $0["mutationCompleted"] as? Bool == true || $0["held"] as? Bool == true }
+        let state = task503State(app)
+        XCTAssertEqual(state["mutationError"] as? String, "")
+        XCTAssertEqual(state["held"] as? Bool, false)
+        XCTAssertEqual(state["busy"] as? Bool, false)
+        XCTAssertEqual(state["confirmation"] as? Bool, true)
+        XCTAssertEqual(state["confirmationCount"] as? Int, 140)
+        XCTAssertEqual(state["submissions"] as? Int, 0)
+        let frozen = try XCTUnwrap(state["refreshConfirmationRequest"] as? String)
+        XCTAssertFalse(frozen.isEmpty)
+        XCTAssertEqual(state["confirmationRequest"] as? String, frozen)
+        boardTap(app, "trash-purge-confirm"); task508Settled(app, count: 140, total: 0)
+        XCTAssertEqual(task503State(app)["requestJSON"] as? String, frozen)
+        let request = try task508FrozenRequest(app)
+        XCTAssertEqual((request["taskIds"] as? [String])?.count, 138)
+        XCTAssertEqual((request["projectIds"] as? [String])?.count, 2)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+    }
+
+    func testTask508ChangedSelectedTargetRefusesWithoutReprepare() throws {
+        let app = try task508App("STALE", mode: "stale-target"); defer { app.terminate() }
+        boardTap(app, "trash-select-toggle")
+        task503TapRow(app, "trash-select-task-task503-child"); task503TapRow(app, "trash-select-project-task503-project")
+        task503Count(app, 2)
+        boardTap(app, "trash-bulk-purge"); task508Alert(app)
+        XCTAssertEqual(task503State(app)["confirmationCount"] as? Int, 2)
+        boardEnabled(app.alerts.firstMatch.buttons.matching(identifier: "trash-purge-confirm").firstMatch, timeout: 30); boardTap(app, "trash-purge-confirm")
+        boardEnabled(app.buttons["trash-bulk-purge"], timeout: 30)
+        task503Wait(app) { $0["busy"] as? Bool == false && $0["pending"] as? Bool == false && $0["selectedCount"] as? Int == 1 }
+        XCTAssertTrue(app.staticTexts["trash-error"].exists)
+        let project = app.buttons["trash-select-project-task503-project"]
+        revealPagedElement(app, project, in: app.descendants(matching: .any).matching(identifier: "trash-scroll").firstMatch)
+        XCTAssertTrue(project.exists)
+        XCTAssertTrue(project.isSelected)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 1)
+        XCTAssertEqual(task503State(app)["confirmedCount"] as? Int, 0)
+        XCTAssertEqual(task503State(app)["total"] as? Int, 139)
+        XCTAssertEqual(task503State(app)["mutationCompleted"] as? Bool, true)
+        XCTAssertEqual((try task508FrozenRequest(app))["taskIds"] as? [String], ["task503-child"])
+        XCTAssertEqual((try task508FrozenRequest(app))["projectIds"] as? [String], ["task503-project"])
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    func testTask508BackgroundRetiresHeldNonselectionClearMetadata() throws {
+        let app = try task508App("CLEAR_BACKGROUND", mode: "hold-selection"); defer { app.terminate() }
+        boardTap(app, "trash-clear"); task503Wait(app) { $0["held"] as? Bool == true }
+        task503BackgroundAndReturn(app); boardTap(app, "trash-bulk-fixture-release")
+        boardEnabled(app.buttons["trash-clear"], timeout: 30)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        XCTAssertEqual(task503State(app)["selectionMode"] as? Bool, false)
+    }
+
+    func testTask508ReplacementHostRefusesHeldNonselectionClearMetadata() throws {
+        let app = try task508App("CLEAR_HOST", mode: "hold-selection"); defer { app.terminate() }
+        boardTap(app, "trash-clear"); task503Wait(app) { $0["held"] as? Bool == true }
+        boardTap(app, "trash-bulk-fixture-host")
+        task503Wait(app) { $0["replaced"] as? Bool == true && $0["busy"] as? Bool == false }
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        XCTAssertEqual(task503State(app)["selectionMode"] as? Bool, false)
+    }
+
+    func testTask508BackgroundCancelsAlertAndLateConfirmCannotSubmit() throws {
+        let app = try task508App("ALERT_BACKGROUND"); defer { app.terminate() }
+        boardTap(app, "trash-clear"); task508Alert(app)
+        task503BackgroundAndReturn(app)
+        boardEnabled(app.buttons["trash-purge-fixture-late-confirm"], timeout: 30)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        boardTap(app, "trash-purge-fixture-late-confirm")
+        XCTAssertEqual(task503State(app)["retiredConfirmation"] as? Bool, true)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        boardTap(app, "trash-clear"); task508Alert(app); boardTap(app, "trash-purge-cancel")
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+    }
+
+    func testTask508ActualTerminalFailureRetainsExactPurgeRetry() throws {
+        let app = try task508App("RETRY", terminal: true); defer { app.terminate() }
+        task503SelectAll(app); boardTap(app, "trash-bulk-purge"); task508Alert(app)
+        app.alerts.firstMatch.buttons.matching(identifier: "trash-purge-confirm").firstMatch.doubleTap()
+        boardEnabled(app.buttons["trash-retry"], timeout: 30); task503Count(app, 140)
+        let before = task503State(app), id = try XCTUnwrap(before["requestId"] as? String)
+        XCTAssertEqual(UUID(uuidString: id)?.uuidString.lowercased(), id)
+        XCTAssertEqual(before["submissions"] as? Int, 1); XCTAssertEqual(before["pending"] as? Bool, true)
+        XCTAssertFalse(app.buttons["trash-clear"].isEnabled); XCTAssertFalse(app.buttons["trash-bulk-purge"].isEnabled)
+        XCTAssertFalse(app.buttons["trash-bulk-restore"].isEnabled)
+        boardTap(app, "trash-retry"); task508Settled(app, count: 140, total: 0)
+        XCTAssertEqual(task503State(app)["requestJSON"] as? String, before["requestJSON"] as? String)
+        XCTAssertEqual(task503State(app)["requestId"] as? String, id)
+    }
+
+    func testTask508ColdTerminalReplayProjectsTrashWithoutPurgeResubmit() throws {
+        let app = try task508App("COLD", terminal: true); defer { app.terminate() }
+        boardTap(app, "trash-clear"); task508Alert(app); boardTap(app, "trash-purge-confirm")
+        boardEnabled(app.buttons["trash-retry"], timeout: 30)
+        XCTAssertEqual(task503State(app)["pending"] as? Bool, true)
+        app.terminate(); app.launchArguments.removeAll { $0 == "--native-capture-terminal-failure-once" }; app.launch()
+        XCTAssertTrue(app.staticTexts["trash-title"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["trash-empty"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.alerts.firstMatch.exists); XCTAssertFalse(app.buttons["trash-bulk-purge"].exists)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists); XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+        app.terminate(); app.launch(); task149OpenTrash(app)
+        XCTAssertTrue(app.staticTexts["trash-empty"].waitForExistence(timeout: 30))
+    }
+
+    func testTask508BackgroundKeepsAcceptedPurgeAcknowledgmentOwned() throws {
+        let app = try task508App("ACK_BACKGROUND", mode: "hold-ack"); defer { app.terminate() }
+        boardTap(app, "trash-clear"); task508Alert(app); boardTap(app, "trash-purge-confirm")
+        task503Wait(app) { $0["held"] as? Bool == true }
+        let before = task503State(app)
+        XCTAssertEqual(before["pending"] as? Bool, true)
+        task503BackgroundAndReturn(app)
+        XCTAssertEqual(task503State(app)["pending"] as? Bool, true)
+        boardTap(app, "trash-bulk-fixture-release"); task508Settled(app, count: 140, total: 0)
+        XCTAssertEqual(task503State(app)["requestJSON"] as? String, before["requestJSON"] as? String)
+    }
+
+    func testTask508AcknowledgedPurgeReadFailureRetriesOnlyProjection() throws {
+        let app = try task508App("READ", mode: "read-failure"); defer { app.terminate() }
+        boardTap(app, "trash-clear"); task508Alert(app); boardTap(app, "trash-purge-confirm")
+        boardEnabled(app.buttons["trash-retry"], timeout: 30)
+        let before = task503State(app)
+        XCTAssertEqual(before["pending"] as? Bool, false); XCTAssertEqual(before["confirmedCount"] as? Int, 140)
+        XCTAssertEqual(before["readFailed"] as? Bool, true); XCTAssertEqual(before["submissions"] as? Int, 1)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        boardTap(app, "trash-retry"); task508Settled(app, count: 140, total: 0)
+        XCTAssertEqual(task503State(app)["requestJSON"] as? String, before["requestJSON"] as? String)
+    }
+
+    func testTask508ClearBoundsRefuseWithoutConfirmationOrTruncation() throws {
+        for suffix in ["COUNT", "BYTES"] {
+            let app = try task508App(suffix); defer { app.terminate() }
+            boardTap(app, "trash-clear"); boardEnabled(app.buttons["trash-retry"], timeout: 30)
+            XCTAssertFalse(app.alerts.firstMatch.exists); XCTAssertTrue(app.staticTexts["trash-error"].exists)
+            XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+            XCTAssertEqual(task503State(app)["selectionMode"] as? Bool, false)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        }
+    }
+
+
+    func testTask508AreaAndNavigationRetireUnsubmittedConfirmation() throws {
+        for (suffix, mode) in [("ALERT_AREA", "area-retire"), ("ALERT_NAVIGATION", "navigate-retire")] {
+            let app = try task508App(suffix, mode: mode); defer { app.terminate() }
+            boardTap(app, "trash-clear")
+            if mode == "navigate-retire" {
+                XCTAssertTrue(app.staticTexts["inbox-title"].waitForExistence(timeout: 30))
+                task149OpenTrash(app)
+            }
+            boardEnabled(app.buttons["trash-clear"], timeout: 30)
+            task503Wait(app) { $0["mutationCompleted"] as? Bool == true && $0["busy"] as? Bool == false }
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+            XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+            XCTAssertEqual(task503State(app)["mutationError"] as? String, "")
+            XCTAssertEqual(task503State(app)["total"] as? Int, mode == "area-retire" ? 67 : 140)
+            boardTap(app, "trash-purge-fixture-late-confirm")
+            XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+        }
+    }
+
+    func testTask508OldAlertCallbacksCannotConsumeReplacementConfirmation() throws {
+        let app = try task508App("ALERT_REPLACEMENT", mode: "late-replacement"); defer { app.terminate() }
+        boardTap(app, "trash-clear"); task508Alert(app)
+        task503BackgroundAndReturn(app)
+        boardEnabled(app.buttons["trash-clear"], timeout: 30)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+
+
+        boardTap(app, "trash-clear"); task508Alert(app)
+        boardTap(app, "trash-purge-cancel")
+        XCTAssertEqual(task503State(app)["mutationCompleted"] as? Bool, true)
+        XCTAssertEqual(task503State(app)["submissions"] as? Int, 0)
+    }
+
+    private func task551App(_ suffix: String, flags: [String] = [], largest: Bool = false) throws -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", try task371Library(suffix, prefix: "MINDWTR_POMODORO_SETTINGS_UI_")] + flags
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-AppleLanguages", "(ar)", "-AppleLocale", "ar_SA"] }
+        app.launch(); task103Open(app); boardTap(app, "gtd-pomodoroSettings")
+        boardEnabled(app.buttons["gtd-pomodoro-back"], timeout: 30)
+        return app
+    }
+
+    private func task551Toggle(_ app: XCUIApplication, _ field: String) -> XCUIElement {
+        let control = app.switches["gtd-" + field]
+        revealPagedElement(app, control, in: app.scrollViews["gtd-pomodoro-scroll"])
+        boardEnabled(control)
+        return control
+    }
+
+    private func task551SetToggle(_ app: XCUIApplication, _ field: String, _ value: String) {
+        let control = task551Toggle(app, field)
+        XCTAssertNotEqual(control.value as? String, value)
+        control.tap()
+        expectation(for: NSPredicate(format: "value == %@ AND enabled == true", value), evaluatedWith: control)
+        waitForExpectations(timeout: 30)
+    }
+
+    private func task551Minutes(_ app: XCUIApplication, _ field: String, _ draft: String, expected: String) {
+        let input = app.textFields["gtd-pomodoro-" + field + "-minutes"]
+        revealPagedElement(app, input, in: app.scrollViews["gtd-pomodoro-scroll"])
+        replaceTextView(input, with: draft, tapOffset: CGVector(dx: 0.5, dy: 0.5))
+        boardTap(app, "gtd-pomodoro-keyboard-done")
+        expectation(for: NSPredicate(format: "value == %@ AND enabled == true", expected), evaluatedWith: input)
+        waitForExpectations(timeout: 30)
+    }
+
+    func testTask551ExistingGtdScheduleDraftStillSavesAndRecovers() throws {
+        task103Normal(try task371Library("SCHEDULE", prefix: "MINDWTR_POMODORO_SETTINGS_UI_"))
+    }
+
+    func testTask551PomodoroSettingsPersistAndNoticeAppearsOncePerVisit() throws {
+        let app = try task551App("NORMAL"); defer { app.terminate() }
+        task551Minutes(app, "focus", "999", expected: "180")
+        task551Minutes(app, "break", "0", expected: "1")
+        task551Minutes(app, "focus", "35", expected: "35")
+        task551SetToggle(app, "pomodoroLinkTask", "0")
+        task551SetToggle(app, "pomodoroCompletionAlert", "0")
+        task551SetToggle(app, "pomodoroAutoStartBreaks", "1")
+        let notice = app.staticTexts["gtd-pomodoro-auto-start-notice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: notice)
+        waitForExpectations(timeout: 8)
+        task551SetToggle(app, "pomodoroAutoStartFocus", "1")
+        XCTAssertFalse(notice.exists)
+        app.terminate(); app.launch(); task103Open(app); boardTap(app, "gtd-pomodoroSettings")
+        boardEnabled(app.buttons["gtd-pomodoro-back"], timeout: 30)
+        XCTAssertEqual(app.textFields["gtd-pomodoro-focus-minutes"].value as? String, "35")
+        XCTAssertEqual(app.textFields["gtd-pomodoro-break-minutes"].value as? String, "1")
+        for field in ["pomodoroLinkTask", "pomodoroCompletionAlert"] { XCTAssertEqual(task551Toggle(app, field).value as? String, "0") }
+        XCTAssertEqual(task551Toggle(app, "pomodoroAutoStartBreaks").value as? String, "1")
+        task551SetToggle(app, "pomodoroAutoStartFocus", "0")
+        task551SetToggle(app, "pomodoroAutoStartFocus", "1")
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+    }
+
+    func testTask551LargestRTLPomodoroSettingsAndFeatureGate() throws {
+        let app = try task551App("LARGEST", largest: true); defer { app.terminate() }
+        let control = task551Toggle(app, "pomodoroCompletionAlert")
+        XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        task551SetToggle(app, "pomodoroCompletionAlert", "0")
+        task551Minutes(app, "focus", "40", expected: "40")
+        boardTap(app, "gtd-pomodoro-back")
+        let feature = app.switches["gtd-pomodoro"]
+        revealPagedElement(app, feature, in: app.scrollViews["gtd-scroll"]); boardEnabled(feature)
+        feature.tap()
+        expectation(for: NSPredicate(format: "value == '0' AND enabled == true"), evaluatedWith: feature)
+        waitForExpectations(timeout: 30)
+        XCTAssertFalse(app.buttons["gtd-pomodoroSettings"].exists)
+        feature.tap()
+        expectation(for: NSPredicate(format: "value == '1' AND enabled == true"), evaluatedWith: feature)
+        waitForExpectations(timeout: 30)
+        boardTap(app, "gtd-pomodoroSettings")
+        boardEnabled(app.buttons["gtd-pomodoro-back"], timeout: 30)
+        XCTAssertEqual(app.textFields["gtd-pomodoro-focus-minutes"].value as? String, "40")
+        XCTAssertEqual(task551Toggle(app, "pomodoroCompletionAlert").value as? String, "0")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Largest RTL Pomodoro settings"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    func testTask551MalformedDurationsLeaveOtherPreferencesUsable() throws {
+        let app = try task551App("MALFORMED"); defer { app.terminate() }
+        for field in ["focus", "break"] {
+            let input = app.textFields["gtd-pomodoro-" + field + "-minutes"]
+            XCTAssertTrue(input.exists); XCTAssertFalse(input.isEnabled)
+        }
+        task551SetToggle(app, "pomodoroLinkTask", "0")
+        let focus = app.textFields["gtd-pomodoro-focus-minutes"]
+        XCTAssertTrue(focus.exists); XCTAssertFalse(focus.isEnabled)
+    }
+
+    func testTask551AcknowledgedSettingsReadRetryPreservesSavedToggle() throws {
+        let app = try task551App("READ_RETRY", flags: ["--native-gtd-workflow-read-failure"]); defer { app.terminate() }
+        task551Toggle(app, "pomodoroLinkTask").tap()
+        for _ in 0..<2 {
+            let retry = app.buttons["gtd-retry"]
+            revealPagedElement(app, retry, in: app.scrollViews["gtd-pomodoro-scroll"]); boardEnabled(retry, timeout: 30)
+            XCTAssertFalse(app.buttons["gtd-pomodoro-back"].isEnabled)
+            retry.tap()
+        }
+        boardEnabled(app.buttons["gtd-pomodoro-back"], timeout: 30)
+        XCTAssertEqual(task551Toggle(app, "pomodoroLinkTask").value as? String, "0")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    func testTask551RefusedSettingsEditCanBeCorrected() throws {
+        let app = try task551App("REFUSAL", flags: ["--native-gtd-workflow-refusal"]); defer { app.terminate() }
+        task551Toggle(app, "pomodoroLinkTask").tap()
+        XCTAssertTrue(app.staticTexts["gtd-error"].waitForExistence(timeout: 30))
+        XCTAssertEqual(task551Toggle(app, "pomodoroLinkTask").value as? String, "1")
+        task551SetToggle(app, "pomodoroLinkTask", "0")
+    }
+
+    func testTask551RealTerminalFailureRetriesSettingsOnce() throws {
+        let app = try task551App("TERMINAL_RETRY", flags: ["--native-capture-terminal-failure-once"]); defer { app.terminate() }
+        task551Toggle(app, "pomodoroLinkTask").tap()
+        let retry = app.buttons["gtd-retry"]
+        revealPagedElement(app, retry, in: app.scrollViews["gtd-pomodoro-scroll"]); boardEnabled(retry, timeout: 30)
+        XCTAssertFalse(app.buttons["gtd-pomodoro-back"].isEnabled)
+        retry.tap(); boardEnabled(app.buttons["gtd-pomodoro-back"], timeout: 30)
+        XCTAssertEqual(task551Toggle(app, "pomodoroLinkTask").value as? String, "0")
+        XCTAssertFalse(app.buttons["gtd-retry"].exists)
+    }
+
+    func testTask551ColdSettingsRecoveryReopensPomodoroPage() throws {
+        let app = try task551App("TERMINAL_COLD", flags: ["--native-capture-terminal-failure-once"]); defer { app.terminate() }
+        task551Toggle(app, "pomodoroLinkTask").tap()
+        let retry = app.buttons["gtd-retry"]
+        revealPagedElement(app, retry, in: app.scrollViews["gtd-pomodoro-scroll"]); boardEnabled(retry, timeout: 30)
+        app.terminate(); app.launchArguments.removeAll { $0 == "--native-capture-terminal-failure-once" }; app.launch()
+        boardEnabled(app.buttons["gtd-pomodoro-back"], timeout: 30)
+        XCTAssertEqual(task551Toggle(app, "pomodoroLinkTask").value as? String, "0")
+        XCTAssertFalse(app.buttons["gtd-retry"].exists)
+    }
+
+    private func task583App(_ suffix: String, largest: Bool = false, flags: [String] = []) throws -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", try task371Library(suffix, prefix: "MINDWTR_POMODORO_PANEL_UI_")] + flags
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); boardEnabled(app.buttons["tab-focus"], timeout: 40); boardTap(app, "tab-focus")
+        boardEnabled(app.buttons["pomodoro-toggle"], timeout: 30)
+        return app
+    }
+
+    private func task583Tap(_ app: XCUIApplication, _ id: String) {
+        let button = app.buttons[id]
+        revealPagedElement(app, button, in: app.scrollViews.firstMatch)
+        boardEnabled(button); button.tap()
+        boardEnabled(app.buttons["pomodoro-toggle"], timeout: 30)
+    }
+
+    func testTask583PomodoroControlsPersistAndCollapse() throws {
+        let app = try task583App("CONTROLS"); defer { app.terminate() }
+        XCTAssertEqual(app.staticTexts["pomodoro-clock"].label, "25:00")
+        task583Tap(app, "pomodoro-preset-quick")
+        XCTAssertEqual(app.staticTexts["pomodoro-clock"].label, "15:00")
+        task583Tap(app, "pomodoro-toggle")
+        XCTAssertEqual(app.buttons["pomodoro-toggle"].label, "Pause")
+        task583Tap(app, "pomodoro-toggle")
+        XCTAssertEqual(app.buttons["pomodoro-toggle"].label, "Start")
+        task583Tap(app, "pomodoro-reset")
+        XCTAssertEqual(app.staticTexts["pomodoro-clock"].label, "15:00")
+        task583Tap(app, "pomodoro-switch")
+        XCTAssertEqual(app.staticTexts["pomodoro-clock"].label, "03:00")
+        boardTap(app, "pomodoro-collapse")
+        XCTAssertFalse(app.buttons["pomodoro-toggle"].exists)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-focus"], timeout: 40); boardTap(app, "tab-focus")
+        boardEnabled(app.buttons["pomodoro-collapse"], timeout: 30)
+        XCTAssertFalse(app.buttons["pomodoro-toggle"].exists)
+        boardTap(app, "pomodoro-collapse"); boardEnabled(app.buttons["pomodoro-toggle"])
+        XCTAssertEqual(app.staticTexts["pomodoro-clock"].label, "03:00")
+        XCTAssertFalse(app.staticTexts["pomodoro-error"].exists)
+    }
+
+    func testTask583LinkedTaskCompletesAndPickerChangesTask() throws {
+        let app = try task583App("LINKED"); defer { app.terminate() }
+        let linked = app.staticTexts["pomodoro-task"]
+        revealPagedElement(app, linked, in: app.scrollViews.firstMatch)
+        XCTAssertEqual(linked.label, "Task583 outside Focus")
+        task583Tap(app, "pomodoro-complete")
+        XCTAssertTrue(app.staticTexts["task-completion-notice"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["persistence-error"].exists)
+
+        XCTAssertEqual(linked.label, "Task583 outside Focus")
+        let change = app.buttons["pomodoro-link"]
+        revealPagedElement(app, change, in: app.scrollViews.firstMatch); boardEnabled(change); change.tap()
+        boardTap(app, "pomodoro-choice-task583-next")
+        boardEnabled(app.buttons["pomodoro-toggle"], timeout: 30)
+        XCTAssertEqual(linked.label, "Task583 next")
+        XCTAssertFalse(app.staticTexts["pomodoro-error"].exists)
+    }
+
+    func testTask583OverdueCreditAppearsOnceAcrossRestart() throws {
+        let app = try task583App("OVERDUE"); defer { app.terminate() }
+        let count = app.staticTexts["pomodoro-count"]
+        XCTAssertEqual(count.label, "Focus sessions completed: 1")
+        XCTAssertEqual(app.staticTexts["pomodoro-clock"].label, "05:00")
+        XCTAssertTrue(app.staticTexts["pomodoro-event"].exists)
+        app.terminate(); app.launch(); boardEnabled(app.buttons["tab-focus"], timeout: 40); boardTap(app, "tab-focus")
+        boardEnabled(app.buttons["pomodoro-toggle"], timeout: 30)
+        XCTAssertEqual(count.label, "Focus sessions completed: 1")
+        XCTAssertEqual(app.staticTexts["pomodoro-clock"].label, "05:00")
+        XCTAssertFalse(app.staticTexts["pomodoro-event"].exists)
+    }
+
+    func testTask583LargestTextTimerControls() throws {
+        let app = try task583App("LARGEST", largest: true); defer { app.terminate() }
+        task583Tap(app, "pomodoro-preset-deep")
+        XCTAssertEqual(app.staticTexts["pomodoro-clock"].label, "50:00")
+        task583Tap(app, "pomodoro-switch")
+        XCTAssertEqual(app.staticTexts["pomodoro-clock"].label, "10:00")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Task583 largest Pomodoro"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    private func task583Recovery(_ suffix: String, cold: Bool) throws {
+        let flag = "--native-pomodoro-terminal-failure-once"
+        let app = try task583App(suffix, flags: [flag]); defer { app.terminate() }
+        boardTap(app, "pomodoro-toggle")
+        let retry = app.buttons["pomodoro-retry"]
+        revealPagedElement(app, retry, in: app.scrollViews.firstMatch); boardEnabled(retry, timeout: 30)
+        XCTAssertFalse(app.buttons["pomodoro-toggle"].isEnabled)
+        if cold {
+            app.terminate(); app.launchArguments.removeAll { $0 == flag }; app.launch()
+            boardEnabled(app.buttons["tab-focus"], timeout: 40); boardTap(app, "tab-focus")
+        } else { retry.tap() }
+        boardEnabled(app.buttons["pomodoro-toggle"], timeout: 30)
+        XCTAssertEqual(app.buttons["pomodoro-toggle"].label, "Pause")
+        XCTAssertFalse(app.buttons["pomodoro-retry"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    func testTask583RealTerminalFailureRetriesExactTimerCommand() throws { try task583Recovery("RETRY", cold: false) }
+    func testTask583ColdRecoverySettlesTimerWithoutRepeatingStart() throws { try task583Recovery("COLD", cold: true) }
+
+    private func task586App(_ suffix: String, flags: [String] = []) throws -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", try task371Library(suffix, prefix: "MINDWTR_POMODORO_ALARMS_UI_"),
+            "--native-pomodoro-alarm-fixture"] + flags
+        task586Application = app
+        app.launch(); boardEnabled(app.buttons["tab-focus"], timeout: 40)
+        boardEnabled(app.buttons["pomodoro-alarm-fixture-refresh"], timeout: 30)
+        return app
+    }
+
+    private func task586State(_ app: XCUIApplication) -> [String: Any] {
+        guard let data = app.staticTexts["pomodoro-alarm-fixture-state"].label.data(using: .utf8),
+              let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return state
+    }
+
+    @discardableResult
+    private func task586Wait(_ app: XCUIApplication, _ predicate: ([String: Any]) -> Bool,
+                             file: StaticString = #filePath, line: UInt = #line) -> [String: Any] {
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            boardTap(app, "pomodoro-alarm-fixture-refresh")
+            let state = task586State(app)
+            if predicate(state) { return state }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        let state = task586State(app)
+        XCTFail("Pomodoro alarm fixture did not settle: \(state)", file: file, line: line)
+        return state
+    }
+
+    func testTask586StartupSchedulesOutsideFocusWithoutDiagnosticOrSnapshotLoops() throws {
+        let app = try task586App("STARTUP"); defer { app.terminate() }
+        let before = task586Wait(app) { $0["addAttempts"] as? Int == 1 && $0["alarmDirty"] as? Bool == false
+            && $0["ownerGeneration"] is NSNull }
+        XCTAssertFalse(app.buttons["pomodoro-toggle"].exists)
+        XCTAssertEqual(before["lifecycleActive"] as? Bool, true)
+        for _ in 0..<6 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            boardTap(app, "pomodoro-alarm-fixture-refresh")
+        }
+        let after = task586State(app)
+        XCTAssertEqual(after["addAttempts"] as? Int, 1)
+        XCTAssertEqual(after["permissionReads"] as? Int, before["permissionReads"] as? Int)
+    }
+
+    func testTask586SavedTimerControlsAndCompletionAlertOffReachAlarmOwner() throws {
+        let app = try task586App("CONTROLS"); defer { app.terminate() }
+        task586Wait(app) { $0["outcome"] as? String == "retained" && $0["alarmDirty"] as? Bool == false }
+        boardTap(app, "tab-focus"); boardEnabled(app.buttons["pomodoro-toggle"], timeout: 30)
+        task583Tap(app, "pomodoro-toggle")
+        task586Wait(app) { $0["addAttempts"] as? Int == 1 && $0["alarmDirty"] as? Bool == false }
+        task583Tap(app, "pomodoro-toggle")
+        task586Wait(app) { $0["removePending"] as? Int == 1 && $0["outcome"] as? String == "cancelled" }
+        task583Tap(app, "pomodoro-toggle")
+        task586Wait(app) { $0["addAttempts"] as? Int == 2 && $0["alarmDirty"] as? Bool == false }
+        task103Open(app); boardTap(app, "gtd-pomodoroSettings"); boardEnabled(app.buttons["gtd-pomodoro-back"], timeout: 30)
+        task551SetToggle(app, "pomodoroCompletionAlert", "0")
+        let off = task586Wait(app) { $0["removePending"] as? Int == 2 && $0["outcome"] as? String == "cancelled"
+            && $0["alarmDirty"] as? Bool == false }
+        XCTAssertEqual(off["addAttempts"] as? Int, 2)
+    }
+
+    func testTask586BackgroundDrainsHeldCallbackAndActivationReconcilesWithoutDuplicateAdd() throws {
+        let app = try task586App("HELD", flags: ["--native-pomodoro-alarm-hold-first-add"]); defer { app.terminate() }
+        let held = task586Wait(app) { $0["heldAdd"] as? Bool == true }
+        let generation = try XCTUnwrap(held["lifecycleGeneration"] as? Int)
+        #if targetEnvironment(simulator)
+        XCUIDevice.shared.press(.home)
+        #else
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+        #endif
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        boardEnabled(app.buttons["pomodoro-alarm-fixture-release"], timeout: 30)
+        let returned = task586Wait(app) { ($0["lifecycleGeneration"] as? Int ?? 0) > generation
+            && $0["heldAdd"] as? Bool == true && $0["draining"] as? Bool == true }
+        XCTAssertEqual(returned["ownerGeneration"] as? Int, held["ownerGeneration"] as? Int)
+        XCTAssertEqual(returned["alarmDirty"] as? Bool, true)
+        boardTap(app, "pomodoro-alarm-fixture-release")
+        let settled = task586Wait(app) { $0["heldAdd"] as? Bool == false && $0["draining"] as? Bool == false
+            && $0["alarmDirty"] as? Bool == false && $0["ownerGeneration"] is NSNull }
+        XCTAssertEqual(settled["addAttempts"] as? Int, 1)
+        XCTAssertEqual(settled["lifecycleActive"] as? Bool, true)
+    }
+
+    func testTask586HostRetirementRejectsLateHeldCallbackAndDrainsItsSlot() throws {
+        let app = try task586App("RETIRE", flags: ["--native-pomodoro-alarm-hold-first-add"]); defer { app.terminate() }
+        task586Wait(app) { $0["heldAdd"] as? Bool == true }
+        boardTap(app, "pomodoro-alarm-fixture-retire")
+        let retired = task586Wait(app) { $0["hostRetired"] as? Bool == true && $0["draining"] as? Bool == true }
+        XCTAssertEqual(retired["lifecycleActive"] as? Bool, false)
+        boardTap(app, "pomodoro-alarm-fixture-release")
+        let drained = task586Wait(app) { $0["heldAdd"] as? Bool == false && $0["draining"] as? Bool == false
+            && $0["ownerGeneration"] is NSNull }
+        XCTAssertEqual(drained["alarmDirty"] as? Bool, true)
+        XCTAssertEqual(drained["outcome"] as? String, "")
+        XCTAssertEqual(drained["addAttempts"] as? Int, 1)
+    }
+
+    private func task586CorruptCancellation(_ suffix: String, denied: Bool) throws {
+        var flags = ["--native-pomodoro-alarm-seed-owned"]
+        if denied { flags.append("--native-pomodoro-alarm-denied") }
+        let app = try task586App(suffix, flags: flags); defer { app.terminate() }
+        let cancelled = task586Wait(app) { $0["removePending"] as? Int == 1 && $0["removeDelivered"] as? Int == 1
+            && $0["outcome"] as? String == "cancelled" && $0["alarmDirty"] as? Bool == false }
+        XCTAssertEqual(cancelled["addAttempts"] as? Int, 0)
+        boardTap(app, "tab-focus")
+        XCTAssertTrue(app.staticTexts["pomodoro-error"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    func testTask586ExplicitOffCancelsOwnedAlarmsEvenWithCorruptTimerPanel() throws {
+        try task586CorruptCancellation("OFF_CORRUPT", denied: false)
+    }
+
+    func testTask586DeniedPermissionCancelsOwnedAlarmsEvenWithCorruptTimerPanel() throws {
+        try task586CorruptCancellation("DENIED_CORRUPT", denied: true)
+    }
+
+}
+
+
+extension FoundationUITests {
+    private func task601App(_ role: String, flags: [String] = [], largest: Bool = false) throws -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication(); task601Application = app
+        app.launchArguments = ["--native-ui-test-library", try task371Library(role, prefix: "MINDWTR_AI_TIMEOUT_UI_"),
+            "--native-ai-timeout-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + flags
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); task594OpenAI(app)
+        XCTAssertTrue(app.staticTexts["ai-summary-timeout"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["ai-timeout-choice-30"].exists, "Advanced defaults to collapsed")
+        return app
+    }
+    private func task601Advanced(_ app: XCUIApplication) {
+        task442Reveal(app, app.buttons["ai-timeout-advanced"], in: app.scrollViews["ai-summary-scroll"])
+        boardEnabled(app.buttons["ai-timeout-advanced"]); boardTap(app, "ai-timeout-advanced")
+    }
+    private func task601Choose(_ app: XCUIApplication, _ value: Int) {
+        let choice = app.buttons["ai-timeout-choice-" + String(value)]
+        task442Reveal(app, choice, in: app.scrollViews["ai-summary-scroll"])
+        boardEnabled(choice, timeout: 30); choice.tap()
+    }
+    private func task601Value(_ app: XCUIApplication, _ value: Int) {
+        let text = app.staticTexts["ai-summary-timeout"]
+        expectation(for: NSPredicate { _, _ in text.exists && text.label == "\(value) seconds" }, evaluatedWith: text)
+        waitForExpectations(timeout: 30)
+        boardEnabled(app.buttons["ai-timeout-choice-30"], timeout: 30)
+        XCTAssertTrue(app.buttons["ai-timeout-choice-" + String(value)].isSelected)
+    }
+    private func task601State(_ app: XCUIApplication, _ expected: String) {
+        let state = app.staticTexts["ai-timeout-fixture-state"]
+        expectation(for: NSPredicate { _, _ in state.exists && state.label == expected }, evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+    }
+    private func task601Background(_ app: XCUIApplication) {
+        let before = app.state.rawValue
+        XCUIApplication(bundleIdentifier: "com.apple.springboard").activate()
+        let after = app.state.rawValue
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed,
+            "Background transition states: before=\(before), after=\(after), final=\(app.state.rawValue)")
+        app.activate()
+    }
+    func testNativeAITimeoutAllChoicesWhileAIDisabledAndColdSaved() throws {
+        let app = try task601App("CHOICES"); defer { app.terminate() }
+        XCTAssertEqual(app.staticTexts["ai-summary-enabled"].label, "Off")
+        task601Advanced(app)
+        for value in [30, 60, 120, 300] { task601Choose(app, value); task601Value(app, value) }
+        XCTAssertEqual(app.staticTexts["ai-summary-enabled"].label, "Off")
+        boardTap(app, "ai-summary-back"); task594EnterAI(app)
+        XCTAssertTrue(app.staticTexts["ai-summary-timeout"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts["ai-summary-timeout"].label, "300 seconds")
+        XCTAssertFalse(app.buttons["ai-timeout-choice-30"].exists)
+        app.terminate(); app.launch(); task594OpenAI(app)
+        XCTAssertTrue(app.staticTexts["ai-summary-timeout"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts["ai-summary-timeout"].label, "300 seconds")
+    }
+    func testNativeAITimeoutExplicitAbsentDefaultIsSaved() throws {
+        let app = try task601App("EXPLICIT_DEFAULT"); defer { app.terminate() }
+        task601Advanced(app); task601Choose(app, 30); task601Value(app, 30)
+    }
+    func testNativeAITimeoutSavedSameValueIsNoop() throws {
+        let app = try task601App("NOOP"); defer { app.terminate() }
+        task601Advanced(app); task601Choose(app, 30); task601Value(app, 30)
+    }
+    func testNativeAITimeoutSavedLargestTextAndCancelArePassive() throws {
+        let app = try task601App("CANCEL", largest: true); defer { app.terminate() }
+        XCTAssertEqual(app.staticTexts["ai-summary-timeout"].label, "120 seconds")
+        task601Advanced(app); boardEnabled(app.buttons["ai-timeout-choice-120"])
+        XCTAssertTrue(app.buttons["ai-timeout-choice-120"].isSelected)
+        task601Advanced(app); XCTAssertFalse(app.buttons["ai-timeout-choice-120"].exists)
+        boardTap(app, "ai-summary-back")
+        XCTAssertTrue(app.staticTexts["advanced-title"].exists)
+    }
+    func testNativeAITimeoutOptionsFailureRetriesReadOnly() throws {
+        let app = try task601App("OPTIONS_FAILURE", flags: ["--native-ai-timeout-options-failure-once"]); defer { app.terminate() }
+        task601Advanced(app)
+        XCTAssertTrue(app.staticTexts["ai-timeout-options-error"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["ai-timeout-choice-30"].exists)
+        boardTap(app, "ai-timeout-options-retry")
+        boardEnabled(app.buttons["ai-timeout-choice-30"], timeout: 30)
+        XCTAssertTrue(app.buttons["ai-timeout-choice-30"].isSelected)
+    }
+    private func task601CancelWrite(_ role: String, retirement: String) throws {
+        let app = try task601App(role, flags: ["--native-ai-timeout-readmission-hold-once"]); defer { app.terminate() }
+        task601Advanced(app); task601Choose(app, 60)
+        XCTAssertTrue(app.staticTexts["ai-timeout-test-held"].waitForExistence(timeout: 20))
+        if retirement == "back" { boardTap(app, "ai-summary-back") }
+        else if retirement == "background" { task601Background(app) }
+        else { boardTap(app, "ai-summary-test-" + retirement) }
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["ai-summary-title"])
+        waitForExpectations(timeout: 20)
+        if retirement == "lock" { boardEnabled(app.buttons["app-lock-read-retry"], timeout: 20); boardTap(app, "app-lock-read-retry") }
+        if retirement == "host" {
+            let advanced = app.buttons["settings-advanced"]
+            task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"]); boardEnabled(advanced, timeout: 30); advanced.tap()
+        }
+        XCTAssertTrue(app.staticTexts["advanced-title"].waitForExistence(timeout: 30))
+        task594EnterAI(app)
+        XCTAssertTrue(app.staticTexts["ai-summary-timeout"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.staticTexts["ai-summary-timeout"].label, "30 seconds")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+    func testNativeAITimeoutBackCancelsBeforeCommit() throws { try task601CancelWrite("BACK", retirement: "back") }
+    func testNativeAITimeoutBackgroundCancelsBeforeCommit() throws { try task601CancelWrite("BACKGROUND", retirement: "background") }
+    func testNativeAITimeoutLockCancelsBeforeCommit() throws { try task601CancelWrite("LOCK", retirement: "lock") }
+    func testNativeAITimeoutHostReplacementCancelsBeforeCommit() throws { try task601CancelWrite("HOST", retirement: "host") }
+
+    private func task601Uncertain(_ role: String, retirement: String? = nil, refreshFailure: Bool = false) throws {
+        var flags = ["--native-ai-timeout-commit-failure-once"]
+        if refreshFailure { flags += ["--native-ai-timeout-refresh-failure-once"] }
+        let app = try task601App(role, flags: flags); defer { app.terminate() }
+        task601Advanced(app); task601Choose(app, 60)
+        XCTAssertTrue(app.staticTexts["ai-timeout-save-error"].waitForExistence(timeout: 20))
+
+        task601State(app, "failure=true;exact=false;commits=5;retired=false")
+        XCTAssertEqual(app.staticTexts["ai-summary-timeout"].label, "30 seconds")
+        if retirement == "background" { task601Background(app) }
+        if retirement != nil { XCTAssertFalse(app.staticTexts["ai-summary-title"].exists) }
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30); boardTap(app, "persistence-retry")
+        task601State(app, "failure=true;exact=true;commits=6;retired=true")
+        if refreshFailure {
+            XCTAssertTrue(app.staticTexts["ai-summary-error"].waitForExistence(timeout: 20))
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            boardTap(app, "ai-summary-retry")
+            task601State(app, "failure=true;exact=true;commits=6;retired=true")
+        }
+        task601Value(app, 60)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.launchArguments.removeAll { $0 == "--native-ai-timeout-commit-failure-once" }
+        app.terminate(); app.launch(); task594OpenAI(app)
+        XCTAssertTrue(app.staticTexts["ai-summary-timeout"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.staticTexts["ai-summary-timeout"].label, "60 seconds")
+    }
+    func testNativeAITimeoutRealCommitFailureExactWarmRetry() throws { try task601Uncertain("COMMIT") }
+    func testNativeAITimeoutBackgroundThenExplicitExactRetry() throws { try task601Uncertain("COMMIT_BACKGROUND", retirement: "background") }
+    func testNativeAITimeoutAcknowledgedRefreshFailureRetriesOnlyRead() throws { try task601Uncertain("REFRESH_FAILURE", refreshFailure: true) }
+    func testNativeAITimeoutReplacementHostCannotRetryUncertainOwner() throws {
+        let app = try task601App("COMMIT_HOST", flags: ["--native-ai-timeout-commit-failure-once"]); defer { app.terminate() }
+        task601Advanced(app); task601Choose(app, 60)
+
+        task601State(app, "failure=true;exact=false;commits=5;retired=false")
+        boardTap(app, "ai-summary-test-host")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["ai-summary-title"])
+        waitForExpectations(timeout: 30)
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30); boardTap(app, "persistence-retry")
+        XCTAssertFalse(app.staticTexts["ai-summary-title"].exists)
+        XCTAssertTrue(app.buttons["persistence-retry"].exists)
+        XCTAssertTrue(app.staticTexts["persistence-error"].exists)
+    }
+
+    private func task680App(_ role: String, flags: [String] = [], largest: Bool = false) throws -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication(); task680Application = app
+        app.launchArguments = ["--native-ui-test-library", try task371Library(role, prefix: "MINDWTR_AI_EFFORT_UI_"),
+            "--native-ai-reasoning-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + flags
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); task594OpenAI(app)
+        XCTAssertTrue(app.staticTexts["ai-summary-effort"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["ai-timeout-choice-30"].exists, "Advanced defaults to collapsed")
+        return app
+    }
+    private func task680Choose(_ app: XCUIApplication, _ value: String) {
+        let choice = app.buttons["ai-effort-choice-" + value]
+        task442Reveal(app, choice, in: app.scrollViews["ai-summary-scroll"])
+        boardEnabled(choice, timeout: 30); choice.tap()
+    }
+    private func task680Value(_ app: XCUIApplication, _ value: String) {
+        let text = app.staticTexts["ai-summary-effort"]
+        let labels = ["low": "Low", "medium": "Medium", "high": "High"]
+        expectation(for: NSPredicate { _, _ in text.exists && text.label == labels[value] }, evaluatedWith: text)
+        waitForExpectations(timeout: 30)
+        boardEnabled(app.buttons["ai-effort-choice-low"], timeout: 30)
+        XCTAssertTrue(app.buttons["ai-effort-choice-" + value].isSelected)
+    }
+    private func task680State(_ app: XCUIApplication, _ expected: String) {
+        let state = app.staticTexts["ai-effort-fixture-state"]
+        expectation(for: NSPredicate { _, _ in state.exists && state.label == expected }, evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+    }
+    func testNativeAIReasoningThreeChoicesWhileDisabledAndColdSaved() throws {
+        let app = try task680App("CHOICES"); defer { app.terminate() }
+        XCTAssertEqual(app.staticTexts["ai-summary-enabled"].label, "Off")
+        for value in ["low", "medium", "high"] { task680Choose(app, value); task680Value(app, value) }
+        XCTAssertEqual(app.staticTexts["ai-summary-enabled"].label, "Off")
+        XCTAssertEqual(app.staticTexts["ai-summary-provider"].label, "OpenAI")
+        XCTAssertEqual(app.staticTexts["ai-summary-timeout"].label, "30 seconds")
+        app.terminate(); app.launch(); task594OpenAI(app)
+        task680Value(app, "high")
+    }
+    func testNativeAIReasoningSavedMinimalDisplayThenExplicitLow() throws {
+        let app = try task680App("MINIMAL", largest: true); defer { app.terminate() }
+        XCTAssertEqual(app.staticTexts["ai-summary-effort"].label, "Saved: Minimal")
+        boardEnabled(app.buttons["ai-effort-choice-low"], timeout: 30)
+        XCTAssertFalse(app.buttons["ai-effort-choice-minimal"].exists)
+        for value in ["low", "medium", "high"] { XCTAssertFalse(app.buttons["ai-effort-choice-" + value].isSelected) }
+        task680Choose(app, "low"); task680Value(app, "low")
+    }
+    func testNativeAIReasoningExplicitAbsentLowAndSavedLowNoop() throws {
+        for role in ["EXPLICIT_DEFAULT", "NOOP"] {
+            let app = try task680App(role); defer { app.terminate() }
+            task680Choose(app, "low"); task680Value(app, "low")
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            app.terminate()
+        }
+    }
+    func testNativeAIReasoningNonOpenAIHasNoActions() throws {
+        for role in ["GEMINI", "ANTHROPIC"] {
+            let app = try task680App(role); defer { app.terminate() }
+            XCTAssertEqual(app.staticTexts["ai-summary-provider"].label, role == "GEMINI" ? "Gemini" : "Anthropic (Claude)")
+            for value in ["low", "medium", "high", "minimal"] { XCTAssertFalse(app.buttons["ai-effort-choice-" + value].exists) }
+            XCTAssertFalse(app.buttons["ai-effort-options-retry"].exists)
+            app.terminate()
+        }
+    }
+    func testNativeAIReasoningOptionsFailureRetriesOnlyRead() throws {
+        let app = try task680App("OPTIONS_FAILURE", flags: ["--native-ai-reasoning-options-failure-once"]); defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["ai-effort-options-error"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["ai-effort-choice-low"].exists)
+        boardTap(app, "ai-effort-options-retry")
+        boardEnabled(app.buttons["ai-effort-choice-low"], timeout: 30)
+        XCTAssertTrue(app.buttons["ai-effort-choice-low"].isSelected)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+    private func task680CancelWrite(_ role: String, retirement: String) throws {
+        let app = try task680App(role, flags: ["--native-ai-reasoning-readmission-hold-once"]); defer { app.terminate() }
+        task680Choose(app, "medium")
+        XCTAssertTrue(app.staticTexts["ai-effort-test-held"].waitForExistence(timeout: 20))
+        if retirement == "back" { boardTap(app, "ai-summary-back") }
+        else if retirement == "background" { task601Background(app) }
+        else { boardTap(app, "ai-summary-test-" + retirement) }
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["ai-summary-title"])
+        waitForExpectations(timeout: 20)
+        if retirement == "lock" { boardEnabled(app.buttons["app-lock-read-retry"], timeout: 20); boardTap(app, "app-lock-read-retry") }
+        if retirement == "host" {
+            let advanced = app.buttons["settings-advanced"]
+            task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"]); boardEnabled(advanced, timeout: 30); advanced.tap()
+        }
+        XCTAssertTrue(app.staticTexts["advanced-title"].waitForExistence(timeout: 30))
+        task594EnterAI(app); task680Value(app, "low")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+    func testNativeAIReasoningBackCancelsBeforeCommit() throws { try task680CancelWrite("BACK", retirement: "back") }
+    func testNativeAIReasoningBackgroundCancelsBeforeCommit() throws { try task680CancelWrite("BACKGROUND", retirement: "background") }
+    func testNativeAIReasoningLockCancelsBeforeCommit() throws { try task680CancelWrite("LOCK", retirement: "lock") }
+    func testNativeAIReasoningHostReplacementCancelsBeforeCommit() throws { try task680CancelWrite("HOST", retirement: "host") }
+    private func task680Uncertain(_ role: String, retirement: String? = nil, refreshFailure: Bool = false) throws {
+        var flags = ["--native-ai-reasoning-commit-failure-once"]
+        if refreshFailure { flags += ["--native-ai-reasoning-refresh-failure-once"] }
+        let app = try task680App(role, flags: flags); defer { app.terminate() }
+        task680Choose(app, "medium")
+        XCTAssertTrue(app.staticTexts["ai-effort-save-error"].waitForExistence(timeout: 20))
+        task680State(app, "failure=true;exact=false;commits=5;retired=false")
+        XCTAssertEqual(app.staticTexts["ai-summary-effort"].label, "Low")
+        if retirement == "background" { task601Background(app) }
+        if retirement != nil { XCTAssertFalse(app.staticTexts["ai-summary-title"].exists) }
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30); boardTap(app, "persistence-retry")
+        task680State(app, "failure=true;exact=true;commits=6;retired=true")
+        if refreshFailure {
+            XCTAssertTrue(app.staticTexts["ai-summary-error"].waitForExistence(timeout: 20))
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            boardTap(app, "ai-summary-retry")
+            task680State(app, "failure=true;exact=true;commits=6;retired=true")
+        }
+        task680Value(app, "medium")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.launchArguments.removeAll { $0 == "--native-ai-reasoning-commit-failure-once" }
+        app.terminate(); app.launch(); task594OpenAI(app)
+        task680Value(app, "medium")
+    }
+    func testNativeAIReasoningRealCommitFailureExactWarmRetry() throws { try task680Uncertain("COMMIT") }
+    func testNativeAIReasoningBackgroundThenExplicitExactRetry() throws { try task680Uncertain("COMMIT_BACKGROUND", retirement: "background") }
+    func testNativeAIReasoningAcknowledgedRefreshFailureRetriesOnlyRead() throws { try task680Uncertain("REFRESH_FAILURE", refreshFailure: true) }
+    func testNativeAIReasoningReplacementHostCannotRetryUncertainOwner() throws {
+        let app = try task680App("COMMIT_HOST", flags: ["--native-ai-reasoning-commit-failure-once"]); defer { app.terminate() }
+        task680Choose(app, "medium")
+        task680State(app, "failure=true;exact=false;commits=5;retired=false")
+        boardTap(app, "ai-summary-test-host")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["ai-summary-title"])
+        waitForExpectations(timeout: 30)
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30); boardTap(app, "persistence-retry")
+        XCTAssertFalse(app.staticTexts["ai-summary-title"].exists)
+        XCTAssertTrue(app.buttons["persistence-retry"].exists)
+        XCTAssertTrue(app.staticTexts["persistence-error"].exists)
+    }
+
+    private func task701App(_ role: String, flags: [String] = [], largest: Bool = false) throws -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication(); task701Application = app
+        let language = role == "CUSTOM" ? "ar" : "en"
+        app.launchArguments = ["--native-ui-test-library", try task371Library(role, prefix: "MINDWTR_AI_GEMINI_UI_"),
+            "--native-ai-gemini-fixture", "-AppleLanguages", "(" + language + ")", "-AppleLocale", language == "ar" ? "ar_SA" : "en_US"] + flags
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); task594OpenAI(app)
+        XCTAssertTrue(app.staticTexts["ai-summary-provider"].waitForExistence(timeout: 20))
+        if !["ABSENT_PROVIDER", "OPENAI", "ANTHROPIC"].contains(role) {
+            XCTAssertTrue(app.staticTexts["ai-summary-gemini-budget"].waitForExistence(timeout: 20))
+        }
+        XCTAssertFalse(app.buttons["ai-timeout-choice-30"].exists, "Advanced defaults to collapsed")
+        return app
+    }
+    private func task701Choose(_ app: XCUIApplication, _ value: Int) {
+        let choice = app.buttons["ai-gemini-choice-" + String(value)]
+        task442Reveal(app, choice, in: app.scrollViews["ai-summary-scroll"])
+        boardEnabled(choice, timeout: 30); choice.tap()
+    }
+    private func task701Value(_ app: XCUIApplication, _ value: Int) {
+        let text = app.staticTexts["ai-summary-gemini-budget"]
+        let labels = app.launchArguments.contains("(ar)")
+            ? [0: "عن", 128: "قليل", 256: "واسطة", 512: "عالي"]
+            : [0: "Off", 128: "Low", 256: "Medium", 512: "High"]
+        expectation(for: NSPredicate { _, _ in text.exists && text.label == labels[value] }, evaluatedWith: text)
+        waitForExpectations(timeout: 30)
+        boardEnabled(app.buttons["ai-gemini-choice-0"], timeout: 30)
+        XCTAssertTrue(app.buttons["ai-gemini-choice-" + String(value)].isSelected)
+    }
+    private func task701State(_ app: XCUIApplication, _ expected: String) {
+        let state = app.staticTexts["ai-gemini-fixture-state"]
+        let match = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in state.exists && state.label == expected }, object: state)
+        if XCTWaiter.wait(for: [match], timeout: 30) != .completed {
+            let retry = app.buttons["persistence-retry"]
+            let admission = retry.exists ? retry.value as? String ?? "value-unavailable" : "retry-control-absent"
+            XCTFail("Gemini fixture state wait failed; initial retry admission: " + admission)
+        }
+    }
+    func testNativeAIGeminiFourChoicesWhileDisabledAndColdSaved() throws {
+        let app = try task701App("CHOICES"); defer { app.terminate() }
+        XCTAssertEqual(app.staticTexts["ai-summary-enabled"].label, "Off")
+        for value in [0, 128, 256, 512] { task701Choose(app, value); task701Value(app, value) }
+        XCTAssertEqual(app.staticTexts["ai-summary-enabled"].label, "Off")
+        XCTAssertEqual(app.staticTexts["ai-summary-provider"].label, "Gemini")
+        XCTAssertEqual(app.staticTexts["ai-summary-timeout"].label, "30 seconds")
+        app.terminate(); app.launch(); task594OpenAI(app)
+        task701Value(app, 512)
+    }
+    func testNativeAIGeminiSavedCustomLargestRTLThenExplicitMedium() throws {
+        let app = try task701App("CUSTOM", largest: true); defer { app.terminate() }
+        XCTAssertEqual(app.staticTexts["ai-summary-gemini-budget"].label, "123")
+        for value in [0, 128, 256, 512] {
+            let choice = app.buttons["ai-gemini-choice-" + String(value)]
+            task442Reveal(app, choice, in: app.scrollViews["ai-summary-scroll"])
+            boardEnabled(choice, timeout: 30)
+            XCTAssertFalse(choice.isSelected)
+            XCTAssertGreaterThanOrEqual(choice.frame.height, 44 - 0.001)
+        }
+        XCTAssertEqual(app.buttons["ai-gemini-choice-256"].label, "واسطة")
+        task701Choose(app, 256); task701Value(app, 256)
+        app.terminate(); app.launch(); task594OpenAI(app)
+        task701Value(app, 256)
+    }
+    func testNativeAIGeminiExplicitAbsentOffAndSavedOffNoop() throws {
+        for role in ["EXPLICIT_DEFAULT", "NOOP"] {
+            let app = try task701App(role); defer { app.terminate() }
+            task701Choose(app, 0); task701Value(app, 0)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            app.terminate(); app.launch(); task594OpenAI(app); task701Value(app, 0)
+            app.terminate()
+        }
+    }
+    func testNativeAIGeminiNonGeminiHasNoActions() throws {
+        for role in ["ABSENT_PROVIDER", "OPENAI", "ANTHROPIC"] {
+            let app = try task701App(role); defer { app.terminate() }
+            XCTAssertEqual(app.staticTexts["ai-summary-provider"].label, role == "ANTHROPIC" ? "Anthropic (Claude)" : "OpenAI")
+            for value in [0, 128, 256, 512] { XCTAssertFalse(app.buttons["ai-gemini-choice-" + String(value)].exists) }
+            XCTAssertFalse(app.staticTexts["ai-summary-gemini-budget"].exists)
+            XCTAssertFalse(app.buttons["ai-gemini-options-retry"].exists)
+            app.terminate()
+        }
+    }
+    func testNativeAIGeminiOptionsFailureRetriesOnlyRead() throws {
+        let app = try task701App("OPTIONS_FAILURE", flags: ["--native-ai-gemini-options-failure-once"]); defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["ai-gemini-options-error"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["ai-gemini-choice-0"].exists)
+        boardTap(app, "ai-gemini-options-retry")
+        boardEnabled(app.buttons["ai-gemini-choice-0"], timeout: 30)
+        XCTAssertTrue(app.buttons["ai-gemini-choice-0"].isSelected)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+    private func task701CancelWrite(_ role: String, retirement: String) throws {
+        let app = try task701App(role, flags: ["--native-ai-gemini-readmission-hold-once"]); defer { app.terminate() }
+        task701Choose(app, 256)
+        XCTAssertTrue(app.staticTexts["ai-gemini-test-held"].waitForExistence(timeout: 20))
+        if retirement == "back" { boardTap(app, "ai-summary-back") }
+        else if retirement == "background" { task601Background(app) }
+        else { boardTap(app, "ai-summary-test-" + retirement) }
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["ai-summary-title"])
+        waitForExpectations(timeout: 20)
+        if retirement == "lock" { boardEnabled(app.buttons["app-lock-read-retry"], timeout: 20); boardTap(app, "app-lock-read-retry") }
+        if retirement == "host" {
+            let advanced = app.buttons["settings-advanced"]
+            task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"]); boardEnabled(advanced, timeout: 30); advanced.tap()
+        }
+        XCTAssertTrue(app.staticTexts["advanced-title"].waitForExistence(timeout: 30))
+        task594EnterAI(app); task701Value(app, 128)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+    func testNativeAIGeminiBackCancelsBeforeCommit() throws { try task701CancelWrite("BACK", retirement: "back") }
+    func testNativeAIGeminiBackgroundCancelsBeforeCommit() throws { try task701CancelWrite("BACKGROUND", retirement: "background") }
+    func testNativeAIGeminiLockCancelsBeforeCommit() throws { try task701CancelWrite("LOCK", retirement: "lock") }
+    func testNativeAIGeminiHostReplacementCancelsBeforeCommit() throws { try task701CancelWrite("HOST", retirement: "host") }
+    private func task701Uncertain(_ role: String, retirement: String? = nil, refreshFailure: Bool = false) throws {
+        var flags = ["--native-ai-gemini-commit-failure-once"]
+        if refreshFailure { flags += ["--native-ai-gemini-refresh-failure-once"] }
+        let app = try task701App(role, flags: flags); defer { app.terminate() }
+        task701Choose(app, 256)
+        XCTAssertTrue(app.staticTexts["ai-gemini-save-error"].waitForExistence(timeout: 20))
+        task701State(app, "failure=true;exact=false;commits=5;retired=false")
+        XCTAssertEqual(app.staticTexts["ai-summary-gemini-budget"].label, "Low")
+        if retirement == "background" { task601Background(app) }
+        if retirement != nil { XCTAssertFalse(app.staticTexts["ai-summary-title"].exists) }
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30); boardTap(app, "persistence-retry")
+        task701State(app, "failure=true;exact=true;commits=6;retired=true")
+        if refreshFailure {
+            XCTAssertTrue(app.staticTexts["ai-summary-error"].waitForExistence(timeout: 20))
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            boardTap(app, "ai-summary-retry")
+            task701State(app, "failure=true;exact=true;commits=6;retired=true")
+        }
+        task701Value(app, 256)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.launchArguments.removeAll { $0 == "--native-ai-gemini-commit-failure-once" }
+        app.terminate(); app.launch(); task594OpenAI(app)
+        task701Value(app, 256)
+    }
+    func testNativeAIGeminiRealCommitFailureExactWarmRetry() throws { try task701Uncertain("COMMIT") }
+    func testNativeAIGeminiBackgroundThenExplicitExactRetry() throws { try task701Uncertain("COMMIT_BACKGROUND", retirement: "background") }
+    func testNativeAIGeminiAcknowledgedRefreshFailureRetriesOnlyRead() throws { try task701Uncertain("REFRESH_FAILURE", refreshFailure: true) }
+    func testNativeAIGeminiReplacementHostCannotRetryUncertainOwner() throws {
+        let app = try task701App("COMMIT_HOST", flags: ["--native-ai-gemini-commit-failure-once"]); defer { app.terminate() }
+        task701Choose(app, 256)
+        task701State(app, "failure=true;exact=false;commits=5;retired=false")
+        task442Reveal(app, app.buttons["ai-summary-test-host"], in: app.scrollViews["ai-summary-scroll"])
+        boardTap(app, "ai-summary-test-host")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["ai-summary-title"])
+        waitForExpectations(timeout: 30)
+        boardEnabled(app.buttons["persistence-retry"], timeout: 30); boardTap(app, "persistence-retry")
+        XCTAssertFalse(app.staticTexts["ai-summary-title"].exists)
+        XCTAssertTrue(app.buttons["persistence-retry"].exists)
+        XCTAssertTrue(app.staticTexts["persistence-error"].exists)
+    }
+
+
+    func testInboxSortNormalAndColdRead() throws { try task736InboxSort("NORMAL") }
+    func testInboxSortLargestTextAndColdRead() throws { try task736InboxSort("LARGEST", largest: true) }
+
+    private func task736InboxSort(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_SORT_UI_" + role + "_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged canonical Inbox sort library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US",
+            "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        task736OpenInbox(app)
+        task736AssertFirst(app, "001")
+        boardTap(app, "inbox-sort-open"); boardEnabled(app.buttons["inbox-sort-default"])
+        XCTAssertTrue(app.buttons["inbox-sort-default"].isSelected)
+        XCTAssertTrue(!app.buttons["tab-menu"].exists || !app.buttons["tab-menu"].isEnabled)
+        boardTap(app, "inbox-sort-close"); task736AssertFirst(app, "001")
+        for _ in 0..<2 {
+            boardTap(app, "inbox-sort-open")
+            task736SortTap(app, "inbox-sort-title")
+            boardEnabled(app.buttons["inbox-sort-open"])
+            XCTAssertTrue(app.buttons["tab-inbox"].isSelected)
+            task736AssertFirst(app, "055")
+        }
+
+        let tail = app.buttons["task-title-inbox-sort-001"]
+        revealPagedElement(app, tail, in: app.descendants(matching: .any)["inbox-scroll"].firstMatch, more: "inbox-more", ready: app.buttons["inbox-sort-open"])
+        XCTAssertTrue(tail.exists); XCTAssertTrue(tail.isHittable)
+        let previous = app.buttons["task-title-inbox-sort-002"]
+        XCTAssertTrue(previous.exists); XCTAssertLessThan(previous.frame.minY, tail.frame.minY)
+        openReferenceSortTest(app); openReferenceSortChoices(app)
+        let referenceTitle = app.buttons["reference-sort-title"]
+        if !referenceTitle.isHittable { revealPagedElement(app, referenceTitle, in: app.scrollViews["reference-panel-scroll"]) }
+        XCTAssertTrue(referenceTitle.isSelected)
+        referenceSortTap(app, "reference-menu-close"); boardTap(app, "reference-back")
+        task736OpenInbox(app); task736AssertFirst(app, "055")
+        app.terminate(); app.launch(); task736OpenInbox(app); task736AssertFirst(app, "055")
+        boardTap(app, "inbox-sort-open")
+        let title = app.buttons["inbox-sort-title"]
+        if !title.isHittable { revealPagedElement(app, title, in: app.scrollViews["inbox-sort-scroll"]) }
+        XCTAssertTrue(title.isSelected)
+        boardTap(app, "inbox-sort-close")
+    }
+
+    private func task736OpenInbox(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["tab-inbox"], timeout: 40)
+        if !app.buttons["tab-inbox"].isSelected { boardTap(app, "tab-inbox") }
+        boardEnabled(app.buttons["inbox-sort-open"])
+    }
+
+    private func task736SortTap(_ app: XCUIApplication, _ identifier: String) {
+        let button = app.buttons[identifier]
+        if !button.isHittable { revealPagedElement(app, button, in: app.scrollViews["inbox-sort-scroll"]) }
+        boardEnabled(button); XCTAssertTrue(button.isHittable)
+        XCTAssertGreaterThanOrEqual(button.frame.height, 44); button.tap()
+    }
+
+    private func task736AssertFirst(_ app: XCUIApplication, _ suffix: String) {
+        let title = app.buttons["task-title-inbox-sort-" + suffix]
+        boardEnabled(app.buttons["inbox-sort-open"])
+        expectation(for: NSPredicate { _, _ in title.exists && title.isHittable }, evaluatedWith: nil)
+        waitForExpectations(timeout: 10)
+        let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "task-title-inbox-sort-"))
+            .allElementsBoundByIndex.filter { $0.exists && $0.isHittable }
+        XCTAssertEqual(titles.min(by: { $0.frame.minY < $1.frame.minY })?.identifier, title.identifier)
+    }
+
+
+    func testInboxGroupNormalAndColdRead() throws { try task737InboxGroup("NORMAL") }
+    func testInboxGroupLargestTextAndColdRead() throws { try task737InboxGroup("LARGEST", largest: true) }
+
+    private func task737InboxGroup(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_GROUP_UI_" + role + "_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged canonical Inbox grouping library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US",
+            "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        task736OpenInbox(app)
+        task737SelectedGroup(app, "none")
+        let headings = [("context", "context:@alpha"), ("area", "area-alpha"),
+            ("project", "project:project-alpha"), ("tag", "tag:alpha")]
+        for (axis, heading) in headings {
+            task737ChooseGroup(app, axis)
+            let button = app.buttons["inbox-section-" + heading]
+            boardEnabled(button); XCTAssertGreaterThanOrEqual(button.frame.height, 44 - 1e-6)
+            XCTAssertEqual(button.value as? String, "Collapse")
+            boardTap(app, "inbox-section-" + heading)
+            boardEnabled(app.buttons["inbox-group-open"])
+            XCTAssertEqual(button.value as? String, "Expand")
+        }
+
+        for (axis, heading) in headings {
+            task737ChooseGroup(app, axis)
+            let button = app.buttons["inbox-section-" + heading]
+            boardEnabled(button); XCTAssertEqual(button.value as? String, "Expand")
+            boardTap(app, "inbox-section-" + heading)
+            boardEnabled(app.buttons["inbox-group-open"])
+            XCTAssertEqual(button.value as? String, "Collapse")
+        }
+
+        for axis in ["context", "tag"] {
+            task737ChooseGroup(app, axis)
+            let tail = app.buttons["task-title-inbox-group-055"]
+            let scroll = app.descendants(matching: .any)["inbox-scroll"].firstMatch
+            for _ in 0..<45 {
+                if tail.exists && tail.isHittable { break }
+                scroll.swipeUp(); boardEnabled(app.buttons["inbox-group-open"])
+            }
+            XCTAssertTrue(tail.exists && tail.isHittable, "Grouped automatic paging must reach the tail without More")
+            XCTAssertTrue(!app.buttons["inbox-more"].exists || !app.buttons["inbox-more"].isHittable)
+        }
+        func revealHeading(_ id: String) {
+            let heading = app.buttons["inbox-section-" + id]
+            let scroll = app.descendants(matching: .any)["inbox-scroll"].firstMatch
+            for _ in 0..<45 where !heading.exists { scroll.swipeDown() }
+            revealPagedElement(app, heading, in: scroll)
+        }
+        task737ChooseGroup(app, "context")
+        boardTap(app, "inbox-sort-open"); task736SortTap(app, "inbox-sort-title")
+        boardEnabled(app.buttons["inbox-group-open"]); task737SelectedGroup(app, "context")
+        revealHeading("context:@alpha")
+        boardTap(app, "inbox-section-context:@alpha")
+        task737ChooseGroup(app, "tag"); revealHeading("tag:alpha"); boardTap(app, "inbox-section-tag:alpha")
+        task737ChooseGroup(app, "context")
+        revealHeading("context:@alpha")
+        XCTAssertEqual(app.buttons["inbox-section-context:@alpha"].value as? String, "Expand")
+        boardTap(app, "tab-focus"); task736OpenInbox(app)
+        task737SelectedGroup(app, "context")
+        revealHeading("context:@alpha")
+        XCTAssertEqual(app.buttons["inbox-section-context:@alpha"].value as? String, "Expand")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.terminate(); app.launch(); task736OpenInbox(app)
+        task737SelectedGroup(app, "none")
+        for (axis, heading) in [("context", "context:@alpha"), ("tag", "tag:alpha")] {
+            task737ChooseGroup(app, axis)
+            revealHeading(heading)
+            XCTAssertEqual(app.buttons["inbox-section-" + heading].value as? String, "Expand")
+        }
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    private func task737ChooseGroup(_ app: XCUIApplication, _ axis: String) {
+        boardEnabled(app.buttons["inbox-group-open"]); boardTap(app, "inbox-group-open")
+        let choice = app.buttons["inbox-group-" + axis]
+        if !choice.isHittable { revealPagedElement(app, choice, in: app.scrollViews["inbox-group-scroll"]) }
+        boardEnabled(choice); XCTAssertGreaterThanOrEqual(choice.frame.height, 44 - 1e-6); choice.tap()
+        boardEnabled(app.buttons["inbox-group-open"])
+        XCTAssertFalse(app.staticTexts["inbox-group-error"].exists)
+    }
+
+    private func task737SelectedGroup(_ app: XCUIApplication, _ axis: String) {
+        boardEnabled(app.buttons["inbox-group-open"]); boardTap(app, "inbox-group-open")
+        let choice = app.buttons["inbox-group-" + axis]
+        if !choice.isHittable { revealPagedElement(app, choice, in: app.scrollViews["inbox-group-scroll"]) }
+        boardEnabled(choice); XCTAssertTrue(choice.isSelected)
+        XCTAssertTrue(!app.buttons["tab-menu"].exists || !app.buttons["tab-menu"].isEnabled)
+        boardTap(app, "inbox-group-close"); boardEnabled(app.buttons["inbox-group-open"])
+    }
+
+
+    func testInboxFiltersNormalAndColdRead() throws { try task738InboxFilters("NORMAL") }
+    func testLegacyTokenFiltersNormalAndColdRead() throws { try legacyTokenFilters("NORMAL") }
+    func testLegacyTokenFiltersLargestAndColdRead() throws { try legacyTokenFilters("LARGEST", largest: true) }
+
+    private func legacyTokenFilters(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_LEGACY_TOKENS_UI_" + role + "_LIBRARY"],
+              UUID(uuidString: library)?.uuidString.lowercased() == library else {
+            throw XCTSkip("A fresh externally seeded legacy-token library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)",
+            "-AppleLocale", "en_US", "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        func openPage(_ prefix: String) {
+            if prefix == "inbox" { task736OpenInbox(app) }
+            else {
+                boardTap(app, "tab-menu"); boardTap(app, "menu-history")
+                boardEnabled(app.buttons["history-tab-done"])
+                if !app.buttons["history-tab-done"].isSelected { boardTap(app, "history-tab-done") }
+            }
+        }
+        func openTokens(_ prefix: String) {
+            if prefix == "inbox" { boardTap(app, "inbox-filters-open") }
+            else { boardTap(app, "done-overflow-button"); boardTap(app, "done-filter-action") }
+            let tokens = app.buttons[prefix + "-filter-tokens"]
+            if !tokens.isHittable { revealPagedElement(app, tokens, in: app.scrollViews[prefix + "-filter-overview-scroll"]) }
+            boardEnabled(tokens); tokens.tap()
+        }
+        func rows(_ prefix: String, target: Bool, others: Bool) {
+            let scroll = app.descendants(matching: .any)[prefix + "-scroll"].firstMatch
+            let suffixes = ["target", "other", "empty"]
+            let expected = Set(suffixes.filter { $0 == "target" ? target : others })
+            for suffix in expected {
+                let row = app.buttons["task-title-legacy-" + prefix + "-" + suffix]
+                if !row.isHittable { revealPagedElement(app, row, in: scroll) }
+                boardEnabled(row); XCTAssertTrue(row.isHittable)
+            }
+
+            scroll.swipeDown(); scroll.swipeDown()
+            var observed = Set<String>()
+            for step in 0..<4 {
+                for suffix in suffixes where app.buttons["task-title-legacy-" + prefix + "-" + suffix].exists {
+                    observed.insert(suffix)
+                }
+                if step < 3 { scroll.swipeUp() }
+            }
+            XCTAssertEqual(observed, expected)
+        }
+        for prefix in ["inbox", "done"] {
+            openPage(prefix); rows(prefix, target: true, others: true)
+
+            for (parent, child, bare) in [("@office", "@office/desk", "office"), ("#admin", "#admin/team", "admin")] {
+                for state in 1...3 {
+                    openTokens(prefix)
+                    let search = app.textFields[prefix + "-filter-picker-search"]
+                    boardEnabled(search); search.tap()
+                    let previous = search.value as? String ?? ""
+                    search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + parent + "\n")
+                    let identifier = prefix + "-filter-token-" + parent
+                    let token = app.buttons[identifier]
+                    if state == 2 {
+                        task739FilterModalAXState(app, role: role, phase: prefix + "-reopened-selected",
+                            tokenIdentifier: identifier, prefix: prefix)
+                        let hitPointDeadline = ProcessInfo.processInfo.systemUptime + 10
+                        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                            let matches = app.buttons.matching(identifier: identifier), selected = matches.firstMatch
+                            return matches.count == 1 && selected.exists && selected.isEnabled && selected.isSelected
+                                && (selected.value as? String ?? "").isEmpty && selected.isHittable
+                        }, object: nil)
+                        guard XCTWaiter.wait(for: [ready], timeout: max(0, hitPointDeadline - ProcessInfo.processInfo.systemUptime)) == .completed else {
+                            task739FilterModalAXState(app, role: role, phase: prefix + "-reopened-selected-timeout",
+                                tokenIdentifier: identifier, prefix: prefix)
+                            XCTFail("The reopened selected token must have a native accessibility hit point before its second tap")
+                            return
+                        }
+                    } else if !token.isHittable {
+                        revealPagedElement(app, token, in: app.scrollViews[prefix + "-filter-picker-scroll"])
+                    }
+                    boardEnabled(token)
+                    XCTAssertEqual(app.buttons.matching(identifier: token.identifier).count, 1)
+                    XCTAssertEqual(app.buttons.matching(identifier: prefix + "-filter-token-" + child).count, 1)
+                    XCTAssertFalse(app.buttons[prefix + "-filter-token-" + bare].exists)
+                    task738TokenState(token, selected: state == 2, value: state == 3 ? "Excluded" : "")
+                    XCTAssertTrue(token.isHittable)
+                    XCTAssertGreaterThanOrEqual(token.frame.height, 44 - 1e-6)
+                    token.tap()
+                    task738TokenState(token, selected: state == 1, value: state == 2 ? "Excluded" : "")
+                    boardTap(app, prefix + "-filters-close")
+                    rows(prefix, target: state != 2, others: state != 1)
+                }
+            }
+        }
+        app.terminate(); app.launch()
+        for prefix in ["inbox", "done"] { openPage(prefix); rows(prefix, target: true, others: true) }
+    }
+
+    func testInboxFiltersLargestTextAndColdRead() throws { try task738InboxFilters("LARGEST", largest: true) }
+
+    func testInboxFiltersNormalSelectedTokenHitPointProbe() throws {
+        try task739SelectedTokenModalAXProbe("NORMAL")
+    }
+
+    func testInboxFiltersLargestSelectedTokenHitPointProbe() throws {
+        try task739SelectedTokenModalAXProbe("LARGEST", largest: true)
+    }
+
+    private func task739SelectedTokenModalAXProbe(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_FILTERS_UI_" + role + "_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged fresh canonical Inbox filter probe library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US",
+            "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        task736OpenInbox(app)
+        _ = app.buttons["inbox-process-primary"].label
+        XCTAssertFalse(app.buttons["inbox-filters-open"].isSelected)
+
+        task738OpenFilters(app)
+        XCTAssertFalse(app.buttons["inbox-filter-projects"].exists)
+        XCTAssertFalse(app.buttons["inbox-filter-timeEstimates"].exists)
+        XCTAssertFalse(app.switches["inbox-include-archived-projects"].exists)
+        task738FilterTap(app, "inbox-filter-more")
+        boardTap(app, "inbox-filters-close")
+        task738OpenFilters(app)
+        XCTAssertFalse(app.textFields["inbox-filter-location"].exists)
+        boardTap(app, "inbox-filters-close")
+        XCTAssertFalse(app.buttons["inbox-filters-open"].isSelected)
+
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-tokens")
+        task738PickerQuery(app, "@alpha")
+        let identifier = "inbox-filter-token-@alpha"
+        task739FilterModalAXState(app, role: role, phase: "before-first-tap")
+        task738FilterTap(app, identifier, picker: true)
+        task738TokenState(app.buttons[identifier], selected: true)
+        task739FilterModalAXState(app, role: role, phase: "after-first-selection")
+        let hitPointDeadline = ProcessInfo.processInfo.systemUptime + 10
+
+
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let matches = app.buttons.matching(identifier: identifier)
+            let selected = matches.firstMatch
+            return matches.count == 1 && selected.exists && selected.isEnabled && selected.isSelected
+                && (selected.value as? String ?? "").isEmpty && selected.isHittable
+        }, object: nil)
+        guard XCTWaiter.wait(for: [ready], timeout: max(0, hitPointDeadline - ProcessInfo.processInfo.systemUptime)) == .completed else {
+            task739FilterModalAXState(app, role: role, phase: "selected-hittability-timeout")
+            XCTFail("The selected token must regain a native accessibility hit point before its second tap")
+            return
+        }
+        let matches = app.buttons.matching(identifier: identifier), selected = matches.firstMatch
+        XCTAssertEqual(matches.count, 1)
+        XCTAssertTrue(selected.exists && selected.isEnabled && selected.isSelected)
+        XCTAssertTrue(selected.isHittable)
+        XCTAssertGreaterThanOrEqual(selected.frame.height, 44 - 1e-6)
+        selected.tap()
+        task738TokenState(app.buttons[identifier], selected: false, value: "Excluded")
+        task739FilterModalAXState(app, role: role, phase: "after-second-tap-excluded")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        task739FilterModalAXState(app, role: role, phase: "after-panel-close")
+        XCTAssertTrue(app.buttons["inbox-process-primary"].exists && app.buttons["inbox-process-primary"].isEnabled)
+        XCTAssertTrue(app.buttons["area-open"].exists && app.buttons["area-open"].isEnabled)
+        XCTAssertTrue(app.buttons["tab-menu"].exists && app.buttons["tab-menu"].isEnabled)
+        XCTAssertTrue(app.descendants(matching: .any)["inbox-scroll"].firstMatch.exists)
+    }
+
+    private func task739FilterModalAXState(_ app: XCUIApplication, role: String, phase: String,
+        tokenIdentifier: String = "inbox-filter-token-@alpha", prefix: String = "inbox") {
+
+
+        let sampleStarted = ProcessInfo.processInfo.systemUptime
+        let all = app.descendants(matching: .any).allElementsBoundByIndex
+        let identifiers = all.map { $0.identifier }
+        func count(_ predicate: (String) -> Bool) -> Int { identifiers.filter(predicate).count }
+        let matches = app.buttons.matching(identifier: tokenIdentifier), token = matches.firstMatch
+        let exists = token.exists, picker = app.scrollViews[prefix + "-filter-picker-scroll"]
+        let keyboard = app.keyboards.firstMatch, primary = app.buttons[prefix + "-process-primary"]
+        let state = "role=\(role), phase=\(phase), axElements=\(all.count), "
+            + "taskTitles=\(count { $0.hasPrefix("task-title-") }), taskStatuses=\(count { $0.hasPrefix("task-status-") }), "
+            + "header=\(count { [prefix + "-title", "area-open", "search-open"].contains($0) }), "
+            + "toolbar=\(count { [prefix + "-sort-open", prefix + "-group-open", prefix + "-filters-open"].contains($0) }), "
+            + "primary=\(count { $0 == prefix + "-process-primary" }), tabs=\(count { $0.hasPrefix("tab-") || $0 == "capture-open" }), "
+            + "matches=\(matches.count), exists=\(exists), enabled=\(exists && token.isEnabled), selected=\(exists && token.isSelected), "
+            + "hittable=\(exists && token.isHittable), valueEmpty=\(exists && (token.value as? String ?? "").isEmpty), "
+            + "valueExcluded=\(exists && (token.value as? String) == "Excluded"), "
+            + "row=\(exists ? token.frame : .zero), picker=\(picker.exists ? picker.frame : .zero), app=\(app.frame), "
+            + "primaryFrame=\(primary.exists ? primary.frame : .zero), keyboard=\(keyboard.exists), keyboardFrame=\(keyboard.exists ? keyboard.frame : .zero), "
+            + "alertContainers=\(app.alerts.count), sheetContainers=\(app.sheets.count), sampleSeconds=\(ProcessInfo.processInfo.systemUptime - sampleStarted)"
+        XCTAssertLessThanOrEqual(state.utf8.count, 2048)
+        let attachment = XCTAttachment(string: state)
+        attachment.name = "Task739 filter modal AX " + role + " " + phase
+        attachment.lifetime = .keepAlways; add(attachment)
+    }
+
+    private func task738InboxFilters(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_FILTERS_UI_" + role + "_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged canonical Inbox filter library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US",
+            "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        task736OpenInbox(app)
+        let processLabel = app.buttons["inbox-process-primary"].label
+        XCTAssertFalse(app.buttons["inbox-filters-open"].isSelected)
+        task738OpenFilters(app)
+        XCTAssertFalse(app.buttons["inbox-filter-projects"].exists)
+        XCTAssertFalse(app.buttons["inbox-filter-timeEstimates"].exists)
+        XCTAssertFalse(app.switches["inbox-include-archived-projects"].exists)
+        task738FilterTap(app, "inbox-filter-more")
+        boardTap(app, "inbox-filters-close")
+        task738OpenFilters(app)
+        XCTAssertFalse(app.textFields["inbox-filter-location"].exists, "A new presentation resets disclosures")
+        boardTap(app, "inbox-filters-close")
+        XCTAssertFalse(app.buttons["inbox-filters-open"].isSelected)
+
+
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-tokens")
+        task738PickerQuery(app, "@alpha")
+        let alpha = app.buttons["inbox-filter-token-@alpha"]
+        task738FilterTap(app, alpha.identifier, picker: true)
+        task738TokenState(alpha, selected: true)
+        task738FilterTap(app, alpha.identifier, picker: true)
+        task738TokenState(alpha, selected: false, value: "Excluded")
+        task738FilterTap(app, alpha.identifier, picker: true)
+        task738TokenState(alpha, selected: false)
+        task738FilterTap(app, alpha.identifier, picker: true)
+        task738TokenState(alpha, selected: true)
+        task738PickerQuery(app, "@beta"); task738FilterTap(app, "inbox-filter-token-@beta", picker: true)
+        task738TokenState(app.buttons["inbox-filter-token-@beta"], selected: true)
+        task738FilterTap(app, "inbox-filter-match-context-all", picker: true)
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: app.buttons["inbox-filter-match-context-all"])
+        waitForExpectations(timeout: 10)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        task738AssertSubset(app, included: "055", absent: "056")
+        XCTAssertEqual(app.buttons["inbox-process-primary"].label, processLabel, "Process count ignores filters")
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-tokens")
+        task738FilterTap(app, "inbox-filter-match-context-any", picker: true)
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: app.buttons["inbox-filter-match-context-any"])
+        waitForExpectations(timeout: 10)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        let tail = app.buttons["task-title-inbox-filter-110"]
+        revealPagedElement(app, tail, in: app.descendants(matching: .any)["inbox-scroll"].firstMatch, more: "inbox-more", ready: app.buttons["inbox-filters-open"])
+        XCTAssertTrue(tail.isHittable)
+        boardTap(app, "inbox-chip-token:@beta"); boardEnabled(app.buttons["inbox-filters-open"])
+        XCTAssertFalse(app.buttons["inbox-chip-token:@beta"].exists)
+        XCTAssertTrue(app.buttons["inbox-chip-token:@alpha"].exists)
+        task738Clear(app)
+
+
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-tokens")
+        task738PickerQuery(app, "@token-110")
+        task738FilterTap(app, "inbox-filter-token-@token-110", picker: true)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        task738AssertSubset(app, included: "110", absent: "109")
+        task738Clear(app)
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-tokens")
+        task738PickerQuery(app, "@token-")
+        task738FilterTap(app, "inbox-filter-picker-more", picker: true)
+        task738FilterTap(app, "inbox-filter-token-@token-110", picker: true)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        task738AssertSubset(app, included: "110", absent: "109")
+        task738Clear(app)
+
+
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-tokens")
+        task738PickerQuery(app, "#alpha"); task738FilterTap(app, "inbox-filter-token-#alpha", picker: true)
+        task738PickerQuery(app, "#beta"); task738FilterTap(app, "inbox-filter-token-#beta", picker: true)
+        task738TokenState(app.buttons["inbox-filter-token-#beta"], selected: true)
+        task738FilterTap(app, "inbox-filter-match-tag-all", picker: true)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        task738AssertSubset(app, included: "055", absent: "056")
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-tokens")
+        task738FilterTap(app, "inbox-filter-match-tag-any", picker: true)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        revealPagedElement(app, tail, in: app.descendants(matching: .any)["inbox-scroll"].firstMatch, more: "inbox-more", ready: app.buttons["inbox-filters-open"])
+        XCTAssertTrue(tail.isHittable)
+        task738Clear(app)
+
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-energyLevels")
+        task738FilterTap(app, "inbox-filter-energyLevels-high")
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        task738AssertSubset(app, included: "055", absent: "056")
+        task738Clear(app)
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-more")
+        task738FilterTap(app, "inbox-filter-priority-high")
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        task738AssertSubset(app, included: "055", absent: "056")
+        task738Clear(app)
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-more")
+        let locationInput = "  Office  "
+        task738SetText(app, "inbox-filter-location", locationInput)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        task738AssertSubset(app, included: "055", absent: "056")
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-more")
+        XCTAssertEqual(app.textFields["inbox-filter-location"].value as? String, locationInput)
+        boardTap(app, "inbox-filters-close"); task738Clear(app)
+
+
+        task738OpenFilters(app)
+        task738SetText(app, "inbox-filter-search", "Task738 no matching Inbox task")
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        boardTap(app, "inbox-empty-clear"); boardEnabled(app.buttons["inbox-filters-open"])
+        XCTAssertFalse(app.buttons["inbox-filters-open"].isSelected)
+        XCTAssertFalse(app.buttons["capture-save"].exists)
+        XCTAssertFalse(app.buttons["process-inbox-close"].exists)
+
+
+        task738OpenFilters(app); task738FilterTap(app, "inbox-filter-tokens")
+        task738PickerQuery(app, "@alpha"); task738FilterTap(app, "inbox-filter-token-@alpha", picker: true)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        task737ChooseGroup(app, "context")
+        XCTAssertTrue(app.buttons["inbox-chip-token:@alpha"].exists)
+        let groupedTail = app.descendants(matching: .any).matching(identifier: "inbox-item-context:@alpha-inbox-filter-110")
+            .containing(.button, identifier: "task-title-inbox-filter-110").firstMatch
+        let groupedTitle = groupedTail.buttons["task-title-inbox-filter-110"]
+        revealPagedElement(app, groupedTitle, in: app.descendants(matching: .any)["inbox-scroll"].firstMatch)
+        XCTAssertTrue(groupedTail.exists); XCTAssertTrue(groupedTitle.isHittable)
+        XCTAssertTrue(!app.buttons["inbox-more"].exists || !app.buttons["inbox-more"].isHittable)
+        groupedTitle.tap(); boardEnabled(app.buttons["task-view-close"])
+        boardTap(app, "task-view-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        XCTAssertTrue(app.buttons["inbox-chip-token:@alpha"].exists)
+        task737SelectedGroup(app, "context")
+        boardTap(app, "tab-focus"); task736OpenInbox(app)
+        XCTAssertTrue(app.buttons["inbox-chip-token:@alpha"].exists)
+        task737SelectedGroup(app, "context")
+        XCTAssertEqual(app.buttons["inbox-process-primary"].label, processLabel)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.terminate(); app.launch(); task736OpenInbox(app)
+        XCTAssertFalse(app.buttons["inbox-filters-open"].isSelected)
+        task737SelectedGroup(app, "none")
+        task738OpenFilters(app)
+        XCTAssertFalse(app.buttons["inbox-filters-clear"].exists)
+        XCTAssertFalse(app.textFields["inbox-filter-location"].exists)
+        boardTap(app, "inbox-filters-close")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    private func task738OpenFilters(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["inbox-filters-open"]); boardTap(app, "inbox-filters-open")
+        boardEnabled(app.buttons["inbox-filters-close"])
+        for id in ["tab-menu", "tab-focus", "capture-open", "inbox-group-open", "inbox-sort-open"] {
+            XCTAssertTrue(!app.buttons[id].exists || !app.buttons[id].isEnabled, "Modal model/background gate: " + id)
+        }
+        XCTAssertGreaterThanOrEqual(app.buttons["inbox-filters-close"].frame.height, 44 - 1e-6)
+    }
+
+    private func task738FilterTap(_ app: XCUIApplication, _ identifier: String, picker: Bool = false) {
+        let button = app.buttons[identifier]
+        let scroll = app.scrollViews[picker ? "inbox-filter-picker-scroll" : "inbox-filter-overview-scroll"]
+        if !button.isHittable { revealPagedElement(app, button, in: scroll) }
+        boardEnabled(button); XCTAssertTrue(button.isHittable)
+        XCTAssertGreaterThanOrEqual(button.frame.height, 44 - 1e-6)
+        button.tap()
+    }
+
+    private func task738TokenState(_ token: XCUIElement, selected: Bool, value: String = "") {
+        expectation(for: NSPredicate { _, _ in
+            token.exists && token.isEnabled && token.isSelected == selected && (token.value as? String ?? "") == value
+        }, evaluatedWith: nil)
+        waitForExpectations(timeout: 10)
+    }
+
+    private func task738PickerQuery(_ app: XCUIApplication, _ value: String) {
+        task738SetText(app, "inbox-filter-picker-search", value)
+    }
+
+    private func task738SetText(_ app: XCUIApplication, _ identifier: String, _ value: String) {
+        let field = app.textFields[identifier]
+        if !field.isHittable {
+            revealPagedElement(app, field, in: app.scrollViews["inbox-filter-overview-scroll"])
+        }
+        boardEnabled(field); field.tap()
+        let previous = field.value as? String ?? ""
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + value + "\n")
+    }
+
+    private func task738Clear(_ app: XCUIApplication) {
+        task738OpenFilters(app); boardTap(app, "inbox-filters-clear")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["inbox-filters-clear"])
+        waitForExpectations(timeout: 10)
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        XCTAssertFalse(app.buttons["inbox-filters-open"].isSelected)
+    }
+
+    private func task738AssertSubset(_ app: XCUIApplication, included: String, absent: String) {
+        let title = app.buttons["task-title-inbox-filter-" + included]
+        revealPagedElement(app, title, in: app.descendants(matching: .any)["inbox-scroll"].firstMatch, more: "inbox-more", ready: app.buttons["inbox-filters-open"])
+        XCTAssertTrue(title.isHittable)
+        XCTAssertFalse(app.buttons["task-title-inbox-filter-" + absent].exists)
+    }
+}
+
+
+extension FoundationUITests {
+    func testInboxBulkTrashUndoNormalAndColdRead() throws { try task739InboxBulk("NORMAL") }
+    func testInboxBulkTrashUndoLargestTextAndColdRead() throws { try task739InboxBulk("LARGEST", largest: true) }
+
+    private func task739Count(_ app: XCUIApplication, _ expected: Int) {
+        let count = app.staticTexts["inbox-bulk-count"]
+        XCTAssertTrue(count.waitForExistence(timeout: 20))
+        let predicate = NSPredicate { _, _ in
+            Int(count.label.compactMap { $0.wholeNumberValue }.map(String.init).joined()) == expected
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: nil)], timeout: 20), .completed)
+        XCTAssertFalse(app.buttons["inbox-bulk-select-all"].exists)
+    }
+
+    private func task739InboxBulk(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_BULK_UI_" + role + "_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged canonical Inbox bulk library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        task736OpenInbox(app)
+        func start() {
+            let title = task192Reveal(app, "task-title-inbox-bulk-001", buttons: true, scrollID: "inbox-scroll", scans: 120)
+            title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.8)
+            task739Count(app, 1)
+            XCTAssertFalse(app.buttons["task-editor-save"].exists)
+            XCTAssertFalse(app.buttons["task-view-close"].exists)
+        }
+        func action(_ id: String) {
+            let control = ["inbox-bulk-range", "inbox-bulk-delete"].contains(id)
+                ? task192Reveal(app, id, buttons: true, scrollID: "inbox-bulk-actions-scroll", horizontal: true, scans: 12)
+                : app.buttons[id]
+            boardEnabled(control, timeout: 20)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44 - 0.01)
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44 - 0.01)
+            XCTAssertTrue(control.isHittable); control.tap()
+        }
+        start(); action("inbox-bulk-exit")
+        XCTAssertTrue(app.staticTexts["inbox-bulk-count"].waitForNonExistence(timeout: 20))
+        start(); task737ChooseGroup(app, "tag"); task739Count(app, 1)
+        for group in ["tag:#alpha", "tag:#beta"] {
+            let selected = task192Reveal(app, "inbox-select-" + group + "-inbox-bulk-001", buttons: true, scrollID: "inbox-scroll", scans: 120)
+            XCTAssertTrue(selected.isSelected)
+        }
+        task738OpenFilters(app); task738SetText(app, "inbox-filter-search", "Task739 Missing")
+        boardTap(app, "inbox-filters-close"); task739Count(app, 0)
+        XCTAssertFalse(app.buttons["inbox-bulk-delete"].isEnabled)
+        task738Clear(app); task739Count(app, 0); action("inbox-bulk-exit")
+        task737ChooseGroup(app, "none")
+        start(); action("inbox-bulk-range")
+        let tail = task192Reveal(app, "inbox-select-none-inbox-bulk-105", buttons: true, scrollID: "inbox-scroll", scans: 120, forwardOnly: true)
+        XCTAssertGreaterThanOrEqual(tail.frame.height, 44 - 0.01)
+        XCTAssertGreaterThanOrEqual(tail.frame.width, 44 - 0.01)
+        tail.tap(); task739Count(app, 105)
+        XCTAssertFalse(app.buttons["inbox-bulk-range"].isSelected)
+        XCTAssertTrue(tail.isSelected)
+        tail.tap(); task739Count(app, 104); tail.tap(); task739Count(app, 105)
+        action("inbox-bulk-delete")
+        let cancel = app.alerts.buttons.matching(identifier: "inbox-bulk-cancel").firstMatch
+        boardEnabled(cancel); cancel.tap(); task739Count(app, 105)
+        action("inbox-bulk-delete")
+        let confirm = app.alerts.buttons.matching(identifier: "inbox-bulk-confirm").firstMatch
+        boardEnabled(confirm); confirm.tap()
+        let undo = app.buttons.matching(identifier: "task-inboxBulkDelete-undo").firstMatch
+        boardEnabled(undo, timeout: 30)
+        XCTAssertGreaterThanOrEqual(undo.frame.height, 44 - 0.01)
+        undo.tap()
+        XCTAssertTrue(app.staticTexts["inbox-bulk-count"].waitForNonExistence(timeout: 30))
+        boardEnabled(app.buttons["inbox-filters-open"])
+        task738OpenFilters(app); task738SetText(app, "inbox-filter-search", "Task739 Batch 105")
+        boardTap(app, "inbox-filters-close")
+        XCTAssertTrue(app.buttons["task-title-inbox-bulk-105"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.terminate(); app.launch(); task736OpenInbox(app)
+        XCTAssertFalse(app.buttons["inbox-filters-open"].isSelected)
+        XCTAssertFalse(app.staticTexts["inbox-bulk-count"].exists)
+        XCTAssertFalse(app.buttons["task-inboxBulkDelete-undo"].exists)
+        task738OpenFilters(app); task738SetText(app, "inbox-filter-search", "Task739 Batch 105")
+        boardTap(app, "inbox-filters-close")
+        XCTAssertTrue(app.buttons["task-title-inbox-bulk-105"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["task-title-inbox-bulk-106"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+}
+
+
+extension FoundationUITests {
+    func testInboxBulkStatusAllFiveNormalAndColdRead() throws { try task740InboxStatus("NORMAL") }
+    func testInboxBulkStatusAllFiveLargestTextAndColdRead() throws { try task740InboxStatus("LARGEST", largest: true) }
+
+    private var task740InboxStatuses: [(status: String, label: String)] {
+        [("next", "Next"), ("waiting", "Waiting"), ("someday", "Someday"), ("done", "Done"), ("reference", "Reference")]
+    }
+
+    private func task740InboxStatusReady(_ element: XCUIElement) {
+        boardEnabled(element, timeout: 20)
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in element.exists && element.isEnabled && element.isHittable }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
+        XCTAssertGreaterThanOrEqual(element.frame.width, 44 - 0.01)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44 - 0.01)
+    }
+
+    private func task740InboxStatusOptions(_ app: XCUIApplication) {
+        let expected = task740InboxStatuses.map { "inbox-bulk-status-" + $0.status }
+        let offered = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "inbox-bulk-status-"))
+        XCTAssertEqual(offered.allElementsBoundByIndex.map { $0.identifier }, expected)
+        for option in task740InboxStatuses {
+            let id = "inbox-bulk-status-" + option.status
+            let button = task192Reveal(app, id, buttons: true, scrollID: "inbox-bulk-actions-scroll", horizontal: true, scans: 16)
+            XCTAssertEqual(app.buttons.matching(identifier: id).count, 1)
+            XCTAssertEqual(button.label, "Move to " + option.label)
+            task740InboxStatusReady(button)
+        }
+        XCTAssertFalse(app.buttons["inbox-bulk-status-inbox"].exists)
+        XCTAssertFalse(app.buttons["inbox-bulk-status-archived"].exists)
+        XCTAssertFalse(app.buttons["inbox-bulk-select-all"].exists)
+    }
+
+    private func task740SetSearch(_ app: XCUIApplication, _ query: String) {
+        let input = app.textFields["inbox-filter-search"]
+        if !input.isHittable { revealPagedElement(app, input, in: app.scrollViews["inbox-filter-overview-scroll"]) }
+        boardEnabled(input); XCTAssertTrue(input.isHittable); input.tap()
+        let previous = input.value as? String ?? ""
+        let actual = previous == input.placeholderValue ? "" : previous
+        if actual != query {
+            if !actual.isEmpty {
+
+
+                input.press(forDuration: 1)
+                let selectAll = app.descendants(matching: .any)["Select All"].firstMatch
+                for _ in 0..<4 {
+                    if selectAll.waitForExistence(timeout: 1), selectAll.isHittable { break }
+                    let next = app.buttons["Next Page"]
+                    guard next.exists && next.isHittable else { break }
+                    next.tap()
+                }
+                guard selectAll.exists && selectAll.isHittable else { XCTFail("Task740 search Select All unavailable"); return }
+                selectAll.tap(); input.typeText(XCUIKeyboardKey.delete.rawValue)
+                let cleared = NSPredicate { _, _ in
+                    let value = input.value as? String ?? ""
+                    return value.isEmpty || value == input.placeholderValue
+                }
+                guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: nil)], timeout: 5) == .completed else {
+                    XCTFail("Task740 search was not completely cleared"); return
+                }
+            }
+            input.typeText(query)
+        }
+        let exact = NSPredicate { _, _ in (input.value as? String ?? "").utf8.elementsEqual(query.utf8) }
+        guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: exact, object: nil)], timeout: 5) == .completed else {
+            XCTFail("Task740 search did not accept the exact requested query"); return
+        }
+        input.typeText("\n")
+    }
+
+    private func task740InboxStatus(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_STATUS_UI_" + role + "_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged fresh canonical Task740 Inbox status library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        task736OpenInbox(app); task737ChooseGroup(app, "tag")
+        for option in task740InboxStatuses {
+            let prefix = "task740-" + option.status, query = "Task740 " + option.status + " batch"
+            task738OpenFilters(app); task740SetSearch(app, query)
+            boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+            XCTAssertTrue(app.buttons["inbox-filters-open"].isSelected)
+            let chip = app.buttons["inbox-chip-search"], filterLabel = chip.label
+            XCTAssertTrue(chip.exists); XCTAssertFalse(filterLabel.isEmpty)
+            let folded = task192Reveal(app, "inbox-section-tag:beta", buttons: true, scrollID: "inbox-scroll", scans: 120)
+            if folded.value as? String == "Collapse" { task740InboxStatusReady(folded); folded.tap(); boardEnabled(app.buttons["inbox-filters-open"]) }
+            XCTAssertEqual(folded.value as? String, "Expand")
+            let first = task192Reveal(app, "task-title-" + prefix + "-01", buttons: true, scrollID: "inbox-scroll", scans: 120)
+            task740InboxStatusReady(first); first.press(forDuration: 0.8); task739Count(app, 1)
+            let second = task192Reveal(app, "inbox-select-tag:alpha-" + prefix + "-02", buttons: true, scrollID: "inbox-scroll", scans: 120)
+            task740InboxStatusReady(second); second.tap(); task739Count(app, 2)
+            XCTAssertFalse(app.buttons["task-view-close"].exists); XCTAssertFalse(app.buttons["task-editor-save"].exists)
+            task740InboxStatusOptions(app)
+            let move = task192Reveal(app, "inbox-bulk-status-" + option.status, buttons: true, scrollID: "inbox-bulk-actions-scroll", horizontal: true, scans: 16)
+            task740InboxStatusReady(move); move.tap()
+            XCTAssertTrue(app.staticTexts["inbox-bulk-count"].waitForNonExistence(timeout: 30))
+            let notice = app.staticTexts["task-inboxBulkMove-notice"]
+            XCTAssertTrue(notice.waitForExistence(timeout: 5)); XCTAssertEqual(notice.label, "2 tasks")
+            XCTAssertFalse(app.buttons["task-inboxBulkMove-undo"].exists); XCTAssertFalse(app.buttons["task-completion-undo"].exists)
+            XCTAssertFalse(app.buttons["inbox-bulk-exit"].exists); XCTAssertFalse(app.alerts.firstMatch.exists)
+            boardEnabled(app.buttons["inbox-filters-open"])
+            XCTAssertTrue(app.buttons["inbox-filters-open"].isSelected); XCTAssertEqual(chip.label, filterLabel)
+            task737SelectedGroup(app, "tag")
+            let retainedFold = task192Reveal(app, "inbox-section-tag:beta", buttons: true, scrollID: "inbox-scroll", scans: 120)
+            XCTAssertEqual(retainedFold.value as? String, "Expand")
+            for suffix in ["-01", "-02"] { XCTAssertFalse(app.buttons["task-title-" + prefix + suffix].exists) }
+            task740InboxStatusReady(retainedFold); retainedFold.tap(); boardEnabled(app.buttons["inbox-filters-open"])
+            let sentinel = task192Reveal(app, "task-title-" + prefix + "-03", buttons: true, scrollID: "inbox-scroll", scans: 120)
+            XCTAssertTrue(sentinel.exists, "The unselected Inbox sentinel must remain")
+            let openFold = task192Reveal(app, "inbox-section-tag:beta", buttons: true, scrollID: "inbox-scroll", scans: 120)
+            task740InboxStatusReady(openFold); openFold.tap(); boardEnabled(app.buttons["inbox-filters-open"])
+            XCTAssertEqual(openFold.value as? String, "Expand")
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        }
+        app.terminate(); app.launch(); task736OpenInbox(app)
+        XCTAssertFalse(app.buttons["inbox-filters-open"].isSelected)
+        XCTAssertFalse(app.staticTexts["inbox-bulk-count"].exists)
+        XCTAssertFalse(app.staticTexts["task-inboxBulkMove-notice"].exists); XCTAssertFalse(app.buttons["task-inboxBulkMove-undo"].exists)
+        task737SelectedGroup(app, "none"); task737ChooseGroup(app, "tag")
+        let savedFold = task192Reveal(app, "inbox-section-tag:beta", buttons: true, scrollID: "inbox-scroll", scans: 120)
+        XCTAssertEqual(savedFold.value as? String, "Expand", "Cold read retains the saved fold without restoring selection")
+        for option in task740InboxStatuses {
+            for index in 1...2 {
+                let id = String(format: "task740-%@-%02d", option.status, index)
+                boardTap(app, "search-open"); let search = app.textFields["search-input"]; boardEnabled(search)
+                search.tap(); let prior = search.value as? String ?? ""
+                search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: prior.count) + "id:" + id + "\n")
+                let result = app.buttons["search-task-" + id]; task740InboxStatusReady(result); result.tap()
+                boardTap(app, "task-mode-edit")
+                if option.status == "reference" {
+
+
+                    boardEnabled(app.buttons["task-reference-convert-to-action"])
+                    XCTAssertFalse(app.buttons["task-editor-status-reference"].exists)
+                } else {
+                    let state = app.buttons["task-editor-status-" + option.status]
+                    revealPagedElement(app, state, in: app.scrollViews["task-editor-scroll"])
+                    XCTAssertTrue(state.isSelected, "Cold public task read must show the requested status")
+                }
+
+                boardTap(app, "task-view-close"); boardEnabled(app.textFields["search-input"])
+                XCTAssertFalse(app.buttons["task-editor-discard"].exists)
+                boardTap(app, "search-close"); boardEnabled(app.buttons["inbox-filters-open"])
+                XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            }
+        }
+    }
+}
+
+
+extension FoundationUITests {
+    func testInboxBulkTag741NormalCancelNoopMixedAndColdRead() throws { try task741InboxTag("NORMAL") }
+    func testInboxBulkTag741LargestCancelNoopMixedAndColdRead() throws { try task741InboxTag("LARGEST", largest: true) }
+
+    private func task741OpenTag(_ app: XCUIApplication) {
+        let open = task192Reveal(app, "inbox-bulk-tag-open", buttons: true, scrollID: "inbox-bulk-actions-scroll", horizontal: true, scans: 16)
+        task740InboxStatusReady(open); open.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["inbox-bulk-tag-dialog"].waitForExistence(timeout: 15))
+        boardEnabled(app.textFields["inbox-bulk-tag-input"])
+    }
+
+    private func task741TypeTag(_ app: XCUIApplication, _ text: String) {
+        let input = app.textFields["inbox-bulk-tag-input"], scroll = app.scrollViews["inbox-bulk-tag-scroll"]
+        if scroll.exists { revealPagedElement(app, input, in: scroll, ready: app.buttons["inbox-bulk-tag-cancel"]) }
+        task740InboxStatusReady(input); input.tap(); input.typeText(text)
+        XCTAssertTrue((input.value as? String ?? "").utf8.elementsEqual(text.utf8))
+    }
+
+    private func task741InboxTag(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_TAG_UI_" + role + "_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged fresh canonical Task741 Inbox tag library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        task736OpenInbox(app); task737ChooseGroup(app, "none")
+        task738OpenFilters(app); task740SetSearch(app, "Task741 tag batch")
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        let first = task192Reveal(app, "task-title-task741-tag-01", buttons: true, scrollID: "inbox-scroll", scans: 120)
+        task740InboxStatusReady(first); first.press(forDuration: 0.8); task739Count(app, 1)
+        let second = task192Reveal(app, "inbox-select-none-task741-tag-02", buttons: true, scrollID: "inbox-scroll", scans: 120)
+        task740InboxStatusReady(second); second.tap(); task739Count(app, 2)
+        task741OpenTag(app); XCTAssertFalse(app.buttons["inbox-bulk-tag-save"].isEnabled)
+        task741TypeTag(app, "   "); XCTAssertFalse(app.buttons["inbox-bulk-tag-save"].isEnabled)
+        boardTap(app, "inbox-bulk-tag-cancel"); task739Count(app, 2)
+        task741OpenTag(app)
+        let cleared = app.textFields["inbox-bulk-tag-input"]
+        XCTAssertTrue((cleared.value as? String ?? "").isEmpty || cleared.value as? String == cleared.placeholderValue)
+        task741TypeTag(app, "###"); boardEnabled(app.buttons["inbox-bulk-tag-save"])
+        boardTap(app, "inbox-bulk-tag-save")
+        XCTAssertTrue(app.textFields["inbox-bulk-tag-input"].waitForNonExistence(timeout: 20)); task739Count(app, 2)
+        XCTAssertFalse(app.staticTexts["task-inboxBulkTag-notice"].exists)
+        task741OpenTag(app); task741TypeTag(app, "  ###Task741  ")
+        boardEnabled(app.buttons["inbox-bulk-tag-save"]); boardTap(app, "inbox-bulk-tag-save")
+        XCTAssertTrue(app.staticTexts["inbox-bulk-count"].waitForNonExistence(timeout: 30))
+        let notice = app.staticTexts["task-inboxBulkTag-notice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 15)); XCTAssertEqual(notice.label, "Done: 1 task")
+        XCTAssertFalse(app.buttons["task-inboxBulkTag-undo"].exists); XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.buttons["task-editor-save"].exists)
+        app.terminate(); app.launch(); task736OpenInbox(app)
+        XCTAssertFalse(app.staticTexts["inbox-bulk-count"].exists); XCTAssertFalse(app.textFields["inbox-bulk-tag-input"].exists)
+        for index in 1...3 {
+            let id = String(format: "task741-tag-%02d", index)
+            boardTap(app, "search-open"); let search = app.textFields["search-input"]; boardEnabled(search)
+            search.tap(); let prior = search.value as? String ?? ""
+            search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: prior.count) + "id:" + id + "\n")
+            let result = app.buttons["search-task-" + id]; task740InboxStatusReady(result); result.tap()
+            boardTap(app, "task-mode-edit")
+            let tags = app.textFields["task-editor-tags"]
+            if !tags.exists { boardTap(app, "task-editor-section-organization") }
+            revealPagedElement(app, tags, in: app.scrollViews["task-editor-scroll"])
+            let values = Set((tags.value as? String ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+            XCTAssertEqual(values, index < 3 ? Set(["#alpha", "#Task741"]) : Set(["#beta"]))
+            boardTap(app, "task-view-close"); XCTAssertFalse(app.buttons["task-editor-discard"].exists)
+            boardTap(app, "search-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        }
+    }
+}
+
+
+extension FoundationUITests {
+    func testInboxBulkRemoveTag742NormalCancelMultiPickSearchMixedAndColdRead() throws { try task742InboxRemove("NORMAL") }
+    func testInboxBulkRemoveTag742LargestCancelMultiPickSearchMixedAndColdRead() throws { try task742InboxRemove("LARGEST", largest: true) }
+
+    private func task742OpenRemove(_ app: XCUIApplication) {
+        let open = task192Reveal(app, "inbox-bulk-remove-tag-open", buttons: true, scrollID: "inbox-bulk-actions-scroll", horizontal: true, scans: 16)
+        task740InboxStatusReady(open); open.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["inbox-bulk-remove-tag-dialog"].waitForExistence(timeout: 15))
+        boardEnabled(app.textFields["inbox-bulk-remove-tag-input"])
+    }
+    private func task742Option(_ app: XCUIApplication, _ value: String) -> XCUIElement {
+        let option = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "inbox-bulk-remove-tag-option-", value)).firstMatch
+        task740InboxStatusReady(option)
+        XCTAssertGreaterThanOrEqual(option.frame.height, 44 - 0.01); XCTAssertGreaterThanOrEqual(option.frame.width, 44 - 0.01)
+        return option
+    }
+    private func task742PickerQuery(_ app: XCUIApplication, _ query: String) {
+        let input = app.textFields["inbox-bulk-remove-tag-input"]
+        if !input.isHittable { revealPagedElement(app, input, in: app.scrollViews["inbox-bulk-remove-tag-scroll"]) }
+        boardEnabled(input); XCTAssertTrue(input.isHittable); input.tap()
+        let previous = input.value as? String ?? ""
+        let actual = previous == input.placeholderValue ? "" : previous
+        if actual != query {
+            if !actual.isEmpty {
+
+
+                input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: actual.count))
+                let cleared = NSPredicate { _, _ in
+                    let value = input.value as? String ?? ""
+                    return value.isEmpty || value == input.placeholderValue
+                }
+                guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: nil)], timeout: 5) == .completed else {
+                    XCTFail("Task742 picker query was not completely cleared"); return
+                }
+            }
+            input.typeText(query)
+        }
+        let exact = NSPredicate { _, _ in (input.value as? String ?? "").utf8.elementsEqual(query.utf8) }
+        guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: exact, object: nil)], timeout: 5) == .completed else {
+            XCTFail("Task742 picker query did not accept the exact requested query"); return
+        }
+        input.typeText("\n")
+    }
+
+
+    private func task742InboxRemove(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_REMOVE_TAG_UI_" + role + "_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged fresh canonical Task742 Inbox Remove tag library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        task736OpenInbox(app); task737ChooseGroup(app, "none")
+        task738OpenFilters(app); task740SetSearch(app, "Task742 remove batch")
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        let first = task192Reveal(app, "task-title-task742-remove-01", buttons: true, scrollID: "inbox-scroll", scans: 120)
+        task740InboxStatusReady(first); first.press(forDuration: 0.8); task739Count(app, 1)
+        let second = task192Reveal(app, "inbox-select-none-task742-remove-02", buttons: true, scrollID: "inbox-scroll", scans: 120)
+        task740InboxStatusReady(second); second.tap(); task739Count(app, 2)
+        task742OpenRemove(app); XCTAssertFalse(app.buttons["inbox-bulk-remove-tag-save"].isEnabled)
+        task742PickerQuery(app, "alpha"); let cancelled = task742Option(app, "#alpha"); cancelled.tap()
+        XCTAssertTrue(cancelled.isSelected); task742PickerQuery(app, "beta")
+        boardTap(app, "inbox-bulk-remove-tag-cancel"); task739Count(app, 2)
+        task742OpenRemove(app); XCTAssertFalse(app.buttons["inbox-bulk-remove-tag-save"].isEnabled)
+        let query = app.textFields["inbox-bulk-remove-tag-input"]
+        XCTAssertTrue((query.value as? String ?? "").isEmpty || query.value as? String == query.placeholderValue)
+        task742PickerQuery(app, "alpha"); let alpha = task742Option(app, "#alpha"); XCTAssertFalse(alpha.isSelected); alpha.tap()
+        task742PickerQuery(app, "beta"); let beta = task742Option(app, "#beta"); XCTAssertFalse(beta.isSelected); beta.tap()
+        task742PickerQuery(app, "alpha"); XCTAssertTrue(task742Option(app, "#alpha").isSelected)
+        task742PickerQuery(app, "gamma"); XCTAssertFalse(task742Option(app, "#gamma").isSelected)
+        boardEnabled(app.buttons["inbox-bulk-remove-tag-save"]); boardTap(app, "inbox-bulk-remove-tag-save")
+        XCTAssertTrue(app.staticTexts["inbox-bulk-count"].waitForNonExistence(timeout: 30))
+        let notice = app.staticTexts["task-inboxBulkRemoveTag-notice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 15)); XCTAssertEqual(notice.label, "Done: 1 task")
+        XCTAssertFalse(app.buttons["task-inboxBulkRemoveTag-undo"].exists); XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.terminate(); app.launch(); task736OpenInbox(app)
+        XCTAssertFalse(app.staticTexts["inbox-bulk-count"].exists); XCTAssertFalse(app.textFields["inbox-bulk-remove-tag-input"].exists)
+        for index in 1...3 {
+            let id = String(format: "task742-remove-%02d", index)
+            boardTap(app, "search-open"); let search = app.textFields["search-input"]; boardEnabled(search)
+            search.tap(); let prior = search.value as? String ?? ""
+            search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: prior.count) + "id:" + id + "\n")
+            let result = app.buttons["search-task-" + id]; task740InboxStatusReady(result); result.tap()
+            boardTap(app, "task-mode-edit"); let tags = app.textFields["task-editor-tags"]
+            let header = app.buttons["task-editor-section-organization"]
+            boardEnabled(header)
+            revealPagedElement(app, header, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+            if header.value as? String == "Expand" {
+                header.tap()
+                expectation(for: NSPredicate(format: "value == %@", "Collapse"), evaluatedWith: header)
+                waitForExpectations(timeout: 10)
+            }
+            XCTAssertEqual(header.value as? String, "Collapse")
+            boardEnabled(tags)
+            revealPagedElement(app, tags, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+            let displayed = tags.value as? String ?? "", rawTags = displayed == tags.placeholderValue ? "" : displayed
+            let values = Set(rawTags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+            XCTAssertEqual(values, index == 1 ? Set<String>() : Set([index == 2 ? "#gamma" : "#alpha"]))
+            boardTap(app, "task-view-close"); XCTAssertFalse(app.buttons["task-editor-discard"].exists)
+            boardTap(app, "search-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        }
+    }
+}
+
+
+extension FoundationUITests {
+    func testInboxBulkOrganize743NormalCancelCreateApplyAndColdRead() throws { try task743InboxOrganize("NORMAL") }
+    func testInboxBulkOrganize743LargestCancelCreateApplyAndColdRead() throws { try task743InboxOrganize("LARGEST", largest: true) }
+
+    @discardableResult private func task743Control(_ app: XCUIApplication, _ id: String, text: Bool = false) -> XCUIElement {
+        let element = text ? app.textFields[id] : app.buttons[id]
+        revealPagedElement(app, element, in: app.scrollViews["inbox-organize-scroll"], outerEdge: true)
+        boardEnabled(element); XCTAssertTrue(element.isHittable)
+        return element
+    }
+    private func task743Open(_ app: XCUIApplication) {
+        let open = task192Reveal(app, "inbox-bulk-organize-open", buttons: true, scrollID: "inbox-bulk-actions-scroll", horizontal: true, scans: 16)
+        task740InboxStatusReady(open); open.tap()
+        boardEnabled(app.buttons["inbox-organize-cancel"])
+        _ = task743Control(app, "inbox-organize-status-__KEEP__")
+    }
+    private func task743Text(_ app: XCUIApplication, _ id: String, _ value: String) {
+        let input = task743Control(app, id, text: true); input.tap()
+        let previous = input.value as? String ?? ""
+        let actual = previous == input.placeholderValue ? "" : previous
+        if actual != value {
+            if !actual.isEmpty {
+
+                input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: actual.count))
+                let cleared = NSPredicate { _, _ in
+                    let current = input.value as? String ?? ""
+                    return current.isEmpty || current == input.placeholderValue
+                }
+                guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: nil)], timeout: 5) == .completed else {
+                    XCTFail("Task743 field was not completely cleared"); return
+                }
+            }
+            input.typeText(value)
+        }
+        let exact = NSPredicate { _, _ in (input.value as? String ?? "").utf8.elementsEqual(value.utf8) }
+        guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: exact, object: nil)], timeout: 5) == .completed else {
+            XCTFail("Task743 field did not accept exact UTF8 intent"); return
+        }
+
+
+        if id != "inbox-organize-picker-search" { task743DismissKeyboard(app, id, value) }
+    }
+    private func task743DismissKeyboard(_ app: XCUIApplication, _ id: String, _ value: String, preservingCreate: Bool = false) {
+        let input = app.textFields[id], keyboard = app.keyboards.firstMatch
+        boardEnabled(input)
+        if preservingCreate { boardEnabled(app.buttons["inbox-organize-picker-create"], timeout: 20) }
+        let shown = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            keyboard.exists && !keyboard.frame.intersection(app.frame).isNull && !keyboard.frame.intersection(app.frame).isEmpty
+        }, object: keyboard)
+        guard XCTWaiter.wait(for: [shown], timeout: 10) == .completed else {
+            XCTFail("Task743 keyboard must be visible before the non-submitting drag"); return
+        }
+        let scroll = app.scrollViews["inbox-organize-scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        var viewport = scroll.frame.intersection(app.frame)
+        if keyboard.frame.intersects(viewport) { viewport.size.height = max(0, keyboard.frame.minY - viewport.minY) }
+        guard !viewport.isNull && !viewport.isEmpty else { XCTFail("Task743 needs a visible scroll drag origin"); return }
+        let startY = viewport.minY + viewport.height * 0.25
+        let endY = min(keyboard.frame.maxY, app.frame.maxY) - 16
+        guard endY > startY else { XCTFail("Task743 keyboard dismissal needs a downward drag"); return }
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let x = viewport.minX + 4 - app.frame.minX
+        origin.withOffset(CGVector(dx: x, dy: startY - app.frame.minY)).press(forDuration: 0.05,
+            thenDragTo: origin.withOffset(CGVector(dx: x, dy: endY - app.frame.minY)),
+            withVelocity: .slow, thenHoldForDuration: 0.2)
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !keyboard.exists || keyboard.frame.intersection(app.frame).isNull || keyboard.frame.intersection(app.frame).isEmpty
+        }, object: keyboard)
+        guard XCTWaiter.wait(for: [hidden], timeout: 10) == .completed else {
+            XCTFail("Task743 scroll drag must dismiss the keyboard without submitting"); return
+        }
+        XCTAssertTrue(input.exists)
+        XCTAssertTrue((input.value as? String ?? "").utf8.elementsEqual(value.utf8), "Keyboard dismissal must preserve exact field intent")
+        if preservingCreate {
+            XCTAssertTrue(app.textFields["inbox-organize-picker-search"].exists)
+            XCTAssertTrue(app.buttons["inbox-organize-picker-create"].exists)
+            XCTAssertTrue(app.buttons["inbox-organize-picker-create"].isEnabled)
+            XCTAssertFalse(app.buttons["inbox-organize-apply"].exists, "Dismissing the keyboard must leave the picker open")
+        }
+    }
+    private func task743Choose(_ app: XCUIApplication, _ kind: String, _ label: String) {
+        task743Control(app, "inbox-organize-" + kind).tap()
+        let option = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "inbox-organize-picker-choice-", label)).firstMatch
+        revealPagedElement(app, option, in: app.scrollViews["inbox-organize-scroll"], outerEdge: true)
+        task740InboxStatusReady(option); option.tap()
+        XCTAssertTrue(app.textFields["inbox-organize-picker-search"].waitForNonExistence(timeout: 15))
+    }
+    private func task743Section(_ app: XCUIApplication, _ id: String) {
+        let header = app.buttons[id]
+        boardEnabled(header)
+        revealPagedElement(app, header, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        if header.value as? String == "Expand" {
+            header.tap()
+            expectation(for: NSPredicate(format: "value == %@", "Collapse"), evaluatedWith: header)
+            waitForExpectations(timeout: 10)
+        }
+        XCTAssertEqual(header.value as? String, "Collapse")
+    }
+    private func task743Tokens(_ app: XCUIApplication, _ field: String, _ expected: Set<String>) {
+        let input = app.textFields["task-editor-" + field]
+        boardEnabled(input)
+        revealPagedElement(app, input, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        let value = input.value as? String ?? "", raw = value == input.placeholderValue ? "" : value
+        XCTAssertEqual(Set(raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }), expected)
+    }
+    private func task743InboxOrganize(_ role: String, largest: Bool = false) throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_ORGANIZE_UI_" + role + "_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged fresh canonical Task743 Organize library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-AppleInterfaceStyle", "Light"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        task736OpenInbox(app); task737ChooseGroup(app, "none")
+        task738OpenFilters(app); task740SetSearch(app, "Task743 organize batch")
+        boardTap(app, "inbox-filters-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        let first = task192Reveal(app, "task-title-task743-organize-01", buttons: true, scrollID: "inbox-scroll", scans: 120)
+        task740InboxStatusReady(first); first.press(forDuration: 0.8); task739Count(app, 1)
+        let second = task192Reveal(app, "inbox-select-none-task743-organize-02", buttons: true, scrollID: "inbox-scroll", scans: 120)
+        task740InboxStatusReady(second); second.tap(); task739Count(app, 2)
+        task743Open(app)
+        task743Control(app, "inbox-organize-status-waiting").tap()
+        _ = task743Control(app, "inbox-organize-delegateWho", text: true)
+        XCTAssertFalse(app.buttons["inbox-organize-apply"].isEnabled)
+        XCTAssertTrue(app.staticTexts["inbox-organize-validation"].exists)
+        boardTap(app, "inbox-organize-cancel"); task739Count(app, 2)
+        XCTAssertFalse(app.staticTexts["task-inboxBulkOrganize-notice"].exists)
+
+        task743Open(app)
+        XCTAssertTrue(task743Control(app, "inbox-organize-status-__KEEP__").isSelected)
+        XCTAssertEqual(task743Control(app, "inbox-organize-project").label, "Project: Keep project")
+        XCTAssertEqual(task743Control(app, "inbox-organize-area").label, "Area: Keep area")
+        task743Choose(app, "project", "No Project")
+        XCTAssertEqual(task743Control(app, "inbox-organize-project").label, "Project: No Project")
+        task743Choose(app, "area", "No Area")
+        XCTAssertEqual(task743Control(app, "inbox-organize-area").label, "Area: No Area")
+        task743Choose(app, "area", "Task743 Area B")
+        task743Choose(app, "project", "Task743 Project A")
+        let disabledArea = app.buttons["inbox-organize-area"]
+        _ = task192Reveal(app, "inbox-organize-area", buttons: true, scrollID: "inbox-organize-scroll", scans: 120)
+        XCTAssertFalse(disabledArea.isEnabled); XCTAssertEqual(disabledArea.label, "Area: Keep area")
+        task743Choose(app, "project", "Keep project")
+        XCTAssertEqual(task743Control(app, "inbox-organize-area").label, "Area: Keep area")
+        task743Choose(app, "area", "Task743 Area A")
+        task743Control(app, "inbox-organize-project").tap()
+        task743Text(app, "inbox-organize-picker-search", "Task743 Created Project")
+        task743DismissKeyboard(app, "inbox-organize-picker-search", "Task743 Created Project", preservingCreate: true)
+        let create = task743Control(app, "inbox-organize-picker-create"); create.tap()
+        XCTAssertTrue(app.textFields["inbox-organize-picker-search"].waitForNonExistence(timeout: 30))
+        XCTAssertEqual(task743Control(app, "inbox-organize-project").label, "Project: Task743 Created Project")
+        boardTap(app, "inbox-organize-cancel"); task739Count(app, 2)
+        XCTAssertFalse(app.staticTexts["task-inboxBulkOrganize-notice"].exists)
+
+
+        task743Open(app); task743Control(app, "inbox-organize-project").tap()
+        task743Text(app, "inbox-organize-picker-search", "Task743 Created Project")
+        let offered = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "inbox-organize-picker-choice-", "Task743 Created Project")).firstMatch
+        revealPagedElement(app, offered, in: app.scrollViews["inbox-organize-scroll"], outerEdge: true)
+        task740InboxStatusReady(offered)
+        XCTAssertFalse(app.buttons["inbox-organize-picker-create"].exists)
+        app.textFields["inbox-organize-picker-search"].typeText("\n")
+        XCTAssertTrue(app.textFields["inbox-organize-picker-search"].waitForNonExistence(timeout: 15))
+        task743Control(app, "inbox-organize-status-waiting").tap()
+        task743Text(app, "inbox-organize-delegateWho", "Task743 Team")
+        task743Text(app, "inbox-organize-startDate", "2031-03-10")
+        task743Text(app, "inbox-organize-dueDate", "2031-03-12")
+        task743Text(app, "inbox-organize-reviewDate", "2031-03-14")
+        task743Text(app, "inbox-organize-contexts", "@École, @shared")
+        task743Text(app, "inbox-organize-tags", "新, #École")
+        boardEnabled(app.buttons["inbox-organize-apply"]); boardTap(app, "inbox-organize-apply")
+        XCTAssertTrue(app.staticTexts["inbox-bulk-count"].waitForNonExistence(timeout: 30))
+        let notice = app.staticTexts["task-inboxBulkOrganize-notice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 15)); XCTAssertEqual(notice.label, "Done: 2 tasks")
+        XCTAssertFalse(app.buttons["task-inboxBulkOrganize-undo"].exists); XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.terminate(); app.launch(); task736OpenInbox(app)
+        XCTAssertFalse(app.staticTexts["inbox-bulk-count"].exists); XCTAssertFalse(app.buttons["inbox-organize-apply"].exists)
+        for index in 1...3 {
+            let id = String(format: "task743-organize-%02d", index)
+            boardTap(app, "search-open"); let search = app.textFields["search-input"]; boardEnabled(search)
+            search.tap(); let prior = search.value as? String ?? ""
+            search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: prior.count) + "id:" + id + "\n")
+            let result = app.buttons["search-task-" + id]; task740InboxStatusReady(result); result.tap()
+            boardTap(app, "task-mode-edit")
+            let status = app.buttons["task-editor-status-" + (index < 3 ? "waiting" : "inbox")]
+            revealPagedElement(app, status, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+            XCTAssertTrue(status.isSelected)
+            task743Section(app, "task-editor-section-organization")
+            task743Tokens(app, "tags", index < 3 ? Set([index == 1 ? "#alpha" : "#beta", "#新", "#École"]) : Set(["#keep"]))
+            task743Tokens(app, "contexts", index < 3 ? Set([index == 1 ? "@old" : "@shared", "@École", "@shared"]) : Set(["@sentinel"]))
+            let destination = app.buttons["task-editor-destination"]
+            revealPagedElement(app, destination, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+            XCTAssertEqual(destination.value as? String, index < 3 ? "Task743 Created Project" : "Task743 Old Project")
+            if index < 3 {
+                task743Section(app, "task-editor-section-scheduling")
+                for (field, day) in [("startTime", "03/10/2031"), ("dueDate", "03/12/2031"), ("reviewAt", "03/14/2031")] {
+                    let date = app.buttons["task-editor-" + field]
+                    revealPagedElement(app, date, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+                    XCTAssertEqual(date.value as? String, day)
+                }
+            }
+            boardTap(app, "task-view-close"); XCTAssertFalse(app.buttons["task-editor-discard"].exists)
+            boardTap(app, "search-close"); boardEnabled(app.buttons["inbox-filters-open"])
+        }
     }
 }

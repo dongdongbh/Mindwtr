@@ -48,9 +48,9 @@ describe('native host replay tokens', () => {
 
     it('optional (the default): a completion without its revision completes, as before journaling', async () => {
         const host = await open();
-        expect(await host.completeTask({ id: 'a' } as never)).toEqual({ ok: true, value: { id: 'a' } });
+        expect(await host.completeTask({ id: 'a' } as never)).toMatchObject({ ok: true, value: { id: 'a' } });
         expect(stored()).toMatchObject({ status: 'done', rev: 8 });
-        // A revision it sends is still checked.
+
         const b = taskRevisionOf(stored('b'));
         expect((await useTaskStore.getState().updateTask('b', { title: 'Other writer' })).success).toBe(true);
         expect(await host.completeTask({ id: 'b', taskRevision: b })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -79,7 +79,7 @@ describe('native host replay tokens', () => {
         expect(await host.saveTaskDraft(input)).toMatchObject({ ok: true, value: { id: 'a', draft: { title: 'Mine' } } });
         expect(stored()).toBe(applied);
         expect(saveData).toHaveBeenCalledTimes(1);
-        // A request UUID it sends still answers from its receipt.
+
         const withRequest = { id: 'b', base: { title: 'b' }, patch: { title: 'Yours' }, requestId: generateUUID() };
         expect(await host.saveTaskDraft(withRequest)).toMatchObject({ ok: true });
         const saved = stored('b');

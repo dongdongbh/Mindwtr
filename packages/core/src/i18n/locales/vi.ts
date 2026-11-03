@@ -1,4 +1,14 @@
 export const viOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Trước khi bắt đầu",
+    "attachments.webUploadRequiresCloud": "Tải lên từ trình duyệt cần đồng bộ với máy chủ đám mây tự lưu trữ.",
+    "attachments.webUploadEncrypted": "Tải lên từ trình duyệt cần tắt mã hóa đồng bộ.",
+    "attachments.webUploadOffline": "Không thể tải tệp lên khi ngoại tuyến.",
+    "attachments.webUploadChanged": "Bản nháp hoặc cấu hình đồng bộ đã thay đổi. Hãy chọn lại tệp.",
+    "attachments.webUploadFailed": "Tệp đính kèm chưa được lưu.",
+    "attachments.webUploadRetry": "Thử lưu lại hoặc xóa tệp để tiếp tục.",
+    "attachments.webProjectUploadUnsupported": "Trình duyệt chưa hỗ trợ tải lên dự án. Hãy thêm tệp vào một công việc.",
+    'contexts.new': 'Ngữ cảnh mới',
+    'tags.new': 'Thẻ mới',
     "projects.convertBlocked.destination-section-sequence": "Chọn dự án đích đặt thành Tuần tự → Trong các phần. Phần mới giữ nguyên thứ tự công việc; các phần khác tiếp tục độc lập.",
     'timeline.moveTaskDates': "Di chuyển ngày của công việc",
     'timeline.moveProjectDates': "Di chuyển ngày của dự án",
@@ -17,6 +27,8 @@ export const viOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "Không thể xác nhận thay đổi thẻ. Hãy khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",
     "task.copyTaskLink": "Sao chép liên kết công việc",
     "task.copyTaskId": "Sao chép mã công việc",
+    "task.addToChecklist": "Thêm vào danh sách kiểm tra…",
+    "task.addedToChecklist": "Đã thêm vào danh sách kiểm tra",
     "task.linkNotFound": "Công việc này không có trong thư viện này. Có thể công việc đã bị xóa hoặc chưa được đồng bộ với thiết bị này.",
     'task.doneCompletedAtOutcomeUnknown': "Không thể xác nhận thay đổi thời gian hoàn thành. Hãy khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",
     'task.destinationOutcomeUnknown': "Không thể xác nhận thay đổi đích đến. Khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",
@@ -62,6 +74,28 @@ export const viOverrides: Record<string, string> = {
     'sandbox.confirmTitle': "Mở môi trường thử nghiệm?",
     'sandbox.confirmDescription': "Dùng các công việc và dự án giả định để ghi lại lỗi hoặc trình diễn ứng dụng. Dữ liệu cá nhân của bạn được giữ riêng. Các thay đổi trong môi trường thử nghiệm sẽ bị xóa khi thoát.",
     'sandbox.enter': "Mở môi trường thử nghiệm",
+    'workspaces.title': "Không gian làm việc",
+    'workspaces.description': "Giữ riêng công việc, tệp đính kèm, máy chủ đồng bộ và cài đặt trên máy tính này. Mỗi lúc chỉ mở một không gian làm việc, và chỉ không gian đó đồng bộ và gửi lời nhắc.",
+    'workspaces.defaultName': "Mặc định",
+    'workspaces.open': "Đang mở",
+    'workspaces.add': "Thêm không gian làm việc",
+    'workspaces.namePlaceholder': "Tên không gian làm việc",
+    'workspaces.switch': "Chuyển",
+    'workspaces.switchTitle': "Chuyển không gian làm việc?",
+    'workspaces.switchDesc': "Mindwtr sẽ khởi động lại để mở {{name}}.",
+    'workspaces.switchNow': "Chuyển ngay",
+    'workspaces.createdTitle': "Đã thêm không gian làm việc",
+    'workspaces.later': "Để sau",
+    'workspaces.saveFailed': "Không lưu được thay đổi của bạn nên chưa chuyển không gian làm việc. Hãy thử lại.",
+    'workspaces.failed': "Không thể thay đổi không gian làm việc.",
+    'workspaces.deleteTitle': "Xóa {{name}}?",
+    'workspaces.deleteDesc': "Thao tác này xóa công việc cục bộ, tệp đính kèm và cài đặt của không gian làm việc khỏi máy tính này. Máy chủ đồng bộ của nó không thay đổi gì.",
+    'workspaces.dataFolder': "Thư mục dữ liệu",
+    'workspaces.cliHint': "Máy chủ MCP và dòng lệnh mở không gian làm việc mặc định. Với không gian làm việc khác, hãy truyền tệp mindwtr.db của nó bằng --db.",
+    'workspaces.unavailable': "Không gian làm việc chưa dùng được cho đến khi Mindwtr chuyển xong thư mục hồ sơ. Hãy khởi động lại Mindwtr rồi thử lại.",
+    'workspaces.unreadable': "Không đọc được danh sách không gian làm việc nên không gian làm việc mặc định đã được mở. Hãy kiểm tra tệp workspaces.toml trong thư mục cấu hình của Mindwtr.",
+    'workspaces.iCloudDefaultOnly': "Đồng bộ iCloud chỉ có trong không gian làm việc mặc định.",
+    'workspaces.switcherLabel': "Không gian làm việc",
     'sandbox.title': "Môi trường thử nghiệm · Dữ liệu mẫu",
     'sandbox.exit': "Thoát môi trường thử nghiệm",
     'sandbox.reset': "Đặt lại dữ liệu mẫu",
@@ -83,7 +117,7 @@ export const viOverrides: Record<string, string> = {
         'settings.automationCaptureLoadFailed': 'Không thể tải cài đặt thu thập tự động.',
         'settings.automationCaptureUpdateFailed': 'Không thể cập nhật cài đặt thu thập tự động.',
         'timeline.omittedItems': 'Thêm {{count}} mục',
-        // Ratchet backfill (i18n-fallback-20260730-12): new en.ts keys
+
         'accessibility.skipToContent': 'Bỏ qua đến nội dung',
         'accessibility.mainContent': 'Nội dung chính',
         'quickAdd.pastedImageTitle': 'Ảnh chụp màn hình',
@@ -161,7 +195,7 @@ export const viOverrides: Record<string, string> = {
         'taskEdit.aiAssistant': 'Trợ lý AI',
         'task.dateIssue.startAfterDue': 'Bắt đầu sau ngày hết hạn',
         'taskEdit.quickAddTokenHint': 'Thêm nhanh: {{token}}',
-        // App
+
         'app.name': 'Mindwtr',
         'app.closeStillSavingTitle': "Mindwtr vẫn đang lưu",
         'app.closeStillSavingBody': "Mindwtr chưa lưu xong các thay đổi gần đây của bạn. Vẫn đóng ứng dụng? Các thay đổi chưa lưu sẽ bị mất.",
@@ -176,7 +210,7 @@ export const viOverrides: Record<string, string> = {
         'markdown.openLinkFailed': "Không thể mở liên kết này. Hãy kiểm tra xem ứng dụng tương ứng đã được cài đặt chưa. Bạn có thể sao chép liên kết và mở trong ứng dụng đó.",
         'markdown.copyLinkFailed': "Không thể sao chép liên kết này.",
 
-        // Navigation
+
         'nav.main': 'Chính',
         'nav.inbox': 'Hộp thư đến',
         'nav.board': 'Bảng Kanban',
@@ -202,9 +236,10 @@ export const viOverrides: Record<string, string> = {
         'nav.sectionOrganize': 'Sắp xếp',
         'nav.sectionArchive': 'Lưu trữ',
 
-        // Quick Add
+
         'quickAdd.help': 'Thêm nhanh hỗ trợ /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> hoặc !Area, @context, #tag, +Project, %Person (hoặc %"Full Name"). Ngày đến hạn chỉ là ngày trừ khi bạn thêm giờ.',
         'quickAdd.example': 'Ví dụ: Gọi cho mẹ /start:tomorrow /due:tomorrow 5pm @phone #family',
+        'quickAdd.pasteImagesHint': 'Dán hình ảnh hoặc ảnh chụp màn hình bằng {{shortcut}} để đính kèm.',
         'quickAdd.placeholder': 'Thêm nhiệm vụ… dùng @ngữ cảnh +Dự án #thẻ',
         'quickAdd.addAnother': 'Thêm cái khác',
         'quickAdd.inputLabel': 'Tiêu đề nhiệm vụ',
@@ -215,6 +250,7 @@ export const viOverrides: Record<string, string> = {
         'quickAdd.audioRecording': 'Đang ghi âm...',
         'quickAdd.audioReady': 'Bản ghi âm đã sẵn sàng để lưu.',
         'quickAdd.audioQueued': 'Đã lưu. Âm thanh sẽ được chuyển thành văn bản khi bạn mở Mindwtr.',
+        'quickAdd.textQueued': "Đã lưu. Nhiệm vụ sẽ được thêm khi bạn mở Mindwtr.",
         'quickAdd.audioProcessing': 'Đang xử lý bản ghi âm...',
         'quickAdd.audioSavingSpeechToText': 'Đang lưu bản ghi và chuyển giọng nói thành văn bản.',
         'quickAdd.audioNoteTitle': 'Ghi chú âm thanh',
@@ -233,10 +269,10 @@ export const viOverrides: Record<string, string> = {
         'quickAdd.bulkCreateError': 'Không thể tạo tất cả nhiệm vụ.',
         'quickAdd.saveAndEdit': 'Lưu và sửa',
 
-        // Checklist
+
         'checklist.progress': 'Tiến độ danh sách kiểm tra',
 
-        // Keybindings (Desktop)
+
         'keybindings.helpTitle': 'Phím tắt',
         'keybindings.helpSubtitle': 'Nhấn Esc để đóng',
         'keybindings.styleLabel': 'Kiểu phím tắt',
@@ -286,7 +322,7 @@ export const viOverrides: Record<string, string> = {
         'keybindings.list.toggleDetails': 'Bật/tắt chi tiết danh sách',
         'keybindings.list.toggleDensity': 'Bật/tắt mật độ',
 
-        // Tabs (Mobile)
+
         'tab.inbox': 'Hộp thư đến',
         'tab.next': 'Tập trung',
         'tab.board': 'Bảng',
@@ -295,7 +331,7 @@ export const viOverrides: Record<string, string> = {
         'tab.calendar': 'Lịch',
         'tab.review': 'Xem lại',
 
-        // List Views
+
         'list.inbox': 'Hộp thư đến',
         'list.todo': 'Cần làm',
         'list.inProgress': 'Đang thực hiện',
@@ -333,7 +369,7 @@ export const viOverrides: Record<string, string> = {
         'reference.empty': 'Chưa có gì được lưu',
         'reference.emptyHint': 'Tham khảo lưu thông tin bạn có thể cần sau — không cần hành động.',
 
-        // Status Labels
+
         'status.inbox': 'Hộp thư đến',
         'status.todo': 'Cần làm',
         'status.next': 'Tiếp theo',
@@ -345,7 +381,7 @@ export const viOverrides: Record<string, string> = {
         'status.archived': 'Đã lưu trữ',
         'status.active': 'Đang hoạt động',
 
-        // Priority Labels
+
         'priority.low': 'Thấp',
         'priority.medium': 'Trung bình',
         'priority.high': 'Cao',
@@ -354,9 +390,16 @@ export const viOverrides: Record<string, string> = {
         'energyLevel.medium': 'Năng lượng trung bình',
         'energyLevel.high': 'Năng lượng cao',
 
-        // Task Edit
+
         'taskEdit.editTask': 'Chỉnh sửa nhiệm vụ',
         'taskEdit.checklist': 'Danh sách kiểm tra',
+        'savedFilters.saveTitle': "Lưu bộ lọc",
+        'savedFilters.namePlaceholder': "Tên bộ lọc",
+        'taskEdit.dragChecklistItem': "Kéo để sắp xếp lại",
+        'taskEdit.checklistItemActions': "Thao tác với mục danh sách",
+        'taskEdit.moveChecklistTop': "Chuyển lên đầu",
+        'taskEdit.moveChecklistBottom': "Chuyển xuống cuối",
+        'taskEdit.addChecklistBelow': "Thêm mục bên dưới",
         'taskEdit.tab.task': 'Nhiệm vụ',
         'taskEdit.tab.list': 'Danh sách',
         'taskEdit.tab.view': 'Xem',
@@ -367,6 +410,8 @@ export const viOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Danh sách mua sắm?',
         'taskEdit.openChecklistMode': 'Mở chế độ danh sách kiểm tra',
         'taskEdit.addItem': 'Thêm mục',
+        'taskEdit.resetChecklistOnRepeat': "Đặt lại danh sách kiểm tra ở lần lặp tiếp theo",
+        'taskEdit.resetChecklistOnRepeatHint': "Tắt để giữ các mục đã đánh dấu khi công việc lặp lại.",
         'taskEdit.resetChecklist': 'Đặt lại danh sách kiểm tra',
         'task.convertToReference': 'Chuyển thành tham khảo',
         'task.createProjectFromTask': 'Tạo dự án từ tác vụ',
@@ -435,6 +480,9 @@ export const viOverrides: Record<string, string> = {
         'markdown.toolbar.italic': 'In nghiêng',
         'markdown.toolbar.strikethrough': 'Gạch ngang',
         'markdown.toolbar.bulletList': 'Danh sách dấu đầu dòng',
+        'markdown.toolbar.quote': 'Trích dẫn',
+        'markdown.toolbar.orderedList': 'Danh sách đánh số',
+        'markdown.toolbar.taskList': 'Danh sách việc cần làm',
         'markdown.toolbar.horizontalRule': 'Đường kẻ ngang',
         'markdown.toolbar.link': 'Chèn liên kết',
         'markdown.toolbar.code': 'Mã nội tuyến',
@@ -543,7 +591,7 @@ export const viOverrides: Record<string, string> = {
         'task.aria.dueTime': 'Giờ đến hạn',
         'task.aria.location': 'Địa điểm',
 
-        // Recurrence Labels
+
         'recurrence.none': 'Không',
         'recurrence.daily': 'Hàng ngày',
         'recurrence.weekly': 'Hàng tuần',
@@ -585,7 +633,7 @@ export const viOverrides: Record<string, string> = {
         'recurrence.showFutureInCalendar': 'Hiện các lần lặp lại sắp tới trong Lịch',
         'recurrence.showFutureInCalendarHint': 'Chỉ xem trước cho lên kế hoạch; nhiệm vụ tiếp theo vẫn được tạo khi hoàn thành cái này.',
 
-        // Inbox (Mobile)
+
         'inbox.title': 'Hộp thư đến',
         'inbox.processButton': 'Xử lý hộp thư đến',
         'inbox.projectHint': 'Việc cần nhiều hơn một hành động? Khi xử lý, hãy chọn “Có, tạo thành dự án” để đặt tên cho kết quả và hành động kế tiếp đầu tiên của nó.',
@@ -631,7 +679,7 @@ export const viOverrides: Record<string, string> = {
         'inbox.noProject': 'Không có dự án',
         'inbox.skip': 'Bỏ qua',
 
-        // Next Actions (Mobile)
+
         'next.title': 'Hành động tiếp theo',
         'next.ready': 'nhiệm vụ sẵn sàng',
         'next.current': 'Hành động hiện tại',
@@ -642,7 +690,7 @@ export const viOverrides: Record<string, string> = {
         'next.warningCount': 'mục trong Hành động tiếp theo',
         'next.warningHint': 'Hãy xem xét tập trung vào ít dự án hơn. GTD khuyến nghị giữ Hành động tiếp theo trong khoảng 10-15 mục để rõ ràng hơn.',
 
-        // Contact / Contexts (Mobile updates)
+
         'contexts.title': 'Ngữ cảnh',
         'contexts.filter': 'Lọc nhiệm vụ theo ngữ cảnh',
         'filters.label': 'Bộ lọc',
@@ -664,6 +712,13 @@ export const viOverrides: Record<string, string> = {
         'filters.starred': 'Đã đánh dấu sao',
         'filters.notStarred': 'Chưa đánh dấu sao',
         'filters.datePreset.today': 'Hôm nay',
+        "filters.taskDates": "Ngày của công việc",
+        "filters.anyTime": "Bất kỳ lúc nào",
+        "filters.datePreset.next_7_days": "7 ngày tới",
+        "filters.datePreset.overdue_next_7_days": "Quá hạn + 7 ngày tới",
+        "filters.datePreset.next_14_days": "14 ngày tới",
+        "filters.datePreset.next_30_days": "30 ngày tới",
+        "filters.datePreset.upcoming": "Tất cả ngày sắp tới",
         'filters.datePreset.this_week': 'Tuần này',
         'filters.datePreset.this_month': 'Tháng này',
         'filters.datePreset.overdue': 'Quá hạn',
@@ -682,7 +737,7 @@ export const viOverrides: Record<string, string> = {
         'contexts.noContexts': 'Không tìm thấy ngữ cảnh nào. Thêm ngữ cảnh như @nhà, @côngviệc, @máytính vào nhiệm vụ của bạn',
         'contexts.noTasks': 'Không có nhiệm vụ đang hoạt động cho ngữ cảnh này',
 
-        // Board
+
         'board.title': 'Bảng Kanban',
         'board.next': 'Hành động tiếp theo',
         'board.todo': 'Cần làm',
@@ -693,7 +748,7 @@ export const viOverrides: Record<string, string> = {
         'board.dragTask': 'Kéo nhiệm vụ',
         'board.delete': 'Xóa',
 
-        // Calendar
+
         'calendar.title': 'Lịch',
         'calendar.tasksAndEvents': 'Nhiệm vụ và sự kiện bên ngoài theo ngày',
         'calendar.today': 'Hôm nay',
@@ -773,7 +828,7 @@ export const viOverrides: Record<string, string> = {
         'shortcuts.captureUnavailable': 'Phím tắt ghi lại không khả dụng',
         'shortcuts.missingTitle': 'Mindwtr không thể đọc tiêu đề nhiệm vụ từ liên kết phím tắt đó.',
 
-        // Projects
+
         'projects.title': 'Dự án',
         'projects.statusLabel': 'Trạng thái',
         'projects.activeSection': 'Dự án đang hoạt động',
@@ -785,6 +840,11 @@ export const viOverrides: Record<string, string> = {
         'projects.noActiveTasks': 'Không có nhiệm vụ đang hoạt động trong dự án này.',
         'projects.projectName': 'Tên dự án',
         'projects.color': 'Màu sắc',
+        'projects.useAreaColor': "Dùng màu của lĩnh vực",
+        'projects.colorSaveFailed': "Không thể lưu màu.",
+        'projects.sequenceMode': "Chế độ luồng",
+        'projects.perSection': "Theo từng phần",
+        'projects.perSectionTooltip': "Theo từng phần: mỗi phần là song song hoặc tuần tự, chọn trong menu của phần đó.",
         'projects.colorBlue': 'Xanh dương',
         'projects.colorGreen': 'Xanh lá',
         'projects.colorAmber': 'Hổ phách',
@@ -841,6 +901,7 @@ export const viOverrides: Record<string, string> = {
         'projects.moveUp': 'Di chuyển lên',
         'projects.moveDown': 'Di chuyển xuống',
         'focus.reorderPosition': '{{title}}. Vị trí {{position}} trên {{count}}',
+        'focus.hiddenByArea': "{{count}} được chọn ở các lĩnh vực khác",
         'focus.reorderHint': 'Nhấn giữ rồi kéo để sắp xếp lại',
         'projects.tagFilter': 'Bộ lọc thẻ',
         'projects.allTags': 'Tất cả thẻ',
@@ -876,7 +937,7 @@ export const viOverrides: Record<string, string> = {
         'projects.nextActionPromptAddButton': 'Thêm hành động tiếp theo',
         'projects.nextActionPromptComplete': 'Hoàn thành dự án',
 
-        // Review Steps
+
         'review.title': 'Xem lại',
         'review.openTasks': 'Công việc đang mở',
         'review.intro': 'Làm rõ, cập nhật và sáng tạo.',
@@ -947,6 +1008,7 @@ export const viOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Đảm bảo mọi dự án đang hoạt động đều có hành động tiếp theo.',
         'review.projectsHint': 'Xem lại từng dự án. Nó có ít nhất một Hành động tiếp theo cụ thể không? Nếu không, thêm một ngay bây giờ. Đánh dấu các dự án đã hoàn thành là xong.',
         'review.hasNextAction': 'Có hành động tiếp theo',
+    'review.projectDeferred': 'Đã lên lịch',
         'review.needsAction': 'Cần hành động',
         'review.noActiveTasks': 'Không có nhiệm vụ đang hoạt động',
         'review.somedayStep': 'Tương lai/Có thể',
@@ -985,7 +1047,7 @@ export const viOverrides: Record<string, string> = {
         'review.noArea': 'Không có khu vực',
         'review.singleActions': 'Hành động đơn lẻ',
 
-        // Processing
+
         'process.title': 'Xử lý mục',
         'process.refineTitle': 'Tinh chỉnh nhiệm vụ',
         'process.refineDesc': 'Làm rõ đây là gì trước khi quyết định làm gì với nó.',
@@ -1053,7 +1115,7 @@ export const viOverrides: Record<string, string> = {
         'process.addAnotherAction': 'Thêm hành động khác',
         'process.removeAction': 'Xóa hành động',
 
-        // Settings
+
         'settings.title': 'Cài đặt',
         'settings.subtitle': 'Tùy chỉnh trải nghiệm Mindwtr của bạn',
         'settings.appearance': 'Giao diện',
@@ -1067,6 +1129,8 @@ export const viOverrides: Record<string, string> = {
         'settings.theme': 'Chủ đề',
         'settings.eink': 'Màn hình mực điện tử',
         'settings.nord': 'Nord',
+        'settings.gruvboxLight': 'Gruvbox Light',
+        'settings.gruvboxDark': 'Gruvbox Dark',
         'settings.sepia': 'Nâu đỏ',
         'settings.oled': 'OLED / Đêm khuya',
         'settings.material3Light': 'Material 3 (Sáng)',
@@ -1131,6 +1195,11 @@ export const viOverrides: Record<string, string> = {
         'settings.terms': 'Điều khoản sử dụng',
         'settings.mobile.appLock': 'Khóa ứng dụng',
         'settings.mobile.appLockDesc': 'Yêu cầu khóa thiết bị khi mở Mindwtr hoặc quay lại ứng dụng. Điều này bảo vệ chế độ xem ứng dụng, không phải cơ sở dữ liệu trên thiết bị.',
+        'settings.mobile.appLockRelock': 'Yêu cầu mở khóa',
+        'settings.mobile.appLockRelockImmediately': 'Ngay lập tức',
+        'settings.mobile.appLockRelockAfter1': 'Sau 1 phút',
+        'settings.mobile.appLockRelockAfter5': 'Sau 5 phút',
+        'settings.mobile.appLockRelockAfter15': 'Sau 15 phút',
         'appLock.title': 'Mindwtr đã bị khóa',
         'appLock.description': 'Dùng khóa thiết bị để mở Mindwtr. Điều này bảo vệ chế độ xem ứng dụng, không phải cơ sở dữ liệu trên thiết bị.',
         'appLock.prompt': 'Mở khóa Mindwtr',
@@ -1141,6 +1210,14 @@ export const viOverrides: Record<string, string> = {
         'appLock.unavailable': 'Thiết lập mã PIN hoặc sinh trắc học để dùng khóa ứng dụng.',
         'appLock.cancelled': 'Mindwtr vẫn bị khóa.',
         'appLock.failed': 'Xác thực thất bại. Thử lại.',
+        "settings.desktopAppLockDesc": "Yêu cầu Windows Hello hoặc Touch ID (hoặc mật khẩu Mac) khi mở Mindwtr và sau khi bạn rời đi. Tính năng này chỉ ẩn cửa sổ ứng dụng; tiện ích macOS, API cục bộ và máy chủ MCP vẫn có thể đọc dữ liệu của bạn.",
+        "settings.desktopAppLockUnavailable": "Hãy thiết lập Windows Hello hoặc mật khẩu đăng nhập Mac để dùng khóa ứng dụng.",
+        "appLock.lockNow": "Khóa Mindwtr",
+        "appLock.lockedReminder": "Lời nhắc Mindwtr",
+        "appLock.turnOff": "Tắt khóa ứng dụng",
+        "appLock.osCheckUnavailable": "Windows Hello hoặc Touch ID hiện không khả dụng trên thiết bị này.",
+        "appLock.macUnlockReason": "mở khóa và hiển thị công việc của bạn",
+        "appLock.macEnableReason": "bật khóa ứng dụng",
         'settings.data': 'Dữ liệu',
         'settings.menuDesc.general': 'Giao diện, ngôn ngữ, hiển thị',
         'settings.menuDesc.gtd': 'Ghi lại, xem lại, trình chỉnh sửa nhiệm vụ',
@@ -1337,6 +1414,7 @@ export const viOverrides: Record<string, string> = {
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'Gemini',
         'settings.aiProviderAnthropic': 'Anthropic (Claude)',
+        'settings.aiEffortMinimalSaved': 'Đã lưu: Tối thiểu',
         'settings.aiEffortLow': 'Thấp',
         'settings.aiEffortMedium': 'Trung bình',
         'settings.aiEffortHigh': 'Cao',
@@ -1629,7 +1707,7 @@ export const viOverrides: Record<string, string> = {
         'digest.reviewDue': 'Xem lại đến hạn',
         'digest.noItems': 'Không có mục khẩn cấp hôm nay.',
 
-        // Common
+
         'common.tasks': 'nhiệm vụ',
         'common.day': 'ngày',
         'common.days': 'ngày',
@@ -1686,7 +1764,7 @@ export const viOverrides: Record<string, string> = {
         'attachments.transcriptionUnavailable': 'Chuyển giọng nói thành văn bản chưa sẵn sàng. Kiểm tra cài đặt AI và thử lại.',
         'attachments.transcriptionFailed': 'Phiên âm thất bại. Vui lòng thử lại.',
 
-        // Bulk Actions
+
         'bulk.select': 'Chọn',
         'bulk.exitSelect': 'Xong',
         'bulk.selected': 'đã chọn',
@@ -1704,7 +1782,7 @@ export const viOverrides: Record<string, string> = {
         'bulk.confirmDeleteTitle': 'Xóa nhiệm vụ',
         'bulk.confirmDeleteBody': 'Xóa các nhiệm vụ đã chọn?',
 
-        // Sorting
+
         'sort.label': 'Sắp xếp',
         'sort.default': 'Mặc định',
         'sort.due': 'Ngày đến hạn',
@@ -1722,7 +1800,7 @@ export const viOverrides: Record<string, string> = {
         'list.completedGroup.earlier': 'Trước đó',
         'list.completedGroup.notCompleted': 'Chưa hoàn thành',
 
-        // Agenda
+
         'agenda.title': 'Tập trung',
         'agenda.active': 'mục đang hoạt động',
         'agenda.collapseOtherSections': 'Chỉ tập trung',
@@ -1749,6 +1827,11 @@ export const viOverrides: Record<string, string> = {
         'agenda.upcoming': 'Sắp tới',
         'widget.upcomingStarts': 'Bắt đầu',
         'widget.upcomingReturns': 'Trở lại',
+        'widget.background': 'Nền',
+        'widget.backgroundLightText': 'Trong suốt, chữ sáng',
+        'widget.backgroundDarkText': 'Trong suốt, chữ tối',
+        'widget.availableActions': 'Việc có thể làm',
+        'widget.includeAvailableActions': 'Thêm hành động tiếp theo đã đến ngày bắt đầu',
         'agenda.allClear': 'Tất cả ổn!',
         'agenda.noTasks': 'Hiện chưa có gì để tập trung. Gắn sao hoặc đặt hạn cho một nhiệm vụ để nó hiển thị ở đây.',
         'agenda.emptyStart': 'Chưa có nhiệm vụ nào. Thêm những gì bạn đang nghĩ vào Hộp thư đến rồi sắp xếp sau.',
@@ -1764,7 +1847,7 @@ export const viOverrides: Record<string, string> = {
         'focus.group.noEnergy': 'Không có năng lượng',
         'focus.group.noPriority': 'Không có ưu tiên',
 
-        // Task Age
+
         'taskAge.day': 'ngày tuổi',
         'taskAge.days': 'ngày tuổi',
         'taskAge.week': 'tuần tuổi',
@@ -1772,13 +1855,13 @@ export const viOverrides: Record<string, string> = {
         'taskAge.month': 'tháng tuổi',
         'taskAge.months': 'tháng tuổi',
 
-        // Energy Contexts
+
         'context.energy.focused': 'Tập trung',
         'context.energy.lowenergy': 'Năng lượng thấp',
         'context.energy.creative': 'Sáng tạo',
         'context.energy.routine': 'Thường ngày',
 
-        // Waiting (Mobile)
+
         'waiting.title': 'Đang chờ',
         'waiting.subtitle': 'Nhiệm vụ đang chờ người khác hoặc sự kiện bên ngoài',
         'waiting.count': 'Đang chờ',
@@ -1788,7 +1871,7 @@ export const viOverrides: Record<string, string> = {
         'waiting.empty': 'Không có gì đang chờ',
         'waiting.emptyHint': 'Đặt nhiệm vụ ở đây khi bước tiếp theo là của người khác — bạn sẽ thấy chúng cho đến khi chúng được giải quyết.',
 
-        // Someday (Mobile)
+
         'someday.title': 'Tương lai/Có thể',
         'someday.subtitle': 'Ý tưởng và mục tiêu bạn có thể muốn theo đuổi trong tương lai',
         'someday.ideas': 'Ý tưởng',
@@ -1799,7 +1882,7 @@ export const viOverrides: Record<string, string> = {
         'someday.emptyHint': 'Đặt ý tưởng và mục tiêu bạn có thể theo đuổi sau — ra khỏi bàn, không ra khỏi tâm trí.',
         'done.emptyHint': 'Các nhiệm vụ đã hoàn thành sẽ xuất hiện ở đây — nhật ký những gì bạn đã hoàn thành.',
 
-        // Search
+
         'search.title': 'Tìm kiếm',
         'search.placeholder': 'Tìm kiếm nhiệm vụ và dự án...',
         'search.scopeHint': 'Nhiệm vụ, dự án, người',
@@ -1836,7 +1919,7 @@ export const viOverrides: Record<string, string> = {
         'search.due.nextWeek': 'Tuần tới',
         'search.due.none': 'Không có ngày đến hạn',
 
-        // Archived
+
         'archived.tasksSegment': 'Nhiệm vụ',
         'archived.title': 'Đã lưu trữ',
         'archived.searchPlaceholder': 'Tìm kiếm nhiệm vụ đã lưu trữ...',
@@ -2105,6 +2188,10 @@ export const viOverrides: Record<string, string> = {
         'settings.backupMobile.recoverySnapshotSaved': 'Đã lưu ảnh chụp khôi phục là {{snapshotName}}.',
                 'settings.backupMobile.restoreBackup': 'Khôi phục sao lưu?',
         'settings.backupMobile.restoreComplete': 'Khôi phục hoàn tất',
+        'settings.backupMobile.undoUnavailableTitle': 'Có thể không hoàn tác được',
+        'settings.backupMobile.undoUnavailableConfirm': 'Thư viện này có thể quá lớn để hoàn tác thay đổi này. Một ảnh chụp khôi phục vẫn được lưu trước. Tiếp tục?',
+        'settings.backupMobile.undoUnavailableContinue': 'Tiếp tục',
+        'settings.backupMobile.undoUnavailableResult': 'Không thể hoàn tác thay đổi này: thư viện quá lớn.',
         'settings.backupMobile.restoreFailed': 'Khôi phục thất bại',
         'settings.backupMobile.restoreRecoverySnapshot': 'Khôi phục ảnh chụp khôi phục?',
         'settings.backupMobile.restoreSnapshotReplaceLocalData': 'Khôi phục {{snapshotName}}? Điều này sẽ thay thế dữ liệu cục bộ hiện tại.',
@@ -2133,7 +2220,7 @@ export const viOverrides: Record<string, string> = {
         'settings.backupMobile.tasksStayedOutsideProjects': '{{taskCount}} nhiệm vụ vẫn ở ngoài dự án.',
         'settings.backupMobile.tasksWillStayOutsideProjects': '{{taskCount}} nhiệm vụ sẽ ở ngoài dự án để bạn có thể xử lý chúng trong Mindwtr.',
 
-        // Apple Reminders Import
+
         'settings.appleRemindersImport.appleReminders': 'Apple Nhắc nhở',
         'settings.appleRemindersImport.autoImport': 'Tự động nhập',
         'settings.appleRemindersImport.autoImportDescription': 'Mỗi khi mở Mindwtr, các lời nhắc mới chưa hoàn thành trong danh sách này sẽ được thêm vào Hộp thư đến.',
@@ -2154,7 +2241,7 @@ export const viOverrides: Record<string, string> = {
         'settings.appleRemindersImport.selected': 'Đã chọn',
         'settings.appleRemindersImport.skippedCount': 'Đã bỏ qua {{taskCount}} nhắc nhở đã nhập, đã hoàn thành hoặc thiếu tiêu đề.',
 
-        // Calendar Mobile Settings
+
         'settings.calendarMobile.calendarAccessIsRequiredToPushTasksToYourCalendar': 'Cần quyền truy cập lịch để đẩy nhiệm vụ lên lịch của bạn.',
         'settings.calendarMobile.calendarAccessWasDeniedPleaseGrantAccessInSettings': 'Quyền truy cập lịch bị từ chối. Vui lòng cấp quyền truy cập trong Cài đặt.',
         'settings.calendarMobile.calendarDeleted': 'Đã xóa lịch',
@@ -2191,7 +2278,7 @@ export const viOverrides: Record<string, string> = {
         'settings.calendarMobile.theMindwtrCalendarAndAllItsEventsHaveBeenRemoved': 'Lịch Mindwtr và tất cả sự kiện của nó đã bị xóa.',
         'settings.calendarMobile.mindwtrCalendarRemovedPushedEventsKept': 'Đã xóa lịch Mindwtr. Các sự kiện đã đẩy sang lịch bạn chọn vẫn ở đó.',
 
-        // GTD Mobile Settings
+
         'settings.gtdMobile.autoStartBreaks': 'Tự động bắt đầu nghỉ',
         'settings.gtdMobile.autoStartFocus': 'Tự động bắt đầu tập trung',
         'settings.gtdMobile.captureDefaults': 'Mặc định ghi lại',
@@ -2221,7 +2308,7 @@ export const viOverrides: Record<string, string> = {
         'settings.mobile.quickAccessView': 'Chế độ xem truy cập nhanh',
         'settings.mobile.showTaskAge': 'Hiện tuổi nhiệm vụ',
 
-        // Sync Mobile Settings
+
         'settings.syncMobile.accountStatus': 'Trạng thái tài khoản',
         'settings.syncMobile.addThisExactRedirectUriInDropboxOauthSettings': 'Thêm URI chuyển hướng chính xác này vào cài đặt Dropbox OAuth.',
         'settings.syncMobile.backgroundSync': 'Đồng bộ nền',
@@ -2316,7 +2403,7 @@ export const viOverrides: Record<string, string> = {
         'captureNotification.text': 'Nhấn để ghi vào Hộp thư đến',
         'captureNotification.channelName': 'Ghi nhanh',
 
-        // Mind Sweep (guided capture)
+
         'mindSweep.launchButton': 'Quét tâm trí',
         'mindSweep.title': 'Quét tâm trí',
         'mindSweep.intro': 'Đi qua một vài danh sách gợi ý và viết xuống bất cứ điều gì nổi lên. Đừng lọc hay sắp xếp — mọi mục đều đổ vào Hộp thư đến để sắp xếp sau.',

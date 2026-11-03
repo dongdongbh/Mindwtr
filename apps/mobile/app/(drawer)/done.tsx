@@ -23,7 +23,7 @@ export default function DoneScreen() {
   const { t } = useLanguage();
   const [viewState, setViewState] = useState<DoneListViewState>(DEFAULT_DONE_LIST_VIEW_STATE);
   const viewStateTouchedRef = useRef(false);
-  // The screen's texts come from core, shared with the native host.
+
   const { title, emptyText, emptyHint } = getStatusListScreenText('done', t);
   const navBarInset = Platform.OS === 'android' && insets.bottom >= 24 ? insets.bottom : 0;
   useEffect(() => {

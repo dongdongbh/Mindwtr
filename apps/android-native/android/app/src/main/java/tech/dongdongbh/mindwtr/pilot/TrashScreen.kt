@@ -1,7 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,12 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/**
- * RN's Trash (app/(drawer)/trash.tsx) on core's getTrashView and runTrashAction: core's counts with Select and Clear Trash,
- * core's retention hint, the bulk bar (Select all, Restore, Delete permanently), core's task and project items with core's
- * type and deleted labels, and core's empty state. A row swipes right to Restore and left to Delete permanently, which asks
- * core's question first, as Clear Trash does (it sends the revision its question showed). Rows open nothing, as in RN.
- */
+
 @Composable
 fun TrashList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
@@ -58,6 +53,8 @@ fun TrashList(model: InboxViewModel) = with(model.menu) {
     val selected = view.getJSONObject("selected")
     val tasks = selected.optJSONArray("taskIds").ids()
     val projects = selected.optJSONArray("projectIds").ids()
+
+    BackHandler(enabled = selecting && dialog == null && model.failedAction == null) { endSelection(); reload() }
     LazyColumn(Modifier.fillMaxSize().testTag("trash-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         view.menuText("summary")?.let { summary ->
             item(key = "summary") {
@@ -100,10 +97,7 @@ fun TrashList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/**
- * RN's trashed task or project: the struck title, core's note preview (a task's), core's type and deleted lines, and the
- * gray bar (a task) or the project's accent bar. While selecting, a tap toggles it and RN's circle shows it.
- */
+
 @Composable
 private fun TrashItem(model: InboxViewModel, item: MenuItem, labels: JSONObject, selecting: Boolean, isSelected: Boolean) = with(model.menu) {
     val theme = LocalTheme.current
@@ -121,14 +115,14 @@ private fun TrashItem(model: InboxViewModel, item: MenuItem, labels: JSONObject,
         width = 120.dp, restoreColor = theme.trashRestore) { actions ->
         val shape = RoundedCornerShape(12.dp)
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(shape).background(c.taskItemBg)
-            .border(if (selecting && isSelected) 2.dp else 1.dp, if (selecting && isSelected) c.tint else c.border, shape)
+            .rnBorder(if (selecting && isSelected) 2.dp else 1.dp, if (selecting && isSelected) c.tint else c.border, shape)
             .clickable(enabled = selecting && idle) { toggleTrash(kind, id) }
             .semantics {
                 contentDescription = if (selecting) "${labels.getString("select")} $title" else title
                 if (selecting) selected = isSelected else customActions = actions
             }.testTag("task-row").padding(16.dp)) {
             if (selecting) {
-                Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).border(2.dp, c.tint, CircleShape).background(if (isSelected) c.tint else c.taskItemBg),
+                Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).rnBorder(2.dp, c.tint, CircleShape).background(if (isSelected) c.tint else c.taskItemBg),
                     contentAlignment = Alignment.Center) { if (isSelected) Icon(Lucide.CheckBold, null, tint = c.onTint, modifier = Modifier.size(14.dp)) }
             }
             Column(Modifier.weight(1f)) {
@@ -146,7 +140,7 @@ private fun TrashItem(model: InboxViewModel, item: MenuItem, labels: JSONObject,
     }
 }
 
-/** RN's Trash bulk bar: core's count, then Select all, Restore, and Delete permanently (core's question first). */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TrashBulkBar(model: InboxViewModel, view: JSONObject, tasks: List<String>, projects: List<String>) = with(model.menu) {
@@ -154,7 +148,7 @@ private fun TrashBulkBar(model: InboxViewModel, view: JSONObject, tasks: List<St
     val labels = view.getJSONObject("labels")
     val shape = RoundedCornerShape(10.dp)
     val count = tasks.size + projects.size
-    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(labels.getString("selected"), style = rnText(12, 600), color = c.secondaryText)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -168,7 +162,7 @@ private fun TrashBulkBar(model: InboxViewModel, view: JSONObject, tasks: List<St
     }
 }
 
-/** One trashed task or project in or out of the selection; core prunes it to the items on screen and counts it. */
+
 private fun MenuModel.toggleTrash(kind: String, id: String) {
     val name = if (kind == "task") "selectedTasks" else "selectedProjects"
     val picked = own("trash").optJSONArray(name).ids()

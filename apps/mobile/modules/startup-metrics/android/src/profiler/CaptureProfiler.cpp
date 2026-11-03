@@ -1,8 +1,7 @@
 #include <jni.h>
 #include <hermes/hermes.h>
 
-// Compiled only for an explicitly opted-in Benchmark APK. Use Hermes's direct
-// API rather than the legacy Java JNI adapter in the pinned RN dependency.
+
 static auto* profiler() {
   return facebook::jsi::castInterface<facebook::hermes::IHermesRootAPI>(
       facebook::hermes::makeHermesRootAPI());

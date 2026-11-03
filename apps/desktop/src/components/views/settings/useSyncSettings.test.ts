@@ -77,13 +77,7 @@ type TargetInputs = {
     dropboxConnected: boolean;
 };
 
-/**
- * The pre-move expression, copied verbatim from SettingsSyncPage before
- * `isSyncTargetValid` was folded into useSyncSettings. Pinned here on purpose:
- * asserting the hook against the old predicate over a fixed candidate list
- * catches a branch quietly going missing, which a test that only re-derives the
- * new implementation would not.
- */
+
 const legacyIsSyncTargetValid = (p: TargetInputs): boolean => {
     const webdavUrlError = p.webdavUrl.trim() ? !isValidHttpUrl(p.webdavUrl.trim()) : false;
     const cloudUrlError = p.cloudUrl.trim() ? !isValidHttpUrl(p.cloudUrl.trim()) : false;
@@ -149,9 +143,8 @@ describe('useSyncSettings cloud token validation', () => {
     });
 
     it('seeds the backend control from the last-known selection before the persisted snapshot resolves', async () => {
-        // The persisted snapshot is read through the serialized restore queue and
-        // can take seconds after launch; without a synchronous seed the control
-        // showed "Off" and then jumped to the real backend on every open.
+
+
         vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: 'cloud', cloudProvider: 'dropbox', configuration: null });
         let resolveSnapshot: (value: ReturnType<typeof dropboxConfigurationSnapshot>) => void = () => undefined;
         vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockReturnValueOnce(new Promise((resolve) => {
@@ -168,8 +161,8 @@ describe('useSyncSettings cloud token validation', () => {
     });
 
     it('seeds every editor field from the last durable configuration on the first frame', () => {
-        // After a Dropbox -> WebDAV switch the reopened page showed the WebDAV
-        // control with empty URL/username fields until the queued read returned.
+
+
         const configuration = {
             ...dropboxConfigurationSnapshot('off'),
             backend: 'webdav' as const,
@@ -252,12 +245,7 @@ describe('useSyncSettings cloud token validation', () => {
         requestConfirmation,
     }));
 
-    /**
-     * Pick a backend while its target is still incomplete. The hook activates a
-     * chosen backend on its own as soon as the target is complete, so tests that
-     * exercise "staged configuration, then Sync now" select the backend first and
-     * fill the fields afterwards; field edits never auto-activate.
-     */
+
     const stageBackend = async (
         result: ReturnType<typeof setup>['result'],
         backend: SyncBackend,
@@ -282,8 +270,7 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showToast).toHaveBeenCalledWith('localized:settings.exportSuccess', 'success');
     });
 
-    // #Q-03: the snapshot name used to appear only as text in a toast that vanished,
-    // leaving Settings → snapshots → match-the-name as the only rollback.
+
     const setupTodoistImport = () => {
         vi.spyOn(dataTransfer, 'inspectDesktopTodoistImport').mockResolvedValue({
             valid: true,
@@ -329,7 +316,7 @@ describe('useSyncSettings cloud token validation', () => {
             await Promise.resolve();
         });
 
-        // Same weight as a manual snapshot restore, and it names the snapshot.
+
         const confirmCalls = requestConfirmation.mock.calls;
         const confirmCall = confirmCalls[confirmCalls.length - 1]?.[0];
         expect(confirmCall.title).toBe('localized:settings.undoImportConfirmTitle');
@@ -340,7 +327,7 @@ describe('useSyncSettings cloud token validation', () => {
         languageMocks.t.mockImplementation((key: string) => `localized:${key}`);
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
-        // true for the import confirmation, false for the undo confirmation.
+
         const requestConfirmation = vi.fn()
             .mockResolvedValueOnce(true)
             .mockResolvedValue(false);
@@ -480,6 +467,38 @@ describe('useSyncSettings cloud token validation', () => {
             activationProbe: true,
             configOverride: { backend: 'file', syncPath: '/sync' },
         });
+    });
+
+    it.each([true, false])('asks before activating without missing attachment files (continue: %s)', async (accept) => {
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: false,
+            error: 'Candidate attachment proof failed for "scan.pdf" on task "Tax return"',
+            activationMissingAttachments: [{ id: 'a1', ownerType: 'task', ownerId: 't1', title: 'scan.pdf', ownerTitle: 'Tax return' }],
+        });
+        const requestConfirmation = vi.fn().mockResolvedValue(accept);
+        const { result } = setup(vi.fn(), requestConfirmation, true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('file');
+        });
+        act(() => result.current.syncPageProps.onSyncPathChange('/sync'));
+        await act(async () => {
+            await result.current.syncPageProps.onSaveSyncPath();
+        });
+
+        expect(requestConfirmation).toHaveBeenCalledWith({
+            title: 'Some attachment files are missing',
+            message: expect.stringContaining('• scan.pdf (Tax return)'),
+            confirmLabel: 'Continue without these files',
+        });
+        expect(requestConfirmation.mock.calls[0]?.[0].message).toContain('The files stay where they were and are not deleted.');
+        const calls = vi.mocked(SyncService.performSync).mock.calls.map(([options]) => options);
+        if (accept) {
+            expect(calls[1]).toMatchObject({ activationProbe: true, acceptMissingAttachmentIds: ['a1'] });
+            expect(calls[2]).toMatchObject({ ignorePendingRemoteWriteBackoff: true });
+        } else {
+            expect(calls).toHaveLength(1);
+        }
     });
 
     it('tests the selected sync folder without saving it', async () => {
@@ -653,7 +672,7 @@ describe('useSyncSettings cloud token validation', () => {
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
         act(() => {
-            // The self-hosted form is only reachable once its chip is selected.
+
             void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
@@ -663,14 +682,11 @@ describe('useSyncSettings cloud token validation', () => {
             await result.current.syncPageProps.onSaveCloud();
         });
 
-        // Nothing is written directly: Save hands the staged configuration to the
-        // verification sync, which is the only path that commits a backend switch.
-        // (It used to stop at a "Sync now to verify" toast; users read "saved" as
-        // durable, left the page, and found the previous backend still selected.)
+
         expect(SyncService.setCloudConfig).not.toHaveBeenCalled();
         expect(SyncService.setSyncBackend).not.toHaveBeenCalled();
-        // First call is the activation probe against the staged configuration;
-        // the regular sync that follows a successful probe is the second.
+
+
         expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({ activationProbe: true });
         expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('Sync now'), 'info');
     });
@@ -691,8 +707,8 @@ describe('useSyncSettings cloud token validation', () => {
     });
 
     it('runs the verification sync when a connected Dropbox account is chosen from the backend control', async () => {
-        // dd's WebDAV -> Dropbox switch: the chip only staged the choice, and
-        // the footer's Sync ran on WebDAV; leaving the page lost the choice.
+
+
         vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockResolvedValue({
             ...dropboxConfigurationSnapshot('off'),
             backend: 'webdav',
@@ -700,9 +716,8 @@ describe('useSyncSettings cloud token validation', () => {
         });
         vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
         vi.spyOn(SyncService, 'isDropboxConnected').mockResolvedValue(true);
-        // The account dd connected in this session. The durable-connection probe
-        // only runs while Dropbox is the selected transport, so on a WebDAV page
-        // this session handle is what makes the Dropbox target complete.
+
+
         SyncService.rememberPendingDropboxCredentialHandleForSession('opaque-candidate-handle');
         const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
         await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('webdav'));
@@ -720,9 +735,8 @@ describe('useSyncSettings cloud token validation', () => {
     });
 
     it('activates Dropbox once the connection probe answers after the chip was chosen', async () => {
-        // Off -> Dropbox on a connected account: the probe only runs while
-        // Dropbox is selected, so at chip time dropboxConnected is still false.
-        // The choice must stay armed until the probe flips it (device test).
+
+
         vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockResolvedValue(dropboxConfigurationSnapshot('off'));
         vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
         let resolveProbe: (value: boolean) => void = () => undefined;
@@ -836,7 +850,7 @@ describe('useSyncSettings cloud token validation', () => {
     ])('preserves the proven backend on %s', async (_label, syncResult) => {
         vi.mocked(SyncService.performSync).mockResolvedValueOnce(syncResult);
         if (_label === 'requeue') {
-            // The probe retries a requeue twice before giving up; keep requeuing.
+
             vi.mocked(SyncService.performSync)
                 .mockResolvedValueOnce(syncResult)
                 .mockResolvedValueOnce(syncResult);
@@ -884,8 +898,8 @@ describe('useSyncSettings cloud token validation', () => {
     });
 
     it('retries a requeued activation probe and commits when the retry passes', async () => {
-        // A store write landing mid-probe (an auto sync, an editor save) used to
-        // drop the switch behind a "Run Sync Now again" toast on the first try.
+
+
         vi.mocked(SyncService.performSync)
             .mockResolvedValueOnce({ success: true, skipped: 'requeued' })
             .mockResolvedValueOnce({ success: true });
@@ -1141,10 +1155,8 @@ describe('useSyncSettings cloud token validation', () => {
     });
 
     it('activates the configuration when the probe finds an encrypted remote it has no key for (#1001)', async () => {
-        // The probe DID reach the sync location — refusing to activate would
-        // deadlock joining an encrypted remote: unlock requires a durable
-        // backend, and the backend could only become durable through a sync
-        // that needs the key.
+
+
         vi.mocked(SyncService.performSync).mockResolvedValueOnce({
             success: false,
             error: 'SYNC_ENCRYPTION_REMOTE_ENCRYPTED: the WebDAV remote is encrypted and this device has no key',
@@ -1166,7 +1178,7 @@ describe('useSyncSettings cloud token validation', () => {
         expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledWith(
             expect.objectContaining({ backend: 'cloud' }),
         );
-        // No follow-up sync — it would only fail with the same no-key error.
+
         expect(SyncService.performSync).toHaveBeenCalledTimes(1);
     });
 
@@ -1261,8 +1273,7 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showSaved).toHaveBeenCalledTimes(1);
     });
 
-    // The commit already landed, so "your previous sync settings are still
-    // active" would be a lie for any later non-success.
+
     it('reports the new backend as active when the follow-up sync ends in an unexplained failure', async () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
@@ -1293,10 +1304,7 @@ describe('useSyncSettings cloud token validation', () => {
         );
     });
 
-    // A deferred remote write after a backend switch is a healthy outcome
-    // (another device holds the write, a retry is already scheduled), not a
-    // failure — the commit already landed, so this must not claim the sync
-    // "did not finish" either.
+
     it('reports the new backend as active, as an informational notice, when a deferred remote write follows a backend switch', async () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
@@ -1357,9 +1365,7 @@ describe('useSyncSettings cloud token validation', () => {
         );
     });
 
-    // A merged-but-deferred cycle (another device holds the remote write; a
-    // retry is already scheduled) is a healthy outcome, not a failure — it
-    // must never show the "did not complete" red toast (#BUG-01).
+
     it.each([
         ['remoteWriteDeferred', { success: true, remoteWriteDeferred: true } as const],
         ['pendingRemoteWriteBackoff', { success: true, skipped: 'pendingRemoteWriteBackoff', remoteWriteDeferred: true } as const],
@@ -1409,8 +1415,8 @@ describe('useSyncSettings cloud token validation', () => {
             expect(result.current.syncPageProps.cloudProvider).toBe('dropbox');
             expect(result.current.syncPageProps.dropboxConnected).toBe(true);
         });
-        // Choosing the connected Dropbox account activates it, and that
-        // automatic verification sync is the probe this race gates.
+
+
         await act(async () => {
             await result.current.syncPageProps.onSetSyncBackend('cloud');
         });
@@ -1597,7 +1603,7 @@ describe('useSyncSettings cloud token validation', () => {
 
     it('does not publish a stale connect error after its durable connection refresh is overtaken', async () => {
         vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
-        // The visit probe only runs while Dropbox is the selected transport.
+
         vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot')
             .mockResolvedValue(dropboxConfigurationSnapshot('cloud'));
         vi.mocked(SyncService.connectDropbox).mockRejectedValue(new Error('stale OAuth failure'));
@@ -1929,9 +1935,7 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
     });
 
-    // A deferred document write is a healthy outcome, not a failure — it
-    // still wins over the (also non-failure) attachment-size guidance, but
-    // with the new informational copy rather than the old red toast.
+
     it('prioritizes a deferred document sync result over attachment guidance', async () => {
         vi.mocked(SyncService.getSyncBackend).mockResolvedValue('cloud');
         vi.mocked(SyncService.getCloudProvider).mockResolvedValue('selfhosted');
@@ -2016,8 +2020,8 @@ describe('useSyncSettings cloud token validation', () => {
         vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
         vi.mocked(SyncService.isDropboxConnected).mockResolvedValue(true);
         vi.mocked(SyncService.commitProvenSyncConfiguration).mockImplementation(async (config) => {
-            // The real service atomically moves this handle from Candidate to
-            // its private finalize-retry registry before returning this result.
+
+
             SyncService.forgetPendingDropboxCredentialHandleForSession(config.dropboxCredentialHandle);
             return {
                 committed: true,
@@ -2236,8 +2240,8 @@ describe('useSyncSettings sync target validity', () => {
         vi.spyOn(SyncService, 'isDropboxConnected').mockResolvedValue(input.dropboxConnected);
         vi.spyOn(SyncService, 'listDataSnapshots').mockResolvedValue([]);
         vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation(() => () => {});
-        // The first-frame seed is a session-static cache; a previous case's
-        // configuration must not satisfy this case's waitFor early.
+
+
         vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: null, cloudProvider: null, configuration: null });
 
         return renderHook(() => useSyncSettings({
@@ -2258,7 +2262,7 @@ describe('useSyncSettings sync target validity', () => {
         const verdicts: boolean[] = [];
 
         for (const input of CASES) {
-            // `dropboxConfigured` is not stored; the hook derives it from the app key.
+
             const expected = legacyIsSyncTargetValid({
                 ...input,
                 dropboxConfigured: Boolean(input.dropboxAppKey.trim()),
@@ -2280,8 +2284,7 @@ describe('useSyncSettings sync target validity', () => {
             vi.restoreAllMocks();
         }
 
-        // Guards against a candidate list that has collapsed to one verdict and
-        // would then agree with any implementation.
+
         expect(verdicts).toContain(true);
         expect(verdicts).toContain(false);
     });

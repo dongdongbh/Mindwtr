@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import SQLite3
 import SQLiteSupport
 
@@ -14,8 +15,8 @@ final class SQLiteBridge {
             close()
             throw HostFailure("Cannot open native SQLite database")
         }
-        // A failed prewrite check must not checkpoint or delete the original WAL
-        // during last-connection teardown. Apply and verify before the first read.
+
+
         guard mindwtr_disable_close_checkpoint(database) == SQLITE_OK else {
             close()
             throw HostFailure("Cannot disable SQLite close checkpoint")
@@ -29,7 +30,7 @@ final class SQLiteBridge {
     }
 
     private func failure(_ operation: String) -> HostFailure {
-        // SQLite error text may contain stored data or paths; expose only its code.
+
         HostFailure("SQLite \(operation) failed (\(sqlite3_extended_errcode(database)))")
     }
 
@@ -45,9 +46,8 @@ final class SQLiteBridge {
     }
 
     private func makeCheckpointStandalone(_ connection: OpaquePointer?) throws {
-        // Backup copies the source's WAL header. Only this new destination must
-        // become a standalone file before rename; otherwise a later read-only
-        // open can fail without its WAL sidecars.
+
+
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(connection, "PRAGMA journal_mode = DELETE", -1, &statement, nil) == SQLITE_OK else {
             throw HostFailure("Cannot finalize prewrite recovery checkpoint")
@@ -58,8 +58,7 @@ final class SQLiteBridge {
               sqlite3_step(statement) == SQLITE_DONE else { throw HostFailure("Cannot finalize prewrite recovery checkpoint") }
     }
 
-    /// The backup API includes committed WAL pages in one consistent snapshot.
-    /// Nothing from core executes until the original snapshot is durably promoted.
+
     func prepareRecovery(at url: URL) throws {
         #if DEBUG
         try faults?.checkpoint?()
@@ -117,6 +116,68 @@ final class SQLiteBridge {
         _ = try execute("PRAGMA foreign_keys = ON")
     }
 
+    #if DEBUG
+
+    func captureAISummaryEvidence(at url: URL, maximumBytes: Int = 64 * 1024 * 1024) throws {
+        guard let database, sqlite3_get_autocommit(database) != 0, maximumBytes > 0 else {
+            throw HostFailure("AI summary evidence is unavailable")
+        }
+        guard sqlite3_exec(database, "BEGIN DEFERRED", nil, nil, nil) == SQLITE_OK else { throw failure("evidence read transaction") }
+        func copySnapshot() throws {
+            func requireBoundedSource() throws {
+                var size: OpaquePointer?
+                guard sqlite3_prepare_v2(database, "SELECT page_count, page_size FROM pragma_page_count, pragma_page_size", -1, &size, nil) == SQLITE_OK,
+                      let size else { throw failure("evidence size") }
+                defer { sqlite3_finalize(size) }
+                guard sqlite3_stmt_readonly(size) != 0, sqlite3_step(size) == SQLITE_ROW else { throw failure("evidence size") }
+                let pages = sqlite3_column_int64(size, 0), pageSize = sqlite3_column_int64(size, 1)
+                guard pages >= 0, pageSize > 0, pages <= Int64(maximumBytes) / pageSize,
+                      sqlite3_step(size) == SQLITE_DONE else { throw HostFailure("AI summary evidence exceeds its limit") }
+            }
+            try requireBoundedSource()
+            let path = try NativeAttachmentFiles.filePath(url.absoluteString)
+            let fd = Darwin.open(path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW_ANY | O_CLOEXEC, 0o600)
+            guard fd >= 0 else { throw HostFailure("AI summary evidence already exists or is unavailable") }
+            defer { Darwin.close(fd) }
+            #if os(iOS)
+            guard fcntl(fd, F_SETPROTECTIONCLASS, NativeAISummaryEvidence.protectionClassC) == 0 else { throw HostFailure("AI summary evidence is unavailable") }
+            #endif
+            var original = stat()
+            guard fstat(fd, &original) == 0, original.st_nlink == 1 else { throw HostFailure("AI summary evidence is unavailable") }
+            var destination: OpaquePointer?
+            guard sqlite3_open_v2(path, &destination, SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+                if let destination { sqlite3_close(destination) }
+                throw HostFailure("AI summary evidence cannot be opened")
+            }
+            defer { if let destination { sqlite3_close(destination) } }
+            guard let backup = sqlite3_backup_init(destination, "main", database, "main") else {
+                throw HostFailure("AI summary evidence cannot be started")
+            }
+            let step = sqlite3_backup_step(backup, -1), finish = sqlite3_backup_finish(backup)
+            guard step == SQLITE_DONE, finish == SQLITE_OK else { throw HostFailure("AI summary evidence is incomplete") }
+            guard sqlite3_close(destination) == SQLITE_OK else { throw HostFailure("AI summary evidence cannot be closed") }
+            destination = nil
+            var current = stat(), named = stat()
+            guard fstat(fd, &current) == 0, lstat(path, &named) == 0,
+                  current.st_dev == original.st_dev, current.st_ino == original.st_ino,
+                  named.st_dev == original.st_dev, named.st_ino == original.st_ino,
+                  current.st_mode & S_IFMT == S_IFREG, current.st_nlink == 1,
+                  current.st_size >= 0, current.st_size <= Int64(maximumBytes),
+                  fsync(fd) == 0, fcntl(fd, F_FULLFSYNC) == 0 else { throw HostFailure("AI summary evidence is unavailable") }
+        }
+        do { try copySnapshot() }
+        catch {
+            guard sqlite3_exec(database, "ROLLBACK", nil, nil, nil) == SQLITE_OK, sqlite3_get_autocommit(database) != 0 else {
+                throw failure("evidence read transaction cleanup")
+            }
+            throw error
+        }
+        guard sqlite3_exec(database, "ROLLBACK", nil, nil, nil) == SQLITE_OK, sqlite3_get_autocommit(database) != 0 else {
+            throw failure("evidence read transaction cleanup")
+        }
+    }
+    #endif
+
     func readCalendarPushMapping(taskID: String) throws -> NativeCalendarPushMapping? {
         guard NativeCalendarWriteValidation.id(taskID) else { throw NativeCalendarWriteError.invalid }
         let parameters = try calendarPushParameters([taskID, "ios"])
@@ -133,7 +194,7 @@ final class SQLiteBridge {
                                             platform: platform, lastSyncedAt: stamp)
     }
 
-    /// The push owner persists its acknowledging effect before this call, then clears it after success.
+
     func compareAndSetCalendarPushMapping(taskID: String, expected: NativeCalendarPushMapping?, next: NativeCalendarPushMapping?) throws {
         guard NativeCalendarWriteValidation.id(taskID),
               expected.map({ NativeCalendarWriteValidation.equalID($0.taskId, taskID) }) ?? true,
@@ -146,7 +207,7 @@ final class SQLiteBridge {
         do {
             _ = try execute("BEGIN IMMEDIATE")
             let current = try readCalendarPushMapping(taskID: taskID)
-            // A committed mapping with a lost reply is already acknowledged; never write it again.
+
             if current != next {
                 guard current == expected else { throw HostFailure("Calendar mapping changed") }
                 if let next {
@@ -176,10 +237,11 @@ final class SQLiteBridge {
             throw HostFailure("SQLite parameters must be an array")
         }
         if readOnly {
-            // SQLite also calls some connection-changing PRAGMAs read-only, and
-            // some PRAGMAs act at prepare time. Admit only the recovery read shapes.
+
+
             let query = sql.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            guard query.hasPrefix("SELECT ") || query == "PRAGMA DATA_VERSION" else {
+            guard query.hasPrefix("SELECT ") || query == "PRAGMA DATA_VERSION"
+                    || query == "PRAGMA TABLE_INFO(NATIVE_POMODORO_SESSION)" else {
                 throw HostFailure("SQLite recovery requires read-only statements")
             }
         }
@@ -220,8 +282,8 @@ final class SQLiteBridge {
                 case SQLITE_TEXT:
                     let count = Int(sqlite3_column_bytes(statement, column))
                     let data = Data(bytes: sqlite3_column_text(statement, column)!, count: count)
-                    // Foundation's Data-to-String initializer discards a leading UTF-8 BOM.
-                    // Decode without that normalization and reject replacement decoding.
+
+
                     let text = String(decoding: data, as: UTF8.self)
                     guard text.utf8.elementsEqual(data) else { throw HostFailure("Invalid SQLite text") }
                     if !loggedLeadingBOM && data.starts(with: [0xEF, 0xBB, 0xBF]) {

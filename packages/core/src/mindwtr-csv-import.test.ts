@@ -539,15 +539,7 @@ describe('mindwtr csv import', () => {
         });
     });
 
-    // BUG-12 (plan 029): the historical-id fallback scan used to rebuild each candidate
-    // key with one encodeSourceKeyTuple(...area, project, sourceId) call per (row, project)
-    // pair; ff816361a precomputes each project's tuplePrefix = encodeSourceKeyTuple(area,
-    // project) + ':' once and appends encodeURIComponent(sourceId) per row instead. The two
-    // constructions are algebraically identical (encodeURIComponent never emits a literal
-    // ':'), but this pins it as a byte-identical id-resolution equality check across an
-    // area-scoped project with a colon in both the project name and the source id -- the
-    // shape the escaping exists for in the first place (see encodeSourceKeyTuple's doc
-    // comment) -- rather than trusting the algebra.
+
     it('resolves a moved task to a hand-computed historical id through the area-scoped tuple prefix (BUG-12)', () => {
         const beforeCsv = buildCsv(
             ['Title', 'Area', 'Project', 'ID'],
@@ -565,10 +557,7 @@ describe('mindwtr csv import', () => {
             now: '2026-08-08T12:00:00.000Z',
         });
 
-        // Hand-computed via encodeSourceKeyTuple's own formula (each component
-        // encodeURIComponent'd, joined by ':'), not read off `first.data` -- this is the
-        // independent expectation the refactor's tuplePrefix + encodeURIComponent(sourceId)
-        // split must still land on.
+
         const priorTaskId = generateDeterministicUUID(
             'mindwtr:csv-import:v1:task:work:legacy%3Ateam:north%3A9',
         );
@@ -1171,9 +1160,7 @@ describe('mindwtr csv import', () => {
         expect(result.data.tasks[0].recurrence).toMatchObject({ rule: 'monthly', byMonthDay: [1] });
     });
 
-    // A rule the model cannot express must never be imported as the nearest thing it can:
-    // FREQ=MONTHLY;BYSETPOS=2;BYDAY=TU means "second Tuesday", and dropping BYSETPOS would
-    // silently turn it into "every Tuesday".
+
     it.each([
         ['unparseable text', 'every other Tuesday'],
         ['an unsupported frequency', 'FREQ=HOURLY;INTERVAL=6'],

@@ -1,27 +1,9 @@
-/**
- * Native Sync: core's mobile sync service and Settings › Sync's device, bound to this
- * host's ports as React Native's lib/sync-service.ts, the root layout's sync effects and the Sync screen bind them. Every rule
- * is core's (mobile-sync-service.ts, mobile-sync-triggers.ts, native-host-contract-settings-sync.ts); this file only binds:
- *
- * - RN's device keys in RN's AsyncStorage (RKStorage, in place) and RN's secret store (expo-secure-store's format);
- * - the fetch bridge, the device's network state, the app log;
- * - the local snapshot (the boot's validated SQLite adapter).
- *
- * - the attachment passes and the editor's attachment IO (host-attachments.ts), on the host's app-private files.
- *
- * - sync encryption: core's cipher on the host's crypto calls (HostCrypto.kt: Argon2id and AES-GCM off the engine thread),
- *   and core's encryption transitions (sync-encryption-service.ts) as RN's lib/sync-encryption-service.ts binds them, with
- *   RN's WebDAV XML parser (@xmldom/xmldom).
- *
- * - the background job (S4a): core's background runner (mobile-background-sync.ts: its deadline, failure cooldown, capture
- *   run and quiesce), which CoreWork's jobs call after the app's start order; core decides whether the job is scheduled.
- *
- * Not on this host yet, and refused the way core refuses an unbound port: Dropbox (S4) and File Sync's folder (S5). The fence
- * owner stays `mindwtr-mobile` and the device keys keep RN's names, so an upgraded RN user's configuration and deviceId carry over.
- * iOS construction is explicit and foreground-only; the entry admits Off, WebDAV and self-hosted settings. Both admission
- * and actual self-hosted cycles refuse unfinished encryption transitions. This factory does not alter stored provider choices.
- */
+
+
+
 import { DOMParser } from '@xmldom/xmldom';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { createNativeAttachments, nativeFileChannels, type NativeAttachmentBindings } from './host-attachments';
 import {
     MOBILE_BACKGROUND_SYNC_DEADLINE_MS,
@@ -37,6 +19,8 @@ import {
     classifySyncFailure,
     coerceSupportedBackend,
     createAutoSyncController,
+    createMobileFileSync,
+    createMobileFileSyncLeases,
     createMobileBackgroundSyncRunner,
     createMobileSyncService,
     createMobileSyncTriggers,
@@ -50,6 +34,7 @@ import {
     getInMemorySyncChangeFingerprint,
     getMobileAutoSyncCadence,
     getMobileWebDavRequestOptions,
+    getSyncConflictCount,
     isLikelyOfflineSyncError,
     loadWebDavSyncConfig,
     nameNotifyListener,
@@ -58,10 +43,21 @@ import {
     readSyncLocationScope,
     resolveBackend,
     resolveSyncBadgeState,
+    runManualPullSync,
     sanitizeLogMessage,
+    setSha256HexProvider,
     shouldScheduleMobileBackgroundSync,
     useTaskStore,
+    FileSyncRetainedGenerationError,
+    FileSyncUnverifiedReadError,
+    SyncFileLockBusyError,
+    SyncFileLockIdentityLostError,
+    SyncFileLockUnavailableError,
     type AppData,
+    type SqliteAdapter,
+    type MobileFileSyncFullHost,
+    type MobileFileSyncLease,
+    type MobileFileSyncSafPort,
     type AutoSyncController,
     type DiagnosticsLogEntry,
     type MobileBackgroundSyncTrigger,
@@ -74,7 +70,7 @@ import {
     type SyncSecretAccessibility,
 } from '@mindwtr/core';
 
-/** host-entry.ts's AsyncStorage over RnKeyValue.kt. */
+
 export type HostKeyValue = {
     get(key: string): Promise<string | null>;
     set(key: string, value: string): Promise<void>;
@@ -85,43 +81,38 @@ export type HostKeyValue = {
 
 export type NativeSyncBindings = {
     keyValue: HostKeyValue;
-    /** host-polyfills.js's secret calls (SecretStore.kt, expo-secure-store's format). */
+
     secrets: { getSecret(key: string): Promise<string | null>; setSecret(key: string, value: string, accessibility?: SyncSecretAccessibility): Promise<void>; deleteSecret(key: string): Promise<void> };
-    /** The boot's validated SQLite adapter: the local snapshot a cycle reads and saves. */
-    localData: () => { getData(): Promise<AppData>; saveData(data: AppData): Promise<void> };
-    /** The device's network state now (HostNetwork.kt), as expo-network reads it. */
+
+    localData: () => Pick<SqliteAdapter, 'getData' | 'saveData' | 'readTokenOf' | 'prepareSaveRows'>;
+
     networkState: () => MobileSyncNetworkState;
-    /** RN's diagnostics log line (app-log.ts appendLogLine): the file's path once written. */
+
     appendLog: (entry: DiagnosticsLogEntry, force?: boolean) => Promise<string | null>;
-    /** Core's words in the language core chose. */
+
     translate: (key: string) => string;
-    /** An event for Kotlin (CoreHost's hostEvent): never a secret, a URL or task text. */
+
     emit: (event: Record<string, unknown>) => void;
-    /** A logcat line (the device checks read the badge's changes there). */
+
     trace: (line: string) => void;
-    /** Core's answer whether the background job runs (BackgroundSync.kt schedules it, or cancels it). */
+
     scheduleBackgroundSync: (on: boolean) => void;
-    /** The build's flavor (BuildConfig.FOSS): a FOSS build hides Dropbox, as RN's FOSS_BUILD does. */
+
     isFossBuild: boolean;
-    /** Selected durable cleanup ownership, required by the explicit iOS foreground factory. */
+
     retireLocalAttachment?: NativeAttachmentBindings['retireLocalAttachment'];
-    /** RN's recovery snapshot names, newest first (Settings › Sync's Recovery snapshots card); absent: the card lists none. */
+
     listRecoverySnapshots?: () => Promise<string[]>;
 };
 
-/** host-polyfills.js's sync crypto call (HostCrypto.kt); absent where the host has no crypto (the gates' stand-in). */
+
 type HostCryptoCall = (request: Record<string, unknown>) => Promise<Uint8Array>;
 
 const unavailableCipher = (): never => {
     throw new Error('Sync encryption is not available on this build yet');
 };
 
-/**
- * Core's SyncCryptoPrimitives on the host's crypto calls, as RN's sync-crypto-native.ts gives them: Argon2id and AES-GCM off the
- * engine thread, a tag or AAD mismatch as core's own SyncCryptoAuthError (core tells it apart with instanceof), and random bytes
- * from the host's SecureRandom. Without the calls, every primitive refuses: a device whose state says `enabled` then fails
- * closed and never writes plaintext beside ciphertext.
- */
+
 export const createHostSyncCrypto = (call: HostCryptoCall | undefined): SyncCryptoPrimitives => {
     if (!call) {
         return { argon2id: async () => unavailableCipher(), aesGcmSeal: async () => unavailableCipher(), aesGcmOpen: async () => unavailableCipher(), randomBytes: () => unavailableCipher() };
@@ -145,16 +136,12 @@ export const createHostSyncCrypto = (call: HostCryptoCall | undefined): SyncCryp
     };
 };
 
-/** RN's key for the device's calendar feeds (lib/external-calendar.ts EXTERNAL_CALENDARS_KEY). */
+
 const EXTERNAL_CALENDARS_KEY = 'mindwtr-external-calendars';
 
 type ExternalCalendar = NonNullable<AppData['settings']['externalCalendars']>[number];
 
-/**
- * RN's background-safe fetch deadline (setMobileSyncRequestDeadline): while the background run's deadline is set, no sync request
- * starts past it. A request in flight at the deadline is aborted by the runner's own deadline (its abort), whose timer this host
- * runs in the background too (CoreHost's idle pump), unlike RN's paused JS timers.
- */
+
 export const createDeadlineFetch = (send: typeof fetch) => {
     let deadline: number | null = null;
     return {
@@ -169,7 +156,32 @@ const unavailable = (what: string) => async (): Promise<never> => {
     throw new Error(`${what} is not available on this build yet`);
 };
 
-/** Missing provider is RN's legacy self-hosted default; explicit unbound providers stay closed. */
+
+export type HostDocumentCall = (request: Record<string, unknown>, bytes?: Uint8Array) => Promise<{ value: unknown; bytes: Uint8Array | null }>;
+
+export type HostSyncLockCall = (request: Record<string, unknown>) => Promise<unknown>;
+
+const refusePath = (): never => {
+    throw new Error('File Sync paths (file://) are not available on this host: pick a folder in Settings › Sync');
+};
+
+
+export const createHostSafPort = (call: HostDocumentCall): MobileFileSyncSafPort => ({
+    listChildren: async (uri) => (await call({ op: 'listChildren', uri })).value as Awaited<ReturnType<MobileFileSyncSafPort['listChildren']>>,
+    stat: async (uri) => (await call({ op: 'stat', uri })).value as Awaited<ReturnType<MobileFileSyncSafPort['stat']>>,
+    readBytes: async (uri) => {
+        const read = await call({ op: 'read', uri });
+        return { bytes: read.bytes ?? new Uint8Array(0), lengthVerified: (read.value as { lengthVerified?: unknown } | null)?.lengthVerified === true };
+    },
+    writeBytes: async (uri, bytes) => { await call({ op: 'write', uri }, bytes); },
+    writeText: async (uri, text) => { await call({ op: 'write', uri }, new TextEncoder().encode(text)); },
+    createFile: async (uri, name, mimeType) => (await call({ op: 'createFile', uri, name, mimeType })).value as string,
+    delete: async (uri) => { await call({ op: 'delete', uri }); },
+    makeDirectory: async (uri, name) => (await call({ op: 'makeDirectory', uri, name })).value as string,
+    rename: async (uri, name) => (await call({ op: 'rename', uri, name })).value as { uri: string; name: string },
+});
+
+
 export const isNativeIosSelfHostedProvider = (value: string | null | undefined): boolean => {
     const provider = value?.trim() || null;
     return (provider === null || provider === 'selfhosted') && normalizeCloudProvider(provider) === 'selfhosted';
@@ -184,6 +196,9 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     if (platform === 'ios' && !channels) {
         throw new Error('Foreground sync requires native attachment files on this iOS build');
     }
+
+
+    if (!channels) setSha256HexProvider((bytes) => bytesToHex(sha256(bytes)));
     const { keyValue } = bindings;
     const storage = {
         getItem: (key: string) => keyValue.get(key),
@@ -191,13 +206,13 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         removeItem: (key: string) => keyValue.remove(key),
     };
 
-    // RN's app-log.ts lines: logInfo, logWarn, logError, logSyncError.
+
     const logLine = (level: 'info' | 'warn', message: string, context?: { scope?: string; extra?: Record<string, unknown>; force?: boolean }) =>
         bindings.appendLog(buildDiagnosticsLogEntry(level, message, context), context?.force).catch(() => null);
     const logError = (error: unknown, context: { scope: string; url?: string; extra?: Record<string, unknown> }) =>
         bindings.appendLog(buildDiagnosticsErrorEntry(error, context)).catch(() => null);
 
-    // RN's secure-secret-store.ts: expo-secure-store as core's keystore port (Android keeps one accessibility class).
+
     const secretStorage: SyncSecretStoragePort = {
         isAvailable: async () => true,
         getItem: (key) => bindings.secrets.getSecret(key),
@@ -217,9 +232,57 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     const crypto = createHostSyncCrypto((globalThis as { __mindwtrCryptoCall?: HostCryptoCall }).__mindwtrCryptoCall);
 
-    // Core's encryption transitions (enable, change, disable, unlock), as RN's lib/sync-encryption-service.ts binds them. They
-    // run on core's serialized sync queue, so a transition and a cycle never interleave. Dropbox and File Sync come later.
-    const transitions = createSyncEncryptionService<never>({
+
+    const documentCall = (globalThis as { __mindwtrDocumentCall?: HostDocumentCall }).__mindwtrDocumentCall;
+    const syncLockCall = (globalThis as { __mindwtrSyncLockCall?: HostSyncLockCall }).__mindwtrSyncLockCall;
+
+    (globalThis as { __mindwtrLockReleasedLate?: (released: boolean) => void }).__mindwtrLockReleasedLate = (released) => {
+        void logLine(released ? 'info' : 'warn', 'Native Android File Sync lease released after a cancelled acquire', {
+            scope: 'sync', extra: { releaseCheck: 'v1.3.8/native-file-sync-late-release', outcome: released ? 'released' : 'failed' },
+        });
+    };
+    const safPort = documentCall ? createHostSafPort(documentCall) : null;
+    const fileSyncHost: MobileFileSyncFullHost = {
+        os: () => platform,
+        saf: safPort,
+        path: {
+            exists: () => false,
+            info: refusePath,
+            list: refusePath,
+            readBytes: refusePath,
+            readText: refusePath,
+            writeBytes: refusePath,
+            createExclusive: refusePath,
+            writeCreated: refusePath,
+            delete: refusePath,
+            rename: refusePath,
+        },
+        bookmarks: { supported: () => false, readText: async () => null },
+        log: {
+            info: (message, context) => { void logLine('info', message, context); },
+            warn: (message, context) => { void logLine('warn', message, context); },
+            error: (error, context) => { void logError(error, { scope: context?.scope ?? 'sync', extra: context?.extra }); },
+        },
+        encryption: {
+            localState: encryptionState.syncEncryptionLocalState,
+            flush: () => encryptionState.flushSyncEncryptionLocalState(),
+            logEvent: (event, extra) => encryptionState.logSyncEncryptionEvent(event, extra),
+        },
+        crypto,
+    };
+    const fileSync = createMobileFileSync(fileSyncHost);
+    const leases = createMobileFileSyncLeases({
+        platform: () => platform,
+        nativeModule: () => (syncLockCall ? {
+
+            acquireAsync: async (uri: string) => (uri.startsWith('content://') ? await syncLockCall({ op: 'acquire', uri }) as string : refusePath()),
+            revalidateAsync: async (token: string) => { await syncLockCall({ op: 'revalidate', token }); },
+            releaseAsync: async (token: string) => { await syncLockCall({ op: 'release', token }); },
+        } : null),
+    });
+
+
+    const transitions = createSyncEncryptionService<MobileFileSyncLease>({
         maxEncryptedArtifactBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         storage,
         state: encryptionState,
@@ -236,11 +299,48 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         webDavRequestOptions: (allowInsecureHttp) => getMobileWebDavRequestOptions(allowInsecureHttp),
         getDropboxClientId: async () => '',
         runDropboxAuthorized: unavailable('Dropbox'),
+
+        ...(safPort ? {
+            fileSync: {
+                acquireLease: (syncPath: string) => leases.acquire(syncPath),
+                openRemotePort: (syncPath: string) => fileSync.createFileSyncEncryptionRemotePort(syncPath),
+                revalidateLease: (lease: MobileFileSyncLease) => leases.revalidate(lease),
+                releaseLease: (lease: MobileFileSyncLease) => leases.release(lease),
+                isLeaseIdentityLostError: (error: unknown) => error instanceof SyncFileLockIdentityLostError,
+            },
+        } : {}),
     });
+
+
+    let fileCycle: { outcome: string | null; provider: string; retained: number } | null = null;
+    const takeFileCycle = () => {
+        const ended = fileCycle;
+        fileCycle = null;
+        return ended;
+    };
+    const noteFileSync = async <T>(uri: string, run: () => Promise<T>, starts = false): Promise<T> => {
+        const provider = /^content:\/\/([^/]+)/.exec(uri)?.[1] ?? 'none';
+        if (starts) fileCycle = { outcome: null, provider, retained: 0 };
+        else fileCycle ??= { outcome: null, provider, retained: 0 };
+        try {
+            return await run();
+        } catch (error) {
+            if (fileCycle && !fileCycle.outcome) {
+                if (error instanceof FileSyncRetainedGenerationError) fileCycle.retained = error.retained;
+                fileCycle.outcome = error instanceof SyncFileLockBusyError ? 'lock-busy'
+                    : error instanceof SyncFileLockUnavailableError ? 'lock-unavailable'
+                    : error instanceof FileSyncRetainedGenerationError ? 'retained-refused'
+                    : error instanceof FileSyncUnverifiedReadError ? 'unverified-read'
+                    : String(error).includes('SAF_DOCUMENT_INCOMPLETE') ? 'incomplete-read'
+                    : 'failed';
+            }
+            throw error;
+        }
+    };
 
     const networkListeners = new Set<(state: MobileSyncNetworkState) => void>();
 
-    // Attachments (host-attachments.ts) on the host's files, with sync's own stores, keystore, log and encryption state.
+
     const attachments = channels ? createNativeAttachments({
         storage,
         getSecureConfigValue: (key) => secureConfig.getSecureConfigValue(key),
@@ -251,6 +351,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         },
         crypto,
         retireLocalAttachment: bindings.retireLocalAttachment,
+        saf: safPort,
         maxWebdavBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         maxCloudBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         encryption: {
@@ -260,8 +361,8 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     }, channels) : null;
 
     const syncFetch = createDeadlineFetch((input, init) => fetch(input, init));
-    const service = createMobileSyncService<never>({
-        // iOS cleanup authority lasts for one admitted foreground invocation.
+    const service = createMobileSyncService<MobileFileSyncLease>({
+
         allowQueuedFollowUp: platform !== 'ios',
         storage,
         getSecureConfigValue: (key) => secureConfig.getSecureConfigValue(key),
@@ -273,14 +374,22 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 return { remove: () => { networkListeners.delete(listener); } };
             },
         },
-        localData: { getData: () => bindings.localData().getData(), saveData: (data) => bindings.localData().saveData(data) },
+        localData: {
+            getData: (options) => bindings.localData().getData(options),
+            saveData: (data, options) => bindings.localData().saveData(data, options),
+            readTokenOf: (data) => bindings.localData().readTokenOf(data),
+            prepareSave: (data) => bindings.localData().prepareSaveRows(data),
+        },
+
+
+        ...(platform === 'android' ? { sliceYield: () => new Promise<void>((resolve) => { setTimeout(resolve, 0); }) } : {}),
         log: {
             info: (message, context) => logLine('info', message, context),
             warn: (message, context) => logLine('warn', message, context),
             syncError: (error, context) => logError(error, { scope: 'sync', url: context.url, extra: { backend: context.backend, step: context.step } }),
             sanitize: (message) => sanitizeLogMessage(message),
         },
-        // RN's lib/external-calendar.ts getExternalCalendars and saveExternalCalendars, on its key.
+
         externalCalendars: {
             load: async () => {
                 let parsed: ExternalCalendar[] = [];
@@ -327,7 +436,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             loadSyncEncryptionLocalState: () => encryptionState.loadSyncEncryptionLocalState(),
             logSyncEncryptionEvent: (event, extra, options) => encryptionState.logSyncEncryptionEvent(event, extra, options),
             syncEncryptionLocalState: encryptionState.syncEncryptionLocalState,
-            // A WebDAV attachment pass with no key first asks whether the location holds ciphertext (core's rule).
+
             probeLocationCiphertext: (target) => transitions.probeSyncLocationCiphertext(target),
         },
         ensureWebdavCapabilityProof: (config, probe, options) => capabilityProof.ensureWebdavCapabilityProof(config, probe, options),
@@ -338,7 +447,17 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             getValidAccessTokenForTokens: unavailable('Dropbox'),
             forceRefreshAccessTokenForTokens: unavailable('Dropbox'),
         },
-        fileSync: {
+
+        fileSync: safPort ? {
+            readVersioned: (path, options) => noteFileSync(path, () => fileSync.readSyncFileVersioned(path, options)),
+            write: (path, data, options) => noteFileSync(path, () => fileSync.writeSyncFile(path, data, options)),
+            resolveUri: (uri, options) => fileSync.resolveSyncFileUri(uri, options),
+            isBookmarksAvailable: () => false,
+            resolveBookmark: async () => null,
+            acquireLease: (path) => noteFileSync(path, () => leases.acquire(path), true),
+            revalidateLease: (lease) => noteFileSync('', () => leases.revalidate(lease)),
+            releaseLease: (lease) => leases.release(lease),
+        } : {
             readVersioned: unavailable('File sync'),
             write: unavailable('File sync'),
             resolveUri: unavailable('File sync'),
@@ -348,7 +467,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             revalidateLease: unavailable('File sync'),
             releaseLease: async () => undefined,
         },
-        // Core's attachment passes on the host's files; a host without app files (the gates' stand-in) syncs metadata only.
+
         attachments: attachments?.syncPort ?? {
             syncWebdav: async () => null,
             syncCloud: async () => null,
@@ -361,12 +480,21 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         },
     });
 
-    // ---- What Kotlin draws: the Menu tab's dot and the Settings row's badge, and when a cycle ended ----
 
     let configured = false;
     let cycles = 0;
+
+
+    let contentRevision = 0;
+    const storeReferences = (): unknown[] => {
+        const store = useTaskStore.getState();
+        return [store._allTasks, store._allProjects, store._allSections, store._allAreas, store._allPeople, store.settings,
+            store.lastDataChangeAt];
+    };
     let lastEvent = '';
     let fatalCleanupError: NativeAttachmentCleanupUnconfirmedError | null = null;
+
+    let localChangePending = false;
     const badge = (): SyncBadgeState => {
         const settings = useTaskStore.getState().settings;
         return resolveSyncBadgeState({
@@ -375,14 +503,15 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             pendingRemoteWriteAt: settings.pendingRemoteWriteAt,
             lastSyncStatus: settings.lastSyncStatus,
             lastSyncAt: settings.lastSyncAt,
+            localChangePending,
         });
     };
     const state = () => {
         const current = badge();
-        // `active`: a sync runs now (Settings › Data's rows wait for it, as RN's isSyncing does); the badge's own "syncing" also
-        // covers a pending write.
+
+
         return { type: 'sync', badge: current, color: current === 'hidden' ? null : SETTINGS_SYNC_BADGE_COLORS[current], cycles,
-            active: service.getMobileSyncActivityState() === 'syncing' };
+            contentRevision, active: service.getMobileSyncActivityState() === 'syncing' };
     };
     const emitState = () => {
         if (fatalCleanupError) return;
@@ -393,7 +522,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         bindings.trace(`Native Android sync state badge=${event.badge} cycles=${event.cycles}`);
         bindings.emit(event);
     };
-    /** RN's useMobileSyncBadge reads the configuration again on every screen change and sync status change. */
+
     const refreshConfigured = async () => {
         if (fatalCleanupError) return;
         try {
@@ -424,7 +553,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             try {
                 await logLine('warn', 'Native iOS self-hosted encryption admission refused', { scope: 'native-ios', force: true,
                     extra: { releaseCheck: 'v1.3.5/ios-selfhosted-encryption-guard', operation: 'admission', outcome: 'refused' } });
-            } catch { /* Diagnostics cannot replace the admission refusal. */ }
+            } catch {                                                         }
             throw error;
         }
     };
@@ -439,10 +568,15 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         return backend;
     };
 
-    /** Every cycle, automatic or from the Sync screen, goes through here, so Kotlin reads its lists again once one ends. */
+
     const performSync: NativeSyncSettingsHost['performSync'] = async (syncPathOverride, options) => {
         if (fatalCleanupError) throw fatalCleanupError;
         if (platform === 'ios') await readIosForegroundBackend(options.configOverride);
+
+        const earlier = fileCycle;
+        const contentBefore = storeReferences();
+        let succeeded = false;
+        let requeued = false;
         try {
             const before = platform === 'ios' && options.manual && !options.activationProbe
                 ? useTaskStore.getState().settings : null;
@@ -455,12 +589,24 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                     iosAutomaticController?.notifyExternalSyncSuccess();
                 }
             }
+            succeeded = answer.success;
+            requeued = answer.skipped === 'requeued';
             return answer;
         } catch (error) {
             if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
             throw error;
         } finally {
+            const ended = !requeued && fileCycle !== earlier ? takeFileCycle() : null;
+            if (ended) {
+                const encrypted = (await encryptionState.getSyncEncryptionStatus().catch(() => null))?.state === 'enabled';
+                await logLine('info', 'Native Android File Sync cycle', { scope: 'sync', extra: {
+                    releaseCheck: 'v1.3.8/native-file-sync', outcome: ended.outcome ?? (succeeded ? 'synced' : 'failed'),
+                    provider: ended.provider, encrypted: encrypted ? 'yes' : 'no', retained: ended.retained,
+                } });
+            }
             if (!fatalCleanupError) {
+                const contentAfter = storeReferences();
+                if (contentAfter.some((reference, index) => reference !== contentBefore[index])) contentRevision += 1;
                 cycles += 1;
                 if (platform === 'ios') await refreshConfigured();
                 else void refreshConfigured();
@@ -521,13 +667,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         } finally { iosAutomaticFrame = null; }
     };
 
-    // ---- The background job (CoreWork's sync and capture jobs; RN's lib/background-sync-task.ts) ----
 
-    /**
-     * RN's syncMobileBackgroundSyncRegistration: core's decision (a configured WebDAV or cloud backend) handed to Kotlin, which
-     * keeps a scheduled or running job (KEEP) or cancels it. Called where RN reconciles: the triggers' start, resume and leave,
-     * and a Sync screen change.
-     */
     const backgroundSyncWanted = async () => {
         const { backend, configured } = await service.getMobileSyncConfigurationStatus();
         return shouldScheduleMobileBackgroundSync({ schedulerAvailable: true, configured, backend });
@@ -538,14 +678,14 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         void refreshConfigured();
         const on = await backgroundSyncWanted();
         if (fatalCleanupError) throw fatalCleanupError;
-        // Kotlin answers once WorkManager stored it (bounded); a refusal throws to the caller, and the next reconcile tries again.
+
         bindings.scheduleBackgroundSync(on);
         bindings.trace(`Native Android background sync schedule=${on ? 'on' : 'off'}`);
     };
     const appStateListeners = new Set<(state: string) => void>();
-    /** What Kotlin's start order stored from the capture queue since the last run took it (core's drain port). */
+
     let imported = 0;
-    /** A debug build's shorter run deadline (CoreWork's `bgsync_deadline_ms`, for the device check); null: core's 4 minutes. */
+
     let shortDeadlineMs: number | null = null;
     const runner = createMobileBackgroundSyncRunner({
         storage,
@@ -553,18 +693,18 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         sync: {
             getConfigurationStatus: () => service.getMobileSyncConfigurationStatus(),
             performSync: () => performSync(undefined, {}),
-            // The run's own abort: the cycle ends with no follow-up (a lifecycle abort would queue one that outlives the job).
+
             abort: () => service.abortMobileSync('deadline'),
             setRequestDeadline: syncFetch.setDeadline,
         },
         flushPendingSave: () => flushPendingSave(),
-        // The queue was drained before the job (ProcessCoreHost.recovered, the app's start order); this reports what it stored.
+
         drainPendingCaptures: async () => {
             const count = imported;
             imported = 0;
             return count;
         },
-        // Native writes are synchronous FULL commits: a debounced store save is the only deferred write.
+
         quiesceStorage: () => flushPendingSave(),
         timersPaused: () => false,
         deadlineMs: () => shortDeadlineMs ?? MOBILE_BACKGROUND_SYNC_DEADLINE_MS,
@@ -574,7 +714,6 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         },
     });
 
-    // ---- Settings › Sync's device (native-host-contract-settings-sync.ts) ----
 
     const logSelectedEncryptionCompleted = async (operation: 'enable' | 'change' | 'disable' | 'abandon' | 'recheck'): Promise<void> => {
         if (platform !== 'ios' || (settingsHost.encryption.mode !== 'saved-webdav-enable-unlock'
@@ -582,7 +721,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         try {
             await logLine('info', 'Native iOS selected encryption service completed', { scope: 'native-ios', force: true,
                 extra: { releaseCheck: 'v1.3.5/ios-encryption-selected', operation, outcome: 'confirmed' } });
-        } catch { /* A failed diagnostic cannot turn a completed transition into a failure. */ }
+        } catch {                                                                              }
     };
     const settingsHost: NativeSyncSettingsHost = {
         platform: { os: platform, cloudKitAvailable: false, isFossBuild: bindings.isFossBuild, dropboxAppKey: '' },
@@ -598,6 +737,25 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             delete: (key) => secureConfig.deleteSecureConfigValue(key),
         },
         performSync,
+
+
+        answersMissingFilesQuestion: platform === 'android',
+
+
+        ...(documentCall ? {
+            pickSyncFolder: async () => {
+                const pick = (await documentCall({ op: 'takePick' })).value as { treeUri?: string } | null;
+                if (!pick) return null;
+                try {
+                    if (!pick.treeUri) throw new Error('Android did not keep access to the selected folder');
+                    const picked = await fileSync.prepareSafSyncFolder(pick.treeUri);
+                    return picked.__fileUri ? { uri: picked.__fileUri } : null;
+                } catch (error) {
+                    void logError(error, { scope: 'sync', extra: { operation: 'import', message: 'Failed to import data from folder' } });
+                    throw error;
+                }
+            },
+        } : {}),
         ...(bindings.listRecoverySnapshots ? { listRecoverySnapshots: bindings.listRecoverySnapshots } : {}),
         clearSyncConfigCache: () => service.clearMobileSyncConfigCache(),
         reconcileBackgroundSync,
@@ -615,7 +773,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                             try {
                                 await logLine('warn', 'Native iOS encryption enable capacity refused', { scope: 'native-ios', force: true,
                                     extra: { releaseCheck: 'v1.3.5/ios-encryption-enable-capacity', operation: 'enable', outcome: 'refused' } });
-                            } catch { /* Diagnostics cannot replace the capacity refusal. */ }
+                            } catch {                                                        }
                         }
                         throw error;
                     }
@@ -660,12 +818,11 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         },
     };
 
-    // ---- Automatic sync: core's triggers, as RN's use-root-layout-sync-effects.ts binds them ----
 
     let triggers: MobileSyncTriggers | null = null;
     let online: boolean | null = null;
 
-    /** RN's showSyncIssue: one warning toast for an automatic failure, with Open for Settings › Sync. */
+
     const showSyncIssue = (classification: string) => {
         const t = bindings.translate;
         const key = ({
@@ -681,19 +838,36 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         bindings.emit({ type: 'toast', title: t('settings.syncBadgeWarning'), message: t(key), tone: 'warning', durationMs: 5200, action: t('common.open'), open: 'sync' });
     };
 
+
+    const pullSync = async () => {
+        const outcome = await runManualPullSync({
+            getConfigurationStatus: () => service.getMobileSyncConfigurationStatus(),
+            getActivityState: () => service.getMobileSyncActivityState(),
+            performSync: () => performSync(undefined, { manual: true }),
+            isLikelyOfflineSyncError,
+            getSyncConflictCount,
+            t: bindings.translate,
+        });
+        await logLine('info', 'Native Android pull to sync', { scope: 'sync', force: true, extra: {
+            releaseCheck: 'v1.3.8/native-pull-sync', outcome: outcome.indicator, toast: outcome.toast ? 'yes' : 'no',
+        } });
+        return outcome;
+    };
+
     return {
         settingsHost,
+        pullSync,
         assertSelfHostedSyncAdmission,
         performStoredAutomaticSync,
-        /** The editor's and the project screen's attachment IO (core's NativeAttachmentsHost); null without app files. */
+
         attachmentsHost: attachments?.contractHost ?? null,
         prepareAttachmentAvailableDetailed: attachments?.prepareAttachmentAvailableDetailed ?? null,
-        /** The badge and cycle count now. */
+
         state,
-        /**
-         * After the boot's validated load and journal replay: the triggers start, and the app's first sync is asked for
-         * (RN's startup requestSync(0)). [appState] is 'active' or 'background'.
-         */
+
+        selectedBackend: () => service.getMobileSelectedSyncBackend(),
+
+
         start(appState: string) {
             if (platform === 'ios') throw new Error('Automatic sync is not available on this iOS build');
             if (triggers) return state();
@@ -713,6 +887,11 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 classifySyncFailure: (error) => classifySyncFailure(error),
                 reportError: (error) => { void logError(error, { scope: 'app' }); },
                 logWarn: (message, context) => logLine('warn', message, context),
+                logInfo: (message, context) => logLine('info', message, context),
+                onLocalChangePendingChange: (pending) => {
+                    localChangePending = pending;
+                    emitState();
+                },
                 showSyncIssue,
             });
             const active = triggers;
@@ -729,19 +908,14 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             void refreshConfigured();
             return state();
         },
-        /** RN's AppState change ('active', 'background'). */
+
         appState(next: string) {
             triggers?.handleAppStateChange(next);
             for (const listener of Array.from(appStateListeners)) listener(next);
             return state();
         },
-        /**
-         * One background run (core's runner), after Kotlin's start order drained the queue: `trigger` 'scheduled' (the periodic
-         * job) or 'capture' (a capture stored while the app was closed, #1257), `stored` what those drains stored (0 while the app
-         * shows: the foreground triggers send it). It resolves once the run settled (synced, failed and recorded, skipped, or
-         * abandoned at core's deadline; `deadlineMs` shortens it, debug builds only, 0 for core's). `schedule`: whether the job
-         * should run again.
-         */
+
+
         async backgroundSync(trigger: MobileBackgroundSyncTrigger, stored: number, deadlineMs = 0) {
             if (platform === 'ios') throw new Error('Background sync is not available on this iOS build');
             imported += stored;
@@ -750,10 +924,8 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             else await runner.run('scheduled');
             return { schedule: await backgroundSyncWanted() };
         },
-        /**
-         * The device's network changed (expo-network's listener): a running cycle stops when it went offline. Coming back
-         * online asks for an automatic sync through core's pacing (RN catches up in its background job, which comes with S4).
-         */
+
+
         network(next: MobileSyncNetworkState) {
             for (const listener of Array.from(networkListeners)) {
                 try { listener(next); } catch (error) { void logError(error, { scope: 'sync' }); }

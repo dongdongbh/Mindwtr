@@ -752,17 +752,14 @@ describe('derived store state helpers', () => {
 
         expect(selectFocusedCount(tasks)).toBe(computeTaskDerivedState(tasks).focusedCount);
         expect(selectFocusedCount(tasks)).toBe(2);
-        // Same array identity: cached hit still agrees.
+
         expect(selectFocusedCount(tasks)).toBe(computeTaskDerivedState(tasks).focusedCount);
-        // A different array identity recomputes and still agrees.
+
         const fewer = tasks.slice(0, 1);
         expect(selectFocusedCount(fewer)).toBe(computeTaskDerivedState(fewer).focusedCount);
     });
 
-    // A-04 pin, written BEFORE folding token accumulation into the main loop:
-    // collectTaskTokenUsage skips deletedAt and nothing else (archived/done still count), and
-    // returns tokens in first-seen order with per-task dedupe. The fold must reproduce all
-    // three exactly, so this asserts the full shape rather than just membership.
+
     it('counts tokens from every non-deleted task, in first-seen order', () => {
         const derived = computeTaskDerivedState([
             createTask('a', undefined, 0, {
@@ -791,7 +788,7 @@ describe('derived store state helpers', () => {
         expect(derived.tagTokenUsage).toEqual([
             { token: '#urgent', count: 2, lastUsedAt: Date.parse('2026-01-05T00:00:00.000Z') },
         ]);
-        // allContexts/allTags are the sorted projection of the same usage.
+
         expect(derived.allContexts).toEqual(['@home', '@phone']);
         expect(derived.allTags).toEqual(['#urgent']);
     });
@@ -882,7 +879,7 @@ describe('derived store state helpers', () => {
         ]);
 
         expect(derived.projectTaskSummaryById.get('project-1')?.nextAction?.id).toBe('created-later');
-        // Without a manual order the earliest-created next task still wins.
+
         expect(derived.projectTaskSummaryById.get('project-2')?.nextAction?.id).toBe('newer');
     });
 
@@ -947,7 +944,7 @@ describe('completion timestamp updates', () => {
             { status: 'done', completedAt: '2026-07-04T09:00:00.000Z' },
             now
         );
-        // Fluid weekly: next due = completed date + 7 days, not click date + 7.
+
         expect(nextRecurringTask?.dueDate).toBe('2026-07-11');
     });
 
@@ -1084,8 +1081,7 @@ describe('persist', () => {
         expect(snapshot.projects).toBe(baseState._allProjects);
         expect(snapshot.settings).toBe(baseState.settings);
 
-        // The enqueue's own error callback writes through the caller's `set`,
-        // same as every hand-written call site used to.
+
         onError('save failed');
         expect(set).toHaveBeenCalledWith({ error: 'save failed' });
     });
@@ -1094,10 +1090,7 @@ describe('persist', () => {
         const set = vi.fn();
         const debouncedSave = vi.fn();
 
-        // Only t1 survives -- t2 silently disappeared, the exact partial-snapshot
-        // bug the guard exists to catch (store-settings.ts's fetchData used to
-        // bypass this by hand-building its save payload instead of routing
-        // through buildSaveSnapshot).
+
         expect(() => persist(set, debouncedSave, baseState, { tasks: [createTask('t1')] }))
             .toThrow(/Refusing to save a partial task snapshot/);
         expect(debouncedSave).not.toHaveBeenCalled();
@@ -1107,8 +1100,7 @@ describe('persist', () => {
         const set = vi.fn();
         const debouncedSave = vi.fn();
 
-        // t2 disappeared while t3 arrived, so the collection length is unchanged --
-        // a drop the guard must still catch.
+
         expect(() => persist(set, debouncedSave, baseState, { tasks: [createTask('t1'), createTask('t3')] }))
             .toThrow(/Refusing to save a partial task snapshot; missing existing ids: t2/);
         expect(debouncedSave).not.toHaveBeenCalled();
@@ -1135,8 +1127,8 @@ describe('reconcileEntityCollection attachments (#1136)', () => {
         expect(hasSameEntityIdentity(existing, incoming)).toBe(false);
         const result = reconcileEntityCollection([existing], buildEntityMap([existing]), [incoming]);
         expect(result.items[0]).toBe(incoming);
-        // The releaseCheck line at store-settings.ts's fetchData reads this
-        // count to prove the #1136 fix actually fired.
+
+
         expect(result.attachmentOnlyReplacedCount).toBe(1);
     });
 

@@ -3,7 +3,7 @@ import UserNotifications
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Pure request objects: these tests never obtain a notification center or apply a request.
+
 final class NativeReminderRequestTests: XCTestCase {
     private let namespace = "tech.dongdongbh.mindwtr.native-ui.439_01"
     private let fireAtMs: Double = 1_900_000_000_123
@@ -131,8 +131,8 @@ final class NativeReminderRequestTests: XCTestCase {
 
     func testDailyUsesOriginalSlotInsteadOfDSTAdjustedFirstFireAndDoesNotPinZone() throws {
         var input = alarm(); input["repeat"] = "daily"; input["calendar"] = ["hour": 2, "minute": 30]
-        // First shared fire is 03:30 in New York's DST gap; the recurring configured slot remains 02:30.
-        input["fireAtMs"] = 2_120_110_200_000 // 2037-03-08T07:30:00Z
+
+        input["fireAtMs"] = 2_120_110_200_000
         var newYork = Calendar(identifier: .gregorian)
         newYork.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
         let firstFire = Date(timeIntervalSince1970: 2_120_110_200)

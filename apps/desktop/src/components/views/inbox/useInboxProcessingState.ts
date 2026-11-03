@@ -8,6 +8,7 @@ import {
     getProjectChoiceState,
     normalizeClockTimeInput,
     openProcessInboxTask,
+    resolveDefaultNewTaskAreaId,
     resolveProcessInboxPlan,
     selectProcessInboxCandidates,
     setTaskDraftField,
@@ -40,8 +41,6 @@ import {
 type ProcessingMode = 'guided' | 'quick';
 
 
-/** Nothing being processed: an all-empty draft built by the same core factory
- *  that hydrates a real task, so reset and hydrate cannot drift apart. */
 const EMPTY_PROCESSING_DRAFT: TaskDraft = createTaskDraft({
     id: '',
     title: '',
@@ -70,10 +69,8 @@ export function useInboxProcessingState({
     const [quickActionability, setQuickActionability] = useState<QuickActionabilityChoice>('actionable');
     const [quickTwoMinuteChoice, setQuickTwoMinuteChoice] = useState<QuickTwoMinuteChoice>('no');
     const [quickExecutionChoice, setQuickExecutionChoice] = useState<QuickExecutionChoice>('defer');
-    // Every task field the flow edits lives in one core draft (title,
-    // description, contexts, tags, priority, energy, assignee, estimate,
-    // project, area). The date fields keep their own draft/committed pairs
-    // below because their inputs commit on blur.
+
+
     const [draft, setDraft] = useState<TaskDraft>(EMPTY_PROCESSING_DRAFT);
     const [delegateWho, setDelegateWho] = useState('');
     const [delegateFollowUp, setDelegateFollowUp] = useState('');
@@ -156,18 +153,15 @@ export function useInboxProcessingState({
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
-    /**
-     * The one write path into the processing draft: the core reducer applies
-     * the field descriptor cascades, and the inbox adds its own container rule
-     * on top — picking an area drops a project that lives outside it.
-     */
+
     const setField = useCallback<TaskDraftSetter>((field, value) => {
         setDraft((current) => {
-            const next = setTaskDraftField(current, field, value);
-            if (field !== 'areaId' || !next.areaId || !next.projectId) return next;
-            return projectMap.get(next.projectId)?.areaId === next.areaId
-                ? next
-                : setTaskDraftField(next, 'projectId', '');
+            let next = setTaskDraftField(current, field, value);
+            if (field === 'areaId' && next.areaId && next.projectId
+                && projectMap.get(next.projectId)?.areaId !== next.areaId) {
+                next = setTaskDraftField(next, 'projectId', '');
+            }
+            return next.projectId === current.projectId ? next : setTaskDraftField(next, 'sectionId', '');
         });
     }, [projectMap]);
     const processingStep = processingSession.currentStep ?? 'actionable';
@@ -231,8 +225,11 @@ export function useInboxProcessingState({
         setDirtyScheduleFieldKeys(new Set());
     }, [defaultProcessingMode]);
 
-    // The task the draft was hydrated from: a step's write merges against it.
+
     const processingBaseRef = useRef<Task | null>(null);
+
+    const defaultAreaIdRef = useRef<string | undefined>(undefined);
+    defaultAreaIdRef.current = resolveDefaultNewTaskAreaId(settings, areas);
     const hydrateProcessingTask = useCallback((
         task: Task,
         session?: ProcessInboxSession<ProcessingStep>,
@@ -242,10 +239,13 @@ export function useInboxProcessingState({
         setQuickActionability('actionable');
         setQuickTwoMinuteChoice('no');
         setQuickExecutionChoice('defer');
-        // Keep an area assigned while the task sat in the inbox; a project home
-        // outranks the direct area (container exclusivity).
+
+
         const taskDraft = createTaskDraft(task);
-        setDraft(task.projectId ? setTaskDraftField(taskDraft, 'areaId', '') : taskDraft);
+        const defaultAreaId = defaultAreaIdRef.current;
+        setDraft(task.projectId
+            ? setTaskDraftField(taskDraft, 'areaId', '')
+            : !task.areaId && defaultAreaId ? setTaskDraftField(taskDraft, 'areaId', defaultAreaId) : taskDraft);
         setCustomContext('');
         setCustomTag('');
         setProjectSearch('');

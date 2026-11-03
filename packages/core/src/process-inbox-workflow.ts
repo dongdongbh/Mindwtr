@@ -11,6 +11,7 @@ import type { Task } from './types';
 export type ProcessInboxWorkflowFields = Partial<Pick<
     Task,
     | 'projectId'
+    | 'sectionId'
     | 'areaId'
     | 'contexts'
     | 'tags'
@@ -24,11 +25,7 @@ export type ProcessInboxWorkflowFields = Partial<Pick<
     | 'viewSectionIds'
 >>;
 
-/**
- * Container exclusivity: a project home outranks a direct area, so a task
- * never keeps both. Every Inbox-processing decision writes this pair so a
- * picked project survives whichever destination the user lands on (#958).
- */
+
 export function resolveProcessInboxContainerFields(
     projectId: string | null | undefined,
     areaId: string | null | undefined,
@@ -43,27 +40,13 @@ function unionTokens(picked: readonly string[] | undefined, parsed: readonly str
     return Array.from(new Set([...(picked ?? []), ...parsed]));
 }
 
-/** The half of a parsed processing title that maps onto decision fields. */
+
 export type ParsedProcessInboxTitleFields = Pick<
     Partial<Task>,
     'contexts' | 'tags' | 'assignedTo' | 'priority' | 'energyLevel' | 'projectId' | 'areaId' | 'timeEstimate'
 >;
 
-/**
- * Fold the quick-add tokens parsed out of the processing title into the fields
- * the decision writes (#1088). Both platforms merge here so the two clarify
- * UIs cannot disagree about what a typed token does.
- *
- * Token lists join what the chips already hold — typing `@phone` adds a
- * context, it never replaces the ones the user toggled. Single-value tokens
- * win over the picker, which is the only way an explicit token can act at all.
- * Estimates fill only an unset estimate: the selected duration stays in charge.
- * A parsed project still drops a directly assigned area (#958); a parsed area
- * leaves an existing project alone, since the project already carries one.
- *
- * This is the single seam both platforms' clarify controllers call before
- * building their commit event (desktop's and mobile's `useInboxProcessingController`).
- */
+
 export function mergeParsedProcessInboxFields(
     fields: ProcessInboxWorkflowFields,
     parsed: ParsedProcessInboxTitleFields,
@@ -74,7 +57,7 @@ export function mergeParsedProcessInboxFields(
     if (parsed.assignedTo) next.assignedTo = parsed.assignedTo;
     if (parsed.priority) next.priority = parsed.priority;
     if (parsed.energyLevel) next.energyLevel = parsed.energyLevel;
-    // The estimate control keeps its selected value; the token fills an unset estimate.
+
     if (parsed.timeEstimate && !fields.timeEstimate) next.timeEstimate = parsed.timeEstimate;
     if (parsed.projectId || parsed.areaId) {
         Object.assign(next, resolveProcessInboxContainerFields(
@@ -85,13 +68,7 @@ export function mergeParsedProcessInboxFields(
     return next;
 }
 
-/**
- * Domain decisions emitted by an Inbox-processing UI.
- *
- * Platforms collect and normalize UI input; process-inbox-plan validates and
- * prepares these events. This boundary owns status/effect mapping so every
- * client commits the same GTD decision once input is ready.
- */
+
 export type ProcessInboxWorkflowEvent =
     | { type: 'discard' }
     | { type: 'skip'; fields: ProcessInboxWorkflowFields }
@@ -113,9 +90,9 @@ export type ProcessInboxWorkflowWriteActions = {
 
 export type ProcessInboxWorkflowCommitOptions<Step extends string> =
     ProcessInboxTaskTransitionOptions<Step> & {
-        /** Platform-prepared title, description, and date updates applied over the workflow effect. */
+
         taskUpdates?: Partial<Task>;
-        /** Multi-write flows can defer advancing until their remaining writes succeed. */
+
         advance?: boolean;
     };
 
@@ -166,10 +143,7 @@ export function resolveProcessInboxWorkflowEvent(
     }
 }
 
-/**
- * Commit one Inbox-processing decision and advance only after persistence
- * confirms success. Platforms keep input collection and error presentation.
- */
+
 export async function commitProcessInboxWorkflowEvent<
     Candidate extends ProcessInboxCandidate,
     Step extends string,

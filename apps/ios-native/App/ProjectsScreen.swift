@@ -339,7 +339,7 @@ struct ProjectsScreen: View {
     }
 
     private func statusColor(_ status: String) -> Color {
-        // RN buildProjectStatusPalette presentation swatches, not task eligibility.
+
         switch status {
         case "active": return palette.tint
         case "waiting": return Color(hex: "F59E0B")
@@ -1162,7 +1162,7 @@ struct ProjectDetailScreen: View {
                             .accessibilityIdentifier("project-retry")
                     }
                     if !model.projectCurrent { statusReadErrorView }
-                    // Keep the same Project's layout during its refresh, with stale controls inert.
+
                     if model.projectCurrent || ((model.busy || model.projectViewReadPending) && !model.projectDetail.isEmpty
                         && model.projectDetail.text("projectId") == model.projectHeader.text("id")) {
                         Group {
@@ -1588,9 +1588,10 @@ struct ProjectDetailScreen: View {
                 .buttonStyle(.plain).disabled(model.busy)
                 .accessibilityIdentifier("project-task-order-retry")
             }
-            if model.busy { ProgressView().padding(12) }
+
             ProjectTaskOrderTable(model: model, palette: palette)
                 .accessibilityIdentifier("project-task-order-list")
+                .overlay(alignment: .top) { if model.busy { ProgressView().padding(12) } }
         }
         .background(palette.bg)
     }
@@ -1803,7 +1804,7 @@ struct ProjectDetailScreen: View {
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
                 projectNotesPanel
-                // Bound generic metadata after an observed iOS 17 stack overflow.
+
                 AnyView(projectAttachmentsPanel)
                 ProjectDatesMetadata(model: model, palette: palette, metadata: metadata) {
                     resignProjectNotesInput()
@@ -2184,7 +2185,7 @@ struct ProjectDetailScreen: View {
     }
 }
 
-// Concrete boundaries keep the Notes view metadata shallow on iOS 17.
+
 private struct ProjectNotesPanel: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -2480,8 +2481,7 @@ private struct ProjectAttachmentLinkSheet: View {
     }
 }
 
-// Keep this concrete View boundary: expanding Details exceeded the iOS 17
-// main-thread stack while resolving the former nested SwiftUI generic type.
+
 private struct ProjectStatusMetadata: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -2631,8 +2631,7 @@ private struct ProjectSectionsMetadata: View {
     }
 }
 
-// Keep the three date rows behind concrete View boundaries so expanding Details
-// does not resolve their nested SwiftUI types in the parent body on iOS 17.
+
 private struct ProjectDatesMetadata: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -2708,7 +2707,7 @@ private struct ProjectDateMetadataRow: View {
     }
 }
 
-// Concrete metadata and sheet boundaries keep Details' iOS 17 View type bounded.
+
 private struct ProjectTagsMetadata: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -2896,7 +2895,7 @@ private struct ProjectTagsAddForm: View {
     }
 }
 
-// A concrete boundary keeps the Area control out of Details' iOS 17 opaque View type.
+
 private struct ProjectAreaMetadata: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -2919,6 +2918,14 @@ private struct ProjectAreaMetadata: View {
                     .accessibilityLabel(model.label("projects.areaLabel") + ": " + metadata.text("areaLabel"))
                     .accessibilityIdentifier("project-area-open")
                 }
+            }
+            if !model.projectDetail.flag("readOnly") {
+                Button(action: onOpen) {
+                    Label(model.label("projects.color"), systemImage: "paintpalette")
+                        .rnFont(14).foregroundStyle(palette.tint).frame(minHeight: 44)
+                }
+                .buttonStyle(.plain).disabled(!model.projectAreaOpenEnabled)
+                .accessibilityIdentifier("project-color-open")
             }
             Text(metadata.text("areaLabel"))
                 .rnFont(14).foregroundStyle(palette.text)
@@ -2994,6 +3001,29 @@ private struct ProjectAreaSelectionSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("project-area-created-status")
                     }
+                    Text(model.label("projects.color")).rnFont(14, .semibold).foregroundStyle(palette.secondary)
+                    areaChoice(model.label("projects.useAreaColor"), color: nil,
+                               selected: model.projectAreaOptions["colorOverride"] is NSNull,
+                               identifier: "project-color-area") {
+                        Task { await model.chooseProjectColor(nil) }
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
+                        ForEach(model.projectAreaOptions["colors"] as? [String] ?? [], id: \.self) { color in
+                            let selected = model.projectAreaOptions["colorOverride"] as? String == color
+                            Button { Task { await model.chooseProjectColor(color) } } label: {
+                                Circle().fill(Color(hex: color)).frame(width: 30, height: 30)
+                                    .overlay(Circle().stroke(selected ? palette.text : palette.border, lineWidth: selected ? 3 : 1))
+                                    .overlay { if selected { Image(systemName: "checkmark").foregroundStyle(palette.text) } }
+                                    .frame(minWidth: 44, minHeight: 44)
+                            }
+                            .buttonStyle(.plain).disabled(!model.projectAreaChoiceEnabled)
+                            .accessibilityLabel(model.label("projects.color") + ": " + color)
+                            .accessibilityAddTraits(selected ? .isSelected : [])
+                            .accessibilityIdentifier("project-color-" + color)
+                        }
+                    }
+                    Divider()
+                    Text(model.label("projects.areaLabel")).rnFont(14, .semibold).foregroundStyle(palette.secondary)
                     let noneSelected = model.projectAreaSelectedID == nil
                     areaChoice(model.projectAreaOptions.text("noAreaLabel"), color: nil,
                                selected: noneSelected, identifier: "project-area-none") {
@@ -3167,7 +3197,7 @@ private struct ProjectAreaCreateForm: View {
     }
 }
 
-/// UIKit keeps section headings fixed as drag sources while allowing tasks to cross them.
+
 private struct ProjectTaskOrderTable: UIViewRepresentable {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -3192,7 +3222,7 @@ private struct ProjectTaskOrderTable: UIViewRepresentable {
         coordinator.parent = self
         table.backgroundColor = UIColor(palette.bg)
         table.isUserInteractionEnabled = model.projectTaskOrderInputEnabled
-        // Keep UIKit's drag preview until the durable result or failure is known.
+
         if !model.busy && (coordinator.revision != model.projectTaskOrderView.text("revision") || coordinator.moving) {
             coordinator.rows = model.projectTaskOrderView.objects("items")
             coordinator.revision = model.projectTaskOrderView.text("revision")
@@ -3261,7 +3291,7 @@ private struct ProjectTaskOrderTable: UIViewRepresentable {
             let insertion = destination.row > source.row ? destination.row + 1 : destination.row
             Task { @MainActor in
                 await model.moveProjectTask(from: IndexSet(integer: source.row), to: insertion)
-                // A rejected/no-op callback may not publish a state change.
+
                 rows = model.projectTaskOrderView.objects("items")
                 revision = model.projectTaskOrderView.text("revision")
                 moving = false

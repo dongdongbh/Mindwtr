@@ -48,7 +48,7 @@ const readRequest = (value: unknown): NativeProjectNotesWriteRequest | null => {
         && iso(expected.updatedAt) ? input as NativeProjectNotesWriteRequest : null;
 };
 
-/** Pure semantic validation for cold or terminal journals, before any SQL operation. */
+
 const readPrepared = (value: unknown): NativePreparedProjectNotesWrite | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

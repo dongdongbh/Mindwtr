@@ -93,13 +93,13 @@ export function AboutSettingsScreen({
     const ANDROID_PACKAGE_NAME = Constants.expoConfig?.android?.package || Application.applicationId || 'tech.dongdongbh.mindwtr';
     const APP_STORE_BUNDLE_ID = Constants.expoConfig?.ios?.bundleIdentifier || Application.applicationId || 'tech.dongdongbh.mindwtr';
 
-    // The latest toast and words for the checks below, which RN's effect never re-ran for.
+
     const toastRef = useRef(showToast);
     toastRef.current = showToast;
     const trRef = useRef(tr);
     trRef.current = tr;
 
-    // Core's update checks and Rate row (about-settings-model.ts) on RN's device.
+
     const updateChecks = useMemo(() => createAboutUpdateChecks({
         platform: Platform.OS,
         isFossBuild,

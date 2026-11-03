@@ -44,7 +44,7 @@ class CaptureIntentReceiverTest {
     context.registerReceiver(CaptureIntentReceiver(), IntentFilter(CaptureIntentProcessor.ACTION), Context.RECEIVER_NOT_EXPORTED)
     val seen = Collections.synchronizedList(mutableListOf<Int>())
     val ran = CountDownLatch(1)
-    // A host's hook (none in RN): it runs on the receiver's thread, before the broadcast finishes, once the file is queued.
+
     CaptureIntentReceiver.queuedHook = { seen += queue.listFiles { file -> file.name.endsWith(".json") }!!.size; ran.countDown() }
 
     send("Buy milk", token)

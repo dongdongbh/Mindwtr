@@ -7,7 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AREA_PRESET_COLORS, areaOrderIdsForIntent, Attachment, collectProjectTaskLinks, DEFAULT_PROJECT_COLOR, getProjectSectionsForView, planProjectMove, Project, type ProjectAreaGroup, projectTagsForIntent, shallow, Task, type Section, type TaskSortBy, undoProjectDelete, updateProjectFromDraft, useTaskStore } from '@mindwtr/core';
 import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { runAfterCaptureRouteGone, SHEET_DISMISS_SETTLE_MS } from '@/lib/capture-route-presence';
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react-native';
+import { ChevronDown, ChevronRight, MoreHorizontal, Plus } from 'lucide-react-native';
 
 import {
   DEFAULT_PROJECT_LIST_VIEW_STATE,
@@ -79,6 +79,7 @@ export default function ProjectsScreen() {
     allProjects,
     tasks,
     allTasks,
+    settings,
     sections,
     allSections,
     addProject,
@@ -98,6 +99,7 @@ export default function ProjectsScreen() {
     allProjects: state._allProjects,
     tasks: state.tasks,
     allTasks: state._allTasks,
+    settings: state.settings,
     sections: state.sections,
     allSections: state._allSections,
     addProject: state.addProject,
@@ -132,9 +134,8 @@ export default function ProjectsScreen() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const selectedProjectRef = useRef(selectedProject);
   selectedProjectRef.current = selectedProject;
-  // The row the open project's edits started from: set when a project opens, then advanced field by field
-  // once the stored row agrees with the draft (a persist or a live write landed it). Closing then writes only
-  // what the user changed, not a field another device synced while the sheet was open.
+
+
   const selectedProjectBaseRef = useRef<Project | null>(null);
   if (!selectedProject || selectedProjectBaseRef.current?.id !== selectedProject.id) {
     selectedProjectBaseRef.current = selectedProject;
@@ -157,6 +158,8 @@ export default function ProjectsScreen() {
   const [taskModalOpenKey, setTaskModalOpenKey] = useState('manual');
   const [showAreaPicker, setShowAreaPicker] = useState(false);
   const [showAreaManager, setShowAreaManager] = useState(false);
+  const [areaPickerProject, setAreaPickerProject] = useState<Project | null>(null);
+  const [managerAreaId, setManagerAreaId] = useState<string | null>(null);
   const [newAreaName, setNewAreaName] = useState('');
   const [newAreaColor, setNewAreaColor] = useState('#3b82f6');
   const [expandedAreaColorId, setExpandedAreaColorId] = useState<string | null>(null);
@@ -165,10 +168,7 @@ export default function ProjectsScreen() {
   const handledRouteProjectKeyRef = useRef<string | null>(null);
   const pathname = usePathname();
 
-  // The open project lives in component state, not the route — mirror it into
-  // the session snapshot so an interrupted session reopens the project, not
-  // just the projects list (#842). Re-persist immediately: an OS kill can
-  // arrive without another navigation or background event.
+
   useEffect(() => {
     setSessionRestoreOpenProject(selectedProject?.id ?? null);
     void persistLastRoute(pathname);
@@ -249,6 +249,7 @@ export default function ProjectsScreen() {
   } = useProjectFiltering({
     projects,
     tasks,
+    settings,
     sortedAreas,
     selectedTagFilter,
     selectedAreaFilter,
@@ -333,7 +334,7 @@ export default function ProjectsScreen() {
     ? t('projects.empty')
     : resolveText('common.loading', 'Loading...');
 
-  // Memos key off the id so a project object refresh with the same id reuses results.
+
   const selectedProjectIdForLists = selectedProject?.id ?? null;
   const selectedProjectTasks = useMemo(() => {
     if (!selectedProjectIdForLists || !allTasks) return EMPTY_PROJECT_TASKS;
@@ -383,9 +384,7 @@ export default function ProjectsScreen() {
     onRestore: restoreProjectSelection,
   });
 
-  // Keep the open project's sort in step with the store, so a sort chosen on
-  // another device (arriving via sync) reorders the already-open detail view.
-  // Local writes set the same value first, making this a no-op for them.
+
   const liveSelectedProjectTaskSortBy = selectedProject
     ? (projects.find((p) => p.id === selectedProject.id)?.taskSortBy ?? 'default')
     : null;
@@ -394,8 +393,7 @@ export default function ProjectsScreen() {
     setProjectTaskSortBy(liveSelectedProjectTaskSortBy);
   }, [liveSelectedProjectTaskSortBy]);
 
-  // Persist the chosen sort on the project so it survives reopening the project
-  // and syncs across devices; core normalizes 'default' to an absent field.
+
   const handleProjectTaskSortByChange = useCallback((next: ProjectTaskSortBy) => {
     if (selectedProject?.status === 'archived') return;
     if (projects.find((project) => project.id === selectedProject?.id)?.status === 'archived') return;
@@ -412,17 +410,15 @@ export default function ProjectsScreen() {
 
   useEffect(() => {
     if (!projectId || typeof projectId !== 'string') return;
-    // Handle each open request once per screen instance — re-running on
-    // unrelated store updates would reset the open project's sort and pickers,
-    // and would reopen a project the user just closed. A fresh openToken marks
-    // a new explicit request, so tapping the same project again still opens it.
+
+
     const openKey = `${projectId}:${typeof openToken === 'string' ? openToken : ''}`;
     if (handledRouteProjectKeyRef.current === openKey) return;
     const project = projects.find((item) => item.id === projectId && !item.deletedAt);
     if (project) {
       handledRouteProjectKeyRef.current = openKey;
-      // Tokenless re-visits (capture returnTo, session restore) must not reset
-      // the detail state of a project that is already open.
+
+
       if (selectedProject?.id !== project.id) {
         openProject(project);
       }
@@ -454,7 +450,7 @@ export default function ProjectsScreen() {
     if (orderedIds) reorderAreas(orderedIds);
   };
 
-  // A chip toggles its tag; the picker's + only adds the typed one (a tag already there stays).
+
   const changeProjectTag = (tag: string, kind: 'add' | 'toggle') => {
     if (!selectedProject) return;
     const normalized = normalizeProjectTag(tag);
@@ -473,8 +469,8 @@ export default function ProjectsScreen() {
   const toggleProjectTag = (tag: string) => changeProjectTag(tag, 'toggle');
 
   const handleDeleteProject = useCallback((projectIdToDelete: string) => {
-    // Deleting detaches the project's tasks, and only Undo can know which they
-    // were -- the links must be read before the delete.
+
+
     const detachedTasks = collectProjectTaskLinks(projectIdToDelete);
     void Promise.resolve(deleteProject(projectIdToDelete))
       .then(() => {
@@ -585,6 +581,12 @@ export default function ProjectsScreen() {
         onToggleProjectFocus={toggleProjectFocus}
         onMoveUp={moveProject(project, group, 'up')}
         onMoveDown={moveProject(project, group, 'down')}
+        onMoveToArea={project.status === 'archived' ? undefined : () => {
+          const live = getLiveMutableProject(project.id);
+          if (!live) return;
+          setAreaPickerProject(live);
+          setShowAreaPicker(true);
+        }}
       />
     );
   };
@@ -737,39 +739,55 @@ export default function ProjectsScreen() {
 
     if (item.type === 'area-header') {
       return (
-        <TouchableOpacity
-          testID={`project-area-header-${item.sectionKind}-${item.areaId}`}
-          onPress={() => toggleAreaCollapse(item.areaId)}
-          style={styles.collapsibleAreaHeader}
-          accessibilityRole="button"
-          accessibilityLabel={item.title}
-          accessibilityState={{ expanded: !item.collapsed }}
-        >
-          <View style={styles.collapsibleAreaHeaderContent}>
-            {item.icon ? (
-              <Text
-                testID={`project-area-icon-${item.areaId}`}
-                style={[styles.collapsibleAreaIcon, { color: tc.secondaryText }]}
-              >
-                {item.icon}
+        <View style={styles.areaHeaderRow}>
+          <TouchableOpacity
+            testID={`project-area-header-${item.sectionKind}-${item.areaId}`}
+            onPress={() => toggleAreaCollapse(item.areaId)}
+            style={[styles.collapsibleAreaHeader, { flex: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel={item.title}
+            accessibilityState={{ expanded: !item.collapsed }}
+          >
+            <View style={styles.collapsibleAreaHeaderContent}>
+              {item.icon ? (
+                <Text
+                  testID={`project-area-icon-${item.areaId}`}
+                  style={[styles.collapsibleAreaIcon, { color: tc.secondaryText }]}
+                >
+                  {item.icon}
+                </Text>
+              ) : item.color ? (
+                <View
+                  testID={`project-area-dot-${item.areaId}`}
+                  style={[
+                    styles.collapsibleAreaDot,
+                    { backgroundColor: item.color, borderColor: tc.border },
+                  ]}
+                />
+              ) : null}
+              <Text style={[styles.collapsibleAreaHeaderText, { color: tc.secondaryText }]} numberOfLines={1}>
+                {item.title}
               </Text>
-            ) : item.color ? (
-              <View
-                testID={`project-area-dot-${item.areaId}`}
-                style={[
-                  styles.collapsibleAreaDot,
-                  { backgroundColor: item.color, borderColor: tc.border },
-                ]}
-              />
-            ) : null}
-            <Text style={[styles.collapsibleAreaHeaderText, { color: tc.secondaryText }]} numberOfLines={1}>
-              {item.title}
-            </Text>
-          </View>
-          {item.collapsed
-            ? <ChevronRight size={16} color={tc.secondaryText} strokeWidth={2.2} />
-            : <ChevronDown size={16} color={tc.secondaryText} strokeWidth={2.2} />}
-        </TouchableOpacity>
+            </View>
+            {item.collapsed
+              ? <ChevronRight size={16} color={tc.secondaryText} strokeWidth={2.2} />
+              : <ChevronDown size={16} color={tc.secondaryText} strokeWidth={2.2} />}
+          </TouchableOpacity>
+          {areaById.has(item.areaId) ? (
+            <TouchableOpacity
+              testID={`project-area-menu-${item.sectionKind}-${item.areaId}`}
+              style={styles.focusButton}
+              accessibilityRole="button"
+              accessibilityLabel={`${t('projects.manageAreas')}: ${item.title}`}
+              onPress={() => {
+                setManagerAreaId(item.areaId);
+                setShowAreaManager(true);
+              }}
+            >
+              <MoreHorizontal size={18} color={tc.secondaryText} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
       );
     }
 
@@ -804,23 +822,16 @@ export default function ProjectsScreen() {
     const updates: Partial<Project> = { areaId: project.areaId || undefined, tagIds: project.tagIds || [] };
     if (nextTitle) updates.title = nextTitle;
     const opened = selectedProjectBaseRef.current?.id === project.id ? selectedProjectBaseRef.current : original;
-    // Compared as saved (trimmed), so outer spaces in the stored title do not read as the user's rename.
+
     const base = { ...opened, title: opened.title.trim(), areaId: opened.areaId || undefined, tagIds: opened.tagIds || [] };
     selectedProjectBaseRef.current = { ...base, ...updates };
-    // Only the fields changed since the sheet opened are written, onto the latest row.
+
     return updateProjectFromDraft(project.id, base, updates);
   };
   const persistSelectedProjectEditsRef = useRef(persistSelectedProjectEdits);
   persistSelectedProjectEditsRef.current = persistSelectedProjectEdits;
 
-  // Quick add is a pushed route, but the project detail is a native modal
-  // (pageSheet on iOS) whose visibility is derived from selectedProject.
-  // Moving the route while that stays set desyncs the two: coming back, the
-  // state still says "open" so the sheet never re-presents, and tapping the
-  // same project sets identical state — no transition, so the row reads as
-  // dead until the screen is remounted (#938). Dismiss on the way out and
-  // restore on the way back, so re-opening is always a real false -> true
-  // transition. Edits are committed first, exactly as closing by hand does.
+
   const openProjectQuickAdd = useCallback((projectToAddTo: Project) => {
     commitSelectedProjectNotes();
     persistSelectedProjectEdits(selectedProject);
@@ -833,22 +844,19 @@ export default function ProjectsScreen() {
       },
       returnTo: buildProjectQuickCaptureReturnTo(projectToAddTo.id),
     });
-    // UIKit must finish dismissing the project sheet before presenting capture,
-    // as for the Getting Started actions below.
+
+
     if (Platform.OS === 'ios') {
       pendingProjectDismissActionRef.current = openCapture;
       return;
     }
     openCapture();
-    // commitSelectedProjectNotes/persistSelectedProjectEdits are re-created every
-    // render; listing them would rebuild this callback on every keystroke.
+
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openQuickCapture, selectedProject, projects, updateProject]);
 
-  // Read through refs so this callback's identity never changes: useFocusEffect
-  // re-runs whenever the callback it is given changes, and openProject is
-  // rebuilt every render, which would re-open the project on every render and
-  // undo the dismissal above.
+
   const openProjectRef = useRef(openProject);
   openProjectRef.current = openProject;
   const projectsRef = useRef(projects);
@@ -865,18 +873,15 @@ export default function ProjectsScreen() {
       const project = pendingId
         ? projectsRef.current.find((item) => item.id === pendingId && !item.deletedAt)
         : undefined;
-      // Save & edit from this project's capture: open the editor on THIS
-      // screen instance. The capture route cannot navigate here — any
-      // navigation to a screen that is already on top stacks a duplicate of
-      // it, so leaving the project would take an extra back tap (#1029).
+
+
       const pendingTask = consumePendingCaptureTaskOpen(pendingId ?? routeProjectIdRef.current);
       const task = pendingTask
         ? tasksRef.current.find((item) => item.id === pendingTask.taskId && !item.deletedAt)
         : undefined;
       if (project) {
-        // iOS presents one sheet at a time: the editor and the project are
-        // siblings, so the second would be refused and leave an invisible
-        // layer. Open the editor first and the project once it is dismissed.
+
+
         if (task && Platform.OS === 'ios') reopenProjectAfterEditorRef.current = project;
         else openProjectRef.current(project);
       }
@@ -885,10 +890,8 @@ export default function ProjectsScreen() {
       setTaskModalDefaultTab(pendingTask.taskTab);
       setTaskModalOpenKey(`capture:${pendingTask.taskId}`);
       setEditingTask(task);
-      // Presenting a sheet while UIKit still dismisses the capture route is
-      // refused and leaves an invisible layer over the list, so wait for it.
-      // setHighlightTask (zustand) and the useState setters are stable; data
-      // is read through refs so this callback never changes identity.
+
+
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }), [])
   );
@@ -930,12 +933,13 @@ export default function ProjectsScreen() {
   const openGettingStartedAction = (action: GettingStartedAction) => {
     pendingGettingStartedAction.current = action;
     closeProjectDetail(false);
-    // UIKit must finish dismissing the project sheet before presenting capture.
-    // Android does not expose Modal.onDismiss, so it follows the normal route path.
+
+
     if (Platform.OS !== 'ios') finishGettingStartedAction();
   };
 
   const openAreaPicker = () => {
+    setAreaPickerProject(null);
     if (!selectedProject || !getLiveMutableProject(selectedProject.id)) return;
     openProjectAreaPicker({
       addArea,
@@ -1096,11 +1100,14 @@ export default function ProjectsScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel={t('areas.manage')}
-              onPress={() => setShowAreaManager(true)}
+              accessibilityLabel={t('projects.manageAreas')}
+              onPress={() => {
+                setManagerAreaId(null);
+                setShowAreaManager(true);
+              }}
               style={[styles.areaSortButton, { borderColor: tc.border, minHeight: 44, justifyContent: 'center' }]}
             >
-              <CompactText style={[styles.areaSortText, { color: tc.text }]}>{t('areas.manage')}</CompactText>
+              <CompactText style={[styles.areaSortText, { color: tc.text }]}>{t('projects.manageAreas')}</CompactText>
             </TouchableOpacity>
           </View>
           {showTagFilter ? renderProjectTagFilters() : null}
@@ -1201,7 +1208,7 @@ export default function ProjectsScreen() {
           setEditingTask(null);
           const project = reopenProjectAfterEditorRef.current;
           reopenProjectAfterEditorRef.current = null;
-          // Wait for UIKit to finish removing the editor sheet (iOS only).
+
           if (project) setTimeout(() => openProjectRef.current(project), SHEET_DISMISS_SETTLE_MS);
         }}
         onSave={(taskId, updates) => {
@@ -1246,6 +1253,7 @@ export default function ProjectsScreen() {
         onClose={() => setImagePreviewAttachment(null)}
       />
       <ProjectAreaModals
+        managerAreaId={managerAreaId}
         addArea={addArea}
         areaListMaxHeight={areaListMaxHeight}
         areaManagerListMaxHeight={areaManagerListMaxHeight}
@@ -1257,19 +1265,29 @@ export default function ProjectsScreen() {
         onCloseAreaManager={() => {
           setShowAreaManager(false);
           setExpandedAreaColorId(null);
+          setManagerAreaId(null);
         }}
         onDeleteArea={deleteArea}
         onSetExpandedAreaColorId={setExpandedAreaColorId}
         onSetNewAreaColor={setNewAreaColor}
         onSetNewAreaName={setNewAreaName}
-        onSetSelectedProject={setSelectedProject}
-        onSetShowAreaManager={setShowAreaManager}
-        onSetShowAreaPicker={setShowAreaPicker}
+        onSetSelectedProject={(project) => {
+          if (areaPickerProject) setAreaPickerProject(project);
+          else setSelectedProject(project);
+        }}
+        onSetShowAreaManager={(visible) => {
+          setManagerAreaId(null);
+          setShowAreaManager(visible);
+        }}
+        onSetShowAreaPicker={(visible) => {
+          setShowAreaPicker(visible);
+          if (!visible) setAreaPickerProject(null);
+        }}
         reorderAreas={reorderAreas}
         onShowToast={showToast}
         overlayModalPresentation={overlayModalPresentation}
         pickerCardMaxHeight={pickerCardMaxHeight}
-        selectedProject={selectedProject}
+        selectedProject={areaPickerProject ?? selectedProject}
         showAreaManager={showAreaManager}
         showAreaPicker={showAreaPicker}
         sortedAreas={sortedAreas}

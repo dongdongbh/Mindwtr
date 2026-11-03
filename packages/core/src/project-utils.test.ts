@@ -6,6 +6,8 @@ import {
     getProjectNextActionCandidates,
     getProjectNextActionPromptData,
     getProjectChoiceState,
+    groupProjectsForPicker,
+    sortProjectsForPicker,
     getProjectSectionsForView,
     getProjectsByArea,
     getProjectsByTag,
@@ -17,7 +19,7 @@ import {
 } from './project-utils';
 import { archiveSectionForProjectArchive } from './store-helpers';
 import { getFocusSequentialFirstTaskIds, getSequentialFirstTaskIds, isSequentialChainStatus } from './task-utils';
-import type { Project, Section, Task } from './types';
+import type { Area, Project, Section, Task } from './types';
 
 describe('project-utils', () => {
     const projects: Project[] = [
@@ -185,7 +187,7 @@ describe('project-utils', () => {
         const sectionProject: Project = { ...projects[0], id: 'seq', isSequential: true, sequentialScope: 'section' };
         expect(getProjectNextActionPromptData(completedTask, projectTasks, [sectionProject])).toBeNull();
 
-        // Section stalls but the project is parallel, or sequential over the whole project: no prompt.
+
         const stalledTasks = projectTasks.filter((task) => task.id !== 'a-next');
         const parallelProject: Project = { ...projects[0], id: 'seq' };
         const projectScoped: Project = { ...projects[0], id: 'seq', isSequential: true, sequentialScope: 'project' };
@@ -432,6 +434,26 @@ describe('project-utils', () => {
         expect(archived.filteredProjects).toEqual([]);
         expect(archived.exactMatch).toBeUndefined();
         expect(archived.canCreate).toBe(true);
+    });
+
+    it('groups picker projects into active, then Someday / Waiting, each in the Projects view order (#1467)', () => {
+        const now = '2026-01-01T00:00:00.000Z';
+        const area = (id: string, order: number, deletedAt?: string): Area => ({ id, name: id, order, createdAt: now, updatedAt: now, deletedAt });
+        const row = (id: string, status: Project['status'], order: number, areaId?: string) =>
+            ({ id, title: `Z ${id}`, status, order, areaId, color: '#000', createdAt: now, updatedAt: now }) as Project;
+        const areas = [area('work', 1), area('home', 0), area('gone', 2, now)];
+        const projects = [
+            row('s-home', 'someday', 0, 'home'), row('a-none', 'active', 0), row('a-work', 'active', 0, 'work'),
+            row('w-work', 'waiting', 1, 'work'), row('a-home-2', 'active', 2, 'home'), row('a-home-1', 'active', 1, 'home'),
+            row('a-gone', 'active', 0, 'gone'),
+        ];
+        const grouped = groupProjectsForPicker(projects, areas);
+
+        expect(grouped.active.map((project) => project.id)).toEqual(['a-home-1', 'a-home-2', 'a-work', 'a-gone', 'a-none']);
+        expect(grouped.deferred.map((project) => project.id)).toEqual(['s-home', 'w-work']);
+        expect(sortProjectsForPicker(projects, areas).map((project) => project.id))
+            .toEqual(['a-home-1', 'a-home-2', 'a-work', 'a-gone', 'a-none', 's-home', 'w-work']);
+        expect(groupProjectsForPicker([], areas)).toEqual({ active: [], deferred: [] });
     });
 
     it('marks archived and legacy completed projects as unavailable for task assignment', () => {

@@ -177,10 +177,8 @@ describe('deriveFocusTaskLists', () => {
 });
 
 describe('computeTodayFocusTasks parity with the screen derivation', () => {
-    // One fixture covering every bucket the widget flattens: a later-today
-    // start, a due-today task, a review-due waiting task, a review-due NEXT
-    // action (the one the widget folds back in), a sequential project whose
-    // step 3 is due today, and a starred someday task.
+
+
     const sequential = makeProject({ id: 'seq', isSequential: true });
     const tasks = [
         makeTask({ id: 'later-today', startTime: iso('2026-03-10T18:00:00') }),
@@ -214,22 +212,17 @@ describe('computeTodayFocusTasks parity with the screen derivation', () => {
         expect(ids(widget.focusTasks).sort()).toEqual(['due-today', 'later-today', 'review-next', 'step-3']);
     });
 
-    // Behaviour change, deliberate: the widget's pool is now narrowed by
-    // shouldShowTaskForStart, which defers a recurring task with no start date
-    // to its next due or review date (#843). Such a task sits in Upcoming on
-    // the screens; the widget has no Upcoming, so it drops out of the list.
+
     it('drops a recurring next action whose next due date is still in the future', () => {
         const recurring = makeTask({ id: 'weekly', recurrence: 'weekly', dueDate: iso('2026-03-17T09:00:00') });
         const pool = [recurring, makeTask({ id: 'plain' })];
         const widget = computeTodayFocusTasks({ activeTasks: pool, projects: [], sections: [], sortBy: 'default', now: NOW });
         expect(ids(widget.focusTasks)).toEqual(['plain']);
-        // The screens agree: it is not a Next action either.
+
         expect(ids(screenLists(pool).nextActions)).toEqual(['plain']);
     });
 
-    // Behaviour change, deliberate: Review Due carries no sequential gate on
-    // the screens, where it is its own labelled section. The widget folds it
-    // into one flat list, so it applies the gate on the way in.
+
     it('keeps a sequential step that lost its slot out of the folded list', () => {
         const project = makeProject({ id: 'seq2', isSequential: true });
         const pool = [
@@ -238,7 +231,7 @@ describe('computeTodayFocusTasks parity with the screen derivation', () => {
         ];
         const widget = computeTodayFocusTasks({ activeTasks: pool, projects: [project], sections: [], sortBy: 'default', now: NOW });
         expect(ids(widget.focusTasks)).toEqual(['first']);
-        // The screen still shows both under its Review Due heading.
+
         expect(ids(screenLists(pool).reviewDue).sort()).toEqual(['first', 'third']);
     });
 });

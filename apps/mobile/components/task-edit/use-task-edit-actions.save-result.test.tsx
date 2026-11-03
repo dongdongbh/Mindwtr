@@ -12,10 +12,6 @@ vi.mock('expo-router', () => ({
     router: { push: vi.fn() },
 }));
 
-/**
- * Store writes resolve `{ success: false, error }` WITHOUT throwing. The editor
- * must be checked before the editor closes.
- */
 
 const baseTask: Task = {
     id: 'task-1',
@@ -182,9 +178,7 @@ describe('task editor save results', () => {
         }));
     });
 
-    // Regression guard for the old hardcoded 'Task update failed' literal, which
-    // was a non-empty string and therefore pre-empted the `task.updateFailed`
-    // lookup it was supposed to be a fallback for.
+
     it('routes a message-less failure through the translated copy', async () => {
         const onSave = vi.fn(() => Promise.resolve({ success: false }));
 
@@ -359,8 +353,7 @@ describe('task editor save results', () => {
         }));
     });
 
-    // The conversion soft-deletes the task, so an uncommitted title edit would be
-    // lost with it unless the draft is saved first (#1106).
+
     it('commits the open draft before converting the task into a section', async () => {
         const onSave = vi.fn(() => Promise.resolve({ success: true }));
         const convertTaskToSection = vi.fn(async () => ({ success: true }));
