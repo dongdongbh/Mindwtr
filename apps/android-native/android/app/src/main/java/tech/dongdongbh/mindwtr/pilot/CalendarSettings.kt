@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -228,6 +229,7 @@ internal fun CalendarSettingsDialogs(model: InboxViewModel) {
     val screen = model.menu.settings.calendar
     val question = screen.confirm?.getJSONObject("confirm") ?: return
     AlertDialog(
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         onDismissRequest = { screen.closeConfirm() },
         title = { Text(question.getString("title")) },
         text = { Text(question.getString("message")) },

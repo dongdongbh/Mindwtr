@@ -1667,7 +1667,7 @@ const scenarioCalendarPush = async () => {
         check(ownRows().length === 1, '(12) N9: a color change in the native card leaves one Mindwtr calendar, made with the marker name, in the new color, with the two live tasks\' events');
         const deleteRow = (current) => current.find((node) => node['content-desc'] === en['settings.calendarMobile.deleteMindwtrCalendar']);
         await tap(await scrollTo(deleteRow, 'Delete Mindwtr calendar'));
-        const confirm = (current) => tagged(current, 'calendar-delete-confirm') ?? current.find((node) => node.text === en['common.delete']);
+        const confirm = (current) => tagged(current, 'calendar-delete-confirm');
         await tap(await waitFor('the Delete question', (current) => Boolean(confirm(current)), 15_000).then(confirm));
         await until('the Mindwtr calendar deleted', () => !mindwtrCalendars().some((row) => !earlier.has(row._id)), 60_000);
         await stopApp();
