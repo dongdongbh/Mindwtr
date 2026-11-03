@@ -536,6 +536,48 @@ describe('GlobalSearch', () => {
     });
 
 
+
+
+    it('keeps Escape for the IME and answers typing and arrows after a reopen that cut off a composition', async () => {
+        const searchAll = vi.fn(async (value: string) => ({
+            tasks: tasks.filter((task) => task.title.toLowerCase().includes(value.toLowerCase())),
+            projects: [],
+        }));
+        setStorageAdapter({ ...initialStorageAdapter, searchAll });
+        useTaskStore.setState({ settings: {} });
+        render(<LanguageProvider><GlobalSearch onNavigate={vi.fn()} /></LanguageProvider>);
+        await act(async () => {
+            window.dispatchEvent(new Event('mindwtr:open-search'));
+            await vi.advanceTimersByTimeAsync(50);
+        });
+
+        fireEvent.compositionStart(screen.getByRole('textbox', { name: 'Search' }));
+        fireEvent.keyDown(window, { key: 'Escape', isComposing: true });
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+        fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+        await act(async () => {
+            window.dispatchEvent(new Event('mindwtr:open-search'));
+            await vi.advanceTimersByTimeAsync(50);
+        });
+        const input = screen.getByRole('textbox', { name: 'Search' });
+        fireEvent.change(input, { target: { value: 'task' } });
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(200);
+        });
+        const rows = () => Array.from(screen.getByRole('dialog').querySelectorAll('[data-search-index]'));
+        expect(rows()).toHaveLength(2);
+        expect(rows()[0]).toHaveClass('bg-accent');
+
+        fireEvent.keyDown(input, { key: 'ArrowDown' });
+        expect(rows()[1]).toHaveClass('bg-accent');
+    });
+
+
+
+
     describe('routing a task that belongs to a project', () => {
         const projectTask: Task = {
             id: 'project-task',

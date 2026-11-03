@@ -120,6 +120,16 @@ describe('WeeklyReviewGuideModal', () => {
         vi.useRealTimers();
     });
 
+    it('does not close the review for IME Escape', () => {
+        const onClose = vi.fn();
+        render(<WeeklyReviewGuideModal onClose={onClose} />);
+        fireEvent.keyDown(window, { key: 'Escape', isComposing: true });
+        fireEvent.keyDown(window, { key: 'Escape', keyCode: 229 });
+        expect(onClose).not.toHaveBeenCalled();
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+
     it('lands on the all-clear step when nothing needs review', () => {
         render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
 

@@ -438,6 +438,7 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
 
 
         modifier = modifier.onPreviewKeyEvent { event ->
+            if (field.composition != null) return@onPreviewKeyEvent false
             val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
             if (enter && event.type == KeyEventType.KeyDown) saveCapture(openAfterSave = false)
             enter

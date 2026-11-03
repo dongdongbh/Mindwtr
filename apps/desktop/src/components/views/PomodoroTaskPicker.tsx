@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { Task } from '@mindwtr/core';
 import { ChevronDown, Timer } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { ModalPortal } from '../ModalPortal';
 import { useDropdownPosition } from '../ui/use-dropdown-position';
 
@@ -77,6 +78,7 @@ export function PomodoroTaskPicker({
     };
 
     const handleDropdownKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             closeDropdown();
@@ -94,7 +96,7 @@ export function PomodoroTaskPicker({
     };
 
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key !== 'Enter') return;
+        if (isImeComposing(event) || event.key !== 'Enter') return;
         const firstMatch = filtered[0];
         if (!firstMatch) return;
         event.preventDefault();

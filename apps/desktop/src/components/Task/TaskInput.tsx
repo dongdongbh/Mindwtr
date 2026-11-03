@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 're
 import type { ClipboardEventHandler, KeyboardEventHandler, RefObject } from 'react';
 import { getTaskContextMatches, resolveFeatureFlags, useTaskStore, type Area, type Project, type TaskPriority } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import {
     compareAutocompleteLabels,
     matchesAutocompleteQuery,
@@ -555,6 +556,8 @@ export function TaskInput({
     };
 
     const handleKeyDown: KeyboardEventHandler<HTMLInputElement> = async (event) => {
+
+        if (isImeComposing(event)) return;
         const lowerKey = event.key.toLowerCase();
         if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && lowerKey === 'z') {
             const previousEntry = undoRef.current[undoRef.current.length - 1];
@@ -567,10 +570,6 @@ export function TaskInput({
                 scheduleSelectionRestore(previousEntry.selection);
                 return;
             }
-        }
-        if (event.nativeEvent.isComposing || event.key === 'Process') {
-            onKeyDown?.(event);
-            return;
         }
         if (trigger && options.length > 0) {
             if (event.key === 'ArrowDown') {

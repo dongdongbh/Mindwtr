@@ -11,6 +11,7 @@ import { getProjectAccentColor, DEFAULT_PROJECT_COLOR, filterProjectsBySelectedA
 } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
+import { isImeComposing } from '../lib/ime';
 import { useNativeDateInputLocale } from '../hooks/use-native-date-input-locale';
 import { InboxNextActionDrafts } from './InboxNextActionDrafts';
 import {
@@ -1249,7 +1250,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                             value={projectSearch}
                                             onChange={(e) => setProjectSearch(e.target.value)}
                                             onKeyDown={async (e) => {
-                                                if (e.key !== 'Enter') return;
+                                                if (isImeComposing(e) || e.key !== 'Enter') return;
                                                 if (!projectSearch.trim()) return;
                                                 e.preventDefault();
                                                 const title = projectSearch.trim();

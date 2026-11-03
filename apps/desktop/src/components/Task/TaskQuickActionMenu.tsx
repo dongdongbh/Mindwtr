@@ -33,6 +33,7 @@ import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 import { reportError } from '../../lib/report-error';
 import { copyTaskReference, copyTaskTitles } from '../../lib/task-clipboard';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { FocusStarIcon } from '../FocusStarIcon';
 import { Button } from '../ui/Button';
 import { DestinationSelector } from '../ui/DestinationSelector';
@@ -403,6 +404,7 @@ export function TaskQuickActionMenu({
 
 
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (isImeComposing(event)) return;
             cancelHoverOpen();
             const target = event.target instanceof Node ? event.target : null;
             const inSelectorDropdown = Boolean(
@@ -755,7 +757,7 @@ export function TaskQuickActionMenu({
 
 
     const handlePanelKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-        if (event.key !== 'Enter' || event.defaultPrevented || !activePanel) return;
+        if (event.key !== 'Enter' || event.defaultPrevented || isImeComposing(event) || !activePanel) return;
         const target = event.target instanceof HTMLElement ? event.target : null;
         if (target?.closest('button, [data-selector-dropdown="true"]')) return;
         event.preventDefault();
@@ -1315,7 +1317,7 @@ export function TaskQuickActionMenu({
                         <div
                             className="space-y-2"
                             onKeyDown={(event) => {
-                                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                                if (isImeComposing(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
 
                                 const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input, [role="option"]'));
                                 const index = controls.indexOf(document.activeElement as HTMLElement);

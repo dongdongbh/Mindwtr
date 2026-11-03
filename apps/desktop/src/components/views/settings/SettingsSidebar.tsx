@@ -2,6 +2,7 @@ import { type ComponentType, useEffect, useState, useMemo, useId } from 'react';
 import { Search } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
+import { isImeComposing } from '../../../lib/ime';
 import {
     formatSettingsSearchPath,
     matchSettingsSearchResults,
@@ -64,6 +65,7 @@ export function SettingsSidebar({
     };
 
     const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             setSearch('');

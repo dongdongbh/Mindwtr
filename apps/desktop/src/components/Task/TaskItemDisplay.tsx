@@ -2,6 +2,7 @@ import { AlertTriangle, AlignLeft, Folder, Calendar as CalendarIcon, Tag, Trash2
 import type { Area, Attachment, Project, RangeSelectionOptions, Section, Task, TaskStatus, RecurrenceRule, RecurrenceStrategy, Language } from '@mindwtr/core';
 import { DEFAULT_AREA_COLOR, TASK_PRIORITY_COLORS, formatRecurrenceLabel, formatTimeEstimateLabel, formatTimeSpentLabel, getChecklistProgress, getContextColor, getInlineMarkdownPreview, getRecurringTaskPreviewDate, getTaskAgeLabel, getTaskDateCoherenceIssues, getTaskStaleness, getTaskUrgency, hasTimeComponent, isTaskActionable, isTaskCancelled, isTaskCompleted, isTaskFinished, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { STATUS_PILL_CLASSES } from '../../lib/status-colors';
 import { isFolderLinkAttachment, useBareFileReferenceCheck } from '../../lib/attachment-reference';
 import { getAttachmentDisplayTitle } from '../../lib/attachment-utils';
@@ -774,6 +775,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             onClick={(event) => event.stopPropagation()}
                             onDoubleClick={(event) => event.stopPropagation()}
                             onKeyDown={(event) => {
+                                if (isImeComposing(event)) return;
                                 if (event.key === 'Enter') {
                                     event.preventDefault();
                                     commitInlineRename();

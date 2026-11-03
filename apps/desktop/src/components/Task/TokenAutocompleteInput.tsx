@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { FocusEventHandler, KeyboardEventHandler, RefObject } from 'react';
 
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import {
     rankAutocompleteTokens,
     stripTokenPrefix,
@@ -152,10 +153,7 @@ export function TokenAutocompleteInput({
     };
 
     const handleKeyDown: KeyboardEventHandler<HTMLInputElement> = (event) => {
-        if (event.nativeEvent.isComposing || event.key === 'Process') {
-            onKeyDown?.(event);
-            return;
-        }
+        if (isImeComposing(event)) return;
 
         if (hasOptions) {
             if (event.key === 'ArrowDown') {

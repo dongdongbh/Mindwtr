@@ -4,6 +4,7 @@ import { useLanguage } from './language-context';
 import { KeybindingHelpModal } from '../components/KeybindingHelpModal';
 import { isFlatpakRuntime, isTauriRuntime } from '../lib/runtime';
 import { reportError } from '../lib/report-error';
+import { isImeComposing } from '../lib/ime';
 import { nextDensityMode } from '../lib/density';
 import { takeUndoableAction } from '../lib/undo-registry';
 import { logInfo, logWarn } from '../lib/app-log';
@@ -828,7 +829,7 @@ export function KeybindingProvider({
         };
 
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.defaultPrevented) return;
+            if (e.defaultPrevented || isImeComposing(e)) return;
             if (pendingRef.current.key === 'y' && (style !== 'vim' || e.key === 'F11' || e.metaKey || e.ctrlKey || e.altKey
                 || CHORD_MODIFIER_KEYS.has(e.key) || editingTaskIdRef.current || isEditableTarget(e.target)
                 || hasModalDialogOpen()

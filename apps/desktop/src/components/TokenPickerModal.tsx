@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
+import { isImeComposing } from '../lib/ime';
 import { Dialog, DialogBody, DialogHeader } from './ui/Dialog';
 
 interface TokenPickerModalProps {
@@ -103,6 +104,7 @@ export function TokenPickerModal({
                         }
                     }}
                     onKeyDown={(event) => {
+                        if (isImeComposing(event)) return;
                         if (event.key === 'Escape') {
                             event.preventDefault();
                             onCancel();

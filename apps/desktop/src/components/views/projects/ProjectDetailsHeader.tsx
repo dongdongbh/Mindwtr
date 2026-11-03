@@ -3,6 +3,7 @@ import { safeParseDate, tFallback, type Project } from '@mindwtr/core';
 import { Calendar, CheckCircle, Copy, FolderOpenDot, FolderPlus, Loader2, MoreHorizontal, RotateCcw, Signal, SlidersHorizontal, Trash2, XCircle } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { isImeComposing } from '../../../lib/ime';
 
 type ProjectProgress = {
     total: number;
@@ -201,6 +202,7 @@ export function ProjectDetailsHeader({
                                 skipTitleCommitOnBlurRef.current = false;
                             }}
                             onKeyDown={(e) => {
+                                if (isImeComposing(e)) return;
                                 if (e.key === 'Enter') {
                                     e.preventDefault();
                                     e.currentTarget.blur();

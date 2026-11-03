@@ -31,6 +31,7 @@ import {
 } from '@mindwtr/core';
 
 import { cn } from '../../../lib/utils';
+import { isImeComposing } from '../../../lib/ime';
 import { STATUS_PILL_ACTIVE_CLASSES } from '../../../lib/status-colors';
 import { PriorityFlag } from '../PriorityFlag';
 import {
@@ -356,7 +357,7 @@ function ToggleTokenField({
     };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (filteredSuggestions.length === 0) return;
+        if (isImeComposing(event) || filteredSuggestions.length === 0) return;
         if (event.key === 'ArrowDown') {
             event.preventDefault();
             setActiveIndex((index) => (index + 1) % filteredSuggestions.length);
@@ -507,7 +508,7 @@ function AutocompleteTextField({
     };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (optionCount === 0) return;
+        if (isImeComposing(event) || optionCount === 0) return;
         if (event.key === 'ArrowDown') {
             event.preventDefault();
             setActiveIndex((index) => (index + 1) % optionCount);

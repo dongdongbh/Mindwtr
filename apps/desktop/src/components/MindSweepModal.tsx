@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Brain, X } from 'lucide-react';
 import { getMindSweepGroups, type MindSweepScope, type StoreActionResult, type Task } from '@mindwtr/core';
 import { Dialog, DialogBody } from './ui/Dialog';
+import { isImeComposing } from '../lib/ime';
 
 type MindSweepModalProps = {
     isOpen: boolean;
@@ -160,6 +161,7 @@ export function MindSweepModal({ isOpen, onClose, t, addTask }: MindSweepModalPr
                                 value={draft}
                                 onChange={(event) => setDraft(event.target.value)}
                                 onKeyDown={(event) => {
+                                    if (isImeComposing(event)) return;
                                     if (event.key === 'Enter') {
                                         event.preventDefault();
                                         void handleAdd();

@@ -23,6 +23,7 @@ import {
     isSandboxMode,
 } from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
+import { isImeComposing } from '../../../lib/ime';
 import { useLanguage } from '../../../contexts/language-context';
 import { FocusStarIcon } from '../../FocusStarIcon';
 import { InboxProcessor } from '../InboxProcessor';
@@ -133,7 +134,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
+            if (event.key === 'Escape' && !isImeComposing(event)) {
                 event.preventDefault();
                 onClose();
             }

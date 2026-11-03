@@ -475,7 +475,7 @@ private struct CaptureTextInput: UIViewRepresentable {
         init(_ parent: CaptureTextInput) { self.parent = parent }
         func textViewDidChange(_ view: UITextView) { parent.text = view.text }
         func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            if text == "\n" { parent.submit(); return false }
+            if text == "\n", view.markedTextRange == nil { parent.submit(); return false }
             return true
         }
     }

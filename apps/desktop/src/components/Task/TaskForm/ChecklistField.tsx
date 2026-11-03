@@ -29,6 +29,7 @@ import {
     type Task,
 } from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
+import { isImeComposing } from '../../../lib/ime';
 import { TaskEditorFieldLabel } from '../task-editor-label';
 import {
     captureScrollSnapshot,
@@ -440,6 +441,7 @@ export function ChecklistField({
                                                     }
                                                 }}
                                                 onKeyDown={(event) => {
+                                                    if (isImeComposing(event)) return;
                                                     const currentValue = event.currentTarget.value;
                                                     const eventSelection = getInputSelection(event.currentTarget);
                                                     const lowerKey = event.key.toLowerCase();

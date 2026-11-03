@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState, type KeyboardEvent, type MouseEven
 import { normalizeTimeSpentMinutes, tFallback } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { useNativeDateInputLocale } from '../hooks/use-native-date-input-locale';
+import { isImeComposing } from '../lib/ime';
 import {
     joinDateTimeLocal,
     parseDateTimeLocalDate,
@@ -108,6 +109,7 @@ export function PromptModal({
 
 
     const handleFieldKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+        if (event.defaultPrevented || isImeComposing(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             onCancel();

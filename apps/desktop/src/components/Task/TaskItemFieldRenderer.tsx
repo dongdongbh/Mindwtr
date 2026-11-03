@@ -45,6 +45,7 @@ import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 import { remove } from '@tauri-apps/plugin-fs';
 
 import { useMarkdownReferenceAutocomplete } from '../MarkdownReferenceAutocomplete';
+import { isImeComposing } from '../../lib/ime';
 import { DateField } from '../ui/DateField';
 import { TimeInput } from '../ui/TimeInput';
 import { AttachmentsField } from './TaskForm/AttachmentsField';
@@ -434,6 +435,7 @@ export function TaskItemFieldRenderer({
         },
     });
     const handleDescriptionKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (isImeComposing(event)) return;
         if (descriptionAutocomplete.handleKeyDown(event)) {
             return;
         }

@@ -4,6 +4,7 @@ import { FolderOpen } from 'lucide-react';
 import { useLanguage } from '../../../contexts/language-context';
 import { reportError } from '../../../lib/report-error';
 import { cn } from '../../../lib/utils';
+import { isImeComposing } from '../../../lib/ime';
 import {
     createWorkspace,
     deleteWorkspace,
@@ -130,6 +131,7 @@ export function SettingsWorkspacesSection() {
                                                 maxLength={64}
                                                 onChange={(event) => setEditing({ ...editing, name: event.target.value })}
                                                 onKeyDown={(event) => {
+                                                    if (isImeComposing(event)) return;
                                                     if (event.key === 'Enter') void handleRename();
                                                     if (event.key === 'Escape') setEditing(null);
                                                 }}
@@ -220,6 +222,7 @@ export function SettingsWorkspacesSection() {
                             maxLength={64}
                             onChange={(event) => setNewName(event.target.value)}
                             onKeyDown={(event) => {
+                                if (isImeComposing(event)) return;
                                 if (event.key === 'Enter') void handleAdd();
                             }}
                             aria-label={t('workspaces.namePlaceholder')}

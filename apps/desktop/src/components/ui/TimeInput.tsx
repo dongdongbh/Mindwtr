@@ -9,6 +9,7 @@ import {
     type KeyboardEvent,
 } from 'react';
 import { flushSync } from 'react-dom';
+import { isImeComposing } from '../../lib/ime';
 import {
     normalizeClockTimeInput,
     normalizeTimeFormatSetting,
@@ -178,6 +179,7 @@ export const TimeInput = forwardRef<HTMLInputElement, TimeInputProps>(function T
     };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Enter') {
             const parsed = parseClockTimeDraft(draft, resolvedFormat);
             if (parsed === null) {
