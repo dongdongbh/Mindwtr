@@ -11,9 +11,8 @@ import { AUDIT_EXCEPTIONS, validateBunAuditTopology, validateNpmAuditTopology, v
 const rootRequire = createRequire(import.meta.url);
 
 const IMAGE_SIZE_ADVISORIES = ["GHSA-5p2g-fcmc-qvqq", "GHSA-w3rx-r6r6-pgpr"];
-const FORGE_ADVISORY = "GHSA-86w9-cpqp-85rv";
 const DEEPMERGE_ADVISORY = "GHSA-gcqx-w48m-w2h4";
-const BUN_ADVISORIES = [...IMAGE_SIZE_ADVISORIES, FORGE_ADVISORY, DEEPMERGE_ADVISORY];
+const BUN_ADVISORIES = [...IMAGE_SIZE_ADVISORIES, DEEPMERGE_ADVISORY];
 const profiles = {mobile: "apps/mobile", eas: "tools/eas-cli"};
 const npmLock = (profile) => JSON.parse(readFileSync(`${profiles[profile]}/package-lock.json`, "utf8"));
 const bunLock = () => {
@@ -75,16 +74,16 @@ test("mobile query parsing keeps a patched CommonJS-compatible resolution", () =
     "utf8",
   );
 
-  expect(rootManifest.dependencies["decode-uri-component"]).toBe("0.5.0");
+  expect(rootManifest.dependencies["decode-uri-component"]).toBe("0.5.1");
   expect(rootManifest.dependencies["query-string"]).toBe("^9.3.1");
-  expect(rootManifest.overrides["decode-uri-component"]).toBe("0.5.0");
-  expect(rootManifest.resolutions["decode-uri-component"]).toBe("0.5.0");
+  expect(rootManifest.overrides["decode-uri-component"]).toBe("0.5.1");
+  expect(rootManifest.resolutions["decode-uri-component"]).toBe("0.5.1");
   expect(rootManifest.patchedDependencies["query-string@7.1.3"]).toBe(
     "patches/query-string@7.1.3.patch",
   );
-  expect(mobileManifest.dependencies["decode-uri-component"]).toBe("0.5.0");
+  expect(mobileManifest.dependencies["decode-uri-component"]).toBe("0.5.1");
   expect(mobileManifest.dependencies["query-string"]).toBe("7.1.3");
-  expect(mobileManifest.overrides["decode-uri-component"]).toBe("0.5.0");
+  expect(mobileManifest.overrides["decode-uri-component"]).toBe("0.5.1");
   expect(mobileManifest.overrides["query-string"]).toBe("7.1.3");
   expect(mobileManifest.scripts.postinstall).toBe(
     "node scripts/patch_query_string_cjs.js",
@@ -109,9 +108,9 @@ test("mobile query parsing keeps a patched CommonJS-compatible resolution", () =
       queryStringVersions.add(metadata.version);
     }
   }
-  expect([...decodeVersions]).toEqual(["0.5.0"]);
+  expect([...decodeVersions]).toEqual(["0.5.1"]);
   expect([...queryStringVersions]).toEqual(["7.1.3"]);
-  expect(bunLock).toContain('["decode-uri-component@0.5.0"');
+  expect(bunLock).toContain('["decode-uri-component@0.5.1"');
   expect(bunLock).not.toMatch(/decode-uri-component@(?:0\.[0-4](?:\.|\")|0\.4\.2)/);
   expect(new Set(bunLock.match(/\["query-string@[^\"]+"/g))).toEqual(new Set([
     '["query-string@7.1.3"',
@@ -187,7 +186,6 @@ const advisory = (name, id, range) => ({
 
 const allowedReport = (profile) => {
   const vulnerabilities = {
-    "node-forge": {name: "node-forge", severity: "high", via: [advisory("node-forge", FORGE_ADVISORY, "<=1.4.0")], nodes: ["node_modules/node-forge"]},
     deepmerge: {name: "deepmerge", severity: "low", via: [advisory("deepmerge", DEEPMERGE_ADVISORY, ">=4.2.0 <=4.3.1")], nodes: ["node_modules/deepmerge"]},
   };
   if (profile === "mobile") vulnerabilities["image-size"] = {
@@ -207,22 +205,20 @@ for (const profile of Object.keys(profiles)) {
     expect(() => validateNpmAuditReport(allowedReport(profile), profile, npmLock(profile))).not.toThrow();
     if (profile === "mobile") expect(() => validateMobileAuditReport(allowedReport(profile))).not.toThrow();
     const unexpected = allowedReport(profile);
-    unexpected.vulnerabilities["node-forge"].via.push(advisory("node-forge", "GHSA-unexpected-advisory", "<=1.4.0"));
+    unexpected.vulnerabilities.deepmerge.via.push(advisory("deepmerge", "GHSA-unexpected-advisory", ">=4.2.0 <=4.3.1"));
     expect(() => validateNpmAuditReport(unexpected, profile, npmLock(profile))).toThrow(/unexpected direct advisories/);
     const missing = allowedReport(profile);
-    missing.vulnerabilities["node-forge"].via = [];
+    missing.vulnerabilities.deepmerge.via = [];
     expect(() => validateNpmAuditReport(missing, profile, npmLock(profile))).toThrow(/invalid dependency record/);
   });
 
   test(`${profile} exceptions fail on version, topology, or runtime exposure drift`, () => {
     for (const mutate of [
-      (lock) => { lock.packages["node_modules/node-forge"].version = "1.4.1"; },
-      (lock) => { lock.packages["node_modules/new-runtime"] = {version: "1.0.0", dependencies: {"node-forge": "1.4.0"}}; },
-      (lock) => { lock.packages["node_modules/nested/node_modules/node-forge"] = {version: "1.4.0"}; },
-      (lock) => { lock.packages[""].dependencies["node-forge"] = "1.4.0"; },
-      (lock) => { lock.packages["node_modules/@expo/code-signing-certificates"].dependencies["node-forge"] = "^0.10.0"; },
       (lock) => { lock.packages["node_modules/deepmerge"].version = "4.3.2"; },
       (lock) => { lock.packages["node_modules/new-runtime"] = {version: "1.0.0", dependencies: {deepmerge: "^4.3.1"}}; },
+      (lock) => { lock.packages["node_modules/nested/node_modules/deepmerge"] = {version: "4.3.1"}; },
+      (lock) => { lock.packages[""].dependencies.deepmerge = "4.3.1"; },
+      (lock) => { lock.packages["node_modules/@expo/config"].dependencies.deepmerge = "^0.10.0"; },
     ]) {
       const lock = npmLock(profile);
       mutate(lock);
@@ -239,15 +235,15 @@ test("npm exceptions reject malformed reports, API errors, unknown records, and 
     (r) => { delete r.metadata; },
     (r) => { r.metadata.vulnerabilities.total = 999; },
     (r) => { r.metadata.vulnerabilities.high = -1; },
-    (r) => { r.vulnerabilities["node-forge"].name = "unrelated"; },
-    (r) => { r.vulnerabilities["node-forge"].severity = "unknown"; },
-    (r) => { r.vulnerabilities["node-forge"].nodes = ["node_modules/unknown"]; },
-    (r) => { r.vulnerabilities["node-forge"].via[0].dependency = "unrelated"; },
-    (r) => { r.vulnerabilities["node-forge"].via[0].url = `https://evil.example/advisories/${FORGE_ADVISORY}`; },
-    (r) => { r.vulnerabilities["node-forge"].via[0].range = "*"; },
-    (r) => { r.vulnerabilities["node-forge"].via.push(null); },
-    (r) => { r.vulnerabilities["node-forge"].via.push("unrelated"); },
-    (r) => { r.vulnerabilities["node-forge"].via.push(r.vulnerabilities["node-forge"].via[0]); },
+    (r) => { r.vulnerabilities.deepmerge.name = "unrelated"; },
+    (r) => { r.vulnerabilities.deepmerge.severity = "unknown"; },
+    (r) => { r.vulnerabilities.deepmerge.nodes = ["node_modules/unknown"]; },
+    (r) => { r.vulnerabilities.deepmerge.via[0].dependency = "unrelated"; },
+    (r) => { r.vulnerabilities.deepmerge.via[0].url = `https://evil.example/advisories/${DEEPMERGE_ADVISORY}`; },
+    (r) => { r.vulnerabilities.deepmerge.via[0].range = "*"; },
+    (r) => { r.vulnerabilities.deepmerge.via.push(null); },
+    (r) => { r.vulnerabilities.deepmerge.via.push("unrelated"); },
+    (r) => { r.vulnerabilities.deepmerge.via.push(r.vulnerabilities.deepmerge.via[0]); },
   ]) {
     const report = allowedReport("mobile");
     mutate(report);
@@ -257,14 +253,14 @@ test("npm exceptions reject malformed reports, API errors, unknown records, and 
 
 test("npm advisory closure rejects missing dependencies and unrelated cycles", () => {
   const missing = allowedReport("mobile");
-  missing.vulnerabilities["@expo/code-signing-certificates"] = {
-    name: "@expo/code-signing-certificates", severity: "high", via: ["node-forge"], nodes: ["node_modules/@expo/code-signing-certificates"],
+  missing.vulnerabilities["@expo/config"] = {
+    name: "@expo/config", severity: "low", via: ["deepmerge"], nodes: ["node_modules/@expo/config"],
   };
-  missing.metadata.vulnerabilities.high += 1;
+  missing.metadata.vulnerabilities.low += 1;
   missing.metadata.vulnerabilities.total += 1;
   expect(() => validateMobileAuditReport(missing)).not.toThrow();
-  delete missing.vulnerabilities["node-forge"];
-  missing.metadata.vulnerabilities.high -= 1;
+  delete missing.vulnerabilities.deepmerge;
+  missing.metadata.vulnerabilities.low -= 1;
   missing.metadata.vulnerabilities.total -= 1;
   expect(() => validateMobileAuditReport(missing)).toThrow(/unexpected direct advisories/);
   const unrelated = allowedReport("mobile");
@@ -277,11 +273,10 @@ test("npm advisory closure rejects missing dependencies and unrelated cycles", (
 
 test("Bun exceptions reject new runtime consumers, nested copies, and changed versions", () => {
   for (const mutate of [
-    (lock) => { lock.packages["node-forge"][0] = "node-forge@1.4.1"; },
-    (lock) => { lock.packages["unexpected-runtime"] = ["unexpected-runtime@1.0.0", "", {dependencies: {"node-forge": "1.4.0"}}]; },
-    (lock) => { lock.packages["nested/node-forge"] = structuredClone(lock.packages["node-forge"]); },
-    (lock) => { lock.workspaces["apps/cloud"].dependencies["node-forge"] = "1.4.0"; },
     (lock) => { lock.packages.deepmerge[0] = "deepmerge@4.3.2"; },
+    (lock) => { lock.packages["unexpected-runtime"] = ["unexpected-runtime@1.0.0", "", {dependencies: {deepmerge: "4.3.1"}}]; },
+    (lock) => { lock.packages["nested/deepmerge"] = structuredClone(lock.packages.deepmerge); },
+    (lock) => { lock.workspaces["apps/cloud"].dependencies.deepmerge = "4.3.1"; },
     (lock) => { lock.workspaces["packages/core"].dependencies = {...lock.workspaces["packages/core"].dependencies, deepmerge: "^4.3.1"}; },
   ]) {
     const lock = bunLock();

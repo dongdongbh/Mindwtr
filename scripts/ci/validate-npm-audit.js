@@ -1,9 +1,6 @@
 import { readFileSync } from "node:fs";
 
 export const AUDIT_EXCEPTIONS = {
-  "node-forge": { version: "1.4.0", advisories: { "GHSA-86w9-cpqp-85rv": "<=1.4.0" } },
-
-
   deepmerge: { version: "4.3.1", advisories: { "GHSA-gcqx-w48m-w2h4": ">=4.2.0 <=4.3.1" } },
   "image-size": { version: "1.2.1", advisories: {
     "GHSA-5p2g-fcmc-qvqq": ">=1.2.0 <=2.0.2",
@@ -11,7 +8,7 @@ export const AUDIT_EXCEPTIONS = {
   } },
 };
 const PROFILE_ROOTS = {
-  mobile: ["node-forge", "image-size", "deepmerge"], eas: ["node-forge", "deepmerge"],
+  mobile: ["image-size", "deepmerge"], eas: ["deepmerge"],
 };
 export const PROFILE_PREFIXES = { mobile: "apps/mobile", eas: "tools/eas-cli" };
 const reviewedTopology = JSON.parse(readFileSync(new URL("./audit-build-tool-topology.json", import.meta.url), "utf8"));

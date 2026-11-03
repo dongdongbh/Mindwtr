@@ -88,7 +88,6 @@ jobs:
           if ! bun audit \
             --ignore=GHSA-5p2g-fcmc-qvqq \
             --ignore=GHSA-w3rx-r6r6-pgpr \
-            --ignore=GHSA-86w9-cpqp-85rv \
             --ignore=GHSA-gcqx-w48m-w2h4; then
             echo "bun audit reported vulnerabilities or failed." >&2
             exit 1

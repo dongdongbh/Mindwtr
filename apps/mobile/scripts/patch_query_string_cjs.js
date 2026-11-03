@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const QUERY_STRING_VERSION = '7.1.3';
-const DECODE_URI_COMPONENT_VERSION = '0.5.0';
+const DECODE_URI_COMPONENT_VERSION = '0.5.1';
 const ORIGINAL_IMPORT = "const decodeComponent = require('decode-uri-component');";
 const COMPATIBLE_IMPORT = [
   "const decodeComponentModule = require('decode-uri-component');",
