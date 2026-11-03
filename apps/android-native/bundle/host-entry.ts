@@ -20,7 +20,7 @@ import {
     nameNotifyListener,
     STATUS_COLORS_BY_THEME,
     type SqliteAdapter,
-    TASK_PRIORITY_COLORS,
+    getTaskPriorityColors,
     consoleLogger,
     createDiagnosticsLog,
     createFeedbackDiagnosticsBuffer,
@@ -2515,7 +2515,7 @@ globalThis.MindwtrHost = {
                     light: STATUS_COLORS_BY_THEME[lightPreset ?? 'light'],
                     dark: STATUS_COLORS_BY_THEME[darkPreset ?? 'dark'],
                 },
-                priority: TASK_PRIORITY_COLORS,
+                priority: getTaskPriorityColors(lightPreset),
             };
         });
     },

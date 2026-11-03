@@ -1,6 +1,7 @@
 import React from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { Star } from 'lucide-react-native';
+import { useEinkSafeColor } from '../hooks/use-eink-safe-color';
 
 export const FOCUS_STAR_COLOR = '#F59E0B';
 
@@ -19,11 +20,13 @@ export function FocusStarIcon({
     size = 22,
     style,
 }: FocusStarIconProps) {
+    const einkSafe = useEinkSafeColor();
+    const starColor = einkSafe(FOCUS_STAR_COLOR);
     return (
         <Star
             size={size}
-            color={focused ? FOCUS_STAR_COLOR : inactiveColor}
-            fill={focused ? FOCUS_STAR_COLOR : 'transparent'}
+            color={focused ? starColor : inactiveColor}
+            fill={focused ? starColor : 'transparent'}
             strokeWidth={2}
             style={[
                 style,

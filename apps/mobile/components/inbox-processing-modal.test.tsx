@@ -297,7 +297,8 @@ vi.mock('../contexts/language-context', () => ({
   }),
 }));
 
-vi.mock('../contexts/theme-context', () => ({
+vi.mock('../contexts/theme-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../contexts/theme-context')>(),
   useTheme: () => ({ isDark: false }),
 }));
 

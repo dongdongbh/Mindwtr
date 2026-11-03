@@ -60,6 +60,30 @@ describe('TaskItemDisplay', () => {
         showQuickDone={false} readOnly={false} showTaskAge={showTaskAge} t={(key) => key}
     /></LanguageProvider>;
 
+    it.each(['light', 'eink'])('renders project and area dots safely on %s', (theme) => {
+        const props: ComponentProps<typeof TaskItemDisplay> = {
+            task: baseTask, language: 'en', selectionMode: false, isViewOpen: true,
+            theme, project: baseProject, projectColor: baseProject.color,
+            actions: { onToggleView: vi.fn(), onEdit: vi.fn(), onDelete: vi.fn(),
+                onDuplicate: vi.fn(), onStatusChange: vi.fn(), openAttachment: vi.fn() },
+            visibleAttachments: [], recurrenceRule: '', recurrenceStrategy: 'strict',
+            prioritiesEnabled: false, timeEstimatesEnabled: false, isStagnant: false,
+            showQuickDone: false, readOnly: false, t: (key) => key,
+        };
+        const view = render(<LanguageProvider><TaskItemDisplay {...props} /></LanguageProvider>);
+        expect(view.container.querySelector('.metadata-badge__dot')).toHaveStyle({
+            backgroundColor: theme === 'eink' ? '#000000' : baseProject.color,
+        });
+        view.rerender(<LanguageProvider><TaskItemDisplay {...props} actions={{ ...props.actions, onOpenProject: vi.fn() }} /></LanguageProvider>);
+        expect(view.container.querySelector('.metadata-badge__dot')).toHaveStyle({
+            backgroundColor: theme === 'eink' ? '#000000' : baseProject.color,
+        });
+        view.rerender(<LanguageProvider><TaskItemDisplay {...props} project={undefined} area={baseArea} /></LanguageProvider>);
+        expect(view.container.querySelector('.metadata-badge__dot')).toHaveStyle({
+            backgroundColor: theme === 'eink' ? '#000000' : baseArea.color,
+        });
+    });
+
     it.each([
         { recurrence: undefined, timeFormat: '12h' as const },
         { recurrence: undefined, timeFormat: '24h' as const },

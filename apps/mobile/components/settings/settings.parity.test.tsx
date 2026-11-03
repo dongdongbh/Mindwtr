@@ -100,7 +100,8 @@ vi.mock('@/contexts/language-context', () => ({
     isReady: true,
   }),
 }));
-vi.mock('@/contexts/theme-context', () => ({
+vi.mock('@/contexts/theme-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/contexts/theme-context')>(),
   useTheme: () => ({
     themeMode: harness.themeMode,
     setThemeMode: (mode: string) => {
