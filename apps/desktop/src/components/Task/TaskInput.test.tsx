@@ -39,6 +39,26 @@ function TaskInputHarness({
 }
 
 describe('TaskInput autocomplete', () => {
+    it.each([
+        { key: 'Enter', isComposing: true },
+        { key: 'Enter', keyCode: 229 },
+        { key: 'Process' },
+    ])('keeps IME keys out of consumer submit handlers: %j', (keyEvent) => {
+        const onKeyDown = vi.fn();
+        const onChange = vi.fn();
+        const { getByRole } = render(
+            <TaskInput value="中文" projects={[]} contexts={[]} onChange={onChange} onKeyDown={onKeyDown} />
+        );
+        const input = getByRole('combobox');
+
+        fireEvent.keyDown(input, keyEvent);
+        expect(onKeyDown).not.toHaveBeenCalled();
+        expect(onChange).not.toHaveBeenCalled();
+
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(onKeyDown).toHaveBeenCalledOnce();
+    });
+
     it('suggests custom contexts for @ trigger', () => {
         const onChange = vi.fn();
         const { getByRole } = render(

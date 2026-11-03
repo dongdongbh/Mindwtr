@@ -151,6 +151,20 @@ beforeEach(() => {
 });
 
 describe('QuickAddModal', () => {
+    it('keeps Quick Add open when Escape cancels an IME composition', async () => {
+        renderQuickAddModal();
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add'));
+        });
+        const input = screen.getByRole('combobox');
+        fireEvent.keyDown(input, { key: 'Escape', isComposing: true });
+        expect(input).toBeInTheDocument();
+        fireEvent.keyDown(input, { key: 'Escape', keyCode: 229 });
+        expect(input).toBeInTheDocument();
+        fireEvent.keyDown(input, { key: 'Escape' });
+        expect(input).not.toBeInTheDocument();
+    });
+
     it('offers retained contexts only after a typed query', async () => {
         const timestamp = '2026-09-27T00:00:00.000Z';
         const task = (id: string, status: Task['status'], deletedAt?: string): Task => ({

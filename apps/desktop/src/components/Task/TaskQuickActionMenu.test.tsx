@@ -593,6 +593,25 @@ describe('TaskQuickActionMenu', () => {
         expect(props.onClose).toHaveBeenCalled();
     });
 
+    it('leaves checklist search focus and Escape to the IME', () => {
+        const props = renderMenu({
+            checklistMove: { onSelect: vi.fn(), tasks: [task, { ...task, id: 'other', title: 'Other' }] },
+        });
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Add to checklist…' }));
+        const panel = screen.getByRole('dialog', { name: 'Add to checklist…' });
+        const input = within(panel).getByRole('textbox', { name: 'Search' });
+        input.focus();
+
+        fireEvent.keyDown(input, { key: 'ArrowDown', isComposing: true });
+        expect(input).toHaveFocus();
+        fireEvent.keyDown(input, { key: 'Escape', keyCode: 229 });
+        expect(panel).toBeInTheDocument();
+        expect(props.onClose).not.toHaveBeenCalled();
+
+        fireEvent.keyDown(input, { key: 'Escape' });
+        expect(panel).not.toBeInTheDocument();
+    });
+
     it('has no Add to checklist entry without a checklist move (#1467)', () => {
         renderMenu();
         expect(screen.queryByRole('menuitem', { name: 'Add to checklist…' })).toBeNull();

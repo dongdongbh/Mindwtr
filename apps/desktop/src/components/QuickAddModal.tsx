@@ -44,6 +44,7 @@ import {
 import { mkdir, remove, writeFile } from '@tauri-apps/plugin-fs';
 import { join } from '@tauri-apps/api/path';
 import { getManagedPath } from '../lib/managed-paths';
+import { isImeComposing } from '../lib/ime';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
 import { isMacRuntime, isTauriRuntime } from '../lib/runtime';
@@ -1037,7 +1038,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     useEffect(() => {
         if (!isOpen) return;
         const handler = (event: KeyboardEvent) => {
-            if (event.key !== 'Escape') return;
+            if (isImeComposing(event) || event.key !== 'Escape') return;
             event.preventDefault();
             handleClose();
         };

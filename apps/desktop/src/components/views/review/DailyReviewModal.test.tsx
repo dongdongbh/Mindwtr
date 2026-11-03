@@ -94,6 +94,16 @@ describe('DailyReviewGuideModal', () => {
         vi.useRealTimers();
     });
 
+    it('does not close the review for IME Escape', () => {
+        const onClose = vi.fn();
+        render(<DailyReviewGuideModal onClose={onClose} />);
+        fireEvent.keyDown(window, { key: 'Escape', isComposing: true });
+        fireEvent.keyDown(window, { key: 'Escape', keyCode: 229 });
+        expect(onClose).not.toHaveBeenCalled();
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+
     it('opens the next step at its top (#1471)', () => {
         useTaskStore.setState({
             _allTasks: [

@@ -428,6 +428,7 @@ export function TaskQuickActionMenu({
         // keys the open menu consumes (arrows would otherwise move the list
         // selection behind the menu and close it via the scroll listener).
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (isImeComposing(event)) return;
             cancelHoverOpen();
             const target = event.target instanceof Node ? event.target : null;
             const inSelectorDropdown = Boolean(
@@ -1347,7 +1348,7 @@ export function TaskQuickActionMenu({
                         <div
                             className="space-y-2"
                             onKeyDown={(event) => {
-                                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                                if (isImeComposing(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
                                 // The search box and the rows walk in visual order.
                                 const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input, [role="option"]'));
                                 const index = controls.indexOf(document.activeElement as HTMLElement);
