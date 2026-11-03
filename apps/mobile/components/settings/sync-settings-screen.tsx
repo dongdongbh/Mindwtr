@@ -3,7 +3,7 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Beaker } from 'lucide-react-native';
+import { Beaker, Check } from 'lucide-react-native';
 
 import {
     updateSettingsFromLatest,
@@ -580,7 +580,11 @@ function SyncSettingsView({
                                                 style={[
                                                     styles.backendOption,
                                                     {
+                                                        flexDirection: 'row',
+                                                        alignItems: 'center',
+                                                        gap: 4,
                                                         borderColor: selected ? tc.tint : tc.border,
+                                                        borderWidth: selected ? 2 : 1,
                                                         backgroundColor: selected ? tc.filterBg : 'transparent',
                                                     },
                                                 ]}
@@ -597,6 +601,7 @@ function SyncSettingsView({
                                                 >
                                                     {getBackendOptionLabel(backend)}
                                                 </CompactText>
+                                                {selected && <Check size={14} color={tc.tint} strokeWidth={2.5} />}
                                             </TouchableOpacity>
                                         );
                                     })}

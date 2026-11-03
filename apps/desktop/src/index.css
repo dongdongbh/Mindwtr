@@ -213,6 +213,22 @@
     outline-offset: -2px;
   }
 
+  /* Segmented controls and toggle buttons in settings mark the selected
+     option with bg-background + shadow-sm, which e-ink renders invisible
+     (white on white, shadows disabled); outline the pressed option too. */
+  :root.theme-eink [aria-pressed='true'] {
+    outline: 2px solid hsl(var(--foreground));
+    outline-offset: -2px;
+  }
+
+  /* Sidebar nav items mark the active view with a faint primary tint and a
+     text-primary vs text-muted-foreground swap, which e-ink collapses to
+     near-invisible gray on identical black ink; outline the current item. */
+  :root.theme-eink [aria-current='page'] {
+    outline: 2px solid hsl(var(--foreground));
+    outline-offset: -2px;
+  }
+
   :root.theme-nord {
     color-scheme: dark;
     --background: 220 16.4% 21.6%;

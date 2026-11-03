@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { ChevronDown, ChevronUp } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, Check } from 'lucide-react-native';
 import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import {
   type Task,
@@ -341,14 +341,19 @@ export function PomodoroPanel({
                 style={[
                   styles.taskPickerOption,
                   {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
                     borderColor: !selectedTaskId ? tc.tint : tc.border,
+                    borderWidth: !selectedTaskId ? 2 : 1,
                     backgroundColor: !selectedTaskId ? `${tc.tint}18` : tc.filterBg,
                   },
                 ]}
               >
-                <Text style={[styles.taskPickerOptionText, { color: !selectedTaskId ? tc.tint : tc.text }]}>
+                <Text style={[styles.taskPickerOptionText, { flex: 1, color: !selectedTaskId ? tc.tint : tc.text }]}>
                   {timerOnlyLabel}
                 </Text>
+                {!selectedTaskId && <Check size={16} color={tc.tint} strokeWidth={2.5} />}
               </Pressable>
               <FlatList
                 data={pickerTasks}
@@ -365,17 +370,22 @@ export function PomodoroPanel({
                       style={[
                         styles.taskPickerOption,
                         {
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
                           borderColor: selected ? tc.tint : tc.border,
+                          borderWidth: selected ? 2 : 1,
                           backgroundColor: selected ? `${tc.tint}18` : tc.filterBg,
                         },
                       ]}
                     >
                       <Text
-                        style={[styles.taskPickerOptionText, { color: selected ? tc.tint : tc.text }]}
+                        style={[styles.taskPickerOptionText, { flex: 1, color: selected ? tc.tint : tc.text }]}
                         numberOfLines={2}
                       >
                         {task.title}
                       </Text>
+                      {selected && <Check size={16} color={tc.tint} strokeWidth={2.5} />}
                     </Pressable>
                   );
                 }}

@@ -159,6 +159,7 @@ export function SettingsSidebar({
                         <button
                             key={item.id}
                             onClick={() => onSelect(item.id)}
+                            aria-current={isActive ? 'page' : undefined}
                             className={cn(
                                 "w-full flex items-start gap-2.5 px-3 py-2 rounded-lg text-left text-[13px] font-medium transition-colors",
                                 isActive
