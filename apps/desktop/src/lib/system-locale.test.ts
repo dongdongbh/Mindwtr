@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getSystemDefaultLocale } from './system-locale';
 
@@ -12,12 +12,15 @@ const setNavigatorLocale = (language: string, languages: readonly string[]) => {
 
 describe('getSystemDefaultLocale', () => {
     afterEach(() => {
+        vi.restoreAllMocks();
         setNavigatorLocale(originalLanguage, originalLanguages ?? [originalLanguage]);
     });
 
-    it('returns the Intl default locale, which follows the OS regional format', () => {
+    it('uses the regional locale when the display language differs', () => {
         setNavigatorLocale('en-US', ['en-US']);
-        expect(getSystemDefaultLocale()).toBe(Intl.DateTimeFormat().resolvedOptions().locale);
+        const options = Intl.DateTimeFormat().resolvedOptions();
+        vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ ...options, locale: 'pt-PT' });
+        expect(getSystemDefaultLocale()).toBe('pt-PT');
     });
 
     it('falls back to the navigator locale when Intl is unavailable', () => {
