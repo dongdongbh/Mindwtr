@@ -23,8 +23,9 @@ class CalendarPushWritesTest {
             (next++).also { calendars[it] = values; accounts[it] = accountName to accountType }
         override fun deleteCalendar(id: Long): Int = if (refuseCalendarDelete || calendars.remove(id) == null) 0 else 1
         override fun insertEvent(values: Map<String, Any>): Long = (next++).also { events[it] = values.toMutableMap() }
-        override fun eventIsLive(id: Long, calendarId: Long?) = id in events && id !in deleted
-            && (calendarId == null || events[id]!![CalendarContract.Events.CALENDAR_ID] == calendarId)
+        override fun liveEventDescription(id: Long, calendarId: Long?): String? = events[id]
+            ?.takeIf { id !in deleted && (calendarId == null || it[CalendarContract.Events.CALENDAR_ID] == calendarId) }
+            ?.let { it[CalendarContract.Events.DESCRIPTION] as String? ?: "" }
         override fun updateEvent(id: Long, values: Map<String, Any>): Int = events[id]?.let { it.putAll(values); 1 } ?: 0
         override fun deleteEvent(id: Long): Int = if (events.remove(id) != null) 1 else 0
         override fun deleteReminders(eventId: Long) { reminders.remove(eventId) }
@@ -85,37 +86,51 @@ class CalendarPushWritesTest {
         val calendar = writes.createCalendar(seed())
         val gone = writes.createEvent(calendar, event())
         rows.events.remove(gone.toLong())
-        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(gone, null, event()) }.message)
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(gone, null, null, event()) }.message)
         val marked = writes.createEvent(calendar, event())
         rows.deleted += marked.toLong()
-        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(marked, null, event()) }.message)
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(marked, null, null, event()) }.message)
     }
 
     @Test fun anUpdateWritesTheEventAndDropsItsRemindersAsExpoDoes() {
         val id = writes.createEvent(writes.createCalendar(seed()), event())
         rows.reminders[id.toLong()] = 1
-        writes.updateEvent(id, null, event().put("title", "Changed"))
+        writes.updateEvent(id, null, null, event().put("title", "Changed"))
         assertEquals("Changed", rows.events[id.toLong()]!![CalendarContract.Events.TITLE])
         assertTrue(id.toLong() !in rows.reminders)
     }
 
     @Test fun aDeleteOfAnEventAlreadyGoneAnswersMissingSoCoreForgetsItsRow_rnBug2() {
         val id = writes.createEvent(writes.createCalendar(seed()), event())
-        writes.deleteEvent(id, null)
-        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(id, null) }.message)
+        writes.deleteEvent(id, null, null)
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(id, null, null) }.message)
     }
 
     @Test fun anEventIdTheProviderGaveToAnEventInAnotherCalendarIsMissingAndUntouched() {
         val mindwtr = writes.createCalendar(seed())
         val users = writes.createCalendar(seed().put("name", "users-own"))
         val theirs = writes.createEvent(users, event().put("title", "Dentist"))
-        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(theirs, mindwtr, event()) }.message)
-        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(theirs, mindwtr) }.message)
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(theirs, mindwtr, null, event()) }.message)
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(theirs, mindwtr, null) }.message)
         assertEquals("Dentist", rows.events[theirs.toLong()]!![CalendarContract.Events.TITLE])
-        writes.updateEvent(theirs, users, event().put("title", "Changed"))
+        writes.updateEvent(theirs, users, null, event().put("title", "Changed"))
         assertEquals("Changed", rows.events[theirs.toLong()]!![CalendarContract.Events.TITLE])
-        writes.deleteEvent(theirs, null)
+        writes.deleteEvent(theirs, null, null)
         assertTrue(theirs.toLong() !in rows.events)
+    }
+
+    @Test fun anEventWithoutTheRowsTaskMarkerIsNotMindwtrsAndIsNeverWritten() {
+        val calendar = writes.createCalendar(seed())
+        val marker = "Mindwtr-Task-ID: t1"
+        val own = writes.createEvent(calendar, event().put("notes", "Status: Next\r\n\r\n[Mindwtr Calendar Mirror]\r\n$marker  \r\n[/Mindwtr Calendar Mirror]"))
+        writes.updateEvent(own, calendar, marker, event().put("title", "Changed").put("notes", "Status: Next\n\n$marker"))
+        assertEquals("Changed", rows.events[own.toLong()]!![CalendarContract.Events.TITLE])
+        val theirs = writes.createEvent(calendar, event().put("title", "Dentist").put("notes", "Bring the card"))
+        assertEquals(CalendarPushWrites.UNMARKED_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(theirs, calendar, marker, event()) }.message)
+        assertEquals(CalendarPushWrites.UNMARKED_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(theirs, calendar, marker) }.message)
+        assertEquals("Dentist", rows.events[theirs.toLong()]!![CalendarContract.Events.TITLE])
+        writes.deleteEvent(own, calendar, marker)
+        assertTrue(own.toLong() !in rows.events)
     }
 
     @Test fun aCalendarDeleteRefusesACalendarWithoutMindwtrsInternalName() {

@@ -11,7 +11,7 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
         fun insertCalendar(accountName: String, accountType: String, values: Map<String, Any>): Long?
         fun deleteCalendar(id: Long): Int
         fun insertEvent(values: Map<String, Any>): Long?
-        fun eventIsLive(id: Long, calendarId: Long?): Boolean
+        fun liveEventDescription(id: Long, calendarId: Long?): String?
         fun updateEvent(id: Long, values: Map<String, Any>): Int
         fun deleteEvent(id: Long): Int
         fun deleteReminders(eventId: Long)
@@ -57,16 +57,22 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
         return (rows.insertEvent(values) ?: error("Event could not be saved")).toString()
     }
 
-    fun updateEvent(eventId: String, calendarId: String?, details: JSONObject) {
+    fun updateEvent(eventId: String, calendarId: String?, taskMarker: String?, details: JSONObject) {
         val id = eventId.toLong()
-        val values = eventValues(details)
-        check(rows.eventIsLive(id, calendarId?.toLong()) && rows.updateEvent(id, values) > 0) { MISSING_EVENT }
+        requireOwnEvent(id, calendarId, taskMarker)
+        check(rows.updateEvent(id, eventValues(details)) > 0) { MISSING_EVENT }
         rows.deleteReminders(id)
     }
 
-    fun deleteEvent(eventId: String, calendarId: String?) {
+    fun deleteEvent(eventId: String, calendarId: String?, taskMarker: String?) {
         val id = eventId.toLong()
-        check(rows.eventIsLive(id, calendarId?.toLong()) && rows.deleteEvent(id) > 0) { MISSING_EVENT }
+        requireOwnEvent(id, calendarId, taskMarker)
+        check(rows.deleteEvent(id) > 0) { MISSING_EVENT }
+    }
+
+    private fun requireOwnEvent(id: Long, calendarId: String?, taskMarker: String?) {
+        val notes = rows.liveEventDescription(id, calendarId?.toLong()) ?: throw IllegalStateException(MISSING_EVENT)
+        check(taskMarker == null || notes.lines().any { it.trimEnd() == taskMarker }) { UNMARKED_EVENT }
     }
 
     private fun eventValues(details: JSONObject): LinkedHashMap<String, Any> = linkedMapOf(
@@ -82,6 +88,7 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
 
     companion object {
         const val MISSING_EVENT = "Calendar event not found"
+        const val UNMARKED_EVENT = "Calendar event not found: not made by Mindwtr"
         private const val MANAGED_NAME = "mindwtr"
 
         private val ACCESS = mapOf(

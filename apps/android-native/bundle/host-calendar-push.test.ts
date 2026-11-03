@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
+import { calendarPushTaskMarkerLine } from '../../../packages/core/src/calendar-scheduling';
 import { setLogger } from '../../../packages/core/src/logger';
 import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/native-host-contract-settings-calendar';
 import { openSqliteHost } from '../../../packages/core/src/screen-parity.replay';
 import { flushPendingSave, getStorageAdapter, useTaskStore } from '../../../packages/core/src/store';
 import type { SqliteAdapter } from '../../../packages/core/src/sqlite-adapter';
 import type { Task } from '../../../packages/core/src/types';
-import { createNativeCalendar } from './host-calendar';
+import { createNativeCalendar, UNMARKED_EVENT } from './host-calendar';
 
 
 const KEY = {
@@ -26,9 +27,16 @@ const calendar = (id: string, extra: Partial<Calendar> = {}): Calendar => ({ id,
     source: { name: 'me@example.com', type: 'com.google', isLocalAccount: false }, ...extra });
 const MARKER = '0f0e0d0c-0b0a-4908-8706-050403020100';
 
-function phone(calendars: Calendar[], events: Record<string, { calendarId: string; title: string }> = {}) {
+function phone(calendars: Calendar[], events: Record<string, { calendarId: string; title: string }> = {}, pushedFor: Record<string, string> = {}) {
     const state = { calendars: calendars.map((entry) => structuredClone(entry)), events: new Map(Object.entries(events)), next: 500,
+        notes: new Map(Object.entries(pushedFor).map(([eventId, taskId]) => [eventId, calendarPushTaskMarkerLine(taskId)!])),
         calls: [] as Record<string, unknown>[], refuse: new Set<string>(), unreadable: false };
+    const requireOwn = (request: Record<string, unknown>, event: { calendarId: string } | undefined) => {
+        if (!event || (request.calendarId && event.calendarId !== request.calendarId)) throw new Error('Calendar event not found');
+        if (request.taskMarker && !(state.notes.get(request.eventId as string) ?? '').split('\n').includes(request.taskMarker as string)) {
+            throw new Error(UNMARKED_EVENT);
+        }
+    };
     const call = async (request: Record<string, unknown>): Promise<unknown> => {
         state.calls.push(structuredClone(request));
         const op = request.op as string;
@@ -57,17 +65,19 @@ function phone(calendars: Calendar[], events: Record<string, { calendarId: strin
                 if (!state.calendars.some((entry) => entry.id === request.calendarId)) throw new Error(`Couldn't find calendar with given id: ${String(request.calendarId)}`);
                 const id = String(state.next++);
                 state.events.set(id, { calendarId: request.calendarId as string, title: (request.details as { title: string }).title });
+                state.notes.set(id, (request.details as { notes: string }).notes);
                 return id;
             }
             case 'updateEvent': {
                 const event = state.events.get(request.eventId as string);
-                if (!event || (request.calendarId && event.calendarId !== request.calendarId)) throw new Error('Calendar event not found');
-                event.title = (request.details as { title: string }).title;
+                requireOwn(request, event);
+                event!.title = (request.details as { title: string }).title;
+                state.notes.set(request.eventId as string, (request.details as { notes: string }).notes);
                 return null;
             }
             case 'deleteEvent': {
                 const event = state.events.get(request.eventId as string);
-                if (!event || (request.calendarId && event.calendarId !== request.calendarId)) throw new Error('Calendar event not found');
+                requireOwn(request, event);
                 state.events.delete(request.eventId as string);
                 return null;
             }
@@ -115,7 +125,7 @@ const started = () => lines.find((line) => line.message === 'Native Android cale
 describe('an upgrade from RN keeps RN\'s Mindwtr calendar and its events', () => {
     it('reuses the saved calendar: done tasks lose their event, the rest update in place, and none is made (e98b4e796)', async () => {
         const device = phone([calendar('1'), calendar('7', { title: 'Mindwtr', name: `mindwtr:${MARKER}`, color: '#3B82F6' })],
-            { 70: { calendarId: '7', title: 'old' }, 71: { calendarId: '7', title: 'old' } });
+            { 70: { calendarId: '7', title: 'old' }, 71: { calendarId: '7', title: 'old' } }, { 70: 't1', 71: 't2' });
         const app = await upgrade({ tasks: [task('t1'), task('t2', { status: 'done', completedAt: at }), task('t3')],
             kv: { [KEY.enabled]: '1', [KEY.calendarId]: '7' }, device,
             rows: [{ taskId: 't1', eventId: '70', calendarId: '7' }, { taskId: 't2', eventId: '71', calendarId: '7' }] });
@@ -210,6 +220,21 @@ describe('an event ID the provider reused (review N9: the S23 hands a deleted _i
         expect(device.state.events.get('71')).toEqual({ calendarId: '1', title: 'Gym' });
         expect(await app.rows()).toEqual([['t1', '500', '7']]);
         expect(device.state.events.get('500')).toEqual({ calendarId: '7', title: 'PRIVATE t1' });
+    });
+});
+
+describe('an event ID the provider gave the user\'s event in the same calendar (final review F2)', () => {
+    it('never overwrites or deletes an event without the row\'s task marker: core makes its own event and forgets the row', async () => {
+        const device = phone([calendar('1'), calendar('7', { title: 'Mindwtr', name: `mindwtr:${MARKER}` })],
+            { 70: { calendarId: '7', title: 'Dentist' }, 71: { calendarId: '7', title: 'Gym' } });
+        const app = await upgrade({ tasks: [task('t1'), task('t2', { status: 'done', completedAt: at })], kv: { [KEY.enabled]: '1', [KEY.calendarId]: '7' },
+            device, rows: [{ taskId: 't1', eventId: '70', calendarId: '7' }, { taskId: 't2', eventId: '71', calendarId: '7' }] });
+        await app.host.startPush();
+        expect(device.state.events.get('70')).toEqual({ calendarId: '7', title: 'Dentist' });
+        expect(device.state.events.get('71')).toEqual({ calendarId: '7', title: 'Gym' });
+        expect(await app.rows()).toEqual([['t1', '500', '7']]);
+        expect(lines.filter((line) => line.message === 'Calendar push left an event it did not make').map((line) => line.context))
+            .toEqual(expect.arrayContaining(['recreated', 'cleared'].map((outcome) => ({ releaseCheck: 'v1.3.8/calendar-push-unmarked-event', outcome }))));
     });
 });
 

@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'bun:test';
 import { useTaskStore } from '@mindwtr/core';
-import { createCalendarFeeds, createNativeCalendar } from './host-calendar';
+import { createCalendarFeeds, createNativeCalendar, UNMARKED_EVENT } from './host-calendar';
 
 
 type Load = { input: { slot: string; start: string; end: string; timeoutMs?: number; refresh?: boolean }; settle: (value: unknown) => void };
@@ -174,9 +175,16 @@ describe('the push writes', () => {
         const sent = { title: 'T', startMs: 1_793_318_400_000, endMs: 1_793_404_800_000, notes: 'N', location: '' };
         expect(calls).toEqual([
             { op: 'createEvent', calendarId: '7', details: { ...sent, allDay: true, timeZone: 'UTC', endTimeZone: 'UTC' } },
-            { op: 'updateEvent', eventId: '9', calendarId: '7', details: { ...sent, allDay: false } },
-            { op: 'deleteEvent', eventId: '9', calendarId: '7' },
+            { op: 'updateEvent', eventId: '9', calendarId: '7', taskMarker: 'Mindwtr-Task-ID: t1', details: { ...sent, allDay: false } },
+            { op: 'deleteEvent', eventId: '9', calendarId: '7', taskMarker: 'Mindwtr-Task-ID: t1' },
             { op: 'deleteCalendar', calendarId: '7' },
         ]);
+    });
+});
+
+describe('the unmarked-event answer', () => {
+    it('is the text CalendarPushWrites.kt answers', () => {
+        const kotlin = readFileSync(new URL('../android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWrites.kt', import.meta.url), 'utf8');
+        expect(kotlin).toContain(`const val UNMARKED_EVENT = "${UNMARKED_EVENT}"`);
     });
 });

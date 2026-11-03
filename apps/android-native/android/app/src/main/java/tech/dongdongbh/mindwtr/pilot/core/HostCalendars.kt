@@ -40,8 +40,8 @@ class HostCalendars(context: Context) {
             "createCalendar" -> reply(runCatching { requireGranted(); writes.createCalendar(request.getJSONObject("details")) })
             "deleteCalendar" -> reply(runCatching { requireGranted(); writes.deleteCalendar(request.getString("calendarId")); null })
             "createEvent" -> reply(runCatching { requireGranted(); writes.createEvent(request.getString("calendarId"), request.getJSONObject("details")) })
-            "updateEvent" -> reply(runCatching { requireGranted(); writes.updateEvent(request.getString("eventId"), request.optString("calendarId").ifEmpty { null }, request.getJSONObject("details")); null })
-            "deleteEvent" -> reply(runCatching { requireGranted(); writes.deleteEvent(request.getString("eventId"), request.optString("calendarId").ifEmpty { null }); null })
+            "updateEvent" -> reply(runCatching { requireGranted(); writes.updateEvent(request.getString("eventId"), request.optString("calendarId").ifEmpty { null }, request.optString("taskMarker").ifEmpty { null }, request.getJSONObject("details")); null })
+            "deleteEvent" -> reply(runCatching { requireGranted(); writes.deleteEvent(request.getString("eventId"), request.optString("calendarId").ifEmpty { null }, request.optString("taskMarker").ifEmpty { null }); null })
             else -> reply(Result.failure(IllegalArgumentException("Unsupported calendar call $op")))
         }
     }
@@ -154,10 +154,10 @@ private class ProviderRows(context: Context) : CalendarPushWrites.Rows {
     override fun insertEvent(values: Map<String, Any>): Long? =
         resolver.insert(CalendarContract.Events.CONTENT_URI, values.toContentValues())?.lastPathSegment?.toLongOrNull()
 
-    override fun eventIsLive(id: Long, calendarId: Long?): Boolean = resolver.query(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id),
-        arrayOf(CalendarContract.Events._ID),
+    override fun liveEventDescription(id: Long, calendarId: Long?): String? = resolver.query(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id),
+        arrayOf(CalendarContract.Events.DESCRIPTION),
         "(${CalendarContract.Events.DELETED} != 1)" + (calendarId?.let { " AND ${CalendarContract.Events.CALENDAR_ID} = $it" } ?: ""),
-        null, null)?.use { it.count > 0 } ?: false
+        null, null)?.use { if (it.moveToFirst()) it.getString(0) ?: "" else null }
 
     override fun updateEvent(id: Long, values: Map<String, Any>): Int =
         resolver.update(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id), values.toContentValues(), null, null)
