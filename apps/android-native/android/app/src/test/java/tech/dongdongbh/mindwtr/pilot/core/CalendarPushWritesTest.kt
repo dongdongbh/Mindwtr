@@ -134,6 +134,10 @@ class CalendarPushWritesTest {
         val users = writes.createCalendar(seed().put("name", "me@example.com"))
         assertThrows(IllegalStateException::class.java) { writes.deleteCalendar(users) }
         assertTrue(users.toLong() in rows.calendars)
+        // Many app-made calendars have no internal name: refused too (a gone calendar is refused as well, and core lists again).
+        rows.calendars[900L] = mapOf(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME to "Mindwtr")
+        assertThrows(IllegalStateException::class.java) { writes.deleteCalendar("900") }
+        assertTrue(900L in rows.calendars)
         val plain = writes.createCalendar(seed().put("name", "mindwtr"))
         writes.deleteCalendar(plain)
         assertTrue(plain.toLong() !in rows.calendars)

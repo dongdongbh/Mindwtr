@@ -63,7 +63,8 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
     fun deleteCalendar(calendarId: String) {
         val id = calendarId.toLong()
         val name = rows.calendarName(id)
-        check(name == null || name == MANAGED_NAME || name.startsWith("$MANAGED_NAME:")) { "Calendar with id $calendarId is not a Mindwtr calendar" }
+        // No name (many app-made calendars, or no such calendar) is refused too: core lists again to see whether it is gone.
+        check(name == MANAGED_NAME || name?.startsWith("$MANAGED_NAME:") == true) { "Calendar with id $calendarId is not a Mindwtr calendar" }
         check(rows.deleteCalendar(id) > 0) { "Calendar with id $calendarId could not be deleted" }
     }
 
