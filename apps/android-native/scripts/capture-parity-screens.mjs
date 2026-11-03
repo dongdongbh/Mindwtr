@@ -894,6 +894,7 @@ const shoot13a = async (prefix, rn) => {
     const doneAction = en['task.aria.action'].replace('{{action}}', en['status.done']);
     const action = (current) => current.find((node) => (node['content-desc'] === doneAction || (node['resource-id'] ?? '').endsWith('swipe-done'))
         && box(node)[1] <= y && box(node)[3] >= y);
+    await shoot(`${prefix}-swipe-tray-right-light`, (current) => Boolean(action(current)));
     await tap(action(await waitFor('the Done action', (current) => Boolean(action(current)), 8_000)));
     const marked = `${T.milk} marked Done`;
     const toast = (current) => undoShown(current) && current.some((node) => (node.text ?? '').includes(marked) || (node['content-desc'] ?? '').includes(marked));
