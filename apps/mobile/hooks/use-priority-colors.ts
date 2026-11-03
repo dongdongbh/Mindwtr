@@ -1,5 +1,6 @@
 import { getTaskPriorityColors, type TaskPriority } from '@mindwtr/core';
-import { useTheme, type ThemeContextType } from '../contexts/theme-context';
+import { useContext } from 'react';
+import { ThemeContext, type ThemeContextType } from '../contexts/theme-context';
 
 type ResolvableTheme = Pick<ThemeContextType, 'themePreset'>;
 
@@ -10,5 +11,5 @@ export function resolvePriorityColors(theme?: ResolvableTheme | null): PriorityP
 }
 
 export function usePriorityColors(): PriorityPalette {
-    return resolvePriorityColors(useTheme());
+    return resolvePriorityColors(useContext(ThemeContext));
 }

@@ -4,6 +4,7 @@ import { AlignLeft, Check, CircleDot, History, Hourglass, ListChecks, Paperclip,
 import { useThemeTokens } from '../../hooks/use-theme-tokens';
 import { useStatusColors } from '../../hooks/use-status-colors';
 import { usePriorityColors } from '../../hooks/use-priority-colors';
+import { useEinkSafeColor } from '../../hooks/use-eink-safe-color';
 import {
     formatI18nTemplate,
     tFallback,
@@ -94,6 +95,7 @@ export function SwipeableTaskItemContent({
     tc,
 }: SwipeableTaskItemContentProps) {
     const isReference = task.status === 'reference';
+    const einkSafe = useEinkSafeColor();
 
 
     const [checklistDraft, setChecklistDraft] = useState('');
@@ -161,7 +163,7 @@ export function SwipeableTaskItemContent({
                     ),
                     children: (
                         <>
-                            <View style={[styles.projectDot, { backgroundColor: part.dotColor || tc.tint }]} />
+                            <View style={[styles.projectDot, { backgroundColor: einkSafe(part.dotColor || tc.tint) }]} />
                             <CompactText
                                 style={[styles.metaText, { color: tc.secondaryText }]}
                                 numberOfLines={2}
@@ -174,7 +176,7 @@ export function SwipeableTaskItemContent({
             case 'area':
                 return (
                     <View key="area" style={styles.inlineMetaItem}>
-                        <View style={[styles.projectDot, { backgroundColor: part.dotColor || tc.tint }]} />
+                        <View style={[styles.projectDot, { backgroundColor: einkSafe(part.dotColor || tc.tint) }]} />
                         <CompactText
                             style={[styles.metaText, { color: tc.secondaryText }]}
                             numberOfLines={2}

@@ -1,5 +1,6 @@
 import { einkSafeColor } from '@mindwtr/core';
-import { useTheme, type ThemeContextType } from '../contexts/theme-context';
+import { useContext } from 'react';
+import { ThemeContext, type ThemeContextType } from '../contexts/theme-context';
 
 type ResolvableTheme = Pick<ThemeContextType, 'themePreset'>;
 
@@ -11,5 +12,5 @@ export function resolveEinkSafeColor(theme?: ResolvableTheme | null): EinkSafeCo
 }
 
 export function useEinkSafeColor(): EinkSafeColorFn {
-    return resolveEinkSafeColor(useTheme());
+    return resolveEinkSafeColor(useContext(ThemeContext));
 }

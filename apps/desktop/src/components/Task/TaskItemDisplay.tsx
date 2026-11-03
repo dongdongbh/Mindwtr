@@ -1,6 +1,6 @@
 import { AlertTriangle, AlignLeft, Folder, Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Circle, CheckCircle2, Clock, Timer, Link2, ListChecks, Paperclip, RotateCcw, Copy, MapPin, History, Hourglass, Play, Zap, MoreHorizontal, XCircle } from 'lucide-react';
 import type { Area, Attachment, Project, RangeSelectionOptions, Section, Task, TaskStatus, RecurrenceRule, RecurrenceStrategy, Language } from '@mindwtr/core';
-import { DEFAULT_AREA_COLOR, getTaskPriorityColors, formatRecurrenceLabel, formatTimeEstimateLabel, formatTimeSpentLabel, getChecklistProgress, getContextColor, getInlineMarkdownPreview, getRecurringTaskPreviewDate, getTaskAgeLabel, getTaskDateCoherenceIssues, getTaskStaleness, getTaskUrgency, hasTimeComponent, isTaskActionable, isTaskCancelled, isTaskCompleted, isTaskFinished, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
+import { einkSafeColor, DEFAULT_AREA_COLOR, getTaskPriorityColors, formatRecurrenceLabel, formatTimeEstimateLabel, formatTimeSpentLabel, getChecklistProgress, getContextColor, getInlineMarkdownPreview, getRecurringTaskPreviewDate, getTaskAgeLabel, getTaskDateCoherenceIssues, getTaskStaleness, getTaskUrgency, hasTimeComponent, isTaskActionable, isTaskCancelled, isTaskCompleted, isTaskFinished, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 import { isImeComposing } from '../../lib/ime';
 import { STATUS_PILL_CLASSES } from '../../lib/status-colors';
@@ -359,7 +359,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                 <MetadataBadge
                     variant="project"
                     label={label}
-                    dotColor={projectColor || DEFAULT_AREA_COLOR}
+                    dotColor={einkSafeColor(projectColor || DEFAULT_AREA_COLOR, theme)}
                 />
             );
         }
@@ -375,7 +375,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                 <MetadataBadge
                     variant="project"
                     label={label}
-                    dotColor={projectColor || DEFAULT_AREA_COLOR}
+                    dotColor={einkSafeColor(projectColor || DEFAULT_AREA_COLOR, theme)}
                 />
             </span>
         );
@@ -518,7 +518,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                 <MetadataBadge
                     variant="project"
                     label={area.name}
-                    dotColor={area.color || DEFAULT_AREA_COLOR}
+                    dotColor={einkSafeColor(area.color || DEFAULT_AREA_COLOR, theme)}
                 />
             )}
             {!isReference && renderCompletionMetadataBadge()}

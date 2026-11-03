@@ -202,7 +202,7 @@ export function InboxProjectSection({
         onPress={() => selectProjectEarly(project.id)}
         accessibilityState={{ selected: isSelected }}
       >
-        <View style={[styles.projectDot, { backgroundColor: projectColor || tc.secondaryText }]} />
+        <View style={[styles.projectDot, { backgroundColor: einkSafe(projectColor || tc.secondaryText) }]} />
         <Text style={[styles.projectChipText, { color: tc.text }]}>{project.title}</Text>
       </TouchableOpacity>
     );

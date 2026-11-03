@@ -50,6 +50,7 @@ import { useQuickCapture } from '../../contexts/quick-capture-context';
 import { useLanguage } from '../../contexts/language-context';
 import { useToast } from '../../contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useEinkSafeColor } from '@/hooks/use-eink-safe-color';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 import { ListSectionHeader, defaultListContentStyle } from '@/components/list-layout';
 import { logError, logWarn } from '../../lib/app-log';
@@ -119,6 +120,7 @@ export default function ProjectsScreen() {
   const { showToast } = useToast();
   const { openQuickCapture } = useQuickCapture();
   const tc = useThemeColors();
+  const einkSafe = useEinkSafeColor();
   const filledButton = useFilledButtonColors();
   const focusedProjectCount = useMemo(
     () => projects.reduce(
@@ -761,7 +763,7 @@ export default function ProjectsScreen() {
                   testID={`project-area-dot-${item.areaId}`}
                   style={[
                     styles.collapsibleAreaDot,
-                    { backgroundColor: item.color, borderColor: tc.border },
+                    { backgroundColor: einkSafe(item.color), borderColor: tc.border },
                   ]}
                 />
               ) : null}
