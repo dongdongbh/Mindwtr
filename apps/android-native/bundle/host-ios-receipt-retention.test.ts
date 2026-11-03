@@ -5,7 +5,7 @@ import vm from 'node:vm';
 const entry = readFileSync(new URL('./host-entry.ts', import.meta.url), 'utf8');
 
 const start = entry.indexOf('    iosPruneReceipts(');
-const end = entry.indexOf('    /** `name` is one of ', start);
+const end = entry.indexOf('    aboutRequest(', start);
 if (start < 0 || end < 0) throw new Error('Private receipt retention bridge unavailable');
 const source = new Bun.Transpiler({ loader: 'ts' }).transformSync(`globalThis.port = {${entry.slice(start, end)}};`);
 const id = 'abcdefab-cdef-4abc-8abc-abcdefabcdef';

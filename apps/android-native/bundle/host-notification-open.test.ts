@@ -7,7 +7,7 @@ import { buildReminderAlarmDetails } from '../../../packages/core/src/mobile-rem
 
 const entry = readFileSync(new URL('./host-entry.ts', import.meta.url), 'utf8');
 const start = entry.indexOf('const isNotificationTap = ');
-const end = entry.indexOf('/** What an entry point opened, by kind only', start);
+const end = entry.indexOf('const logEntryPoint = ', start);
 if (start < 0 || end < 0) throw new Error('notificationEntry unavailable');
 const source = new Bun.Transpiler({ loader: 'ts' }).transformSync(`${entry.slice(start, end)}\nglobalThis.open = notificationEntry;`);
 const fixture = () => {
