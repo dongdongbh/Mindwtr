@@ -1,0 +1,1 @@
+Erinnerungen vor Start und Fälligkeit. Eigene Sortierung je gespeicherter Suche. Einfache Eingangseinträge mit Rückgängig zu Checklisten hinzufügen. Verbesserte Projektabschnitte, Wochenrückblick, Checklisten und Texteingabe. Widgets mit transparentem Hintergrund und verfügbaren Aktionen. Sichererer Start, Sync und Kalenderabgleich.

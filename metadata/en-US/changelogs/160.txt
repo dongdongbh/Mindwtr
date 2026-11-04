@@ -1,0 +1,1 @@
+Advance start and due reminders. Sort each Saved Search separately. Add simple Inbox items to checklists with Undo. Improve project sections, Weekly Review, checklist dragging and IME input. Widgets gain transparent backgrounds and available actions. Safer startup, sync and calendar push preserve your data.

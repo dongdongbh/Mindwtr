@@ -1,0 +1,19 @@
+<en-US>
+Advance start and due reminders. Sort each Saved Search separately. Add simple Inbox items to checklists with Undo. Improve project sections, Weekly Review, checklist dragging and IME input. Widgets gain transparent backgrounds and available actions. Safer startup, sync and calendar push preserve your data.
+</en-US>
+
+<de-DE>
+Erinnerungen vor Start und Fälligkeit. Eigene Sortierung je gespeicherter Suche. Einfache Eingangseinträge mit Rückgängig zu Checklisten hinzufügen. Verbesserte Projektabschnitte, Wochenrückblick, Checklisten und Texteingabe. Widgets mit transparentem Hintergrund und verfügbaren Aktionen. Sichererer Start, Sync und Kalenderabgleich.
+</de-DE>
+
+<es-ES>
+Avisos antes del inicio y vencimiento. Orden propio por búsqueda guardada. Añade entradas simples de la bandeja a listas con Deshacer. Mejoras en secciones, revisión semanal, listas y escritura IME. Widgets transparentes y con acciones disponibles. Inicio, sincronización y calendario más seguros.
+</es-ES>
+
+<fr-FR>
+Rappels avant le début et l’échéance. Tri propre à chaque recherche enregistrée. Ajoutez des entrées simples aux listes avec Annuler. Sections, revue hebdomadaire, listes et saisie IME améliorées. Widgets transparents avec actions disponibles. Démarrage, synchronisation et calendrier plus sûrs.
+</fr-FR>
+
+<zh-CN>
+支持在开始和到期前提醒，每个已保存搜索可单独排序。简单收件箱条目可加入其他任务的清单，并支持撤销。改进项目分区、每周回顾、清单拖动和输入法。小组件支持透明背景和可执行行动。启动、同步和日历推送更安全，保留你的数据。
+</zh-CN>

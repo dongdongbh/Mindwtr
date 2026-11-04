@@ -1,0 +1,1 @@
+Avisos antes del inicio y vencimiento. Orden propio por búsqueda guardada. Añade entradas simples de la bandeja a listas con Deshacer. Mejoras en secciones, revisión semanal, listas y escritura IME. Widgets transparentes y con acciones disponibles. Inicio, sincronización y calendario más seguros.
