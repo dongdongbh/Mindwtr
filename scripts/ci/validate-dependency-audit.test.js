@@ -190,7 +190,7 @@ const advisory = (name, id, range) => ({
 
 const allowedReport = (profile) => {
   const vulnerabilities = {
-    minimatch: {name: "minimatch", severity: "moderate", via: [advisory("minimatch", MINIMATCH_ADVISORY, "<11.0.1")], nodes: ["node_modules/minimatch"]},
+    minimatch: {name: "minimatch", severity: "moderate", via: [advisory("minimatch", MINIMATCH_ADVISORY, ">=7.0.0 <11.0.1")], nodes: ["node_modules/minimatch"]},
   };
   if (profile !== "desktop") {
     vulnerabilities.deepmerge = {name: "deepmerge", severity: "low", via: [advisory("deepmerge", DEEPMERGE_ADVISORY, ">=4.2.0 <=4.3.1")], nodes: ["node_modules/deepmerge"]};
@@ -213,11 +213,14 @@ for (const profile of Object.keys(profiles)) {
     expect(() => validateNpmAuditReport(allowedReport(profile), profile, npmLock(profile))).not.toThrow();
     if (profile === "mobile") expect(() => validateMobileAuditReport(allowedReport(profile))).not.toThrow();
     const unexpected = allowedReport(profile);
-    unexpected.vulnerabilities.minimatch.via.push(advisory("minimatch", "GHSA-unexpected-advisory", "<11.0.1"));
+    unexpected.vulnerabilities.minimatch.via.push(advisory("minimatch", "GHSA-unexpected-advisory", ">=7.0.0 <11.0.1"));
     expect(() => validateNpmAuditReport(unexpected, profile, npmLock(profile))).toThrow(/unexpected direct advisories/);
     const everyCopy = allowedReport(profile);
     everyCopy.vulnerabilities.minimatch.nodes = Object.keys(npmLock(profile).packages).filter((path) => path.endsWith("node_modules/minimatch"));
     expect(() => validateNpmAuditReport(everyCopy, profile, npmLock(profile))).not.toThrow();
+    const broadened = allowedReport(profile);
+    broadened.vulnerabilities.minimatch.via[0].range = "<11.0.1";
+    expect(() => validateNpmAuditReport(broadened, profile, npmLock(profile))).toThrow(/unexpected direct advisories/);
     const outsideVersions = npmLock(profile);
     outsideVersions.packages["node_modules/minimatch"].version = "11.0.0";
     expect(() => validateNpmAuditReport(allowedReport(profile), profile, outsideVersions)).toThrow(/unreviewed/);
@@ -412,7 +415,7 @@ test("shipped runtime sources never import the excepted Node build-tool chains",
 test("glob and minimatch exceptions name only the reviewed advisories and fail once a locked line accepts the fix", () => {
   const workflow = readFileSync(".github/workflows/dependency-audit.yml", "utf8");
   expect(AUDIT_EXCEPTIONS.glob.advisories).toEqual({[GLOB_ADVISORY]: ">=9.0.0 <=14.0.1"});
-  expect(AUDIT_EXCEPTIONS.minimatch.advisories).toEqual({[MINIMATCH_ADVISORY]: "<11.0.1"});
+  expect(AUDIT_EXCEPTIONS.minimatch.advisories).toEqual({[MINIMATCH_ADVISORY]: ">=7.0.0 <11.0.1"});
   expect(workflow).toContain("bun scripts/ci/check-audit-exception-upstreams.js");
   expect(workflow.indexOf("bun scripts/ci/check-audit-exception-upstreams.js")).toBeLessThan(workflow.indexOf("if ! bun audit"));
   expect(UPSTREAM_GUARDS.filter((guard) => guard.dependency === "glob").map((guard) => [guard.consumer, guard.fixed, guard.advisory]))

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 export const AUDIT_EXCEPTIONS = {
   deepmerge: { versions: ["4.3.1"], advisories: { "GHSA-gcqx-w48m-w2h4": ">=4.2.0 <=4.3.1" } },
   glob: { versions: ["6.0.4", "7.2.3", "10.5.0", "13.0.1", "13.0.6"], advisories: { "GHSA-3g3m-2fjr-6pw4": ">=9.0.0 <=14.0.1" } },
-  minimatch: { versions: ["3.1.5", "5.1.8", "9.0.9", "10.2.4", "10.2.6"], advisories: { "GHSA-g3hv-75wg-m249": "<11.0.1" } },
+  minimatch: { versions: ["3.1.5", "5.1.8", "9.0.9", "10.2.4", "10.2.6"], advisories: { "GHSA-g3hv-75wg-m249": ">=7.0.0 <11.0.1" } },
   "image-size": { versions: ["1.2.1"], advisories: {
     "GHSA-5p2g-fcmc-qvqq": ">=1.2.0 <=2.0.2",
     "GHSA-w3rx-r6r6-pgpr": ">=0.6.3 <=2.0.2",
