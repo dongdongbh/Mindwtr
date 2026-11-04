@@ -36,6 +36,7 @@ import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
 import { InboxProcessingSectionField } from './InboxProcessingSectionField';
 import { PriorityFlag } from './Task/PriorityFlag';
 import { InboxSimilarTasks } from './InboxSimilarTasks';
+import { InboxProcessingLinks, type InboxProcessingLinksProps } from './InboxProcessingLinks';
 
 type QuickActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference' | 'incubate';
 type QuickTwoMinuteChoice = 'yes' | 'no';
@@ -49,6 +50,8 @@ export type InboxProcessingQuickPanelProps = {
     draft: TaskDraft;
     setField: TaskDraftSetter;
     similarTasks: readonly Task[];
+    linkAttachments: InboxProcessingLinksProps['attachments'];
+    onAddLinks: InboxProcessingLinksProps['onAddLinks'];
     visibility: InboxProcessingVisibility;
     options: InboxProcessingOptionLists;
     settings?: AppData['settings'];
@@ -124,6 +127,8 @@ export function InboxProcessingQuickPanel({
     draft,
     setField,
     similarTasks,
+    linkAttachments,
+    onAddLinks,
     visibility,
     options,
     settings,
@@ -470,6 +475,7 @@ export function InboxProcessingQuickPanel({
                     <button
                         type="button"
                         onClick={onClose}
+                        aria-label={t('common.close')}
                         className="text-muted-foreground hover:text-foreground"
                     >
                         <X className="w-4 h-4" />
@@ -524,6 +530,7 @@ export function InboxProcessingQuickPanel({
                             rows={3}
                         />
                     </div>
+                    <InboxProcessingLinks t={t} attachments={linkAttachments} onAddLinks={onAddLinks} />
                 </div>
 
                 <div className="space-y-3">

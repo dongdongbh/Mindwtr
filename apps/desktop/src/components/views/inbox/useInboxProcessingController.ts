@@ -6,6 +6,9 @@ import {
     commitProcessInboxWorkflowEvent,
     createTaskSimilarityIndex,
     DEFAULT_PROJECT_COLOR,
+    generateUUID,
+    isSandboxMode,
+    parseAttachmentLinkBatch,
     enterProcessInboxStep,
     getPersonOptionNames,
     findSimilarTasks,
@@ -113,6 +116,8 @@ export function useInboxProcessingController({
         setQuickExecutionChoice,
         draft,
         setField,
+        pendingLinks,
+        setPendingLinks,
         delegateWho,
         setDelegateWho,
         delegateFollowUp,
@@ -187,6 +192,23 @@ export function useInboxProcessingController({
         () => parseProcessingTitle(draft.title),
         [draft.title, parseProcessingTitle],
     );
+    const addLinks = useCallback((value: string): boolean => {
+        if (isSandboxMode()) {
+            showToast(t('sandbox.unavailable'), 'error');
+            return false;
+        }
+        const batch = parseAttachmentLinkBatch(value, true);
+        if (batch.invalidLine !== null || batch.entries.length === 0) return false;
+        const now = new Date().toISOString();
+        setPendingLinks((current) => [...current, ...batch.entries.map((entry) => ({
+            ...entry,
+            id: generateUUID(),
+            createdAt: now,
+            updatedAt: now,
+        }))]);
+        return true;
+    }, [setPendingLinks, showToast, t]);
+    const linkAttachments = useMemo(() => [...(processingTask?.attachments ?? []), ...pendingLinks], [processingTask, pendingLinks]);
     const isReturningItem = Boolean(processingTask && isProcessInboxReturningTask(processingTask));
 
 
@@ -335,7 +357,10 @@ export function useInboxProcessingController({
 
 
         const base = processingBaseRef.current?.id === processingTask.id ? processingBaseRef.current : processingTask;
-        const updateTaskFromDraft = (id: string, updates: Partial<Task>) => saveTaskDraftOntoLatest(id, base, updates, {
+        const updateTaskFromDraft = (id: string, updates: Partial<Task>) => saveTaskDraftOntoLatest(id, base, {
+            ...updates,
+            ...(decision.type !== 'skip' && pendingLinks.length > 0 ? { attachments: [...(updates.attachments ?? base.attachments ?? []), ...pendingLinks] } : {}),
+        }, {
             write: (taskId, merged): Promise<StoreActionResult> | StoreActionResult => (Object.keys(merged).length > 0
                 ? updateTask(taskId, merged) : { success: true, id: taskId }),
             keepUntouched: true,
@@ -379,6 +404,7 @@ export function useInboxProcessingController({
         eligibleInboxTasks,
         parseProcessingTitle,
         parsedTitle,
+        pendingLinks,
         processInboxPlan,
         processingSession,
         processingTask,
@@ -900,6 +926,8 @@ export function useInboxProcessingController({
             draft,
             setField,
             similarTasks,
+            linkAttachments,
+            onAddLinks: addLinks,
             visibility,
             options,
             settings,
@@ -947,6 +975,8 @@ export function useInboxProcessingController({
         draft,
         setField,
         similarTasks,
+        linkAttachments,
+        onAddLinks: addLinks,
         visibility,
         options,
         setIsProcessing,

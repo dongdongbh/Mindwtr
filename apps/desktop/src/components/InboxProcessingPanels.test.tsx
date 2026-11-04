@@ -111,6 +111,8 @@ function QuickPanelHarness({ initialDraft, ...overrides }: Partial<InboxProcessi
             draft={draft}
             setField={setField}
             similarTasks={[]}
+            linkAttachments={[]}
+            onAddLinks={() => true}
             visibility={visibility}
             options={options}
             processingMode="quick"
@@ -165,6 +167,8 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, initialDra
             draft={draft}
             setField={setField}
             similarTasks={[]}
+            linkAttachments={[]}
+            onAddLinks={() => true}
             visibility={visibility}
             options={options}
             setIsProcessing={noop}

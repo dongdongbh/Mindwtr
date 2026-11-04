@@ -162,13 +162,14 @@ describe('useInboxProcessingController not-actionable destinations', () => {
     const renderController = (
         updateTask: UpdateTask,
         controllerSettings: Parameters<typeof useInboxProcessingController>[0]['settings'] = settings,
+        controllerTasks: Task[] = tasks,
     ) => renderHook(() => {
 
 
         const [isProcessing, setIsProcessing] = useState(true);
         return useInboxProcessingController({
             t: (key) => key,
-            tasks,
+            tasks: controllerTasks,
             projects,
             areas,
             settings: controllerSettings,
@@ -183,6 +184,33 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         });
     });
 
+    it('preserves concurrent file updates, link edits, and tombstones when saving an added link', async () => {
+        const attachment = (id: string) => ({ id, kind: 'link' as const, title: id, uri: `https://${id}.example`, createdAt: tasks[0].createdAt, updatedAt: tasks[0].updatedAt });
+        const file = { ...attachment('file'), kind: 'file' as const, uri: '/data/attachments/file.pdf', size: 4 };
+        const opened = { ...tasks[0], attachments: [file, attachment('edited'), attachment('deleted')] };
+        useTaskStore.setState({ _allTasks: [opened] });
+        const { result } = renderController((id, updates) => useTaskStore.getState().updateTask(id, updates), settings, [opened]);
+        await waitFor(() => expect(result.current.wizardProps.processingTask?.id).toBe('one'));
+        act(() => {
+            expect(result.current.wizardProps.onAddLinks('not a URL')).toBe(false);
+            expect(result.current.wizardProps.onAddLinks('Draft | https://draft.example')).toBe(true);
+        });
+        const remoteAttachments = [
+            { ...file, size: 8, cloudKey: 'attachments/file.pdf' },
+            { ...attachment('edited'), title: 'Changed remotely', uri: 'https://changed.example' },
+            { ...attachment('deleted'), deletedAt: new Date().toISOString() },
+            attachment('new'),
+        ];
+        const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{ ...opened, rev: 5, attachments: remoteAttachments }] }));
+        let committed!: Promise<unknown>;
+        act(() => { committed = Promise.resolve(result.current.wizardProps.handleConfirmReference()); });
+        await finish();
+        await act(async () => { await committed; });
+        const saved = useTaskStore.getState()._tasksById.get('one');
+        expect(saved?.status).toBe('reference');
+        expect(saved?.attachments).toEqual([...remoteAttachments, expect.objectContaining({ title: 'Draft', uri: 'https://draft.example' })]);
+    });
+
     it('appends a title link to the attachments a sync save published while the write waited', async () => {
         useTaskStore.setState({ _allTasks: tasks });
         const updateTask: UpdateTask = (id, updates) => useTaskStore.getState().updateTask(id, updates);
@@ -192,6 +220,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         });
         act(() => {
             result.current.wizardProps.setField('title', 'Call Alice /link:https://notes.example');
+            expect(result.current.wizardProps.onAddLinks('Draft | https://draft.example')).toBe(true);
         });
         const remote = { id: 'att-remote', kind: 'link' as const, title: 'Remote', uri: 'https://remote.example',
             createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' };
@@ -207,7 +236,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         await act(async () => { await committed; });
 
         expect(useTaskStore.getState()._tasksById.get('one')?.attachments?.map((attachment) => attachment.uri))
-            .toEqual(['https://remote.example', 'https://notes.example']);
+            .toEqual(['https://remote.example', 'https://notes.example', 'https://draft.example']);
     });
 
     it('merges the picked tags onto the tags a sync save published, and still appends a title link', async () => {

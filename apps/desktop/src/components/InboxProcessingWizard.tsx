@@ -39,6 +39,7 @@ import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
 import { InboxProcessingSectionField } from './InboxProcessingSectionField';
 import { PriorityFlag } from './Task/PriorityFlag';
 import { InboxSimilarTasks } from './InboxSimilarTasks';
+import { InboxProcessingLinks, type InboxProcessingLinksProps } from './InboxProcessingLinks';
 
 export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'reference' | 'someday' | 'project' | 'delegate';
 
@@ -53,6 +54,8 @@ export type InboxProcessingWizardProps = {
     draft: TaskDraft;
     setField: TaskDraftSetter;
     similarTasks: readonly Task[];
+    linkAttachments: InboxProcessingLinksProps['attachments'];
+    onAddLinks: InboxProcessingLinksProps['onAddLinks'];
     visibility: InboxProcessingVisibility;
     options: InboxProcessingOptionLists;
     setIsProcessing: (value: boolean) => void;
@@ -131,6 +134,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     draft,
     setField,
     similarTasks,
+    linkAttachments,
+    onAddLinks,
     visibility,
     options,
     setIsProcessing,
@@ -521,6 +526,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 rows={2}
                             />
                         </div>
+                        <InboxProcessingLinks t={t} attachments={linkAttachments} onAddLinks={onAddLinks} />
                         {showProjectInRefine && showAreaField && !selectedProjectId && (
                             <div className="space-y-1">
                                 <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.areaLabel')}</label>

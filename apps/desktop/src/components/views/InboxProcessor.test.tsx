@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AppData, Area, ClarifyResponse, Project, Task } from '@mindwtr/core';
 
@@ -8,6 +8,9 @@ import { LanguageProvider } from '../../contexts/language-context';
 import { InboxProcessor } from './InboxProcessor';
 import { reportError } from '../../lib/report-error';
 import { useUiStore } from '../../store/ui-store';
+import { openAttachmentTarget } from '../../lib/open-attachment-target';
+
+vi.mock('../../lib/open-attachment-target', () => ({ openAttachmentTarget: vi.fn(async () => undefined) }));
 
 const clarifyTask = vi.hoisted(() => vi.fn());
 
@@ -169,6 +172,97 @@ const renderInboxProcessor = (options?: AppData['settings'] | RenderInboxProcess
         deleteTask,
     };
 };
+
+describe('InboxProcessor links', () => {
+    afterEach(() => {
+        cleanup();
+        vi.clearAllMocks();
+    });
+
+    const addLinkDraft = (view: ReturnType<typeof renderInboxProcessor>, value = 'Notes | https://notes.example') => {
+        fireEvent.click(view.getByRole('button', { name: 'attachments.addLink' }));
+        const dialog = view.getByRole('dialog', { name: 'attachments.addLink' });
+        fireEvent.change(within(dialog).getByRole('textbox'), { target: { value } });
+        fireEvent.click(within(dialog).getByRole('button', { name: 'common.save' }));
+    };
+
+    it.each(['quick', 'guided'] as const)('shows and opens saved live links in %s mode', async (mode) => {
+        const link = { id: 'live', kind: 'link' as const, title: 'Saved notes', uri: 'https://saved.example', createdAt: nowIso, updatedAt: nowIso };
+        const view = renderInboxProcessor({
+            settings: { gtd: { inboxProcessing: { defaultMode: mode } } },
+            tasks: [{ ...inboxTask, attachments: [link, { ...link, id: 'deleted', title: 'Deleted notes', deletedAt: nowIso }, { ...link, id: 'file', kind: 'file', title: 'File notes' }] }],
+        });
+        fireEvent.click(view.getByRole('button', { name: /process\.btn/i }));
+        expect(view.queryByRole('button', { name: 'attachments.open: Deleted notes' })).not.toBeInTheDocument();
+        expect(view.queryByRole('button', { name: 'attachments.open: File notes' })).not.toBeInTheDocument();
+        fireEvent.click(view.getByRole('button', { name: 'attachments.open: Saved notes' }));
+        await waitFor(() => expect(openAttachmentTarget).toHaveBeenCalledWith(link.uri, link.id));
+        expect(view.updateTask).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid input and keeps prompt Enter shortcuts from processing the task', () => {
+        const view = renderInboxProcessor({ gtd: { inboxProcessing: { defaultMode: 'quick' } } });
+        fireEvent.click(view.getByRole('button', { name: /process\.btn/i }));
+        fireEvent.click(view.getByRole('button', { name: 'attachments.addLink' }));
+        const dialog = view.getByRole('dialog', { name: 'attachments.addLink' });
+        const input = within(dialog).getByRole('textbox');
+        fireEvent.change(input, { target: { value: 'not a URL' } });
+        expect(within(dialog).getByRole('alert')).toBeInTheDocument();
+        expect(within(dialog).getByRole('button', { name: 'common.save' })).toBeDisabled();
+        fireEvent.keyDown(input, { key: 'Enter' });
+        fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+        fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+        expect(view.updateTask).not.toHaveBeenCalled();
+        fireEvent.click(within(dialog).getByRole('button', { name: 'common.cancel' }));
+        expect(view.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(view.updateTask).not.toHaveBeenCalled();
+    });
+
+    it('preserves link drafts across modes, keeps them after failure, then saves with the decision', async () => {
+        const view = renderInboxProcessor({ gtd: { inboxProcessing: { defaultMode: 'quick' } } });
+        fireEvent.click(view.getByRole('button', { name: /process\.btn/i }));
+        addLinkDraft(view);
+        expect(view.updateTask).not.toHaveBeenCalled();
+        fireEvent.click(view.getByRole('button', { name: 'process.modeGuided' }));
+        expect(view.getByRole('button', { name: 'attachments.open: Notes' })).toBeInTheDocument();
+        fireEvent.click(view.getByRole('button', { name: 'process.modeQuick' }));
+        view.updateTask.mockResolvedValueOnce({ success: false, error: 'disk full' });
+        fireEvent.keyDown(view.getByRole('textbox', { name: 'taskEdit.titleLabel' }), { key: 'Enter' });
+        await waitFor(() => expect(view.updateTask).toHaveBeenCalledTimes(1));
+        expect(view.getByRole('button', { name: 'attachments.open: Notes' })).toBeInTheDocument();
+        fireEvent.keyDown(view.getByRole('textbox', { name: 'taskEdit.titleLabel' }), { key: 'Enter' });
+        await waitFor(() => expect(view.updateTask).toHaveBeenCalledTimes(2));
+        const first = view.updateTask.mock.calls[0][1];
+        expect(first).toMatchObject({ status: 'next', attachments: [expect.objectContaining({ kind: 'link', title: 'Notes', uri: 'https://notes.example' })] });
+        expect(view.updateTask.mock.calls[1][1].attachments).toEqual(first.attachments);
+    });
+
+    it('keeps added links on the next action when converting to a project', async () => {
+        const view = renderInboxProcessor();
+        fireEvent.click(view.getByRole('button', { name: /process\.btn/i }));
+        addLinkDraft(view);
+        fireEvent.click(view.getByText('process.refineNext'));
+        fireEvent.click(view.getByText('process.yesActionable'));
+        fireEvent.click(view.getByText('process.moreThanOneStepYes'));
+        fireEvent.click(view.getByText('process.createProject'));
+        await waitFor(() => expect(view.updateTask).toHaveBeenCalledWith(inboxTask.id, expect.objectContaining({
+            status: 'next',
+            projectId: createdProject.id,
+            attachments: [expect.objectContaining({ title: 'Notes', uri: 'https://notes.example' })],
+        })));
+    });
+
+    it.each(['close', 'skip'] as const)('discards pending links on %s', async (action) => {
+        const view = renderInboxProcessor({ gtd: { inboxProcessing: { defaultMode: 'quick' } } });
+        fireEvent.click(view.getByRole('button', { name: /process\.btn/i }));
+        addLinkDraft(view);
+        fireEvent.click(view.getByRole('button', { name: action === 'close' ? 'common.close' : 'inbox.skip' }));
+        await waitFor(() => expect(view.getByRole('button', { name: /process\.btn/i })).toBeInTheDocument());
+        fireEvent.click(view.getByRole('button', { name: /process\.btn/i }));
+        expect(view.queryByRole('button', { name: 'attachments.open: Notes' })).not.toBeInTheDocument();
+        for (const [, updates] of view.updateTask.mock.calls) expect(updates.attachments).toBeUndefined();
+    });
+});
 
 describe('InboxProcessor', () => {
     afterEach(() => {

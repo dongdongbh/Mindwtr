@@ -13,6 +13,7 @@ import {
     selectProcessInboxCandidates,
     setTaskDraftField,
     type AppData,
+    type Attachment,
     type Area,
     resolveTimeEstimateOptions,
     type ProcessInboxSession,
@@ -72,6 +73,7 @@ export function useInboxProcessingState({
 
 
     const [draft, setDraft] = useState<TaskDraft>(EMPTY_PROCESSING_DRAFT);
+    const [pendingLinks, setPendingLinks] = useState<Attachment[]>([]);
     const [delegateWho, setDelegateWho] = useState('');
     const [delegateFollowUp, setDelegateFollowUp] = useState('');
     const [projectSearch, setProjectSearch] = useState('');
@@ -205,6 +207,7 @@ export function useInboxProcessingState({
         setQuickTwoMinuteChoice('no');
         setQuickExecutionChoice('defer');
         setDraft(EMPTY_PROCESSING_DRAFT);
+        setPendingLinks([]);
         setDelegateWho('');
         setDelegateFollowUp('');
         setProjectSearch('');
@@ -235,6 +238,7 @@ export function useInboxProcessingState({
         session?: ProcessInboxSession<ProcessingStep>,
     ) => {
         processingBaseRef.current = task;
+        setPendingLinks([]);
         setProcessingSession((current) => openProcessInboxTask(session ?? current, task.id, 'refine'));
         setQuickActionability('actionable');
         setQuickTwoMinuteChoice('no');
@@ -482,6 +486,8 @@ export function useInboxProcessingState({
         setQuickExecutionChoice,
         draft,
         setField,
+        pendingLinks,
+        setPendingLinks,
         delegateWho,
         setDelegateWho,
         delegateFollowUp,
