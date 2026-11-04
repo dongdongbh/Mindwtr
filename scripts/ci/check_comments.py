@@ -255,6 +255,8 @@ def main():
             parsers[language] = get_parser(language)
         checked += 1
         data = path.read_bytes()
+        if path.name == "mindwtr.desktop.template":
+            data = re.sub(rb"\{\{[^{}\r\n]*\}\}", lambda expression: b" " * len(expression[0]), data)
         comments = explanatory_comments(parsers[language], data)
         if language == "yaml" and (name.startswith(".github/") or Path(name).name in ("action.yml", "action.yaml")):
             comments.extend(workflow_shell_comments(data, parsers[language]))

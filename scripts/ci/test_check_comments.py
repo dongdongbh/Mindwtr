@@ -1,4 +1,8 @@
 import unittest
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
 from tree_sitter_language_pack import get_parser
 from check_comments import (
@@ -11,6 +15,21 @@ from check_comments import (
 
 
 class CommentPolicyTests(unittest.TestCase):
+    def test_desktop_template_directives_are_not_explanatory_comments(self):
+        source = '[Desktop Entry]\n{{#if comment}}\nComment={{comment}}\n{{/if}}\nName={{name}}\n'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'mindwtr.desktop.template'
+            command = [sys.executable, str(Path(__file__).with_name('check_comments.py')), str(path)]
+            path.write_text(source)
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            path.write_text('# explanation\n' + source + '# another explanation\n')
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn(f'{path}:1:1:', result.stdout)
+            self.assertIn(f'{path}:7:1:', result.stdout)
+            self.assertIn('2 violations.', result.stdout)
+
     def test_explanations_are_rejected_across_source_languages(self):
         samples = {
             'typescript': b'const value = 1; // explanation',
