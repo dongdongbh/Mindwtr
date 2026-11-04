@@ -82,12 +82,6 @@ jobs:
 
 
 
-          deepmerge_latest="$(npm view deepmerge version)"
-          if [ "$deepmerge_latest" != "4.3.1" ]; then
-            echo "deepmerge $deepmerge_latest is released: check GHSA-gcqx-w48m-w2h4 and drop its audit exception." >&2
-            exit 1
-          fi
-          bun scripts/ci/check-audit-exception-upstreams.js
           if ! bun audit \
             --ignore=GHSA-5p2g-fcmc-qvqq \
             --ignore=GHSA-w3rx-r6r6-pgpr \
@@ -116,6 +110,17 @@ jobs:
           if ! npm audit --prefix tools/eas-cli --audit-level=low --json > "$eas_audit_report"; then
             bun scripts/ci/validate-npm-audit.js "$eas_audit_report" eas
           fi
+
+      - name: Check upstream fixes for audit exceptions
+        if: always()
+        run: |
+          set -euo pipefail
+          deepmerge_latest="$(npm view deepmerge version)"
+          if [ "$deepmerge_latest" != "4.3.1" ]; then
+            echo "deepmerge $deepmerge_latest is released: check GHSA-gcqx-w48m-w2h4 and drop its audit exception." >&2
+            exit 1
+          fi
+          bun scripts/ci/check-audit-exception-upstreams.js
 
   cargo-audit:
     runs-on: ubuntu-latest

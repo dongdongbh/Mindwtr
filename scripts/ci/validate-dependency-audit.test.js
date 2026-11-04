@@ -4,10 +4,11 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import ts from "typescript";
+import { parse } from "yaml";
 
 import { validateMobileAuditReport } from "./validate-mobile-npm-audit.js";
 import { AUDIT_EXCEPTIONS, validateBunAuditTopology, validateNpmAuditTopology, validateNpmAuditReport } from "./validate-npm-audit.js";
-import { UPSTREAM_GUARDS, upstreamGuardFailure } from "./check-audit-exception-upstreams.js";
+import { UPSTREAM_GUARDS, bunLockedVersions, unwatchedLockedVersions, upstreamGuardFailure } from "./check-audit-exception-upstreams.js";
 
 const rootRequire = createRequire(import.meta.url);
 
@@ -184,22 +185,22 @@ test("every tracked npm package lock triggers and runs its own audit", () => {
   );
 });
 
-const advisory = (name, id, range) => ({
-  name, dependency: name, range, url: `https://github.com/advisories/${id}`,
+const advisory = (name, id, range, severity) => ({
+  name, dependency: name, range, severity, url: `https://github.com/advisories/${id}`,
 });
 
 const allowedReport = (profile) => {
   const vulnerabilities = {
-    minimatch: {name: "minimatch", severity: "moderate", via: [advisory("minimatch", MINIMATCH_ADVISORY, ">=7.0.0 <11.0.1")], nodes: ["node_modules/minimatch"]},
+    minimatch: {name: "minimatch", severity: "moderate", via: [advisory("minimatch", MINIMATCH_ADVISORY, ">=7.0.0 <11.0.1", "moderate")], nodes: ["node_modules/minimatch"]},
   };
   if (profile !== "desktop") {
-    vulnerabilities.deepmerge = {name: "deepmerge", severity: "low", via: [advisory("deepmerge", DEEPMERGE_ADVISORY, ">=4.2.0 <=4.3.1")], nodes: ["node_modules/deepmerge"]};
-    vulnerabilities.glob = {name: "glob", severity: "moderate", via: [advisory("glob", GLOB_ADVISORY, ">=9.0.0 <=14.0.1"), "minimatch"], nodes: ["node_modules/glob"]};
+    vulnerabilities.deepmerge = {name: "deepmerge", severity: "low", via: [advisory("deepmerge", DEEPMERGE_ADVISORY, ">=4.2.0 <=4.3.1", "low")], nodes: ["node_modules/deepmerge"]};
+    vulnerabilities.glob = {name: "glob", severity: "moderate", via: [advisory("glob", GLOB_ADVISORY, ">=9.0.0 <=14.0.1", "moderate"), "minimatch"], nodes: ["node_modules/glob"]};
   }
   if (profile === "mobile") vulnerabilities["image-size"] = {
     name: "image-size", severity: "high", via: [
-      advisory("image-size", IMAGE_SIZE_ADVISORIES[0], ">=1.2.0 <=2.0.2"),
-      advisory("image-size", IMAGE_SIZE_ADVISORIES[1], ">=0.6.3 <=2.0.2"),
+      advisory("image-size", IMAGE_SIZE_ADVISORIES[0], ">=1.2.0 <=2.0.2", "high"),
+      advisory("image-size", IMAGE_SIZE_ADVISORIES[1], ">=0.6.3 <=2.0.2", "high"),
     ], nodes: ["node_modules/image-size"],
   };
   const count = (severity) => Object.values(vulnerabilities).filter((vulnerability) => vulnerability.severity === severity).length;
@@ -213,7 +214,7 @@ for (const profile of Object.keys(profiles)) {
     expect(() => validateNpmAuditReport(allowedReport(profile), profile, npmLock(profile))).not.toThrow();
     if (profile === "mobile") expect(() => validateMobileAuditReport(allowedReport(profile))).not.toThrow();
     const unexpected = allowedReport(profile);
-    unexpected.vulnerabilities.minimatch.via.push(advisory("minimatch", "GHSA-unexpected-advisory", ">=7.0.0 <11.0.1"));
+    unexpected.vulnerabilities.minimatch.via.push(advisory("minimatch", "GHSA-unexpected-advisory", ">=7.0.0 <11.0.1", "moderate"));
     expect(() => validateNpmAuditReport(unexpected, profile, npmLock(profile))).toThrow(/unexpected direct advisories/);
     const everyCopy = allowedReport(profile);
     everyCopy.vulnerabilities.minimatch.nodes = Object.keys(npmLock(profile).packages).filter((path) => path.endsWith("node_modules/minimatch"));
@@ -260,6 +261,8 @@ test("npm exceptions reject malformed reports, API errors, unknown records, and 
     (r) => { r.vulnerabilities.deepmerge.via[0].dependency = "unrelated"; },
     (r) => { r.vulnerabilities.deepmerge.via[0].url = `https://evil.example/advisories/${DEEPMERGE_ADVISORY}`; },
     (r) => { r.vulnerabilities.deepmerge.via[0].range = "*"; },
+    (r) => { r.vulnerabilities.deepmerge.via[0].severity = "critical"; },
+    (r) => { delete r.vulnerabilities.deepmerge.via[0].severity; },
     (r) => { r.vulnerabilities.deepmerge.via.push(null); },
     (r) => { r.vulnerabilities.deepmerge.via.push("unrelated"); },
     (r) => { r.vulnerabilities.deepmerge.via.push(r.vulnerabilities.deepmerge.via[0]); },
@@ -326,7 +329,7 @@ const EXPO_CONFIG_RUNTIME_PACKAGES = ["expo", "expo-constants", "expo-manifests"
 test("deepmerge stays a build-time dependency of @expo/config only, at the excepted version", () => {
   const workflow = readFileSync(".github/workflows/dependency-audit.yml", "utf8");
   const excepted = AUDIT_EXCEPTIONS.deepmerge;
-  expect(excepted.advisories).toEqual({[DEEPMERGE_ADVISORY]: ">=4.2.0 <=4.3.1"});
+  expect(excepted.advisories).toEqual({[DEEPMERGE_ADVISORY]: {range: ">=4.2.0 <=4.3.1", severity: "low"}});
   expect(excepted.versions).toEqual(["4.3.1"]);
   expect(workflow).toContain(`if [ "$deepmerge_latest" != "${excepted.versions[0]}" ]; then`);
   const consumers = new Set();
@@ -414,16 +417,23 @@ test("shipped runtime sources never import the excepted Node build-tool chains",
 
 test("glob and minimatch exceptions name only the reviewed advisories and fail once a locked line accepts the fix", () => {
   const workflow = readFileSync(".github/workflows/dependency-audit.yml", "utf8");
-  expect(AUDIT_EXCEPTIONS.glob.advisories).toEqual({[GLOB_ADVISORY]: ">=9.0.0 <=14.0.1"});
-  expect(AUDIT_EXCEPTIONS.minimatch.advisories).toEqual({[MINIMATCH_ADVISORY]: ">=7.0.0 <11.0.1"});
-  expect(workflow).toContain("bun scripts/ci/check-audit-exception-upstreams.js");
-  expect(workflow.indexOf("bun scripts/ci/check-audit-exception-upstreams.js")).toBeLessThan(workflow.indexOf("if ! bun audit"));
+  expect(AUDIT_EXCEPTIONS.glob).toEqual({versions: ["6.0.4", "7.2.3", "10.5.0", "13.0.1", "13.0.6"],
+    advisories: {[GLOB_ADVISORY]: {range: ">=9.0.0 <=14.0.1", severity: "moderate"}}});
+  expect(AUDIT_EXCEPTIONS.minimatch).toEqual({versions: ["3.1.5", "5.1.8", "9.0.9", "10.2.4", "10.2.6"],
+    advisories: {[MINIMATCH_ADVISORY]: {range: ">=7.0.0 <11.0.1", severity: "moderate"}}});
+  const steps = parse(workflow).jobs["bun-audit"].steps;
+  const upstream = steps.at(-1);
+  expect(upstream.name).toBe("Check upstream fixes for audit exceptions");
+  expect(upstream.if).toBe("always()");
+  expect(upstream.run).toContain('if [ "$deepmerge_latest" != "4.3.1" ]; then');
+  expect(upstream.run.trim().endsWith("bun scripts/ci/check-audit-exception-upstreams.js")).toBe(true);
+  expect(steps.slice(0, -1).some((step) => /check-audit-exception-upstreams|npm view deepmerge/.test(step.run ?? ""))).toBe(false);
   expect(UPSTREAM_GUARDS.filter((guard) => guard.dependency === "glob").map((guard) => [guard.consumer, guard.fixed, guard.advisory]))
-    .toEqual([["@expo/cli@^54.0.20", "14.0.2", GLOB_ADVISORY]]);
+    .toEqual([["@expo/cli", "14.0.2", GLOB_ADVISORY]]);
   const minimatchConsumers = UPSTREAM_GUARDS.filter((guard) => guard.dependency === "minimatch");
   expect(minimatchConsumers.every((guard) => guard.fixed === "11.0.1" && guard.advisory === MINIMATCH_ADVISORY)).toBe(true);
-  expect(minimatchConsumers.map((guard) => guard.consumer.slice(0, guard.consumer.lastIndexOf("@")))).toEqual([
-    "eslint", "@eslint/config-array", "@eslint/eslintrc", "glob", "@expo/cli", "@expo/fingerprint", "@expo/metro-config",
+  expect(minimatchConsumers.map((guard) => guard.consumer)).toEqual([
+    "eslint", "@eslint/config-array", "@eslint/eslintrc", "glob", "glob", "glob", "@expo/cli", "@expo/fingerprint", "@expo/metro-config",
   ]);
   const [globGuard] = UPSTREAM_GUARDS;
   expect(upstreamGuardFailure(globGuard, ["^13.0.0", "^13.0.0"])).toBeNull();
@@ -433,4 +443,47 @@ test("glob and minimatch exceptions name only the reviewed advisories and fail o
   expect(upstreamGuardFailure(globGuard, [])).toContain("no longer depends on glob");
   expect(upstreamGuardFailure(minimatchConsumers[0], ["^3.1.5"])).toBeNull();
   expect(upstreamGuardFailure(minimatchConsumers[0], ["^11.0.1"])).toContain("now accepts minimatch 11.0.1");
+});
+
+test("every locked glob and minimatch consumer in bun.lock sits inside a guarded release line", () => {
+  const lockText = readFileSync("bun.lock", "utf8");
+  expect(unwatchedLockedVersions(lockText)).toEqual([]);
+  expect(bunLockedVersions(lockText, "glob")).toEqual(["10.5.0", "13.0.0", "7.2.3"]);
+  const movedLine = lockText.replace('["@expo/cli@54.0.20"', '["@expo/cli@55.0.1"');
+  expect(unwatchedLockedVersions(movedLine)).toEqual([
+    "@expo/cli@55.0.1 in bun.lock is outside the GHSA-3g3m-2fjr-6pw4 guard ranges ^54.0.20 for glob: move the guard to the locked line.",
+    "@expo/cli@55.0.1 in bun.lock is outside the GHSA-g3hv-75wg-m249 guard ranges ^54.0.20 for minimatch: move the guard to the locked line.",
+  ]);
+  const newGlobLine = lockText.replace('["glob@7.2.3"', '["glob@8.1.0"');
+  expect(unwatchedLockedVersions(newGlobLine)).toEqual([
+    "glob@8.1.0 in bun.lock is outside the GHSA-g3hv-75wg-m249 guard ranges ^7.2.3, ^10.5.0, ^13.0.0 for minimatch: move the guard to the locked line.",
+  ]);
+  const dropped = lockText.replaceAll('["@expo/fingerprint@0.15.4"', '["@expo/fingerprint-gone@0.15.4"');
+  expect(unwatchedLockedVersions(dropped)).toEqual([
+    "@expo/fingerprint is no longer in bun.lock: re-check the GHSA-g3hv-75wg-m249 guard for minimatch.",
+  ]);
+});
+
+test("the desktop, mobile and eas npm audits each run through their exact validator profile", () => {
+  const run = parse(readFileSync(".github/workflows/dependency-audit.yml", "utf8")).jobs["bun-audit"].steps
+    .find((step) => step.name === "Audit shipped npm package locks").run;
+  for (const line of [
+    'npm audit --prefix apps/desktop --audit-level=low --json > "$desktop_audit_report"',
+    'bun scripts/ci/validate-npm-audit.js "$desktop_audit_report" desktop',
+    'npm audit --prefix apps/mobile --audit-level=low --json > "$mobile_audit_report"',
+    'bun scripts/ci/validate-mobile-npm-audit.js "$mobile_audit_report"',
+    "npm audit --prefix packages/core --audit-level=low\n",
+    'npm audit --prefix tools/eas-cli --audit-level=low --json > "$eas_audit_report"',
+    'bun scripts/ci/validate-npm-audit.js "$eas_audit_report" eas',
+  ]) expect(run).toContain(line);
+  expect(run.match(/validate-(?:mobile-)?npm-audit\.js/g)).toHaveLength(3);
+});
+
+test("topology closure follows peer dependencies", () => {
+  const lock = npmLock("mobile");
+  lock.packages["node_modules/peer-consumer"] = {version: "1.0.0", peerDependencies: {minimatch: "*"}};
+  expect(() => validateNpmAuditTopology(lock, "mobile")).toThrow(/unreviewed/);
+  const bun = bunLock();
+  bun.packages["peer-consumer"] = ["peer-consumer@1.0.0", "", {peerDependencies: {glob: "*"}}];
+  expect(() => validateBunAuditTopology(bun)).toThrow(/unreviewed/);
 });
