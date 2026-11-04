@@ -491,11 +491,16 @@ describePerf('large-store performance budgets', () => {
         for (const size of DATASET_SIZES) {
             const fixture = createLargeStoreFixture(size);
             const projects = fixture.projects.map((project) => ({ ...project, isSequential: true }));
-            const start = performance.now();
-            const weekly = getWeeklyReviewBuckets(fixture.tasks, projects, { now: NOW, sections: fixture.sections });
-            const overview = getReviewOverviewGroups({ tasks: fixture.tasks, projects, sections: fixture.sections, orderedAreas: fixture.areas,
-                areaFilter: { included: [], excluded: [] }, sortBy: 'default', now: NOW });
-            const duration = performance.now() - start;
+            const derive = () => ({
+                weekly: getWeeklyReviewBuckets(fixture.tasks, projects, { now: NOW, sections: fixture.sections }),
+                overview: getReviewOverviewGroups({ tasks: fixture.tasks, projects, sections: fixture.sections, orderedAreas: fixture.areas,
+                    areaFilter: { included: [], excluded: [] }, sortBy: 'default', now: NOW }),
+            });
+            const { weekly, overview } = derive();
+            const { durationMs: duration } = measureHotPath(() => {
+                const result = derive();
+                return result.weekly.projectEntries.length + result.overview.length;
+            });
             measurements.set(size, duration);
             expect(weekly.projectEntries.length).toBeGreaterThan(0);
             expect(overview.length).toBeGreaterThan(0);
