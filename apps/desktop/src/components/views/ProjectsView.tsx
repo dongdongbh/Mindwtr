@@ -1,7 +1,4 @@
-import { createPortal } from 'react-dom';
-import { ViewSidebarContext } from '../../contexts/view-sidebar-context';
 import {
-    useContext,
     useState,
     useMemo,
     useEffect,
@@ -207,7 +204,6 @@ export function ProjectsView() {
         DEFAULT_PROJECTS_VIEW_STATE,
         sanitizeProjectsViewState
     );
-    const projectSidebarSlot = useContext(ViewSidebarContext);
     const projectsSidebarCollapsed = persistedViewState.projectsSidebarCollapsed;
     const showDeferredProjects = persistedViewState.showDeferredProjects;
     const showArchivedProjects = persistedViewState.showArchivedProjects;
@@ -257,7 +253,7 @@ export function ProjectsView() {
     }, [setPersistedViewState]);
     const fallbackProjectsWidth = typeof window === 'undefined' ? PROJECTS_VIEW_DEFAULT_MAX_WIDTH : window.innerWidth;
     const isCompactProjectsLayout = (availableProjectsWidth ?? fallbackProjectsWidth) < 760;
-    const projectsSidebarVisible = projectSidebarSlot ? true : isCompactProjectsLayout
+    const projectsSidebarVisible = isCompactProjectsLayout
         ? compactSidebarOpen
         : !projectsSidebarCollapsed;
     const projectsSidebarEffectivelyCollapsed = !projectsSidebarVisible;
@@ -765,7 +761,6 @@ export function ProjectsView() {
 
     const projectSidebar = (
         <ProjectsSidebar
-            embedded={Boolean(projectSidebarSlot)}
             t={t}
             areaFilterLabel={areaFilterLabel ?? undefined}
             selectedTag={selectedTag}
@@ -814,13 +809,13 @@ export function ProjectsView() {
             onDuplicateProject={handleDuplicateProject}
             draggingSection={activeDrag?.type === 'project' ? activeDrag.section : null}
             collapseLabel={collapseProjectsSidebarLabel}
-            onToggleCollapsed={projectSidebarSlot ? undefined : toggleProjectsSidebarCollapsed}
+            onToggleCollapsed={toggleProjectsSidebarCollapsed}
         />
     );
 
     return (
         <ErrorBoundary>
-            <div className={projectSidebarSlot ? "h-full px-5 pt-6 lg:px-8" : "h-full px-4 pt-3"}>
+            <div className="h-full px-4 pt-3">
                 <DndContext
                     sensors={dndSensors}
                     collisionDetection={projectsViewCollisionDetection}
@@ -829,13 +824,12 @@ export function ProjectsView() {
                     onDragCancel={handleDndDragCancel}
                     onDragEnd={handleDndDragEnd}
                 >
-                {projectSidebarSlot && createPortal(projectSidebar, projectSidebarSlot)}
                 <div
                     ref={projectsLayoutRef}
                     className="relative mx-auto flex h-full w-full min-w-0 gap-5 xl:gap-6"
                     style={{ maxWidth: `${projectsLayoutMaxWidth}px` }}
                 >
-                    {!projectSidebarSlot && (isCompactProjectsLayout || projectsSidebarVisible) && (
+                    {(isCompactProjectsLayout || projectsSidebarVisible) && (
                         <div
                             className={`relative min-h-0 flex-none ${
                                 isCompactProjectsLayout

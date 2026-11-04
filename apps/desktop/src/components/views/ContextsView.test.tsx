@@ -1,4 +1,3 @@
-import { ViewSidebarContext } from '../../contexts/view-sidebar-context';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Area, Project, Task } from '@mindwtr/core';
 import { safeFormatDate, useTaskStore } from '@mindwtr/core';
@@ -40,20 +39,19 @@ const renderContextsView = () => render(
 );
 
 describe('ContextsView', () => {
-    it('moves the existing token submenu into the main sidebar without losing its selection', () => {
-        const slot = document.createElement('div');
-        document.body.append(slot);
-        const view = render(<ViewSidebarContext.Provider value={slot}><LanguageProvider><ContextsView /></LanguageProvider></ViewSidebarContext.Provider>);
-        expect(view.container.querySelector('[data-context-navigation-root]')).toBeNull();
-        expect(slot.querySelector('[data-context-navigation-root]')).not.toBeNull();
-        fireEvent.click(within(slot).getByRole('button', { name: '@Office (1)' }));
-        expect(within(slot).getByRole('button', { name: '@Office (1)' })).toHaveAttribute('aria-pressed', 'true');
-        view.rerender(<ViewSidebarContext.Provider value={null}><LanguageProvider><ContextsView /></LanguageProvider></ViewSidebarContext.Provider>);
-        expect(slot.children).toHaveLength(0);
-        expect(view.container.querySelector('[data-context-navigation-root]')).not.toBeNull();
-        expect(view.getByRole('button', { name: '@Office (1)' })).toHaveAttribute('aria-pressed', 'true');
+    it('collapses and restores its own navigation without losing token selection', () => {
+        const view = renderContextsView();
+        const navigation = view.container.querySelector('[data-context-navigation-root]');
+        fireEvent.click(view.getByRole('button', { name: '@Office (1)' }));
+        fireEvent.click(view.getByRole('button', { name: 'Collapse contexts panel' }));
+        expect(navigation).toHaveClass('hidden');
+        expect(navigation).toHaveAttribute('hidden');
+        expect(window.localStorage.getItem('mindwtr:view:contexts:sidebar-collapsed:v1')).toBe('true');
         view.unmount();
-        slot.remove();
+        const restored = renderContextsView();
+        fireEvent.click(restored.getByRole('button', { name: 'Expand contexts panel' }));
+        expect(restored.container.querySelector('[data-context-navigation-root]')).not.toHaveAttribute('hidden');
+        expect(restored.getByRole('button', { name: '@Office (1)' })).toHaveAttribute('aria-pressed', 'true');
     });
 
     beforeEach(() => {
@@ -386,6 +384,8 @@ describe('ContextsView', () => {
         expect(view.getByRole('button', { name: '@tools (0)' })).toHaveAttribute('aria-pressed', 'true');
         expect(view.queryByRole('button', { name: '@tools/chainsaw (0)' })).not.toBeInTheDocument();
         expect(view.queryByText('Home')).not.toBeInTheDocument();
+        vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600);
+        fireEvent(window, new Event('resize'));
         expect(view.getByRole('button', { name: 'Remove filter @tools' })).toBeInTheDocument();
         fireEvent.click(view.getByRole('button', { name: 'Remove filter @tools' }));
         expect(view.getByText('Home')).toBeInTheDocument();
@@ -488,6 +488,7 @@ describe('ContextsView', () => {
     });
 
     it('migrates the old single persisted token and adds tokens from the compact selector', () => {
+        vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600);
         window.localStorage.setItem(CONTEXTS_VIEW_STATE_STORAGE_KEY,
             JSON.stringify({ selectedContext: '@Office', statusFilters: [], groupBy: 'none' }));
         const view = renderContextsView();
@@ -507,6 +508,7 @@ describe('ContextsView', () => {
     });
 
     it('returns the compact token selector to all contexts', () => {
+        vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600);
         const view = renderContextsView();
         const compactSelect = view.getByRole('combobox', { name: 'Contexts & Tags' });
 

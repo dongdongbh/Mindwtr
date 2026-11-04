@@ -122,12 +122,7 @@ describe('Layout shared view actions', () => {
 });
 
 beforeEach(() => {
-    vi.stubGlobal('ResizeObserver', class {
-        observe() {}
-        disconnect() {}
-    });
     window.localStorage.clear();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 256, 800));
     resetStores();
 
 
@@ -185,64 +180,15 @@ afterEach(() => {
 });
 
 describe('Layout content width', () => {
-    it('keeps navigation usable when resize observation is unavailable', () => {
+    it.each(['projects', 'contexts'])('keeps global navigation independent of the %s pane', (view) => {
         vi.stubGlobal('ResizeObserver', undefined);
-        const { container, getByRole } = renderLayout('projects');
-        expect(container.querySelector('[data-view-sidebar-slot]')).toBeNull();
-        expect(getByRole('button', { name: 'Add Task (Inbox)' })).toBeInTheDocument();
-    });
-
-    it.each(['projects', 'contexts'])('keeps the %s submenu standalone when the sidebar cannot fit both panes', (view) => {
-        vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue(new DOMRect(0, 0, 256, 400));
-        const { container, queryByRole } = renderLayout(view);
+        const { container, getByRole, queryByRole } = renderLayout(view);
         expect(container.querySelector('[data-view-sidebar-slot]')).toBeNull();
         expect(queryByRole('separator')).not.toBeInTheDocument();
-    });
-
-    it('resizes the navigation/submenu split with the keyboard, clamps it, and remembers it', () => {
-        const view = renderLayout('projects');
-        const separator = view.getByRole('separator', { name: 'Resize navigation and submenu' });
-        expect(separator).toHaveAttribute('aria-valuenow', '60');
-        fireEvent.keyDown(separator, { key: 'ArrowUp' });
-        expect(separator).toHaveAttribute('aria-valuenow', '55');
-        fireEvent.keyDown(separator, { key: 'Home' });
-        fireEvent.keyDown(separator, { key: 'ArrowUp' });
-        expect(separator).toHaveAttribute('aria-valuenow', '20');
-        fireEvent.keyDown(separator, { key: 'End' });
-        fireEvent.keyDown(separator, { key: 'ArrowDown' });
-        expect(separator).toHaveAttribute('aria-valuenow', '80');
-        view.unmount();
-        const next = renderLayout('contexts');
-        expect(next.getByRole('separator')).toHaveAttribute('aria-valuenow', '80');
-        fireEvent.doubleClick(next.getByRole('separator'));
-        expect(next.getByRole('separator')).toHaveAttribute('aria-valuenow', '60');
-    });
-
-    it('resizes the submenu by dragging the separator inside its available height', () => {
-        const view = renderLayout('projects');
-        const separator = view.getByRole('separator') as HTMLDivElement;
-        separator.setPointerCapture = vi.fn();
-        separator.hasPointerCapture = vi.fn(() => true);
-        separator.releasePointerCapture = vi.fn();
-        const split = view.container.querySelector('[data-sidebar-split]')!;
-        vi.spyOn(split, 'getBoundingClientRect').mockReturnValue({ top: 100, height: 400 } as DOMRect);
-        fireEvent.pointerDown(separator, { button: 0, pointerId: 1, clientY: 300 });
-        expect(separator).toHaveAttribute('aria-valuenow', '50');
-        fireEvent.pointerMove(separator, { pointerId: 1, clientY: 200 });
-        expect(separator).toHaveAttribute('aria-valuenow', '25');
-        fireEvent.pointerUp(separator, { pointerId: 1 });
-        expect(separator.releasePointerCapture).toHaveBeenCalledWith(1);
-    });
-
-    it.each(['projects', 'contexts'])('preserves navigation sections and capture while hosting the %s submenu', (view) => {
-        const { container, rerender, getByRole } = renderLayout(view);
-        expect(container.querySelector('[data-view-sidebar-slot]')).not.toBeNull();
-        expect(container.querySelector('aside')).toHaveClass('w-64');
+        expect(container.querySelector('aside')).toHaveClass('w-64', 'shrink-0');
         expect(container.querySelectorAll('[data-sidebar-section-toggle]')).toHaveLength(4);
         expect(getByRole('button', { name: 'More' })).toBeInTheDocument();
         expect(getByRole('button', { name: 'Add Task (Inbox)' })).toBeInTheDocument();
-        rerender(<LanguageProvider><KeybindingProvider currentView="inbox" onNavigate={onNavigate}><Layout currentView="inbox" onViewChange={vi.fn()}><div /></Layout></KeybindingProvider></LanguageProvider>);
-        expect(container.querySelector('[data-view-sidebar-slot]')).toBeNull();
     });
 
     it('sizes rendered content independently from the requested sidebar view', () => {

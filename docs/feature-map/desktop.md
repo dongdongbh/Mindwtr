@@ -89,8 +89,8 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Reach: Sidebar › Projects. The projects panel has New project, Active Projects, Someday / Waiting, and Closed groups, plus a Tag filter. Select a project to open its workspace (Project Notes, Add Section, Add Task, Columns layout, Complete, Duplicate, Cancel project, Convert to section…).
 - Shortcuts: `gp` (Vim, Standard), `Alt+P` (Emacs). `j`/`k` move through the project list when it has focus.
 - Code: `apps/desktop/src/components/views/ProjectsView.tsx`, `apps/desktop/src/components/views/projects/ProjectsSidebar.tsx`, `apps/desktop/src/components/views/projects/ProjectWorkspace.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsHeader.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsFields.tsx`, `apps/desktop/src/components/views/projects/ProjectNotesSection.tsx`, `apps/desktop/src/components/views/projects/ProjectToSectionDialog.tsx`, `apps/desktop/src/components/GettingStartedActions.tsx`
-- Checks: `e2e/projects-calm.spec.ts`, `e2e/projects-keyboard.spec.ts`, `e2e/archived-project-reopen.spec.ts`, `e2e/project-color-override.spec.ts`, `apps/desktop/src/components/views/ProjectsView.test.tsx`, `apps/desktop/src/components/views/projects/ProjectsSidebar.test.tsx`, `apps/desktop/src/components/views/projects/ProjectWorkspace.columns.test.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsHeader.test.tsx`, `apps/desktop/src/components/views/projects/ProjectNotesSection.test.tsx`
-- Notes: A Deferred project still accepts tasks; an Archived project accepts none. Completing one task in an archived project reopens the project and its section.
+- Checks: `e2e/navigation-submenus.spec.ts`, `e2e/projects-calm.spec.ts`, `e2e/projects-keyboard.spec.ts`, `e2e/archived-project-reopen.spec.ts`, `e2e/project-color-override.spec.ts`, `apps/desktop/src/components/views/ProjectsView.test.tsx`, `apps/desktop/src/components/views/projects/ProjectsSidebar.test.tsx`, `apps/desktop/src/components/views/projects/ProjectWorkspace.columns.test.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsHeader.test.tsx`, `apps/desktop/src/components/views/projects/ProjectNotesSection.test.tsx`
+- Notes: Wide windows show a separate projects pane beside global navigation. Its collapse/expand buttons preserve selection; drag its vertical divider to resize (width is remembered). Narrow workspaces use an overlay navigator. A Deferred project still accepts tasks; an Archived project accepts none. Completing one task in an archived project reopens the project and its section.
 
 ## Project sections
 
@@ -133,10 +133,10 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Contexts
 
-- Reach: Sidebar › Contexts. One view covers both @contexts and #tags. Context match and Tag match switch between All and Any.
+- Reach: Sidebar › Contexts. Wide workspaces show a separate collapsible contexts pane beside global navigation; use Collapse contexts panel / Expand contexts panel to hide or restore it. Narrow workspaces use the context selector above tasks. One view covers both @contexts and #tags. Context match and Tag match switch between All and Any.
 - Shortcuts: `gc` (Vim, Standard), `Alt+C` (Emacs).
 - Code: `apps/desktop/src/components/views/ContextsView.tsx`, `apps/desktop/src/lib/contexts-view-state.ts`
-- Checks: `e2e/contexts-match-mode.spec.ts`, `e2e/saved-taxonomy.spec.ts`, `apps/desktop/src/components/views/ContextsView.test.tsx`
+- Checks: `e2e/navigation-submenus.spec.ts`, `e2e/contexts-match-mode.spec.ts`, `e2e/saved-taxonomy.spec.ts`, `apps/desktop/src/components/views/ContextsView.test.tsx`
 - Notes: Dropping a dragged task on a context assigns that context and offers undo.
 
 ## Calendar

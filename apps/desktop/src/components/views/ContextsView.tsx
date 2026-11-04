@@ -1,6 +1,4 @@
-import { createPortal } from 'react-dom';
-import { ViewSidebarContext } from '../../contexts/view-sidebar-context';
-import { useState, useContext, useEffect, useMemo, useCallback, useRef, type DragEvent, type KeyboardEvent } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, type DragEvent, type KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     useTaskStore,
@@ -39,7 +37,7 @@ import {
     type ContextOrTagMatchMode,
     type ContextsChipLabel,
 } from '@mindwtr/core';
-import { AtSign, CheckSquare, ChevronDown, ChevronRight, Filter, Hash, List, Tag, type LucideIcon } from 'lucide-react';
+import { AtSign, CheckSquare, ChevronDown, ChevronRight, Filter, Hash, List, PanelLeftClose, PanelLeftOpen, Tag, type LucideIcon } from 'lucide-react';
 import { TokenPickerModal } from '../TokenPickerModal';
 import { PromptModal } from '../PromptModal';
 import { AgendaFiltersPanel } from './agenda/AgendaFiltersPanel';
@@ -92,7 +90,29 @@ const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
 const CLEAR_SELECTION_OPTION = '__clear__';
 
 export function ContextsView() {
-    const sidebarSlot = useContext(ViewSidebarContext);
+    const [sidebarCollapsed, setSidebarCollapsed] = usePersistedViewState(
+        'mindwtr:view:contexts:sidebar-collapsed:v1', false,
+        (value) => value === true,
+    );
+    const contextsLayoutRef = useRef<HTMLDivElement | null>(null);
+    const [availableWidth, setAvailableWidth] = useState<number | null>(null);
+    const isCompactLayout = availableWidth === null ? window.innerWidth < 1024 : availableWidth < 760;
+    useEffect(() => {
+        const layout = contextsLayoutRef.current;
+        if (!layout) return;
+        const measure = () => {
+            const width = layout.clientWidth;
+            if (width > 0) setAvailableWidth(width);
+        };
+        measure();
+        window.addEventListener('resize', measure);
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+        observer?.observe(layout);
+        return () => {
+            window.removeEventListener('resize', measure);
+            observer?.disconnect();
+        };
+    }, []);
     const perf = usePerformanceMonitor('ContextsView');
     const { tasksById, projects, areas, settings, theme, undoNotificationsEnabled, updateSettings } = useTaskStore(
         (state) => ({
@@ -622,13 +642,18 @@ export function ContextsView() {
     };
 
     const contextNavigation = (
-        <div data-context-navigation-root className={sidebarSlot ? "flex flex-col gap-3" : "hidden min-w-[13.5rem] w-[clamp(13.5rem,16vw,15.5rem)] flex-shrink-0 flex-col gap-4 border-r border-border pr-5 lg:flex xl:pr-6"}>
+        <div data-context-navigation-root id="contexts-sidebar-panel" hidden={sidebarCollapsed || isCompactLayout} className={cn("min-h-0 min-w-[13.5rem] w-[clamp(13.5rem,16vw,15.5rem)] flex-shrink-0 flex-col gap-4 border-r border-border pr-5 xl:pr-6", sidebarCollapsed || isCompactLayout ? "hidden" : "flex")}>
                         <div className="flex items-center justify-between">
-                            <h2 className={sidebarSlot ? "text-xs font-semibold uppercase tracking-wide text-muted-foreground" : "text-xl font-bold tracking-tight"}>{t('contexts.title')}</h2>
-                            <Filter className="w-5 h-5 text-muted-foreground" />
+                            <h2 className="text-xl font-bold tracking-tight">{t('contexts.title')}</h2>
+                            <button type="button" onClick={() => setSidebarCollapsed(true)}
+                                aria-label={t('contexts.collapseSidebar')} title={t('contexts.collapseSidebar')}
+                                aria-expanded="true" aria-controls="contexts-sidebar-panel"
+                                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-primary/40">
+                                <PanelLeftClose className="h-4 w-4" />
+                            </button>
                         </div>
 
-                        <div className={sidebarSlot ? "space-y-1" : "space-y-1 overflow-y-auto flex-1"}>
+                        <div className="space-y-1 overflow-y-auto flex-1">
                             <button
                                 type="button"
                                 onClick={() => setSelectedContext(null)}
@@ -695,13 +720,19 @@ export function ContextsView() {
             <PromptModal isOpen={saveFilterOpen} title={t('savedFilters.saveTitle')} placeholder={t('savedFilters.namePlaceholder')}
                 defaultValue={selectedContexts.join(' + ')} confirmLabel={t('common.save')} cancelLabel={t('common.cancel')}
                 onConfirm={saveContextFilter} onCancel={() => setSaveFilterOpen(false)} />
-            <div className={sidebarSlot ? "h-full px-5 pt-6 lg:px-8" : "h-full px-4 pt-3"}>
-                <div className="mx-auto flex h-full w-full max-w-[84rem] min-w-0 gap-0 lg:gap-5 xl:gap-6 2xl:max-w-[88rem]">
-                    {sidebarSlot ? createPortal(contextNavigation, sidebarSlot) : contextNavigation}
+            <div className="h-full px-4 pt-3">
+                <div ref={contextsLayoutRef} className={cn("mx-auto flex h-full w-full max-w-[84rem] min-w-0 2xl:max-w-[88rem]", !isCompactLayout && "gap-5 xl:gap-6")}>
+                    {contextNavigation}
 
                     {                   }
                     <div className="min-w-0 flex-1 flex flex-col h-full overflow-hidden">
                         <header className="mb-6 flex flex-wrap items-center gap-3">
+                            {sidebarCollapsed && !isCompactLayout && <button type="button" onClick={() => setSidebarCollapsed(false)}
+                                aria-label={t('contexts.expandSidebar')} title={t('contexts.expandSidebar')}
+                                aria-expanded="false" aria-controls="contexts-sidebar-panel"
+                                className="inline-flex rounded-md p-1.5 text-muted-foreground hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-primary/40">
+                                <PanelLeftOpen className="h-4 w-4" />
+                            </button>}
                             <div className="p-2 bg-primary/10 rounded-lg">
                                 <Tag className="w-6 h-6 text-primary" />
                             </div>
@@ -713,7 +744,7 @@ export function ContextsView() {
                                     {filteredTasks.length} {t('common.tasks')}
                                 </p>
                             </div>
-                            <div className="order-3 w-full lg:hidden">
+                            <div hidden={!isCompactLayout} className={cn("order-3 w-full", !isCompactLayout && "hidden")}>
                                 <label htmlFor="contexts-token-select" className="sr-only">{allTokensLabel}</label>
                                 <select
                                     id="contexts-token-select"

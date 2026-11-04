@@ -241,7 +241,6 @@ export const svOverrides: Record<string, string> = {
         'nav.calendar': 'Kalender',
         'nav.review': 'Genomgång',
         'nav.agenda': 'Fokus',
-        'nav.resizeSubmenu': 'Ändra storlek på navigering och undermeny',
         'nav.settings': 'Inställningar',
         'nav.done': 'Klart',
         'nav.archived': 'Arkiverat',
@@ -774,6 +773,8 @@ export const svOverrides: Record<string, string> = {
         'next.warningHint': 'Överväg att fokusera på färre projekt. GTD rekommenderar att hålla Nästa steg till 10–15 poster för tydlighetens skull.',
 
         'contexts.title': 'Kontexter',
+        "contexts.collapseSidebar": "Fäll ihop kontextpanelen",
+        "contexts.expandSidebar": "Expandera kontextpanelen",
         'contexts.filter': 'Filtrera uppgifter efter kontext',
         'contexts.dropAdd': 'Lägg till {context}',
         'contexts.dropAdded': 'Lade till {context}',

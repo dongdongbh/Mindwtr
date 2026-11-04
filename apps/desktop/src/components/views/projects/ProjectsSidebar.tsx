@@ -71,7 +71,6 @@ export function getVisibleProjectIds({
 }
 
 interface ProjectsSidebarProps {
-    embedded?: boolean;
     t: (key: string) => string;
     areaFilterLabel?: string;
     selectedTag: string;
@@ -158,7 +157,6 @@ export function ProjectsSidebar({
     draggingSection,
     collapseLabel,
     onToggleCollapsed,
-    embedded = false,
 }: ProjectsSidebarProps) {
     const theme = useTaskStore((state) => state.settings.theme);
     const focusedCount = focusedProjectCount;
@@ -492,18 +490,18 @@ export function ProjectsSidebar({
         <div
             ref={projectNavigationRootRef}
             data-project-navigation-root
-            className={cn("w-full min-h-0 flex flex-col gap-4", !embedded && "h-full border-r border-border pr-5 xl:pr-6")}
+            className="w-full h-full min-h-0 flex flex-col gap-4 border-r border-border pr-5 xl:pr-6"
         >
-            <div data-projects-sidebar-header className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                    <h2 className={embedded ? "text-xs font-semibold text-muted-foreground uppercase tracking-wide" : "text-xl font-bold tracking-tight"}>{t(embedded ? 'projects.activeSection' : 'projects.title')}</h2>
+            <div data-projects-sidebar-header className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex max-w-full flex-none items-center gap-2 min-w-0">
+                    <h2 className="shrink-0 whitespace-nowrap text-xl font-bold tracking-tight">{t('projects.title')}</h2>
                     {areaFilterLabel && (
                         <span className="text-[10px] uppercase tracking-wide bg-muted/40 text-muted-foreground border border-border/60 rounded-full px-2 py-0.5 truncate max-w-[180px]">
                             {t('projects.areaLabel')}: {areaFilterLabel}
                         </span>
                     )}
                 </div>
-                <div className="flex flex-none items-center gap-1">
+                <div className="ml-auto flex flex-none items-center gap-1">
                     {!isCreating && (
                         <button
                             type="button"
@@ -632,8 +630,8 @@ export function ProjectsSidebar({
                 </form>
             )}
 
-            <div className={embedded ? "space-y-3" : "space-y-3 overflow-y-auto flex-1"}>
-                {!embedded && groupedActiveProjects.length > 0 && (
+            <div className="space-y-3 overflow-y-auto flex-1">
+                {groupedActiveProjects.length > 0 && (
                     <div className="pt-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         {t('projects.activeSection')}
                     </div>
