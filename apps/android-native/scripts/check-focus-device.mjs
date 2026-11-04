@@ -79,7 +79,7 @@ const goHome = async () => {
 const inboxTab = (nodes) => tab(nodes, 'Inbox');
 
 const headers = (nodes) => nodes.flatMap((node) => {
-    const match = /^(.+) · (\d+)$/.exec(node.text ?? '');
+    const match = /^(.+) · (\d+)(?:\/\d+)?$/.exec(node.text ?? '');
     return match ? [{ title: match[1], total: Number(match[2]), top: box(node)[1] }] : [];
 });
 const sectionTotal = (nodes, title) => headers(nodes).find((header) => header.title === title)?.total;
