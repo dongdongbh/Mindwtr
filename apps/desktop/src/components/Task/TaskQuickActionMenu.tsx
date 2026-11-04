@@ -943,7 +943,7 @@ export function TaskQuickActionMenu({
                     key: `copy-${kind}`,
                     icon: <Copy className="h-4 w-4" />,
                     label: kind === 'link'
-                        ? tFallback(t, 'task.copyTaskLink', 'Copy task link')
+                        ? tFallback(t, 'task.copyTaskLink', 'Copy Mindwtr link')
                         : tFallback(t, 'task.copyTaskId', 'Copy task ID'),
                     onClick: (event) => {
                         void copyTaskReference(task.id, kind, t, {

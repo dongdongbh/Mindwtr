@@ -375,7 +375,7 @@ export const svOverrides: Record<string, string> = {
         'list.taskDeleted': 'Uppgift borttagen',
         'list.taskCopied': 'Uppgift kopierad till urklipp',
         'task.copyTitle': 'Kopiera titel',
-        "task.copyTaskLink": "Kopiera uppgiftslänk",
+        "task.copyTaskLink": "Kopiera Mindwtr-länk",
         "task.copyTaskId": "Kopiera uppgiftens ID",
         "task.addToChecklist": "Lägg till i checklista…",
         "task.addedToChecklist": "Tillagd i checklista",

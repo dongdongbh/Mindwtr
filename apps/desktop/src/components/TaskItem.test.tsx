@@ -70,7 +70,7 @@ describe('TaskItem', () => {
         const { getByRole } = render(<LanguageProvider>
             <TaskItem task={mockTask} onSelect={onSelect} onToggleSelect={onToggleSelect} />
         </LanguageProvider>);
-        const copy = getByRole('button', { name: 'Copy task link' });
+        const copy = getByRole('button', { name: 'Copy Mindwtr link' });
         await user.click(copy);
         copy.focus();
         await user.keyboard('{Enter}');

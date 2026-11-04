@@ -25,7 +25,7 @@ export const itOverrides: Record<string, string> = {
     "timeline.reorderFailed": "Impossibile salvare il nuovo ordine. Riprova.",
     "timeline.reorderInstructions": "Premi Spazio per selezionare una riga, Su o Giù per spostarla nel gruppo, Spazio per rilasciarla o Esc per annullare.",
     'task.doneTagOutcomeUnknown': "Impossibile confermare la modifica dei tag. Riavvia Mindwtr per ricaricare i dati salvati.",
-    "task.copyTaskLink": "Copia link dell’attività",
+    "task.copyTaskLink": "Copia link Mindwtr",
     "task.copyTaskId": "Copia ID dell’attività",
     "task.addToChecklist": "Aggiungi alla lista di controllo…",
     "task.addedToChecklist": "Aggiunto alla lista di controllo",

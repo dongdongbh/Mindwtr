@@ -380,7 +380,7 @@ export const jaOverrides: Record<string, string> = {
         'list.taskDeleted': 'タスクを削除しました',
         'list.taskCopied': 'タスクをクリップボードにコピーしました',
         'task.copyTitle': 'タイトルをコピー',
-        "task.copyTaskLink": "タスクのリンクをコピー",
+        "task.copyTaskLink": "Mindwtrリンクをコピー",
         "task.copyTaskId": "タスク ID をコピー",
         "task.addToChecklist": "チェックリストに追加…",
         "task.addedToChecklist": "チェックリストに追加しました",

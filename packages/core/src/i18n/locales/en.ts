@@ -374,7 +374,7 @@ export const en: Record<string, string> = {
         'list.taskDeleted': 'Task deleted',
         'list.taskCopied': 'Task copied to clipboard',
         'task.copyTitle': 'Copy Title',
-        "task.copyTaskLink": "Copy task link",
+        "task.copyTaskLink": "Copy Mindwtr link",
         "task.copyTaskId": "Copy task ID",
         "task.addToChecklist": "Add to checklist…",
         "task.addedToChecklist": "Added to checklist",

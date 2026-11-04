@@ -286,10 +286,10 @@ try {
     const plainRows = [...head, ROW.cancel, ROW.delete];
     await openFromInbox(names.plain);
     const copied = (nodes) => editorShows(nodes, names.plain) && hasText(nodes, en['list.taskCopied']);
-    await choose(ROW.copyLink, copied, '(1) Copy task link shows "Task copied to clipboard"', plainRows);
+    await choose(ROW.copyLink, copied, '(1) Copy Mindwtr link shows "Task copied to clipboard"', plainRows);
     await waitFor('the copy toast to go', (nodes) => !hasText(nodes, en['list.taskCopied']), 20_000);
     await choose(ROW.copyId, copied, '(1) Copy task ID shows "Task copied to clipboard"');
-    check(true, '(1) Copy task link and Copy task ID each showed RN\'s toast');
+    check(true, '(1) Copy Mindwtr link and Copy task ID each showed RN\'s toast');
     await waitFor('the copy toast to go', (nodes) => !hasText(nodes, en['list.taskCopied']), 20_000);
 
 

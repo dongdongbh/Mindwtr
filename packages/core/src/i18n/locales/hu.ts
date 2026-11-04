@@ -368,7 +368,7 @@ export const huOverrides: Record<string, string> = {
     'list.taskDeleted': 'Feladat törölve',
     'list.taskCopied': 'Feladat a vágólapra másolva',
     'task.copyTitle': 'Cím másolása',
-    "task.copyTaskLink": "Feladat hivatkozásának másolása",
+    "task.copyTaskLink": "Mindwtr-hivatkozás másolása",
     "task.copyTaskId": "Feladatazonosító másolása",
     "task.addToChecklist": "Hozzáadás az ellenőrzőlistához…",
     "task.addedToChecklist": "Hozzáadva az ellenőrzőlistához",

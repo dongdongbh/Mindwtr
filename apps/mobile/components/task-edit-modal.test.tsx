@@ -449,7 +449,7 @@ describe('TaskEditModal', () => {
       act(() => tree.root.findByType('TaskEditFormTab' as any).props.onTitleDraftChange('Unsaved title'));
     }
     for (const [label, payload] of [
-      ['Copy task link', 'mindwtr://open?task=saved%20%2F%3F%26%23'],
+      ['Copy Mindwtr link', 'mindwtr://open?task=saved%20%2F%3F%26%23'],
       ['Copy task ID', task.id],
     ]) {
       act(() => tree.root.findByProps({ accessibilityLabel: 'common.more' }).props.onPress());
@@ -476,7 +476,7 @@ describe('TaskEditModal', () => {
       tree = renderer.create(<TaskEditModal visible task={task} onSave={vi.fn()} onClose={vi.fn()} />);
     });
     act(() => tree.root.findByProps({ accessibilityLabel: 'common.more' }).props.onPress());
-    expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy task link' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy Mindwtr link' })).toHaveLength(0);
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy task ID' })).toHaveLength(0);
     expect(tree.root.findByProps({ accessibilityLabel: 'common.share' })).toBeTruthy();
     expect(referenceClipboard.write).not.toHaveBeenCalled();

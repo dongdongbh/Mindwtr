@@ -32,7 +32,7 @@ export const trOverrides: Record<string, string> = {
     "timeline.reorderFailed": "Yeni sıralama kaydedilemedi. Tekrar deneyin.",
     "timeline.reorderInstructions": "Satırı seçmek için Boşluk, grubu içinde taşımak için Yukarı veya Aşağı, bırakmak için Boşluk ya da iptal etmek için Escape tuşuna basın.",
     'task.doneTagOutcomeUnknown': "Etiket değişikliği doğrulanamadı. Kaydedilen verileri yeniden yüklemek için Mindwtr uygulamasını yeniden başlatın.",
-    "task.copyTaskLink": "Görev bağlantısını kopyala",
+    "task.copyTaskLink": "Mindwtr bağlantısını kopyala",
     "task.copyTaskId": "Görev kimliğini kopyala",
     "task.addToChecklist": "Kontrol listesine ekle…",
     "task.addedToChecklist": "Kontrol listesine eklendi",

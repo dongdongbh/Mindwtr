@@ -24,7 +24,7 @@ export const csOverrides: Record<string, string> = {
     "timeline.reorderFailed": "Nové pořadí nelze uložit. Zkuste to znovu.",
     "timeline.reorderInstructions": "Stiskněte mezerník pro výběr řádku, šipku nahoru nebo dolů pro přesun ve skupině, mezerník pro umístění nebo Escape pro zrušení.",
     'task.doneTagOutcomeUnknown': "Změnu štítků se nepodařilo potvrdit. Restartujte Mindwtr a znovu načtěte uložená data.",
-    "task.copyTaskLink": "Kopírovat odkaz na úkol",
+    "task.copyTaskLink": "Kopírovat odkaz Mindwtr",
     "task.copyTaskId": "Kopírovat ID úkolu",
     "task.addToChecklist": "Přidat do kontrolního seznamu…",
     "task.addedToChecklist": "Přidáno do kontrolního seznamu",

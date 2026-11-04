@@ -30,7 +30,7 @@ export const hiOverrides: Record<string, string> = {
     "timeline.reorderFailed": "नया क्रम सहेजा नहीं जा सका। फिर से कोशिश करें।",
     "timeline.reorderInstructions": "पंक्ति चुनने के लिए स्पेस, समूह में ले जाने के लिए ऊपर या नीचे, छोड़ने के लिए स्पेस या रद्द करने के लिए एस्केप दबाएँ।",
     'task.doneTagOutcomeUnknown': "टैग में बदलाव की पुष्टि नहीं हो सकी। सहेजे गए डेटा को फिर से लोड करने के लिए Mindwtr को पुनः प्रारंभ करें।",
-    "task.copyTaskLink": "कार्य का लिंक कॉपी करें",
+    "task.copyTaskLink": "Mindwtr लिंक कॉपी करें",
     "task.copyTaskId": "कार्य की आईडी कॉपी करें",
     "task.addToChecklist": "जांच सूची में जोड़ें…",
     "task.addedToChecklist": "जांच सूची में जोड़ा गया",

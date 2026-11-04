@@ -25,7 +25,7 @@ export const viOverrides: Record<string, string> = {
     "timeline.reorderFailed": "Không thể lưu thứ tự mới. Hãy thử lại.",
     "timeline.reorderInstructions": "Nhấn Space để chọn một hàng, Lên hoặc Xuống để di chuyển trong nhóm, Space để thả hoặc Escape để hủy.",
     'task.doneTagOutcomeUnknown': "Không thể xác nhận thay đổi thẻ. Hãy khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",
-    "task.copyTaskLink": "Sao chép liên kết công việc",
+    "task.copyTaskLink": "Sao chép liên kết Mindwtr",
     "task.copyTaskId": "Sao chép mã công việc",
     "task.addToChecklist": "Thêm vào danh sách kiểm tra…",
     "task.addedToChecklist": "Đã thêm vào danh sách kiểm tra",

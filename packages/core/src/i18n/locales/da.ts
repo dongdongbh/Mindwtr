@@ -370,7 +370,7 @@ export const daOverrides: Record<string, string> = {
     'list.taskDeleted': 'Opgave slettet',
     'list.taskCopied': 'Opgave kopieret til udklipsholderen',
     'task.copyTitle': 'Kopiér titel',
-    "task.copyTaskLink": "Kopiér opgavelink",
+    "task.copyTaskLink": "Kopiér Mindwtr-link",
     "task.copyTaskId": "Kopiér opgavens ID",
     "task.addToChecklist": "Føj til tjekliste…",
     "task.addedToChecklist": "Føjet til tjekliste",

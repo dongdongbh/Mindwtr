@@ -33,7 +33,7 @@ export const koOverrides: Record<string, string> = {
     "task.expandChecklistSaveFailed": "전환을 저장하지 못했습니다. 다시 시도하면 중복 없이 같은 전환을 저장합니다.",
 
     'task.copyTitle': '제목 복사',
-    "task.copyTaskLink": "작업 링크 복사",
+    "task.copyTaskLink": "Mindwtr 링크 복사",
     "task.copyTaskId": "작업 ID 복사",
     "task.addToChecklist": "체크리스트에 추가…",
     "task.addedToChecklist": "체크리스트에 추가됨",

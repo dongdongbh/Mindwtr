@@ -429,7 +429,7 @@ export const zhHant: Record<string, string> = {
         'list.taskDeleted': '任務已刪除',
         'list.taskCopied': '任務已複製到剪貼簿',
         'task.copyTitle': '複製標題',
-        "task.copyTaskLink": "複製任務連結",
+        "task.copyTaskLink": "複製 Mindwtr 連結",
         "task.copyTaskId": "複製任務 ID",
         "task.addToChecklist": "加入清單…",
         "task.addedToChecklist": "已加入清單",

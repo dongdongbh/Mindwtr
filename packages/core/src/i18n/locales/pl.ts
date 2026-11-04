@@ -27,7 +27,7 @@ export const plOverrides: Record<string, string> = {
     "timeline.reorderFailed": "Nie udało się zapisać nowej kolejności. Spróbuj ponownie.",
     "timeline.reorderInstructions": "Naciśnij Spację, aby wybrać wiersz, strzałkę w górę lub w dół, aby przesunąć go w grupie, Spację, aby upuścić, lub Escape, aby anulować.",
     'task.doneTagOutcomeUnknown': "Nie udało się potwierdzić zmiany tagów. Uruchom ponownie Mindwtr, aby ponownie wczytać zapisane dane.",
-    "task.copyTaskLink": "Kopiuj link do zadania",
+    "task.copyTaskLink": "Kopiuj link Mindwtr",
     "task.copyTaskId": "Kopiuj ID zadania",
     "task.addToChecklist": "Dodaj do listy kontrolnej…",
     "task.addedToChecklist": "Dodano do listy kontrolnej",

@@ -38,7 +38,7 @@ export const arOverrides: Record<string, string> = {
     "timeline.reorderFailed": "تعذر حفظ الترتيب الجديد. حاول مرة أخرى.",
     "timeline.reorderInstructions": "اضغط المسافة لاختيار صف، ولأعلى أو لأسفل لتحريكه داخل مجموعته، ثم المسافة لإفلاته أو الخروج للإلغاء.",
     'task.doneTagOutcomeUnknown': "تعذّر تأكيد تغيير الوسوم. أعد تشغيل Mindwtr لإعادة تحميل البيانات المحفوظة.",
-    "task.copyTaskLink": "نسخ رابط المهمة",
+    "task.copyTaskLink": "نسخ رابط Mindwtr",
     "task.copyTaskId": "نسخ معرّف المهمة",
     "task.addToChecklist": "إضافة إلى قائمة التحقق…",
     "task.addedToChecklist": "أُضيفت إلى قائمة التحقق",

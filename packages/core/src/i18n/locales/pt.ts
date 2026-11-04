@@ -27,7 +27,7 @@ export const ptOverrides: Record<string, string> = {
     "timeline.reorderFailed": "Não foi possível salvar a nova ordem. Tente novamente.",
     "timeline.reorderInstructions": "Pressione Espaço para selecionar uma linha, Cima ou Baixo para movê-la no grupo, Espaço para soltá-la ou Escape para cancelar.",
     'task.doneTagOutcomeUnknown': "Não foi possível confirmar a alteração das etiquetas. Reinicie o Mindwtr para recarregar os dados salvos.",
-    "task.copyTaskLink": "Copiar link da tarefa",
+    "task.copyTaskLink": "Copiar link do Mindwtr",
     "task.copyTaskId": "Copiar ID da tarefa",
     "task.addToChecklist": "Adicionar à lista de verificação…",
     "task.addedToChecklist": "Adicionado à lista de verificação",

@@ -378,7 +378,7 @@ export const faOverrides: Record<string, string> = {
         'list.taskDeleted': 'کار حذف شد',
         'list.taskCopied': 'کار در کلیپ‌بورد کپی شد',
         'task.copyTitle': 'کپی عنوان',
-        "task.copyTaskLink": "کپی پیوند کار",
+        "task.copyTaskLink": "کپی پیوند Mindwtr",
         "task.copyTaskId": "کپی شناسهٔ کار",
         "task.addToChecklist": "افزودن به چک‌لیست…",
         "task.addedToChecklist": "به چک‌لیست افزوده شد",

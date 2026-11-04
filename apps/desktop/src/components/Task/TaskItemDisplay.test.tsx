@@ -588,7 +588,7 @@ describe('TaskItemDisplay', () => {
                 showQuickDone readOnly={false} t={(key) => key}
             /></LanguageProvider>
         </div>);
-        const copyLink = getByRole('button', { name: 'Copy task link' });
+        const copyLink = getByRole('button', { name: 'Copy Mindwtr link' });
         copyLink.focus();
         expect(copyLink).toHaveFocus();
         fireEvent.pointerDown(copyLink);

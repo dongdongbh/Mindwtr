@@ -43,7 +43,7 @@ describe('Someday task menu', () => {
   beforeEach(() => { vi.clearAllMocks(); clipboard.write.mockResolvedValue(undefined); });
 
   it.each([
-    ['Copy task link', 'mindwtr://open?task=task%20%2F%3F%26%23'],
+    ['Copy Mindwtr link', 'mindwtr://open?task=task%20%2F%3F%26%23'],
     ['Copy task ID', 'task /?&#'],
   ])('copies %s from the actual menu without changing status', async (label, expected) => {
     let tree!: ReturnType<typeof create>;
@@ -58,7 +58,7 @@ describe('Someday task menu', () => {
     act(() => tree.unmount());
   });
 
-  it.each(['Copy task link', 'Copy task ID'])('reports clipboard failure for %s', async (label) => {
+  it.each(['Copy Mindwtr link', 'Copy task ID'])('reports clipboard failure for %s', async (label) => {
     clipboard.write.mockRejectedValueOnce(new Error('Unavailable'));
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<SwipeableTaskItemStatusMenu {...baseProps} />); });

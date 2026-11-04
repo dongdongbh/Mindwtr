@@ -404,8 +404,8 @@ describe('TaskQuickActionMenu', () => {
     it.each([
         ['Copy Title', 1, 'pointer'],
         ['Copy Title', 0, 'keyboard-or-assistive'],
-        ['Copy task link', 1, 'pointer'],
-        ['Copy task link', 0, 'keyboard-or-assistive'],
+        ['Copy Mindwtr link', 1, 'pointer'],
+        ['Copy Mindwtr link', 0, 'keyboard-or-assistive'],
         ['Copy task ID', 1, 'pointer'],
         ['Copy task ID', 0, 'keyboard-or-assistive'],
     ])('records the native click metadata for %s (detail=%s)', async (label, detail, inputKind) => {
@@ -463,7 +463,7 @@ describe('TaskQuickActionMenu', () => {
     });
 
     it.each([
-        ['Copy task link', 'mindwtr://open?task=task%20%2F%3F%26%23'],
+        ['Copy Mindwtr link', 'mindwtr://open?task=task%20%2F%3F%26%23'],
         ['Copy task ID', 'task /?&#'],
     ])('copies %s without changing the task or closing an editor', async (label, expected) => {
         const writeText = vi.fn().mockResolvedValue(undefined);
@@ -482,7 +482,7 @@ describe('TaskQuickActionMenu', () => {
         } finally { vi.unstubAllGlobals(); }
     });
 
-    it.each(['Copy task link', 'Copy task ID'])('shows clipboard failure for %s', async (label) => {
+    it.each(['Copy Mindwtr link', 'Copy task ID'])('shows clipboard failure for %s', async (label) => {
         const writeText = vi.fn().mockRejectedValue(new Error('Clipboard unavailable'));
         const showToast = vi.fn();
         const previousToast = useUiStore.getState().showToast;
@@ -559,7 +559,7 @@ describe('TaskQuickActionMenu', () => {
         const props = renderClosableMenu({ task: { ...task, status: 'done' }, readOnly: true });
 
         expect(screen.getAllByRole('menuitem').map((item) => item.textContent))
-            .toEqual(['Copy Title', 'Copy task link', 'Copy task ID', 'Duplicate', 'Move to Next', 'Delete']);
+            .toEqual(['Copy Title', 'Copy Mindwtr link', 'Copy task ID', 'Duplicate', 'Move to Next', 'Delete']);
         await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{Enter}');
 
         expect(props.onStatusChange).toHaveBeenCalledExactlyOnceWith('next');

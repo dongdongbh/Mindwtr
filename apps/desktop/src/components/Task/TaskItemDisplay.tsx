@@ -1121,8 +1121,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                 isTrusted: event.nativeEvent.isTrusted, detail: event.nativeEvent.detail,
                             });
                         }}
-                        aria-label={tFallback(t, 'task.copyTaskLink', 'Copy task link')}
-                        title={tFallback(t, 'task.copyTaskLink', 'Copy task link')}
+                        aria-label={tFallback(t, 'task.copyTaskLink', 'Copy Mindwtr link')}
+                        title={tFallback(t, 'task.copyTaskLink', 'Copy Mindwtr link')}
                         className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                     >
                         <Link2 className="w-4 h-4" />

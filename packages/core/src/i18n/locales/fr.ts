@@ -76,7 +76,7 @@ export const frOverrides: Record<string, string> = {
     "settings.mcpError.exited": "Le serveur MCP s’est arrêté de manière inattendue. Réessayez.",
     "settings.mcpError.config_failed": "Impossible de charger ou d’enregistrer la configuration MCP. Réessayez.",
     'task.doneTagOutcomeUnknown': "Impossible de confirmer la modification des étiquettes. Redémarrez Mindwtr pour recharger les données enregistrées.",
-    "task.copyTaskLink": "Copier le lien de la tâche",
+    "task.copyTaskLink": "Copier le lien Mindwtr",
     "task.copyTaskId": "Copier l’identifiant de la tâche",
     "task.addToChecklist": "Ajouter à la liste de contrôle…",
     "task.addedToChecklist": "Ajouté à la liste de contrôle",

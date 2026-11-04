@@ -108,7 +108,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Task editor menu
 
-- Reach: Editor › ⋯ menu. It has Copy task link, Copy task ID, Share, Duplicate, Delete, Cancel task, and Create project (promote to project).
+- Reach: Editor › ⋯ menu. It has Copy Mindwtr link, Copy task ID, Share, Duplicate, Delete, Cancel task, and Create project (promote to project).
 - Selectors: `editor-menu`, `editor-more`, `promote-dialog`, `promote-title`, `promote-confirm`, `promote-expand`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/EditorMenu.kt`
 - Checks: `apps/android-native/scripts/check-editor-menu-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/EditorMenuTest.kt`

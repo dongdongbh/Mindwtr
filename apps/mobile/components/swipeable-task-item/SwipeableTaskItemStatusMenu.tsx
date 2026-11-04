@@ -138,7 +138,7 @@ export function SwipeableTaskItemStatusMenu({
                     <View style={styles.menuMoveActions}>
                         {(['link', 'id'] as const).map((kind) => {
                             const label = kind === 'link'
-                                ? tFallback(t, 'task.copyTaskLink', 'Copy task link')
+                                ? tFallback(t, 'task.copyTaskLink', 'Copy Mindwtr link')
                                 : tFallback(t, 'task.copyTaskId', 'Copy task ID');
                             return (
                                 <Pressable

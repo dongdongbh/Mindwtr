@@ -262,7 +262,7 @@ try {
     };
     nodes = await openStatusMenu();
     check(hasText(nodes, en['task.destination']) && [en['task.moveToProjectOrArea'], en['viewSections.moveToSection'], en['task.copyTaskLink'], en['task.copyTaskId']]
-        .every((label) => withDescription(nodes, label) && hasText(nodes, label)), '(c2) the status menu shows Destination, Move to project or area…, Move to section…, Copy task link and Copy task ID, as RN writes them');
+        .every((label) => withDescription(nodes, label) && hasText(nodes, label)), '(c2) the status menu shows Destination, Move to project or area…, Move to section…, Copy Mindwtr link and Copy task ID, as RN writes them');
     mkdirSync(work, { recursive: true });
     writeFileSync(resolve(work, 'status-menu.png'), adbRaw('exec-out', 'screencap', '-p'));
     await tap(withDescription(nodes, en['task.copyTaskId']));

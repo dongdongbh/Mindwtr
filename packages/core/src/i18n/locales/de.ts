@@ -76,7 +76,7 @@ export const deOverrides: Record<string, string> = {
     "settings.mcpError.exited": "Der MCP-Server wurde unerwartet gestoppt. Versuche es erneut.",
     "settings.mcpError.config_failed": "Die MCP-Konfiguration konnte nicht geladen oder gespeichert werden. Versuche es erneut.",
     'task.doneTagOutcomeUnknown': "Die Tag-Änderung konnte nicht bestätigt werden. Starte Mindwtr neu, um die gespeicherten Daten erneut zu laden.",
-    "task.copyTaskLink": "Aufgabenlink kopieren",
+    "task.copyTaskLink": "Mindwtr-Link kopieren",
     "task.copyTaskId": "Aufgaben-ID kopieren",
     "task.addToChecklist": "Zur Checkliste hinzufügen…",
     "task.addedToChecklist": "Zur Checkliste hinzugefügt",

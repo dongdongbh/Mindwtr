@@ -119,7 +119,7 @@ export function TaskEditHeader({
               <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
                 {taskId ? (['link', 'id'] as const).map((kind) => {
                   const label = kind === 'link'
-                    ? tFallback(t, 'task.copyTaskLink', 'Copy task link')
+                    ? tFallback(t, 'task.copyTaskLink', 'Copy Mindwtr link')
                     : tFallback(t, 'task.copyTaskId', 'Copy task ID');
                   return (
                     <AppPressable

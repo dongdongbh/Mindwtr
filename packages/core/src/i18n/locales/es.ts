@@ -368,7 +368,7 @@ export const esOverrides: Record<string, string> = {
 'list.taskDeleted': "Tarea eliminada",
 'list.taskCopied': 'Tarea copiada al portapapeles',
 'task.copyTitle': 'Copiar título',
-"task.copyTaskLink": "Copiar enlace de la tarea",
+"task.copyTaskLink": "Copiar enlace de Mindwtr",
 "task.copyTaskId": "Copiar ID de la tarea",
 "task.addToChecklist": "Añadir a la lista de verificación…",
 "task.addedToChecklist": "Añadido a la lista de verificación",

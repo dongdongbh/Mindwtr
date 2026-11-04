@@ -236,7 +236,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Task menu
 
-- Reach: Right-click a task row, or its more-options button. Items include Move to…, Dates…, Contexts…, Copy Title, Copy task link, Copy task ID, Rename task, Add to checklist…, Create project from task, Convert to Section, Cancel task.
+- Reach: Right-click a task row, or its more-options button. Items include Move to…, Dates…, Contexts…, Copy Title, Copy Mindwtr link, Copy task ID, Rename task, Add to checklist…, Create project from task, Convert to Section, Cancel task.
 - Shortcuts: `.` (Vim, Standard), `Ctrl+.` (Emacs). `F2` renames (Standard).
 - Code: `apps/desktop/src/components/Task/TaskQuickActionMenu.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.ts`, `apps/desktop/src/components/ui/DestinationSelector.tsx`, `apps/desktop/src/components/TaskProjectConversionDialog.tsx`
 - Checks: `e2e/task-menu-dates.spec.ts`, `e2e/task-menu-contexts.spec.ts`, `e2e/task-menu-project-create.spec.ts`, `e2e/task-copy-title.spec.ts`, `e2e/ui-simplification.spec.ts`, `apps/desktop/src/components/Task/TaskQuickActionMenu.test.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.test.tsx`, `apps/desktop/src/components/ui/DestinationSelector.test.tsx`
@@ -323,7 +323,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Task links
 
-- Reach: Task menu › Copy task link. Opening a `mindwtr://open?task=<id>` link opens that task.
+- Reach: Task menu › Copy Mindwtr link. Opening a `mindwtr://open?task=<id>` link opens that task.
 - Code: `apps/desktop/src/hooks/use-task-deep-link.ts`, `apps/desktop/src/lib/task-clipboard.ts`
 - Checks: `apps/desktop/src/hooks/use-task-deep-link.test.tsx`
 

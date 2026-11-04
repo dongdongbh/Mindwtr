@@ -27,7 +27,7 @@ export const ruOverrides: Record<string, string> = {
     "timeline.reorderFailed": "Не удалось сохранить новый порядок. Попробуйте снова.",
     "timeline.reorderInstructions": "Нажмите Пробел, чтобы выбрать строку, Вверх или Вниз для перемещения в группе, Пробел для размещения или Эскейп для отмены.",
     'task.doneTagOutcomeUnknown': "Не удалось подтвердить изменение тегов. Перезапустите Mindwtr, чтобы повторно загрузить сохранённые данные.",
-    "task.copyTaskLink": "Копировать ссылку на задачу",
+    "task.copyTaskLink": "Копировать ссылку Mindwtr",
     "task.copyTaskId": "Копировать ID задачи",
     "task.addToChecklist": "Добавить в контрольный список…",
     "task.addedToChecklist": "Добавлено в контрольный список",
