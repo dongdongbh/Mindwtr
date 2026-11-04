@@ -7,6 +7,7 @@ import { resolveMobileAppLockRelockDelayMinutes, translateWithFallback, useTaskS
 import { useLanguage } from '@/contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
+import { logInfo } from '@/lib/app-log';
 import {
   authenticateWithDeviceLock,
   getMobileAppLockErrorKey,
@@ -121,6 +122,13 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
         leftUnlockedAtRef.current = null;
         if (isWithinMobileAppLockRelockDelay({ delayMinutes: relockDelayMinutes, leftUnlockedAt, now: Date.now() })) {
           setLocked(false);
+          if (Platform.OS === 'android') {
+            void logInfo('App lock grace return cleared privacy cover', {
+              scope: 'app-lock',
+              extra: { releaseCheck: 'v1.3.9/app-lock-resume-cover', outcome: 'grace-return' },
+              force: true,
+            }).catch(() => undefined);
+          }
         }
       }
     });
@@ -200,7 +208,9 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
           navigationBarTranslucent
           onRequestClose={() => {}}
         >
-          {lockScreen}
+          {locked && (appState === 'active' ? lockScreen : (
+            <View testID="app-lock-privacy-cover" style={{ flex: 1, backgroundColor: tc.bg }} />
+          ))}
         </Modal>
       </>
     );

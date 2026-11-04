@@ -264,10 +264,10 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Settings › General (appearance, language, app lock)
 
 - Reach: Settings › General. Theme, Language, regional formats, Quick access view, App lock, Expose to system search (Android).
-- Selectors: `regional-formats-toggle`
+- Selectors: `regional-formats-toggle`, `app-lock-privacy-cover`
 - Code: `apps/mobile/components/settings/general-settings-screen.tsx`, `packages/core/src/general-settings-model.ts`, `apps/mobile/components/mobile-app-lock-gate.tsx`
 - Checks: `apps/mobile/components/settings/general-settings-screen.test.tsx`, `apps/mobile/components/mobile-app-lock-gate.test.tsx`
-- Notes: App lock uses the device lock and protects the app view, not the database.
+- Notes: App lock uses the device lock and protects the app view, not the database. On Android, a native window keeps the mounted app and its dialogs private while away, showing a blank cover. The unlock panel appears only while active and locked.
 
 ## Settings › GTD
 

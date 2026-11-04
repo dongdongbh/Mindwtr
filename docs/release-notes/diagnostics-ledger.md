@@ -34,6 +34,10 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 The v1.3.6 task-editor correction is confirmed by the visible disappearance of the error panel and normal task opening/closing; it adds no data writes or new diagnostic marker. Unconfirmed checks from v1.3.5 retain their original tags below.
 
+## v1.3.9 (add before tagging, trim in the release after)
+
+- **`v1.3.9/app-lock-resume-cover`** — React Native `apps/mobile/components/mobile-app-lock-gate.tsx`, after an Android return within Require unlock clears the privacy cover without requesting authentication. Forced message: `App lock grace return cleared privacy cover`; field: `outcome=grace-return`. Tester: unlock, open a task, switch away briefly, and return within the configured delay. The task must stay open and the unlock panel must not flash. The native window still shows an opaque privacy cover while away, including over other app dialogs. This marker proves the grace-return branch ran; it does not prove native frame timing. A cold start, an expired delay, and a return after cancelled authentication must still require unlocking. No content, identifiers, or credentials are logged. (#1423)
+
 ## v1.3.8 (add before tagging, trim in the release after)
 
 - **`v1.3.8/local-api-reliability`** — desktop `apps/desktop/src-tauri/src/local_api.rs` and `storage.rs`, after a conditional task PATCH commits, a normalized PATCH returns unchanged, or an idempotent create replays its durable SQLite receipt (#1506). Message: `Desktop Local API reliability completed`; field: `outcome=conditional-write`, `unchanged`, or `replay`. Tester: read a task version and PATCH with `If-Match`, repeat an unchanged PATCH, then repeat a create with the same idempotency token. Diagnostics must show the corresponding outcome. A replay returns the original task result even after later edits or deletion; the marker proves receipt replay, not sync. No task content, identifiers, credentials, or request tokens are logged.
