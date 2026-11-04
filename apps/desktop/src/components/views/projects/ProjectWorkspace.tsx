@@ -653,9 +653,9 @@ export function ProjectWorkspace({
         const { activeTasks, completedTasks } = splitCompletedTasks(sortedProjectTasks);
         return {
             activeTasks,
-            completedTasks: sortDoneTasksForListView(completedTasks),
+            completedTasks: projectTaskSortBy === 'default' ? sortDoneTasksForListView(completedTasks) : completedTasks,
         };
-    }, [shouldGroupCompletedTasks, sortedProjectTasks]);
+    }, [projectTaskSortBy, shouldGroupCompletedTasks, sortedProjectTasks]);
 
     const projectSections = useMemo(
         () => getProjectSectionsForView(selectedProject, sections, allSections),

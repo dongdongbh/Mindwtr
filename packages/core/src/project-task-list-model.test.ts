@@ -151,6 +151,27 @@ describe('project task list model', () => {
         expect(model.orderedTasks).toEqual([]);
     });
 
+    it.each([
+        ['default', ['archived-m', 'done-z', 'done-a-new', 'done-a-old']],
+        ['title', ['done-a-old', 'done-a-new', 'archived-m', 'done-z']],
+        ['due', ['done-a-new', 'archived-m', 'done-z', 'done-a-old']],
+    ] as const)('applies %s sort and its tie order to the expanded Completed pile', (sortBy, expected) => {
+        const base = fixture.tasks.find((task) => task.status === 'done')!;
+        const tasks: Task[] = [
+            { ...base, id: 'done-z', title: 'Zulu', completedAt: '2026-10-23', createdAt: '2026-10-02', dueDate: '2026-10-20' },
+            { ...base, id: 'done-a-new', title: 'Alpha', completedAt: '2026-10-22', createdAt: '2026-10-03', dueDate: '2026-10-19' },
+            { ...base, id: 'done-a-old', title: 'Alpha', completedAt: '2026-10-21', createdAt: '2026-10-01', dueDate: '2026-10-21' },
+            { ...base, id: 'archived-m', title: 'Mike', status: 'archived', completedAt: '2026-10-23', createdAt: '2026-10-01', dueDate: '2026-10-20' },
+        ];
+        const before = JSON.stringify(tasks);
+        const { model } = buildLikeMobile(scenario('live-default'), {
+            tasks, visibleTasks: [], sections: [], allSections: [], sortBy,
+            groupCompletedTasksLast: true, completedCollapsed: false,
+        });
+        expect(model.items.flatMap((item) => item.type === 'task' ? [item.task.id] : [])).toEqual(expected);
+        expect(JSON.stringify(tasks)).toBe(before);
+    });
+
     it('keeps only the requested status and the caller visibility rule', () => {
         const projectTasks = fixture.tasks.filter((task) => task.projectId === 'p-live');
         const ids = (tasks: Task[]) => tasks.map(({ id }) => id).sort();

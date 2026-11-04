@@ -675,6 +675,23 @@ describe('ProjectWorkspace Select mode', () => {
         ]);
     });
 
+    it.each([
+        ['title', ['alpha-old', 'alpha-new', 'zulu']],
+        ['due', ['alpha-new', 'alpha-old', 'zulu']],
+    ] as const)('keeps the selected %s sort in the expanded Done group', (taskSortBy, expected) => {
+        const { container, getByRole } = renderWorkspace({
+            selectedProject: { ...project, taskSortBy },
+            showCompletedTasks: true,
+            allTasks: [
+                task('zulu', 'Zulu', { status: 'done', completedAt: '2026-05-15', dueDate: '2026-05-20' }),
+                task('alpha-new', 'Alpha', { status: 'archived', completedAt: '2026-05-14', dueDate: '2026-05-19', createdAt: '2026-05-13' }),
+                task('alpha-old', 'Alpha', { status: 'done', completedAt: '2026-05-13', dueDate: '2026-05-20', createdAt: '2026-05-11' }),
+            ],
+        });
+        fireEvent.click(getByRole('button', { name: /Done/ }));
+        expect(Array.from(container.querySelectorAll('[data-task-id]')).map((row) => row.getAttribute('data-task-id'))).toEqual(expected);
+    });
+
     it('keeps completed tasks in sequence for sequential projects', () => {
         const { container } = renderWorkspace({
             selectedProject: { ...project, isSequential: true },

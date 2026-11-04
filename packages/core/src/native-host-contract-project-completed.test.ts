@@ -80,6 +80,28 @@ describe('native Project completed view', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it.each([
+        ['default', ['done-z', 'done-a']],
+        ['title', ['done-a', 'done-z']],
+        ['due', ['done-a', 'done-z']],
+    ] as const)('uses the saved project %s sort for expanded completed rows without writes', async (taskSortBy, expected) => {
+        const host = createNativeHostContract();
+        expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+        useTaskStore.setState({
+            _allProjects: [project('parallel', { taskSortBy })],
+            _allTasks: [
+                task('done-z', 'parallel', 'done', { title: 'Zulu', completedAt: '2026-09-03', dueDate: '2026-09-05' }),
+                task('done-a', 'parallel', 'archived', { title: 'Alpha', completedAt: '2026-09-02', dueDate: '2026-09-04' }),
+            ],
+        });
+        saveData.mockClear();
+        const result = host.getProjectDetailView({ projectId: 'parallel', offset: 0, limit: NATIVE_HOST_MAX_WINDOW,
+            showCompleted: true, completedCollapsed: false });
+        if (!result.ok) throw new Error(result.error.code);
+        expect(result.value.items.flatMap((item) => item.type === 'task' ? [item.row.id] : [])).toEqual(expected);
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
     it('binds paging to the exact project and controls while preserving the legacy detail shape', async () => {
         const host = createNativeHostContract();
         expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });

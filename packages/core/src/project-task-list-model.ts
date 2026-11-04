@@ -142,7 +142,7 @@ export function buildProjectTaskListModel(input: ProjectTaskListModelInput): Pro
     if (groupCompleted) {
         const split = splitCompletedTasks(orderedTasks);
         activeTasks = split.activeTasks;
-        completedTasks = sortDoneTasksForListView(split.completedTasks);
+        completedTasks = sortBy === 'default' ? sortDoneTasksForListView(split.completedTasks) : split.completedTasks;
     }
 
 
