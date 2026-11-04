@@ -99,12 +99,18 @@ jobs:
           if [ "$ROLLOUT_ACTION" = auto ]; then
             args=(auto-rollout --package tech.dongdongbh.mindwtr)
           else
-            args=(rollout --package tech.dongdongbh.mindwtr --version-code "$VERSION_CODE" --action "$ROLLOUT_ACTION")
+            args=(rollout --package tech.dongdongbh.mindwtr --action "$ROLLOUT_ACTION")
+            if [ -n "$VERSION_CODE" ]; then
+              args+=(--version-code "$VERSION_CODE")
+            fi
             if [ "$ROLLOUT_ACTION" = increase ]; then
               args+=(--percentage "$ROLLOUT_PERCENTAGE")
             fi
           fi
           python3 scripts/ci/google-play-edit.py "${args[@]}" --result "$RUNNER_TEMP/play-rollout.json"
+          if [ "$ROLLOUT_ACTION" = status ]; then
+            python3 scripts/ci/google-play-edit.py max-version-code --package tech.dongdongbh.mindwtr --result "$RUNNER_TEMP/play-maximum.json"
+          fi
           {
             echo '### Google Play production rollout'
             echo '```json'

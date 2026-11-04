@@ -7,6 +7,32 @@ import { parse } from 'yaml';
 
 const workflow = (name) => parse(readFileSync(`.github/workflows/${name}.yml`, 'utf8'));
 
+test('Play status discovers production and its maximum without an empty version code', () => {
+  const step = workflow('rollout').jobs.play.steps.find((entry) => entry.env?.VERSION_CODE);
+  const directory = mkdtempSync(join(tmpdir(), 'mindwtr-play-status-'));
+  try {
+    const result = spawnSync('bash', ['-c', `
+      python3() {
+        printf '%s\\n' "$*"
+        for argument in "$@"; do
+          [ -n "$argument" ] || return 1
+        done
+        printf '{}' > "\${!#}"
+      }
+      ${step.run}
+    `], {
+      encoding: 'utf8',
+      env: { ...process.env, RUNNER_TEMP: directory, GITHUB_STEP_SUMMARY: join(directory, 'summary'), ROLLOUT_ACTION: 'status', VERSION_CODE: '', ROLLOUT_PERCENTAGE: '20' },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('rollout --package tech.dongdongbh.mindwtr --action status --result');
+    expect(result.stdout).not.toContain('--version-code');
+    expect(result.stdout).toContain('max-version-code --package tech.dongdongbh.mindwtr --result');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('stable policy is validated before publishing and forwarded to every production store', () => {
   const stable = workflow('release');
   const inputs = stable.on.workflow_dispatch.inputs;
