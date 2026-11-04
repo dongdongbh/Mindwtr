@@ -421,6 +421,16 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Checks: `apps/desktop/src/components/views/settings/SettingsAdvancedPage.test.tsx`, `apps/desktop/src/components/views/settings/useSettingsAdvancedPage.test.tsx`
 - Notes: Default port is 3456. Native app only. The MCP server calls the same operations.
 
+
+### Task reliability
+
+- Reach: native app › Settings › Advanced › Local API, or MCP server. Enable edits for writes and use that service's bearer credential.
+- Read: `GET /tasks/:id` returns sibling `version` and a quoted strong `ETag`. PATCH accepts optional `If-Match` (wildcard or comma-separated quoted entity tags; weak tags never match). Built-in MCP `mindwtr_update_task` accepts optional `expectedVersion`. Stale requests return `task_version_conflict` (HTTP 412) without writing.
+- Create: `POST /tasks` accepts optional `Idempotency-Key`; built-in MCP `mindwtr_add_task` accepts `idempotencyKey`. Tokens are 1–128 visible ASCII characters. Identical retries return the original result for seven days, including after edits or deletion; changed payloads return `idempotency_conflict`. Receipts are local to the workspace SQLite database and authenticated credential. At 10,000 unexpired receipts, new keyed creates return `idempotency_capacity`; existing receipts still replay. After expiry, reuse can create another task.
+- Compatibility: `/v1/tasks` and `/v1/tasks/:id` are reliability-capable aliases. Standalone MCP uses these for protected writes so older servers refuse them. Omitting protection preserves ordinary writes. A normalized unchanged PATCH preserves revision metadata and skips task writes and snapshot publication.
+- Owning files: `apps/desktop/src-tauri/src/local_api.rs`, `apps/desktop/src-tauri/src/storage.rs`, `apps/desktop/src-tauri/src/mcp_tools.rs`, `apps/desktop/src-tauri/src/mcp_server.rs`; standalone adapter `apps/mcp-server/src/local-api-service.ts`.
+- Checks: `apps/desktop/src-tauri/src/local_api.rs` (reliability tests), `apps/desktop/src-tauri/src/storage.rs`, `apps/desktop/src-tauri/src/mcp_server.rs`, and `apps/mcp-server/src/local-api-service.test.ts`; run bun run docs:check-feature-map. Diagnostics marker v1.3.8/local-api-reliability proves conditional commit, unchanged PATCH, or durable replay.
+
 ## Settings › About
 
 - Reach: Settings › About. Version, Install Channel, Check for Updates, Send feedback, Documentation, Support development, License. A badge on About marks an available update.

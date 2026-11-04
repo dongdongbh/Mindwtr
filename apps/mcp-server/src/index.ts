@@ -17,7 +17,7 @@ import * as z from 'zod';
 
 import { listViewSectionsSchema, viewSectionIdsSchema } from './view-sections.js';
 import { createCloudService } from './cloud-service.js';
-import { createLocalApiService, validateLocalApiUrl } from './local-api-service.js';
+import { createLocalApiService, localApiIdempotencyKeySchema, localApiTaskVersionSchema, validateLocalApiUrl, type LocalApiTask } from './local-api-service.js';
 import { getMindwtrToolErrorCode, ReadOnlyError, ValidationError } from './errors.js';
 import { parseArgs, parseBooleanFlag, readStringFlag, type FlagEnv, type FlagMap } from './flags.js';
 import {
@@ -553,6 +553,11 @@ export const registerMindwtrTools = (
     if (readonly) throw new ReadOnlyError(options.readonlyMessage);
     return await handler(input);
   });
+  const taskResponse = (task: LocalApiTask): McpToolResponse => {
+    if (!options.localApi || task.version === undefined) return createMcpTextResponse({ task });
+    const { version, ...value } = task;
+    return createMcpTextResponse({ task: value, version });
+  };
 
   server.registerTool(
     'mindwtr_list_tasks',
@@ -668,8 +673,8 @@ export const registerMindwtrTools = (
   server.registerTool(
     'mindwtr_add_task',
     {
-      description: options.localApi ? 'Add a task through the desktop Local API. Provide a title and explicit fields; quickAdd is unavailable.' : 'Add a task to the configured Mindwtr backend.',
-      inputSchema: options.localApi ? addTaskSchema.omit({ quickAdd: true }).extend({ title: z.string().trim().min(1).max(MAX_TASK_TITLE_LENGTH) }).strict() : addTaskSchema,
+      description: options.localApi ? 'Add a task through the desktop Local API. Provide a title and explicit fields; quickAdd is unavailable. Set idempotencyKey to retry the same creation safely with identical input.' : 'Add a task to the configured Mindwtr backend.',
+      inputSchema: options.localApi ? addTaskSchema.omit({ quickAdd: true }).extend({ title: z.string().trim().min(1).max(MAX_TASK_TITLE_LENGTH), idempotencyKey: localApiIdempotencyKeySchema.optional() }).strict() : addTaskSchema.strict(),
     },
     withReadonlyMcpErrorHandling('mindwtr_add_task', async (input) => {
       const normalizedInput = normalizeAddTaskInput(input);
@@ -678,22 +683,22 @@ export const registerMindwtrTools = (
       const task = await service.addTask({
         ...normalizedInput,
       } as AddTaskInput);
-      return createMcpTextResponse({ task });
+      return taskResponse(task);
     }),
   );
 
   server.registerTool(
     'mindwtr_update_task',
     {
-      description: options.localApi ? 'Update a task through the desktop Local API. Attachment replacement is unavailable; use the complete tool for completion. Unsupported lifecycle changes are rejected.' : 'Update a task in the configured Mindwtr backend.',
-      inputSchema: options.localApi ? updateTaskSchema.omit({ attachments: true }).strict() : updateTaskSchema,
+      description: options.localApi ? 'Update a task through the desktop Local API. Set expectedVersion from get_task to reject stale edits. Attachment replacement is unavailable; use the complete tool for completion. Unsupported lifecycle changes are rejected.' : 'Update a task in the configured Mindwtr backend.',
+      inputSchema: options.localApi ? updateTaskSchema.omit({ attachments: true }).extend({ expectedVersion: localApiTaskVersionSchema.optional() }).strict() : updateTaskSchema.strict(),
     },
     withReadonlyMcpErrorHandling('mindwtr_update_task', async (input) => {
 
       const task = await service.updateTask({
         ...normalizeUpdateTaskInput(input),
       } as UpdateTaskInput);
-      return createMcpTextResponse({ task });
+      return taskResponse(task);
     }),
   );
 
@@ -705,7 +710,7 @@ export const registerMindwtrTools = (
     },
     withReadonlyMcpErrorHandling('mindwtr_complete_task', async (input) => {
       const task = await service.completeTask(input.id);
-      return createMcpTextResponse({ task });
+      return taskResponse(task);
     }),
   );
 
@@ -717,7 +722,7 @@ export const registerMindwtrTools = (
     },
     withReadonlyMcpErrorHandling('mindwtr_delete_task', async (input) => {
       const task = await service.deleteTask(input.id);
-      return createMcpTextResponse({ task });
+      return taskResponse(task);
     }),
   );
 
@@ -729,7 +734,7 @@ export const registerMindwtrTools = (
     },
     withMcpErrorHandling('mindwtr_get_task', async (input) => {
       const task = await service.getTask({ id: input.id, includeDeleted: input.includeDeleted });
-      return createMcpTextResponse({ task });
+      return taskResponse(task);
     }),
   );
 
@@ -741,7 +746,7 @@ export const registerMindwtrTools = (
     },
     withReadonlyMcpErrorHandling('mindwtr_restore_task', async (input) => {
       const task = await service.restoreTask(input.id);
-      return createMcpTextResponse({ task });
+      return taskResponse(task);
     }),
   );
 

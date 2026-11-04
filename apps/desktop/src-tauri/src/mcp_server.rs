@@ -73,14 +73,18 @@ impl McpPermissions {
             LocalOperation::TaskAction { action, .. } if action == "archive" => {
                 (false, true, false)
             }
-            LocalOperation::CreateTask(body) | LocalOperation::CreateProject(body) => (
+            LocalOperation::CreateTask(body)
+            | LocalOperation::CreateTaskWithReceipt { body, .. }
+            | LocalOperation::CreateProject(body) => (
                 true,
                 body.get("props")
                     .and_then(Value::as_object)
                     .is_some_and(archives),
                 false,
             ),
-            LocalOperation::PatchTask { body, .. } | LocalOperation::PatchProject { body, .. } => {
+            LocalOperation::PatchTask { body, .. }
+            | LocalOperation::ConditionalPatchTask { body, .. }
+            | LocalOperation::PatchProject { body, .. } => {
                 let archive = archives(body);
                 let edit = !archive
                     || body
@@ -644,7 +648,7 @@ pub(crate) fn handle_mcp_request(
                     "MCP is read-only. Enable writes in desktop settings to edit.",
                 )
             } else {
-                match execute(operation) {
+                match execute(operation.bind_credential(token)) {
                     Ok(body) => {
                         let operation = if writing { "write" } else { "read" };
                         log::info!("In-process MCP native operation completed extra.releaseCheck=v1.3.5/in-process-mcp operation={operation}");
@@ -661,6 +665,8 @@ pub(crate) fn handle_mcp_request(
                         let response = local_api::api_error_response(error);
                         let error_message = response.body["error"].as_str().unwrap_or("");
                         let (code, message) = match response.status {
+                            412 => ("task_version_conflict", "Task version does not match. Read the task again before editing."),
+                            409 if response.body["code"].as_str().is_some() => (response.body["code"].as_str().unwrap(), error_message),
                             403 => ("read_only", "MCP access was revoked."),
                             404 => ("not_found", "Entity not found."),
                             409 if error_message.starts_with("Focus limit of ") => {
@@ -741,6 +747,75 @@ mod tests {
             |_| Ok(json!({"tasks":[]})),
         )
     }
+    #[test]
+    fn reliability_mcp_controls_bind_after_auth_and_preserve_structured_errors() {
+        let version = format!("sha256-{}", "0".repeat(64));
+        for (name, arguments, failure) in [
+            (
+                "mindwtr_add_task",
+                json!({"title":"Task","idempotencyKey":"receipt"}),
+                "idempotency_conflict",
+            ),
+            (
+                "mindwtr_update_task",
+                json!({"id":"task","expectedVersion":version}),
+                "task_version_conflict",
+            ),
+        ] {
+            let response = handle_mcp_request(
+                "fixture-token",
+                &access(true),
+                permissions(true),
+                MCP_PORT,
+                request(
+                    json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":arguments}}),
+                ),
+                |operation| {
+                    if let LocalOperation::CreateTaskWithReceipt { receipt, .. } = operation {
+                        assert!(receipt.credential_digest.is_some());
+                        assert_ne!(receipt.credential_digest.as_deref(), Some("fixture-token"));
+                    }
+                    Err(failure.into())
+                },
+            );
+            assert_eq!(response.body["result"]["isError"], true);
+            let result: Value = serde_json::from_str(
+                response.body["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(result["code"], failure);
+        }
+        let tools = crate::mcp_tools::tools();
+        let add = tools
+            .iter()
+            .find(|tool| tool["name"] == "mindwtr_add_task")
+            .unwrap();
+        let update = tools
+            .iter()
+            .find(|tool| tool["name"] == "mindwtr_update_task")
+            .unwrap();
+        assert_eq!(
+            add["inputSchema"]["properties"]["idempotencyKey"]["maxLength"],
+            128
+        );
+        assert_eq!(
+            update["inputSchema"]["properties"]["expectedVersion"]["type"],
+            "string"
+        );
+        for input in [
+            json!({"id":"task","expectedVersion":null}),
+            json!({"id":"task","expectedVersion":1}),
+            json!({"id":"task","expectedVersion":"1"}),
+        ] {
+            assert!(
+                crate::mcp_tools::operation("mindwtr_update_task", input.as_object().unwrap())
+                    .is_err()
+            );
+        }
+    }
+
     #[test]
     fn mcp_protocol_negotiation_notifications_and_bounded_scope() {
         for proposed in ["2025-03-26", "2025-06-18", "2099-01-01"] {
@@ -931,6 +1006,21 @@ mod tests {
             for (name, arguments, required) in [
                 ("mindwtr_get_task", json!({"id":"task"}), 0),
                 ("mindwtr_add_task", json!({"title":"Task"}), 1),
+                (
+                    "mindwtr_add_task",
+                    json!({"title":"Task","idempotencyKey":"receipt","status":"archived"}),
+                    3,
+                ),
+                (
+                    "mindwtr_add_task",
+                    json!({"title":"Task","idempotencyKey":"receipt","cancelledAt":"2026-10-13T12:00:00Z"}),
+                    3,
+                ),
+                (
+                    "mindwtr_update_task",
+                    json!({"id":"task","expectedVersion":format!("sha256-{}", "0".repeat(64)),"cancelledAt":"2026-10-13T12:00:00Z"}),
+                    2,
+                ),
                 (
                     "mindwtr_update_task",
                     json!({"id":"task","title":"Edit"}),

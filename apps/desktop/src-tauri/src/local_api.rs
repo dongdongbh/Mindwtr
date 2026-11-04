@@ -1,8 +1,8 @@
 use crate::storage::{
     ensure_data_file, load_data_snapshot, mutate_project_rows_with_retries,
-    mutate_task_rows_with_retries, ProjectMutationReadScope, ProjectMutationRows,
-    TaskMutationReadScope, PROJECT_MUTATION_NEXT_ORDER_KEY, TASK_MUTATION_FOCUSED_COUNT_KEY,
-    TASK_MUTATION_PROJECT_NEXT_ORDERS_KEY,
+    mutate_task_rows_with_receipt_retries, mutate_task_rows_with_retries, ProjectMutationReadScope,
+    ProjectMutationRows, TaskCreateReceipt, TaskMutationReadScope, PROJECT_MUTATION_NEXT_ORDER_KEY,
+    TASK_MUTATION_FOCUSED_COUNT_KEY, TASK_MUTATION_PROJECT_NEXT_ORDERS_KEY,
 };
 use crate::{
     get_config_path, get_secrets_path, lock_config_read_modify_write, read_config,
@@ -715,6 +715,7 @@ fn http_response(response: &ApiResponse) -> String {
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
+        412 => "Precondition Failed",
         413 => "Payload Too Large",
         500 => "Internal Server Error",
         _ => "OK",
@@ -724,8 +725,15 @@ fn http_response(response: &ApiResponse) -> String {
     } else {
         serde_json::to_string_pretty(&response.body).unwrap_or_else(|_| "{}".to_string())
     };
+    let etag = response
+        .body
+        .get("version")
+        .and_then(Value::as_str)
+        .filter(|version| valid_task_version(version))
+        .map(|version| format!("ETag: \"{version}\"\r\n"))
+        .unwrap_or_default();
     format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\n{etag}Content-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         response.status,
         status_text,
         body.len(),
@@ -755,7 +763,9 @@ fn handle_api_operation(
         return response;
     }
 
-    match route_api_operation(request, execute) {
+    match route_api_operation(request, |operation| {
+        execute(operation.bind_credential(token))
+    }) {
         Ok(response) => response,
         Err(error) => api_error_response(error),
     }
@@ -813,6 +823,23 @@ pub(crate) fn is_request_authorized(request: &ApiRequest, token: &str) -> bool {
 }
 
 pub(crate) fn api_error_response(error: String) -> ApiResponse {
+    if let Some((status, message)) = match error.as_str() {
+        "task_version_conflict" => Some((412, "Task version does not match")),
+        "idempotency_conflict" => Some((
+            409,
+            "Idempotency token was already used with a different request",
+        )),
+        "idempotency_capacity" => Some((
+            409,
+            "Idempotency receipt capacity reached; retry after receipts expire",
+        )),
+        _ => None,
+    } {
+        return ApiResponse {
+            status,
+            body: json!({"error": message, "code": error}),
+        };
+    }
     if error == RECURRENCE_REQUIRES_APP {
         return recurrence_completion_refusal_response();
     }
@@ -847,6 +874,135 @@ pub(crate) fn api_error_response(error: String) -> ApiResponse {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) enum TaskMatchCondition {
+    Exists,
+    Versions(Vec<String>),
+}
+
+fn canonical_json(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => {
+            let mut fields = object.iter().collect::<Vec<_>>();
+            fields.sort_unstable_by(|left, right| left.0.cmp(right.0));
+            Value::Object(
+                fields
+                    .into_iter()
+                    .map(|(name, value)| (name.clone(), canonical_json(value)))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(items.iter().map(canonical_json).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn json_digest(value: &Value) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(canonical_json(value).to_string().as_bytes())
+    )
+}
+
+pub(crate) fn task_version(task: &Value) -> String {
+    format!("sha256-{}", json_digest(task))
+}
+
+pub(crate) fn valid_task_version(version: &str) -> bool {
+    version.strip_prefix("sha256-").is_some_and(|digest| {
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    })
+}
+
+pub(crate) fn task_response(task: Value) -> Value {
+    json!({"version": task_version(&task), "task": task})
+}
+
+pub(crate) fn valid_task_response(response: &Value) -> bool {
+    let Some(task) = response.get("task").filter(|task| task.is_object()) else {
+        return false;
+    };
+    ["id", "title", "status", "createdAt", "updatedAt", "revBy"]
+        .iter()
+        .all(|field| {
+            task.get(*field)
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+        })
+        && task
+            .get("rev")
+            .and_then(Value::as_i64)
+            .is_some_and(|rev| rev > 0)
+        && response.get("version").and_then(Value::as_str) == Some(task_version(task).as_str())
+}
+
+pub(crate) fn create_receipt(token: &str, payload: &Value) -> Result<TaskCreateReceipt, String> {
+    if token.is_empty()
+        || token.len() > 128
+        || !token.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+    {
+        return Err("Invalid Idempotency-Key; expected 1..128 visible ASCII characters".into());
+    }
+    Ok(TaskCreateReceipt {
+        credential_digest: None,
+        request_token: token.into(),
+        fingerprint: json_digest(payload),
+    })
+}
+
+fn parse_if_match(header: &str) -> Result<TaskMatchCondition, String> {
+    let invalid = || "Invalid If-Match header".to_string();
+    let header = header.trim_matches([' ', '\t']);
+    if header == "*" {
+        return Ok(TaskMatchCondition::Exists);
+    }
+    let mut remaining = header;
+    let mut versions = Vec::new();
+    loop {
+        let weak = remaining.starts_with("W/");
+        if weak {
+            remaining = &remaining[2..];
+        }
+        remaining = remaining.strip_prefix('"').ok_or_else(invalid)?;
+        let end = remaining.find('"').ok_or_else(invalid)?;
+        let opaque = &remaining[..end];
+        if !opaque
+            .bytes()
+            .all(|byte| byte == 0x21 || (0x23..=0x7e).contains(&byte))
+        {
+            return Err(invalid());
+        }
+        if !weak {
+            versions.push(opaque.to_string());
+        }
+        remaining = remaining[end + 1..].trim_start_matches([' ', '\t']);
+        if remaining.is_empty() {
+            break;
+        }
+        remaining = remaining
+            .strip_prefix(',')
+            .ok_or_else(invalid)?
+            .trim_start_matches([' ', '\t']);
+    }
+    Ok(TaskMatchCondition::Versions(versions))
+}
+
+fn ensure_task_version(
+    data: &Value,
+    id: &str,
+    condition: &TaskMatchCondition,
+) -> Result<(), String> {
+    let task = find_task(data, id).ok_or("task_version_conflict")?;
+    if matches!(condition, TaskMatchCondition::Versions(versions) if !versions.contains(&task_version(&task)))
+    {
+        return Err("task_version_conflict".into());
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LocalOperation {
     Health,
     ListTasks(HashMap<String, String>),
@@ -871,6 +1027,15 @@ pub(crate) enum LocalOperation {
     Search(String),
     GetTask(String),
     CreateTask(Map<String, Value>),
+    CreateTaskWithReceipt {
+        body: Map<String, Value>,
+        receipt: TaskCreateReceipt,
+    },
+    ConditionalPatchTask {
+        id: String,
+        body: Map<String, Value>,
+        condition: TaskMatchCondition,
+    },
     PatchTask {
         id: String,
         body: Map<String, Value>,
@@ -883,6 +1048,14 @@ pub(crate) enum LocalOperation {
 }
 
 impl LocalOperation {
+    pub(crate) fn bind_credential(mut self, credential: &str) -> Self {
+        if let Self::CreateTaskWithReceipt { receipt, .. } = &mut self {
+            receipt.credential_digest =
+                Some(format!("{:x}", Sha256::digest(credential.as_bytes())));
+        }
+        self
+    }
+
     pub(crate) fn writes(&self) -> bool {
         matches!(
             self,
@@ -891,6 +1064,8 @@ impl LocalOperation {
                 | Self::PatchArea { .. }
                 | Self::ProjectLifecycle { .. }
                 | Self::CreateTask(_)
+                | Self::CreateTaskWithReceipt { .. }
+                | Self::ConditionalPatchTask { .. }
                 | Self::PatchTask { .. }
                 | Self::DeleteTask(_)
                 | Self::TaskAction { .. }
@@ -901,10 +1076,16 @@ impl LocalOperation {
 pub(crate) fn operation_from_api_request(
     request: &ApiRequest,
 ) -> Result<Option<LocalOperation>, String> {
-    let segments = path_segments(&request.path);
+    let path = request
+        .path
+        .strip_prefix("/v1/tasks")
+        .filter(|suffix| suffix.is_empty() || suffix.starts_with('/'))
+        .map(|suffix| format!("/tasks{suffix}"))
+        .unwrap_or_else(|| request.path.clone());
+    let segments = path_segments(&path);
     let id = || segments[1].clone();
     let body = || parse_body_object(&request.body);
-    let operation = match (request.method.as_str(), request.path.as_str()) {
+    let operation = match (request.method.as_str(), path.as_str()) {
         ("GET", "/health") => LocalOperation::Health,
         ("GET", "/tasks") => LocalOperation::ListTasks(request.query.clone()),
         ("GET", "/projects") => LocalOperation::ListProjects,
@@ -912,7 +1093,16 @@ pub(crate) fn operation_from_api_request(
         ("GET", "/search") => {
             LocalOperation::Search(request.query.get("query").cloned().unwrap_or_default())
         }
-        ("POST", "/tasks") => LocalOperation::CreateTask(body()?),
+        ("POST", "/tasks") => {
+            let body = body()?;
+            match request.headers.get("idempotency-key") {
+                Some(token) => LocalOperation::CreateTaskWithReceipt {
+                    receipt: create_receipt(token, &Value::Object(body.clone()))?,
+                    body,
+                },
+                None => LocalOperation::CreateTask(body),
+            }
+        }
         ("POST", "/projects") => LocalOperation::CreateProject(body()?),
         (method, _) if segments.len() == 2 && segments[0] == "areas" => match method {
             "GET" => LocalOperation::GetArea(id()),
@@ -924,9 +1114,16 @@ pub(crate) fn operation_from_api_request(
         },
         (method, _) if segments.len() == 2 && segments[0] == "tasks" => match method {
             "GET" => LocalOperation::GetTask(id()),
-            "PATCH" => LocalOperation::PatchTask {
-                id: id(),
-                body: body()?,
+            "PATCH" => match request.headers.get("if-match") {
+                Some(header) => LocalOperation::ConditionalPatchTask {
+                    id: id(),
+                    body: body()?,
+                    condition: parse_if_match(header)?,
+                },
+                None => LocalOperation::PatchTask {
+                    id: id(),
+                    body: body()?,
+                },
             },
             "DELETE" => LocalOperation::DeleteTask(id()),
             _ => return Ok(None),
@@ -975,7 +1172,9 @@ fn route_api_operation(
     };
     let created = matches!(
         operation,
-        LocalOperation::CreateTask(_) | LocalOperation::CreateProject(_)
+        LocalOperation::CreateTask(_)
+            | LocalOperation::CreateTaskWithReceipt { .. }
+            | LocalOperation::CreateProject(_)
     );
     let deleted = matches!(
         operation,
@@ -1127,9 +1326,15 @@ pub(crate) fn execute_operation(
         LocalOperation::GetTask(id) => {
             let data = load_data_snapshot(app)?;
             let task = find_task(&data, &id).ok_or_else(|| "Task not found".to_string())?;
-            return Ok(json!({ "task": task }));
+            return Ok(task_response(task));
         }
-        LocalOperation::CreateTask(body) => {
+        operation @ (LocalOperation::CreateTask(_)
+        | LocalOperation::CreateTaskWithReceipt { .. }) => {
+            let (body, receipt) = match operation {
+                LocalOperation::CreateTask(body) => (body, None),
+                LocalOperation::CreateTaskWithReceipt { body, receipt } => (body, Some(receipt)),
+                _ => unreachable!(),
+            };
             let _guard = access.lock_write(write_lock)?;
             let props = body.get("props").and_then(Value::as_object);
             let scope = TaskMutationReadScope::create(
@@ -1148,12 +1353,23 @@ pub(crate) fn execute_operation(
                     == Some(true),
             );
             let operation = LocalOperation::CreateTask(body);
-            let (task_id, persisted) = mutate_task_rows_with_retries(app, scope, |data| {
-                mutate_task_operation(data, &operation)
-            })?;
-            let task = persisted_task(&persisted, &task_id)?;
+            let (response, persisted) =
+                mutate_task_rows_with_receipt_retries(app, scope, receipt.as_ref(), |data| {
+                    let (task_id, changed) = mutate_task_operation(data, &operation)?;
+                    Ok((task_response(persisted_task(data, &task_id)?), changed))
+                })?;
+            let response = if receipt.is_some() || persisted.is_null() {
+                response
+            } else {
+                let id = response["task"]["id"]
+                    .as_str()
+                    .ok_or("Task not found after persistence")?;
+                task_response(persisted_task(&persisted, id)?)
+            };
+            let task = response["task"].clone();
             let now = OffsetDateTime::now_utc();
-            if task.get("isFocusedToday").and_then(Value::as_bool) == Some(true)
+            if !persisted.is_null()
+                && task.get("isFocusedToday").and_then(Value::as_bool) == Some(true)
                 && task.as_object().is_some_and(|task| {
                     local_api_task_is_future_start(task, now, &crate::local_query::local_wall)
                 })
@@ -1164,25 +1380,51 @@ pub(crate) fn execute_operation(
                 "Desktop Local API scheduled Focus queued extra.releaseCheck=v1.3.3/local-api-scheduled-focus operation=create outcome=queued count={count}"
             );
             }
-            return Ok(json!({ "task": task }));
+            return Ok(response);
         }
-        LocalOperation::PatchTask { id, body } => {
+        operation @ (LocalOperation::PatchTask { .. }
+        | LocalOperation::ConditionalPatchTask { .. }) => {
+            let (id, body, condition) = match operation {
+                LocalOperation::PatchTask { id, body } => (id, body, None),
+                LocalOperation::ConditionalPatchTask {
+                    id,
+                    body,
+                    condition,
+                } => (id, body, Some(condition)),
+                _ => unreachable!(),
+            };
             let _guard = access.lock_write(write_lock)?;
             let is_triage = body.contains_key("status");
             let scope = task_patch_read_scope(&id, &body);
-            let operation = LocalOperation::PatchTask {
-                id: id.clone(),
-                body,
+            let operation = match &condition {
+                Some(condition) => LocalOperation::ConditionalPatchTask {
+                    id: id.clone(),
+                    body,
+                    condition: condition.clone(),
+                },
+                None => LocalOperation::PatchTask {
+                    id: id.clone(),
+                    body,
+                },
             };
-            let (_, persisted) = mutate_task_rows_with_retries(app, scope, |data| {
-                mutate_task_operation(data, &operation)
+            let (changed, persisted) = mutate_task_rows_with_retries(app, scope, |data| {
+                let (_, changed) = mutate_task_operation(data, &operation)?;
+                Ok((!changed.is_empty(), changed))
             })?;
-            if is_triage {
+            if condition.is_some() || !changed {
+                let outcome = if changed {
+                    "conditional-write"
+                } else {
+                    "unchanged"
+                };
+                log::info!("Desktop Local API reliability completed extra.releaseCheck=v1.3.8/local-api-reliability outcome={outcome}");
+            }
+            if is_triage && changed {
                 log::info!(
                 "Desktop Local API task triage persisted extra.releaseCheck=v1.3.1/local-api-task-triage"
             );
             }
-            return Ok(json!({ "task": persisted_task(&persisted, &id)? }));
+            return Ok(task_response(persisted_task(&persisted, &id)?));
         }
         LocalOperation::DeleteTask(id) => {
             let _guard = access.lock_write(write_lock)?;
@@ -1239,9 +1481,25 @@ fn mutate_task_operation(
             ensure_array_mut(data, "tasks")?.push(task.clone());
             Ok((task_id, vec![task]))
         }
+        LocalOperation::ConditionalPatchTask {
+            id,
+            body,
+            condition,
+        } => {
+            ensure_task_version(data, id, condition)?;
+            mutate_task_operation(
+                data,
+                &LocalOperation::PatchTask {
+                    id: id.clone(),
+                    body: body.clone(),
+                },
+            )
+        }
         LocalOperation::PatchTask { id, body } => {
-            let task = patch_task_in_data(data, &id, &body)?;
-            Ok((id.clone(), vec![task]))
+            let before = find_task(data, id).ok_or("Task not found")?;
+            let task = patch_task_in_data(data, id, body)?;
+            let changed = if task == before { vec![] } else { vec![task] };
+            Ok((id.clone(), changed))
         }
         LocalOperation::DeleteTask(id) => {
             let device_id = device_id_from_data(data);
@@ -2937,6 +3195,22 @@ fn patch_task_in_data_at(
             return Err(format!("Focus limit of {n} reached"));
         }
     }
+    let mut meaningful_current = current.as_object().ok_or("Task is invalid")?.clone();
+    let mut meaningful_candidate = candidate.clone();
+    for field in ["rev", "revBy", "updatedAt"] {
+        meaningful_current.remove(field);
+        meaningful_candidate.remove(field);
+    }
+    for content in [&mut meaningful_current, &mut meaningful_candidate] {
+        if content.get("showFutureRecurrence").and_then(Value::as_bool) != Some(true)
+            || !content.contains_key("recurrence")
+        {
+            content.remove("showFutureRecurrence");
+        }
+    }
+    if meaningful_current == meaningful_candidate {
+        return Ok(current);
+    }
     update_task_in_data(data, task_id, |task| {
         *task = candidate;
         Ok(())
@@ -4186,6 +4460,18 @@ fn create_task_from_body(
     if task.contains_key("title") {
         return Err("Unsupported task props: title".to_string());
     }
+    if let Some(attachments) = task.get_mut("attachments") {
+        if attachments.as_array().is_some_and(|items| {
+            items.iter().all(|item| {
+                item.as_object().is_some_and(|item| {
+                    item.keys()
+                        .all(|field| matches!(field.as_str(), "id" | "kind" | "title" | "uri"))
+                })
+            })
+        }) {
+            *attachments = crate::mcp_tools::normalize_links(attachments)?;
+        }
+    }
     sanitize_task_patch_map(&mut task)?;
     task.retain(|_, value| !value.is_null());
     if task.get("reminderPolicy").is_none_or(Value::is_null)
@@ -5332,6 +5618,568 @@ fn hex_value(value: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    fn reliability_create(
+        conn: &rusqlite::Connection,
+        token: &str,
+        credential: &str,
+        body: &Value,
+        now: i64,
+    ) -> Result<(Value, bool), String> {
+        let operation = LocalOperation::CreateTaskWithReceipt {
+            body: body.as_object().unwrap().clone(),
+            receipt: create_receipt(token, body)?,
+        }
+        .bind_credential(credential);
+        let LocalOperation::CreateTaskWithReceipt { body, receipt } = operation else {
+            unreachable!()
+        };
+        let operation = LocalOperation::CreateTask(body);
+        let (response, _, changed) = crate::storage::local_receipt_operation_test_commit(
+            conn,
+            TaskMutationReadScope::create(None, None, None, false),
+            Some(&receipt),
+            now,
+            |data| {
+                let (id, rows) = mutate_task_operation(data, &operation)?;
+                Ok((task_response(persisted_task(data, &id)?), rows))
+            },
+        )?;
+        Ok((response, changed))
+    }
+
+    #[test]
+    fn reliability_receipt_reopens_replays_original_without_resurrection_and_isolates_scope() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("receipts.db");
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let payload = json!({"title":"Original", "props":{"attachments":[{"uri":"https://example.com/note"}]}});
+        let (first, changed) =
+            reliability_create(&conn, "operation-1", "credential-a", &payload, 100).unwrap();
+        assert!(changed);
+        assert!(valid_task_response(&first));
+        let id = first["task"]["id"].as_str().unwrap();
+        let canonical = crate::storage::read_sqlite_data(&conn).unwrap();
+        assert_eq!(first, task_response(find_task(&canonical, id).unwrap()));
+        drop(conn);
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        for mutation in [
+            json!({"description":"Later edit"}),
+            json!({"title":"Changed"}),
+        ] {
+            let operation = LocalOperation::PatchTask {
+                id: id.into(),
+                body: mutation.as_object().unwrap().clone(),
+            };
+            crate::storage::local_operation_test_commit(
+                &conn,
+                task_patch_read_scope(id, mutation.as_object().unwrap()),
+                |data| mutate_task_operation(data, &operation),
+            )
+            .unwrap();
+            let (replayed, changed) =
+                reliability_create(&conn, "operation-1", "credential-a", &payload, 101).unwrap();
+            assert_eq!(replayed, first);
+            assert!(!changed);
+        }
+        conn.execute("UPDATE tasks SET deletedAt = '2026-11-01T00:00:00Z', purgedAt = '2026-11-01T00:00:00Z' WHERE id = ?1", [id]).unwrap();
+        assert_eq!(
+            reliability_create(&conn, "operation-1", "credential-a", &payload, 102).unwrap(),
+            (first.clone(), false)
+        );
+        conn.execute("DELETE FROM tasks WHERE id = ?1", [id])
+            .unwrap();
+        assert_eq!(
+            reliability_create(&conn, "operation-1", "credential-a", &payload, 103).unwrap(),
+            (first.clone(), false)
+        );
+        assert_eq!(
+            crate::storage::read_sqlite_data(&conn).unwrap()["tasks"],
+            json!([])
+        );
+        assert_eq!(
+            reliability_create(
+                &conn,
+                "operation-1",
+                "credential-a",
+                &json!({"title":"Different"}),
+                103
+            )
+            .unwrap_err(),
+            "idempotency_conflict"
+        );
+        let (other, changed) =
+            reliability_create(&conn, "operation-1", "credential-b", &payload, 103).unwrap();
+        assert!(changed);
+        assert_ne!(first["task"]["id"], other["task"]["id"]);
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        assert_eq!(
+            reliability_create(&conn, "operation-1", "credential-a", &payload, 104).unwrap(),
+            (first.clone(), false)
+        );
+        let mut workspace = rusqlite::Connection::open_in_memory().unwrap();
+        crate::storage::local_operation_test_seed(&mut workspace, &empty_local_api_data()).unwrap();
+        let (isolated, changed) =
+            reliability_create(&workspace, "operation-1", "credential-a", &payload, 100).unwrap();
+        assert!(changed);
+        assert_ne!(first["task"]["id"], isolated["task"]["id"]);
+        assert!(canonical.get("local_api_create_receipts").is_none());
+    }
+
+    #[test]
+    fn reliability_receipt_rollback_expiry_capacity_and_corruption_fail_closed() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let payload = json!({"title":"Original"});
+        conn.execute_batch("CREATE TRIGGER fail_receipt BEFORE INSERT ON local_api_create_receipts BEGIN SELECT RAISE(FAIL, 'receipt failure'); END;").unwrap();
+        assert!(reliability_create(&conn, "retry", "credential", &payload, 100).is_err());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM local_api_create_receipts",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        conn.execute_batch("DROP TRIGGER fail_receipt;").unwrap();
+        assert!(
+            reliability_create(&conn, "invalid", "credential", &json!({"title":""}), 100).is_err()
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM local_api_create_receipts",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        let (first, _) = reliability_create(&conn, "retry", "credential", &payload, 100).unwrap();
+        assert_eq!(
+            reliability_create(&conn, "retry", "credential", &payload, 604899).unwrap(),
+            (first.clone(), false)
+        );
+        let (expired, changed) =
+            reliability_create(&conn, "retry", "credential", &payload, 604900).unwrap();
+        assert!(changed);
+        assert_ne!(first["task"]["id"], expired["task"]["id"]);
+        conn.execute(
+            "UPDATE local_api_create_receipts SET result_json = 'null'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            reliability_create(&conn, "retry", "credential", &payload, 604901)
+                .unwrap_err()
+                .starts_with("Invalid local API receipt")
+        );
+        conn.execute(
+            "UPDATE local_api_create_receipts SET result_json = ?1",
+            [expired.to_string()],
+        )
+        .unwrap();
+        conn.execute_batch("WITH RECURSIVE items(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM items WHERE n < 9999) INSERT INTO local_api_create_receipts SELECT 'capacity', 'create_task', CAST(n AS TEXT), 'fingerprint', '{}', 700000 FROM items;").unwrap();
+        assert_eq!(
+            reliability_create(&conn, "retry", "credential", &payload, 604901).unwrap(),
+            (expired, false)
+        );
+        assert_eq!(
+            reliability_create(&conn, "new", "credential", &payload, 604901).unwrap_err(),
+            "idempotency_capacity"
+        );
+        assert!(
+            reliability_create(&conn, "new", "credential", &payload, 700000)
+                .unwrap()
+                .1
+        );
+        assert!(reliability_create(&conn, "overflow", "credential", &payload, i64::MAX).is_err());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    fn reliability_conditional_patch_rechecks_authoritative_content_and_noop_skips_rows() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("conditional.db");
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let (first, _) = reliability_create(
+            &conn,
+            "create",
+            "credential",
+            &json!({"title":"Original","props":{"tags":["tag"]}}),
+            100,
+        )
+        .unwrap();
+        let id = first["task"]["id"].as_str().unwrap();
+        let version = first["version"].as_str().unwrap();
+        let operation = LocalOperation::ConditionalPatchTask {
+            id: id.into(),
+            body: json!({"title":"Original","tags":[" tag "],"showFutureRecurrence":false})
+                .as_object()
+                .unwrap()
+                .clone(),
+            condition: TaskMatchCondition::Versions(vec![version.into()]),
+        };
+        conn.execute_batch("CREATE TRIGGER fail_task_update BEFORE INSERT ON tasks BEGIN SELECT RAISE(FAIL, 'unexpected task write'); END;").unwrap();
+        let (result, _, changed) = crate::storage::local_receipt_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            None,
+            100,
+            |data| {
+                let (_, rows) = mutate_task_operation(data, &operation)?;
+                Ok((task_response(find_task(data, id).unwrap()), rows))
+            },
+        )
+        .unwrap();
+        assert!(!changed, "before={first} after={result}");
+        assert_eq!(result, first);
+        let true_without_recurrence = LocalOperation::PatchTask {
+            id: id.into(),
+            body: json!({"showFutureRecurrence":true})
+                .as_object()
+                .unwrap()
+                .clone(),
+        };
+        crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            |data| mutate_task_operation(data, &true_without_recurrence),
+        )
+        .unwrap();
+        conn.execute_batch("DROP TRIGGER fail_task_update;")
+            .unwrap();
+        let retry_error = crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            |data| {
+                mutate_task_operation(data, &operation)?;
+                Err("database is locked".into())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(retry_error, "database is locked");
+        let other = rusqlite::Connection::open(&path).unwrap();
+        other
+            .execute(
+                "UPDATE tasks SET title = 'Concurrent same revision edit' WHERE id = ?1",
+                [id],
+            )
+            .unwrap();
+        let error = crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            |data| mutate_task_operation(data, &operation),
+        )
+        .unwrap_err();
+        assert_eq!(error, "task_version_conflict");
+        assert_eq!(api_error_response(error).status, 412);
+        let unconditional = LocalOperation::PatchTask {
+            id: id.into(),
+            body: json!({"description":"Unconditional remains supported"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        };
+        let persisted = crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            |data| mutate_task_operation(data, &unconditional),
+        )
+        .unwrap();
+        assert_eq!(find_task(&persisted, id).unwrap()["rev"], 2);
+        let mut repaired = persisted.clone();
+        repaired["tasks"][0]["completedAt"] = json!("2026-11-01T00:00:00Z");
+        let (_, rows) = mutate_task_operation(
+            &mut repaired,
+            &LocalOperation::PatchTask {
+                id: id.into(),
+                body: Map::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].get("completedAt").is_none());
+        assert_eq!(rows[0]["rev"], 3);
+    }
+
+    #[test]
+    fn reliability_http_dispatch_persists_versions_and_rejects_stale_patch() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let access = LocalApiAccess {
+            allow_write: true,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        };
+        let dispatch = |method: &str, path: &str, headers: Vec<(&str, String)>, body: Value| {
+            let mut headers = headers
+                .into_iter()
+                .map(|(name, value)| (name.into(), value))
+                .collect::<HashMap<_, _>>();
+            headers.insert("authorization".into(), "Bearer credential".into());
+            handle_api_operation(
+                "credential",
+                &access,
+                ApiRequest {
+                    method: method.into(),
+                    path: path.into(),
+                    query: HashMap::new(),
+                    headers,
+                    body: serde_json::to_vec(&body).unwrap(),
+                },
+                |operation| match operation {
+                    LocalOperation::CreateTaskWithReceipt { body, receipt } => {
+                        let operation = LocalOperation::CreateTask(body);
+                        let (response, _, _) = crate::storage::local_receipt_operation_test_commit(
+                            &conn,
+                            TaskMutationReadScope::create(None, None, None, false),
+                            Some(&receipt),
+                            100,
+                            |data| {
+                                let (id, rows) = mutate_task_operation(data, &operation)?;
+                                Ok((task_response(find_task(data, &id).unwrap()), rows))
+                            },
+                        )?;
+                        Ok(response)
+                    }
+                    operation @ (LocalOperation::PatchTask { .. }
+                    | LocalOperation::ConditionalPatchTask { .. }) => {
+                        let id = match &operation {
+                            LocalOperation::PatchTask { id, .. }
+                            | LocalOperation::ConditionalPatchTask { id, .. } => id.clone(),
+                            _ => unreachable!(),
+                        };
+                        let canonical = crate::storage::local_operation_test_commit(
+                            &conn,
+                            TaskMutationReadScope::existing(&id, false),
+                            |data| mutate_task_operation(data, &operation),
+                        )?;
+                        Ok(task_response(find_task(&canonical, &id).unwrap()))
+                    }
+                    _ => panic!(),
+                },
+            )
+        };
+        let first = dispatch(
+            "POST",
+            "/v1/tasks",
+            vec![("idempotency-key", "receipt".into())],
+            json!({"title":"Original"}),
+        );
+        assert_eq!(first.status, 201);
+        let version = first.body["version"].as_str().unwrap();
+        assert!(http_response(&first).contains(&format!("ETag: \"{version}\"\r\n")));
+        let id = first.body["task"]["id"].as_str().unwrap();
+        let path = format!("/v1/tasks/{id}");
+        let noop = dispatch(
+            "PATCH",
+            &path,
+            vec![("if-match", format!("\"{version}\""))],
+            json!({}),
+        );
+        assert_eq!(noop.body, first.body);
+        let changed = dispatch(
+            "PATCH",
+            &path,
+            vec![("if-match", format!("\"{version}\""))],
+            json!({"description":"Changed"}),
+        );
+        assert_eq!(changed.status, 200);
+        assert_ne!(changed.body["version"], first.body["version"]);
+        let stale = dispatch(
+            "PATCH",
+            &path,
+            vec![("if-match", format!("\"{version}\""))],
+            json!({"description":"Stale"}),
+        );
+        assert_eq!(stale.status, 412);
+        assert_eq!(stale.body["code"], "task_version_conflict");
+        let replay = dispatch(
+            "POST",
+            "/v1/tasks",
+            vec![("idempotency-key", "receipt".into())],
+            json!({"title":"Original"}),
+        );
+        assert_eq!(replay.body, first.body);
+        assert_eq!(
+            crate::storage::read_sqlite_data(&conn).unwrap()["tasks"][0]["description"],
+            "Changed"
+        );
+    }
+
+    #[test]
+    fn reliability_concurrent_create_admission_replays_one_committed_task() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("concurrent.db");
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let workers = (0..2)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let conn = rusqlite::Connection::open(path).unwrap();
+                    conn.busy_timeout(Duration::from_secs(5)).unwrap();
+                    barrier.wait();
+                    reliability_create(
+                        &conn,
+                        "retry",
+                        "credential",
+                        &json!({"title":"Original"}),
+                        100,
+                    )
+                    .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        let results = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(results[0].0, results[1].0);
+        assert_ne!(results[0].1, results[1].1);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM local_api_create_receipts",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn reliability_http_headers_conditions_aliases_and_auth_are_bounded() {
+        let task = json!({"id":"task", "title":"Task", "rev":1});
+        let version = task_version(&task);
+        assert_ne!(
+            version,
+            task_version(&json!({"id":"task", "title":"Different", "rev":1}))
+        );
+        assert_eq!(
+            version,
+            task_version(
+                &serde_json::from_str::<Value>("{\"rev\":1,\"title\":\"Task\",\"id\":\"task\"}")
+                    .unwrap()
+            )
+        );
+        let header = format!("W/\"{version}\", \"other\", \"{version}\"");
+        assert_eq!(
+            parse_if_match(&header).unwrap(),
+            TaskMatchCondition::Versions(vec!["other".into(), version.clone()])
+        );
+        assert_eq!(parse_if_match(" * ").unwrap(), TaskMatchCondition::Exists);
+        for header in [
+            "",
+            "token",
+            "*, \"token\"",
+            "\"token\",",
+            "w/\"token\"",
+            "\"unterminated",
+            "\"bad\nvalue\"",
+        ] {
+            assert!(parse_if_match(header).is_err(), "{header:?}");
+        }
+        let data = json!({"tasks":[task]});
+        assert!(ensure_task_version(
+            &data,
+            "task",
+            &parse_if_match(&format!("W/\"{version}\"")).unwrap()
+        )
+        .is_err());
+        assert!(ensure_task_version(&data, "missing", &TaskMatchCondition::Exists).is_err());
+        let response = ApiResponse::ok(task_response(data["tasks"][0].clone()));
+        assert!(http_response(&response).contains(&format!("ETag: \"{version}\"\r\n")));
+        assert!(
+            http_response(&api_error_response("task_version_conflict".into()))
+                .starts_with("HTTP/1.1 412 Precondition Failed")
+        );
+        for token in ["", "space token", "new\nline", "é"] {
+            assert!(create_receipt(token, &json!({})).is_err());
+        }
+        assert!(create_receipt(&"a".repeat(128), &json!({})).is_ok());
+        assert!(create_receipt(&"a".repeat(129), &json!({})).is_err());
+        let mut request = ApiRequest {
+            method: "POST".into(),
+            path: "/v1/tasks".into(),
+            query: HashMap::new(),
+            headers: HashMap::from([
+                ("authorization".into(), "Bearer secret".into()),
+                ("idempotency-key".into(), "token".into()),
+            ]),
+            body: serde_json::to_vec(&json!({"title":"Task"})).unwrap(),
+        };
+        assert!(matches!(
+            operation_from_api_request(&request).unwrap(),
+            Some(LocalOperation::CreateTaskWithReceipt { .. })
+        ));
+        let access = LocalApiAccess {
+            allow_write: true,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        };
+        let response = handle_api_operation("secret", &access, request, |operation| {
+            let LocalOperation::CreateTaskWithReceipt { receipt, .. } = operation else {
+                panic!()
+            };
+            assert_eq!(
+                receipt.credential_digest,
+                Some(format!("{:x}", Sha256::digest(b"secret")))
+            );
+            Ok(json!({}))
+        });
+        assert_eq!(response.status, 201);
+        request = ApiRequest {
+            method: "PATCH".into(),
+            path: "/v1/tasks/task".into(),
+            query: HashMap::new(),
+            headers: HashMap::from([("if-match".into(), format!("\"{version}\""))]),
+            body: b"{}".to_vec(),
+        };
+        assert!(matches!(
+            operation_from_api_request(&request).unwrap(),
+            Some(LocalOperation::ConditionalPatchTask { .. })
+        ));
+        assert_eq!(
+            handle_api_operation("secret", &access, request, |_| panic!()).status,
+            401
+        );
+        let readonly = LocalApiAccess {
+            allow_write: false,
+            ..access
+        };
+        let request = ApiRequest {
+            method: "POST".into(),
+            path: "/tasks".into(),
+            query: HashMap::new(),
+            headers: HashMap::from([
+                ("authorization".into(), "Bearer secret".into()),
+                ("idempotency-key".into(), "token".into()),
+            ]),
+            body: b"{}".to_vec(),
+        };
+        assert_eq!(
+            handle_api_operation("secret", &readonly, request, |_| panic!()).status,
+            403
+        );
+    }
+
     #[test]
     fn advance_reminder_patch_validation_and_clear() {
         for minutes in [json!(0), json!(1), json!(1440), json!(10080), Value::Null] {

@@ -68,8 +68,8 @@ pub(crate) fn tools() -> Vec<Value> {
     TOOL_NAMES.iter().map(|(name, description)| {
         let fields: Vec<&str> = match *name {
             "mindwtr_list_tasks" => crate::local_query::TASK_QUERY_FIELDS.to_vec(),
-            "mindwtr_add_task" => TASK_FIELDS.to_vec(),
-            "mindwtr_update_task" => std::iter::once("id").chain(TASK_FIELDS.iter().copied().filter(|field| *field != "attachments")).collect(),
+            "mindwtr_add_task" => TASK_FIELDS.iter().copied().chain(["idempotencyKey"]).collect(),
+            "mindwtr_update_task" => ["id", "expectedVersion"].into_iter().chain(TASK_FIELDS.iter().copied().filter(|field| *field != "attachments")).collect(),
             "mindwtr_add_project" => PROJECT_FIELDS.to_vec(),
             "mindwtr_update_project" => std::iter::once("id").chain(PROJECT_FIELDS.iter().copied()).collect(),
             "mindwtr_get_task" | "mindwtr_get_project" => vec!["id", "includeDeleted"],
@@ -82,7 +82,7 @@ pub(crate) fn tools() -> Vec<Value> {
             if field == "status" && *name != "mindwtr_list_tasks" && !name.contains("project") {
                 schema["enum"].as_array_mut().unwrap().retain(|status| status != "all" && (*name != "mindwtr_update_task" || (status != "done" && status != "archived")));
             }
-            if (name.contains("project") && matches!(field, "areaId" | "colorOverride")) || (name.starts_with("mindwtr_update_") && !matches!(field, "id" | "title" | "status" | "color" | "colorOverride" | "isSequential" | "showFutureRecurrence" | "isFocusedToday" | "suppressMindwtrReminders")) {
+            if (name.contains("project") && matches!(field, "areaId" | "colorOverride")) || (name.starts_with("mindwtr_update_") && !matches!(field, "id" | "expectedVersion" | "title" | "status" | "color" | "colorOverride" | "isSequential" | "showFutureRecurrence" | "isFocusedToday" | "suppressMindwtrReminders")) {
                 schema = json!({"anyOf":[schema, {"type":"null"}]});
             }
             properties.insert(field.to_string(), schema);
@@ -96,6 +96,10 @@ pub(crate) fn tools() -> Vec<Value> {
 
 fn field_schema(field: &str, project: bool) -> Value {
     match field {
+        "expectedVersion" => json!({"type":"string", "pattern":"^sha256-[0-9a-f]{64}$"}),
+        "idempotencyKey" => {
+            json!({"type":"string", "minLength":1, "maxLength":128, "pattern":"^[!-~]+$"})
+        }
         "id" => json!({"type":"string", "minLength":1}),
         "title" => json!({"type":"string", "minLength":1, "maxLength":500}),
         "status" if project => json!({"enum":["active","someday","waiting","archived"]}),
@@ -208,7 +212,10 @@ pub(crate) fn operation(name: &str, input: &Map<String, Value>) -> Result<LocalO
                 return Err(invalid());
             }
             if input.keys().any(|field| {
-                !TASK_FIELDS.contains(&field.as_str()) && !(field == "id" && !creating)
+                !TASK_FIELDS.contains(&field.as_str())
+                    && !(field == "id" && !creating)
+                    && !(field == "idempotencyKey" && creating)
+                    && !(field == "expectedVersion" && !creating)
             }) || (!creating && input.contains_key("attachments"))
             {
                 return Err(invalid());
@@ -216,6 +223,24 @@ pub(crate) fn operation(name: &str, input: &Map<String, Value>) -> Result<LocalO
             let mut props = input.clone();
             let entity_id = if creating { None } else { Some(id()?) };
             props.remove("id");
+            let receipt = props
+                .remove("idempotencyKey")
+                .map(|value| {
+                    value.as_str().ok_or_else(invalid).and_then(|token| {
+                        local_api::create_receipt(token, &Value::Object(input.clone()))
+                    })
+                })
+                .transpose()?;
+            let expected = props
+                .remove("expectedVersion")
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|version| local_api::valid_task_version(version))
+                        .map(str::to_string)
+                        .ok_or_else(invalid)
+                })
+                .transpose()?;
             if let Some(recurrence) = props.get_mut("recurrence") {
                 *recurrence = local_api::normalize_mcp_recurrence(recurrence)?;
             }
@@ -274,16 +299,23 @@ pub(crate) fn operation(name: &str, input: &Map<String, Value>) -> Result<LocalO
             local_api::sanitize_task_patch_map(&mut props)?;
             if creating {
                 let title = props.remove("title").ok_or_else(invalid)?;
-                LocalOperation::CreateTask(
-                    json!({"title":title,"props":props})
-                        .as_object()
-                        .unwrap()
-                        .clone(),
-                )
+                let body = json!({"title":title,"props":props})
+                    .as_object()
+                    .unwrap()
+                    .clone();
+                match receipt {
+                    Some(receipt) => LocalOperation::CreateTaskWithReceipt { body, receipt },
+                    None => LocalOperation::CreateTask(body),
+                }
             } else {
-                LocalOperation::PatchTask {
-                    id: entity_id.unwrap(),
-                    body: props,
+                let id = entity_id.unwrap();
+                match expected {
+                    Some(version) => LocalOperation::ConditionalPatchTask {
+                        id,
+                        body: props,
+                        condition: local_api::TaskMatchCondition::Versions(vec![version]),
+                    },
+                    None => LocalOperation::PatchTask { id, body: props },
                 }
             }
         }
@@ -342,7 +374,7 @@ pub(crate) fn operation(name: &str, input: &Map<String, Value>) -> Result<LocalO
     })
 }
 
-fn normalize_links(input: &Value) -> Result<Value, String> {
+pub(crate) fn normalize_links(input: &Value) -> Result<Value, String> {
     let invalid = || "Invalid task link attachments".to_string();
     let items = input
         .as_array()

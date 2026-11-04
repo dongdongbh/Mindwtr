@@ -112,6 +112,10 @@ const normalizeInputs = (
 };
 
 
+export const normalizeLinkAttachmentInputs = (inputs: readonly LinkAttachmentInput[]): LinkAttachmentInput[] => (
+  normalizeInputs(inputs).map(({ id, title, uri }) => ({ ...(id ? { id } : {}), kind: 'link', title, uri }))
+);
+
 export const buildLinkAttachments = (
   inputs: readonly LinkAttachmentInput[] | undefined,
   now: string = new Date().toISOString(),

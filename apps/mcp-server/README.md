@@ -121,6 +121,13 @@ Use the port shown in Settings. `MINDWTR_MCP_API_URL` can replace `--api-url`. U
 
 Writes remain disabled unless explicitly enabled with `--write`. If the app is closed or the token is invalid, the helper returns an error. A timed-out write may have reached the app: inspect the task before retrying, as the helper does not retry writes automatically.
 
+Desktop 1.3.8 adds optional protection for task creation and edits in Local API mode:
+
+- `mindwtr_add_task` accepts `idempotencyKey`, 1–128 visible ASCII characters without spaces. Keep the same key and identical input when retrying an uncertain create, including attachment links. The desktop retains the original result for seven days, even if that task is later edited or deleted. Different input with the same key returns `idempotency_conflict`. A full receipt store returns `idempotency_capacity`; retry later with the same key and input.
+- `mindwtr_get_task`, task creation, and task edits return `{ "task": { ... }, "version": "sha256-..." }`. Pass the version unchanged as `expectedVersion` to `mindwtr_update_task`. A stale edit returns `task_version_conflict`; read the task again and review the changes before retrying. An edit that changes nothing preserves the version.
+
+Both arguments are optional. Without them, writes keep their existing behavior. Protected requests use versioned desktop endpoints and fail on older desktop versions without falling back to an unprotected write. Older desktop reads can omit `version`. These arguments are unavailable in Cloud and direct SQLite mode; unsupported task input fields are rejected. Attachment replacement and lifecycle restrictions below still apply.
+
 | MCP capability | Desktop Local API support |
 | --- | --- |
 | List/get tasks | Supported, including rich search operators, date filters, sorting and pagination |

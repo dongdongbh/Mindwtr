@@ -38,7 +38,7 @@ const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const STORAGE_RETRY_ATTEMPTS: usize = 4;
 const STORAGE_RETRY_BASE_DELAY_MS: u64 = 120;
 
-const STORAGE_SCHEMA_VERSION: i64 = 16;
+const STORAGE_SCHEMA_VERSION: i64 = 17;
 const STORAGE_SCHEMA_STATE_TABLE: &str = "storage_schema_state";
 
 const FTS_TRIGGER_MIGRATION_VERSION: i64 = 4;
@@ -61,6 +61,17 @@ static SQLITE_WARM_STATES: OnceLock<Mutex<HashMap<PathBuf, SqliteWarmState>>> = 
 const SQLITE_SCHEMA: &str = r#"
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS local_api_create_receipts (
+  credential_digest TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  request_token TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY (credential_digest, operation, request_token)
+);
+CREATE INDEX IF NOT EXISTS idx_local_api_create_receipts_expiry ON local_api_create_receipts(expires_at);
 
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
@@ -5098,17 +5109,47 @@ fn ensure_task_mutation_storage_ready(app: &tauri::AppHandle) -> Result<(), Stri
 pub(crate) fn mutate_task_rows_with_retries<T, F>(
     app: &tauri::AppHandle,
     scope: TaskMutationReadScope,
+    mutate: F,
+) -> Result<(T, Value), String>
+where
+    T: Serialize + serde::de::DeserializeOwned,
+    F: FnMut(&mut Value) -> Result<(T, Vec<Value>), String>,
+{
+    mutate_task_rows_with_receipt_retries(app, scope, None, mutate)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TaskCreateReceipt {
+    pub(crate) credential_digest: Option<String>,
+    pub(crate) request_token: String,
+    pub(crate) fingerprint: String,
+}
+
+pub(crate) fn mutate_task_rows_with_receipt_retries<T, F>(
+    app: &tauri::AppHandle,
+    scope: TaskMutationReadScope,
+    receipt: Option<&TaskCreateReceipt>,
     mut mutate: F,
 ) -> Result<(T, Value), String>
 where
+    T: Serialize + serde::de::DeserializeOwned,
     F: FnMut(&mut Value) -> Result<(T, Vec<Value>), String>,
 {
     ensure_task_mutation_storage_ready(app)?;
     let data_path = get_data_path(app);
     for attempt in 0..STORAGE_RETRY_ATTEMPTS {
         let conn = open_sqlite(app)?;
-        match commit_task_row_mutation(&conn, &scope, &mut mutate) {
-            Ok((result, fallback, _read_stats)) => {
+        match commit_task_row_mutation_with_receipt(
+            &conn,
+            &scope,
+            receipt,
+            OffsetDateTime::now_utc().unix_timestamp(),
+            &mut mutate,
+        ) {
+            Ok((result, fallback, _read_stats, changed)) => {
+                if !changed {
+                    return Ok((result, fallback));
+                }
                 let canonical = match stable_sqlite_snapshot_with_version(&conn) {
                     Ok((canonical, data_version)) => {
                         publish_task_data_json(&conn, &data_path, canonical, data_version)
@@ -5174,20 +5215,100 @@ where
     read_sqlite_data(conn)
 }
 
+#[cfg(test)]
+pub(crate) fn local_receipt_operation_test_commit<F>(
+    conn: &Connection,
+    scope: TaskMutationReadScope,
+    receipt: Option<&TaskCreateReceipt>,
+    now: i64,
+    mut mutate: F,
+) -> Result<(Value, Value, bool), String>
+where
+    F: FnMut(&mut Value) -> Result<(Value, Vec<Value>), String>,
+{
+    let (result, canonical, _, changed) =
+        commit_task_row_mutation_with_receipt(conn, &scope, receipt, now, &mut mutate)?;
+    Ok((result, canonical, changed))
+}
+
 fn commit_task_row_mutation<T, F>(
     conn: &Connection,
     scope: &TaskMutationReadScope,
     mutate: &mut F,
 ) -> Result<(T, Value, TaskMutationReadStats), String>
 where
+    T: Serialize + serde::de::DeserializeOwned,
+    F: FnMut(&mut Value) -> Result<(T, Vec<Value>), String>,
+{
+    let (result, canonical, stats, _) =
+        commit_task_row_mutation_with_receipt(conn, scope, None, 0, mutate)?;
+    Ok((result, canonical, stats))
+}
+
+fn commit_task_row_mutation_with_receipt<T, F>(
+    conn: &Connection,
+    scope: &TaskMutationReadScope,
+    receipt: Option<&TaskCreateReceipt>,
+    now: i64,
+    mutate: &mut F,
+) -> Result<(T, Value, TaskMutationReadStats, bool), String>
+where
+    T: Serialize + serde::de::DeserializeOwned,
     F: FnMut(&mut Value) -> Result<(T, Vec<Value>), String>,
 {
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| e.to_string())?;
     let result = (|| {
+        if let Some(receipt) = receipt {
+            let digest = receipt
+                .credential_digest
+                .as_deref()
+                .filter(|digest| !digest.is_empty())
+                .ok_or("Invalid idempotency authentication scope")?;
+            conn.execute(
+                "DELETE FROM local_api_create_receipts WHERE expires_at <= ?1",
+                params![now],
+            )
+            .map_err(|e| e.to_string())?;
+            let stored: Option<(String, String)> = conn.query_row(
+                "SELECT fingerprint, result_json FROM local_api_create_receipts WHERE credential_digest = ?1 AND operation = 'create_task' AND request_token = ?2",
+                params![digest, receipt.request_token], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).optional().map_err(|e| e.to_string())?;
+            if let Some((fingerprint, result_json)) = stored {
+                if fingerprint != receipt.fingerprint {
+                    return Err("idempotency_conflict".into());
+                }
+                let saved_value: Value = serde_json::from_str(&result_json)
+                    .map_err(|e| format!("Invalid local API receipt: {e}"))?;
+                if !crate::local_api::valid_task_response(&saved_value) {
+                    return Err("Invalid local API receipt result".into());
+                }
+                let saved_result = serde_json::from_value(saved_value)
+                    .map_err(|e| format!("Invalid local API receipt: {e}"))?;
+                conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+                log::info!("Desktop Local API reliability completed extra.releaseCheck=v1.3.8/local-api-reliability outcome=replay");
+                return Ok((
+                    saved_result,
+                    Value::Null,
+                    TaskMutationReadStats::default(),
+                    false,
+                ));
+            }
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM local_api_create_receipts",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if count >= 10_000 {
+                return Err("idempotency_capacity".into());
+            }
+        }
         let (mut canonical, read_stats) =
             read_task_mutation_data(conn, scope, OffsetDateTime::now_utc())?;
-        let (result, changed_tasks) = mutate(&mut canonical)?;
+        let (mut result, changed_tasks) = mutate(&mut canonical)?;
+        let changed = !changed_tasks.is_empty();
         let mut written_ids = HashSet::new();
         for task in changed_tasks {
             let task_id = task
@@ -5199,8 +5320,35 @@ where
                 replace_task_row(conn, &task)?;
             }
         }
+        if let Some(receipt) = receipt {
+            let candidate = serde_json::to_value(&result).map_err(|e| e.to_string())?;
+            let id = candidate
+                .pointer("/task/id")
+                .and_then(Value::as_str)
+                .ok_or("Invalid local API receipt result")?;
+            let task = conn
+                .query_row(
+                    "SELECT * FROM tasks WHERE id = ?1",
+                    params![id],
+                    row_to_task_value,
+                )
+                .map_err(|e| e.to_string())?;
+            let response = crate::local_api::task_response(task);
+            if !crate::local_api::valid_task_response(&response) {
+                return Err("Invalid local API receipt result".into());
+            }
+            result = serde_json::from_value(response.clone()).map_err(|e| e.to_string())?;
+            let result_json = serde_json::to_string(&response).map_err(|e| e.to_string())?;
+            let expires_at = now
+                .checked_add(7 * 24 * 60 * 60)
+                .ok_or("Invalid idempotency expiry")?;
+            conn.execute(
+                "INSERT INTO local_api_create_receipts (credential_digest, operation, request_token, fingerprint, result_json, expires_at) VALUES (?1, 'create_task', ?2, ?3, ?4, ?5)",
+                params![receipt.credential_digest, receipt.request_token, receipt.fingerprint, result_json, expires_at],
+            ).map_err(|e| e.to_string())?;
+        }
         conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
-        Ok((result, canonical, read_stats))
+        Ok((result, canonical, read_stats, changed))
     })();
     if result.is_err() {
         let _ = conn.execute_batch("ROLLBACK");
@@ -5810,6 +5958,44 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn reliability_schema_extension_preserves_an_existing_version_sixteen_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("version-sixteen.db");
+        let conn = open_sqlite_path(&path).unwrap();
+        replace_task_row(
+            &conn,
+            &serde_json::json!({
+                "id":"existing", "title":"Existing", "status":"inbox", "rev":1,
+                "createdAt":"2026-11-01T00:00:00Z", "updatedAt":"2026-11-01T00:00:00Z"
+            }),
+        )
+        .unwrap();
+        conn.execute_batch("DROP TABLE local_api_create_receipts; UPDATE storage_schema_state SET storage_version = 16;").unwrap();
+        drop(conn);
+        let conn = open_sqlite_path(&path).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM local_api_create_receipts",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            read_sqlite_data(&conn).unwrap()["tasks"][0]["id"],
+            "existing"
+        );
+        assert_eq!(
+            stored_sqlite_schema_state(&conn)
+                .unwrap()
+                .unwrap()
+                .storage_version,
+            STORAGE_SCHEMA_VERSION
+        );
+    }
 
     #[test]
     fn relaxed_parse_refuses_a_garbage_prefix_before_the_first_brace() {

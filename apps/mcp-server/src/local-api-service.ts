@@ -1,7 +1,7 @@
 import { filterTasksBySearch, PRIORITY_RANK, safeParseDate, TASK_STATUS_VALUES, taskMatchesQuery, TIME_ESTIMATE_OPTIONS } from '@mindwtr/core';
 import * as z from 'zod';
 
-import { NotFoundError, ValidationError } from './errors.js';
+import { MindwtrToolError, NotFoundError, ValidationError, type MindwtrToolErrorCode } from './errors.js';
 import {
   isoDateLikeSchema,
   MAX_TASK_LIST_LIMIT,
@@ -15,8 +15,8 @@ import {
   normalizeNullableTaskTimeSpentMinutes,
   taskRecurrenceInputSchema,
 } from './input-validation.js';
-import { buildLinkAttachments, linkAttachmentsCreateSchema } from './link-attachments.js';
-import type { Area, ListTasksInput, Project, Task, TaskStatus } from './queries.js';
+import { buildLinkAttachments, linkAttachmentsCreateSchema, normalizeLinkAttachmentInputs } from './link-attachments.js';
+import type { AddTaskInput, Area, GetTaskInput, ListTasksInput, Project, Task, TaskStatus, UpdateTaskInput } from './queries.js';
 import type { MindwtrService } from './service.js';
 import { buildTaskCreateFieldsShape, buildTaskUpdateFieldsShape } from './task-field-schemas.js';
 
@@ -30,6 +30,14 @@ export type LocalApiServiceOptions = {
   logInfo?: (message: string, context?: Record<string, unknown>) => void;
 };
 
+export const localApiIdempotencyKeySchema = z.string().regex(/^[\x21-\x7e]{1,128}$/);
+export const localApiTaskVersionSchema = z.string().regex(/^sha256-[0-9a-f]{64}$/);
+export type LocalApiTask = Task & { version?: string };
+type LocalApiService = Omit<MindwtrService, 'getTask' | 'addTask' | 'updateTask'> & {
+  getTask: (input: GetTaskInput) => Promise<LocalApiTask>;
+  addTask: (input: AddTaskInput & { idempotencyKey?: string }) => Promise<LocalApiTask>;
+  updateTask: (input: UpdateTaskInput & { expectedVersion?: string }) => Promise<LocalApiTask>;
+};
 
 export const LOCAL_API_UNSUPPORTED_PROJECT_FIELDS = [
   'viewSectionIds', 'cancelledAt', 'isFocused', 'dueDate', 'startDate', 'reviewAt', 'supportNotes', 'attachments',
@@ -87,11 +95,17 @@ for (const [name, schema] of Object.entries(dedicatedTaskShape)) {
   createTaskShape[name] = schema.optional();
   patchTaskShape[name] = ['title', 'status'].includes(name) ? schema.optional() : schema.nullable().optional();
 }
-createTaskShape.title = titleSchema;
-createTaskShape.attachments = linkAttachmentsCreateSchema.optional();
-patchTaskShape.id = z.string().min(1);
-const createTaskSchema = z.object(createTaskShape).strict();
-const patchTaskSchema = z.object(patchTaskShape).strict();
+const createTaskSchema = z.object({
+  ...createTaskShape,
+  title: titleSchema,
+  attachments: linkAttachmentsCreateSchema.optional(),
+  idempotencyKey: localApiIdempotencyKeySchema.optional(),
+}).strict();
+const patchTaskSchema = z.object({
+  ...patchTaskShape,
+  id: z.string().min(1),
+  expectedVersion: localApiTaskVersionSchema.optional(),
+}).strict();
 const projectFieldsShape = {
   colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
   color: z.string().refine((value) => value.trim().length > 0).optional(),
@@ -132,7 +146,7 @@ const assertTaskInputsSupported = (input: unknown, creating: boolean): void => {
     throw new ValidationError('Desktop Local API attachment updates are unsupported because conditional concurrency protection is unavailable.');
   }
   for (const name of Object.keys(record)) {
-    if (!TASK_FIELDS.has(name) && !(name === 'id' && !creating)) {
+    if (!TASK_FIELDS.has(name) && name !== (creating ? 'idempotencyKey' : 'expectedVersion') && !(name === 'id' && !creating)) {
       throw new ValidationError('Unsupported task field for the desktop Local API.');
     }
   }
@@ -152,7 +166,7 @@ const assertProjectInputsSupported = (input: unknown): void => {
 const normalizeTaskProps = (input: Record<string, unknown>, creating: boolean): Record<string, unknown> => {
   const props: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(input)) {
-    if (value === undefined || name === 'id' || (creating && name === 'title')) continue;
+    if (value === undefined || name === 'id' || name === 'idempotencyKey' || name === 'expectedVersion' || (creating && name === 'title')) continue;
 
     if (name === 'tags' || name === 'contexts') props[name] = value ?? [];
     else if (name === 'viewSectionIds') props[name] = normalizeViewSectionIds(value, !creating);
@@ -163,7 +177,10 @@ const normalizeTaskProps = (input: Record<string, unknown>, creating: boolean): 
     else if (name === 'startReminderLeadMinutes') props[name] = normalizeNullableTaskStartReminderLeadMinutes(value as number | null) ?? 0;
     else if (name === 'repeatReminderMinutes') props[name] = normalizeNullableTaskRepeatReminderMinutes(value as number | null);
     else if (name === 'attachments') {
-      try { props[name] = buildLinkAttachments(value as Parameters<typeof buildLinkAttachments>[0]); } catch {
+      try {
+        const attachments = linkAttachmentsCreateSchema.parse(value);
+        props[name] = input.idempotencyKey === undefined ? buildLinkAttachments(attachments) : normalizeLinkAttachmentInputs(attachments);
+      } catch {
         throw new ValidationError('Invalid task link attachments for the desktop Local API.');
       }
     }
@@ -211,12 +228,12 @@ const unsupported = (label: string): never => { throw new ValidationError(`Deskt
 
 
 class LocalApiRequestError extends Error {
-  constructor(message: string, readonly toolCode?: 'validation_error' | 'not_found') {
+  constructor(message: string, readonly toolCode?: MindwtrToolErrorCode) {
     super(message);
   }
 }
 
-export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrService => {
+export const createLocalApiService = (options: LocalApiServiceOptions): LocalApiService => {
   const baseUrl = validateLocalApiUrl(options.url);
   if (typeof options.token !== 'string' || !options.token.trim() || /\s/.test(options.token.trim())) {
     throw new ValidationError('Local API token is required and must not contain whitespace.');
@@ -227,7 +244,7 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new ValidationError('Local API timeout must be positive.');
   let loggedConnection = false;
 
-  const request = async (method: string, path: string, body?: unknown): Promise<Record<string, unknown>> => {
+  const request = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ body: Record<string, unknown>; etag: string | null }> => {
     const writing = method !== 'GET';
     const controller = new AbortController();
     let timedOut = false;
@@ -243,7 +260,7 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
     try {
       const response = await Promise.race([fetcher(`${baseUrl}${path}`, {
         method,
-        headers: { Authorization: authorization, 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: { Authorization: authorization, 'Content-Type': 'application/json', Accept: 'application/json', ...headers },
         redirect: 'error',
         signal: controller.signal,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -251,11 +268,14 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
       if (response.status >= 300 && response.status < 400) throw new LocalApiRequestError('Desktop Local API redirects are unsupported.', 'validation_error');
       if (response.status === 401 || response.status === 403) throw new LocalApiRequestError('Desktop Local API token is invalid or expired. Check the token in desktop settings.', 'validation_error');
       if (response.status === 404) throw new LocalApiRequestError('Desktop Local API entity or endpoint not found.', 'not_found');
+      if (response.status === 412) throw new LocalApiRequestError('The task changed. Read it again and review your update before retrying.', 'task_version_conflict');
       if (!response.ok) {
 
         if (response.status === 409) {
           let code: unknown;
           try { code = asRecord(await Promise.race([response.json(), timeout]))?.code; } catch {                              }
+          if (code === 'idempotency_conflict') throw new LocalApiRequestError('This idempotency key was already used with different task input. Reuse the original input or start a new operation.', code);
+          if (code === 'idempotency_capacity') throw new LocalApiRequestError('Desktop Local API cannot retain another idempotent create receipt yet. Retry later with the same key and input.', code);
           if (code === 'recurrence_requires_app') throw new LocalApiRequestError('This recurrence requires completion in the desktop app.', 'validation_error');
           throw new LocalApiRequestError('Desktop Local API rejected a lifecycle conflict. Check the task or project in the app.', 'validation_error');
         }
@@ -274,13 +294,14 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
         loggedConnection = true;
         try { options.logInfo?.('Desktop Local API authenticated connection succeeded', { extra: { releaseCheck: 'v1.3.4/mcp-local-api' } }); } catch {                                                 }
       }
-      return result;
+      return { body: result, etag: response.headers.get('ETag') };
     } catch (error) {
       if (timedOut) throw new Error(`Desktop Local API request timed out.${outcomeWarning}`);
 
       if (error instanceof LocalApiRequestError) {
         if (error.toolCode === 'validation_error') throw new ValidationError(error.message);
         if (error.toolCode === 'not_found') throw new NotFoundError(error.message);
+        if (error.toolCode) throw new MindwtrToolError(error.message, error.toolCode);
         throw error;
       }
       throw new Error(`Desktop Local API is unavailable. Open the desktop app and enable Local API.${outcomeWarning}`);
@@ -288,14 +309,24 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
       if (timer !== undefined) clearTimeout(timer);
     }
   };
-  const entity = async <T extends Task | Project | Area>(method: string, path: string, kind: 'task' | 'project' | 'area', body?: unknown, expectedId?: string): Promise<T> => {
-    const result = await request(method, path, body);
-    try { return validateEntity<T>(result[kind], kind, expectedId); } catch {
+  const entity = async <T extends Task | Project | Area>(method: string, path: string, kind: 'task' | 'project' | 'area', body?: unknown, expectedId?: string, reliability: { headers?: Record<string, string>; requireVersion?: boolean } = {}): Promise<T> => {
+    const result = await request(method, path, body, reliability.headers);
+    try {
+      const value = validateEntity<T>(result.body[kind], kind, expectedId);
+      if (kind !== 'task') return value;
+      if (result.body.version === undefined) {
+        if (reliability.requireVersion || result.etag !== null) return malformedResponse();
+        return value;
+      }
+      const version = localApiTaskVersionSchema.parse(result.body.version);
+      if (result.etag !== `"${version}"`) return malformedResponse();
+      return { ...value, version };
+    } catch {
       throw new Error(`Desktop Local API returned an invalid response.${method === 'GET' ? '' : ' The write outcome is unknown; check the desktop app before retrying.'}`);
     }
   };
   const entities = async <T extends Task | Project | Area>(path: string, key: 'tasks' | 'projects' | 'areas', kind: 'task' | 'project' | 'area'): Promise<T[]> => {
-    const result = await request('GET', path);
+    const { body: result } = await request('GET', path);
     if (!Array.isArray(result[key])) return malformedResponse();
     return result[key].map((value) => validateEntity<T>(value, kind));
   };
@@ -314,7 +345,7 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
   };
   const deleteEntity = async <T extends Task | Project>(kind: 'tasks' | 'projects', id: string): Promise<T> => {
     const path = entityPath(kind, id);
-    const result = await request('DELETE', path);
+    const { body: result } = await request('DELETE', path);
     if (result.ok !== true) throw new Error('Desktop Local API returned an invalid deletion response. The write outcome is unknown; check the desktop app before retrying.');
     try { return await entity<T>('GET', path, kind === 'tasks' ? 'task' : 'project', undefined, id); } catch {
       throw new Error('Desktop Local API deletion succeeded, but the deleted entity could not be read. Check the desktop app before retrying.');
@@ -348,7 +379,7 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
     listAreas: async () => (await entities<Area>('/areas', 'areas', 'area')).filter((area) => !area.deletedAt).sort((left, right) => ((left.order ?? 0) - (right.order ?? 0)) || right.updatedAt.localeCompare(left.updatedAt)),
     getTask: async (input) => {
       parseInput(getEntitySchema, input, 'task');
-      const task = await entity<Task>('GET', entityPath('tasks', input.id), 'task', undefined, input.id);
+      const task = await entity<LocalApiTask>('GET', entityPath('tasks', input.id), 'task', undefined, input.id);
       if (!input.includeDeleted && task.deletedAt) throw new NotFoundError('Task not found.');
       return task;
     },
@@ -361,14 +392,19 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
     addTask: async (input) => {
       assertTaskInputsSupported(input, true);
       const parsed = parseInput(createTaskSchema, input, 'task creation');
-      const task = await entity<Task>('POST', '/tasks', 'task', { title: parsed.title, props: normalizeTaskProps(parsed, true) });
+      const idempotencyKey = parsed.idempotencyKey;
+      const task = await entity<LocalApiTask>('POST', idempotencyKey === undefined ? '/tasks' : '/v1/tasks', 'task', { title: parsed.title, props: normalizeTaskProps(parsed, true) }, undefined,
+        idempotencyKey === undefined ? {} : { headers: { 'Idempotency-Key': idempotencyKey }, requireVersion: true });
       logViewSectionWrite(options.logInfo, 'task', 'create', input.viewSectionIds);
       return task;
     },
     updateTask: async (input) => {
       assertTaskInputsSupported(input, false);
       const parsed = parseInput(patchTaskSchema, input, 'task update');
-      const task = await entity<Task>('PATCH', entityPath('tasks', input.id), 'task', normalizeTaskProps(parsed, false), input.id);
+      const expectedVersion = parsed.expectedVersion;
+      const path = entityPath('tasks', input.id);
+      const task = await entity<LocalApiTask>('PATCH', expectedVersion === undefined ? path : `/v1${path}`, 'task', normalizeTaskProps(parsed, false), input.id,
+        expectedVersion === undefined ? {} : { headers: { 'If-Match': `"${expectedVersion}"` }, requireVersion: true });
       logViewSectionWrite(options.logInfo, 'task', 'update', input.viewSectionIds);
       return task;
     },
