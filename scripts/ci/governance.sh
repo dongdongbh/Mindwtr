@@ -36,6 +36,7 @@ main() {
   run "Merged worktree cleanup regression tests" python3 -- python3 -m unittest discover -s scripts/maintenance -p test_cleanup_merged_worktrees.py
   run "Schema and release workflow governance checks" bun python3 -- bun run test:governance
   run "README heading parity check" bun -- bun run docs:check-readme
+  run "Feature map check" bun -- bun run docs:check-feature-map
   run "Store image asset check" file -- bash scripts/ci/validate-store-image-assets.sh
   run "AppStream metainfo locale check" python3 -- python3 scripts/ci/validate-appstream-locales.py
   run "Workflow JSON newline check" node -- node scripts/ci/validate-workflow-json-newlines.js

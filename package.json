@@ -141,6 +141,7 @@
     "test:e2e": "playwright test",
     "i18n:check": "bun run scripts/i18n-locale-parity.ts --check",
     "docs:check-readme": "bun run scripts/check-readme-heading-parity.ts",
+    "docs:check-feature-map": "bun run scripts/check-feature-map.ts",
     "mindwtr:cli": "bun run scripts/mindwtr-cli.ts --",
     "mindwtr:api": "bun run scripts/mindwtr-api.ts --",
     "mindwtr:mcp": "bun run --filter mindwtr-mcp dev --",
