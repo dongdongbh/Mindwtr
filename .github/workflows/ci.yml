@@ -209,6 +209,9 @@ jobs:
     runs-on: ubuntu-24.04
     name: Desktop App (Tauri)
     timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
