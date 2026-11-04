@@ -248,6 +248,12 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
 
+      - name: Free Android build disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Setup Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:

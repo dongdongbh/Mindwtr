@@ -922,6 +922,13 @@ jobs:
                 in_house: false
               )
 
+              unless ENV.fetch("SKIP_METADATA", "false") == "true"
+                update_app_age_rating(
+                  api_key: api_key,
+                  app_identifier: ENV.fetch("EXPECTED_BUNDLE_ID"),
+                  age_rating_config_path: File.join(ENV.fetch("GITHUB_WORKSPACE"), "metadata/apple-age-rating.json")
+                )
+              end
               deliver(deliver_options.merge(api_key: api_key))
             end
           end

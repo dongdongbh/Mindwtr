@@ -1033,3 +1033,21 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(aurDocs).toContain("pacman -R mindwtr-bin-beta");
   expect(aurDocs).toContain("AUR helpers do not reliably migrate package identities");
 });
+
+
+test('Linux desktop template keeps its conditional comment directive intact', () => {
+  const template = readFileSync('apps/desktop/src-tauri/linux/mindwtr.desktop.template', 'utf8');
+  const directives = [...template.matchAll(/{{([\s\S]*?)}}/g)].map((match) => match[1]);
+  expect(directives).toEqual(['categories', '#if comment', 'comment', '/if', 'exec', 'exec', 'icon', 'name']);
+});
+
+test('Android AAB clears unused hosted toolchains before the local EAS build', () => {
+  const workflow = parse(readFileSync('.github/workflows/release-android.yml', 'utf8'));
+  const steps = workflow.jobs['build-aab'].steps;
+  const cleanup = steps.findIndex((step) => step.name === 'Free Android build disk space');
+  const build = steps.findIndex((step) => step.name === 'Build Android AAB (local EAS)');
+  expect(cleanup).toBeGreaterThan(0);
+  expect(cleanup).toBeLessThan(build);
+  expect(steps[cleanup].run).toContain('sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL');
+  expect(steps[cleanup].run).not.toContain('/usr/local/lib/android');
+});

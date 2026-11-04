@@ -291,13 +291,15 @@ def default_platform(*); end
 def platform(*); yield; end
 def lane(*); yield; end
 def app_store_connect_api_key(**); nil; end
-def deliver(options); puts JSON.generate(options); end
+def update_app_age_rating(**options); $age_rating = JSON.parse(File.read(options.fetch(:age_rating_config_path))); end
+def deliver(options); puts JSON.generate(options.merge(age_rating: $age_rating)); end
 `;
     for (const [phased, skipMetadata] of [['true', 'false'], ['false', 'false'], ['true', 'true']]) {
       const result = spawnSync('ruby', ['-'], {
         input: stubs + fastfile,
         encoding: 'utf8',
         env: { ...process.env, PHASED_RELEASE: phased, SKIP_METADATA: skipMetadata,
+          GITHUB_WORKSPACE: process.cwd(),
           EXPECTED_BUNDLE_ID: 'tech.dongdongbh.mindwtr', APP_VERSION: '1.0.5',
           IPA_PATH: 'fixture.ipa', PKG_PATH: 'fixture.pkg', FASTLANE_METADATA_PATH: 'fixture',
           FASTLANE_ASC_KEY_ID: 'fixture', FASTLANE_ASC_ISSUER_ID: 'fixture', ASC_KEY_PATH: 'fixture',
@@ -306,6 +308,7 @@ def deliver(options); puts JSON.generate(options); end
       expect(result.status).toBe(0);
       const options = JSON.parse(result.stdout);
       expect(options.automatic_release).toBe(true);
+      expect(options.age_rating).toEqual(skipMetadata === 'true' ? null : { socialMedia: false, socialMediaAgeRestricted: false });
       expect(options.phased_release).toBe(skipMetadata === 'true' ? undefined : phased === 'true');
     }
   }
