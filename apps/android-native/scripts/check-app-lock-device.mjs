@@ -1,7 +1,7 @@
 
 
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -309,11 +309,55 @@ try {
     await away();
     await waitFor('the lock screen after 65 seconds away', lockScreen(seen), 30_000);
     check(true, '(e) with "After 1 minute", 65 seconds away comes back on the lock screen');
+    await sleep(1500);
+    const lockReference = resolve(work, 'grace-lock-reference.png');
+    writeFileSync(lockReference, adbRaw('exec-out', 'screencap', '-p'));
 
 
     setProp('app_lock_answer', 'yes');
     await tap(tagged(await screen(), 'app-lock-unlock') ?? fail('no Unlock button'));
     await waitFor('General open again', (current) => !locked(current) && Boolean(relockRow(current, 'settings.mobile.appLockRelockAfter1')), 15_000);
+    await sleep(1500);
+    const openReference = resolve(work, 'grace-open-reference.png');
+    writeFileSync(openReference, adbRaw('exec-out', 'screencap', '-p'));
+    requireAppFront();
+    sh('input keyevent KEYCODE_HOME');
+    await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
+    await sleep(3000);
+    const clip = '/sdcard/mindwtr-app-lock-grace.mp4';
+    sh(`rm -f ${clip}`);
+    const recording = spawn(adbBin, ['-s', serial, 'shell', 'screenrecord', '--time-limit', '6', clip]);
+    const recorded = new Promise((done) => recording.on('exit', done));
+    await sleep(1000);
+    device.launch(ACTIVITY);
+    await recorded;
+    await sleep(1000);
+    const video = resolve(work, 'grace-return.mp4');
+    writeFileSync(video, adbRaw('exec-out', 'cat', clip));
+    sh(`rm -f ${clip}`);
+    const gray = (file) => execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-vf', 'scale=72:160,format=gray', '-f', 'rawvideo', '-'], { maxBuffer: 256 << 20 });
+    const lockPixels = gray(lockReference);
+    const openPixels = gray(openReference);
+    const frames = gray(video);
+    const size = lockPixels.length;
+    const distance = (offset, reference) => {
+        let sum = 0;
+        for (let i = 0; i < size; i += 1) sum += Math.abs(frames[offset + i] - reference[i]);
+        return sum / size;
+    };
+    const panelFrames = [];
+    const nearest = [];
+    for (let offset = 0, index = 0; offset + size <= frames.length; offset += size, index += 1) {
+        const toLock = distance(offset, lockPixels);
+        const toOpen = distance(offset, openPixels);
+        nearest.push(`${index}:${toLock.toFixed(1)}/${toOpen.toFixed(1)}`);
+        if (toLock < 12 && toLock < toOpen) panelFrames.push(index);
+    }
+    writeFileSync(resolve(work, 'grace-return-distances.txt'), `${nearest.join('\n')}\n`);
+    console.log(`observed - grace return: ${frames.length / size} frames, unlock panel in frames [${panelFrames.join(', ')}]`);
+    nodes = await screen();
+    check(!locked(nodes) && Boolean(relockRow(nodes, 'settings.mobile.appLockRelockAfter1')) && panelFrames.length === 0,
+        '(g) a return within the relock delay shows General again and never draws the unlock panel on the way (RN 80690c7eb, #1423)');
     await choose('settings.mobile.appLockRelockAfter1', 'settings.mobile.appLockRelockImmediately', 0);
     setProp('app_lock_answer', '');
     const taskId = core('read').taskId ?? fail('no open task in the development data');
