@@ -38,6 +38,67 @@ final class NativeAttachmentFileJobsTests: XCTestCase {
     private func answer() throws -> [String: Any] { jobs.drain(); return try object(jobs.next()) }
     private func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 
+    private func useCandidateJobs() throws -> URL {
+        jobs.shutdown()
+        let container = root.appendingPathComponent("candidate", isDirectory: true)
+        try FileManager.default.createDirectory(at: container.appendingPathComponent("Documents"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: container.appendingPathComponent("Library"), withIntermediateDirectories: true)
+        jobs = try NativeAttachmentFileJobs(rnAdoptionContainerURL: container)
+        let directories = try object(jobs.directoriesJSON)
+        documents = try XCTUnwrap(URL(string: XCTUnwrap(directories["document"] as? String)))
+        cache = try XCTUnwrap(URL(string: XCTUnwrap(directories["cache"] as? String)))
+        let managed = documents.appendingPathComponent("attachments", isDirectory: true)
+        _ = try submit(["op": "makeDirectory", "uri": managed.absoluteString])
+        XCTAssertNil(try answer()["error"])
+        return managed
+    }
+
+    func testCandidateRawProviderFIFOInstallsHashesAndPreservesConflict() throws {
+        let managed = try useCandidateJobs(), source = managed.appendingPathComponent(".mindwtr-download-jobs.staged")
+        let target = managed.appendingPathComponent("file.txt"), bytes = Data("candidate bytes".utf8)
+        _ = try submit(["op": "writeBytes", "uri": source.absoluteString, "base64": bytes.base64EncodedString()])
+        let installed = try submit(["op": "install", "staged": source.absoluteString, "target": target.absoluteString,
+            "expected": ["kind": "absent"], "expectedDownloadSha256": digest(bytes)], installer: true)
+        let hashed = try submit(["op": "hash", "path": target.absoluteString], installer: true)
+        jobs.drain()
+        XCTAssertNil(try object(jobs.next())["error"])
+        let install = try object(jobs.next()), hash = try object(jobs.next())
+        XCTAssertEqual(install["id"] as? String, installed); XCTAssertEqual(hash["id"] as? String, hashed)
+        XCTAssertEqual(try XCTUnwrap(install["value"] as? [String: Any]) as NSDictionary, ["status": "installed"] as NSDictionary)
+        let snapshot = try XCTUnwrap(hash["value"] as? [String: Any])
+        XCTAssertEqual(Set(snapshot.keys), ["sha256", "size", "modificationTimeMs"])
+        XCTAssertEqual(snapshot["sha256"] as? String, digest(bytes)); XCTAssertEqual(snapshot["size"] as? Int, bytes.count)
+        XCTAssertGreaterThan(try XCTUnwrap(snapshot["modificationTimeMs"] as? Double), 1_000_000_000_000)
+        let conflict = managed.appendingPathComponent(".mindwtr-download-conflict.staged"), incoming = Data("incoming".utf8)
+        try incoming.write(to: conflict)
+        _ = try submit(["op": "install", "staged": conflict.absoluteString, "target": target.absoluteString,
+            "expected": ["kind": "absent"], "expectedDownloadSha256": digest(incoming)], installer: true)
+        XCTAssertEqual(try XCTUnwrap(answer()["value"] as? [String: Any]) as NSDictionary,
+            ["status": "conflict", "preservedPath": conflict.absoluteString] as NSDictionary)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try Data(contentsOf: conflict), incoming)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertEqual(jobs.counters.jobs, 0); XCTAssertEqual(jobs.counters.bytes, 0)
+    }
+
+    func testCandidateStartedRawInstallerFinishesBeforeCancellationDrainReturns() throws {
+        let managed = try useCandidateJobs(), stage = managed.appendingPathComponent(".mindwtr-download-drain.staged")
+        let target = managed.appendingPathComponent("item"), bytes = Data("published candidate".utf8)
+        try bytes.write(to: stage)
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0), drained = DispatchSemaphore(value: 0)
+        jobs.afterWork = { _, installer in if installer { entered.signal(); release.wait() } }
+        _ = try submit(["op": "install", "staged": stage.absoluteString, "target": target.absoluteString,
+            "expected": ["kind": "absent"], "expectedDownloadSha256": digest(bytes)], installer: true)
+        XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        let owner = jobs!
+        DispatchQueue.global().async { owner.cancelAndDrain(); drained.signal() }
+        XCTAssertEqual(drained.wait(timeout: .now() + 0.05), .timedOut)
+        release.signal(); XCTAssertEqual(drained.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(try Data(contentsOf: target), bytes)
+        XCTAssertEqual((try object(jobs.next())["value"] as? [String: Any])?["status"] as? String, "installed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stage.path))
+        XCTAssertEqual(jobs.counters.jobs, 0); XCTAssertEqual(jobs.counters.bytes, 0)
+    }
+
     func testFIFOBytesRangeAndBarrier() throws {
         let source = cache.appendingPathComponent("Source + 文.txt"), target = documents.appendingPathComponent("copy.txt")
         let bytes = Data("abcdef".utf8)

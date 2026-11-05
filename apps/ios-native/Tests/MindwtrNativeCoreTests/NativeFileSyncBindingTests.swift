@@ -200,6 +200,118 @@ final class NativeFileSyncBindingTests: XCTestCase {
         try Data(json(["picked": result, "manual": manual, "off": off]).utf8).write(to: root.appendingPathComponent("directory-result.json"))
         await cold.close()
     }
+    func testPullUsesSavedDirectoryWithoutOpeningSettingsAndDrainsItsOwner() async throws {
+        let bookmark = try CoreHost.captureSyncDirectoryBookmark(selected)
+        let config = ["@mindwtr_sync_backend": "file",
+                      "@mindwtr_sync_path": selected.appendingPathComponent("data.json").absoluteString,
+                      "@mindwtr_sync_path_bookmark": bookmark.base64EncodedString()]
+        try Data(json(config).utf8).write(to: manifest)
+        let observation = FileBindingDrainObservation()
+        let host = host(configure: { faults in
+            faults.configureFileSyncJobs = { jobs in
+                observation.record("constructed")
+                jobs.afterClose = { success in observation.record(success ? "closed" : "failed") }
+            }
+        })
+        _ = try await host.start()
+        let localID = try await capture(host), remoteID = UUID().uuidString.lowercased()
+        var document = try await export(host, "pull-before.json")
+        document["tasks"] = [["id": remoteID, "title": "Synthetic pull row", "status": "inbox", "tags": [], "contexts": [],
+            "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z", "rev": 1]]
+        try Data(json(document).utf8).write(to: selected.appendingPathComponent("data.json"))
+        let result = try object(await host.foregroundSync(command: "syncPull", requestJSON: "{}"))
+        XCTAssertEqual(try json(result), try json(["ok": true, "value": ["success": true, "skipped": false]]))
+        XCTAssertEqual(observation.count("constructed"), 1)
+        XCTAssertEqual(observation.count("closed"), 1)
+        XCTAssertEqual(observation.count("failed"), 0)
+        XCTAssertEqual(try readConfiguration(), config)
+        let remote = try object(String(contentsOf: selected.appendingPathComponent("data.json"), encoding: .utf8))
+        XCTAssertEqual(Set((remote["tasks"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }), Set([localID, remoteID]))
+        let after = try await export(host, "pull-after.json")
+        XCTAssertEqual(Set((after["tasks"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }), Set([localID, remoteID]))
+        XCTAssertEqual(try Data(contentsOf: selected.appendingPathComponent("unknown.bin")), Data([0, 255, 7]))
+        await host.close()
+    }
+
+    func testArchiveRetentionWaitsForActualSavedFileSyncThenPurgesInSameHost() async throws {
+        let bookmark = try CoreHost.captureSyncDirectoryBookmark(selected)
+        let config = ["@mindwtr_sync_backend": "file",
+                      "@mindwtr_sync_path": selected.appendingPathComponent("data.json").absoluteString,
+                      "@mindwtr_sync_path_bookmark": bookmark.base64EncodedString()]
+        var stored = config; stored["fixture_unrelated"] = "preserved"
+        try Data(json(stored).utf8).write(to: manifest)
+
+        // Create the row through Capture, then seed its old archive clock before
+        // opening the host whose real first-sync boundary this test exercises.
+        let seed = self.host(); _ = try await seed.start()
+        let archivedID = try await capture(seed); await seed.close()
+        let database = root.appendingPathComponent("core.sqlite"), old = "2026-01-01T00:00:00.000Z"
+        let sql = try SQLiteBridge(url: database)
+        _ = try sql.execute("UPDATE tasks SET status='archived',createdAt=?,updatedAt=?,completedAt=?,archivedAt=?,rev=rev+1 WHERE id=?",
+            parametersJSON: json([old, old, old, old, archivedID]))
+        sql.close()
+        func archivedRow() throws -> [String: Any] {
+            let reader = try SQLiteBridge(url: database); defer { reader.close() }
+            let rows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(reader.execute(
+                "SELECT id,status,archivedAt,purgedAt,deletedAt,rev FROM tasks WHERE id=?", parametersJSON: json([archivedID])).utf8)) as? [[String: Any]])
+            return try XCTUnwrap(rows.first)
+        }
+        let observation = FileBindingDrainObservation()
+        let host = self.host(configure: { faults in
+            faults.configureFileSyncJobs = { jobs in
+                observation.record("constructed")
+                jobs.afterClose = { success in observation.record(success ? "closed" : "failed") }
+            }
+        })
+        _ = try await host.start()
+        _ = try await host.call("dataSetting", argumentsJSON: json([json([
+            "requestId": UUID().uuidString.lowercased(), "edit": ["type": "archiveRetentionDays", "value": 30],
+        ])]))
+        let before = try archivedRow()
+        XCTAssertEqual(before["status"] as? String, "archived")
+        XCTAssertEqual(before["archivedAt"] as? String, old)
+        XCTAssertTrue(before["purgedAt"] is NSNull)
+        let request = "{\"editorOpen\":false}"
+        let deferred = try object(await host.foregroundSync(command: "archiveRetention", requestJSON: request))
+        XCTAssertEqual(try json(deferred), try json(["ok": true, "value": ["outcome": "skipped",
+            "purged": ["tasks": 0, "projects": 0, "sections": 0], "skipped": "waiting-for-sync"]]))
+        XCTAssertEqual(try json(archivedRow()), try json(before))
+        XCTAssertEqual(observation.count("constructed"), 0, "Deferral must not acquire the saved File Sync folder")
+
+        let remoteID = UUID().uuidString.lowercased()
+        var document = try await export(host, "retention-before-file-sync.json")
+        document["tasks"] = [["id": remoteID, "title": "Synthetic retention remote row", "status": "inbox", "tags": [], "contexts": [],
+            "createdAt": old, "updatedAt": old, "rev": 1]]
+        let file = selected.appendingPathComponent("data.json")
+        try Data(json(document).utf8).write(to: file)
+        let sync = try object(await host.foregroundSync(command: "syncPull", requestJSON: "{}"))
+        XCTAssertEqual(try json(sync), try json(["ok": true, "value": ["success": true, "skipped": false]]))
+        XCTAssertEqual(observation.count("constructed"), 1)
+        XCTAssertEqual(observation.count("closed"), 1)
+        XCTAssertEqual(observation.count("failed"), 0)
+        let merged = try await export(host, "retention-after-file-sync.json")
+        XCTAssertEqual(Set((merged["tasks"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }), Set([archivedID, remoteID]))
+        let published = try Data(contentsOf: file)
+
+        // No test hook marks session sync complete: the production File Sync
+        // merge above must unlock the configured-backend retention gate.
+        let retained = try object(await host.foregroundSync(command: "archiveRetention", requestJSON: request))
+        XCTAssertEqual(try json(retained), try json(["ok": true, "value": ["outcome": "purged",
+            "purged": ["tasks": 1, "projects": 0, "sections": 0], "skipped": NSNull()]]))
+        let purged = try archivedRow()
+        XCTAssertNotNil(purged["purgedAt"] as? String)
+        XCTAssertEqual(purged["purgedAt"] as? String, purged["deletedAt"] as? String)
+        XCTAssertGreaterThan(try XCTUnwrap(purged["rev"] as? Int), try XCTUnwrap(before["rev"] as? Int))
+        XCTAssertEqual(try Data(contentsOf: file), published, "Local retention does not publish a second sync")
+        XCTAssertEqual(observation.count("constructed"), 1)
+        XCTAssertEqual(try readConfiguration(), config)
+        XCTAssertEqual(try object(String(contentsOf: manifest, encoding: .utf8))["fixture_unrelated"] as? String, "preserved")
+        XCTAssertEqual(try Data(contentsOf: selected.appendingPathComponent("unknown.bin")), Data([0, 255, 7]))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+        try Data(json(["deferred": deferred, "sync": sync, "retention": retained]).utf8).write(to: root.appendingPathComponent("retention-file-sync-result.json"))
+        await host.close()
+    }
+
     func testSavedFileMetadataAndOffNeverConstructAFileOwnerEvenWithRevokedBookmark() async throws {
         var config = configuration; config["@mindwtr_sync_backend"] = "file"
         try Data(json(config).utf8).write(to: manifest)

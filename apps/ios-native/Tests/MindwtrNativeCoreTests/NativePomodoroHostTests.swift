@@ -82,6 +82,56 @@ final class NativePomodoroHostTests: XCTestCase {
         XCTAssertEqual(try rows("SELECT timeSpentMinutes FROM tasks WHERE id='task'").first?["timeSpentMinutes"] as? Int, expected)
     }
 
+    private func watchSource(_ action: String, id: String = UUID().uuidString.lowercased(), at: String? = nil) throws -> NativeWatchPomodoro {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return try NativeWatchPomodoro(name: id + ".json", body: json([
+            "protocolVersion": 1, "id": id, "kind": "pomodoro", "source": "apple-watch",
+            "createdAt": at ?? formatter.string(from: Date()), "action": action,
+        ]))
+    }
+
+    func testWatchStartsAbsentTimerAndColdReplayPreservesLaterPhoneReset() async throws {
+        let source = try watchSource("start")
+        let first = host(); _ = try await first.start()
+        try await first.submitWatchPomodoro(source)
+        let read = try object(await first.readPomodoroSession())
+        let state = try XCTUnwrap(read["state"] as? [String: Any])
+        let session = try XCTUnwrap(state["session"] as? [String: Any])
+        XCTAssertEqual((session["timerState"] as? [String: Any])?["isRunning"] as? Bool, true)
+        _ = try await first.writePomodoroTransition(requestJSON: request("reset"))
+        await first.close(); let before = try snapshot()
+        let cold = host(); _ = try await cold.start(); try await cold.submitWatchPomodoro(source); await cold.close()
+        XCTAssertEqual(try snapshot(), before)
+        XCTAssertEqual(try rows("SELECT count(*) AS n FROM native_request_receipts WHERE request_id=?", [source.id]).first?["n"] as? Int, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    }
+
+    func testWatchColdRecoveryRetainsExactTimerReceiptAfterLostTerminalWrite() async throws {
+        let source = try watchSource("start"), faults = HostIOFaults(), first = host(faults)
+        _ = try await first.start(); var writes = 0
+        faults.journalWrite = { writes += 1; if writes == 2 { throw HostFailure("lost Watch terminal") } }
+        await failure { try await first.submitWatchPomodoro(source) }
+        let prepared = try plan(); XCTAssertEqual((prepared["request"] as? [String: Any])?["sourceJSON"] as? String, source.body)
+        await first.close()
+        let cold = host(); _ = try await cold.start(); try await cold.submitWatchPomodoro(source); await cold.close()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(try rows("SELECT count(*) AS n FROM native_request_receipts WHERE request_id=?", [source.id]).first?["n"] as? Int, 1)
+    }
+
+    func testWatchStaleSourceCannotResetLaterStateAndRequiresOwnedFacade() async throws {
+        let first = host(); _ = try await first.start(); let start = try watchSource("start")
+        try await first.submitWatchPomodoro(start)
+        let before = try rows("SELECT state_json FROM native_pomodoro_session")
+        try await first.submitWatchPomodoro(watchSource("reset", at: "2020-01-01T00:00:00.000Z"))
+        XCTAssertEqual(try json(rows("SELECT state_json FROM native_pomodoro_session")), try json(before))
+        await failure { _ = try await first.call("watchPomodoroSubmit", argumentsJSON: self.json([start.body])) }
+        let denied = try watchSource("pause")
+        await failure { try await first.submitWatchPomodoro(denied, readmit: { false }) }
+        await first.close()
+        XCTAssertEqual(try rows("SELECT count(*) AS n FROM native_request_receipts WHERE request_id=?", [denied.id]).first?["n"] as? Int, 0)
+        XCTAssertThrowsError(try NativeWatchPomodoro(name: "../escape.json", body: start.body))
+    }
+
     func testReadExplicitAbsenceInitializePausedAndOrdinaryDocumentExcludesLocalSession() async throws {
         let core = host(); _ = try await core.start()
         let absent = try object(await core.readPomodoroSession()); XCTAssertTrue(absent["raw"] is NSNull)

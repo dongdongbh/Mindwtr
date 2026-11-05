@@ -99,6 +99,46 @@ final class NativeReminderImportTests: XCTestCase {
         var value = stat(); guard lstat(url.path, &value) == 0 else { throw Injected.failure }; return UInt64(value.st_ino)
     }
 
+    func testAppBridgeRequiresExistingOriginalSourceAndKeepsSameLiveFinalProof() async throws {
+        XCTAssertThrowsError(try NativeReminderInbox.openExistingForHandover(selection: route.selection))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent("Library").path))
+        let event = try response(); _ = try seed([(event, 7, .admitting)])
+        let bytes = try Data(contentsOf: legacyFile)
+        let original = try NativeReminderInbox(selection: route.selection); sources.append(original)
+        let destination = try target()
+        try await original.handoverCaptures(into: destination, route: route)
+        let held = try await destination.requiresReminderPreparation(); XCTAssertTrue(held)
+        let page = try await destination.pendingPage()
+        XCTAssertEqual(page.items.first?.event?.response, event); XCTAssertEqual(page.items.first?.stage, .admitting)
+        XCTAssertEqual(try Data(contentsOf: legacyFile), bytes)
+        await failure { _ = try await original.capture(event) }
+        await original.close()
+        do { try await original.handoverCaptures(into: destination, route: route); XCTFail("Closed original cannot ACK") }
+        catch { XCTAssertEqual(error as? NativeReminderInbox.CaptureHandoverFailure, .unavailable) }
+        await destination.close()
+        let coldSource = try NativeReminderInbox.openExistingForHandover(selection: route.selection); sources.append(coldSource)
+        let coldTarget = try XCTUnwrap(NativePersonalIntake.openExisting(route: route, diagnostic: { _ in })); targets.append(coldTarget)
+        try await coldSource.handoverCaptures(into: coldTarget, route: route)
+        let coldPage = try await coldTarget.pendingPage(); XCTAssertEqual(coldPage.items.first?.event?.response, event)
+        XCTAssertEqual(try Data(contentsOf: legacyFile), bytes)
+    }
+
+    func testAppColdProjectionHoldsPartialImportAndMissingOriginalWithoutRecreatingIt() async throws {
+        let event = try response(); _ = try seed([(event, 1, .captured)])
+        let (original, _) = try await source(), destination = try target()
+        await destination.setIOFaults(beforePublication: { if $0 == "legacy-reminder-terminals.json" { throw Injected.failure } })
+        do { try await original.handoverCaptures(into: destination, route: route); XCTFail("Partial import cannot ACK") }
+        catch { XCTAssertEqual(error as? NativeReminderInbox.CaptureHandoverFailure, .unavailable) }
+        let header = try Data(contentsOf: state)
+        await destination.close(); await original.close()
+        let existing = try XCTUnwrap(NativePersonalIntake.openExisting(route: route, diagnostic: { _ in })); targets.append(existing)
+        let held = try await existing.requiresReminderPreparation(); XCTAssertTrue(held)
+        try FileManager.default.removeItem(at: legacyFile)
+        XCTAssertThrowsError(try NativeReminderInbox.openExistingForHandover(selection: route.selection))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyFile.path))
+        XCTAssertEqual(try Data(contentsOf: state), header)
+    }
+
     func testRealImportPreservesFirstBytesClockSequenceAdmittingTerminalsAndFloorWhileHeld() async throws {
         let first = try response(delivered: 90), second = try response(clock: 123, delivered: 200)
         let terminalIDs = try seed([(first, 2, .captured), (second, 9, .admitting)], terminalCount: 16_384, floor: 100)

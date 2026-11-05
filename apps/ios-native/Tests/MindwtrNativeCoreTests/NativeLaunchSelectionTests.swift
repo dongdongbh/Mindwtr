@@ -59,10 +59,36 @@ final class NativeLaunchSelectionTests: XCTestCase {
         }
         XCTAssertEqual(containerURL.path, "/synthetic448/Application Support/NativeRNRehearsal")
         XCTAssertEqual(databaseURL.path, "/synthetic448/Application Support/NativeRNRehearsal/Documents/SQLite/mindwtr.db")
-        XCTAssertEqual(bundleIdentifier, bundle)
+        XCTAssertEqual(bundleIdentifier, "tech.dongdongbh.mindwtr")
         XCTAssertNotEqual(containerURL, home)
         // Repeated rehearsal flag alone retains the previous contains-based selection policy.
         guard case .rehearsal = try resolve([rehearsalFlag, rehearsalFlag]) else { return XCTFail("Expected staged rehearsal") }
+    }
+
+    func testSimulatorRehearsalReadsProductionPreferencesIndependentlyOfRunningBundle() throws {
+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+            ".mindwtr-native-launch-selection-tests/" + UUID().uuidString.lowercased(), isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let support = root.appendingPathComponent("Support", isDirectory: true)
+        let staged = support.appendingPathComponent("NativeRNRehearsal", isDirectory: true)
+        let manifest = staged.appendingPathComponent(
+            "Library/Application Support/tech.dongdongbh.mindwtr/RCTAsyncLocalStorage_V1/manifest.json")
+        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = Data(#"{"mindwtr-language":"de","mindwtr:quickCapture:addAnother":"true","unknown-preference":"keep"}"#.utf8)
+        try original.write(to: manifest)
+
+        for runningBundle in [bundle, "tech.dongdongbh.mindwtr"] {
+            let selected = try NativeLaunchSelection.resolve(arguments: [rehearsalFlag], bundleIdentifier: runningBundle,
+                supportURL: support, homeURL: root, mode: .simulatorDebug)
+            guard case let .rehearsal(container, _, sourceIdentifier) = selected else {
+                return XCTFail("Expected staged rehearsal")
+            }
+            let storage = try LegacyRNStorage(containerURL: container, bundleIdentifier: sourceIdentifier)
+            XCTAssertEqual(try storage.value(forKey: "mindwtr-language"), "de")
+            XCTAssertEqual(try storage.value(forKey: "mindwtr:quickCapture:addAnother"), "true")
+            XCTAssertEqual(try storage.value(forKey: "unknown-preference"), "keep")
+            XCTAssertEqual(try Data(contentsOf: manifest), original)
+        }
     }
 
     func testSimulatorReleaseIgnoresAllDebugOnlyArguments() throws {
@@ -165,6 +191,7 @@ final class NativeLaunchSelectionTests: XCTestCase {
                 let selected = try NativeLaunchSelection.resolve(arguments: arguments, bundleIdentifier: bundle,
                     supportURL: supportURL, homeURL: homeURL, mode: .simulatorDebug)
                 switch selected {
+                case .production: XCTFail("Simulator fixture cannot select production")
                 case let .standard(databaseURL, containerURL, _):
                     XCTAssertEqual(Data(databaseURL.path.utf8), Data((path + "/NativeFoundation/mindwtr.sqlite").utf8))
                     XCTAssertEqual(Data(containerURL.path.utf8), Data((path + "/Home").utf8))
@@ -182,4 +209,33 @@ final class NativeLaunchSelectionTests: XCTestCase {
         }
         XCTAssertNotEqual(selectedPaths[0], selectedPaths[1])
     }
+    func testProductionSelectionUsesOnlySystemHomeWithoutCreatingAFreshLibrary() throws {
+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+            ".mindwtr-native-launch-selection-tests/" + UUID().uuidString.lowercased(), isDirectory: true)
+        let defaults = NSDictionary(dictionary: UserDefaults.standard.dictionaryRepresentation())
+        let selected = try NativeLaunchSelection.resolve(arguments: ["MindwtrNative", "-AppleLanguages", "(de)"],
+            bundleIdentifier: NativeLaunchSelection.productionNamespace,
+            supportURL: root.appendingPathComponent("Library/Application Support"), homeURL: root, mode: .production)
+        guard case let .production(container) = selected else { return XCTFail("Expected production selection") }
+        XCTAssertEqual(container, root)
+        XCTAssertEqual(NativeLaunchSelection.productionNamespace, "tech.dongdongbh.mindwtr")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        XCTAssertEqual(NSDictionary(dictionary: UserDefaults.standard.dictionaryRepresentation()), defaults)
+    }
+
+    func testProductionSelectionRefusesWrongBundlesAndEveryNativeTestArgument() throws {
+        for bundle in [nil, "", "tech.dongdongbh.mindwtr.native.dev", "TECH.DONGDONGBH.MINDWTR",
+                       "tech.dongdongbh.mindwtr.other"] as [String?] {
+            XCTAssertThrowsError(try resolve(mode: .production, bundleIdentifier: bundle))
+        }
+        for arguments in [[libraryFlag, identifier], [rehearsalFlag], ["--native-app-lock-auth", "success"],
+                          ["--native-response-context-read-failure"], ["MindwtrNative", "--native-about-lookup-unavailable"]] {
+            XCTAssertThrowsError(try resolve(arguments, mode: .production,
+                bundleIdentifier: NativeLaunchSelection.productionNamespace))
+        }
+        XCTAssertThrowsError(try NativeLaunchSelection.resolve(arguments: [],
+            bundleIdentifier: NativeLaunchSelection.productionNamespace, supportURL: support,
+            homeURL: XCTUnwrap(URL(string: "https://example.invalid/home")), mode: .production))
+    }
+
 }

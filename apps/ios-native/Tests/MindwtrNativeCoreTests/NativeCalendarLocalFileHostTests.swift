@@ -47,10 +47,11 @@ private final class CalendarFileHostIO: @unchecked Sendable {
 final class NativeCalendarLocalFileHostTests: XCTestCase {
     private struct Library {
         let root: URL
-        let namespace = "tech.example.mindwtr.calendar-file"
-        var database: URL { root.appendingPathComponent("core.sqlite") }
+        var rnCandidate = false
+        var namespace: String { rnCandidate ? "tech.dongdongbh.mindwtr" : "tech.example.mindwtr.calendar-file" }
+        var database: URL { root.appendingPathComponent(rnCandidate ? "Documents/SQLite/mindwtr.db" : "core.sqlite") }
         var journal: URL { database.appendingPathExtension("pending.json") }
-        var container: URL { root.appendingPathComponent("container") }
+        var container: URL { rnCandidate ? root : root.appendingPathComponent("container") }
         var manifest: URL { container.appendingPathComponent("Library/Application Support/\(namespace)/RCTAsyncLocalStorage_V1/manifest.json") }
     }
     private var root: URL!, bundle: URL!
@@ -67,11 +68,16 @@ final class NativeCalendarLocalFileHostTests: XCTestCase {
     override func tearDownWithError() throws { if let root { try FileManager.default.removeItem(at: root) } }
     private func json(_ value: Any) throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), as: UTF8.self) }
     private func object(_ raw: String) throws -> [String: Any] { try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any]) }
-    private func library(_ name: String) throws -> Library {
-        let value = Library(root: root.appendingPathComponent(name))
+    private func library(_ name: String, rnCandidate: Bool = false) throws -> Library {
+        let value = Library(root: root.appendingPathComponent(name), rnCandidate: rnCandidate)
         try FileManager.default.createDirectory(at: value.manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(json(["@mindwtr_sync_backend": "off", "unknown-device-cell": "raw 文",
             "mindwtr-system-calendar-settings": json(["enabled": false, "selectAll": false, "selectedCalendarIds": []])]).utf8).write(to: value.manifest)
+        if rnCandidate {
+            try FileManager.default.createDirectory(at: value.database.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let sqlite = try SQLiteBridge(url: value.database)
+            _ = try sqlite.execute("PRAGMA user_version = 0"); sqlite.close()
+        }
         return value
     }
     private func host(_ library: Library, io: CalendarFileHostIO = CalendarFileHostIO(),
@@ -88,8 +94,13 @@ final class NativeCalendarLocalFileHostTests: XCTestCase {
         faults.cryptoBeforeOperation = { _ in XCTFail("Local Calendar cannot access crypto") }
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [CalendarFileHostNoNetwork.self]; faults.httpConfiguration = config
         configure(faults)
-        let core = CoreHost(databaseURL: library.database, bundleURL: bundle, faults: faults,
-            deviceStorage: (containerURL: library.container, bundleIdentifier: library.namespace))
+        let core: CoreHost
+        if library.rnCandidate {
+            core = try! CoreHost(rnAdoptionContainerURL: library.container, bundleURL: bundle, faults: faults)
+        } else {
+            core = CoreHost(databaseURL: library.database, bundleURL: bundle, faults: faults,
+                deviceStorage: (containerURL: library.container, bundleIdentifier: library.namespace))
+        }
         addTeardownBlock { await core.close() }; return core
     }
     private func sql(_ library: Library, _ statement: String, _ parameters: [Any] = []) throws -> String {
@@ -166,6 +177,48 @@ final class NativeCalendarLocalFileHostTests: XCTestCase {
         XCTAssertEqual(io.provider.operations, providerReads); XCTAssertEqual(io.counters?.jobs, 0); XCTAssertEqual(try receiptCount(library), receipts + 1)
         try result(await core.addCalendarSubscription(requestJSON: added.requestJSON)); XCTAssertEqual(try receiptCount(library), receipts + 1)
         XCTAssertEqual(try Data(contentsOf: owned), original); try privacy(library)
+    }
+
+    func testCandidateDocumentsCalendarReadsAndRefusesReplacedBoundCacheAncestor() async throws {
+        let library = try library("candidate-calendar", rnCandidate: true), io = CalendarFileHostIO()
+        let core = host(library, io: io); _ = try await core.start()
+        let selected = try source(library), input = try await request(core)
+        let added = try await core.addLocalCalendarSubscription(selectedURL: selected, requestJSON: input)
+        try result(added.resultJSON)
+        let owned = try file(added.requestJSON), bytes = try Data(contentsOf: selected)
+        XCTAssertEqual(owned.deletingLastPathComponent(), library.root.appendingPathComponent("Documents/calendar-files", isDirectory: true))
+        XCTAssertEqual(try Data(contentsOf: owned), bytes)
+        _ = try await core.calendarRead(requestJSON: "{\"op\":\"openSettings\"}")
+        try await toast(core, tone: "success")
+        let before = try json(settings(library)), receipts = try receiptCount(library)
+        let readerCount = io.readerCount, providerOperations = io.provider.operations
+        let cache = library.root.appendingPathComponent("Library/Caches", isDirectory: true)
+        let held = library.root.appendingPathComponent("retained-cache", isDirectory: true)
+        try FileManager.default.moveItem(at: cache, to: held)
+        try FileManager.default.copyItem(at: held, to: cache)
+        try await toast(core, tone: "warning")
+        XCTAssertEqual(try json(settings(library)), before); XCTAssertEqual(try receiptCount(library), receipts)
+        XCTAssertEqual(try Data(contentsOf: owned), bytes); XCTAssertEqual(io.readerCount, readerCount)
+        XCTAssertEqual(io.provider.operations, providerOperations)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: library.root.appendingPathComponent("Documents/SQLite/attachment-files").path))
+    }
+
+    func testCandidateCalendarCannotRecaptureRootsWhenAttachmentInstallerBindingRefuses() async throws {
+        let library = try library("candidate-calendar-refused", rnCandidate: true), core = host(library)
+        _ = try await core.start()
+        let selected = try source(library), input = try await request(core)
+        let added = try await core.addLocalCalendarSubscription(selectedURL: selected, requestJSON: input)
+        let owned = try file(added.requestJSON), bytes = try Data(contentsOf: owned)
+        await core.close()
+        let foreign = library.root.appendingPathComponent("foreign-managed", isDirectory: true)
+        try FileManager.default.createDirectory(at: foreign, withIntermediateDirectories: false)
+        try FileManager.default.createSymbolicLink(at: library.root.appendingPathComponent("Documents/attachments"), withDestinationURL: foreign)
+        let cold = host(library); _ = try await cold.start()
+        let before = try json(settings(library))
+        _ = try await cold.calendarRead(requestJSON: "{\"op\":\"openSettings\"}")
+        try await toast(cold, tone: "warning")
+        XCTAssertEqual(try json(settings(library)), before); XCTAssertEqual(try Data(contentsOf: owned), bytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: foreign.path), [])
     }
 
     func testPrivateInputRawDuplicatesBlankDefaultAndOversizeRefuseBeforeCopy() async throws {

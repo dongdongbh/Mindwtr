@@ -13,7 +13,7 @@ final class NativeAttachmentFilesTests: XCTestCase {
     private enum Cancelled: Error { case stopped }
 
     override func setUpWithError() throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("attachment-files-\(UUID().uuidString)", isDirectory: true)
+        root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".mindwtr-native-tests/attachment-files-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         // Foundation can retain Apple's /var alias after resolving symlinks.
         // POSIX realpath gives the exact spelling used by the descriptor port.
@@ -74,6 +74,106 @@ final class NativeAttachmentFilesTests: XCTestCase {
         XCTAssertEqual(files.sourceRoots, [documents!, cache!])
         XCTAssertNil(try call(["op": "barrier"]).value)
         XCTAssertNil(try call(["op": "barrier"]).bytes)
+    }
+
+    private func candidate(_ name: String = UUID().uuidString) throws -> URL {
+        let container = root.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: container.appendingPathComponent("Documents", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: container.appendingPathComponent("Library", isDirectory: true), withIntermediateDirectories: false)
+        return container
+    }
+
+    func testCandidateUsesActualRNRootsForIOWithoutCreatingAlternateAuthority() throws {
+        let container = try candidate(), port = try NativeAttachmentFiles(rnAdoptionContainerURL: container)
+        let document = container.appendingPathComponent("Documents", isDirectory: true)
+        let cache = container.appendingPathComponent("Library/Caches", isDirectory: true)
+        let preserved = document.appendingPathComponent("unrelated.json"), bytes = Data("existing RN bytes".utf8)
+        try bytes.write(to: preserved)
+        XCTAssertEqual(port.managedRoot, document.appendingPathComponent("attachments", isDirectory: true))
+        XCTAssertEqual(port.sourceRoots, [document, cache])
+        XCTAssertEqual(try call(["op": "readBytes", "uri": preserved.absoluteString], on: port).bytes, bytes)
+        let target = port.managedRoot.appendingPathComponent("new.bin")
+        _ = try call(["op": "writeBytes", "uri": target.absoluteString, "base64": bytes.base64EncodedString()], on: port)
+        XCTAssertEqual(try Data(contentsOf: target), bytes)
+        XCTAssertEqual(try Data(contentsOf: preserved), bytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: container.appendingPathComponent("Documents/SQLite/attachment-files").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: container.appendingPathComponent("attachment-files").path))
+        XCTAssertThrowsError(try call(["op": "readBytes", "uri": documents.appendingPathComponent("unrelated.json").absoluteString], on: port))
+        XCTAssertThrowsError(try call(["op": "readBytes", "uri": target.absoluteString]))
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: ["op": "readBytes", "uri": target.absoluteString]), as: UTF8.self)
+        XCTAssertThrowsError(try port.call(json, maximumReadBytes: bytes.count - 1)) {
+            XCTAssertEqual($0 as? NativeAttachmentFilesError, .tooLarge)
+        }
+    }
+
+    func testCandidateRefusesSameContentReplacementOfEveryBoundAncestor() throws {
+        for relative in ["", "Documents", "Library", "Library/Caches"] {
+            let container = try candidate(), port = try NativeAttachmentFiles(rnAdoptionContainerURL: container)
+            let document = container.appendingPathComponent("Documents/file.bin")
+            let cache = container.appendingPathComponent("Library/Caches/file.bin")
+            let bytes = Data("same contents".utf8)
+            try bytes.write(to: document); try bytes.write(to: cache)
+            let replaced = relative.isEmpty ? container : container.appendingPathComponent(relative, isDirectory: true)
+            let retained = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.moveItem(at: replaced, to: retained)
+            try FileManager.default.copyItem(at: retained, to: replaced)
+            for target in [document, cache] {
+                XCTAssertThrowsError(try call(["op": "readBytes", "uri": target.absoluteString], on: port), relative)
+                XCTAssertThrowsError(try call(["op": "writeBytes", "uri": target.absoluteString, "base64": Data("replacement".utf8).base64EncodedString()], on: port), relative)
+                XCTAssertEqual(try Data(contentsOf: target), bytes)
+            }
+            XCTAssertThrowsError(try port.verifyCandidateRoots(), relative)
+        }
+    }
+
+    func testCandidateMissingOrSymlinkedRootsNeverGrantAuthority() throws {
+        for relative in ["", "Documents", "Library", "Library/Caches"] {
+            let container = try candidate()
+            if relative == "Library/Caches" {
+                try FileManager.default.createDirectory(at: container.appendingPathComponent(relative), withIntermediateDirectories: false)
+            }
+            let replaced = relative.isEmpty ? container : container.appendingPathComponent(relative, isDirectory: true)
+            let retained = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.moveItem(at: replaced, to: retained)
+            if relative != "Library/Caches" { XCTAssertThrowsError(try NativeAttachmentFiles(rnAdoptionContainerURL: container), relative) }
+            try FileManager.default.createSymbolicLink(at: replaced, withDestinationURL: retained)
+            XCTAssertThrowsError(try NativeAttachmentFiles(rnAdoptionContainerURL: container), relative)
+        }
+    }
+
+    func testCandidateRefusesSymlinkAndHardlinkedLeavesWithoutReadingOrChangingThem() throws {
+        let container = try candidate(), port = try NativeAttachmentFiles(rnAdoptionContainerURL: container)
+        let document = container.appendingPathComponent("Documents", isDirectory: true)
+        let original = document.appendingPathComponent("original.bin"), linked = document.appendingPathComponent("linked.bin")
+        let bytes = Data("preserve linked bytes".utf8)
+        try bytes.write(to: original)
+        try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: original)
+        XCTAssertThrowsError(try call(["op": "readBytes", "uri": linked.absoluteString], on: port))
+        try FileManager.default.removeItem(at: linked)
+        XCTAssertEqual(Darwin.link(original.path, linked.path), 0)
+        for target in [original, linked] {
+            XCTAssertThrowsError(try call(["op": "readBytes", "uri": target.absoluteString], on: port))
+            XCTAssertThrowsError(try call(["op": "getInfo", "uri": target.absoluteString], on: port))
+            XCTAssertThrowsError(try call(["op": "writeBytes", "uri": target.absoluteString, "base64": Data("changed".utf8).base64EncodedString()], on: port))
+            XCTAssertEqual(try Data(contentsOf: target), bytes)
+        }
+    }
+
+    func testCandidatePathnameInstallerHashAndInstallRefuseWithoutMutation() throws {
+        let container = try candidate(), port = try NativeAttachmentFiles(rnAdoptionContainerURL: container)
+        let installer = try NativeAttachmentInstaller(managedRoot: port.managedRoot, sourceRoots: port.sourceRoots, filePort: port)
+        let source = port.cacheRoot.appendingPathComponent("source.bin"), bytes = Data("preserved cache source".utf8)
+        try bytes.write(to: source)
+        for input: [String: Any] in [
+            ["op": "hash", "path": source.absoluteString],
+            ["op": "install", "staged": source.absoluteString, "target": port.managedRoot.appendingPathComponent("target.bin").absoluteString,
+             "expected": ["kind": "absent"], "expectedDownloadSha256": digest(bytes)]
+        ] {
+            let raw = String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)
+            XCTAssertThrowsError(try installer.handle(raw))
+        }
+        XCTAssertEqual(try Data(contentsOf: source), bytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: port.managedRoot.path))
     }
 
     func testRealByteRoundTripPreservesSpacesPlusUnicodeAndSeconds() throws {

@@ -29,6 +29,72 @@ final class NativeAttachmentInstallerTests: XCTestCase {
                      "expected": expected, "expectedDownloadSha256": sha(bytes)])
     }
 
+    func testCandidateRawProviderJSONInstallHashReplayAndConflictKeepExactPayloads() throws {
+        try withCandidate { files, adapter in
+            let target = files.managedRoot.appendingPathComponent("provider.txt")
+            func stage(_ name: String, _ value: String) throws -> URL {
+                let path = files.managedRoot.appendingPathComponent(".mindwtr-download-" + name + ".staged")
+                try Data(value.utf8).write(to: path); return path
+            }
+            func install(_ source: URL, _ text: String, _ expected: [String: String]) throws -> [String: Any] {
+                try request(["op": "install", "staged": source.absoluteString, "target": target.absoluteString,
+                    "expected": expected, "expectedDownloadSha256": sha(text)], on: adapter)
+            }
+            let first = try stage("first", "first")
+            XCTAssertEqual(try install(first, "first", ["kind": "absent"]) as NSDictionary, ["status": "installed"] as NSDictionary)
+            let hashed = try request(["op": "hash", "path": target.absoluteString], on: adapter)
+            XCTAssertEqual(Set(hashed.keys), ["sha256", "size", "modificationTimeMs"])
+            XCTAssertEqual(hashed["sha256"] as? String, sha("first")); XCTAssertEqual(hashed["size"] as? Int, 5)
+            let replay = try stage("replay", "first")
+            XCTAssertEqual(try install(replay, "first", ["kind": "absent"])["status"] as? String, "installed")
+            let conflict = try stage("conflict", "conflict")
+            XCTAssertEqual(try install(conflict, "conflict", ["kind": "absent"]) as NSDictionary,
+                ["status": "conflict", "preservedPath": conflict.absoluteString] as NSDictionary)
+            let replacement = try stage("replacement", "second")
+            let result = try install(replacement, "second", ["kind": "present", "sha256": sha("first")])
+            XCTAssertEqual(Set(result.keys), ["status", "preservedPath"])
+            XCTAssertEqual(result["status"] as? String, "installed")
+            let preserved = try XCTUnwrap(URL(string: XCTUnwrap(result["preservedPath"] as? String)))
+            XCTAssertEqual(try Data(contentsOf: preserved), Data("first".utf8))
+            XCTAssertEqual(try Data(contentsOf: target), Data("second".utf8))
+            XCTAssertEqual(try request(["op": "hash", "path": target.absoluteString], on: adapter)["sha256"] as? String, sha("second"))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: first.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: replay.path))
+            XCTAssertEqual(try Data(contentsOf: conflict), Data("conflict".utf8))
+        }
+    }
+
+    func testCandidateRawProviderRefusesCacheSourceOldUUIDAndReplacedAncestor() throws {
+        try withCandidate { files, adapter in
+            let cache = files.cacheRoot.appendingPathComponent(".mindwtr-download-cache.staged")
+            let target = files.managedRoot.appendingPathComponent("target.txt")
+            try Data("incoming".utf8).write(to: cache)
+            try Data("local".utf8).write(to: target)
+            XCTAssertThrowsError(try request(["op": "install", "staged": cache.absoluteString, "target": target.absoluteString,
+                "expected": ["kind": "absent"], "expectedDownloadSha256": sha("incoming")], on: adapter))
+            let old = files.managedRoot.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("old-uuid/Documents/attachments/target.txt")
+            XCTAssertThrowsError(try request(["op": "hash", "path": old.absoluteString], on: adapter))
+            let documents = files.managedRoot.deletingLastPathComponent(), retained = documents.appendingPathExtension("retained")
+            try FileManager.default.moveItem(at: documents, to: retained)
+            try FileManager.default.copyItem(at: retained, to: documents)
+            XCTAssertThrowsError(try request(["op": "hash", "path": target.absoluteString], on: adapter))
+            XCTAssertEqual(try Data(contentsOf: target), Data("local".utf8))
+            XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("attachments/target.txt")), Data("local".utf8))
+            XCTAssertEqual(try Data(contentsOf: cache), Data("incoming".utf8))
+        }
+    }
+
+    private func withCandidate(_ body: (NativeAttachmentFiles, NativeAttachmentInstaller) throws -> Void) throws {
+        let container = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".mindwtr-native-tests/provider-adapter-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: container) }
+        try FileManager.default.createDirectory(at: container.appendingPathComponent("Documents"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: container.appendingPathComponent("Library"), withIntermediateDirectories: true)
+        let files = try NativeAttachmentFiles(rnAdoptionContainerURL: container)
+        _ = try files.ensureManagedDirectoryProof(checkCancellation: {})
+        let adapter = try NativeAttachmentInstaller(managedRoot: files.managedRoot, sourceRoots: files.sourceRoots, filePort: files)
+        try body(files, adapter)
+    }
+
     func testInstallHashAndReplacementThroughRecreatedHost() throws {
         let source = stage.appendingPathComponent("first")
         let target = managed.appendingPathComponent("attachment.txt")

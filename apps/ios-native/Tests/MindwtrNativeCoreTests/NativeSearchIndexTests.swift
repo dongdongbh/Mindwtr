@@ -193,4 +193,14 @@ final class NativeSearchIndexTests: XCTestCase {
         for _ in 0..<5 { await Task.yield() }
         XCTAssertEqual(port.requests.count, 3)
     }
+    func testProductionSearchIdentityColdDecodeNeverUsesDevelopmentScope() throws {
+        let production = NativeLaunchSelection.production(containerURL: root)
+        let task = "production task/漢e\u{0301}"
+        let identifier = try NativeSearchIndex.identifier(taskID: task, selection: production)
+        XCTAssertEqual(NativeSearchIndex.taskID(for: identifier, selection: production), task)
+        XCTAssertNil(NativeSearchIndex.taskID(for: identifier, selection: selection))
+        XCTAssertNil(NativeSearchIndex.taskID(for: try NativeSearchIndex.identifier(taskID: task, selection: selection), selection: production))
+        XCTAssertNil(NativeSearchIndex.taskID(for: identifier + "=", selection: production))
+    }
+
 }

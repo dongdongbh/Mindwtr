@@ -1220,3 +1220,25 @@ final class NativeDeviceKVTests: XCTestCase {
     }
     #endif
 }
+
+
+extension NativeDeviceKVTests {
+    func testDropboxRevisionIsWritableAndLegacyTokensAreRemoveOnlyWithoutOtherKeyAdmission() throws {
+        try seed("{\"@mindwtr_dropbox_tokens\":\"synthetic legacy payload\",\"unknown\":\"preserved / 文\",\"@mindwtr_sync_backend\":\"off\"}")
+        let store = try open()
+        XCTAssertEqual(try store.get("@mindwtr_dropbox_tokens"), "synthetic legacy payload")
+        XCTAssertThrowsError(try store.set("@mindwtr_dropbox_tokens", "must not persist plaintext"))
+        XCTAssertThrowsError(try store.multiSet([("@mindwtr_dropbox_last_rev", "must not partly write"), ("@mindwtr_dropbox_tokens", "must not write")]))
+        XCTAssertNil(try store.get("@mindwtr_dropbox_last_rev"))
+        try store.set("@mindwtr_dropbox_last_rev", "synthetic-revision")
+        XCTAssertEqual(try store.get("@mindwtr_dropbox_last_rev"), "synthetic-revision")
+        XCTAssertTrue(NativeDeviceKV.isLegacySecretRemoval(["@mindwtr_dropbox_tokens"]))
+        try store.remove("@mindwtr_dropbox_tokens")
+        XCTAssertNil(try store.get("@mindwtr_dropbox_tokens"))
+        try store.remove("@mindwtr_dropbox_last_rev")
+        XCTAssertNil(try store.get("@mindwtr_dropbox_last_rev"))
+        XCTAssertThrowsError(try store.set("@mindwtr_dropbox_other", "refused"))
+        XCTAssertThrowsError(try store.remove("@mindwtr_dropbox_other"))
+        XCTAssertEqual(try store.get("unknown"), "preserved / 文"); XCTAssertEqual(try store.get("@mindwtr_sync_backend"), "off")
+    }
+}

@@ -2,15 +2,28 @@ import XCTest
 import Foundation
 import Darwin
 import CryptoKit
+import Security
 @testable import MindwtrNativeCore
+
+private final class CandidateAttachmentNoNetwork: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        XCTFail("Candidate attachment tests must not access the network")
+        client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+    }
+    override func stopLoading() {}
+}
 
 final class AttachmentOpenHostTests: XCTestCase {
     private var root: URL!
     private var bundle: URL!
     private var fixtureBase: URL!
-    private var database: URL { root.appendingPathComponent("core.sqlite") }
-    private var managed: URL { root.appendingPathComponent("attachment-files/documents/attachments", isDirectory: true) }
-    private var cache: URL { root.appendingPathComponent("attachment-files/cache", isDirectory: true) }
+    private var rnCandidate = false
+    private var database: URL { root.appendingPathComponent(rnCandidate ? "Documents/SQLite/mindwtr.db" : "core.sqlite") }
+    private var managed: URL { root.appendingPathComponent(rnCandidate ? "Documents/attachments" : "attachment-files/documents/attachments", isDirectory: true) }
+    private var cache: URL { root.appendingPathComponent(rnCandidate ? "Library/Caches" : "attachment-files/cache", isDirectory: true) }
+    private var log: URL { database.deletingLastPathComponent().appendingPathComponent("logs/mindwtr.log") }
     private let taskID = "file-open-task"
     private let projectID = "file-open-project"
     private let at = "2026-10-06T12:00:00.000Z"
@@ -27,7 +40,14 @@ final class AttachmentOpenHostTests: XCTestCase {
     private func json(_ value: Any) throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), as: UTF8.self) }
     private func object(_ raw: String) throws -> [String: Any] { try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any]) }
     private func core(_ faults: HostIOFaults = HostIOFaults(), bundleURL: URL? = nil) -> CoreHost {
-        let host = CoreHost(databaseURL: database, bundleURL: bundleURL ?? bundle, faults: faults)
+        let host: CoreHost
+        if rnCandidate {
+            faults.secretStatus = { _, _ in errSecItemNotFound }
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [CandidateAttachmentNoNetwork.self]
+            faults.httpConfiguration = configuration
+            host = try! CoreHost(rnAdoptionContainerURL: root, bundleURL: bundleURL ?? bundle, faults: faults)
+        } else { host = CoreHost(databaseURL: database, bundleURL: bundleURL ?? bundle, faults: faults) }
         addTeardownBlock { await host.close() }; return host
     }
     private func sql(_ statement: String, _ args: [Any] = []) throws -> String {
@@ -40,6 +60,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         return "\(UInt64(value.st_dev)):\(UInt64(value.st_ino))"
     }
     private func seed(_ attachments: [[String: Any]] = [], deleted: Bool = false, archived: Bool = false) async throws {
+        if rnCandidate { try prepareCandidateStorage() }
         let initial = core(); _ = try await initial.start(); await initial.close()
         try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
         if archived { _ = try sql("INSERT INTO projects(id,title,status,color,supportNotes,createdAt,updatedAt,rev) VALUES ('archived','Archived','archived','#94a3b8','',?,?,1)", [at, at]) }
@@ -66,12 +87,10 @@ final class AttachmentOpenHostTests: XCTestCase {
         try object(await host.prepareProjectFileOpen(requestJSON: json(["projectId": projectID, "attachmentId": id])))
     }
     private func projectMarkers() throws -> Int {
-        let log = root.appendingPathComponent("logs/mindwtr.log")
         guard FileManager.default.fileExists(atPath: log.path) else { return 0 }
         return try String(contentsOf: log).components(separatedBy: "v1.3.5/ios-project-local-file-open").count - 1
     }
     private func markers() throws -> Int {
-        let log = root.appendingPathComponent("logs/mindwtr.log")
         guard FileManager.default.fileExists(atPath: log.path) else { return 0 }
         return try String(contentsOf: log).components(separatedBy: "v1.3.5/ios-local-file-open").count - 1
     }
@@ -114,6 +133,124 @@ final class AttachmentOpenHostTests: XCTestCase {
         try await checkActualAddCompleteSaveAndColdOpen(legacyEmptyArrays: true)
     }
 
+    private func prepareCandidateStorage() throws {
+        let manifest = root.appendingPathComponent("Library/Application Support/tech.dongdongbh.mindwtr/RCTAsyncLocalStorage_V1/manifest.json")
+        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: manifest.path) { try Data(json(["@mindwtr_sync_backend": "off"]).utf8).write(to: manifest) }
+        try FileManager.default.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: database.path) {
+            let sqlite = try SQLiteBridge(url: database)
+            _ = try sqlite.execute("PRAGMA user_version = 0")
+            sqlite.close()
+        }
+    }
+
+    func testCandidateTaskAndProjectPublicationColdReopenUsesRNRoots() async throws {
+        try await checkCandidatePublication(interrupted: false)
+    }
+
+    func testCandidateProjectPublicationInterruptedAfterRenameColdRetriesFrozenRequest() async throws {
+        try await checkCandidatePublication(interrupted: true)
+    }
+
+    private func checkCandidatePublication(interrupted: Bool) async throws {
+        rnCandidate = true
+        try await seed(); try seedProject([])
+        _ = try sql("UPDATE projects SET orderNum=1,tagIds='[]',isSequential=0,isFocused=0 WHERE id=?", [projectID])
+        let host = core(); _ = try await host.start()
+        let taskAttachments = try await produce(host), taskRows = try rows()
+        let source = root.appendingPathComponent("picked.txt"), bytes = Data("candidate Project bytes".utf8)
+        try bytes.write(to: source)
+        let sourceIdentity = try inode(source)
+        let options = try object(await host.call("projectAttachmentEditOptions", argumentsJSON: json([json(["projectId": projectID])])))
+        let token = try XCTUnwrap(options["project"] as? [String: Any]), id = UUID().uuidString.lowercased()
+        let input: [String: Any] = ["requestId": id, "projectId": projectID, "expected": token.filter { $0.key != "id" }]
+        var fired = false
+        if interrupted {
+            let hooks = ProjectFileAddHostHooks()
+            hooks.boundary = { boundary in
+                if boundary == .afterPublication && !fired { fired = true; throw HostFailure("Injected candidate publication interruption") }
+            }
+            await host.configureProjectFileAddHost(hooks)
+            await refused { _ = try await host.addProviderProjectAttachment(selectedURL: source, requestJSON: self.json(input)) }
+            XCTAssertTrue(fired)
+            let journal = database.appendingPathExtension("pending.json"), frozen = try Data(contentsOf: journal)
+            await host.close()
+            let recovery = core()
+            let summary = try object(await recovery.projectFileAddSummary())
+            XCTAssertEqual(summary["requestId"] as? String, id)
+            do { _ = try await recovery.start(); XCTFail("Interrupted candidate Add requires explicit recovery") }
+            catch { XCTAssertTrue(error is CoreHostProjectFileAddRecovery) }
+            XCTAssertEqual(try Data(contentsOf: journal), frozen)
+            let result = try object(await recovery.recoverProjectFileAdd(requestId: id))
+            XCTAssertEqual(result["attachmentIds"] as? [String], [id])
+            await recovery.close()
+        } else {
+            let result = try object(await host.addProviderProjectAttachment(selectedURL: source, requestJSON: json(input)))
+            XCTAssertEqual(result["attachmentIds"] as? [String], [id])
+            await host.close()
+        }
+        let cold = core(); _ = try await cold.start()
+        let projectRowsBefore = try projectRows()
+        for selected in taskAttachments {
+            let selectedID = try XCTUnwrap(selected["id"] as? String), uri = try XCTUnwrap(selected["uri"] as? String)
+            let answer = try await opened(cold, taskAttachments, id: selectedID)
+            XCTAssertEqual(try plannedURI285(answer), uri)
+            XCTAssertEqual(URL(string: uri)?.deletingLastPathComponent(), managed)
+        }
+        let projectOpen = try await projectOpened(cold, id: id), target = try XCTUnwrap(URL(string: plannedURI285(projectOpen)))
+        XCTAssertEqual(target.deletingLastPathComponent(), managed)
+        XCTAssertEqual(try Data(contentsOf: target), bytes)
+        XCTAssertEqual(try rows(), taskRows); XCTAssertEqual(try projectRows(), projectRowsBefore)
+        XCTAssertEqual(try Data(contentsOf: source), bytes); XCTAssertEqual(try inode(source), sourceIdentity)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Documents/SQLite/attachment-files").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+    }
+
+    func testCandidateMissingManagedOpenPreservesRows() async throws {
+        rnCandidate = true; try await testMissingManagedFileReturnsExistingUnavailableWithoutWrites()
+    }
+
+    func testCandidateUnknownDeletedAndMissingSelectionsPreserveRows() async throws {
+        rnCandidate = true; try await testUnknownDeletedLinkMalformedAndMissingTaskSelectionsPreserveEvidence()
+    }
+
+    func testCandidateForeignCacheAndAlternateSelectionsRefuse() async throws {
+        rnCandidate = true; try await testForeignCacheRemoteAlternateSpellingAndWrongIDCannotCopy()
+    }
+
+    func testCandidateRelocatedTaskAndProjectOpenPreservesMetadata() async throws {
+        rnCandidate = true; try await testRelocatedRenameTaskAndArchivedProjectPlansPreserveOriginalRowsAndBytes()
+    }
+
+    func testCandidateRelocatedOpenReadsCurrentTargetWhileOldTreeContainsDifferentBytes() async throws {
+        rnCandidate = true; try await testRelocatedCopiedContainerReadsOnlyCurrentTargetWhileOldURIStillExists()
+    }
+
+    func testCandidateRelocatedOpenMissingHashAndInvalidMetadataRefuseForBothOwners() async throws {
+        rnCandidate = true; try await testRelocatedHashSizeAndCanonicalUUIDAreRequiredForBothOwners()
+    }
+
+    func testCandidateRelocatedOpenCannotBorrowMissingCurrentBytesFromOldTree() async throws {
+        rnCandidate = true; try await testRelocatedMissingCurrentTargetCannotCopyReadableOldBytesOrRepairMetadata()
+    }
+
+    func testCandidateRelocatedOpenRejectsForeignAndNoncanonicalMappings() async throws {
+        rnCandidate = true; try await testRelocatedForeignSuffixAndNoncanonicalMappingsRefuseBeforeFileJobs()
+    }
+
+    func testCandidateRelocatedOpenRejectsMultipleContainerAnchors() async throws {
+        rnCandidate = true; try await testRelocatedAmbiguousCurrentContainerAnchorIsNeverGuessed()
+    }
+
+    func testCandidateRelocatedOpenRejectsCurrentGenerationReplacement() async throws {
+        rnCandidate = true; try await testRelocatedCurrentFileAndParentGenerationChangesDuringReadRefuse()
+    }
+
+    func testCandidateRelocatedOpenCancellationDrainsCurrentRead() async throws {
+        rnCandidate = true; try await testRelocatedCancellationDrainsCurrentReadWithoutPreparingOrChangingRows()
+    }
+
     private func checkActualAddCompleteSaveAndColdOpen(legacyEmptyArrays: Bool) async throws {
         try await seed()
         if legacyEmptyArrays {
@@ -135,9 +272,9 @@ final class AttachmentOpenHostTests: XCTestCase {
         XCTAssertEqual(try rows(), before); XCTAssertEqual(try markers() - count, 3)
         XCTAssertNil(try EditorDraftStore(databaseURL: database).read()); XCTAssertNil(try NativeAttachmentDraftStore(databaseURL: database).readMixed())
         XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
-        let log = try String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"))
-        XCTAssertTrue(log.contains("v1.3.5/ios-owned-raw-row-save"))
-        XCTAssertFalse(log.contains("Private.txt")); XCTAssertFalse(log.contains(files[0].absoluteString))
+        let logged = try String(contentsOf: log)
+        XCTAssertTrue(logged.contains("v1.3.5/ios-owned-raw-row-save"))
+        XCTAssertFalse(logged.contains("Private.txt")); XCTAssertFalse(logged.contains(files[0].absoluteString))
     }
 
     func testMissingManagedFileReturnsExistingUnavailableWithoutWrites() async throws {
@@ -531,7 +668,7 @@ final class AttachmentOpenHostTests: XCTestCase {
     }
     private func oldContainer285() throws -> URL {
         let container = fixtureBase.appendingPathComponent("Application/" + UUID().uuidString.lowercased(), isDirectory: true)
-        root = container.appendingPathComponent("Library/" + UUID().uuidString.lowercased(), isDirectory: true)
+        root = rnCandidate ? container : container.appendingPathComponent("Library/" + UUID().uuidString.lowercased(), isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return container
     }
@@ -552,7 +689,6 @@ final class AttachmentOpenHostTests: XCTestCase {
         return try XCTUnwrap(plan["kind"] as? String == "file" ? plan["uri"] as? String : (plan["attachment"] as? [String: Any])?["uri"] as? String)
     }
     private func relocatedMarkers285() throws -> Int {
-        let log = root.appendingPathComponent("logs/mindwtr.log")
         guard FileManager.default.fileExists(atPath: log.path) else { return 0 }
         return try String(contentsOf: log).components(separatedBy: "v1.3.5/ios-relocated-file-open").count - 1
     }
@@ -590,8 +726,8 @@ final class AttachmentOpenHostTests: XCTestCase {
         XCTAssertEqual(try relocatedMarkers285(), 6)
         XCTAssertNil(try EditorDraftStore(databaseURL: database).read()); XCTAssertNil(try NativeAttachmentDraftStore(databaseURL: database).readMixed())
         XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
-        let log = try String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"))
-        XCTAssertFalse(log.contains(oldFiles[0].absoluteString)); XCTAssertFalse(log.contains("Private.txt"))
+        let logged = try String(contentsOf: log)
+        XCTAssertFalse(logged.contains(oldFiles[0].absoluteString)); XCTAssertFalse(logged.contains("Private.txt"))
     }
 
     func testRelocatedCopiedContainerReadsOnlyCurrentTargetWhileOldURIStillExists() async throws {
@@ -674,10 +810,13 @@ final class AttachmentOpenHostTests: XCTestCase {
         let container = try oldContainer285(), id = UUID().uuidString.lowercased(), bytes = Data("plain".utf8)
         let old = managed.appendingPathComponent(id + ".txt"), oldURI = old.absoluteString
         let scope = root.lastPathComponent
+        let changedAncestor = rnCandidate ? "/Documents/" : "/Library/" + scope + "/"
+        let wrongAncestor = rnCandidate ? "/Foreign/" : "/Library/" + UUID().uuidString.lowercased() + "/"
+        let duplicateAncestor = rnCandidate ? "/Documents/" : "/Library/"
         let uris = ["file:" + old.path,
-            oldURI.replacingOccurrences(of: "/Library/" + scope + "/", with: "/Library/" + UUID().uuidString.lowercased() + "/"),
+            oldURI.replacingOccurrences(of: changedAncestor, with: wrongAncestor),
             oldURI.replacingOccurrences(of: "/Application/", with: "/Foreign/"),
-            oldURI.replacingOccurrences(of: "/Library/", with: "/Library//"),
+            oldURI.replacingOccurrences(of: duplicateAncestor, with: duplicateAncestor + "/"),
             oldURI.replacingOccurrences(of: id + ".txt", with: "%" + String(format: "%02X", id.utf8.first!) + String(id.dropFirst()) + ".txt"),
             oldURI.replacingOccurrences(of: id + ".txt", with: "../" + id + ".txt"),
             oldURI + "?query=1", oldURI + "#fragment"]
@@ -703,7 +842,7 @@ final class AttachmentOpenHostTests: XCTestCase {
     func testRelocatedAmbiguousCurrentContainerAnchorIsNeverGuessed() async throws {
         let outer = try oldContainer285(), outerRoot = try XCTUnwrap(root)
         let inner = outerRoot.appendingPathComponent("Application/" + UUID().uuidString.lowercased(), isDirectory: true)
-        root = inner.appendingPathComponent("Library/" + UUID().uuidString.lowercased(), isDirectory: true)
+        root = rnCandidate ? inner : inner.appendingPathComponent("Library/" + UUID().uuidString.lowercased(), isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let id = UUID().uuidString.lowercased(), bytes = Data("plain".utf8), old = managed.appendingPathComponent(id + ".txt")
         let selected = hashed285(id, uri: old.absoluteString, bytes: bytes)

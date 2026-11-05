@@ -153,4 +153,99 @@ final class EntityOpenHostTests: XCTestCase {
         XCTAssertEqual(try rows(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
     }
+
+    private func productionRoute(_ core: CoreHost, _ url: String) async throws -> [String: String] {
+        let raw = try await core.call("iosProductionWidgetTaskOpen", argumentsJSON: json([url]))
+        return try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: String])
+    }
+
+    func testActualProductionTaskLookupUsesCurrentLibraryAndKeepsDevReadClosed() async throws {
+        try await seed()
+        let core = host(); _ = try await core.start()
+        let before = try rows()
+        let values: [(String, [String: String])] = [
+            ("mindwtr://open?task=" + encoded(taskID), ["type": "task", "taskId": taskID]),
+            ("MINDWTR:///OPEN?task=" + encoded(taskID), ["type": "task", "taskId": taskID]),
+            ("mindwtr://open?task=reference-task", ["type": "task", "taskId": "reference-task"]),
+            ("mindwtr://open?task=missing", ["type": "inbox"]),
+            ("mindwtr://open?task=deleted-task", ["type": "inbox"]),
+            ("mindwtr://open?task=missing&project=" + encoded(projectID), ["type": "inbox"]),
+            ("mindwtr://open?task=" + encoded(taskID) + "&library=other&mode=rehearsal", ["type": "task", "taskId": taskID])]
+        for (url, expected) in values {
+            let production = try await productionRoute(core, url), dev = try await route(core, url)
+            XCTAssertEqual(production, expected)
+            XCTAssertEqual(dev, ["type": "none"])
+        }
+        for url in [link("task=reference-task"), "https://open?task=reference-task", "mindwtr:///focus", "mindwtr:///inbox",
+                    "mindwtr:///capture-quick?mode=text", "mindwtr:///waiting", "mindwtr:///someday",
+                    "mindwtr:///widget-list/next", "mindwtr://open?project=" + encoded(projectID), "mindwtr://open?area=a"] {
+            let value = try await productionRoute(core, url)
+            XCTAssertEqual(value, ["type": "none"])
+        }
+        XCTAssertEqual(try rows(), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+    }
+
+    func testProductionTaskReadRetainsStartupRestrictedAndTransportBounds() async throws {
+        try await seed()
+        let core = host(), url = "mindwtr://open?task=reference-task"
+        do { _ = try await productionRoute(core, url); XCTFail("Canonical startup must precede resolution") } catch {}
+        _ = try await core.start()
+        let before = try rows(), prefix = url + "&ignored="
+        let remaining = 16_000 - prefix.utf16.count
+        let exact = prefix + String(repeating: "😀", count: remaining / 2) + String(repeating: "x", count: remaining % 2)
+        let exactTarget = try await productionRoute(core, exact)
+        XCTAssertEqual(exactTarget, ["type": "task", "taskId": "reference-task"])
+        let valid = try json([url]), transport = valid + String(repeating: " ", count: 128_000 - valid.utf8.count)
+        _ = try await core.call("iosProductionWidgetTaskOpen", argumentsJSON: transport)
+        for input in ["null", "{}", "[]", "[true]", "[1]", "[null]", "[{}]", "[\"a\",\"b\"]", try json([exact + "x"]), transport + " "] {
+            do { _ = try await core.call("iosProductionWidgetTaskOpen", argumentsJSON: input); XCTFail("Expected bounded production task URL refusal") } catch {}
+        }
+        let restricted = CoreHost(databaseURL: database, bundleURL: bundle, workspaceMode: .restricted)
+        addTeardownBlock { await restricted.close() }
+        do { _ = try await productionRoute(restricted, url); XCTFail("Restricted hosts cannot dispatch production links") } catch {}
+        XCTAssertEqual(try rows(), before)
+        let devTarget = try await route(core, link("task=reference-task"))
+        XCTAssertEqual(devTarget, ["type": "task", "taskId": "reference-task"])
+    }
+
+    func testColdRetainedProductionTaskURLResolvesActualTaskBeforeExistingFinishReceipt() async throws {
+        try await seed()
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent(".mindwtr-native-tests/personal-intake/" + UUID().uuidString.lowercased() + "/home", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: home.deletingLastPathComponent()) }
+        let fixtureRoute = try NativePersonalIntakeRoute.fixture(home: home)
+        let intake = try NativePersonalIntake(route: fixtureRoute, diagnostic: { _ in })
+        addTeardownBlock { await intake.close() }
+        let event = try NativePersonalIntakeEvent.url("mindwtr://open?task=" + encoded(taskID))
+        let captured = try await intake.capture(event)
+        XCTAssertEqual(captured.stage, .captured)
+        await intake.close()
+        let cold = try NativePersonalIntake(route: fixtureRoute, diagnostic: { _ in })
+        addTeardownBlock { await cold.close() }
+        let pending = try await cold.pendingPage(), original = try XCTUnwrap(pending.items.first)
+        XCTAssertEqual(Data(try XCTUnwrap(original.event?.text).utf8), Data(try XCTUnwrap(event.text).utf8))
+        let admitting = try await cold.markAdmitting(original)
+        let core = host(); _ = try await core.start()
+        let before = try rows(), target = try await productionRoute(core, XCTUnwrap(admitting.event?.text))
+        XCTAssertEqual(target, ["type": "task", "taskId": taskID])
+        let viewJSON = try await core.call("taskView", argumentsJSON: json([json(["id": XCTUnwrap(target["taskId"])])]))
+        let view = try XCTUnwrap(NativeJSON.jsonObject(with: Data(viewJSON.utf8)) as? [String: Any])
+        let presentedRows = try XCTUnwrap(view["rows"] as? [[String: Any]])
+        XCTAssertEqual(presentedRows.first?["type"] as? String, "title")
+        XCTAssertEqual(presentedRows.first?["value"] as? String, "PRIVATE_TASK")
+        XCTAssertFalse(try XCTUnwrap(view["revision"] as? String).isEmpty)
+        try await cold.finish(admitting, outcome: .completed)
+        let receipt = try await cold.settleFinish(admitting, outcome: .completed)
+        XCTAssertEqual(receipt.id, event.id); XCTAssertEqual(receipt.sequence, admitting.sequence)
+        XCTAssertEqual(receipt.outcome, .completed); XCTAssertEqual(receipt.kind, .url)
+        XCTAssertEqual(try rows(), before)
+        await cold.close(); await core.close()
+        let terminal = try NativePersonalIntake(route: fixtureRoute, diagnostic: { _ in })
+        addTeardownBlock { await terminal.close() }
+        let page = try await terminal.pendingPage(); XCTAssertTrue(page.items.isEmpty)
+        let replay = try await terminal.capture(event)
+        XCTAssertEqual(replay.stage, .terminal); XCTAssertNil(replay.event); XCTAssertEqual(replay.outcome, .completed)
+    }
 }

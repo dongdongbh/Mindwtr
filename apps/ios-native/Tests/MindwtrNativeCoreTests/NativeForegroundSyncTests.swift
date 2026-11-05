@@ -89,7 +89,7 @@ final class NativeForegroundSyncTests: XCTestCase {
         let model = try XCTUnwrap(opened["value"] as? [String: Any])
         let backend = try XCTUnwrap(model["backend"] as? [String: Any])
         let options = try XCTUnwrap(backend["options"] as? [[String: Any]])
-        XCTAssertEqual(options.compactMap { $0["option"] as? String }, ["off", "webdav", "selfhosted"])
+        XCTAssertEqual(options.compactMap { $0["option"] as? String }, ["off", "file", "webdav", "selfhosted"])
         XCTAssertFalse(state.recorded.isEmpty, "Shared settings read the existing secret adapter")
         XCTAssertTrue(state.recorded.allSatisfy { $0 == "get" })
         XCTAssertEqual(try Data(contentsOf: manifest), before)
@@ -151,11 +151,15 @@ final class NativeForegroundSyncTests: XCTestCase {
         try await assertStoredSkip(backend: nil, command: "syncResume")
     }
 
+    func testPullOffSkipsWithoutNetworkSecretsOrConfigurationWritesAcrossColdOpen() async throws {
+        try await assertStoredSkip(backend: "off", command: "syncPull")
+    }
+
     func testStoredRequestRejectsSuppliedFieldsBeforeWork() async throws {
         let (host, state) = try host(backend: "webdav")
         _ = try await host.start()
         let before = try Data(contentsOf: manifest)
-        for command in ["syncStored", "syncResume"] {
+        for command in ["syncStored", "syncResume", "syncPull"] {
             for input in ["[]", "null", "{\"manual\":false}", "{\"revision\":\"synthetic\"}",
                           "{\"webdav\":{\"url\":\"https://native-fixture.invalid/data.json\",\"password\":\"synthetic-only\"}}"] {
                 do {
@@ -175,7 +179,7 @@ final class NativeForegroundSyncTests: XCTestCase {
         let (host, state) = try host(backend: "cloudkit")
         let before = try Data(contentsOf: manifest)
         _ = try await host.start()
-        for command in ["syncStored", "syncResume"] {
+        for command in ["syncStored", "syncResume", "syncPull"] {
             let response = try object(await host.foregroundSync(command: command, requestJSON: "{}"))
             XCTAssertEqual(response["ok"] as? Bool, false)
             XCTAssertEqual((response["error"] as? [String: Any])?["code"] as? String, "ACTION_FAILED")

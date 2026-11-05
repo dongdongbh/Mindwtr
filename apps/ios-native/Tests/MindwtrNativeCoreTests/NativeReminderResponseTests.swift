@@ -416,4 +416,18 @@ final class NativeReminderResponseTests: XCTestCase {
         data["context"] = String(repeating: "x", count: 65_536); largeOpen["data"] = data
         XCTAssertNil(capture(try request(largeOpen)))
     }
+    func testProductionForegroundPresentationUsesOnlyFixedProductionOwnership() throws {
+        let selected = NativeLaunchSelection.production(containerURL: URL(fileURLWithPath: "/synthetic-production"))
+        for sounding in [false, true] {
+            var original = details(); original["play_sound"] = sounding
+            let owned = try request(original, namespace: NativeLaunchSelection.productionNamespace)
+            assertForeground(owned, selection: selected, options: sounding ? [.banner, .list, .sound] : [.banner, .list])
+            assertForeground(try request(original, namespace: "tech.dongdongbh.mindwtr.native.dev"), selection: selected, options: [])
+            let captured = try XCTUnwrap(capture(owned, namespace: NativeLaunchSelection.productionNamespace))
+            XCTAssertEqual(captured.notificationIdentifier, owned.identifier)
+            XCTAssertEqual(Set(try payload(captured).allKeys.compactMap { $0 as? String }),
+                Set(["notificationId", "actionIdentifier", "kind", "taskId", "projectId", "context"]))
+        }
+    }
+
 }

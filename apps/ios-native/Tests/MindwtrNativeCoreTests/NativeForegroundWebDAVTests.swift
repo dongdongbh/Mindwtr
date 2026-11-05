@@ -44,7 +44,7 @@ private final class ForegroundDAVProtocol: URLProtocol {
 }
 
 private final class ForegroundDAVStore: @unchecked Sendable {
-    struct Request: Equatable { let method: String; let path: String; let condition: String?; let status: Int; let serverDate: String }
+    struct Request: Equatable { let method: String; let path: String; let condition: String?; let status: Int; let serverDate: String; let range: String? }
     struct Reply { let status: Int; let headers: [String: String]; let body: Data }
     private struct Object { let bytes: Data; let etag: String }
     private let lock = NSLock()
@@ -57,6 +57,7 @@ private final class ForegroundDAVStore: @unchecked Sendable {
     private var serverTime: Date?
     private var getStatuses: [String: Int] = [:]
     private var declaredLengths: [String: Int] = [:]
+    private var omitCollectionHrefSlash = false
     init(expectedAuthorization: String) { self.expectedAuthorization = expectedAuthorization }
     var recorded: [Request] { lock.lock(); defer { lock.unlock() }; return requests }
     var unexpectedCount: Int { lock.lock(); defer { lock.unlock() }; return unexpected }
@@ -69,6 +70,7 @@ private final class ForegroundDAVStore: @unchecked Sendable {
     }
     func refuseGet(_ path: String, status: Int) { lock.lock(); getStatuses[path] = status; lock.unlock() }
     func declareGetLength(_ path: String, bytes: Int) { lock.lock(); declaredLengths[path] = bytes; lock.unlock() }
+    func omitTrailingSlashInCollectionHrefs() { lock.lock(); omitCollectionHrefSlash = true; lock.unlock() }
     func respond(_ request: URLRequest, body: Data) -> Reply {
         lock.lock(); defer { lock.unlock() }
         let url = request.url!, path = url.path, method = request.httpMethod ?? "GET"
@@ -79,7 +81,7 @@ private final class ForegroundDAVStore: @unchecked Sendable {
         date.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
         func reply(_ status: Int, _ bytes: Data = Data(), etag: String? = nil, type: String = "application/octet-stream") -> Reply {
             let serverDate = date.string(from: serverTime ?? Date())
-            requests.append(Request(method: method, path: path, condition: condition, status: status, serverDate: serverDate))
+            requests.append(Request(method: method, path: path, condition: condition, status: status, serverDate: serverDate, range: request.value(forHTTPHeaderField: "Range")))
             var headers = ["Date": serverDate, "Content-Length": String(bytes.count), "Content-Type": type]
             if let etag { headers["ETag"] = etag }
             return Reply(status: status, headers: headers, body: method == "HEAD" ? Data() : bytes)
@@ -128,7 +130,8 @@ private final class ForegroundDAVStore: @unchecked Sendable {
             guard depth == "0" || depth == "1" else { unexpected += 1; return reply(400) }
             func escaped(_ value: String) -> String { value.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;") }
             func entry(_ name: String, directory: Bool, object: Object? = nil) -> String {
-                let href = escaped("https://" + url.host! + name)
+                let hrefPath = directory && omitCollectionHrefSlash ? String(name.dropLast()) : name
+                let href = escaped("https://" + url.host! + hrefPath)
                 let resource = directory ? "<d:collection/>" : ""
                 let properties = object.map { "<d:getetag>\(escaped($0.etag))</d:getetag><d:getcontentlength>\($0.bytes.count)</d:getcontentlength>" } ?? ""
                 return "<d:response><d:href>\(href)</d:href><d:propstat><d:prop><d:resourcetype>\(resource)</d:resourcetype>\(properties)</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
@@ -183,22 +186,23 @@ final class NativeForegroundWebDAVTests: XCTestCase {
     private var remote: ForegroundDAVStore!
     private var unexpectedBefore = 0
     private var traceBusyLease = false
+    private var rnCandidate = false
     #if os(macOS)
     private let secretLock = NSLock()
     private var nativeSecretOperations = 0
     private var nativeCredentialObservations = 0
-    private var fixtureSecrets: URL { root.appendingPathComponent("attachment-files/cache/foreground-fixture-secrets.json") }
+    private var fixtureSecrets: URL { rnCandidate ? container.appendingPathComponent("Library/Caches/foreground-fixture-secrets.json") : root.appendingPathComponent("attachment-files/cache/foreground-fixture-secrets.json") }
     #endif
     private let taskID = UUID().uuidString.lowercased(), attachmentID = UUID().uuidString.lowercased()
     private let originalBytes = Data("Private synthetic foreground cleanup bytes".utf8)
     private let unknownValue = "Unknown current namespace value 🧠"
     private let password = "synthetic-dav-credential-318"
-    private var database: URL { root.appendingPathComponent("core.sqlite") }
+    private var database: URL { rnCandidate ? container.appendingPathComponent("Documents/SQLite/mindwtr.db") : root.appendingPathComponent("core.sqlite") }
     private var journal: URL { database.appendingPathExtension("pending.json") }
     private var container: URL { root.appendingPathComponent("container", isDirectory: true) }
     private var manifest: URL { container.appendingPathComponent("Library/Application Support/\(namespace!)/RCTAsyncLocalStorage_V1/manifest.json") }
-    private var target: URL { root.appendingPathComponent("attachment-files/documents/attachments/\(attachmentID).txt") }
-    private var logURL: URL { root.appendingPathComponent("logs/mindwtr.log") }
+    private var target: URL { rnCandidate ? container.appendingPathComponent("Documents/attachments/\(attachmentID).txt") : root.appendingPathComponent("attachment-files/documents/attachments/\(attachmentID).txt") }
+    private var logURL: URL { database.deletingLastPathComponent().appendingPathComponent("logs/mindwtr.log") }
     private var endpoint: String { "https://\(hostname!)/sync/data.json" }
     private var fields: [String: Any] { ["url": endpoint, "username": "synthetic", "password": password, "allowInsecureHttp": false] }
 
@@ -281,8 +285,13 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         }
         #endif
         if let boundary { faults.cleanupBoundary = { name in try boundary.visit(name) { try self.captureBoundary() } } }
-        let value = CoreHost(databaseURL: database, bundleURL: selectedBundle ?? bundle, faults: faults,
-            deviceStorage: (containerURL: container, bundleIdentifier: namespace))
+        let value: CoreHost
+        if rnCandidate {
+            value = try! CoreHost(rnAdoptionContainerURL: container, bundleURL: selectedBundle ?? bundle, faults: faults)
+        } else {
+            value = CoreHost(databaseURL: database, bundleURL: selectedBundle ?? bundle, faults: faults,
+                deviceStorage: (containerURL: container, bundleIdentifier: namespace))
+        }
         addTeardownBlock { await value.close() }; return value
     }
     private func projectCore(faults: HostIOFaults? = nil) throws -> CoreHost {
@@ -326,6 +335,12 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         #endif
     }
     private func seed() async throws {
+        if rnCandidate {
+            try FileManager.default.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let sqlite = try SQLiteBridge(url: database)
+            _ = try sqlite.execute("PRAGMA user_version = 0")
+            sqlite.close()
+        }
         try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(json(["@mindwtr_sync_backend": "off", "unknown": unknownValue]).utf8).write(to: manifest)
         let value = core(); let requests = remote.recorded.count
@@ -555,6 +570,96 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertEqual(stored["@mindwtr_webdav_url"] as? String, endpoint)
         XCTAssertEqual(stored["@mindwtr_webdav_username"] as? String, "synthetic")
         return try json(selected)
+    }
+
+    func testCandidateStoredWebDAVRawProviderDownloadsIntoRNDocumentsAndColdReopens() async throws {
+        rnCandidate = true
+        namespace = "tech.dongdongbh.mindwtr"
+        try await seed()
+        let setupSQL = try SQLiteBridge(url: database)
+        _ = try setupSQL.execute("UPDATE tasks SET attachments=NULL WHERE id=?", parametersJSON: json([taskID]))
+        setupSQL.close()
+        let setup = core()
+        try await openAndTest(setup); try await save(setup); await setup.close()
+        let bytes = Data("Synthetic candidate raw provider bytes 🧠".utf8)
+        let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        let at = ISO8601DateFormatter().string(from: Date().addingTimeInterval(1))
+        let attachment: [String: Any] = ["id": attachmentID, "kind": "file", "title": "Synthetic provider file.txt",
+            "uri": "", "cloudKey": "attachments/" + attachmentID + ".txt", "fileHash": digest,
+            "size": bytes.count, "mimeType": "text/plain", "localStatus": "missing", "contentRev": 1,
+            "createdAt": at, "updatedAt": at]
+        try FileManager.default.removeItem(at: target)
+        remote.seed("/sync/attachments/" + attachmentID + ".txt", bytes: bytes)
+        let sql = try SQLiteBridge(url: database)
+        _ = try sql.execute("UPDATE tasks SET attachments=?,updatedAt=?,rev=rev+1,revBy='fixture' WHERE id=?",
+            parametersJSON: json([try json([attachment]), at, taskID]))
+        sql.close()
+        let host = core(), hooks = NativeAttachmentHostHooks(), countLock = NSLock()
+        var installerCalls = 0
+        hooks.configureJobs = { jobs in
+            jobs.beforeWork = { _, installer in
+                if installer { countLock.lock(); installerCalls += 1; countLock.unlock() }
+            }
+        }
+        try await host.configureAttachmentHost(hooks)
+        let before = remote.recorded.count
+        _ = try await host.start(); XCTAssertEqual(remote.recorded.count, before)
+        let result = try await command(host, "syncStored")
+        XCTAssertEqual(result["success"] as? Bool, true); XCTAssertEqual(result["skipped"] as? Bool, false)
+        countLock.lock(); let rawCalls = installerCalls; countLock.unlock()
+        XCTAssertGreaterThan(rawCalls, 0, "The real WebDAV pass reaches the raw native JSON installer")
+        let attachmentGets = remote.recorded.dropFirst(before).filter { $0.method == "GET" && $0.path == "/sync/attachments/" + attachmentID + ".txt" }
+        XCTAssertEqual(attachmentGets.filter { $0.range == nil }.count, 1)
+        XCTAssertEqual(attachmentGets.map(\.range), ["bytes=0-63", nil])
+        XCTAssertEqual(attachmentGets.map(\.status), [200, 200])
+        XCTAssertEqual(try Data(contentsOf: target), bytes)
+        let saved = try self.attachment()
+        XCTAssertEqual(saved["uri"] as? String, target.absoluteString)
+        XCTAssertEqual(saved["localStatus"] as? String, "available"); XCTAssertEqual(saved["fileHash"] as? String, digest)
+        let names = try FileManager.default.contentsOfDirectory(atPath: target.deletingLastPathComponent().path)
+        XCTAssertFalse(names.contains { $0.hasPrefix(".mindwtr-download-") || $0.hasPrefix(".mindwtr-install-") })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("attachment-files").path))
+        let settled = try rows(), identity = try inode(target)
+        await host.close()
+        let cold = core(), coldRequests = remote.recorded.count
+        _ = try await cold.start(); XCTAssertEqual(remote.recorded.count, coldRequests)
+        let opened = try object(await cold.prepareTaskFileOpen(requestJSON: json([
+            "owner": ["kind": "task", "taskId": taskID, "attachments": [saved]], "attachmentId": attachmentID])))
+        XCTAssertEqual(opened["status"] as? String, "available"); XCTAssertTrue(opened["update"] is NSNull)
+        let plan = try XCTUnwrap(opened["open"] as? [String: Any])
+        XCTAssertEqual(plan["kind"] as? String, "file"); XCTAssertEqual(plan["uri"] as? String, target.absoluteString)
+        XCTAssertEqual(try rows(), settled); XCTAssertEqual(try inode(target), identity)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(remote.recorded.count, coldRequests)
+        await cold.close()
+    }
+
+    func testStoredWebDAVSyncAcceptsCollectionHrefWithoutTrailingSlash() async throws {
+        let original = try await configureStoredCleanupCandidate()
+        remote.omitTrailingSlashInCollectionHrefs()
+        let fixture = try seedProjectDownload(); remote.seed(fixture.remotePath, bytes: fixture.bytes)
+        let host = core(), beforeStart = remote.recorded.count
+        _ = try await host.start()
+        XCTAssertEqual(remote.recorded.count, beforeStart)
+        _ = try await host.call("dataSetting", argumentsJSON: json([json([
+            "requestId": UUID().uuidString.lowercased(), "edit": ["type": "debugLogging", "value": true],
+        ])]))
+        let result = try await command(host, "syncStored")
+        XCTAssertEqual(result["success"] as? Bool, true)
+        XCTAssertEqual(result["skipped"] as? Bool, false)
+        XCTAssertTrue(remote.recorded.dropFirst(beforeStart).contains {
+            $0.method == "PROPFIND" && ["/sync/attachments", "/sync/attachments/"].contains($0.path) && $0.status == 207
+        })
+        let matched = try markers("v1.3.8/webdav-collection-href-no-slash")
+        XCTAssertFalse(matched.isEmpty, "The actual native bundle must parse the slashless collection href")
+        XCTAssertEqual(try Data(contentsOf: fixture.target), fixture.bytes)
+        let downloaded = try projectDownloadAttachment(fixture)
+        XCTAssertEqual(downloaded["contentSize"] as? Int, fixture.bytes.count)
+        XCTAssertGreaterThan(try XCTUnwrap(downloaded["contentMtimeMs"] as? Double), 0)
+        var expected = fixture.attachment
+        expected["uri"] = fixture.target.absoluteString; expected["localStatus"] = "available"
+        XCTAssertEqual(try json(downloaded.filter { !["contentSize", "contentMtimeMs"].contains($0.key) }), try json(expected))
+        try assertCleaned(original: original); try assertRemoteTask(original: original); try assertConfiguration()
+        await host.close()
     }
 
     func testColdStoredWebDAVSyncOwnsLocalPublicationCleanupAndDurableFastSkip() async throws {
@@ -998,7 +1103,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         await host.close()
     }
 
-    func testProjectDownloadAuthHashAndCapFailuresStayRetryableWhile404IsTerminal() async throws {
+    func testProjectDownloadAuthHashCapAnd404PreserveMetadataAndCold404RetrySucceeds() async throws {
         _ = try await configureStoredCleanupCandidate()
         var fixtures: [(String, ProjectDownloadFixture)] = []
         for mode in ["auth", "hash", "cap", "404"] {
@@ -1011,43 +1116,41 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         faults.configureHTTPJobs = { jobs = $0 }
         let host = try projectCore(faults: faults); _ = try await host.start()
         try await settleDownloadFixtureWriter(host)
+        let savedRows = try rows(), settings = try Data(contentsOf: manifest)
         for (mode, fixture) in fixtures {
             let input = try await projectDownloadInput(host, fixture), before = try rows(), oldProjects = try projectRows(), requestStart = remote.recorded.count
             let answer = try await command(host, "projectAttachmentDownload", input)
-            XCTAssertEqual(answer["status"] as? String, mode == "404" ? "unrecoverable" : "unavailable", mode)
+            XCTAssertEqual(answer["status"] as? String, "unavailable", mode)
             XCTAssertTrue(answer["update"] is NSNull)
             XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.target.path), mode)
             try assertDownloadPreservation(rows: before, projects: oldProjects, selected: fixture.projectID)
+            XCTAssertEqual(try rows(), before, mode)
+            XCTAssertEqual(try Data(contentsOf: manifest), settings, mode)
             XCTAssertTrue(remote.recorded.dropFirst(requestStart).allSatisfy { $0.method == "GET" && $0.path == fixture.remotePath })
             XCTAssertGreaterThan(remote.recorded.count, requestStart)
-            let current = try projectDownloadAttachment(fixture)
-            if mode == "404" {
-                XCTAssertNotNil(current["deletedAt"] as? String); XCTAssertNil(current["cloudKey"]); XCTAssertNil(current["fileHash"])
-                XCTAssertEqual(current["title"] as? String, fixture.attachment["title"] as? String)
-                XCTAssertEqual(current["contentRev"] as? Int, fixture.attachment["contentRev"] as? Int)
-                let repeatInput = try await projectDownloadInput(host, fixture), repeatStart = remote.recorded.count, terminalRows = try rows()
-                do {
-                    _ = try await host.foregroundSync(command: "projectAttachmentDownload", requestJSON: json(repeatInput))
-                    XCTFail("The native owned preflight must refuse the terminal tombstone")
-                } catch { XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed") }
-                XCTAssertEqual(remote.recorded.count, repeatStart); XCTAssertEqual(try rows(), terminalRows)
-            } else {
-                XCTAssertNil(current["deletedAt"]); XCTAssertEqual(current["cloudKey"] as? String, fixture.attachment["cloudKey"] as? String)
-                XCTAssertEqual(current["fileHash"] as? String, fixture.attachment["fileHash"] as? String)
-                XCTAssertEqual(current["localStatus"] as? String, "missing")
-            }
+            XCTAssertEqual(try json(projectDownloadAttachment(fixture)), try json(fixture.attachment), mode)
             XCTAssertEqual(jobs?.counters.jobs, 0, "No refused response remains retained after this scope")
             XCTAssertEqual(jobs?.counters.running, 0, "No failed download escapes the foreground invocation")
-            try assertProjectDownloadMarker(mode == "404" ? ["unrecoverable"] : [])
+            let summary = try await host.projectFileAvailabilitySummary(); XCTAssertEqual(summary, "null")
+            try assertProjectDownloadMarker([])
         }
         try assertConfiguration(); await host.close()
-        let cold = core(), beforeCold = remote.recorded.count
+        let cold = try projectCore(), beforeCold = remote.recorded.count
         _ = try await cold.start(); XCTAssertEqual(remote.recorded.count, beforeCold)
-        for (mode, fixture) in fixtures {
-            let current = try projectDownloadAttachment(fixture)
-            XCTAssertEqual(current["deletedAt"] != nil, mode == "404", "The durable distinction survives recreation")
+        XCTAssertEqual(try rows(), savedRows); XCTAssertEqual(try Data(contentsOf: manifest), settings)
+        for (_, fixture) in fixtures {
+            XCTAssertEqual(try json(projectDownloadAttachment(fixture)), try json(fixture.attachment))
             XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.target.path))
         }
+        let missing = try XCTUnwrap(fixtures.first { $0.0 == "404" }?.1)
+        remote.seed(missing.remotePath, bytes: missing.bytes)
+        let beforeRetry = try rows(), oldProjects = try projectRows(), retryStart = remote.recorded.count
+        let answer = try await command(cold, "projectAttachmentDownload", try await projectDownloadInput(cold, missing))
+        XCTAssertEqual(answer["status"] as? String, "available"); XCTAssertTrue(answer["update"] is NSNull)
+        XCTAssertEqual(remote.recorded.dropFirst(retryStart).map { $0.path }, [missing.remotePath])
+        XCTAssertEqual(remote.recorded.dropFirst(retryStart).map { $0.status }, [200])
+        try assertDownloaded(missing); try assertDownloadPreservation(rows: beforeRetry, projects: oldProjects, selected: missing.projectID)
+        try assertProjectDownloadMarker(["saved"]); try assertConfiguration()
         XCTAssertEqual(try Data(contentsOf: target), originalBytes); assertNativeCredentialObservation(); await cold.close()
     }
 

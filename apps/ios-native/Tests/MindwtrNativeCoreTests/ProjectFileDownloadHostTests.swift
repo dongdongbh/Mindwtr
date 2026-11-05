@@ -1093,3 +1093,97 @@ final class ProjectFileDownloadHostTests: XCTestCase {
     }
 
 }
+
+
+extension ProjectFileDownloadHostTests {
+    private func dropboxSelectedSettings() throws {
+        var settings = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+        settings["@mindwtr_cloud_provider"] = "dropbox"
+        settings.removeValue(forKey: "@mindwtr_cloud_url"); settings.removeValue(forKey: "@mindwtr_cloud_allow_insecure_http")
+        settings["@mindwtr_dropbox_tokens"] = try json(["accessToken": "expired-synthetic", "refreshToken": "controlled-refresh", "expiresAt": 0])
+        try Data(json(settings).utf8).write(to: manifest, options: .atomic)
+    }
+    private func dropboxSelectedHost(_ fixture: NativeDropboxSelectedHTTPFixture) throws -> CoreHost {
+        let faults = HostIOFaults(); fixture.configure(faults)
+        let core = CoreHost(databaseURL: database, bundleURL: bundle, faults: faults,
+            deviceStorage: (containerURL: container, bundleIdentifier: namespace), dropboxAuthorization: try NativeDropboxSelectedHTTPFixture.binding())
+        addTeardownBlock { await core.close() }; return core
+    }
+    func testDropboxSelectedProjectFilledProofColdRecoveryDoesNotRepeatRefreshOrDownload() async throws {
+        try await seed(status: "archived"); try dropboxSelectedSettings()
+        let fixture = NativeDropboxSelectedHTTPFixture(path: "/attachments/" + attachmentID + ".txt", bytes: bytes)
+        let core = try dropboxSelectedHost(fixture); _ = try await core.start()
+        let input = try await request(core), before = try rows(), other = try others(), fired = await inject(core, .afterFilled)
+        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+        XCTAssertTrue(fired()); XCTAssertEqual(fixture.counts, [1, 1, 0]); XCTAssertEqual(try rows(), before); XCTAssertEqual(try others(), other)
+        let retained = try state(), id = try XCTUnwrap(retained["requestId"] as? String)
+        XCTAssertEqual(retained["phase"] as? String, "stageFilled")
+        let raw = try String(contentsOf: journal)
+        XCTAssertFalse(raw.contains("controlled-refresh")); XCTAssertFalse(raw.contains("controlled-refreshed"))
+        await core.close()
+        let cold = host(); try await retainedStart(cold)
+        let result = try object(await cold.recoverProjectFileAvailability(requestId: id))
+        XCTAssertEqual(result["status"] as? String, "available"); XCTAssertEqual(try Data(contentsOf: target), bytes)
+        XCTAssertEqual(fixture.counts, [1, 1, 0]); XCTAssertEqual(try others(), other)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); try assertNoTaskOwner()
+        await cold.close()
+    }
+    func testDropboxSelectedProjectNotFoundUsesMetadataOnlyPrivateModeAndColdProof() async throws {
+        try await seed(); try dropboxSelectedSettings()
+        let fixture = NativeDropboxSelectedHTTPFixture(path: "/attachments/" + attachmentID + ".txt", bytes: bytes); fixture.notFound = true
+        let core = try dropboxSelectedHost(fixture); _ = try await core.start()
+        let input = try await request(core), other = try others(), fired = await inject(core, .afterIntent)
+        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+        XCTAssertTrue(fired()); XCTAssertEqual(fixture.counts, [1, 1, 0])
+        let retained = try state(), id = try XCTUnwrap(retained["requestId"] as? String)
+        XCTAssertEqual(retained["version"] as? Int, 2); XCTAssertEqual(retained["outcome"] as? String, "unrecoverable"); XCTAssertNil(retained["source"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertEqual(try others(), other)
+        await core.close()
+        let cold = host(); try await retainedStart(cold)
+        let result = try object(await cold.recoverProjectFileAvailability(requestId: id))
+        XCTAssertEqual(result["status"] as? String, "unrecoverable"); XCTAssertEqual(fixture.counts, [1, 1, 0])
+        XCTAssertNotNil(try selected()["deletedAt"] as? String); XCTAssertEqual(try others(), other)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); try assertNoTaskOwner()
+        await cold.close()
+    }
+}
+
+
+extension ProjectFileDownloadHostTests {
+    func testDropboxSelectedProjectRefusesForeignCloudSecretBeforeQuery() async throws {
+        try await seed(); try dropboxSelectedSettings()
+        let fixture = NativeDropboxSelectedHTTPFixture(path: "/attachments/" + attachmentID + ".txt", bytes: bytes)
+        let faults = HostIOFaults(); fixture.configure(faults)
+        var forbiddenQueries = 0, tokenQueries = 0
+        faults.configureSecretJobs = { jobs in jobs.beforeRead = { account in
+            if account == "mindwtr_cloud_token" { forbiddenQueries += 1 }
+            if account == "mindwtr_dropbox_tokens" { tokenQueries += 1 }
+        } }
+        let source = try String(contentsOf: bundle, encoding: .utf8)
+        let selectedBundle = root.appendingPathComponent("dropbox-foreign-secret-probe.js")
+        let probe = #"""
+        ;(function () {
+            const original = globalThis.__mindwtrSyncSecrets.getSecret;
+            let checked = false;
+            globalThis.__mindwtrSyncSecrets.getSecret = async function (account) {
+                if (!checked && account === 'mindwtr_dropbox_tokens') {
+                    checked = true;
+                    try { await original.call(this, 'mindwtr_cloud_token'); } catch (_) { }
+                }
+                return original.call(this, account);
+            };
+        })();
+        """#
+        try (source + "\n" + probe).write(to: selectedBundle, atomically: true, encoding: .utf8)
+        let core = CoreHost(databaseURL: database, bundleURL: selectedBundle, faults: faults,
+            deviceStorage: (containerURL: container, bundleIdentifier: namespace), dropboxAuthorization: try NativeDropboxSelectedHTTPFixture.binding())
+        addTeardownBlock { await core.close() }
+        _ = try await core.start(); let input = try await request(core), other = try others()
+        let response = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input))
+        XCTAssertEqual((response["value"] as? [String: Any])?["status"] as? String, "available")
+        XCTAssertGreaterThan(tokenQueries, 0, "The controlled bridge wrapper must reach the real Dropbox token entrance")
+        XCTAssertEqual(forbiddenQueries, 0, "Dropbox content ownership must refuse an old cloud-token query before secure I/O")
+        XCTAssertEqual(fixture.counts, [1, 1, 0]); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try others(), other)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); await core.close()
+    }
+}
