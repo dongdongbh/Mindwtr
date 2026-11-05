@@ -1,0 +1,6 @@
+// Existing canonical nav.addTask and widget.capture translations.
+"Add Task" = "Přidat úkol";
+"Quick capture" = "Rychlé zachycení";
+// Canonical nav.next plus the unavailable-cache refresh action.
+"Next Actions" = "Další kroky";
+"Open Mindwtr to refresh" = "Otevřete Mindwtr pro obnovení";

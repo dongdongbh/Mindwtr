@@ -1,0 +1,5 @@
+"common.retry" = "Réessayer";
+"common.close" = "Fermer";
+"share.openLater" = "Les éléments partagés en attente seront prêts à être examinés la prochaine fois que vous ouvrirez Mindwtr.";
+"share.preparing" = "Préparation du partage…";
+"share.queueFailed" = "Impossible de confirmer que le partage a été mis en attente. Réessayez, ou fermez cette fenêtre et vérifiez dans Mindwtr.";

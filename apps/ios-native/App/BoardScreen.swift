@@ -273,7 +273,7 @@ struct BoardScreen: View {
                             value: BoardDragMeasurements(viewports: [geometry.frame(in: .global)]))
                     }
                 }
-                .refreshable { endInput(); await model.refresh() }
+                .refreshable { endInput(); await model.pullToRefresh() }
                 .onPreferenceChange(BoardRowFrames.self) { frames in
                     guard trackingAnchor, model.boardCurrent, !model.busy, !model.boardFiltersPresented,
                           !model.taskPresented, !model.areaPickerPresented else { return }

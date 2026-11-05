@@ -1,0 +1,5 @@
+"common.retry" = "Prøv igen";
+"common.close" = "Luk";
+"share.openLater" = "Det delte indhold i køen er klar til gennemgang, næste gang du åbner Mindwtr.";
+"share.preparing" = "Forbereder deling…";
+"share.queueFailed" = "Det kunne ikke bekræftes, om delingen blev sat i kø. Prøv igen, eller luk og tjek Mindwtr.";

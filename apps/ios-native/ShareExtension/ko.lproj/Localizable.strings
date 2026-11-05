@@ -1,0 +1,5 @@
+"common.retry" = "다시 시도";
+"common.close" = "닫기";
+"share.openLater" = "대기열에 추가된 공유 내용은 다음에 Mindwtr를 열 때 검토할 수 있습니다.";
+"share.preparing" = "공유 준비 중…";
+"share.queueFailed" = "공유 내용이 대기열에 추가되었는지 확인할 수 없습니다. 다시 시도하거나 이 창을 닫고 Mindwtr에서 확인하세요.";

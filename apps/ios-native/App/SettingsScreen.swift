@@ -3,6 +3,698 @@ import UIKit
 import UniformTypeIdentifiers
 import MindwtrNativeCore
 
+private struct AITextConfigurationCard: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @State private var assistantDraft = ""
+    @State private var copilotDraft = ""
+    @State private var credentialDraft = ""
+    @State private var endpointDraft = ""
+    @State private var endpointEditing = false
+    @State private var consentAnswered = false
+    private enum Field: Hashable { case assistant, copilot, credential, endpoint, extraBody }
+    @FocusState private var focused: Field?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if let options = model.settingsAITextOptions {
+                    VStack(alignment: .leading, spacing: 10) {
+                        heading("settings.aiProvider")
+                        let selected = options.providerOptions.first { $0.value.rawValue == options.provider.rawValue }?.label ?? ""
+                        Menu {
+                            ForEach(options.providerOptions.indices, id: \.self) { index in
+                                let option = options.providerOptions[index]
+                                Button(option.label) {
+                                    dismissKeyboard()
+                                    model.saveAITextConfiguration(.provider(option.value))
+                                }
+                                .accessibilityAddTraits(option.value.rawValue == options.provider.rawValue ? .isSelected : [])
+                                .accessibilityIdentifier("ai-text-provider-choice-" + option.value.rawValue)
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text(selected).rnFont(15).fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 8)
+                                Image(systemName: "chevron.down").accessibilityHidden(true)
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.foregroundStyle(palette.text).disabled(!model.settingsAITextCanEdit)
+                            .accessibilityLabel(model.label("settings.aiProvider")).accessibilityValue(selected)
+                            .accessibilityIdentifier("ai-text-provider")
+                    }
+                    Toggle(model.label("settings.aiEnable"), isOn: Binding(
+                        get: { options.enabled },
+                        set: { dismissKeyboard(); model.saveAITextConfiguration(.enabled($0)) }
+                    )).tint(palette.tint).disabled(!model.settingsAITextCanEdit)
+                        .accessibilityIdentifier("ai-text-enabled")
+
+                    modelDiscoveryControls
+                    modelEditor("settings.aiModel", draft: $assistantDraft,
+                                choices: model.settingsAITextModelChoices?.modelOptions ?? options.modelOptions,
+                                field: .assistant, id: "model") {
+                        model.saveAITextConfiguration(.model(assistantDraft))
+                    }
+                    modelEditor("settings.aiCopilotModel", draft: $copilotDraft,
+                                choices: model.settingsAITextModelChoices?.copilotModelOptions ?? options.copilotModelOptions,
+                                field: .copilot, id: "copilot-model") {
+                        model.saveAITextConfiguration(.copilotModel(copilotDraft))
+                    }
+                    if options.provider == .anthropic { anthropicThinkingEditor }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        heading("settings.aiApiKey")
+                        if let available = model.settingsAITextCredentialAvailable {
+                            Text(model.label(available ? "settings.aiCredentialPresent" : "settings.aiCredentialMissing"))
+                                .rnFont(14).foregroundStyle(palette.secondary)
+                                .accessibilityIdentifier("ai-text-credential-status")
+                        } else {
+                            Text(model.label("settings.feedback.loadFailed")).rnFont(14).foregroundStyle(palette.danger)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("ai-text-credential-status-unavailable")
+                        }
+                        if options.provider == .openai {
+                            Text(model.label("settings.aiApiKeyHint")).rnFont(14).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        SecureField(model.label("settings.aiApiKeyPlaceholder"), text: $credentialDraft)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .focused($focused, equals: .credential).privacySensitive()
+                            .textFieldStyle(.roundedBorder).disabled(!model.settingsAITextCanEdit)
+                            .accessibilityLabel(model.label("settings.aiApiKey"))
+                            .accessibilityIdentifier("ai-text-credential-input")
+                        HStack(spacing: 20) {
+                            action("common.save", id: "credential-save",
+                                   enabled: !credentialDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                                let value = credentialDraft
+                                dismissKeyboard()
+                                model.saveAITextCredential(value)
+                            }
+                            action("common.clear", id: "credential-clear") {
+                                credentialDraft = ""; dismissKeyboard()
+                                model.clearAITextCredential()
+                            }
+                        }
+                    }
+
+                    if options.provider == .openai {
+                        VStack(alignment: .leading, spacing: 10) {
+                            heading("settings.aiBaseUrl")
+                            Text(model.label("settings.aiBaseUrlHint")).rnFont(14).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if endpointEditing {
+                                TextField(model.label("settings.aiBaseUrlPlaceholder"), text: $endpointDraft, axis: .vertical)
+                                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                                    .focused($focused, equals: .endpoint).privacySensitive()
+                                    .textFieldStyle(.roundedBorder).disabled(!model.settingsAITextCanEdit)
+                                    .accessibilityLabel(model.label("settings.aiBaseUrl"))
+                                    .accessibilityIdentifier("ai-text-endpoint-input")
+                                HStack(spacing: 20) {
+                                    action("common.save", id: "endpoint-save") {
+                                        let value = endpointDraft
+                                        dismissKeyboard()
+                                        model.saveAITextEndpoint(value)
+                                    }
+                                    action("common.cancel", id: "endpoint-cancel") {
+                                        endpointDraft = ""; endpointEditing = false; dismissKeyboard()
+                                    }
+                                }
+                            } else {
+                                action("common.edit", id: "endpoint-edit") {
+                                    dismissKeyboard()
+                                    model.readAITextEndpoint { value in
+                                        endpointDraft = value; endpointEditing = true
+                                    }
+                                }
+                            }
+                        }
+                        extraBodyEditor
+                    }
+                } else if !model.settingsAITextWorking && !model.settingsAITextNeedsRetry && !model.settingsAITextConsentRecordFailed {
+                    Button(model.label("common.retry")) { model.retryAITextConfigurationRead() }
+                        .frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
+                        .accessibilityIdentifier("ai-text-options-retry")
+                }
+                if model.settingsAITextWorking && !model.settingsAITextModelDiscoveryWorking {
+                    ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-text-working")
+                }
+                if let error = model.settingsAITextError {
+                    Text(error).rnFont(14).foregroundStyle(palette.danger)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-text-error")
+                }
+                if model.settingsAITextNeedsRetry && !model.settingsAITextExtraBodyNeedsRetry {
+                    Button(model.label("common.retry")) { dismissKeyboard(); model.retryAITextConfiguration() }
+                        .frame(minHeight: 44).disabled(model.busy || model.settingsAITextWorking)
+                        .accessibilityIdentifier("ai-text-save-retry")
+                }
+                if model.settingsAITextConsentRecordFailed {
+                    Text(model.label("settings.aiConsentRecordFailed")).rnFont(14).foregroundStyle(palette.danger)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-text-consent-record-error")
+                    Button(model.label("common.retry")) { dismissKeyboard(); model.retryAITextConsentRecord() }
+                        .frame(minHeight: 44).disabled(!model.settingsAITextCanRetryConsentRecord)
+                        .accessibilityIdentifier("ai-text-consent-record-retry")
+                }
+                if let notice = model.settingsAITextNotice {
+                    Text(notice).rnFont(14).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-text-notice")
+                }
+            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityIdentifier("ai-text-scroll")
+        .onAppear { updateModels(); clearSensitiveDrafts() }
+        .onChange(of: model.settingsAITextOptions) { _ in updateModels() }
+        .onChange(of: model.settingsAITextDraftGeneration) { _ in
+            assistantDraft = ""; copilotDraft = ""
+            clearSensitiveDrafts()
+            updateModels()
+        }
+        .onChange(of: model.settingsAITextConsentPrompt) { prompt in if prompt != nil { consentAnswered = false } }
+        .onChange(of: model.appLock.concealed) { concealed in
+            if concealed { clearSensitiveDrafts(); model.closeAITextConfiguration(refreshSummary: false) }
+        }
+        .onChange(of: model.capturePresented) { presented in if presented { model.closeAITextConfiguration(refreshSummary: false) } }
+        .onChange(of: model.taskPresented) { presented in if presented { model.closeAITextConfiguration(refreshSummary: false) } }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            clearSensitiveDrafts(); model.closeAITextConfiguration(refreshSummary: false)
+        }
+        .onDisappear {
+            assistantDraft = ""; copilotDraft = ""; clearSensitiveDrafts()
+            model.closeAITextConfiguration(refreshSummary: false)
+        }
+        .alert(model.settingsAITextConsentPrompt?.title ?? "", isPresented: Binding(
+            get: { model.settingsAITextConsentPrompt != nil },
+            set: { presented in
+                if !presented {
+                    DispatchQueue.main.async { if !consentAnswered { model.cancelAITextConsent() } }
+                }
+            }
+        )) {
+            Button(model.settingsAITextConsentPrompt?.cancel ?? model.label("common.cancel"), role: .cancel) {
+                consentAnswered = true; model.cancelAITextConsent()
+            }
+                .accessibilityIdentifier("ai-text-consent-cancel")
+            Button(model.settingsAITextConsentPrompt?.agree ?? model.label("settings.aiConsentAgree")) {
+                consentAnswered = true; model.agreeAITextConsent()
+            }
+                .accessibilityIdentifier("ai-text-consent-agree")
+        } message: { Text(model.settingsAITextConsentPrompt?.message ?? "") }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if focused != nil {
+                HStack {
+                    Spacer()
+                    Button(model.label("common.done")) { dismissKeyboard() }
+                        .rnFont(16, .semibold).foregroundStyle(palette.tint)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityIdentifier("ai-text-keyboard-done")
+                }
+                .padding(.horizontal, 16).padding(.vertical, 4)
+                .background(palette.card)
+            }
+        }
+    }
+
+    private var modelDiscoveryControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.settingsAITextModelDiscoveryWorking {
+                HStack(spacing: 20) {
+                    ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-text-model-discovery-working")
+                    Spacer(minLength: 8)
+                    Button(model.label("common.cancel")) { dismissKeyboard(); model.cancelAITextModelDiscovery() }
+                        .rnFont(15, .semibold).foregroundStyle(palette.tint).frame(minHeight: 44)
+                        .disabled(!model.settingsAITextModelDiscoveryCanCancel)
+                        .accessibilityIdentifier("ai-text-model-discovery-cancel")
+                }
+            } else {
+                action("settings.aiRefreshModels", id: "models-refresh") { dismissKeyboard(); model.discoverAITextModels() }
+            }
+            if let error = model.settingsAITextModelDiscoveryError {
+                Text(error).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("ai-text-model-discovery-error")
+            }
+        }
+    }
+
+    private var extraBodyEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            heading("settings.aiExtraBodyParams")
+            Text(model.label("settings.aiExtraBodyParamsDesc")).rnFont(14).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if model.settingsAITextExtraBodyEditing {
+                TextField("{}", text: Binding(
+                    get: { model.settingsAITextExtraBodyDraft },
+                    set: { model.updateAITextExtraBodyDraft($0) }
+                ), axis: .vertical)
+                    .font(.system(.body, design: .monospaced)).lineLimit(8...16)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .focused($focused, equals: .extraBody).privacySensitive().textFieldStyle(.roundedBorder)
+                    .disabled(!model.settingsAITextCanEdit)
+                    .accessibilityLabel(model.label("settings.aiExtraBodyParams"))
+                    .accessibilityIdentifier("ai-text-extra-body-input")
+                Text(model.label("settings.aiExtraBodyParamsHint")).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.settingsAITextExtraBodyNeedsRetry {
+                    Button(model.label("common.retry")) { dismissKeyboard(); model.retryAITextExtraBody() }
+                        .rnFont(15, .semibold).foregroundStyle(palette.tint).frame(minHeight: 44)
+                        .disabled(!model.settingsAITextExtraBodyCanRetry).accessibilityIdentifier("ai-text-extra-body-save-retry")
+                } else {
+                    HStack(spacing: 20) {
+                        action("settings.aiExtraBodyParamsSave", id: "extra-body-save") {
+                            dismissKeyboard(); model.saveAITextExtraBody()
+                        }
+                        action("common.cancel", id: "extra-body-cancel") {
+                            dismissKeyboard(); model.cancelAITextExtraBodyEditor()
+                        }
+                    }
+                }
+            } else {
+                action("common.edit", id: "extra-body-edit") {
+                    dismissKeyboard(); model.openAITextExtraBodyEditor()
+                }
+            }
+            if let error = model.settingsAITextExtraBodyError {
+                Text(error).rnFont(14).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("ai-text-extra-body-error")
+            }
+        }
+    }
+
+    private var anthropicThinkingEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let thinking = model.settingsAIAnthropicThinkingOptions {
+                Toggle(model.label("settings.aiThinkingEnable"), isOn: Binding(
+                    get: { thinking.enabled },
+                    set: { dismissKeyboard(); model.saveAITextConfiguration(.anthropicThinking($0)) }
+                )).tint(palette.tint).disabled(!model.settingsAITextCanEdit)
+                    .accessibilityIdentifier("ai-text-anthropic-thinking-enabled")
+                Text(model.label("settings.aiThinkingEnableDesc")).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if thinking.enabled {
+                    heading("settings.aiThinkingBudget")
+                    Text(model.label("settings.aiThinkingHint")).rnFont(14).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(thinking.value.formatted()).rnFont(14).foregroundStyle(palette.secondary)
+                        .accessibilityLabel(model.label("settings.aiThinkingBudget")).accessibilityValue(thinking.value.formatted())
+                        .accessibilityIdentifier("ai-text-anthropic-thinking-budget-value")
+                    ForEach(thinking.options.indices, id: \.self) { index in
+                        let option = thinking.options[index]
+                        Button {
+                            dismissKeyboard(); model.saveAITextConfiguration(.thinkingBudget(option.value))
+                        } label: {
+                            HStack {
+                                Text(option.label).rnFont(15).fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 8)
+                                if option.value == thinking.value { Image(systemName: "checkmark").accessibilityHidden(true) }
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).foregroundStyle(palette.text).disabled(!model.settingsAITextCanEdit)
+                            .accessibilityAddTraits(option.value == thinking.value ? .isSelected : [])
+                            .accessibilityIdentifier("ai-text-anthropic-thinking-budget-choice-" + String(option.value))
+                    }
+                }
+            } else {
+                heading("settings.aiThinkingEnable")
+                Text(model.label("settings.aiThinkingEnableDesc")).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !model.settingsAITextWorking {
+                    action("common.retry", id: "anthropic-thinking-read-retry") { model.retryAITextConfigurationRead() }
+                }
+            }
+        }
+    }
+
+    private func modelEditor(_ label: String, draft: Binding<String>, choices: [String], field: Field,
+                             id: String, save: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            heading(label)
+            let available = draft.wrappedValue.isEmpty || choices.contains(draft.wrappedValue) ? choices : [draft.wrappedValue] + choices
+            HStack(spacing: 12) {
+                TextField(model.label(label), text: draft)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .focused($focused, equals: field).textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("ai-text-" + id + "-input")
+                Menu {
+                    ForEach(available.indices, id: \.self) { index in
+                        Button(available[index]) { dismissKeyboard(); draft.wrappedValue = available[index] }
+                            .accessibilityIdentifier("ai-text-" + id + "-choice-" + String(index))
+                    }
+                } label: {
+                    Image(systemName: "chevron.down").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }.accessibilityLabel(model.label(label)).accessibilityIdentifier("ai-text-" + id + "-choices")
+            }.disabled(!model.settingsAITextCanEdit)
+            action("common.save", id: id + "-save") { dismissKeyboard(); save() }
+        }
+    }
+
+    private func heading(_ key: String) -> some View {
+        Text(model.label(key)).rnFont(15, .semibold).foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
+    }
+    private func action(_ key: String, id: String, enabled: Bool = true, perform: @escaping () -> Void) -> some View {
+        Button(model.label(key), action: perform).buttonStyle(.plain).rnFont(15, .semibold).foregroundStyle(palette.tint)
+            .frame(minHeight: 44).disabled(!model.settingsAITextCanEdit || !enabled)
+            .accessibilityIdentifier("ai-text-" + id)
+    }
+    private func updateModels() {
+        guard let options = model.settingsAITextOptions else { return }
+        assistantDraft = options.model; copilotDraft = options.copilotModel
+    }
+    private func clearSensitiveDrafts() {
+        credentialDraft = ""; endpointDraft = ""; endpointEditing = false; focused = nil
+    }
+    private func dismissKeyboard() {
+        focused = nil
+        _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+private struct SpeechSettingsCard: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @State private var modelDraft = ""
+    @State private var languageDraft = ""
+    @State private var credentialDraft = ""
+    @State private var endpointDraft = ""
+    @State private var endpointEditing = false
+    private enum Field: Hashable { case model, language, credential, endpoint }
+    @FocusState private var focused: Field?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if let options = model.settingsVoiceOptions {
+                    heading("settings.speechProvider")
+                    Menu {
+                        Button(model.label("settings.aiProviderGemini")) {
+                            clearSensitiveDrafts(); dismissKeyboard(); model.saveVoiceSetting(.useGemini)
+                        }.accessibilityAddTraits(options.provider == .gemini ? .isSelected : [])
+                            .accessibilityIdentifier("voice-settings-use-gemini")
+                        Button(model.label("settings.aiProviderOpenAI")) {
+                            clearSensitiveDrafts(); dismissKeyboard(); model.saveVoiceSetting(.useOpenAI)
+                        }.accessibilityAddTraits(options.provider == .openai ? .isSelected : [])
+                            .accessibilityIdentifier("voice-settings-use-openai")
+                        Button(model.label("settings.speechProviderOffline")) {
+                            clearSensitiveDrafts(); dismissKeyboard(); model.saveVoiceSetting(.useWhisper)
+                        }.accessibilityAddTraits(options.provider == .whisper ? .isSelected : [])
+                            .accessibilityIdentifier("voice-settings-use-whisper")
+                    } label: {
+                        HStack(spacing: 12) {
+                            Text(providerLabel(options.provider)).rnFont(15).fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.down").accessibilityHidden(true)
+                        }.frame(minHeight: 44).contentShape(Rectangle())
+                    }.foregroundStyle(palette.text).disabled(!model.settingsVoiceCanEdit)
+                        .accessibilityLabel(model.label("settings.speechProvider")).accessibilityValue(providerLabel(options.provider))
+                        .accessibilityIdentifier("voice-settings-provider")
+                    Toggle(model.label("settings.speechEnable"), isOn: Binding(get: { options.enabled }, set: { value in
+                        guard options.supported || !value else { return }
+                        dismissKeyboard(); model.saveVoiceSetting(.enabled(value))
+                    })).tint(palette.tint)
+                        .disabled(!model.settingsVoiceCanEdit || (!options.supported && !options.enabled))
+                        .accessibilityIdentifier("voice-settings-enabled")
+                    if !options.supported {
+                        Text(options.model).rnFont(14).foregroundStyle(palette.secondary)
+                            .accessibilityIdentifier("voice-settings-unsupported-model")
+                        Text(model.label("settings.speechNativeUnsupported")).rnFont(14).foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(model.label(options.provider == .whisper ? "settings.speechOfflineModelDesc"
+                            : options.provider == .openai ? "settings.speechOpenAIDisclosure" : "settings.speechGeminiDisclosure")).rnFont(14).foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if options.provider == .openai || options.provider == .gemini { modelDiscoveryControls }
+                        modelEditor(options)
+                        if options.provider == .openai { endpointEditor }
+                        if options.provider == .whisper { localModelEditor }
+                        VStack(alignment: .leading, spacing: 8) {
+                            heading("settings.speechLanguage")
+                            Text(model.label("settings.speechLanguageHint")).rnFont(14).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            TextField(model.label("settings.speechLanguageAuto"), text: $languageDraft)
+                                .focused($focused, equals: .language).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .textFieldStyle(.roundedBorder).disabled(!model.settingsVoiceCanEdit)
+                                .accessibilityLabel(model.label("settings.speechLanguage")).accessibilityIdentifier("voice-settings-language")
+                            action("common.save", id: "language-save") { model.saveVoiceSetting(.language(languageDraft)) }
+                        }
+                        if options.provider != .whisper {
+                            VStack(alignment: .leading, spacing: 8) {
+                                heading("settings.speechMode")
+                                Text(model.label("settings.speechModeHint")).rnFont(14).foregroundStyle(palette.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                choice("settings.speechModeSmart", selected: options.mode == .smartParse, id: "mode-smart") {
+                                    model.saveVoiceSetting(.mode(.smartParse))
+                                }
+                                choice("settings.speechModeTranscript", selected: options.mode == .transcribeOnly, id: "mode-transcript") {
+                                    model.saveVoiceSetting(.mode(.transcribeOnly))
+                                }
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            heading("settings.speechFieldStrategy")
+                            Text(model.label("settings.speechFieldStrategyHint")).rnFont(14).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            choice("settings.speechFieldSmart", selected: options.fieldStrategy == .smart, id: "field-smart") {
+                                model.saveVoiceSetting(.fieldStrategy(.smart))
+                            }
+                            choice("settings.speechFieldTitle", selected: options.fieldStrategy == .titleOnly, id: "field-title") {
+                                model.saveVoiceSetting(.fieldStrategy(.titleOnly))
+                            }
+                            choice("settings.speechFieldDescription", selected: options.fieldStrategy == .descriptionOnly, id: "field-description") {
+                                model.saveVoiceSetting(.fieldStrategy(.descriptionOnly))
+                            }
+                        }
+                        if options.provider != .whisper { credentialEditor(options) }
+                    }
+                } else if !model.settingsVoiceWorking && !model.settingsVoiceNeedsRetry {
+                    Button(model.label("common.retry")) { model.retryVoiceSettingsRead() }
+                        .frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
+                        .accessibilityIdentifier("voice-settings-read-retry")
+                }
+                if model.settingsVoiceWorking && !model.settingsVoiceLocalWorking && !model.settingsVoiceModelDiscoveryWorking {
+                    ProgressView(model.label("common.loading")).accessibilityIdentifier("voice-settings-working")
+                }
+                if let error = model.settingsVoiceError {
+                    Text(error).rnFont(14).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("voice-settings-error")
+                }
+                if model.settingsVoiceNeedsRetry {
+                    Button(model.label("common.retry")) { dismissKeyboard(); model.retryVoiceSetting() }
+                        .frame(minHeight: 44).disabled(model.busy || model.settingsVoiceWorking)
+                        .accessibilityIdentifier("voice-settings-save-retry")
+                }
+                if let notice = model.settingsVoiceNotice {
+                    Text(notice).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("voice-settings-notice")
+                }
+            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityIdentifier("voice-settings-scroll")
+            .onAppear { updateDrafts(); clearSensitiveDrafts() }
+            .onChange(of: model.settingsVoiceOptions) { _ in updateDrafts() }
+            .onChange(of: model.settingsVoiceDraftGeneration) { _ in clearSensitiveDrafts(); updateDrafts() }
+            .onChange(of: model.appLock.concealed) { concealed in
+                if concealed { clearSensitiveDrafts(); model.closeVoiceSettings() }
+            }
+            .onChange(of: model.capturePresented) { presented in if presented { model.closeVoiceSettings() } }
+            .onChange(of: model.taskPresented) { presented in if presented { model.closeVoiceSettings() } }
+            .onDisappear { modelDraft = ""; languageDraft = ""; clearSensitiveDrafts(); model.closeVoiceSettings() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                modelDraft = ""; languageDraft = ""; clearSensitiveDrafts(); model.closeVoiceSettings()
+            }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(model.label("common.done")) { dismissKeyboard() }.accessibilityIdentifier("voice-settings-keyboard-done")
+                }
+            }
+    }
+    private func modelEditor(_ options: NativeVoiceSettingsOptions) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            heading("settings.speechModel")
+            if options.provider == .whisper {
+                Menu {
+                    ForEach(options.modelOptions.indices, id: \.self) { index in
+                        Button(options.modelOptions[index]) {
+                            dismissKeyboard(); model.saveVoiceSetting(.model(options.modelOptions[index]))
+                        }.accessibilityAddTraits(options.modelOptions[index] == options.model ? .isSelected : [])
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(options.model).rnFont(15).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.down").accessibilityHidden(true)
+                    }.frame(minHeight: 44).contentShape(Rectangle())
+                }.foregroundStyle(palette.text).disabled(!model.settingsVoiceCanEdit)
+                    .accessibilityLabel(model.label("settings.speechModel")).accessibilityValue(options.model)
+                    .accessibilityIdentifier("voice-settings-model-options")
+            } else {
+                let choices = model.settingsVoiceModelChoices?.modelOptions ?? options.modelOptions
+                let available = modelDraft.isEmpty || choices.contains(modelDraft) ? choices : [modelDraft] + choices
+                HStack(spacing: 12) {
+                    TextField(model.label("settings.speechModel"), text: $modelDraft)
+                        .focused($focused, equals: .model).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder).accessibilityIdentifier("voice-settings-model")
+                    Menu {
+                        ForEach(available.indices, id: \.self) { index in
+                            Button(available[index]) { dismissKeyboard(); modelDraft = available[index] }
+                        }
+                    } label: { Image(systemName: "chevron.down").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle()) }
+                        .accessibilityLabel(model.label("settings.speechModel")).accessibilityIdentifier("voice-settings-model-options")
+                }.disabled(!model.settingsVoiceCanEdit)
+                action("common.save", id: "model-save") { model.saveVoiceSetting(.model(modelDraft)) }
+            }
+        }
+    }
+    private var modelDiscoveryControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if model.settingsVoiceModelDiscoveryWorking {
+                HStack(spacing: 20) {
+                    ProgressView(model.label("common.loading")).accessibilityIdentifier("voice-settings-model-discovery-working")
+                    Spacer(minLength: 8)
+                    Button(model.label("common.cancel")) { dismissKeyboard(); model.cancelVoiceModelDiscovery() }
+                        .rnFont(15, .semibold).foregroundStyle(palette.tint).frame(minHeight: 44)
+                        .disabled(!model.settingsVoiceModelDiscoveryCanCancel)
+                        .accessibilityIdentifier("voice-settings-model-discovery-cancel")
+                }
+            } else {
+                action("settings.aiRefreshModels", id: "models-refresh") { model.discoverVoiceModels() }
+            }
+            if let error = model.settingsVoiceModelDiscoveryError {
+                Text(error).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("voice-settings-model-discovery-error")
+            }
+        }
+    }
+    private var localModelEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            heading("settings.speechOfflineModel")
+            if let state = model.settingsVoiceLocalModel {
+                Text(state.modelID).rnFont(14).foregroundStyle(palette.secondary)
+                    .accessibilityIdentifier("voice-settings-local-model-effective")
+                Text(model.label(state.availability == .installed ? "settings.speechOfflineReady" : "settings.speechOfflineNotDownloaded"))
+                    .rnFont(14).foregroundStyle(palette.secondary).accessibilityIdentifier("voice-settings-local-model-status")
+                Text(model.label("settings.speechOfflineEstimatedSize") + ": " + ByteCountFormatter.string(fromByteCount: state.sizeBytes, countStyle: .file))
+                    .rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("voice-settings-local-model-size")
+                if !model.settingsVoiceLocalWorking {
+                    if state.availability != .missing {
+                        action("settings.speechOfflineDelete", id: "local-model-remove") { model.removeVoiceLocalModel() }
+                    } else {
+                        action("settings.speechOfflineDownload", id: "local-model-download") { model.downloadVoiceLocalModel() }
+                    }
+                }
+            } else if !model.settingsVoiceLocalWorking {
+                action("common.retry", id: "local-model-read-retry") { model.retryVoiceLocalModelRead() }
+            }
+            if model.settingsVoiceLocalDownloading {
+                if let progress = model.settingsVoiceLocalProgress {
+                    ProgressView(value: progress)
+                        .accessibilityLabel(model.label("settings.speechOfflineDownloadModel"))
+                        .accessibilityIdentifier("voice-settings-local-model-progress")
+                    Text(progress.formatted(.percent.precision(.fractionLength(0)))).rnFont(14).monospacedDigit()
+                        .foregroundStyle(palette.secondary).accessibilityIdentifier("voice-settings-local-model-progress-value")
+                } else {
+                    ProgressView(model.label("settings.speechOfflineDownloadModel"))
+                        .accessibilityIdentifier("voice-settings-local-model-progress")
+                }
+                Button(model.label("common.cancel")) { dismissKeyboard(); model.cancelVoiceLocalModelDownload() }
+                    .rnFont(15, .semibold).foregroundStyle(palette.tint).frame(minHeight: 44)
+                    .disabled(!model.settingsVoiceLocalCanCancel).accessibilityIdentifier("voice-settings-local-model-cancel")
+            } else if model.settingsVoiceLocalWorking {
+                ProgressView(model.label("common.loading")).accessibilityIdentifier("voice-settings-local-model-working")
+            }
+            if let error = model.settingsVoiceLocalError {
+                Text(error).rnFont(14).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("voice-settings-local-model-error")
+            }
+            if let notice = model.settingsVoiceLocalNotice {
+                Text(notice).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("voice-settings-local-model-notice")
+            }
+        }
+    }
+    private var endpointEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            heading("settings.speechBaseUrl")
+            Text(model.label("settings.speechBaseUrlHint")).rnFont(14).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if endpointEditing {
+                TextField(model.label("settings.aiBaseUrlPlaceholder"), text: $endpointDraft, axis: .vertical)
+                    .focused($focused, equals: .endpoint).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .keyboardType(.URL).textFieldStyle(.roundedBorder).privacySensitive().disabled(!model.settingsVoiceCanEdit)
+                    .accessibilityLabel(model.label("settings.speechBaseUrl")).accessibilityIdentifier("voice-settings-endpoint-input")
+                HStack(spacing: 20) {
+                    action("common.save", id: "endpoint-save") { model.saveVoiceEndpoint(endpointDraft) }
+                    action("common.cancel", id: "endpoint-cancel") { endpointDraft = ""; endpointEditing = false }
+                }
+            } else {
+                action("common.edit", id: "endpoint-edit") {
+                    model.readVoiceEndpoint { value in endpointDraft = value; endpointEditing = true }
+                }
+            }
+        }
+    }
+    private func credentialEditor(_ options: NativeVoiceSettingsOptions) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            heading("settings.aiApiKey")
+            Text(model.label(options.provider == .openai ? "settings.speechOpenAICredentialShared" : "settings.speechGeminiCredentialShared"))
+                .rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            if options.provider == .openai {
+                Text(model.label("settings.aiApiKeyHint")).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let available = model.settingsVoiceCredentialAvailable {
+                Text(model.label(available ? "settings.aiCredentialPresent" : "settings.aiCredentialMissing"))
+                    .rnFont(14).foregroundStyle(palette.secondary).accessibilityIdentifier("voice-settings-credential-status")
+            } else {
+                Text(model.label("settings.feedback.loadFailed")).rnFont(14).foregroundStyle(palette.danger)
+                    .accessibilityIdentifier("voice-settings-credential-unavailable")
+            }
+            SecureField(model.label("settings.aiApiKeyPlaceholder"), text: $credentialDraft)
+                .focused($focused, equals: .credential).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder).privacySensitive().disabled(!model.settingsVoiceCanEdit)
+                .accessibilityLabel(model.label("settings.aiApiKey")).accessibilityIdentifier("voice-settings-credential-input")
+            HStack(spacing: 20) {
+                action("common.save", id: "credential-save", enabled: !credentialDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                    model.saveVoiceCredential(credentialDraft)
+                }
+                action("common.clear", id: "credential-clear") { credentialDraft = ""; model.clearVoiceCredential() }
+            }
+        }
+    }
+    private func action(_ key: String, id: String, enabled: Bool = true, perform: @escaping () -> Void) -> some View {
+        Button(model.label(key)) { dismissKeyboard(); perform() }.buttonStyle(.plain).rnFont(15, .semibold)
+            .foregroundStyle(palette.tint).frame(minHeight: 44).disabled(!model.settingsVoiceCanEdit || !enabled)
+            .accessibilityIdentifier("voice-settings-" + id)
+    }
+    private func choice(_ key: String, selected: Bool, id: String, perform: @escaping () -> Void) -> some View {
+        Button { dismissKeyboard(); perform() } label: {
+            HStack {
+                Text(model.label(key)).rnFont(15).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                if selected { Image(systemName: "checkmark").accessibilityHidden(true) }
+            }.frame(minHeight: 44).contentShape(Rectangle())
+        }.buttonStyle(.plain).foregroundStyle(palette.text).disabled(!model.settingsVoiceCanEdit)
+            .accessibilityAddTraits(selected ? .isSelected : []).accessibilityIdentifier("voice-settings-" + id)
+    }
+    private func heading(_ key: String) -> some View {
+        Text(model.label(key)).rnFont(15, .semibold).foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
+    }
+    private func providerLabel(_ provider: NativeVoiceProvider) -> String {
+        switch provider {
+        case .gemini: return model.label("settings.aiProviderGemini")
+        case .openai: return model.label("settings.aiProviderOpenAI")
+        case .whisper: return model.label("settings.speechProviderOffline")
+        case .parakeet: return model.label("settings.speechProviderParakeet")
+        }
+    }
+    private func updateDrafts() {
+        guard let value = model.settingsVoiceOptions else { return }
+        modelDraft = value.model; languageDraft = value.language == "auto" ? "" : value.language
+    }
+    private func clearSensitiveDrafts() {
+        credentialDraft = ""; endpointDraft = ""; endpointEditing = false; focused = nil
+    }
+    private func dismissKeyboard() {
+        focused = nil
+        _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
 struct SettingsScreen: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -24,6 +716,7 @@ struct SettingsScreen: View {
     @State private var areaDeleteConfirmAnswered = false
     @State private var syncReloadConfirmPresented = false
     @State private var syncBackendPending: String?
+    @State private var syncCloudKitHistoryExpanded = false
     private enum SyncField: Hashable { case url, username, password, token, encryption(String) }
     @FocusState private var syncField: SyncField?
     @State private var notificationPicker: String?
@@ -48,6 +741,8 @@ struct SettingsScreen: View {
                     else if model.settingsFeedbackPresented { model.closeFeedbackSettings() }
                     else if model.settingsAboutPresented { model.closeAboutSettings() }
                     else if model.settingsNotificationsPresented { model.closeNotificationSettings() }
+                    else if model.settingsVoicePresented { model.closeVoiceSettings() }
+                    else if model.settingsAITextPresented { model.closeAITextConfiguration() }
                     else if model.settingsAIPresented { model.retireAISettingsPage() }
                     else if model.settingsCalendarPresented { calendarSubscriptionField = nil; model.closeCalendarSettings() }
                     else if model.settingsGeneralPresented { model.closeGeneralSettings() }
@@ -67,7 +762,7 @@ struct SettingsScreen: View {
                           || model.notificationSettingActive || (model.calendarSettingActive && !model.settingsCalendarCanCancel) || (model.settingsGtdPresented ? model.gtdWorkflowPending : model.generalPreferenceActive) || model.settingsTaxonomyActive || model.settingsPersonDeleteActive || model.settingsAreaDeleteActive || model.settingsAreaEditActive
                           || model.settingsPersonCreatePresented || model.settingsPersonEditPresented)))
                 .accessibilityLabel(model.label("common.back"))
-                .accessibilityIdentifier(model.settingsRemindersPresented ? "apple-reminders-back" : model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdPomodoroPresented ? "gtd-pomodoro-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsFeedbackPresented ? "feedback-back" : model.settingsAboutPresented ? "about-back" : model.settingsNotificationsPresented ? "notifications-back" : model.settingsAIPresented ? "ai-summary-back" : model.settingsCalendarPresented ? "calendar-settings-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : model.settingsAdvancedPresented ? "advanced-back" : "settings-back")
+                .accessibilityIdentifier(model.settingsRemindersPresented ? "apple-reminders-back" : model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdPomodoroPresented ? "gtd-pomodoro-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsFeedbackPresented ? "feedback-back" : model.settingsAboutPresented ? "about-back" : model.settingsNotificationsPresented ? "notifications-back" : model.settingsVoicePresented ? "voice-settings-back" : model.settingsAITextPresented ? "ai-text-back" : model.settingsAIPresented ? "ai-summary-back" : model.settingsCalendarPresented ? "calendar-settings-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : model.settingsAdvancedPresented ? "advanced-back" : "settings-back")
                 if model.settingsRemindersPresented {
                     Text(model.label("settings.appleRemindersImport.appleReminders")).rnFont(20, .bold).foregroundStyle(palette.text)
                         .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
@@ -93,10 +788,10 @@ struct SettingsScreen: View {
                         .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("calendar-settings-title")
                 } else if model.settingsAIPresented {
-                    Text(model.label("settings.ai")).rnFont(20, .bold).foregroundStyle(palette.text)
+                    Text(model.label(model.settingsVoicePresented ? "settings.speechTitle" : model.settingsAITextPresented ? "settings.aiConfigureTextAssistant" : "settings.ai")).rnFont(20, .bold).foregroundStyle(palette.text)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("ai-summary-title")
+                        .accessibilityIdentifier(model.settingsVoicePresented ? "voice-settings-title" : model.settingsAITextPresented ? "ai-text-title" : "ai-summary-title")
                 } else if model.settingsAdvancedPresented {
                     Text(model.settingsMenu.object("advanced").text("title").isEmpty ? model.label("settings.advanced") : model.settingsMenu.object("advanced").text("title"))
                         .rnFont(20, .bold).foregroundStyle(palette.text)
@@ -126,6 +821,8 @@ struct SettingsScreen: View {
             else if model.settingsGtdPresented { gtdContent }
             else if model.settingsAboutPresented { AboutSettingsCard(model: model, palette: palette) }
             else if model.settingsNotificationsPresented { notificationsContent }
+            else if model.settingsVoicePresented { SpeechSettingsCard(model: model, palette: palette) }
+            else if model.settingsAITextPresented { AITextConfigurationCard(model: model, palette: palette) }
             else if model.settingsAIPresented { aiSummaryContent }
             else if model.settingsCalendarPresented { calendarSettingsContent }
             else if model.settingsGeneralPresented { generalContent }
@@ -339,7 +1036,9 @@ struct SettingsScreen: View {
             else if model.settingsNotificationsPresented { model.closeNotificationSettings() }
             else if model.settingsAIPresented {
                 if !model.retryNeeded && !model.appLock.concealed && (!model.busy || model.settingsAICanCancel) {
-                    model.retireAISettingsPage()
+                    if model.settingsVoicePresented { model.closeVoiceSettings() }
+                    else if model.settingsAITextPresented { model.closeAITextConfiguration() }
+                    else { model.retireAISettingsPage() }
                 }
             }
             else if model.settingsCalendarPresented { calendarSubscriptionField = nil; model.closeCalendarSettings() }
@@ -350,6 +1049,97 @@ struct SettingsScreen: View {
         }
     }
 
+    private var syncBackendContent: AnyView {
+        AnyView(Group {
+            let backend = model.settingsSync.object("backend")
+            if !backend.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(backend.text("title")).rnFont(16, .semibold).foregroundStyle(palette.text)
+                    ForEach(backend.objects("options").indices, id: \.self) { index in
+                        let option = backend.objects("options")[index]
+                        Button {
+                            guard !option.flag("selected") else { return }
+                            syncField = nil
+                            if model.settingsSyncDraftDirty {
+                                syncBackendPending = option.text("option")
+                                syncReloadConfirmPresented = true
+                            } else { Task { await model.selectSettingsSyncBackend(option.text("option")) } }
+                        } label: {
+                            HStack {
+                                Text(option.text("label")).rnFont(15, .semibold)
+                                Spacer()
+                                if option.flag("selected") { Image(systemName: "checkmark").accessibilityHidden(true) }
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).foregroundStyle(palette.text)
+                            .disabled(!model.settingsSyncCanEdit || model.settingsSyncChecking)
+                            .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
+                            .accessibilityIdentifier("sync-option-" + option.text("option"))
+                    }
+                    Text(backend.text("hint")).rnFont(13).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+            }
+        })
+    }
+
+    private var syncDestinationContent: AnyView {
+        AnyView(Group {
+            let off = model.settingsSync.object("off")
+            if !off.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(off.text("title")).rnFont(16, .semibold)
+                    Text(off.text("description")).rnFont(14).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+            }
+            if model.settingsSync.object("panel").text("kind") == "file" { AnyView(syncDirectoryContent) }
+            if model.settingsSync.object("panel").text("kind") == "cloudkit" { AnyView(syncCloudKitContent) }
+            if model.settingsSync.object("panel").text("kind") == "dropbox" { AnyView(syncDropboxContent) }
+            if ["webdav", "selfhosted"].contains(model.settingsSync.object("panel").text("kind")) { AnyView(syncRemoteContent) }
+            if !["selfhosted", "file", "cloudkit"].contains(model.settingsSync.object("panel").text("kind")),
+               !model.settingsSync.object("encryption").isEmpty { AnyView(syncEncryptionContent) }
+        })
+    }
+
+    private var syncFeedbackContent: AnyView {
+        AnyView(Group {
+            Button { syncField = nil; Task { await model.openAppleRemindersSettings() } } label: {
+                HStack {
+                    Text(model.label("settings.appleRemindersImport.appleReminders")).rnFont(16, .semibold)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(); Image(systemName: "chevron.right").accessibilityHidden(true)
+                }.frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .disabled(!model.settingsSyncCanEdit || model.settingsSyncChecking || model.settingsSyncDraftDirty)
+                .accessibilityIdentifier("sync-apple-reminders")
+            if let failure = model.settingsSyncError {
+                Text(failure).rnFont(14).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-error")
+            }
+            if let status = model.settingsSyncStatus, !status.isEmpty {
+                Text(status).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-status")
+            }
+            if model.settingsSyncNeedsReload {
+                Text("Reload saved settings to review them before trying again.").rnFont(14)
+                    .foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                syncField = nil
+                if model.settingsSyncDraftDirty { syncBackendPending = nil; syncReloadConfirmPresented = true }
+                else { Task { await model.reloadSyncSettings() } }
+            } label: {
+                Text("Reload settings").rnFont(15, .semibold)
+                    .frame(minHeight: 44).contentShape(Rectangle())
+            }.disabled(!model.settingsSyncCanClose)
+                .accessibilityIdentifier("sync-reload")
+            if model.busy || model.settingsSyncChecking {
+                ProgressView().frame(maxWidth: .infinity).padding(8)
+                    .accessibilityIdentifier(model.settingsSyncEncryptionTypedHeld ? "sync-encryption-typed-held" : "sync-progress")
+            }
+        })
+    }
+
     private var syncContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -357,80 +1147,9 @@ struct SettingsScreen: View {
                     Text("Sync is unavailable in this rehearsal.").rnFont(15).foregroundStyle(palette.secondary)
                         .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-unavailable")
                 } else {
-                    let backend = model.settingsSync.object("backend")
-                    if !backend.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(backend.text("title")).rnFont(16, .semibold).foregroundStyle(palette.text)
-                            ForEach(backend.objects("options").indices, id: \.self) { index in
-                                let option = backend.objects("options")[index]
-                                Button {
-                                    guard !option.flag("selected") else { return }
-                                    syncField = nil
-                                    if model.settingsSyncDraftDirty {
-                                        syncBackendPending = option.text("option")
-                                        syncReloadConfirmPresented = true
-                                    } else { Task { await model.selectSettingsSyncBackend(option.text("option")) } }
-                                } label: {
-                                    HStack {
-                                        Text(option.text("label")).rnFont(15, .semibold)
-                                        Spacer()
-                                        if option.flag("selected") { Image(systemName: "checkmark").accessibilityHidden(true) }
-                                    }.frame(minHeight: 44).contentShape(Rectangle())
-                                }.buttonStyle(.plain).foregroundStyle(palette.text)
-                                    .disabled(!model.settingsSyncCanEdit || model.settingsSyncChecking)
-                                    .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
-                                    .accessibilityIdentifier("sync-option-" + option.text("option"))
-                            }
-                            Text(backend.text("hint")).rnFont(13).foregroundStyle(palette.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    let off = model.settingsSync.object("off")
-                    if !off.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(off.text("title")).rnFont(16, .semibold)
-                            Text(off.text("description")).rnFont(14).foregroundStyle(palette.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    if model.settingsSync.object("panel").text("kind") == "file" { syncDirectoryContent }
-                    if ["webdav", "selfhosted"].contains(model.settingsSync.object("panel").text("kind")) { syncRemoteContent }
-                    if !["selfhosted", "file"].contains(model.settingsSync.object("panel").text("kind")),
-                       !model.settingsSync.object("encryption").isEmpty { syncEncryptionContent }
-                    Button { syncField = nil; Task { await model.openAppleRemindersSettings() } } label: {
-                        HStack {
-                            Text(model.label("settings.appleRemindersImport.appleReminders")).rnFont(16, .semibold)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(); Image(systemName: "chevron.right").accessibilityHidden(true)
-                        }.frame(minHeight: 44).contentShape(Rectangle())
-                    }.buttonStyle(.plain).padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                        .disabled(!model.settingsSyncCanEdit || model.settingsSyncChecking || model.settingsSyncDraftDirty)
-                        .accessibilityIdentifier("sync-apple-reminders")
-                    if let failure = model.settingsSyncError {
-                        Text(failure).rnFont(14).foregroundStyle(palette.danger)
-                            .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-error")
-                    }
-                    if let status = model.settingsSyncStatus, !status.isEmpty {
-                        Text(status).rnFont(14).foregroundStyle(palette.secondary)
-                            .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-status")
-                    }
-                    if model.settingsSyncNeedsReload {
-                        Text("Reload saved settings to review them before trying again.").rnFont(14)
-                            .foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Button {
-                        syncField = nil
-                        if model.settingsSyncDraftDirty { syncBackendPending = nil; syncReloadConfirmPresented = true }
-                        else { Task { await model.reloadSyncSettings() } }
-                    } label: {
-                        Text("Reload settings").rnFont(15, .semibold)
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                    }.disabled(!model.settingsSyncCanClose)
-                        .accessibilityIdentifier("sync-reload")
-                    if model.busy || model.settingsSyncChecking {
-                        ProgressView().frame(maxWidth: .infinity).padding(8)
-                            .accessibilityIdentifier(model.settingsSyncEncryptionTypedHeld ? "sync-encryption-typed-held" : "sync-progress")
-                    }
+                    syncBackendContent
+                    syncDestinationContent
+                    syncFeedbackContent
                 }
             }.padding(16).foregroundStyle(palette.text)
         }.accessibilityIdentifier("sync-screen")
@@ -665,6 +1384,108 @@ struct SettingsScreen: View {
         }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
     }
 
+    private var syncCloudKitContent: some View {
+        let panel = model.settingsSync.object("panel"), help = panel.object("help"), action = panel.object("syncNow")
+        let lastSync = panel.object("lastSync"), history = lastSync.object("history")
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(help.text("title")).rnFont(16, .semibold).accessibilityAddTraits(.isHeader)
+            Text(help.text("text")).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(help.text("status")).rnFont(14).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-cloudkit-account-status")
+            Button { syncField = nil; Task { await model.performSettingsSync("syncNow") } } label: {
+                VStack(spacing: 4) {
+                    Text(action.text("label")).rnFont(15, .semibold)
+                    if let description = action["description"] as? String, !description.isEmpty {
+                        Text(description).rnFont(12).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.frame(maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.bordered).tint(palette.tint)
+                .disabled(!model.settingsSyncActionEnabled("syncNow"))
+                .accessibilityIdentifier("sync-now")
+            Text(lastSync.text("title")).rnFont(15, .semibold)
+            Text(lastSync.text("status")).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            ForEach(lastSync["lines"] as? [String] ?? [], id: \.self) {
+                Text($0).rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let failure = lastSync["error"] as? String {
+                Text(failure).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+            }
+            if !history.isEmpty {
+                Button { syncCloudKitHistoryExpanded.toggle() } label: {
+                    Text(history.text(syncCloudKitHistoryExpanded ? "open" : "closed")).rnFont(14, .semibold)
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityIdentifier("sync-cloudkit-history")
+                if syncCloudKitHistoryExpanded {
+                    ForEach(history["entries"] as? [String] ?? [], id: \.self) {
+                        Text($0).rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var syncDropboxContent: some View {
+        let panel = model.settingsSync.object("panel"), connection = panel.object("connect")
+        let last = panel.object("lastSync"), history = last.object("history")
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(panel.text("title")).rnFont(17, .semibold).accessibilityAddTraits(.isHeader)
+            Text(panel.text("description")).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(panel.text("redirect")).rnFont(12).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("sync-dropbox-redirect")
+            if let unavailable = panel["notConfigured"] as? String {
+                Text(unavailable).rnFont(13).foregroundStyle(palette.warning).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("sync-dropbox-not-configured")
+            }
+            Text(panel.text("status")).rnFont(14).foregroundStyle(palette.secondary)
+                .accessibilityIdentifier("sync-dropbox-connection-status")
+            Button { syncField = nil; Task { await model.connectOrDisconnectDropbox() } } label: {
+                VStack(spacing: 4) {
+                    Text(connection.text("label")).rnFont(15, .semibold)
+                    if let description = connection["description"] as? String, !description.isEmpty {
+                        Text(description).rnFont(12).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.frame(maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.bordered).tint(palette.tint)
+                .disabled(!model.settingsSyncCanEdit || model.settingsSyncChecking || !connection.flag("enabled"))
+                .accessibilityIdentifier("sync-dropbox-connect")
+            ForEach(["test", "syncNow"], id: \.self) { action in
+                let value = panel.object(action)
+                Button { syncField = nil; Task { await model.performSettingsSync(action) } } label: {
+                    VStack(spacing: 4) {
+                        Text(value.text("label")).rnFont(15, .semibold)
+                        if let description = value["description"] as? String, !description.isEmpty {
+                            Text(description).rnFont(12).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }.frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.bordered).tint(palette.tint).disabled(!model.settingsSyncActionEnabled(action))
+                    .accessibilityIdentifier(action == "test" ? "sync-test" : "sync-now")
+            }
+            Text(last.text("title")).rnFont(15, .semibold)
+            Text(last.text("status")).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            ForEach(last["lines"] as? [String] ?? [], id: \.self) {
+                Text($0).rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let error = last["error"] as? String {
+                Text(error).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+            }
+            if !history.isEmpty {
+                Button { syncCloudKitHistoryExpanded.toggle() } label: {
+                    Text(history.text(syncCloudKitHistoryExpanded ? "open" : "closed")).rnFont(14, .semibold).frame(minHeight: 44)
+                }.buttonStyle(.plain).accessibilityIdentifier("sync-dropbox-history")
+                if syncCloudKitHistoryExpanded {
+                    ForEach(history["entries"] as? [String] ?? [], id: \.self) {
+                        Text($0).rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            #if DEBUG && targetEnvironment(simulator)
+            if !model.dropboxAuthorizationFixtureState.isEmpty {
+                Text(model.dropboxAuthorizationFixtureState).rnFont(12).accessibilityIdentifier("dropbox-authorization-fixture-state")
+            }
+            #endif
+        }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private var syncDirectoryContent: some View {
         let panel = model.settingsSync.object("panel")
         let help = panel.object("help"), folder = panel.object("folder"), action = panel.object("syncNow")
@@ -696,64 +1517,82 @@ struct SettingsScreen: View {
         }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
     }
 
+    private var gtdFeatureContent: AnyView {
+        AnyView(Group {
+            Text(model.gtdWorkflow.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 12) {
+                generalSettingLabel(model.gtdWorkflow.object("features"), description: "description")
+                palette.border.frame(height: 0.5)
+                gtdToggle(model.gtdWorkflow.object("pomodoro"))
+                if model.gtdWorkflow["pomodoroSettings"] is CoreObject { gtdNavigationRow("pomodoroSettings") }
+            }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        })
+    }
+
+    private func gtdWorkflowChoices(_ field: String) -> AnyView {
+        AnyView(Group {
+            VStack(alignment: .leading, spacing: 12) {
+                generalSettingLabel(model.gtdWorkflow.object(field), description: "description")
+                let options = model.gtdWorkflow.object(field).objects("options")
+                let columns = dynamicTypeSize.isAccessibilitySize
+                    ? (field == "defaultProjectFlowMode" ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 140), spacing: 4)])
+                    : Array(repeating: GridItem(.flexible(), spacing: 4), count: max(1, options.count))
+                LazyVGrid(columns: columns, spacing: 4) {
+                    ForEach(options.indices, id: \.self) { index in
+                        let option = options[index]
+                        Button {
+                            Task { await model.chooseGtdWorkflow(option.object("edit")); gtdTimeFocused = false }
+                        } label: {
+                            Text(option.text("label")).rnFont(14, .semibold)
+                                .foregroundStyle(option.flag("selected") ? palette.tint : palette.secondary)
+                                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 6)
+                                .background(option.flag("selected") ? palette.filter : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain).disabled(!model.gtdWorkflowEnabled)
+                            .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
+                            .accessibilityIdentifier("gtd-" + field + "-" + (field == "focusTaskLimit" ? String(option.number("value")) : option.text("value")))
+                    }
+                }.padding(4).background(palette.bg, in: RoundedRectangle(cornerRadius: 10))
+            }.padding(14)
+        })
+    }
+
+    private var gtdScheduleContent: AnyView {
+        AnyView(Group {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    generalSettingLabel(model.gtdWorkflow.object("defaultScheduleTime"), description: "description")
+                    TextField(model.gtdWorkflow.object("defaultScheduleTime").text("placeholder"), text: Binding(
+                        get: { model.gtdScheduleDraft }, set: { model.setGtdScheduleDraft($0) }))
+                        .rnFont(16).keyboardType(.numbersAndPunctuation).submitLabel(.done)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .focused($gtdTimeFocused).disabled(!model.gtdWorkflowEnabled)
+                        .padding(12).frame(minHeight: 44)
+                        .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+                        .accessibilityLabel(model.gtdWorkflow.object("defaultScheduleTime").text("label"))
+                        .accessibilityIdentifier("gtd-defaultScheduleTime")
+                        .onSubmit { gtdTimeFocused = false; Task { await model.commitGtdScheduleDraft() } }
+                }.padding(14)
+                ForEach(["focusTaskLimit", "defaultProjectFlowMode"], id: \.self) { field in
+                    palette.border.frame(height: 0.5)
+                    gtdWorkflowChoices(field)
+                    if field == "focusTaskLimit" {
+                        palette.border.frame(height: 0.5)
+                        gtdToggle(model.gtdWorkflow.object("focusIncludeStartDates")).padding(14)
+                    }
+                }
+                gtdNavigationRow("autoArchive")
+            }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        })
+    }
+
     private var gtdContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text(model.gtdWorkflow.text("description")).rnFont(13).foregroundStyle(palette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                VStack(alignment: .leading, spacing: 12) {
-                    generalSettingLabel(model.gtdWorkflow.object("features"), description: "description")
-                    palette.border.frame(height: 0.5)
-                    gtdToggle(model.gtdWorkflow.object("pomodoro"))
-                    if model.gtdWorkflow["pomodoroSettings"] is CoreObject { gtdNavigationRow("pomodoroSettings") }
-                }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        generalSettingLabel(model.gtdWorkflow.object("defaultScheduleTime"), description: "description")
-                        TextField(model.gtdWorkflow.object("defaultScheduleTime").text("placeholder"), text: Binding(
-                            get: { model.gtdScheduleDraft }, set: { model.setGtdScheduleDraft($0) }))
-                            .rnFont(16).keyboardType(.numbersAndPunctuation).submitLabel(.done)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .focused($gtdTimeFocused).disabled(!model.gtdWorkflowEnabled)
-                            .padding(12).frame(minHeight: 44)
-                            .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
-                            .accessibilityLabel(model.gtdWorkflow.object("defaultScheduleTime").text("label"))
-                            .accessibilityIdentifier("gtd-defaultScheduleTime")
-                            .onSubmit { gtdTimeFocused = false; Task { await model.commitGtdScheduleDraft() } }
-                    }.padding(14)
-                    ForEach(["focusTaskLimit", "defaultProjectFlowMode"], id: \.self) { field in
-                        palette.border.frame(height: 0.5)
-                        VStack(alignment: .leading, spacing: 12) {
-                            generalSettingLabel(model.gtdWorkflow.object(field), description: "description")
-                            let options = model.gtdWorkflow.object(field).objects("options")
-                            let columns = dynamicTypeSize.isAccessibilitySize
-                                ? (field == "defaultProjectFlowMode" ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 140), spacing: 4)])
-                                : Array(repeating: GridItem(.flexible(), spacing: 4), count: max(1, options.count))
-                            LazyVGrid(columns: columns, spacing: 4) {
-                                ForEach(options.indices, id: \.self) { index in
-                                    let option = options[index]
-                                    Button {
-                                        Task { await model.chooseGtdWorkflow(option.object("edit")); gtdTimeFocused = false }
-                                    } label: {
-                                        Text(option.text("label")).rnFont(14, .semibold)
-                                            .foregroundStyle(option.flag("selected") ? palette.tint : palette.secondary)
-                                            .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                                            .frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 6)
-                                            .background(option.flag("selected") ? palette.filter : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-                                    }.buttonStyle(.plain).disabled(!model.gtdWorkflowEnabled)
-                                        .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
-                                        .accessibilityIdentifier("gtd-" + field + "-" + (field == "focusTaskLimit" ? String(option.number("value")) : option.text("value")))
-                                }
-                            }.padding(4).background(palette.bg, in: RoundedRectangle(cornerRadius: 10))
-                        }.padding(14)
-                        if field == "focusTaskLimit" {
-                            palette.border.frame(height: 0.5)
-                            gtdToggle(model.gtdWorkflow.object("focusIncludeStartDates")).padding(14)
-                        }
-                    }
-                    gtdNavigationRow("autoArchive")
-                }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                gtdFeatureContent
+                gtdScheduleContent
                 gtdFeedback
                 ForEach([["taskEditor", "capture"], ["review", "inbox"]], id: \.self) { fields in
                     VStack(spacing: 0) {
@@ -1135,11 +1974,12 @@ struct SettingsScreen: View {
                         .accessibilityIdentifier("gtd-default-area")
                 }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                 VStack(spacing: 0) {
-                    ForEach(["quickAddAutoClean", "naturalLanguageDates"], id: \.self) { field in
+                    ForEach(["quickAddAutoClean", "naturalLanguageDates", "saveAudio"], id: \.self) { field in
                         if field != "quickAddAutoClean" { palette.border.frame(height: 0.5) }
                         gtdToggle(model.gtdCapture.object(field)).padding(14)
                     }
                 }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                GmailCaptureCard(model: model, gmail: model.gmailCapture, palette: palette)
                 if !model.gtdCaptureAreaPicker { gtdFeedback }
             }.padding(16).padding(.bottom, 24)
         }.accessibilityIdentifier("gtd-capture-scroll")
@@ -1224,112 +2064,149 @@ struct SettingsScreen: View {
         }
     }
 
+    private func generalAppearanceContent(_ appearance: CoreObject) -> AnyView {
+        AnyView(Group {
+            Text(appearance.text("title")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                .accessibilityAddTraits(.isHeader)
+            VStack(spacing: 0) {
+                generalSettingRow(appearance.object("theme"), type: "theme", enabled: true)
+                palette.border.frame(height: 0.5)
+                Toggle(isOn: Binding(
+                    get: { appearance.object("showTaskAge")["value"] as? Bool ?? false },
+                    set: { value in Task { await model.saveGeneralPreference(["type": "showTaskAge", "value": value]) } }
+                )) {
+                    generalSettingLabel(appearance.object("showTaskAge"), description: "description")
+                }
+                .tint(palette.tint).padding(14).frame(minHeight: 48)
+                .disabled(!model.generalPreferenceEnabled)
+                .accessibilityIdentifier("general-show-task-age")
+                palette.border.frame(height: 0.5)
+                generalSettingRow(appearance.object("quickAccess"), type: "quickAccessView", enabled: true)
+            }
+            .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        })
+    }
+
+    private func generalPrivacyContent(_ privacy: CoreObject) -> AnyView {
+        AnyView(Group {
+            Text(privacy.text("title")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                .accessibilityAddTraits(.isHeader)
+            Toggle(isOn: Binding(get: { model.appLockRow.flag("value") },
+                                 set: { value in Task { await model.saveAppLock(value) } })) {
+                generalSettingLabel(model.appLockRow.isEmpty ? privacy.object("appLock") : model.appLockRow, description: "description")
+            }
+            .tint(palette.tint).padding(14).disabled(!model.appLockCanChange)
+            .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityIdentifier("general-app-lock")
+            if model.appLock.enabled == true && !model.appLockDelayRow.isEmpty {
+                Button { model.openGeneralPreferencePicker("appLockRelockDelay") } label: {
+                    HStack {
+                        generalSettingLabel(model.appLockDelayRow, description: "description")
+                        Spacer()
+                        Text(model.appLockDelayRow.text("value")).rnFont(14).foregroundStyle(palette.secondary)
+                        Image(systemName: "chevron.right").foregroundStyle(palette.secondary)
+                    }.padding(14).frame(minHeight: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(!model.generalPreferenceEnabled)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityIdentifier("general-app-lock-delay")
+            }
+            if let failure = model.appLockError {
+                Text(failure).rnFont(13).foregroundStyle(palette.danger)
+                    .accessibilityIdentifier("general-app-lock-error")
+                if model.retryNeeded || model.appLockAwaitingRefresh {
+                    Button(model.label("common.retry")) { Task { await model.retryAppLockRead() } }
+                        .disabled(model.busy).accessibilityIdentifier("general-app-lock-retry")
+                }
+            }
+        })
+    }
+
+    private var generalSearchContent: AnyView {
+        AnyView(Group {
+            if model.searchAvailable {
+                Toggle(isOn: Binding(get: { model.searchConsentEnabled },
+                                     set: { enabled in Task { await model.saveSearchConsent(enabled) } })) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(model.label("settings.iosSearchLabel")).rnFont(15).foregroundStyle(palette.text)
+                        Text(model.label("settings.iosSearchDesc")).rnFont(12).foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(palette.tint).padding(14).disabled(!model.searchConsentCanChange)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityIdentifier("general-ios-search")
+                if model.appLock.enabled == true {
+                    Text(model.label("settings.iosSearchPaused")).rnFont(12).foregroundStyle(palette.secondary)
+                        .accessibilityIdentifier("general-ios-search-paused")
+                }
+                if let failure = model.searchConsentError {
+                    Text(failure).rnFont(13).foregroundStyle(palette.danger)
+                        .accessibilityIdentifier("general-ios-search-consent-error")
+                    Button(model.label("common.retry")) { Task { await model.retrySearchConsent() } }
+                        .disabled(model.searchConsentBusy || model.busy)
+                        .accessibilityIdentifier("general-ios-search-consent-retry")
+                }
+                if let failure = model.searchPublicationError {
+                    Text(failure).rnFont(13).foregroundStyle(palette.danger)
+                        .accessibilityIdentifier("general-ios-search-publication-error")
+                    Button(model.label("common.retry")) { model.retrySearchPublication() }
+                        .disabled(model.searchConsentBusy || model.busy)
+                        .accessibilityIdentifier("general-ios-search-publication-retry")
+                }
+                #if DEBUG && targetEnvironment(simulator)
+                if !model.searchTestState.isEmpty {
+                    Text(model.searchTestState).rnFont(12)
+                        .accessibilityIdentifier("ios-search-test-state")
+                }
+                #endif
+            }
+        })
+    }
+
+    private func generalRegionalContent(_ regional: CoreObject) -> AnyView {
+        AnyView(Group {
+            generalSettingRow(model.generalSettings.object("language"), type: "language", enabled: true)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+            VStack(spacing: 0) {
+                Button { model.toggleGeneralRegional() } label: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(regional.text("label")).rnFont(15).foregroundStyle(palette.text)
+                            Text(regional.text("summary")).rnFont(12).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: model.generalRegionalOpen ? "chevron.up" : "chevron.down")
+                            .foregroundStyle(palette.secondary).accessibilityHidden(true)
+                    }.padding(14).frame(minHeight: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(!model.generalPreferenceEnabled)
+                .accessibilityValue(model.generalRegionalOpen ? "expanded" : "collapsed")
+                .accessibilityIdentifier("general-regional-toggle")
+                if model.generalRegionalOpen {
+                    ForEach(["weekStart", "dateFormat", "calendarSystem", "timeFormat"], id: \.self) { type in
+                        if let row = regional[type] as? CoreObject {
+                            palette.border.frame(height: 0.5)
+                            generalSettingRow(row, type: type, enabled: true)
+                        }
+                    }
+                }
+            }
+            .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+            if model.generalPreferencePicker == nil { generalPreferenceFailure }
+        })
+    }
+
     private var generalContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 let appearance = model.generalSettings.object("appearance")
                 let privacy = model.generalSettings.object("privacy")
                 let regional = model.generalSettings.object("regional")
-                Text(appearance.text("title")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
-                    .accessibilityAddTraits(.isHeader)
-                VStack(spacing: 0) {
-                    generalSettingRow(appearance.object("theme"), type: "theme", enabled: true)
-                    palette.border.frame(height: 0.5)
-                    Toggle(isOn: Binding(
-                        get: { appearance.object("showTaskAge")["value"] as? Bool ?? false },
-                        set: { value in Task { await model.saveGeneralPreference(["type": "showTaskAge", "value": value]) } }
-                    )) {
-                        generalSettingLabel(appearance.object("showTaskAge"), description: "description")
-                    }
-                    .tint(palette.tint).padding(14).frame(minHeight: 48)
-                    .disabled(!model.generalPreferenceEnabled)
-                    .accessibilityIdentifier("general-show-task-age")
-                    palette.border.frame(height: 0.5)
-                    generalSettingRow(appearance.object("quickAccess"), type: "quickAccessView", enabled: true)
-                }
-                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                Text(privacy.text("title")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
-                    .accessibilityAddTraits(.isHeader)
-                Toggle(isOn: Binding(get: { model.appLockRow.flag("value") },
-                                     set: { value in Task { await model.saveAppLock(value) } })) {
-                    generalSettingLabel(model.appLockRow.isEmpty ? privacy.object("appLock") : model.appLockRow, description: "description")
-                }
-                .tint(palette.tint).padding(14).disabled(!model.appLockCanChange)
-                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                .accessibilityIdentifier("general-app-lock")
-                if let failure = model.appLockError {
-                    Text(failure).rnFont(13).foregroundStyle(palette.danger)
-                        .accessibilityIdentifier("general-app-lock-error")
-                    if model.retryNeeded || model.appLockAwaitingRefresh {
-                        Button(model.label("common.retry")) { Task { await model.retryAppLockRead() } }
-                            .disabled(model.busy).accessibilityIdentifier("general-app-lock-retry")
-                    }
-                }
-                if model.searchAvailable {
-                    Toggle(isOn: Binding(get: { model.searchConsentEnabled },
-                                         set: { enabled in Task { await model.saveSearchConsent(enabled) } })) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(model.label("settings.iosSearchLabel")).rnFont(15).foregroundStyle(palette.text)
-                            Text(model.label("settings.iosSearchDesc")).rnFont(12).foregroundStyle(palette.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .tint(palette.tint).padding(14).disabled(!model.searchConsentCanChange)
-                    .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                    .accessibilityIdentifier("general-ios-search")
-                    if model.appLock.enabled == true {
-                        Text(model.label("settings.iosSearchPaused")).rnFont(12).foregroundStyle(palette.secondary)
-                            .accessibilityIdentifier("general-ios-search-paused")
-                    }
-                    if let failure = model.searchConsentError {
-                        Text(failure).rnFont(13).foregroundStyle(palette.danger)
-                            .accessibilityIdentifier("general-ios-search-consent-error")
-                        Button(model.label("common.retry")) { Task { await model.retrySearchConsent() } }
-                            .disabled(model.searchConsentBusy || model.busy)
-                            .accessibilityIdentifier("general-ios-search-consent-retry")
-                    }
-                    if let failure = model.searchPublicationError {
-                        Text(failure).rnFont(13).foregroundStyle(palette.danger)
-                            .accessibilityIdentifier("general-ios-search-publication-error")
-                        Button(model.label("common.retry")) { model.retrySearchPublication() }
-                            .disabled(model.searchConsentBusy || model.busy)
-                            .accessibilityIdentifier("general-ios-search-publication-retry")
-                    }
-                    #if DEBUG && targetEnvironment(simulator)
-                    if !model.searchTestState.isEmpty {
-                        Text(model.searchTestState).rnFont(12)
-                            .accessibilityIdentifier("ios-search-test-state")
-                    }
-                    #endif
-                }
-                generalSettingRow(model.generalSettings.object("language"), type: "language", enabled: true)
-                    .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                VStack(spacing: 0) {
-                    Button { model.toggleGeneralRegional() } label: {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(regional.text("label")).rnFont(15).foregroundStyle(palette.text)
-                                Text(regional.text("summary")).rnFont(12).foregroundStyle(palette.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                            Image(systemName: model.generalRegionalOpen ? "chevron.up" : "chevron.down")
-                                .foregroundStyle(palette.secondary).accessibilityHidden(true)
-                        }.padding(14).frame(minHeight: 48).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).disabled(!model.generalPreferenceEnabled)
-                    .accessibilityValue(model.generalRegionalOpen ? "expanded" : "collapsed")
-                    .accessibilityIdentifier("general-regional-toggle")
-                    if model.generalRegionalOpen {
-                        ForEach(["weekStart", "dateFormat", "calendarSystem", "timeFormat"], id: \.self) { type in
-                            if let row = regional[type] as? CoreObject {
-                                palette.border.frame(height: 0.5)
-                                generalSettingRow(row, type: type, enabled: true)
-                            }
-                        }
-                    }
-                }
-                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                if model.generalPreferencePicker == nil { generalPreferenceFailure }
+                generalAppearanceContent(appearance)
+                generalPrivacyContent(privacy)
+                generalSearchContent
+                generalRegionalContent(regional)
             }
             .padding(16)
         }
@@ -1377,7 +2254,7 @@ struct SettingsScreen: View {
 
     private var generalPreferenceSheet: some View {
         let type = model.generalPreferencePicker ?? ""
-        let picker = ["quickAccessView", "theme"].contains(type)
+        let picker = type == "appLockRelockDelay" ? model.appLockDelayRow : ["quickAccessView", "theme"].contains(type)
             ? model.generalSettings.object("appearance").object(type == "theme" ? "theme" : "quickAccess")
             : type == "language" ? model.generalSettings.object("language") : model.generalSettings.object("regional").object(type)
         let groups = picker["groups"] as? [[CoreObject]] ?? [picker["options"] as? [CoreObject] ?? []]
@@ -1428,7 +2305,8 @@ struct SettingsScreen: View {
         .buttonStyle(.plain).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
         .disabled(!model.generalPreferenceEnabled)
         .accessibilityAddTraits(option["selected"] as? Bool == true ? .isSelected : [])
-        .accessibilityIdentifier("general-option-" + option.text("value"))
+        .accessibilityIdentifier("general-option-" + (option.object("edit").text("type") == "appLockRelockDelay"
+            ? String(option.number("value")) : option.text("value")))
     }
 
     private var calendarSettingsContent: some View {
@@ -1809,59 +2687,109 @@ struct SettingsScreen: View {
         }
     }
 
+    private func notificationsTaskContent(_ task: CoreObject) -> AnyView {
+        AnyView(Group {
+            VStack(spacing: 0) {
+                notificationToggle(task.object("master"))
+                palette.border.frame(height: 0.5)
+                notificationPickerRow(task.object("default"), type: "taskReminderDefault",
+                    summary: task.object("default").text("valueLabel") + " · " + task.object("default").text("description"))
+                palette.border.frame(height: 0.5)
+                notificationToggle(task.object("start"))
+                palette.border.frame(height: 0.5)
+                notificationToggle(task.object("due"))
+            }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        })
+    }
+
+    private func notificationsWeeklyContent(_ weekly: CoreObject) -> AnyView {
+        AnyView(Group {
+            VStack(spacing: 0) {
+                notificationToggle(weekly.object("enabled"))
+                palette.border.frame(height: 0.5)
+                notificationPickerRow(weekly.object("day"), type: "weeklyReviewDay", summary: weekly.object("day").text("valueLabel"))
+                palette.border.frame(height: 0.5)
+                notificationPickerRow(weekly.object("time"), type: "weeklyReviewTime")
+            }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        })
+    }
+
+    private func notificationsDigestContent(_ digest: CoreObject) -> AnyView {
+        AnyView(Group {
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(digest.text("title")).rnFont(15).foregroundStyle(palette.text)
+                    Text(digest.text("description")).rnFont(12).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                ForEach(["morning", "evening"], id: \.self) { slot in
+                    let row = digest.object(slot)
+                    palette.border.frame(height: 0.5)
+                    notificationToggle(row.object("enabled"))
+                    palette.border.frame(height: 0.5)
+                    notificationPickerRow(row.object("time"), type: slot == "morning" ? "dailyDigestMorningTime" : "dailyDigestEveningTime")
+                }
+            }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        })
+    }
+
+    private var notificationsFeedbackContent: AnyView {
+        AnyView(Group {
+            if let failure = model.notificationSettingReadError ?? model.notificationSettingError {
+                Text(failure).rnFont(14).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("notifications-error")
+                if model.retryNeeded || model.notificationSettingReadError != nil {
+                    Button { model.retryNotificationSettings() } label: {
+                        Text(model.label("common.retry")).rnFont(15, .semibold)
+                            .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+                    }
+                    .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    .disabled(model.busy).accessibilityIdentifier("notifications-retry")
+                }
+            }
+        })
+    }
+
     private var notificationsContent: some View {
         let task = model.notificationSettings.object("task")
         let weekly = model.notificationSettings.object("weekly")
         let digest = model.notificationSettings.object("digest")
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if !model.notificationSettings.isEmpty { notificationsTaskContent(task) }
+                notificationsBadgeContent
                 if !model.notificationSettings.isEmpty {
-                    VStack(spacing: 0) {
-                        notificationToggle(task.object("master"))
-                        palette.border.frame(height: 0.5)
-                        notificationPickerRow(task.object("default"), type: "taskReminderDefault",
-                            summary: task.object("default").text("valueLabel") + " · " + task.object("default").text("description"))
-                        palette.border.frame(height: 0.5)
-                        notificationToggle(task.object("start"))
-                        palette.border.frame(height: 0.5)
-                        notificationToggle(task.object("due"))
-                    }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                    VStack(spacing: 0) {
-                        notificationToggle(weekly.object("enabled"))
-                        palette.border.frame(height: 0.5)
-                        notificationPickerRow(weekly.object("day"), type: "weeklyReviewDay", summary: weekly.object("day").text("valueLabel"))
-                        palette.border.frame(height: 0.5)
-                        notificationPickerRow(weekly.object("time"), type: "weeklyReviewTime")
-                    }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                    VStack(spacing: 0) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(digest.text("title")).rnFont(15).foregroundStyle(palette.text)
-                            Text(digest.text("description")).rnFont(12).foregroundStyle(palette.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                        ForEach(["morning", "evening"], id: \.self) { slot in
-                            let row = digest.object(slot)
-                            palette.border.frame(height: 0.5)
-                            notificationToggle(row.object("enabled"))
-                            palette.border.frame(height: 0.5)
-                            notificationPickerRow(row.object("time"), type: slot == "morning" ? "dailyDigestMorningTime" : "dailyDigestEveningTime")
-                        }
-                    }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    notificationsWeeklyContent(weekly)
+                    notificationsDigestContent(digest)
                 }
-                if let failure = model.notificationSettingReadError ?? model.notificationSettingError {
-                    Text(failure).rnFont(14).foregroundStyle(palette.danger)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("notifications-error")
-                    if model.retryNeeded || model.notificationSettingReadError != nil {
-                        Button { model.retryNotificationSettings() } label: {
-                            Text(model.label("common.retry")).rnFont(15, .semibold)
-                                .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
-                        }
-                        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                        .disabled(model.busy).accessibilityIdentifier("notifications-retry")
-                    }
-                }
+                notificationsFeedbackContent
             }.padding(16)
         }.accessibilityIdentifier("notifications-scroll")
+        .alert(model.label("settings.appIconBadge"), isPresented: Binding(
+            get: { model.appIconBadgeNotice != nil && model.settingsNotificationsPresented && !model.appLock.concealed },
+            set: { if !$0 { model.dismissAppIconBadgeNotice() } }
+        )) {
+            Button(model.label("common.ok")) { model.dismissAppIconBadgeNotice() }
+                .accessibilityIdentifier("notifications-app-icon-badge-ok")
+        } message: { Text(model.appIconBadgeNotice ?? "") }
+    }
+
+    private var notificationsBadgeContent: AnyView {
+        AnyView(Group {
+            if model.appIconBadge != nil {
+                Toggle(isOn: Binding(get: { model.appIconBadgeEnabled },
+                                     set: { enabled in Task { await model.saveAppIconBadge(enabled) } })) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(model.label("settings.appIconBadge")).rnFont(15).foregroundStyle(palette.text)
+                        Text(model.label("settings.appIconBadgeHint")).rnFont(12).foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(palette.tint).padding(14).frame(minHeight: 48).disabled(model.appIconBadgeBusy)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityIdentifier("notifications-app-icon-badge")
+            }
+        })
     }
 
     private func notificationToggle(_ row: CoreObject) -> some View {
@@ -2038,156 +2966,201 @@ struct SettingsScreen: View {
         .accessibilityIdentifier("advanced-scroll")
     }
 
+    private var aiSummaryOverview: AnyView {
+        AnyView(Group {
+            Button { model.openVoiceSettings() } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(model.label("settings.speechTitle")).rnFont(15, .semibold)
+                        Text(model.label("settings.speechDesc")).rnFont(14).foregroundStyle(palette.secondary)
+                    }.fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").accessibilityHidden(true)
+                }.frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).foregroundStyle(palette.text).disabled(!model.settingsVoiceCanOpen)
+                .accessibilityIdentifier("voice-settings-open")
+            if let projection = model.settingsAIProjection {
+                aiSummaryRow("settings.aiEnable", value: model.label(projection.aiEnabled ? "settings.on" : "settings.off"), id: "enabled")
+                aiSummaryRow("settings.aiProvider", value: model.label(projection.aiProvider == .openai ? "settings.aiProviderOpenAI"
+                    : projection.aiProvider == .gemini ? "settings.aiProviderGemini" : "settings.aiProviderAnthropic"), id: "provider")
+                if projection.aiProvider == .gemini {
+                    aiSummaryRow("settings.aiThinkingBudget", value: model.aiGeminiThinkingBudgetLabel(projection.aiThinkingBudgetSavedValue), id: "gemini-budget")
+                }
+                aiSummaryRow("settings.aiReasoning", value: model.aiReasoningEffortLabel(projection.aiReasoningEffortSavedValue), id: "effort")
+                aiSummaryRow("settings.aiRequestTimeout", value: model.label("settings.aiRequestTimeoutSeconds")
+                    .replacingOccurrences(of: "{{seconds}}", with: String(projection.aiRequestTimeoutSeconds)), id: "timeout")
+            } else if model.settingsAILoading {
+                ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-summary-loading")
+            } else if model.settingsAIReadFailed {
+                Text(model.label("settings.feedback.actionFailed")).rnFont(14).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-summary-error")
+                Button(model.label("common.retry")) { model.retryAISettingsSummary() }
+                    .buttonStyle(.plain).rnFont(15, .semibold).foregroundStyle(palette.tint)
+                    .frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
+                    .accessibilityIdentifier("ai-summary-retry")
+            }
+            if model.settingsAIProjection != nil || model.settingsAITextHasRetainedConsentRetry {
+                Button { model.openAITextConfiguration() } label: {
+                    HStack(spacing: 12) {
+                        Text(model.label("settings.aiConfigureTextAssistant")).rnFont(15, .semibold)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right").accessibilityHidden(true)
+                    }.frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain).foregroundStyle(palette.tint)
+                    .disabled(model.busy || model.retryNeeded || !model.settingsAICanOpen)
+                    .accessibilityIdentifier("ai-text-configure")
+            }
+        })
+    }
+
+    private var aiSummaryProviderControls: AnyView {
+        AnyView(Group {
+            if model.settingsAIProjection?.aiProvider == .openai {
+                Text(model.label("settings.aiReasoningHint")).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let options = model.settingsAIEffortOptions {
+                    ForEach([NativeAIReasoningEffortValue.low, .medium, .high], id: \.rawValue) { value in
+                        Button { model.saveAIReasoningEffort(value) } label: {
+                            HStack {
+                                Text(model.label(value == .low ? "settings.aiEffortLow"
+                                    : value == .medium ? "settings.aiEffortMedium" : "settings.aiEffortHigh")).rnFont(15)
+                                Spacer()
+                                if options.value.rawValue == value.rawValue { Image(systemName: "checkmark") }
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).foregroundStyle(palette.text)
+                            .disabled(!model.settingsAIReasoningCanChoose)
+                            .accessibilityAddTraits(options.value.rawValue == value.rawValue ? .isSelected : [])
+                            .accessibilityIdentifier("ai-effort-choice-" + value.rawValue)
+                    }
+                } else if model.settingsAIEffortOptionsFailed {
+                    Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
+                        .accessibilityIdentifier("ai-effort-options-error")
+                    Button(model.label("common.retry")) { model.retryAIReasoningEffortOptions() }
+                        .frame(minHeight: 44).disabled(model.busy || model.retryNeeded || !model.settingsAICanOpen)
+                        .accessibilityIdentifier("ai-effort-options-retry")
+                } else if !model.retryNeeded {
+                    ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-effort-loading")
+                }
+            }
+            if model.settingsAIProjection?.aiProvider == .gemini {
+                Text(model.label("settings.aiThinkingHint")).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let options = model.settingsAIGeminiOptions {
+                    ForEach([NativeAIGeminiThinkingBudgetValue.off, .low, .medium, .high], id: \.rawValue) { value in
+                        Button { model.saveAIGeminiThinkingBudget(value) } label: {
+                            HStack {
+                                Text(model.aiGeminiThinkingBudgetLabel(value.rawValue)).rnFont(15)
+                                Spacer()
+                                if options.value == value.rawValue { Image(systemName: "checkmark") }
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).foregroundStyle(palette.text)
+                            .disabled(!model.settingsAIGeminiCanChoose)
+                            .accessibilityAddTraits(options.value == value.rawValue ? .isSelected : [])
+                            .accessibilityIdentifier("ai-gemini-choice-" + String(value.rawValue))
+                    }
+                } else if model.settingsAIGeminiOptionsFailed {
+                    Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
+                        .accessibilityIdentifier("ai-gemini-options-error")
+                    Button(model.label("common.retry")) { model.retryAIGeminiThinkingBudgetOptions() }
+                        .frame(minHeight: 44).disabled(model.busy || model.retryNeeded || !model.settingsAICanOpen)
+                        .accessibilityIdentifier("ai-gemini-options-retry")
+                } else if !model.retryNeeded {
+                    ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-gemini-loading")
+                }
+            }
+        })
+    }
+
+    private var aiSummaryTimeoutControls: AnyView {
+        AnyView(Group {
+            Button { model.toggleAIAdvanced() } label: {
+                HStack {
+                    Text(model.label("settings.aiAdvanced")).rnFont(15, .semibold)
+                    Spacer()
+                    Image(systemName: model.settingsAIAdvanced ? "chevron.up" : "chevron.down")
+                }.frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).foregroundStyle(palette.text)
+                .disabled(model.busy || model.retryNeeded || !model.settingsAICanOpen || model.settingsAILoading || model.settingsAIReadFailed || model.settingsAITextHasRetainedConsentRetry)
+                .accessibilityValue(model.settingsAIAdvanced ? model.label("settings.on") : model.label("settings.off"))
+                .accessibilityIdentifier("ai-timeout-advanced")
+            if model.settingsAIAdvanced {
+                Text(model.label("settings.aiRequestTimeoutDesc")).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let options = model.settingsAIOptions {
+                    ForEach([30, 60, 120, 300], id: \.self) { seconds in
+                        Button { model.saveAIRequestTimeout(seconds) } label: {
+                            HStack {
+                                Text(model.label("settings.aiRequestTimeoutSeconds")
+                                    .replacingOccurrences(of: "{{seconds}}", with: String(seconds))).rnFont(15)
+                                Spacer()
+                                if options.value == seconds { Image(systemName: "checkmark") }
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).foregroundStyle(palette.text)
+                            .disabled(!model.settingsAITimeoutCanChoose)
+                            .accessibilityAddTraits(options.value == seconds ? .isSelected : [])
+                            .accessibilityIdentifier("ai-timeout-choice-" + String(seconds))
+                    }
+                } else if model.settingsAIOptionsFailed {
+                    Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
+                        .accessibilityIdentifier("ai-timeout-options-error")
+                    Button(model.label("common.retry")) { model.retryAIRequestTimeoutOptions() }
+                        .frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
+                        .accessibilityIdentifier("ai-timeout-options-retry")
+                } else if !model.retryNeeded {
+                    ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-timeout-loading")
+                }
+            }
+        })
+    }
+
+    private var aiSummaryFeedback: AnyView {
+        AnyView(Group {
+            if model.settingsAISaveFailed {
+                Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-timeout-save-error")
+            }
+            if model.settingsAIEffortSaveFailed {
+                Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-effort-save-error")
+            }
+            if model.settingsAIGeminiSaveFailed {
+                Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-gemini-save-error")
+            }
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if !model.settingsAIGeminiFixtureState.isEmpty {
+                Text(model.settingsAIGeminiFixtureState).accessibilityIdentifier("ai-gemini-fixture-state")
+            }
+            if !model.settingsAIEffortFixtureState.isEmpty {
+                Text(model.settingsAIEffortFixtureState).accessibilityIdentifier("ai-effort-fixture-state")
+            }
+            if !model.settingsAITimeoutFixtureState.isEmpty {
+                Text(model.settingsAITimeoutFixtureState).accessibilityIdentifier("ai-timeout-fixture-state")
+            }
+            if model.settingsAITestHeld || model.settingsAITimeoutTestHeld || model.settingsAISaveFailed
+                || model.settingsAIEffortTestHeld || model.settingsAIEffortSaveFailed
+                || model.settingsAIGeminiTestHeld || model.settingsAIGeminiSaveFailed {
+                if model.settingsAITimeoutTestHeld { Text("held").accessibilityIdentifier("ai-timeout-test-held") }
+                if model.settingsAIEffortTestHeld { Text("held").accessibilityIdentifier("ai-effort-test-held") }
+                if model.settingsAIGeminiTestHeld { Text("held").accessibilityIdentifier("ai-gemini-test-held") }
+                Text("held").accessibilityIdentifier("ai-summary-test-held")
+                Button("Lock fixture") { model.retireAISettingsSummaryFixture("lock") }
+                    .frame(minHeight: 44).accessibilityIdentifier("ai-summary-test-lock")
+                Button("Replace fixture host") { model.retireAISettingsSummaryFixture("host") }
+                    .frame(minHeight: 44).accessibilityIdentifier("ai-summary-test-host")
+            }
+            #endif
+        })
+    }
+
     private var aiSummaryContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text(model.label("settings.aiSummaryReadOnly")).rnFont(14).foregroundStyle(palette.secondary)
-                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-summary-note")
-                if let projection = model.settingsAIProjection {
-                    aiSummaryRow("settings.aiEnable", value: model.label(projection.aiEnabled ? "settings.on" : "settings.off"), id: "enabled")
-                    aiSummaryRow("settings.aiProvider", value: model.label(projection.aiProvider == .openai ? "settings.aiProviderOpenAI"
-                        : projection.aiProvider == .gemini ? "settings.aiProviderGemini" : "settings.aiProviderAnthropic"), id: "provider")
-                    if projection.aiProvider == .gemini {
-                        aiSummaryRow("settings.aiThinkingBudget", value: model.aiGeminiThinkingBudgetLabel(projection.aiThinkingBudgetSavedValue), id: "gemini-budget")
-                    }
-                    aiSummaryRow("settings.aiReasoning", value: model.aiReasoningEffortLabel(projection.aiReasoningEffortSavedValue), id: "effort")
-                    aiSummaryRow("settings.aiRequestTimeout", value: model.label("settings.aiRequestTimeoutSeconds")
-                        .replacingOccurrences(of: "{{seconds}}", with: String(projection.aiRequestTimeoutSeconds)), id: "timeout")
-                } else if model.settingsAILoading {
-                    ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-summary-loading")
-                } else if model.settingsAIReadFailed {
-                    Text(model.label("settings.feedback.actionFailed")).rnFont(14).foregroundStyle(palette.danger)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-summary-error")
-                    Button(model.label("common.retry")) { model.retryAISettingsSummary() }
-                        .buttonStyle(.plain).rnFont(15, .semibold).foregroundStyle(palette.tint)
-                        .frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
-                        .accessibilityIdentifier("ai-summary-retry")
-                }
-                if model.settingsAIProjection?.aiProvider == .openai {
-                    Text(model.label("settings.aiReasoningHint")).rnFont(14).foregroundStyle(palette.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let options = model.settingsAIEffortOptions {
-                        ForEach([NativeAIReasoningEffortValue.low, .medium, .high], id: \.rawValue) { value in
-                            Button { model.saveAIReasoningEffort(value) } label: {
-                                HStack {
-                                    Text(model.label(value == .low ? "settings.aiEffortLow"
-                                        : value == .medium ? "settings.aiEffortMedium" : "settings.aiEffortHigh")).rnFont(15)
-                                    Spacer()
-                                    if options.value.rawValue == value.rawValue { Image(systemName: "checkmark") }
-                                }.frame(minHeight: 44).contentShape(Rectangle())
-                            }.buttonStyle(.plain).foregroundStyle(palette.text)
-                                .disabled(!model.settingsAIReasoningCanChoose)
-                                .accessibilityAddTraits(options.value.rawValue == value.rawValue ? .isSelected : [])
-                                .accessibilityIdentifier("ai-effort-choice-" + value.rawValue)
-                        }
-                    } else if model.settingsAIEffortOptionsFailed {
-                        Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
-                            .accessibilityIdentifier("ai-effort-options-error")
-                        Button(model.label("common.retry")) { model.retryAIReasoningEffortOptions() }
-                            .frame(minHeight: 44).disabled(model.busy || model.retryNeeded || !model.settingsAICanOpen)
-                            .accessibilityIdentifier("ai-effort-options-retry")
-                    } else if !model.retryNeeded {
-                        ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-effort-loading")
-                    }
-                }
-                if model.settingsAIProjection?.aiProvider == .gemini {
-                    Text(model.label("settings.aiThinkingHint")).rnFont(14).foregroundStyle(palette.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let options = model.settingsAIGeminiOptions {
-                        ForEach([NativeAIGeminiThinkingBudgetValue.off, .low, .medium, .high], id: \.rawValue) { value in
-                            Button { model.saveAIGeminiThinkingBudget(value) } label: {
-                                HStack {
-                                    Text(model.aiGeminiThinkingBudgetLabel(value.rawValue)).rnFont(15)
-                                    Spacer()
-                                    if options.value == value.rawValue { Image(systemName: "checkmark") }
-                                }.frame(minHeight: 44).contentShape(Rectangle())
-                            }.buttonStyle(.plain).foregroundStyle(palette.text)
-                                .disabled(!model.settingsAIGeminiCanChoose)
-                                .accessibilityAddTraits(options.value == value.rawValue ? .isSelected : [])
-                                .accessibilityIdentifier("ai-gemini-choice-" + String(value.rawValue))
-                        }
-                    } else if model.settingsAIGeminiOptionsFailed {
-                        Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
-                            .accessibilityIdentifier("ai-gemini-options-error")
-                        Button(model.label("common.retry")) { model.retryAIGeminiThinkingBudgetOptions() }
-                            .frame(minHeight: 44).disabled(model.busy || model.retryNeeded || !model.settingsAICanOpen)
-                            .accessibilityIdentifier("ai-gemini-options-retry")
-                    } else if !model.retryNeeded {
-                        ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-gemini-loading")
-                    }
-                }
-                Button { model.toggleAIAdvanced() } label: {
-                    HStack {
-                        Text(model.label("settings.aiAdvanced")).rnFont(15, .semibold)
-                        Spacer()
-                        Image(systemName: model.settingsAIAdvanced ? "chevron.up" : "chevron.down")
-                    }.frame(minHeight: 44).contentShape(Rectangle())
-                }.buttonStyle(.plain).foregroundStyle(palette.text)
-                    .disabled(model.busy || model.retryNeeded || !model.settingsAICanOpen || model.settingsAILoading || model.settingsAIReadFailed)
-                    .accessibilityValue(model.settingsAIAdvanced ? model.label("settings.on") : model.label("settings.off"))
-                    .accessibilityIdentifier("ai-timeout-advanced")
-                if model.settingsAIAdvanced {
-                    Text(model.label("settings.aiRequestTimeoutDesc")).rnFont(14).foregroundStyle(palette.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let options = model.settingsAIOptions {
-                        ForEach([30, 60, 120, 300], id: \.self) { seconds in
-                            Button { model.saveAIRequestTimeout(seconds) } label: {
-                                HStack {
-                                    Text(model.label("settings.aiRequestTimeoutSeconds")
-                                        .replacingOccurrences(of: "{{seconds}}", with: String(seconds))).rnFont(15)
-                                    Spacer()
-                                    if options.value == seconds { Image(systemName: "checkmark") }
-                                }.frame(minHeight: 44).contentShape(Rectangle())
-                            }.buttonStyle(.plain).foregroundStyle(palette.text)
-                                .disabled(!model.settingsAITimeoutCanChoose)
-                                .accessibilityAddTraits(options.value == seconds ? .isSelected : [])
-                                .accessibilityIdentifier("ai-timeout-choice-" + String(seconds))
-                        }
-                    } else if model.settingsAIOptionsFailed {
-                        Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
-                            .accessibilityIdentifier("ai-timeout-options-error")
-                        Button(model.label("common.retry")) { model.retryAIRequestTimeoutOptions() }
-                            .frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
-                            .accessibilityIdentifier("ai-timeout-options-retry")
-                    } else if !model.retryNeeded {
-                        ProgressView(model.label("common.loading")).accessibilityIdentifier("ai-timeout-loading")
-                    }
-                }
-                if model.settingsAISaveFailed {
-                    Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-timeout-save-error")
-                }
-                if model.settingsAIEffortSaveFailed {
-                    Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-effort-save-error")
-                }
-                if model.settingsAIGeminiSaveFailed {
-                    Text(model.label("settings.feedback.actionFailed")).foregroundStyle(palette.danger)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ai-gemini-save-error")
-                }
-                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                if !model.settingsAIGeminiFixtureState.isEmpty {
-                    Text(model.settingsAIGeminiFixtureState).accessibilityIdentifier("ai-gemini-fixture-state")
-                }
-                if !model.settingsAIEffortFixtureState.isEmpty {
-                    Text(model.settingsAIEffortFixtureState).accessibilityIdentifier("ai-effort-fixture-state")
-                }
-                if !model.settingsAITimeoutFixtureState.isEmpty {
-                    Text(model.settingsAITimeoutFixtureState).accessibilityIdentifier("ai-timeout-fixture-state")
-                }
-                if model.settingsAITestHeld || model.settingsAITimeoutTestHeld || model.settingsAISaveFailed
-                    || model.settingsAIEffortTestHeld || model.settingsAIEffortSaveFailed
-                    || model.settingsAIGeminiTestHeld || model.settingsAIGeminiSaveFailed {
-                    if model.settingsAITimeoutTestHeld { Text("held").accessibilityIdentifier("ai-timeout-test-held") }
-                    if model.settingsAIEffortTestHeld { Text("held").accessibilityIdentifier("ai-effort-test-held") }
-                    if model.settingsAIGeminiTestHeld { Text("held").accessibilityIdentifier("ai-gemini-test-held") }
-                    Text("held").accessibilityIdentifier("ai-summary-test-held")
-                    Button("Lock fixture") { model.retireAISettingsSummaryFixture("lock") }
-                        .frame(minHeight: 44).accessibilityIdentifier("ai-summary-test-lock")
-                    Button("Replace fixture host") { model.retireAISettingsSummaryFixture("host") }
-                        .frame(minHeight: 44).accessibilityIdentifier("ai-summary-test-host")
-                }
-                #endif
+                aiSummaryOverview
+                aiSummaryProviderControls
+                aiSummaryTimeoutControls
+                aiSummaryFeedback
             }
             .padding(16).frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -3243,11 +4216,68 @@ struct DiagnosticsCard: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
     let owner: UUID
+    @FocusState private var retentionDaysFocused: Bool
     @State private var backupOpen = false
     @State private var backupPreviewPresented = false
     @State private var backupPreviewAnswered = false
     @State private var backupRestorePresented = false
     @State private var backupRestoreAnswered = false
+    @State private var sandboxConfirm = false
+
+    private var archiveRetentionContent: some View {
+        let card = model.archiveRetentionCard
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(card.text("title")).rnFont(18, .bold).accessibilityAddTraits(.isHeader)
+            Text(card.text("description")).rnFont(14).foregroundStyle(palette.secondary)
+            Text(card.text("safety")).rnFont(13).foregroundStyle(palette.secondary)
+            Text(card.text("current")).rnFont(14).accessibilityIdentifier("archive-retention-current")
+            TextField(card.text("daysLabel"), text: $model.archiveRetentionDaysDraft)
+                .keyboardType(.numberPad).focused($retentionDaysFocused).textFieldStyle(.roundedBorder).frame(minHeight: 44)
+                .accessibilityLabel(card.text("daysLabel"))
+                .accessibilityIdentifier("archive-retention-days")
+                .disabled(!model.diagnosticsToggleEnabled)
+            HStack {
+                Button(card.text("save")) { retentionDaysFocused = false; Task { await model.saveArchiveRetention() } }
+                    .frame(minHeight: 44).accessibilityIdentifier("archive-retention-save")
+                Spacer()
+                Button(card.object("never").text("label")) { retentionDaysFocused = false; Task { await model.saveArchiveRetention(never: true) } }
+                    .frame(minHeight: 44).accessibilityIdentifier("archive-retention-never")
+            }.disabled(!model.diagnosticsToggleEnabled)
+            if let error = model.archiveRetentionError {
+                Text(error).rnFont(14).foregroundStyle(palette.danger)
+                    .accessibilityIdentifier("archive-retention-error")
+            }
+            if !model.archiveRetentionReview.isEmpty {
+                let review = model.archiveRetentionReview
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(review.text("title")).rnFont(16, .semibold).accessibilityAddTraits(.isHeader)
+                    Text(review.text("description")).rnFont(14)
+                    Text(review.text("counts")).rnFont(14)
+                    Text(review.text("legacy")).rnFont(14)
+                    Text(review.text("heading")).rnFont(14, .semibold)
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(((review["lines"] as? [String]) ?? []).enumerated()), id: \.offset) { _, line in
+                            Text(line).rnFont(13).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    HStack {
+                        Button(review.text("cancel")) { model.cancelArchiveRetentionReview() }
+                            .frame(minHeight: 44).accessibilityIdentifier("archive-retention-cancel")
+                        Spacer()
+                        Button(review.text("confirm"), role: .destructive) { Task { await model.confirmArchiveRetentionReview() } }
+                            .frame(minHeight: 44).accessibilityIdentifier("archive-retention-confirm")
+                    }.disabled(model.busy || model.retryNeeded)
+                }
+            }
+        }.fixedSize(horizontal: false, vertical: true)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(model.label("common.done")) { retentionDaysFocused = false }
+                        .accessibilityIdentifier("archive-retention-keyboard-done")
+                }
+            }
+    }
 
     var body: some View {
         let pickerID = model.backupImportPickerID
@@ -3302,7 +4332,19 @@ struct DiagnosticsCard: View {
                                 .accessibilityIdentifier("backup-export-error")
                         }
                         backupTransferContent(backup)
+                        gettingStartedContent(backup.object("gettingStarted"))
                     }
+                    Button { sandboxConfirm = true } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.label("sandbox.open")).rnFont(15, .semibold)
+                            Text(model.label("sandbox.description")).rnFont(13).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).multilineTextAlignment(.leading)
+                    }.disabled(!model.sandboxEntryEnabled || NativeAppModel.session.model !== model)
+                        .accessibilityIdentifier("sandbox-open")
+                }
+                if owner == model.settingsDiagnosticsOwner, !model.archiveRetentionCard.isEmpty {
+                    archiveRetentionContent
                 }
                 Text(model.diagnosticsLabels.text("title")).rnFont(18, .bold)
                     .accessibilityAddTraits(.isHeader).accessibilityIdentifier("diagnostics-title")
@@ -3365,6 +4407,11 @@ struct DiagnosticsCard: View {
             .foregroundStyle(palette.text).padding(16)
         }
         .background(palette.bg).accessibilityIdentifier("diagnostics-scroll")
+        .alert(model.label("sandbox.confirmTitle"), isPresented: $sandboxConfirm) {
+            Button(model.label("common.cancel"), role: .cancel) {}
+            Button(model.label("sandbox.enter")) { NativeAppModel.session.enter() }
+                .accessibilityIdentifier("sandbox-enter-confirm")
+        } message: { Text(model.label("sandbox.confirmDescription")) }
         .sheet(item: Binding(get: {
             guard let payload = model.diagnosticsShare, payload.owner == owner,
                   model.diagnosticsCurrent(owner: owner, session: payload.id) else { return nil }
@@ -3440,11 +4487,52 @@ struct DiagnosticsCard: View {
         .onChange(of: model.backupDocumentPending) { pending in
             if owner == model.settingsDiagnosticsOwner && pending { backupOpen = true }
         }
+        .onChange(of: model.gettingStartedMessage) { message in
+            if owner == model.settingsDiagnosticsOwner && message != nil { backupOpen = true }
+        }
+        .onChange(of: model.gettingStartedError) { error in
+            if owner == model.settingsDiagnosticsOwner && error != nil { backupOpen = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            sandboxConfirm = false
+            if owner == model.settingsDiagnosticsOwner { model.retireGettingStartedPresentation() }
+        }
         .onAppear {
             guard owner == model.settingsDiagnosticsOwner else { return }
             backupOpen = !model.backupDocumentResult.isEmpty || model.backupDocumentPending || model.backupResultReadRetryNeeded
             backupPreviewPresented = !model.backupImportPreview.isEmpty
             backupRestorePresented = !model.backupRestoreConfirmation.isEmpty
+        }
+    }
+
+    @ViewBuilder
+    private func gettingStartedContent(_ row: CoreObject) -> some View {
+        Button { model.addGettingStartedContent() } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.text("label")).rnFont(15, .semibold)
+                Text(row.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }.disabled(!model.gettingStartedCanAdd).accessibilityIdentifier("data-getting-started")
+        if model.gettingStartedWorking {
+            ProgressView(model.label("common.loading")).accessibilityIdentifier("data-getting-started-working")
+        }
+        if let message = model.gettingStartedMessage {
+            Text(message).rnFont(14).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("data-getting-started-result")
+        }
+        if model.gettingStartedProjectID != nil {
+            Button(row.text("open")) { Task { await model.openGettingStartedProject() } }
+                .disabled(!model.gettingStartedCanOpen).frame(minHeight: 44).accessibilityIdentifier("data-getting-started-open")
+        }
+        if let error = model.gettingStartedError {
+            Text(error).rnFont(14).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("data-getting-started-error")
+        }
+        if model.gettingStartedNeedsRetry {
+            Button(model.label("common.retry")) { model.retryGettingStarted() }
+                .disabled(model.busy || model.gettingStartedWorking).frame(minHeight: 44)
+                .accessibilityIdentifier("data-getting-started-retry")
         }
     }
 
@@ -3855,5 +4943,119 @@ private struct FeedbackSettingsForm: View {
             }.foregroundStyle(selected ? palette.tint : palette.text).padding(12).frame(minHeight: 44).contentShape(Rectangle())
         }.buttonStyle(.plain).disabled(!model.settingsFeedbackEditable)
             .accessibilityAddTraits(selected ? .isSelected : []).accessibilityIdentifier(id)
+    }
+}
+
+private struct GmailCaptureCard: View {
+    @ObservedObject var model: CoreModel
+    @ObservedObject var gmail: NativeGmailCaptureModel
+    let palette: AppPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { gmail.toggle() } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(model.label("settings.gmailCapture")).rnFont(16, .semibold).foregroundStyle(palette.text)
+                        Text(model.label("settings.gmailCaptureDesc")).rnFont(13).foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Text(gmail.open ? "▾" : "▸").foregroundStyle(palette.secondary).accessibilityHidden(true)
+                }.padding(14).frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .accessibilityValue(gmail.open ? "expanded" : "collapsed")
+                .accessibilityIdentifier("gmail-expand")
+            if gmail.open { content }
+        }
+        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("gmail-capture-section")
+        .task { await model.openGmailSettings() }
+        .onDisappear { gmail.leave() }
+        .sheet(isPresented: $gmail.pickerOpen) { labelSheet }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(model.label("settings.gmailCaptureDisclosure")).rnFont(13).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !gmail.available {
+                Text(model.label("settings.gmailCaptureUnavailable")).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("gmail-unavailable")
+            } else {
+                if gmail.connected {
+                    Text("\(model.label("settings.gmailCaptureAccount")): \(gmail.account)").rnFont(14).foregroundStyle(palette.text)
+                        .textSelection(.enabled)
+                    Button { gmail.pickerOpen = true } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.label("settings.gmailCaptureLabel")).rnFont(16, .semibold).foregroundStyle(palette.text)
+                            Text(gmail.labelName ?? model.label("settings.gmailCaptureChooseLabel")).rnFont(13).foregroundStyle(palette.secondary)
+                        }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(gmail.busy).accessibilityIdentifier("gmail-label-picker")
+                    Text(model.label("settings.gmailCaptureLabelHint")).rnFont(13).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(model.label(gmail.enabled ? "settings.gmailCaptureActive" : "settings.gmailCapturePaused")).rnFont(14)
+                        .foregroundStyle(palette.secondary).accessibilityIdentifier("gmail-enabled-status")
+                }
+                actions
+            }
+            if gmail.connected, let polled = gmail.lastPollText {
+                let imported = gmail.lastImportCount > 0 && gmail.lastErrorKey == nil
+                    ? " · " + model.label("settings.gmailCaptureImportedCount").replacingOccurrences(of: "{{count}}", with: String(gmail.lastImportCount)) : ""
+                Text("\(model.label("settings.gmailCaptureLastChecked")): \(polled)\(imported)").rnFont(13).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let key = gmail.shownError {
+                Text(model.label(key)).rnFont(14).foregroundStyle(palette.warning)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("gmail-error")
+                    .onAppear { UIAccessibility.post(notification: .announcement, argument: model.label(key)) }
+            }
+            if let key = gmail.notice {
+                Text(model.label(key)).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("gmail-notice")
+            }
+        }.padding(16).overlay(alignment: .top) { palette.border.frame(height: 0.5) }
+    }
+
+    private var actions: some View {
+        let operation = gmail.operation
+        return VStack(alignment: .leading, spacing: 8) {
+            button("connect", operation == "connect" ? "settings.gmailCaptureConnecting"
+                : gmail.connected ? "settings.gmailCaptureReconnect" : "settings.gmailCaptureConnect",
+                enabled: !gmail.busy && gmail.config != nil) { gmail.connect() }
+            if gmail.connected {
+                button("disconnect", "settings.gmailCaptureDisconnect", enabled: !gmail.busy) { gmail.disconnect() }
+                button("check", operation == "check" ? "settings.gmailCaptureChecking" : "settings.gmailCaptureCheckNow",
+                    enabled: !gmail.busy && gmail.enabled && !gmail.terminal) { gmail.checkNow() }
+                button("save", operation == "save" ? "settings.gmailCaptureSaving" : "settings.gmailCaptureSave",
+                    enabled: !gmail.busy && !gmail.labelId.isEmpty) { gmail.save() }
+            }
+        }
+    }
+
+    private func button(_ id: String, _ key: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(model.label(key)).rnFont(14, .semibold).foregroundStyle(palette.tint)
+                .padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 44, alignment: .leading)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.tint, lineWidth: 1))
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.5).accessibilityIdentifier("gmail-" + id)
+    }
+
+    private var labelSheet: some View {
+        NavigationStack {
+            List(gmail.labels, id: \.id) { label in
+                Button { gmail.choose(label.id) } label: {
+                    HStack {
+                        Text(label.name).rnFont(14).foregroundStyle(palette.text)
+                        Spacer()
+                        if label.id == gmail.labelId { Image(systemName: "checkmark").foregroundStyle(palette.tint).accessibilityHidden(true) }
+                    }.frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .accessibilityAddTraits(label.id == gmail.labelId ? .isSelected : [])
+                    .accessibilityIdentifier("gmail-label-" + label.id)
+            }
+            .navigationTitle(model.label("settings.gmailCaptureLabel"))
+            .navigationBarTitleDisplayMode(.inline)
+        }.presentationDetents([.medium, .large])
     }
 }

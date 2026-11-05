@@ -6,12 +6,26 @@ struct CaptureSheet: View {
     let palette: AppPalette
     @State private var expanded = false
     @State private var showSyntax = false
+    @State private var sheetHeight: CGFloat = 0
     private var copy: CoreObject { model.capture.object("text") }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             if !model.captureLinesConfirmationPresented {
-                sheet.accessibilityHidden(model.contextPickerPresented)
+                GeometryReader { geometry in
+                    ScrollView {
+                        sheet.fixedSize(horizontal: false, vertical: true)
+                            .background(GeometryReader { content in
+                                Color.clear.preference(key: CaptureSheetHeight.self, value: content.size.height)
+                            })
+                    }
+                    .frame(height: min(sheetHeight > 0 ? sheetHeight : geometry.size.height, geometry.size.height))
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .accessibilityIdentifier("capture-scroll")
+                    .scrollDismissesKeyboard(.immediately)
+                    .onPreferenceChange(CaptureSheetHeight.self) { sheetHeight = $0 }
+                }
+                .accessibilityHidden(model.contextPickerPresented)
             }
             if model.contextPickerPresented {
                 Color.black.opacity(0.35).ignoresSafeArea()
@@ -22,6 +36,9 @@ struct CaptureSheet: View {
             if model.captureLinesConfirmationPresented { linesConfirmation }
         }
         .frame(maxHeight: model.contextPickerPresented || model.captureLinesConfirmationPresented ? .infinity : nil, alignment: .bottom)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            if model.capturePresented { model.textChanged() }
+        }
         .onChange(of: model.draft) { _ in model.textChanged() }
         .onChange(of: model.noteDraft) { _ in model.textChanged() }
         .onChange(of: model.contextQuery) { _ in model.textChanged() }
@@ -61,7 +78,7 @@ struct CaptureSheet: View {
                     .accessibilityAddTraits(.isHeader).accessibilityIdentifier("capture-lines-title")
                 Spacer(minLength: 0)
                 Button { model.requestCaptureClose() } label: {
-                    AppIcon(name: "x", size: 18).frame(width: 44, height: 44)
+                    AppIcon(name: "x", size: 18).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
                 .accessibilityLabel(model.bulkConfirm.text("cancelLabel"))
@@ -123,8 +140,22 @@ struct CaptureSheet: View {
                 }
                 .background(palette.input, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1))
-                // ponytail: no mic until native audio capture exists; RN's recorder button returns with it.
+                Button {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    if model.captureVoiceIsRecording { Task { await model.stopCaptureVoice() } }
+                    else { model.startCaptureVoice() }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: model.captureVoiceIsRecording ? "stop.fill" : "mic.fill").font(.system(size: 19))
+                        if model.captureVoiceIsRecording { Text(model.label("quickAdd.audioStopAndSave")).rnFont(11, .semibold) }
+                    }.frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain).foregroundStyle(model.captureVoiceIsRecording ? palette.danger : palette.secondary)
+                    .disabled(model.captureVoiceIsRecording ? !model.captureVoiceCanStop : !model.captureVoiceCanStart)
+                    .accessibilityLabel(model.label(model.captureVoiceIsRecording ? "quickAdd.audioStopAndSave" : "quickAdd.audioRecord"))
+                    .accessibilityIdentifier(model.captureVoiceIsRecording ? "capture-voice-stop" : "capture-voice-record")
             }
+
+            voiceControls
 
             if !model.capture.objects("preview").isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -140,6 +171,8 @@ struct CaptureSheet: View {
                 }
                 .padding(.top, 8).accessibilityIdentifier("capture-preview")
             }
+
+            captureCopilot
 
             Text(model.capture.object("area").text("label")).rnFont(12, .bold)
                 .padding(.horizontal, 12).frame(minHeight: 40)
@@ -210,6 +243,10 @@ struct CaptureSheet: View {
             .padding(.top, 8)
 
 #if DEBUG && os(iOS) && targetEnvironment(simulator)
+            if !model.captureCopilotFixtureState.isEmpty {
+                Text(model.captureCopilotFixtureState).rnFont(10)
+                    .accessibilityIdentifier("capture-ai-fixture-state")
+            }
             if model.captureSaveEditFixtureEnabled {
                 Text(model.captureSaveEditTestState).rnFont(10).lineLimit(1)
                     .accessibilityIdentifier("capture-save-edit-fixture-state")
@@ -234,22 +271,124 @@ struct CaptureSheet: View {
         .background { CaptureCorners().fill(palette.card).ignoresSafeArea(edges: .bottom) }
     }
 
+    @ViewBuilder private var captureCopilot: some View {
+        let labels = model.captureCopilotOptions.object("labels")
+        if !model.captureCopilotOptions.object("request").isEmpty || model.captureCopilotWorking
+            || !model.captureCopilotView.objects("chips").isEmpty
+            || !model.captureCopilotView.text("appliedLabel").isEmpty || model.captureCopilotError != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    if model.captureCopilotWorking {
+                        ProgressView().accessibilityHidden(true)
+                        Text(labels.text("working")).rnFont(12, .medium).foregroundStyle(palette.secondary)
+                            .accessibilityIdentifier("capture-copilot-working")
+                        Spacer(minLength: 0)
+                        Button { model.cancelCaptureCopilot() } label: {
+                            Text(model.label("common.cancel")).rnFont(12, .semibold)
+                                .padding(.horizontal, 12).frame(minHeight: 44)
+                        }
+                        .buttonStyle(.plain).accessibilityIdentifier("capture-copilot-cancel")
+                    } else if !model.captureCopilotOptions.object("request").isEmpty {
+                        Button { Task { await model.suggestCaptureCopilot() } } label: {
+                            Label(labels.text("suggest"), systemImage: "sparkles").rnFont(12, .semibold)
+                                .padding(.horizontal, 12).frame(minHeight: 44)
+                                .background(palette.filter, in: Capsule())
+                                .overlay(Capsule().stroke(palette.border, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain).disabled(!model.captureCopilotCanSuggest)
+                        .accessibilityIdentifier("capture-copilot-suggest")
+                        Spacer(minLength: 0)
+                    }
+                }
+                if !model.captureCopilotView.objects("chips").isEmpty {
+                    Text(labels.text("hint")).rnFont(11).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(model.captureCopilotView.objects("chips").indices, id: \.self) { index in
+                                let chip = model.captureCopilotView.objects("chips")[index]
+                                Button { Task { await model.applyCaptureCopilot(chip.object("edit")) } } label: {
+                                    Text(chip.text("label")).rnFont(12, .semibold)
+                                        .padding(.horizontal, 12).frame(minHeight: 44)
+                                        .overlay(Capsule().stroke(palette.border, lineWidth: 1))
+                                }
+                                .buttonStyle(.plain).disabled(!model.captureCopilotCanApply)
+                                .accessibilityIdentifier("capture-copilot-chip-\(index)")
+                            }
+                            if !model.captureCopilotView.object("applyAll").isEmpty {
+                                Button {
+                                    Task { await model.applyCaptureCopilot(model.captureCopilotView.object("applyAll").object("edit")) }
+                                } label: {
+                                    Text(model.captureCopilotView.object("applyAll").text("label")).rnFont(12, .bold)
+                                        .foregroundStyle(palette.tint).padding(.horizontal, 12).frame(minHeight: 44)
+                                }
+                                .buttonStyle(.plain).disabled(!model.captureCopilotCanApply)
+                                .accessibilityIdentifier("capture-copilot-apply-all")
+                            }
+                        }
+                    }.accessibilityIdentifier("capture-copilot-chips")
+                }
+                if !model.captureCopilotView.text("appliedLabel").isEmpty {
+                    Text(model.captureCopilotView.text("appliedLabel")).rnFont(12, .medium).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("capture-copilot-applied")
+                }
+                if let message = model.captureCopilotError {
+                    Text(message).rnFont(12).foregroundStyle(palette.danger)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("capture-copilot-error")
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+
     @ViewBuilder private var saveButtons: some View {
         Button { Task { await model.saveCapture(openAfterSave: true) } } label: {
             Text(copy.text("saveAndEdit")).rnFont(13, .bold)
                 .frame(minWidth: 80, minHeight: 44).padding(.horizontal, 16)
                 .overlay(Capsule().stroke(palette.border, lineWidth: 1))
         }
-        .buttonStyle(.plain).disabled(!model.canSave)
+        .buttonStyle(.plain).disabled(model.captureVoiceIsRecording ? !model.captureVoiceCanStop : (!model.canSave || model.captureVoiceWorking))
         .accessibilityIdentifier("capture-save-edit")
+        if !model.captureVoiceIsRecording {
         Button { Task { await model.saveCapture() } } label: {
             Text(copy.text("save")).rnFont(13, .bold)
                 .foregroundStyle(palette.captureForeground)
                 .frame(minWidth: 72, minHeight: 44).padding(.horizontal, 16)
                 .background(palette.captureBackground, in: Capsule())
         }
-        .buttonStyle(.plain).disabled(!model.canSave)
+        .buttonStyle(.plain).disabled(!model.canSave || model.captureVoiceWorking)
         .accessibilityIdentifier("capture-save")
+        }
+    }
+
+    @ViewBuilder private var voiceControls: some View {
+        if model.captureVoiceIsRecording || model.captureVoiceWorking {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    if let started = model.captureVoiceStartedAt {
+                        TimelineView(.periodic(from: started, by: 1)) { context in
+                            let elapsed = max(0, Int(context.date.timeIntervalSince(started)))
+                            Text(model.label("quickAdd.audioRecording") + " " + String(format: "%02d:%02d", elapsed / 60, elapsed % 60))
+                                .rnFont(14, .medium).monospacedDigit().foregroundStyle(palette.danger)
+                                .accessibilityIdentifier("capture-voice-recording")
+                        }
+                    } else {
+                        ProgressView(model.label(model.captureVoiceState == .saving ? "persistence.retrying" : "common.loading"))
+                            .accessibilityIdentifier("capture-voice-working")
+                    }
+                    Spacer(minLength: 0)
+                    if model.captureVoiceCanCancel {
+                        Button(model.label("common.cancel")) { model.cancelCaptureVoice() }
+                            .buttonStyle(.plain).rnFont(14, .semibold).frame(minHeight: 44)
+                            .foregroundStyle(palette.secondary).accessibilityIdentifier("capture-voice-cancel")
+                    }
+                }
+                if model.captureVoiceIsRecording, model.captureVoiceRuntime?.saveAudioAttachments == false {
+                    Text(model.label("quickAdd.audioNotRetained")).rnFont(12).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("capture-voice-retention-off")
+                }
+            }.padding(.top, 8)
+        }
     }
 
     @ViewBuilder private var captureControls: some View {
@@ -319,7 +458,7 @@ private struct ContextPicker: View {
                     .accessibilityIdentifier("capture-context-title")
                 Spacer()
                 Button { model.closeContextPicker() } label: {
-                    AppIcon(name: "x", size: 18).frame(width: 44, height: 44)
+                    AppIcon(name: "x", size: 18).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
                 .accessibilityLabel(model.label("common.close"))
@@ -449,14 +588,30 @@ private struct CaptureTextInput: UIViewRepresentable {
         view.delegate = context.coordinator
         view.accessibilityIdentifier = "capture-input"
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        DispatchQueue.main.async { view.becomeFirstResponder() }
+        DispatchQueue.main.async { [weak view, weak coordinator = context.coordinator] in
+            guard let view, let coordinator, coordinator.parent.enabled, !coordinator.requestedInitialFocus,
+                  view.window != nil else { return }
+            coordinator.requestedInitialFocus = true
+            view.becomeFirstResponder()
+        }
         return view
     }
 
     func updateUIView(_ view: UITextView, context: Context) {
         context.coordinator.parent = self
         if view.text != text { view.text = text }
-        view.isEditable = enabled
+        if view.isEditable != enabled || !context.coordinator.requestedInitialFocus {
+            // UIKit can resolve the SwiftUI responder graph while changing editability.
+            // Apply after this render, using the latest owner state rather than a stale update.
+            DispatchQueue.main.async { [weak view, weak coordinator = context.coordinator] in
+                guard let view, let coordinator else { return }
+                if view.isEditable != coordinator.parent.enabled { view.isEditable = coordinator.parent.enabled }
+                if coordinator.parent.enabled && !coordinator.requestedInitialFocus && view.window != nil {
+                    coordinator.requestedInitialFocus = true
+                    view.becomeFirstResponder()
+                }
+            }
+        }
         view.textColor = color
         view.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 15))
         view.accessibilityLabel = label
@@ -472,11 +627,18 @@ private struct CaptureTextInput: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: CaptureTextInput
+        var requestedInitialFocus = false
         init(_ parent: CaptureTextInput) { self.parent = parent }
         func textViewDidChange(_ view: UITextView) { parent.text = view.text }
         func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            guard parent.enabled else { return false }
             if text == "\n" { parent.submit(); return false }
             return true
         }
     }
+}
+
+private struct CaptureSheetHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

@@ -1,0 +1,5 @@
+"common.retry" = "Riprova";
+"common.close" = "Chiudi";
+"share.openLater" = "I contenuti condivisi in coda saranno disponibili per la revisione alla prossima apertura di Mindwtr.";
+"share.preparing" = "Preparazione della condivisione…";
+"share.queueFailed" = "Non è stato possibile confermare che il contenuto condiviso sia stato messo in coda. Riprova, oppure chiudi questa finestra e controlla in Mindwtr.";

@@ -1,0 +1,6 @@
+// Existing canonical nav.addTask and widget.capture translations.
+"Add Task" = "할 일 추가";
+"Quick capture" = "빠른 수집";
+// Canonical nav.next plus the unavailable-cache refresh action.
+"Next Actions" = "다음 행동";
+"Open Mindwtr to refresh" = "Mindwtr를 열어 새로고침";

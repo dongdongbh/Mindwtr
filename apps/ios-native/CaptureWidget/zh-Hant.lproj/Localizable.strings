@@ -1,0 +1,6 @@
+// Existing canonical nav.addTask and widget.capture translations.
+"Add Task" = "添加任務";
+"Quick capture" = "快速記錄";
+// Canonical nav.next plus the unavailable-cache refresh action.
+"Next Actions" = "下一步行動";
+"Open Mindwtr to refresh" = "開啟 Mindwtr 以重新整理";

@@ -1,0 +1,5 @@
+"common.retry" = "Zkusit znovu";
+"common.close" = "Zavřít";
+"share.openLater" = "Sdílený obsah zařazený do fronty si můžete prohlédnout při příštím otevření Mindwtr.";
+"share.preparing" = "Připravuje se sdílení…";
+"share.queueFailed" = "Nelze potvrdit, zda byl sdílený obsah zařazen do fronty. Zkuste to znovu, nebo zavřete toto okno a podívejte se do Mindwtr.";

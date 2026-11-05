@@ -12,6 +12,7 @@ struct ContextsScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var searchFocused: Bool
+    @FocusState private var filterFocused: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,10 +22,30 @@ struct ContextsScreen: View {
                 .focused($searchFocused).submitLabel(.done).onSubmit { endInput() }
                 .padding(.horizontal, 12).padding(.vertical, 8).frame(minHeight: 40)
                 .background(palette.input, in: RoundedRectangle(cornerRadius: 8))
-                .disabled(model.retryNeeded).accessibilityIdentifier("contexts-search")
+                .disabled(model.retryNeeded || model.contextsSortPresented || model.contextsFiltersPresented || model.focusSavedFilterPresented).accessibilityIdentifier("contexts-search")
                 .padding(12).background(palette.card)
                 .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
-            if !model.contexts.isEmpty { filters }
+            if !model.contexts.isEmpty {
+                HStack {
+                    Button { endInput(); model.openContextsFilters() } label: {
+                        Label(model.label("filters.label"), systemImage: "line.3.horizontal.decrease")
+                            .rnFont(13, .semibold).padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(!model.contextsActionsEnabled)
+                    .accessibilityIdentifier("contexts-filters")
+                    Spacer()
+                    Button { endInput(); Task { await model.openContextsSort() } } label: {
+                        Label(model.contexts.object("sort").text("title"), systemImage: "arrow.up.arrow.down")
+                            .rnFont(13, .semibold).padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(!model.contextsSortEnabled)
+                    .accessibilityLabel(model.contexts.object("sort").text("accessibilityLabel"))
+                    .accessibilityIdentifier("contexts-sort")
+                }
+                .padding(.horizontal, 10).background(palette.card)
+                filters
+            }
+            if model.statusListSelectionMode { StatusListBulkBar(model: model, palette: palette, idPrefix: "contexts") }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if let error = model.contextsError {
@@ -41,10 +62,18 @@ struct ContextsScreen: View {
                         let rows = model.contexts.objects("rows")
                         ForEach(rows.map(ContextsTaskRow.init)) { entry in
                             let row = entry.row
-                            TaskCard(row: row, model: model, palette: palette,
-                                     onProject: { project in Task { await model.openProject(project) } },
-                                     onToken: { model.focusContextsToken($0) }, beforeAction: endInput)
-                                .disabled(!model.contextsActionsEnabled)
+                            let selecting = model.statusListSelectionMode
+                            let selectable = model.statusListTaskSelectable(row)
+                            HStack(spacing: 8) {
+                                if selecting && selectable { StatusListSelectButton(model: model, row: row, palette: palette, idPrefix: "contexts") }
+                                TaskCard(row: row, model: model, palette: palette,
+                                         readOnly: selecting || row.flag("readOnly"), hideStatusBadge: selecting,
+                                         onProject: { project in Task { await model.openProject(project) } },
+                                         onToken: { model.focusContextsToken($0) }, beforeAction: endInput,
+                                         onSelection: selecting && selectable ? { row in Task { await model.selectStatusListTask(row) } } : nil,
+                                         onSelectionStart: selectable ? { row in endInput(); Task { await model.selectStatusListTask(row) } } : nil)
+                            }
+                            .disabled(!model.contextsActionsEnabled)
                         }
                         if rows.count < model.contexts.number("total") {
                             Button { endInput(); model.loadMoreContexts() } label: {
@@ -77,8 +106,14 @@ struct ContextsScreen: View {
                 .padding(12)
             }
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { endInput(); await model.refresh() }
+            .accessibilityIdentifier("contexts-scroll")
+            .refreshable { endInput(); await model.pullToRefresh() }
         }
+        .sheet(isPresented: Binding(get: { model.contextsFiltersPresented }, set: { if !$0 { model.closeContextsFilters() } })) {
+            filterSheet
+        }
+        .onChange(of: scenePhase) { model.statusListSelectionOwnerChanged(active: $0 == .active) }
+        .onDisappear { model.statusListSelectionOwnerChanged(active: false) }
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
@@ -89,8 +124,81 @@ struct ContextsScreen: View {
         }
     }
 
+    private var filterSheet: some View {
+        VStack(spacing: 0) {
+            ListFilterControls(
+                data: model.contextsFilterData, strings: model.strings, palette: palette, prefix: "contexts",
+                enabled: model.contextsFilterControlsEnabled, busy: model.contextsLoading || model.busy,
+                frozen: model.retryNeeded, error: model.contextsError,
+                searchText: Binding(get: { model.contextsTaskSearchText }, set: { model.setContextsFilterText($0) }),
+                locationText: Binding(get: { model.contextsLocationText }, set: { model.setContextsFilterText($0, location: true) }),
+                pickerName: model.contextsPickerName, picker: model.contextsPicker, pickerCurrent: model.contextsCurrent,
+                pickerEnabled: model.contextsPickerActionsEnabled, pickerError: nil,
+                pickerQuery: Binding(get: { model.contextsPickerQuery }, set: { model.setContextsPickerQuery($0) }),
+                onEdit: model.editContextsFilter, onChipAction: model.applyContextsFilterChip, onArchived: { _ in },
+                onOpenPicker: model.openContextsPicker, onBack: model.closeContextsPicker,
+                onMore: model.loadMoreContextsPicker, onRetry: model.retryContexts,
+                onRetryPicker: model.retryContexts, onClose: model.closeContextsFilters, focusedField: $filterFocused)
+            if model.contextsPickerName.isEmpty {
+                Button { filterFocused = nil; Task { await model.openContextsSaveFilter() } } label: {
+                    Text(model.label("common.save")).rnFont(15, .semibold).frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.tint)
+                .disabled(!model.contextsFilterControlsEnabled || !model.contextsCurrent || !model.contexts.flag("canSave"))
+                .accessibilityIdentifier("contexts-filter-save")
+            }
+        }
+        .padding(16).background(palette.card).presentationDetents([.large])
+        .interactiveDismissDisabled(model.busy || model.retryNeeded)
+    }
+
     private var filters: some View {
         VStack(spacing: 0) {
+            let saved = model.contexts.object("savedFilters")
+            if !saved.objects("items").isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(saved.objects("items").indices, id: \.self) { index in
+                            let item = saved.objects("items")[index]
+                            Button { endInput(); model.selectContextsSavedFilter(item.text("id")) } label: {
+                                Text(item.text("name")).rnFont(13, .semibold).padding(.horizontal, 12).frame(minHeight: 44)
+                                    .foregroundStyle(item.flag("selected") ? palette.onTint : palette.text)
+                                    .background(item.flag("selected") ? palette.tint : palette.filter, in: Capsule()).contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain).disabled(!model.contextsActionsEnabled)
+                            .accessibilityAddTraits(item.flag("selected") ? .isSelected : [])
+                            .accessibilityIdentifier("contexts-saved-filter-" + item.text("id"))
+                        }
+                        if saved.objects("items").count < saved.number("total") {
+                            Button(model.label("common.more")) { endInput(); model.loadMoreContextsSavedFilters() }
+                                .rnFont(13, .semibold).frame(minHeight: 44).buttonStyle(.plain)
+                                .disabled(!model.contextsActionsEnabled).accessibilityIdentifier("contexts-saved-filters-more")
+                        }
+                    }.padding(.horizontal, 10).padding(.vertical, 4)
+                }.fixedSize(horizontal: false, vertical: true)
+            }
+            let criteria = model.contexts.objects("filterChips")
+            if !criteria.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(criteria.indices, id: \.self) { index in
+                            let item = criteria[index]
+                            Button { endInput(); model.applyContextsFilterChip(item.object("action")) } label: {
+                                HStack(spacing: 6) {
+                                    Text(item.text("label")).strikethrough(item.flag("excluded"))
+                                    Image(systemName: "xmark")
+                                }.rnFont(12, .semibold).padding(.horizontal, 12).frame(minHeight: 44)
+                                    .foregroundStyle(item.flag("excluded") ? palette.danger : palette.tint)
+                                    .background(palette.filter, in: Capsule()).contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain).disabled(!model.contextsControlsEnabled)
+                            .accessibilityLabel(model.label("filters.remove") + ": " + item.text("label"))
+                            .accessibilityIdentifier("contexts-filter-chip-" + item.text("id"))
+                        }
+                    }.padding(.horizontal, 10).padding(.vertical, 4)
+                }.fixedSize(horizontal: false, vertical: true)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     let chips = model.contexts.objects("chips")

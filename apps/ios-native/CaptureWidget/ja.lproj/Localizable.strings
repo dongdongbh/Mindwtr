@@ -1,0 +1,6 @@
+// Existing canonical nav.addTask and widget.capture translations.
+"Add Task" = "タスクを追加";
+"Quick capture" = "クイックキャプチャ";
+// Canonical nav.next plus the unavailable-cache refresh action.
+"Next Actions" = "次のアクション";
+"Open Mindwtr to refresh" = "Mindwtrを開いて更新";

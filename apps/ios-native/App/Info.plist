@@ -17,7 +17,7 @@
     <array>
       <dict>
         <key>CFBundleURLSchemes</key>
-        <array><string>mindwtr-native-dev</string></array>
+        <array><string>$(MINDWTR_URL_SCHEME)</string></array>
       </dict>
     </array>
     <key>MindwtrFeedbackEndpointURL</key>
@@ -33,6 +33,8 @@
         <string>mind water</string>
       </dict>
     </array>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Mindwtr uses the microphone to capture voice notes.</string>
     <key>NSRemindersUsageDescription</key>
     <string>Mindwtr needs reminders access to import your chosen Apple Reminders capture list into Inbox.</string>
     <key>NSRemindersFullAccessUsageDescription</key>

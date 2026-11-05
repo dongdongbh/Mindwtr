@@ -1,0 +1,5 @@
+"common.retry" = "Tentar novamente";
+"common.close" = "Fechar";
+"share.openLater" = "O conteúdo compartilhado na fila poderá ser revisado na próxima vez que você abrir o Mindwtr.";
+"share.preparing" = "Preparando compartilhamento…";
+"share.queueFailed" = "Não foi possível confirmar se o conteúdo compartilhado entrou na fila. Tente novamente ou feche esta janela e confira no Mindwtr.";

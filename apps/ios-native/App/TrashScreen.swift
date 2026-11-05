@@ -81,7 +81,7 @@ struct TrashScreen: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .accessibilityIdentifier("trash-scroll")
-                .refreshable { await model.refresh() }
+                .refreshable { await model.pullToRefresh() }
             }
             #if DEBUG && targetEnvironment(simulator)
             if model.trashBulkFixtureEnabled {

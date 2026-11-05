@@ -1,0 +1,6 @@
+// Existing canonical nav.addTask and widget.capture translations.
+"Add Task" = "Feladat hozzáadása";
+"Quick capture" = "Gyors rögzítés";
+// Canonical nav.next plus the unavailable-cache refresh action.
+"Next Actions" = "Következő teendők";
+"Open Mindwtr to refresh" = "A frissítéshez nyissa meg a Mindwtr alkalmazást";

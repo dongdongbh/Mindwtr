@@ -225,7 +225,7 @@ struct SearchScreen: View {
                     inputFocused = false
                     Task { await model.completeSearchTask(row.text("id")) }
                 } label: {
-                    taskGlyph(cancelled: row.flag("cancelled")).foregroundStyle(palette.secondary).frame(width: 44, height: 44)
+                    taskGlyph(cancelled: row.flag("cancelled")).foregroundStyle(palette.secondary).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).disabled(!model.searchActionsEnabled)
                 .accessibilityLabel(model.label("review.markDone"))
@@ -306,7 +306,7 @@ struct SearchScreen: View {
                         .disabled(!filtersEnabled).accessibilityIdentifier("search-filters-clear")
                 }
                 Button { closeFilters() } label: {
-                    AppIcon(name: "x", size: 18).foregroundStyle(palette.secondary).frame(width: 44, height: 44)
+                    AppIcon(name: "x", size: 18).foregroundStyle(palette.secondary).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
                 .accessibilityLabel(model.label("common.close")).accessibilityIdentifier("search-filters-close")

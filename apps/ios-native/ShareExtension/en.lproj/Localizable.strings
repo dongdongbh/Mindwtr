@@ -1,0 +1,5 @@
+"common.retry" = "Try again";
+"common.close" = "Close";
+"share.openLater" = "Queued shares are ready to review the next time you open Mindwtr.";
+"share.preparing" = "Preparing share…";
+"share.queueFailed" = "Couldn’t confirm that the share was queued. Retry, or close and check Mindwtr.";

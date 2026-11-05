@@ -41,7 +41,7 @@ struct ProjectsScreen: View {
             }
         }
         .accessibilityIdentifier("projects-scroll")
-        .refreshable { await model.refresh() }
+        .refreshable { await model.pullToRefresh() }
         .sheet(isPresented: Binding(
             get: { model.areaManagerPresented && model.areaManagerProjectID == nil },
             set: { if !$0 && !model.appLock.concealed { model.closeAreaManager() } }
@@ -610,7 +610,7 @@ private struct AreaManagerSheet: View {
                         ForEach(colors, id: \.self) { color in
                             Button { model.selectAreaCreateColor(color) } label: {
                                 Circle().fill(Color(hex: color)).frame(width: 34, height: 34)
-                                    .frame(width: 44, height: 44)
+                                    .frame(width: 44, height: 44).contentShape(Rectangle())
                                     .overlay(Circle().stroke(model.areaCreateColor == color ? palette.tint : palette.border,
                                                              lineWidth: model.areaCreateColor == color ? 3 : 1))
                             }
@@ -859,6 +859,7 @@ struct ProjectFileAddRecoveryPanel: View {
 }
 
 struct ProjectDetailScreen: View {
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var model: CoreModel
     let palette: AppPalette
     @FocusState private var renameFocused: Bool
@@ -877,9 +878,17 @@ struct ProjectDetailScreen: View {
     @State private var cancelProjectConfirmedRevision = ""
     @State private var projectDateDraft = Date()
     @State private var filePickerID: UUID?
+    @State private var projectBulkDeleteConfirmPresented = false
 
-    var body: some View {
-        let fileOpenID = model.projectFileOpenPresentation?.id
+    private var navigationReplayUncovered: Bool {
+        !projectBulkDeleteConfirmPresented && !discardNotesConfirm && !deleteSectionConfirmPresented && !deleteProjectConfirmPresented
+            && !cancelProjectConfirmPresented && !renameFocused && !notesFocused && !sectionFocused
+            && filterFocusedField == nil && model.projectAttachmentOpenError == nil
+            && model.projectFileOpenPresentation == nil && !model.projectFileImporterPresented
+            && !model.projectFileAvailabilityRecoveryVisible && !model.projectFileAddRecoveryVisible
+    }
+
+    private var detailContent: some View {
         VStack(spacing: 0) {
             if model.projectFileAvailabilityRecoveryVisible {
                 ProjectFileAvailabilityRecoveryPanel(model: model, palette: palette)
@@ -955,6 +964,15 @@ struct ProjectDetailScreen: View {
                         }
                         .disabled(!model.projectDuplicateOpenEnabled)
                         .accessibilityIdentifier("project-duplicate-button")
+                        Button {
+                            let id = model.projectHeader.text("id")
+                            let revision = model.projectDetail.text("projectRevision")
+                            Task { await model.openProjectConvert(expectedID: id, expectedRevision: revision) }
+                        } label: {
+                            Label(model.label("projects.convertToSection"), systemImage: "folder")
+                        }
+                        .disabled(!model.projectConvertOpenEnabled)
+                        .accessibilityIdentifier("project-convert-to-section-button")
                         Button(role: .destructive) {
                             deleteProjectConfirmedID = model.projectHeader.text("id")
                             deleteProjectConfirmedRevision = model.projectDetail.text("projectRevision")
@@ -992,6 +1010,16 @@ struct ProjectDetailScreen: View {
                         .accessibilityIdentifier("project-rename-cancel")
                     }
                     .buttonStyle(.plain).rnFont(14, .semibold).foregroundStyle(palette.tint)
+                }
+                if let message = model.projectBulkRetryError ?? model.projectBulkError {
+                    Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("project-bulk-error")
+                    if model.projectBulkRetryError != nil {
+                        Button(model.label("common.retry")) { Task { await model.retry() } }
+                            .rnFont(14, .semibold).frame(minHeight: 45)
+                            .disabled(model.busy).accessibilityIdentifier("project-bulk-retry")
+                    }
                 }
                 if let error = model.projectRenameError {
                     Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
@@ -1146,6 +1174,7 @@ struct ProjectDetailScreen: View {
                     .padding(.horizontal, 12).padding(.bottom, 8).background(palette.card)
                 }
             }
+            if model.projectSelectionMode { projectBulkBar }
             if model.projectTaskOrderPresented {
                 projectTaskOrderList
             } else {
@@ -1221,9 +1250,7 @@ struct ProjectDetailScreen: View {
                                         .padding(.top, 12).padding(.bottom, 4).accessibilityAddTraits(.isHeader)
                                     }
                                 } else if item.text("type") == "task" {
-                                    TaskCard(row: item.object("row"), model: model, palette: palette,
-                                             readOnly: model.projectDetail.flag("readOnly"),
-                                             beforeAction: resignProjectNotesInput)
+                                    projectTaskRow(item.object("row"))
                                 }
                             }
                             if items.count < model.projectDetail.number("total") {
@@ -1231,24 +1258,36 @@ struct ProjectDetailScreen: View {
                                     Text(model.label("common.more")).rnFont(13, .semibold)
                                         .padding(.horizontal, 16).frame(minHeight: 44).background(palette.filter, in: Capsule())
                                 }
-                                .buttonStyle(.plain).disabled(!model.projectActionsEnabled)
+                                .buttonStyle(.plain).disabled(!model.projectRowsEnabled)
                                 .frame(maxWidth: .infinity).accessibilityIdentifier("project-more")
                             }
                         }
                         .disabled(!model.projectCurrent)
                         .allowsHitTesting(model.projectCurrent)
+                        .background {
+                            if model.projectCurrent, !model.busy, !model.projectViewReadPending,
+                               model.projectError == nil, navigationReplayUncovered,
+                               let ticket = model.navigationReplayTicket(for: "project") {
+                                NavigationReplayContentEntry(model: model, ticket: ticket,
+                                    uncovered: { navigationReplayUncovered })
+                            }
+                        }
                     }
                     if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
                 }
                 .padding(12)
             }
             .accessibilityIdentifier("project-detail-scroll")
-            .refreshable { resignProjectNotesInput(); await model.refresh() }
+            .refreshable { resignProjectNotesInput(); await model.pullToRefresh() }
             .allowsHitTesting(!model.projectRenameEditing)
             }
         }
         .disabled(model.projectAttachmentOpening)
         .accessibilityHidden(model.projectFileOpenPresentation != nil)
+    }
+
+    private var observedDetailContent: some View {
+        detailContent
         .onChange(of: model.projectRenameEditing) { renameFocused = $0 }
         .onChange(of: model.projectRenameInputEnabled) { if $0 { renameFocused = true } }
         .onChange(of: notesFocused) { if !$0 { Task { await model.flushProjectNotesEdit() } } }
@@ -1256,7 +1295,7 @@ struct ProjectDetailScreen: View {
         .onChange(of: model.projectDatePicker.text("instant")) { _ in updateProjectDateDraft() }
         .task(id: [model.projectHeader.text("id"), model.projectDetail.text("mutationRevision"),
                    model.projectCurrent ? "current" : "stale", detailsExpanded ? "expanded" : "collapsed"]) {
-            if detailsExpanded && model.projectCurrent { await model.readProjectAttachments() }
+            if detailsExpanded && model.projectCurrent && !model.projectSelectionMode { await model.readProjectAttachments() }
         }
         .task(id: model.projectDetail.text("mutationRevision")) {
             if model.projectDateField != nil && !model.projectDatePending && model.projectCurrent {
@@ -1270,6 +1309,8 @@ struct ProjectDetailScreen: View {
                 await model.retryProjectTagsRead()
             }
         }
+        .onChange(of: scenePhase) { model.projectSelectionOwnerChanged(active: $0 == .active) }
+        .onDisappear { model.projectSelectionOwnerChanged(active: false) }
         .onAppear { detailsProjectID = model.projectHeader.text("id") }
         .onChange(of: model.projectHeader.text("id")) { id in
             if id != detailsProjectID {
@@ -1279,11 +1320,21 @@ struct ProjectDetailScreen: View {
                 discardNotesConfirm = false
                 deleteProjectConfirmPresented = false
                 cancelProjectConfirmPresented = false
+                model.cancelProjectConvert()
             }
         }
         .onChange(of: model.projectSectionsPresented) {
             if !$0 { deleteSectionConfirmPresented = false }
         }
+        .alert(model.projectBulkDeleteConfirmation.text("title"), isPresented: $projectBulkDeleteConfirmPresented) {
+            Button(model.projectBulkDeleteConfirmation.text("cancelLabel"), role: .cancel) {
+                model.cancelProjectBulkDeleteConfirmation()
+            }.accessibilityIdentifier("project-bulk-delete-cancel")
+            Button(model.projectBulkDeleteConfirmation.text("confirmLabel"), role: .destructive) {
+                Task { await model.confirmProjectBulkDelete() }
+            }.accessibilityIdentifier("project-bulk-delete-confirm")
+        } message: { Text(model.projectBulkDeleteConfirmation.text("message")) }
+        .onChange(of: model.projectBulkDeleteConfirmation.isEmpty) { if $0 { projectBulkDeleteConfirmPresented = false } }
         .alert(model.label("taskEdit.discardChanges"), isPresented: $discardNotesConfirm) {
             Button(model.label("common.discard"), role: .destructive) {
                 Task { await model.discardProjectNotesDraft() }
@@ -1318,6 +1369,12 @@ struct ProjectDetailScreen: View {
             Text(model.projectAttachmentOpenError ?? "")
                 .accessibilityIdentifier("project-attachment-open-error")
         }
+    }
+
+    var body: some View {
+        let fileOpenID = model.projectFileOpenPresentation?.id
+        observedDetailContent
+        .overlay { if model.projectConvertPresented { ProjectToSectionDialog(model: model, palette: palette) } }
         .sheet(item: Binding(
             get: {
                 guard let filePickerID, filePickerID == model.projectFileImporterID,
@@ -1380,6 +1437,12 @@ struct ProjectDetailScreen: View {
             .interactiveDismissDisabled(model.retryNeeded || model.projectTaskSortPending
                 || (!model.projectFiltersPresented && model.busy))
         }
+        .sheet(isPresented: Binding(get: { model.projectBulkComposerPresented },
+                                    set: { if !$0 { model.closeProjectBulkComposer() } })) {
+            ProjectBulkTagSheet(model: model, palette: palette)
+                .presentationDetents([.medium, .large])
+                .interactiveDismissDisabled(!model.projectBulkComposerCloseEnabled)
+        }
         .sheet(isPresented: Binding(get: { model.projectAreaPresented },
                                     set: { if !$0 && !model.appLock.concealed { model.closeProjectArea() } })) {
             ProjectAreaSelectionSheet(model: model, palette: palette)
@@ -1398,6 +1461,12 @@ struct ProjectDetailScreen: View {
                 .presentationDetents([.large])
                 .interactiveDismissDisabled(model.busy || model.retryNeeded || model.projectAttachmentWritePending)
         }
+        .sheet(isPresented: Binding(get: { model.projectFlowModePresented },
+                                    set: { if !$0 && !model.appLock.concealed { model.closeProjectFlowMode() } })) {
+            projectFlowModeSheet
+                .presentationDetents([.medium, .large])
+                .interactiveDismissDisabled(model.busy || model.retryNeeded)
+        }
         .sheet(isPresented: Binding(get: { model.projectSectionsPresented },
                                     set: { if !$0 && !model.appLock.concealed { model.closeProjectSections() } })) {
             projectSectionsSheet
@@ -1415,6 +1484,112 @@ struct ProjectDetailScreen: View {
                 }
         }
         .accessibilityAction(.escape) { resignProjectNotesInput(); Task { await model.closeProject() } }
+    }
+
+    private func projectTaskRow(_ row: CoreObject) -> some View {
+        let writable = !model.projectDetail.flag("readOnly") && model.projectTaskSelectable(row.text("id"))
+        let selected = model.projectTaskSelected(row.text("id"))
+        return HStack(spacing: 8) {
+            if model.projectSelectionMode && writable {
+                Button {
+                    resignProjectNotesInput()
+                    Task { await model.selectProjectTask(row) }
+                } label: {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22)).foregroundStyle(palette.tint)
+                        .frame(width: 45, height: 45).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel(row.text("title"))
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier("project-select-" + row.text("id"))
+            }
+            TaskCard(row: row, model: model, palette: palette,
+                     readOnly: !writable || model.projectSelectionMode,
+                     hideStatusBadge: model.projectSelectionMode,
+                     beforeAction: resignProjectNotesInput,
+                     onSelection: model.projectSelectionMode && writable ? { selected in
+                         resignProjectNotesInput(); Task { await model.selectProjectTask(selected) }
+                     } : nil,
+                     onSelectionStart: writable ? { selected in
+                         resignProjectNotesInput(); Task { await model.selectProjectTask(selected) }
+                     } : nil)
+        }
+        .disabled(!model.projectRowsEnabled)
+    }
+
+    private var projectBulkBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(model.projectBulk.object("bar").text("countLabel"))
+                    .rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("project-bulk-count")
+                Spacer(minLength: 0)
+                Button { model.leaveProjectTaskSelection() } label: {
+                    AppIcon(name: "x", size: 16).frame(width: 45, height: 45).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.secondary).disabled(!model.projectSelectionExitEnabled)
+                .accessibilityLabel(model.projectBulk.object("bar").object("exit").text("accessibilityLabel"))
+                .accessibilityIdentifier("project-bulk-exit")
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    let statuses = model.projectBulk.object("bar").objects("statuses")
+                    ForEach(statuses.indices, id: \.self) { index in
+                        let option = statuses[index]
+                        Button { Task { await model.moveSelectedProjectTasks(status: option.text("status")) } } label: {
+                            projectBulkActionLabel(option.text("label"))
+                        }
+                        .buttonStyle(.plain).foregroundStyle(palette.tint)
+                        .disabled(!model.projectBulkStatusEnabled(option.text("status")))
+                        .accessibilityLabel(option.text("accessibilityLabel"))
+                        .accessibilityIdentifier("project-bulk-status-" + option.text("status"))
+                    }
+                    Button { model.openProjectBulkOrganize() } label: {
+                        projectBulkActionLabel(model.projectBulk.object("bar").object("organize").text("label"))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.projectBulkOrganizeEnabled)
+                    .accessibilityLabel(model.projectBulk.object("bar").object("organize").text("label"))
+                    .accessibilityIdentifier("project-bulk-organize-open")
+                    Button { model.openProjectBulkTag() } label: {
+                        projectBulkActionLabel(model.projectBulk.object("bar").object("addTag").text("label"))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.projectBulkTagEnabled)
+                    .accessibilityLabel(model.projectBulk.object("bar").object("addTag").text("accessibilityLabel"))
+                    .accessibilityIdentifier("project-bulk-tag-open")
+                    Button { model.openProjectBulkRemove() } label: {
+                        projectBulkActionLabel(model.projectBulk.object("bar").object("removeTag").text("label"))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.projectBulkRemoveEnabled)
+                    .accessibilityLabel(model.projectBulk.object("bar").object("removeTag").text("label"))
+                    .accessibilityIdentifier("project-bulk-remove-tag-open")
+                    Button { Task { await model.toggleProjectTaskRange() } } label: {
+                        projectBulkActionLabel(model.projectBulk.object("bar").object("range").text("label"))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.projectBulkRangeEnabled)
+                    .accessibilityAddTraits(model.projectBulk.object("bar").object("range").flag("active") ? .isSelected : [])
+                    .accessibilityIdentifier("project-bulk-range")
+                    Button {
+                        resignProjectNotesInput(); model.requestProjectBulkDeleteConfirmation()
+                        projectBulkDeleteConfirmPresented = !model.projectBulkDeleteConfirmation.isEmpty
+                    } label: { projectBulkActionLabel(model.projectBulk.object("bar").object("delete").text("label")) }
+                    .buttonStyle(.plain).foregroundStyle(palette.danger).disabled(!model.projectBulkDeleteEnabled)
+                    .accessibilityIdentifier("project-bulk-delete")
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("project-bulk-actions-scroll")
+        }
+        .padding(12).background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border).allowsHitTesting(false))
+        .padding(.horizontal, 16).padding(.vertical, 8)
+    }
+
+    private func projectBulkActionLabel(_ text: String) -> some View {
+        Text(text).rnFont(13, .semibold).fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 12).frame(minWidth: 45, minHeight: 45)
+            .background(palette.card, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border).allowsHitTesting(false))
+            .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -1743,7 +1918,7 @@ struct ProjectDetailScreen: View {
                     Color.clear.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(model.projectRenameEditing || model.projectStatusPending || model.retryNeeded)
+                .disabled(model.projectRenameEditing || model.projectStatusPending || model.retryNeeded || model.projectSelectionMode)
                 .accessibilityLabel(model.label("taskEdit.details"))
                 .accessibilityValue(model.label(detailsExpanded ? "markdown.collapse" : "markdown.expand"))
                 .accessibilityIdentifier("project-details-toggle")
@@ -1764,12 +1939,12 @@ struct ProjectDetailScreen: View {
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
                             .contentShape(Rectangle())
                             .overlay(alignment: .trailing) {
-                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Image(systemName: "chevron.down")
                                     .font(.system(size: 16)).foregroundStyle(palette.tint)
                                     .accessibilityHidden(true)
                             }
                             .overlay {
-                                Button { resignProjectNotesInput(); Task { await model.toggleProjectType() } } label: {
+                                Button { resignProjectNotesInput(); Task { await model.openProjectFlowMode() } } label: {
                                     Color.clear.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain).disabled(!model.projectFlowInputEnabled)
@@ -1814,6 +1989,48 @@ struct ProjectDetailScreen: View {
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.card, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+    }
+
+    private var projectFlowModeSheet: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(model.label("projects.projectTypeLabel"))
+                    .rnFont(20, .bold).foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                Button { model.closeProjectFlowMode() } label: {
+                    Image(systemName: "xmark").font(.system(size: 20)).foregroundStyle(palette.secondary)
+                        .frame(width: 48, height: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel(model.label("common.close"))
+                .accessibilityIdentifier("project-flow-mode-close")
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(["parallel", "sequential", "perSection"], id: \.self) { mode in
+                        Button { Task { await model.chooseProjectFlowMode(mode) } } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(model.label("projects." + mode)).rnFont(16, .semibold).foregroundStyle(palette.text)
+                                    Text(model.label("projects." + mode + "Tooltip"))
+                                        .rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 8)
+                                if model.projectFlowMode == mode {
+                                    Image(systemName: "checkmark").foregroundStyle(palette.tint).accessibilityHidden(true)
+                                }
+                            }
+                            .padding(12).frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                            .background(palette.card, in: RoundedRectangle(cornerRadius: 8)).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+                        .accessibilityAddTraits(model.projectFlowMode == mode ? .isSelected : [])
+                        .accessibilityIdentifier("project-flow-mode-" + mode)
+                    }
+                }.padding(16)
+            }
+        }
+        .background(palette.bg.ignoresSafeArea())
     }
 
     private var projectSectionsSheet: some View {
@@ -1892,6 +2109,18 @@ struct ProjectDetailScreen: View {
                                 Text(row.text("title")).rnFont(15).foregroundStyle(palette.text)
                                     .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                                     .accessibilityIdentifier("project-section-row-" + row.text("id"))
+                                if model.projectSectionFlowOptions.flag("canChange") {
+                                    Picker(model.label("projects.projectTypeLabel"), selection: Binding(
+                                        get: { model.projectSectionSequential(row.text("id")) },
+                                        set: { value in Task { await model.setProjectSectionFlow(row.text("id"), sequential: value) } })) {
+                                            Text(model.label("projects.parallel")).tag(false)
+                                            Text(model.label("projects.sequential")).tag(true)
+                                        }
+                                        .pickerStyle(.segmented).frame(minHeight: 48)
+                                        .disabled(!model.projectSectionFlowEnabled(row.text("id")))
+                                        .accessibilityLabel(row.text("title") + ": " + model.label("projects.projectTypeLabel"))
+                                        .accessibilityIdentifier("project-section-flow-" + row.text("id"))
+                                }
                                 if model.projectSectionOptions.flag("canCreate") {
                                     HStack(spacing: 8) {
                                         Button { Task { await model.moveProjectSection(row.text("id"), direction: "up") } } label: {
@@ -1941,6 +2170,14 @@ struct ProjectDetailScreen: View {
                                 }
                             }
                         }
+                    }
+                    if let message = model.projectFlowError ?? model.projectFlowReadError {
+                        Text(message).rnFont(13).foregroundStyle(palette.danger)
+                            .accessibilityIdentifier("project-section-flow-error")
+                        Button(model.label("common.retry")) {
+                            Task { if model.projectFlowPending { await model.retry() } else { await model.retryProjectFlowRead() } }
+                        }.frame(minHeight: 48).disabled(model.busy)
+                            .accessibilityIdentifier("project-section-flow-retry")
                     }
                     if let message = model.projectSectionError {
                         Text(message).rnFont(13).foregroundStyle(palette.danger)
@@ -2186,6 +2423,174 @@ struct ProjectDetailScreen: View {
 }
 
 // Concrete boundaries keep the Notes view metadata shallow on iOS 17.
+private struct ProjectToSectionDialog: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @FocusState private var titleFocused: Bool
+    private var options: CoreObject { model.projectConvertOptions }
+    private var destination: CoreObject { model.projectConvertDestination }
+    private var owed: Bool { model.projectConvertPending && model.retryNeeded }
+    private var frozen: Bool { model.busy || model.projectConvertPending }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { cancel() }.accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(model.label("projects.convertToSection")).rnFont(18, .bold)
+                        .accessibilityAddTraits(.isHeader).accessibilityIdentifier("project-convert-title")
+                    ScrollView { form.frame(maxWidth: .infinity, alignment: .leading) }
+                    .scrollDismissesKeyboard(.interactively)
+                    .frame(maxHeight: max(160, min(dynamicTypeSize.isAccessibilitySize ? .infinity : 460, geometry.size.height - 160)))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("project-convert-scroll")
+                    buttons
+                }
+                .padding(16).frame(maxWidth: 460)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1)).padding(16)
+            }
+            .foregroundStyle(palette.text).frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { cancel() }
+        }
+    }
+
+    @ViewBuilder private var form: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !options.text("sequentialMessage").isEmpty {
+                note(options.text("sequentialMessage"), id: "project-convert-sequence")
+            }
+            if model.projectConvertLoading && options.isEmpty {
+                ProgressView().accessibilityLabel(model.label("common.loading"))
+            } else if !options.text("blockedMessage").isEmpty {
+                Text(options.text("blockedMessage")).rnFont(14).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("project-convert-blocked")
+            } else if model.projectConvertReviewing {
+                review
+            } else {
+                choose
+            }
+            if let error = model.projectConvertError {
+                Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("project-convert-error")
+            }
+        }
+    }
+
+    @ViewBuilder private var choose: some View {
+        Text(model.label("projects.convertDestination")).rnFont(14).foregroundStyle(palette.secondary)
+            .accessibilityAddTraits(.isHeader)
+        if options.objects("destinations").isEmpty && !options.isEmpty {
+            note(model.label("projects.convertBlocked.missing-destination"), id: "project-convert-no-destination")
+        }
+        ForEach(options.objects("destinations").map { $0.text("id") }, id: \.self) { id in
+            let row = options.objects("destinations").first { $0.text("id") == id } ?? [:]
+            let selected = model.projectConvertDestinationID == id
+            Button { model.selectProjectConvertDestination(id) } label: {
+                HStack(spacing: 10) {
+                    Circle().fill(row.text("color").isEmpty ? palette.secondary : Color(hex: row.text("color")))
+                        .frame(width: 12, height: 12).accessibilityHidden(true)
+                    Text(row.text("title")).rnFont(16, selected ? .semibold : .regular)
+                        .foregroundStyle(selected ? palette.tint : palette.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if selected { Image(systemName: "checkmark").foregroundStyle(palette.tint).accessibilityHidden(true) }
+                }
+                .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(frozen)
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+            .accessibilityIdentifier("project-convert-destination-" + id)
+        }
+        Text(model.label("projects.convertSectionName")).rnFont(14).foregroundStyle(palette.secondary)
+        TextField(model.label("projects.convertSectionName"), text: Binding(
+            get: { model.projectConvertTitle }, set: { model.setProjectConvertTitle($0) }))
+            .focused($titleFocused).submitLabel(.done).rnFont(16)
+            .padding(12).frame(minHeight: 44)
+            .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+            .accessibilityLabel(model.label("projects.convertSectionName"))
+            .accessibilityIdentifier("project-convert-name").disabled(frozen)
+        if !destination.isEmpty { preview(named: nil) }
+    }
+
+    @ViewBuilder private var review: some View {
+        preview(named: model.projectConvertTitle.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    @ViewBuilder private func preview(named name: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(destination.text("summary")).rnFont(15).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("project-convert-summary")
+            if let name {
+                Text(model.label("projects.convertNamedSection").replacingOccurrences(of: "{{name}}", with: name))
+                    .rnFont(15).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("project-convert-section-name")
+            }
+            if !options.text("notesMessage").isEmpty { note(options.text("notesMessage"), id: "project-convert-notes") }
+            note(destination.text("areaLine"), id: "project-convert-area")
+            HStack(spacing: 8) {
+                Circle().fill(destination.text("color").isEmpty ? palette.secondary : Color(hex: destination.text("color")))
+                    .frame(width: 12, height: 12).overlay(Circle().stroke(palette.border, lineWidth: 1)).accessibilityHidden(true)
+                note(model.label("projects.convertDestinationColor"), id: "project-convert-destination-color")
+            }
+            note(model.label("projects.convertColor"), id: "project-convert-color")
+            note(model.label("projects.convertSettings"), id: "project-convert-settings")
+            note(model.label("projects.convertTrash"), id: "project-convert-trash")
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func note(_ text: String, id: String) -> some View {
+        Text(text).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier(id)
+    }
+
+    private var buttons: some View {
+        HStack {
+            Spacer()
+            if model.projectConvertReviewing {
+                Button { model.backProjectConvert() } label: {
+                    Text(model.label("common.back")).frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.secondary)
+                .disabled(frozen).accessibilityIdentifier("project-convert-back")
+                Button {
+                    titleFocused = false
+                    Task { if owed { await model.retry() } else { await model.submitProjectConvert() } }
+                } label: {
+                    Text(owed ? model.label("common.retry") : model.label("projects.convertToSection"))
+                        .frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.tint)
+                .disabled(model.busy || (!owed && !model.projectConvertCanContinue))
+                .accessibilityIdentifier(owed ? "project-convert-retry" : "project-convert-confirm")
+            } else {
+                Button(action: cancel) {
+                    Text(model.label("common.cancel")).frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.secondary)
+                .disabled(frozen).accessibilityIdentifier("project-convert-cancel")
+                Button {
+                    titleFocused = false
+                    model.continueProjectConvert()
+                } label: {
+                    Text(model.label("common.next")).frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.tint)
+                .disabled(!model.projectConvertCanContinue).accessibilityIdentifier("project-convert-next")
+            }
+        }
+    }
+
+    private func cancel() {
+        guard !frozen else { return }
+        titleFocused = false
+        model.cancelProjectConvert()
+    }
+}
+
 private struct ProjectNotesPanel: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -3016,7 +3421,7 @@ private struct ProjectAreaSelectionSheet: View {
                                 Circle().fill(Color(hex: color)).frame(width: 30, height: 30)
                                     .overlay(Circle().stroke(selected ? palette.text : palette.border, lineWidth: selected ? 3 : 1))
                                     .overlay { if selected { Image(systemName: "checkmark").foregroundStyle(palette.text) } }
-                                    .frame(minWidth: 44, minHeight: 44)
+                                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain).disabled(!model.projectAreaChoiceEnabled)
                             .accessibilityLabel(model.label("projects.color") + ": " + color)
@@ -3133,7 +3538,7 @@ private struct ProjectAreaCreateForm: View {
                 ForEach(colors, id: \.self) { color in
                     Button { model.selectProjectAreaCreateColor(color) } label: {
                         Circle().fill(Color(hex: color)).frame(width: 34, height: 34)
-                            .frame(width: 44, height: 44)
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
                             .overlay(Circle().stroke(model.projectAreaCreateColor == color
                                 ? palette.tint : palette.border,
                                 lineWidth: model.projectAreaCreateColor == color ? 3 : 1))
@@ -3300,5 +3705,100 @@ private struct ProjectTaskOrderTable: UIViewRepresentable {
                 tableView.reloadData()
             }
         }
+    }
+}
+
+private struct ProjectBulkTagSheet: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @FocusState private var inputFocused: Bool
+    private var prefix: String { model.projectBulkComposerRemoving ? "project-bulk-remove-tag" : "project-bulk-tag" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(model.projectBulkComposerOptions.text("title")).rnFont(18, .bold).accessibilityAddTraits(.isHeader)
+            if model.projectBulkComposerRemoving {
+                Text(model.projectBulkComposerOptions.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            TextField(model.projectBulkComposerOptions.text("placeholder"), text: Binding(
+                get: { model.projectBulkComposerRemoving ? model.projectBulkRemoveQuery : model.projectBulkTagText },
+                set: { if model.projectBulkComposerRemoving { model.setProjectBulkRemoveQuery($0) } else { model.setProjectBulkTagText($0) } }))
+                .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled().focused($inputFocused)
+                .submitLabel(.done).onSubmit { inputFocused = false }
+                .padding(12).frame(minHeight: 45).background(palette.input, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+                .disabled(!model.projectBulkComposerInputEnabled)
+                .accessibilityLabel(model.projectBulkComposerOptions.text("placeholder"))
+                .accessibilityIdentifier(prefix + "-input")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if model.projectBulkComposerRemoving {
+                        AppChipFlow {
+                            ForEach(model.projectBulkRemoveItems.indices, id: \.self) { index in
+                                let option = model.projectBulkRemoveItems[index]
+                                let picked = model.projectBulkRemovePicked(option.text("value"))
+                                Button { model.toggleProjectBulkRemove(option.text("value")) } label: {
+                                    Text(option.text("label")).rnFont(14).multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .padding(.horizontal, 12).padding(.vertical, 8).frame(minWidth: 45, minHeight: 45)
+                                        .background(picked ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 8))
+                                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(picked ? palette.tint : palette.border, lineWidth: 1))
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain).foregroundStyle(picked ? palette.onTint : palette.text)
+                                .disabled(!model.projectBulkComposerInputEnabled || model.projectBulkComposerReading)
+                                .accessibilityLabel(option.text("label")).accessibilityAddTraits(picked ? .isSelected : [])
+                                .accessibilityIdentifier(prefix + "-option-\(index)")
+                            }
+                        }
+                        if model.projectBulkRemoveItems.isEmpty && !model.projectBulkComposerReading && model.projectBulkComposerReadError == nil {
+                            Text(model.label("common.noMatches")).rnFont(14).foregroundStyle(palette.secondary)
+                                .accessibilityIdentifier(prefix + "-no-matches")
+                        }
+                        if model.projectBulkRemoveItems.count < model.projectBulkRemoveTotal {
+                            Button { model.loadMoreProjectBulkRemove() } label: {
+                                Text(model.label("common.more")).rnFont(14, .semibold).frame(minWidth: 45, minHeight: 45).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).disabled(!model.projectBulkRemoveCanLoadMore).accessibilityIdentifier(prefix + "-more")
+                        }
+                    }
+                    if model.projectBulkComposerReading { ProgressView().accessibilityLabel(model.label("common.loading")) }
+                    if let message = model.projectBulkComposerReadError {
+                        Text(message).rnFont(13).foregroundStyle(palette.danger).accessibilityIdentifier(prefix + "-read-error")
+                        Button { model.retryProjectBulkComposerRead() } label: {
+                            Text(model.label("common.retry")).rnFont(14, .semibold).frame(minWidth: 45, minHeight: 45).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(!model.projectBulkComposerInputEnabled || model.projectBulkComposerReading)
+                        .accessibilityIdentifier(prefix + "-read-retry")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityIdentifier(prefix + "-scroll")
+            HStack {
+                Button {
+                    inputFocused = false; model.closeProjectBulkComposer()
+                } label: {
+                    Text(model.projectBulkComposerOptions.text("cancelLabel")).rnFont(14, .semibold)
+                        .frame(minWidth: 45, minHeight: 45).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.secondary).disabled(!model.projectBulkComposerCloseEnabled)
+                .accessibilityIdentifier(prefix + "-cancel")
+                Spacer(minLength: 0)
+                Button {
+                    inputFocused = false; Task { await model.saveProjectBulkComposer() }
+                } label: {
+                    Text(model.projectBulkComposerOptions.text("saveLabel")).rnFont(14, .semibold)
+                        .frame(minWidth: 45, minHeight: 45).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.projectBulkComposerSaveEnabled)
+                .accessibilityIdentifier(prefix + "-save")
+            }
+        }
+        .padding(16).background(palette.card).foregroundStyle(palette.text).tint(palette.tint)
+        .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+        .accessibilityIdentifier(prefix + "-sheet")
+        .accessibilityAction(.escape) { inputFocused = false; model.closeProjectBulkComposer() }
     }
 }

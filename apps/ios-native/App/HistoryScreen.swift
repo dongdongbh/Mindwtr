@@ -222,7 +222,7 @@ struct HistoryScreen: View {
                             .disabled(model.busy || (model.retryNeeded && !model.historyArchiveActionPending))
                             .accessibilityIdentifier("archive-retry")
                     }
-                    if model.historyCurrent {
+                    if model.historyCurrent || (model.busy && !model.history.isEmpty) {
                         if model.history.text("segment") != "tasks", !model.history.text("summary").isEmpty {
                             Text(model.history.text("summary")).rnFont(13, .medium).foregroundStyle(palette.secondary)
                                 .padding(.top, 4).accessibilityIdentifier("archive-summary")
@@ -310,7 +310,7 @@ struct HistoryScreen: View {
             .scrollContentBackground(.hidden)
             .accessibilityIdentifier("archive-scroll")
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await model.refresh() }
+            .refreshable { await model.pullToRefresh() }
         }
     }
 

@@ -1,0 +1,5 @@
+"common.retry" = "Volver a intentar";
+"common.close" = "Cerrar";
+"share.openLater" = "El contenido compartido que está en cola estará listo para revisar la próxima vez que abras Mindwtr.";
+"share.preparing" = "Preparando contenido compartido…";
+"share.queueFailed" = "No se pudo confirmar si el contenido compartido se añadió a la cola. Vuelve a intentarlo o cierra esta ventana y revisa Mindwtr.";

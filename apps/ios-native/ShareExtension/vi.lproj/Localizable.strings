@@ -1,0 +1,5 @@
+"common.retry" = "Thử lại";
+"common.close" = "Đóng";
+"share.openLater" = "Nội dung đã được đưa vào hàng đợi sẽ sẵn sàng để xem lại khi bạn mở Mindwtr lần tới.";
+"share.preparing" = "Đang chuẩn bị chia sẻ…";
+"share.queueFailed" = "Không thể xác nhận nội dung chia sẻ đã được đưa vào hàng đợi hay chưa. Hãy thử lại, hoặc đóng cửa sổ này và kiểm tra trong Mindwtr.";

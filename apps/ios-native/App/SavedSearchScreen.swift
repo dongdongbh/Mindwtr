@@ -13,15 +13,25 @@ struct SavedSearchScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 16) {
+            Spacer()
+            if model.savedSearch.flag("found") {
+                Button { Task { await model.openSavedSearchSort() } } label: {
+                    Label(model.label("sort.label"), systemImage: "arrow.up.arrow.down")
+                        .rnFont(14, .semibold).frame(minHeight: 44)
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.text)
+                .disabled(!model.savedSearchActionsEnabled).accessibilityIdentifier("saved-search-sort")
+            }
             if !model.savedSearch.object("delete").isEmpty {
                 Button { Task { await model.openSavedSearchDelete() } } label: {
                     Text(model.savedSearch.object("delete").text("label")).rnFont(14, .semibold)
                         .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                 }
                     .buttonStyle(.plain).foregroundStyle(palette.danger)
-                    .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal, 16)
                     .disabled(!model.savedSearchActionsEnabled).accessibilityIdentifier("saved-search-delete")
             }
+            }.padding(.horizontal, 16)
             if !model.savedSearch.text("query").isEmpty {
                 Text(model.savedSearch.text("query"))
                     .rnFont(12).foregroundStyle(palette.secondary)
@@ -89,7 +99,7 @@ struct SavedSearchScreen: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("saved-search-scroll")
-            .refreshable { await model.refresh() }
+            .refreshable { await model.pullToRefresh() }
         }
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { return }
@@ -133,6 +143,7 @@ struct SavedSearchWriteDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var labels: CoreObject { model.savedSearchWriteDialog }
     private var saving: Bool { model.savedSearchWriteOperation.text("type") == "save" }
+    private var sorting: Bool { model.savedSearchWriteOperation.text("type") == "sort" }
 
     var body: some View {
         GeometryReader { geometry in
@@ -173,6 +184,23 @@ struct SavedSearchWriteDialog: View {
                 .contentShape(Rectangle()).onTapGesture { nameFocused = true }
                 .disabled(model.busy || model.retryNeeded)
                 .accessibilityLabel(labels.text("placeholder")).accessibilityIdentifier("saved-search-write-name")
+        } else if sorting {
+            let choices = model.savedSearchWriteOptions.objects("choices")
+            ForEach(choices.indices, id: \.self) { index in
+                let choice = choices[index]
+                Button { Task { await model.chooseSavedSearchSort(choice) } } label: {
+                    HStack {
+                        Text(choice.text("label")).rnFont(15, .semibold)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if choice.flag("selected") { Image(systemName: "checkmark").foregroundStyle(palette.tint) }
+                    }
+                    .padding(.horizontal, 8).frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(!model.savedSearchWriteCanConfirm)
+                .accessibilityAddTraits(choice.flag("selected") ? .isSelected : [])
+                .accessibilityIdentifier("saved-search-sort-" + (choice["value"] is NSNull ? "global" : choice.text("value")))
+            }
+            if model.busy { ProgressView().frame(maxWidth: .infinity) }
         } else {
             Text(labels.text("message")).rnFont(15).foregroundStyle(palette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -181,7 +209,7 @@ struct SavedSearchWriteDialog: View {
             Text(error).rnFont(14).foregroundStyle(palette.danger)
                 .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("saved-search-write-error")
             Button { endInput(); Task { await model.retrySavedSearchWrite() } } label: {
-                Text(model.label("common.retry")).rnFont(14, .semibold).frame(minWidth: 44, minHeight: 44)
+                Text(model.label("common.retry")).rnFont(14, .semibold).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
             }
             .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(model.busy)
             .accessibilityIdentifier("saved-search-write-retry")
@@ -198,6 +226,7 @@ struct SavedSearchWriteDialog: View {
         }
         .buttonStyle(.plain).foregroundStyle(palette.secondary).disabled(model.busy || model.retryNeeded)
         .accessibilityIdentifier("saved-search-write-cancel")
+        if !sorting {
         Button { submit() } label: {
             Text(labels.text(saving ? "saveLabel" : "confirmLabel")).rnFont(14, .semibold)
                 .padding(.horizontal, 20).frame(minHeight: 44)
@@ -207,6 +236,7 @@ struct SavedSearchWriteDialog: View {
         }
         .buttonStyle(.plain).disabled(!model.savedSearchWriteCanConfirm)
         .opacity(model.savedSearchWriteCanConfirm ? 1 : 0.5).accessibilityIdentifier("saved-search-write-confirm")
+        }
     }
 
     private func submit() { endInput(); Task { await model.confirmSavedSearchWrite() } }

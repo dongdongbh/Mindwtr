@@ -1,0 +1,5 @@
+"common.retry" = "Újrapróbálkozás";
+"common.close" = "Bezárás";
+"share.openLater" = "A megosztási sorba került tartalmakat a Mindwtr következő megnyitásakor nézheted át.";
+"share.preparing" = "Megosztás előkészítése…";
+"share.queueFailed" = "Nem sikerült megerősíteni, hogy a megosztás bekerült a sorba. Próbáld újra, vagy zárd be ezt az ablakot, és ellenőrizd a Mindwtr alkalmazást.";

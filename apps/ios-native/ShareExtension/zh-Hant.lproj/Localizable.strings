@@ -1,0 +1,5 @@
+"common.retry" = "重試";
+"common.close" = "關閉";
+"share.openLater" = "已加入佇列的分享內容可在下次開啟 Mindwtr 時檢視。";
+"share.preparing" = "正在準備分享…";
+"share.queueFailed" = "無法確認分享內容是否已加入佇列。請重試，或關閉此視窗後到 Mindwtr 中查看。";

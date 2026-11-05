@@ -1,0 +1,5 @@
+"common.retry" = "Tekrar dene";
+"common.close" = "Kapalı";
+"share.openLater" = "Mindwtr uygulamasını bir sonraki açışınızda kuyruğa alınan paylaşımları inceleyebilirsiniz.";
+"share.preparing" = "Paylaşım hazırlanıyor…";
+"share.queueFailed" = "Paylaşımın kuyruğa alındığı doğrulanamadı. Tekrar deneyin veya bu pencereyi kapatıp Mindwtr uygulamasını kontrol edin.";

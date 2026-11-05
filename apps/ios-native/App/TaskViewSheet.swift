@@ -29,6 +29,9 @@ struct TaskViewSheet: View {
     @State private var fileImporterID: UUID?
     @State private var ownedMenuPromptVisible = false
     @State private var sectionExpanded: [String: Bool] = [:]
+    @State private var sectionHelpExpanded: Set<String> = []
+    @State private var sectionGuideErrors: Set<String> = []
+    @State private var sectionGuideAttempts: [String: UUID] = [:]
     @State private var sectionTaskID = ""
     @State private var datePickerID = ""
     @State private var datePickerValue = Date.distantPast
@@ -63,7 +66,13 @@ struct TaskViewSheet: View {
         !model.taskDestinationKind.isEmpty || monthlyCustom != nil || waitingAssignment != nil
             || backdatedCompletion != nil || model.taskLinkSheetActive || model.taskFileImporterPresented
             || model.taskFileOpenPresentation != nil
-            || ownedMenuPromptVisible
+            || ownedMenuPromptVisible || !model.taskAIAnswer.isEmpty || model.taskPromotionPresented
+    }
+    private var navigationReplayUncovered: Bool {
+        !editing && !discardConfirm && !modalPresented && !attachmentRecoveryFrozen && !checklistReordering
+            && focusedChecklistIndex == nil && model.taskSharePayload == nil
+            && model.taskShareError == nil && model.taskAttachmentOpenError == nil
+            && !model.taskFileImporterPresented
     }
 
     var body: some View {
@@ -90,6 +99,10 @@ struct TaskViewSheet: View {
                     close: { backdatedCompletion = nil })
             }
             if model.taskLinkSheetActive { taskLinkDialog }
+            if model.taskPromotionPresented { TaskPromotionDialog(model: model, palette: palette) }
+            if let ownerID = model.taskAIAnswerID, !model.taskAIAnswer.isEmpty {
+                taskAIDialog(ownerID: ownerID)
+            }
             #if DEBUG && targetEnvironment(simulator)
             if model.entityLinkTestReadEnabled {
                 Text("Entity link read test state").font(.system(size: 1)).frame(width: 1, height: 1)
@@ -98,6 +111,18 @@ struct TaskViewSheet: View {
             }
             #endif
         }
+        #if DEBUG && targetEnvironment(simulator)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if model.quickCaptureIntentFixtureEnabled { NativeQuickCaptureIntentFixtureView(model: model) }
+        }
+        #endif
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        .overlay(alignment: .bottomLeading) {
+            if model.navigationReplayFixtureEnabled {
+                NativeNavigationReplayFixtureView(model: model, session: NativeAppModel.session, task: true)
+            }
+        }
+        #endif
         .sheet(item: Binding(get: { model.taskSharePayload }, set: { if $0 == nil { model.dismissTaskShare() } })) { payload in
             TaskActivitySheet(payload: payload)
         }
@@ -216,60 +241,79 @@ struct TaskViewSheet: View {
                     : frozen) || model.taskScheduleUpdating)
                 .accessibilityLabel(strings.text("common.close")).accessibilityIdentifier("task-view-close")
                 Spacer()
-                if !readOnly && !model.taskEditor.isEmpty {
+                if !model.taskEditor.isEmpty {
                     Menu {
-                        if model.taskEditor.flag("canSkipOccurrence") {
-                            Button(strings.text("task.skipOccurrence")) {
-                                endEditingBeforeAction()
-                                Task { await model.saveTask(intent: .skip) }
-                            }.accessibilityIdentifier("task-skip-occurrence")
+                        let taskID = model.taskEditor.text("id")
+                        let session = model.taskEditorSession
+                        if !taskID.isEmpty {
+                            Button(strings.text("task.copyTaskLink")) {
+                                model.copyTaskReference(taskID, link: true, editorSession: session)
+                            }.accessibilityIdentifier("task-editor-copy-link")
+                            Button(strings.text("task.copyTaskId")) {
+                                model.copyTaskReference(taskID, link: false, editorSession: session)
+                            }.accessibilityIdentifier("task-editor-copy-id")
                         }
-                        if model.taskEditor.flag("canCancel") {
-                            Button(model.taskEditor.text("cancelLabel"), role: .destructive) {
-                                endEditingBeforeAction()
-                                Task { await model.saveTask(intent: .cancel) }
-                            }.accessibilityIdentifier("task-cancel")
-                        }
-                        if model.taskEditor.object("draft").text("status") == "reference" {
-                            Button(strings.text("reference.convertToAction")) {
-                                endEditingBeforeAction()
-                                Task { _ = await model.editTaskStatus("next") }
+                        if !readOnly {
+                            if model.taskEditor.flag("canSkipOccurrence") {
+                                Button(strings.text("task.skipOccurrence")) {
+                                    endEditingBeforeAction()
+                                    Task { await model.saveTask(intent: .skip) }
+                                }.accessibilityIdentifier("task-skip-occurrence")
                             }
-                            .disabled(!model.taskStatusEditable("next"))
-                            .accessibilityIdentifier("task-reference-action-menu")
+                            if model.taskEditor.flag("canCancel") {
+                                Button(model.taskEditor.text("cancelLabel"), role: .destructive) {
+                                    endEditingBeforeAction()
+                                    Task { await model.saveTask(intent: .cancel) }
+                                }.accessibilityIdentifier("task-cancel")
+                            }
+                            if model.taskEditor.object("draft").text("status") == "reference" {
+                                Button(strings.text("reference.convertToAction")) {
+                                    endEditingBeforeAction()
+                                    Task { _ = await model.editTaskStatus("next") }
+                                }
+                                .disabled(!model.taskStatusEditable("next"))
+                                .accessibilityIdentifier("task-reference-action-menu")
+                            }
+                            Button(strings.text("taskEdit.duplicateTask")) {
+                                endEditingBeforeAction()
+                                Task { await model.duplicateTask() }
+                            }.accessibilityIdentifier("task-duplicate")
+                            Button(strings.text("task.createProjectFromTask")) {
+                                endEditingBeforeAction()
+                                Task { await model.openTaskPromotion() }
+                            }.accessibilityIdentifier("task-promote")
+                            Button(strings.text("common.share")) {
+                                endEditingBeforeAction()
+                                Task { await model.shareTask() }
+                            }.accessibilityIdentifier("task-share")
+                            Button(strings.text("common.delete"), role: .destructive) {
+                                endEditingBeforeAction()
+                                Task { await model.deleteTask() }
+                            }.accessibilityIdentifier("task-delete")
                         }
-                        Button(strings.text("taskEdit.duplicateTask")) {
-                            endEditingBeforeAction()
-                            Task { await model.duplicateTask() }
-                        }.accessibilityIdentifier("task-duplicate")
-                        Button(strings.text("task.createProjectFromTask")) {
-                            endEditingBeforeAction()
-                            Task { await model.promoteTaskToProject() }
-                        }.accessibilityIdentifier("task-promote")
-                        Button(strings.text("common.share")) {
-                            endEditingBeforeAction()
-                            Task { await model.shareTask() }
-                        }.accessibilityIdentifier("task-share")
-                        Button(strings.text("common.delete"), role: .destructive) {
-                            endEditingBeforeAction()
-                            Task { await model.deleteTask() }
-                        }.accessibilityIdentifier("task-delete")
                     } label: {
                         Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
                     }
                     .disabled(frozen || modalPresented || model.taskScheduleUpdating || model.taskPersonCreateNeedsReview)
                     .accessibilityLabel(strings.text("common.more")).accessibilityIdentifier("task-more")
+                }
+                if !readOnly && !model.taskEditor.isEmpty {
                     Button {
                         endEditingBeforeAction()
                         Task { await model.saveTask() }
                     } label: {
-                        Text(strings.text("common.save")).rnFont(18, .bold).frame(minWidth: 44, minHeight: 44)
+                        Text(strings.text("common.save")).rnFont(18, .bold).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).disabled(frozen || model.taskPersonCreateNeedsReview || model.taskLinkSheetActive).accessibilityIdentifier("task-editor-save")
                 }
             }
             .foregroundStyle(palette.tint).padding(.horizontal, 16).padding(.vertical, 8)
             Divider().overlay(palette.border)
+            if let notice = model.taskReferenceCopyNotice {
+                Text(notice).rnFont(14).padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(palette.text).background(palette.filter)
+                    .accessibilityIdentifier("task-editor-copy-notice")
+            }
             if !readOnly && !model.taskEditor.isEmpty {
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
@@ -318,6 +362,13 @@ struct TaskViewSheet: View {
                             editorFields
                         } else {
                             ForEach(rows.indices, id: \.self) { index in row(rows[index]) }
+                                .background {
+                                    if !busy, error == nil, !rows.isEmpty, navigationReplayUncovered,
+                                       let ticket = model.navigationReplayTicket(for: "task") {
+                                        NavigationReplayContentEntry(model: model, ticket: ticket,
+                                            uncovered: { navigationReplayUncovered })
+                                    }
+                                }
                         }
                         if busy {
                             ProgressView(strings.text("common.loading")).tint(palette.tint)
@@ -411,7 +462,10 @@ struct TaskViewSheet: View {
             ownedMenuPromptVisible = model.taskOwnedMenuAction != nil
             initializeSections()
         }
-        .onChange(of: model.taskInitialTab) { tab in editing = tab == "task" }
+        .onChange(of: model.taskInitialTab) { tab in
+            editing = tab == "task"
+            if editing { model.refreshTaskAIOptions() }
+        }
         .onChange(of: model.taskEditor.text("id")) { _ in
             cancelFileImporter()
             waitingAssignment = nil; backdatedCompletion = nil; initializeSections()
@@ -419,9 +473,12 @@ struct TaskViewSheet: View {
         .onChange(of: model.taskEditorSession) { _ in
             cancelFileImporter()
             waitingAssignment = nil; backdatedCompletion = nil
+            sectionHelpExpanded = []; sectionGuideErrors = []; sectionGuideAttempts = [:]
         }
         .onChange(of: model.taskOwnedMenuAction) { action in ownedMenuPromptVisible = action != nil }
-        .onDisappear { cancelFileImporter(); backdatedCompletion = nil }
+        .onDisappear { model.retireTaskAI(); cancelFileImporter(); backdatedCompletion = nil; sectionHelpExpanded = []; sectionGuideErrors = []; sectionGuideAttempts = [:] }
+        .onChange(of: model.currentLanguage) { _ in model.refreshTaskAIOptions() }
+        .onChange(of: model.busy) { active in if !active { model.refreshTaskAIOptions() } }
         .onChange(of: model.taskChecklistFocusIndex) { index in focusedChecklistIndex = index }
     }
 
@@ -486,6 +543,38 @@ struct TaskViewSheet: View {
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
                     .accessibilityIdentifier("task-editor-title")
                     .disabled(model.taskScheduleUpdating)
+                if model.taskAIOptions.flag("enabled") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if model.taskAIWorking {
+                            HStack(spacing: 10) {
+                                ProgressView().accessibilityHidden(true)
+                                Text(model.taskAIOptions.text("working")).rnFont(14).fixedSize(horizontal: false, vertical: true)
+                                    .accessibilityIdentifier("task-ai-working")
+                                Spacer(minLength: 8)
+                                Button(strings.text("common.cancel")) { model.retireTaskAI() }
+                                    .frame(minWidth: 44, minHeight: 44).accessibilityIdentifier("task-ai-cancel")
+                            }
+                        } else {
+                            Button {
+                                endEditingBeforeAction(); model.requestTaskAI("clarify")
+                            } label: {
+                                Label(model.taskAIOptions.text("clarify"), systemImage: "sparkles")
+                                    .rnFont(14, .semibold).fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).disabled(!model.taskAICanRequest).accessibilityIdentifier("task-ai-clarify")
+                            Button {
+                                endEditingBeforeAction(); model.requestTaskAI("breakdown")
+                            } label: {
+                                Label(model.taskAIOptions.text("breakdown"), systemImage: "list.bullet.indent")
+                                    .rnFont(14, .semibold).fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).disabled(!model.taskAICanRequest).accessibilityIdentifier("task-ai-breakdown")
+                        }
+                    }
+                    .foregroundStyle(palette.tint)
+                }
             }
             if model.taskEditor.object("draft").text("status") == "reference" {
                 Button {
@@ -510,12 +599,56 @@ struct TaskViewSheet: View {
         }
     }
 
+    private func taskAIDialog(ownerID: UUID) -> some View {
+        let answer = model.taskAIAnswer
+        let choices = answer.objects("choices")
+        return GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { model.dismissTaskAIAnswer() }.accessibilityHidden(true)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(answer.text("title")).rnFont(18, .bold).accessibilityAddTraits(.isHeader)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let message = answer["message"] as? String, !message.isEmpty {
+                            Text(message).rnFont(15).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        if answer.text("kind") == "alert" {
+                            Button(strings.text("common.ok")) { model.dismissTaskAIAnswer() }
+                                .rnFont(15, .semibold).frame(maxWidth: .infinity, minHeight: 44)
+                                .accessibilityIdentifier("task-ai-alert-dismiss")
+                        } else {
+                            ForEach(choices.indices, id: \.self) { index in
+                                Button {
+                                    endEditingBeforeAction(); model.applyTaskAIChoice(ownerID: ownerID, index: index)
+                                } label: {
+                                    Text(choices[index].text("label")).rnFont(15, choices[index].text("variant") == "primary" ? .semibold : .regular)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(model.busy)
+                                .accessibilityIdentifier("task-ai-choice-\(index)")
+                            }
+                        }
+                    }
+                    .padding(20)
+                }
+                .frame(maxWidth: 520, maxHeight: max(160, geometry.size.height - 48))
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.border, lineWidth: 1))
+                .padding(24)
+                .accessibilityIdentifier("task-ai-dialog")
+                .accessibilityAction(.escape) { model.dismissTaskAIAnswer() }
+            }
+        }
+    }
+
     private func initializeSections() {
         let id = model.taskEditor.text("id")
         guard !id.isEmpty, sectionTaskID != id else { return }
         sectionTaskID = id
         datePickerID = ""
         sectionExpanded = [:]
+        sectionHelpExpanded = []; sectionGuideErrors = []; sectionGuideAttempts = [:]
         for section in model.taskEditor.object("layout").objects("sections") {
             sectionExpanded[section.text("id")] = section.flag("open")
         }
@@ -533,31 +666,89 @@ struct TaskViewSheet: View {
             let open = sectionExpanded[id] ?? section.flag("open")
             VStack(alignment: .leading, spacing: 16) {
                 if !section.text("titleKey").isEmpty {
-                    Button {
-                        endEditingBeforeAction()
-                        sectionExpanded[id] = !open
-                    } label: {
-                        HStack(spacing: 8) {
-                            AppIcon(name: "chevron", size: 16).rotationEffect(.degrees(open ? 0 : -90))
-                                .foregroundStyle(palette.secondary)
-                            Text(strings.text(section.text("titleKey")).uppercased()).rnFont(12, .bold).tracking(0.6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if section.number("filledCount") > 0 {
-                                Text(String(section.number("filledCount"))).rnFont(12, .semibold).foregroundStyle(palette.onTint)
-                                    .padding(.horizontal, 8).padding(.vertical, 2).background(palette.tint, in: Capsule())
+                    HStack(spacing: 4) {
+                        Button {
+                            endEditingBeforeAction()
+                            sectionExpanded[id] = !open
+                        } label: {
+                            HStack(spacing: 8) {
+                                AppIcon(name: "chevron", size: 16).rotationEffect(.degrees(open ? 0 : -90))
+                                    .foregroundStyle(palette.secondary)
+                                Text(strings.text(section.text("titleKey")).uppercased()).rnFont(12, .bold).tracking(0.6)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
+                            .frame(minHeight: 44).contentShape(Rectangle())
                         }
-                        .frame(minHeight: 44).contentShape(Rectangle())
+                        .buttonStyle(.plain).disabled(frozen).layoutPriority(1)
+                        .accessibilityLabel(strings.text(section.text("titleKey")))
+                        .accessibilityValue(strings.text(open ? "markdown.collapse" : "markdown.expand"))
+                        .accessibilityIdentifier("task-editor-section-" + id)
+                        let help = model.taskEditorSectionHelp.object(id)
+                        if !help.isEmpty {
+                            Button {
+                                if sectionHelpExpanded.contains(id) { sectionHelpExpanded.remove(id) }
+                                else { sectionHelpExpanded.insert(id) }
+                            } label: {
+                                Image(systemName: "questionmark.circle").font(.system(size: 16))
+                                    .foregroundStyle(palette.secondary).frame(width: 44, height: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).disabled(frozen)
+                            .accessibilityLabel(model.taskEditorSectionHelp.text("help") + ": " + help.text("title"))
+                            .accessibilityValue(strings.text(sectionHelpExpanded.contains(id) ? "markdown.collapse" : "markdown.expand"))
+                            .accessibilityIdentifier("task-editor-section-help-" + id)
+                        }
+                        Button {
+                            endEditingBeforeAction()
+                            sectionExpanded[id] = !open
+                        } label: {
+                            HStack {
+                                Spacer(minLength: 0)
+                                if section.number("filledCount") > 0 {
+                                    Text(String(section.number("filledCount"))).rnFont(12, .semibold).foregroundStyle(palette.onTint)
+                                        .padding(.horizontal, 8).padding(.vertical, 2).background(palette.tint, in: Capsule())
+                                }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(frozen).accessibilityHidden(true)
                     }
-                    .buttonStyle(.plain).disabled(frozen)
-                    .accessibilityLabel(strings.text(section.text("titleKey")))
-                    .accessibilityValue(strings.text(open ? "markdown.collapse" : "markdown.expand"))
-                    .accessibilityIdentifier("task-editor-section-" + id)
                     .padding(.top, 8).overlay(alignment: .top) { palette.border.frame(height: 1) }
+                }
+                if sectionHelpExpanded.contains(id), !model.taskEditorSectionHelp.object(id).isEmpty {
+                    editorSectionHelp(id)
                 }
                 if section.text("titleKey").isEmpty || open {
                     ForEach(fields, id: \.self) { field in editorField(field) }
                 }
+            }
+        }
+    }
+
+    private func editorSectionHelp(_ id: String) -> some View {
+        let help = model.taskEditorSectionHelp
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(help.object(id).text("body")).rnFont(13).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("task-editor-section-help-body-" + id)
+            Button {
+                sectionGuideErrors.remove(id)
+                let attempt = UUID()
+                sectionGuideAttempts[id] = attempt
+                model.openTaskEditorSectionGuide(id) { opened in
+                    guard sectionGuideAttempts[id] == attempt else { return }
+                    if !opened { sectionGuideErrors.insert(id) }
+                }
+            } label: {
+                Label(help.text("readGuide"), systemImage: "arrow.up.right.square").rnFont(13, .semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(frozen)
+            .accessibilityAddTraits(.isLink).accessibilityIdentifier("task-editor-section-guide-" + id)
+            if sectionGuideErrors.contains(id) {
+                Text(help.text("guideError")).rnFont(13).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("task-editor-section-guide-error-" + id)
             }
         }
     }
@@ -575,7 +766,7 @@ struct TaskViewSheet: View {
                                 let current = model.taskTokenInputs["assignedTo"] ?? model.taskEditor.object("draft").text("assignedTo")
                                 model.preserveTaskTokenInputForTransientModal()
                                 _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                waitingAssignment = current
+                                model.retireTaskAI(); waitingAssignment = current
                             } else {
                                 endEditingBeforeAction()
                                 Task { _ = await model.editTaskStatus(status) }
@@ -639,7 +830,7 @@ struct TaskViewSheet: View {
         } else if field == "recurrence" {
             TaskRecurrenceField(model: model, palette: palette, pickerID: $datePickerID,
                 pickerValue: $datePickerValue, beforeAction: endEditingBeforeAction,
-                openCustom: { monthlyCustom = $0 })
+                openCustom: { model.retireTaskAI(); monthlyCustom = $0 })
         } else if field == "checklist" {
             checklistEditor
         } else if field == "attachments" {
@@ -709,7 +900,7 @@ struct TaskViewSheet: View {
             showMinutes: model.taskEditor.object("fields").object("timeSpent").flag("enabled"))
         model.preserveTaskTokenInputForTransientModal()
         _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        backdatedCompletion = draft
+        model.retireTaskAI(); backdatedCompletion = draft
     }
 
     private var checklistEditor: some View {
@@ -850,32 +1041,21 @@ struct TaskViewSheet: View {
 
     private var destinationControl: some View {
         let destination = model.taskDestination.object("destination")
-        return Button {
-            endEditingBeforeAction()
-            Task { await model.openTaskDestination("destination") }
-        } label: {
-            Group {
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(alignment: .leading, spacing: 8) {
-                        destinationLabel(destination.text("label"))
-                        Text(destination.text("value")).rnFont(14, .bold).foregroundStyle(palette.tint)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                } else {
-                    HStack(spacing: 12) {
-                        destinationLabel(destination.text("label"))
-                        Text(destination.text("value")).rnFont(14, .bold).foregroundStyle(palette.tint)
-                            .multilineTextAlignment(.trailing).frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                }
+        return VStack(alignment: .leading, spacing: 8) {
+            destinationLabel(destination.text("label")).accessibilityAddTraits(.isHeader)
+            Button {
+                endEditingBeforeAction()
+                Task { await model.openTaskDestination("destination") }
+            } label: {
+                Text(destination.text("value")).rnFont(14).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12).frame(minHeight: 44)
+                    .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
             }
-            .padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 44)
-            .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
+            .buttonStyle(.plain).foregroundStyle(palette.text).disabled(frozen || model.taskDestination.flag("readOnly"))
+            .accessibilityLabel(destination.text("label")).accessibilityValue(destination.text("value"))
+            .accessibilityIdentifier("task-editor-destination")
         }
-        .buttonStyle(.plain).disabled(frozen || model.taskDestination.flag("readOnly"))
-        .accessibilityLabel(destination.text("label")).accessibilityValue(destination.text("value"))
-        .accessibilityIdentifier("task-editor-destination")
     }
 
     private func destinationLabel(_ text: String) -> some View {
@@ -1713,9 +1893,9 @@ struct NativeMarkdownContent: View {
 enum NativeMarkdownLinkURL {
     static func externalURL(_ href: String) -> URL? {
         guard let url = URL(string: href),
-              ["http", "https", "mailto", "tel", "upnote"].contains(url.scheme?.lowercased() ?? "") else { return nil }
-        if url.scheme?.lowercased() == "upnote" {
-            guard href.lowercased().hasPrefix("upnote://"), url.absoluteString == href else { return nil }
+              ["http", "https", "mailto", "tel", "upnote", "obsidian"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        if let scheme = url.scheme?.lowercased(), ["upnote", "obsidian"].contains(scheme) {
+            guard href.lowercased().hasPrefix("\(scheme)://"), url.absoluteString == href else { return nil }
         }
         return url
     }
@@ -1725,7 +1905,7 @@ enum NativeMarkdownLinkURL {
     }
 }
 
-private struct NativeExternalLinkDiagnostic: EnvironmentKey { static let defaultValue: ((String, String) async -> Void)? = nil }
+private struct NativeExternalLinkDiagnostic: EnvironmentKey { static let defaultValue: ((String, String, String) async -> Void)? = nil }
 private struct NativeExternalLinkLabels: EnvironmentKey { static let defaultValue: CoreObject = [:] }
 private struct NativeExternalLinkAdmission: EnvironmentKey { static let defaultValue: () -> Bool = { true } }
 extension EnvironmentValues {
@@ -1733,7 +1913,7 @@ extension EnvironmentValues {
         get { self[NativeExternalLinkAdmission.self] }
         set { self[NativeExternalLinkAdmission.self] = newValue }
     }
-    var nativeExternalLinkDiagnostic: ((String, String) async -> Void)? {
+    var nativeExternalLinkDiagnostic: ((String, String, String) async -> Void)? {
         get { self[NativeExternalLinkDiagnostic.self] }
         set { self[NativeExternalLinkDiagnostic.self] = newValue }
     }
@@ -1744,19 +1924,20 @@ extension EnvironmentValues {
 }
 
 @MainActor
-enum NativeUpNoteLink {
+enum NativeNoteAppLink {
     private(set) static var inFlight = 0
     static func open(_ original: String, surface: String, admission: () -> Bool, completion: (Bool) async -> Void) async {
         guard admission() else { return }
         inFlight += 1
         defer { inFlight -= 1 }
-        guard let url = NativeMarkdownLinkURL.externalURL(original), url.scheme?.lowercased() == "upnote" else {
+        guard let url = NativeMarkdownLinkURL.externalURL(original),
+              let scheme = url.scheme?.lowercased(), ["upnote", "obsidian"].contains(scheme) else {
             await completion(false); return
         }
         let opened = await withCheckedContinuation { continuation in
             UIApplication.shared.open(url, options: [:]) { continuation.resume(returning: $0) }
         }
-        NSLog("Native iOS UpNote handoff scope=links outcome=%@ surface=%@ scheme=upnote", opened ? "opened" : "failed", surface)
+        NSLog("Native iOS note app handoff scope=links outcome=%@ surface=%@ scheme=%@", opened ? "opened" : "failed", surface, scheme)
         await completion(opened)
     }
     static func showFailure(_ original: String, labels: CoreObject, admission: () -> Bool) {
@@ -1799,12 +1980,12 @@ struct NativeMarkdownInline: View {
                     onReference(index)
                     return .handled
                 }
-                if url.scheme?.lowercased() == "upnote",
+                if let scheme = url.scheme?.lowercased(), ["upnote", "obsidian"].contains(scheme),
                    let original = NativeMarkdownLinkURL.originalHref(url, runs: runs) {
                     Task {
-                        await NativeUpNoteLink.open(original, surface: "markdown", admission: linkAdmission) { opened in
-                            await linkDiagnostic?(opened ? "opened" : "failed", "markdown")
-                            if !opened { NativeUpNoteLink.showFailure(original, labels: linkLabels, admission: linkAdmission) }
+                        await NativeNoteAppLink.open(original, surface: "markdown", admission: linkAdmission) { opened in
+                            await linkDiagnostic?(opened ? "opened" : "failed", "markdown", scheme)
+                            if !opened { NativeNoteAppLink.showFailure(original, labels: linkLabels, admission: linkAdmission) }
                         }
                     }
                     return .handled
@@ -1863,9 +2044,11 @@ private struct TaskScheduleField: View {
     @Binding var pickerValue: Date
     let beforeAction: () -> Void
     @FocusState private var amountFocused: Bool
+    @State private var advanceExpanded = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var part: CoreObject { model.taskEditor.object("fields").object(field) }
     private var relative: CoreObject { model.taskEditor.object("fields").object("relativeStart") }
+    private var reminders: CoreObject { model.taskEditor.object("fields").object("reminders") }
     private var prefix: String { "task-date-" + field }
     private var label: String {
         model.label(field == "startTime" ? "taskEdit.startDateLabel" : field == "dueDate" ? "taskEdit.dueDateLabel" : "taskEdit.reviewDateLabel")
@@ -1900,6 +2083,10 @@ private struct TaskScheduleField: View {
                     }
                 }
             }
+            if field == "startTime", let start = reminders["startAdvance"] as? CoreObject {
+                advanceReminder(enabled: start.flag("enabled"), label: start.text("label"), value: start.text("valueLabel"),
+                    hint: start.text("hint"), options: start.objects("options"), id: "task-start-advance") { model.setTaskStartAdvanceReminder($0) }
+            }
             let issue = model.taskEditor.object("fields").text("dateIssue")
             if field != "reviewAt" && !issue.isEmpty {
                 Text(issue).rnFont(13).foregroundStyle(palette.warning).fixedSize(horizontal: false, vertical: true)
@@ -1907,7 +2094,69 @@ private struct TaskScheduleField: View {
             }
             if field == "startTime" && !relative.isEmpty { relativeControls }
             if !pickerMode.isEmpty { inlinePicker }
+            if field == "dueDate" && reminders.flag("showSkip") { reminderPolicy }
+            if field == "dueDate" && (!part.text("value").isEmpty || reminders.flag("showSkip")
+                || model.taskEditor.object("draft").number("dueReminderLeadMinutes") > 0) {
+                advanceReminder(enabled: reminders.flag("showAdvance"), label: reminders.text("advanceLabel"),
+                    value: reminders.text("advanceValueLabel"), hint: reminders.text("advanceHint"),
+                    options: reminders.objects("advanceOptions"), id: "task-due-advance") { model.setTaskAdvanceReminder($0) }
+            }
         }
+    }
+
+    private var reminderPolicy: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(reminders.text("policyLabel")).rnFont(14).foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
+            AppChipFlow {
+                ForEach(reminders.objects("policyOptions").indices, id: \.self) { index in
+                    let option = reminders.objects("policyOptions")[index]
+                    chip(option.text("label"), selected: option.flag("selected"), id: "task-reminder-policy-" + option.text("value")) {
+                        model.setTaskReminderPolicy(option.text("value"))
+                    }
+                }
+            }
+            Text(reminders.text("hint")).rnFont(12).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            if !reminders.text("disabledHint").isEmpty {
+                Text(reminders.text("disabledHint")).rnFont(12).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("task-reminder-policy-disabled-hint")
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func advanceReminder(enabled: Bool, label: String, value: String, hint: String, options: [CoreObject],
+                                 id: String, choose: @escaping (Int) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                beforeAction()
+                advanceExpanded.toggle()
+            } label: {
+                Text(label + ": " + value).rnFont(14).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12).frame(minHeight: 44)
+                    .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(palette.text).opacity(enabled ? 1 : 0.5).disabled(!enabled)
+            .accessibilityLabel(label).accessibilityValue(value)
+            .accessibilityAddTraits(advanceExpanded && enabled ? .isSelected : [])
+            .accessibilityIdentifier(id)
+            if !hint.isEmpty {
+                Text(hint).rnFont(12).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(id + "-hint")
+            }
+            if enabled && advanceExpanded {
+                AppChipFlow {
+                    ForEach(options.indices, id: \.self) { index in
+                        let option = options[index]
+                        chip(option.text("label"), selected: option.flag("selected"), id: id + "-" + String(option.number("value"))) {
+                            advanceExpanded = false
+                            choose(option.number("value"))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.top, 2)
     }
 
     private var heading: some View {
@@ -1931,44 +2180,24 @@ private struct TaskScheduleField: View {
     }
 
     private var compactDue: some View {
-        Button { openPicker("date") } label: {
-            Group {
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(alignment: .leading, spacing: 8) {
-                        heading
-                        Text(part.text("label")).rnFont(14, .bold).foregroundStyle(palette.tint)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    HStack(spacing: 12) {
-                        heading
-                        Text(part.text("label")).rnFont(14, .bold).foregroundStyle(palette.tint)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 44)
-            .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 8) {
+            heading
+            dateButton
         }
-        .buttonStyle(.plain).accessibilityLabel(label).accessibilityValue(part.text("label"))
-        .accessibilityIdentifier("task-editor-" + field)
     }
 
     @ViewBuilder private var dateActions: some View {
         if !part.text("value").isEmpty {
-            if field != "reviewAt" {
-                Button { openPicker("time") } label: {
-                    Image(systemName: "clock").font(.system(size: 14)).frame(width: 44, height: 44)
-                        .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).foregroundStyle(palette.secondary)
-                .accessibilityLabel(part.flag("hasTime") && !part.text("time").isEmpty
-                    ? model.label(field == "startTime" ? "task.aria.startTime" : "task.aria.dueTime") + ": " + part.text("time")
-                    : model.label("calendar.changeTime"))
-                .accessibilityIdentifier(prefix + "-time")
+            Button { openPicker("time") } label: {
+                Image(systemName: "clock").font(.system(size: 14)).frame(width: 44, height: 44)
+                    .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
             }
+            .buttonStyle(.plain).foregroundStyle(palette.secondary)
+            .accessibilityLabel(part.flag("hasTime") && !part.text("time").isEmpty
+                ? model.label(field == "startTime" ? "task.aria.startTime" : field == "dueDate" ? "task.aria.dueTime" : "task.aria.reviewTime") + ": " + part.text("time")
+                : model.label("calendar.changeTime"))
+            .accessibilityIdentifier(prefix + "-time")
             if part.flag("hasTime") {
                 chip(model.label("taskEdit.dateOnly"), selected: false, id: prefix + "-date-only", compact: true) {
                     pickerID = ""
@@ -1985,7 +2214,7 @@ private struct TaskScheduleField: View {
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
             }
             .buttonStyle(.plain).foregroundStyle(palette.secondary)
-            .accessibilityLabel(model.label("common.clear")).accessibilityIdentifier(prefix + "-clear")
+            .accessibilityLabel(model.label("common.clear") + " " + label).accessibilityIdentifier(prefix + "-clear")
         }
     }
 
@@ -2087,6 +2316,147 @@ private struct TaskScheduleField: View {
                 .accessibilityLabel(label).accessibilityIdentifier(prefix + "-picker")
         }
         .padding(.top, 8)
+    }
+}
+
+/// The row quick sheet owns an ephemeral core draft, separate from the full editor.
+struct TaskRowDatesDialog: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @State private var pickerField = ""
+    @State private var pickerValue = Date.distantPast
+    private var locked: Bool {
+        model.busy || model.retryNeeded || model.rowTaskDatesPending || model.rowTaskDatesSaveWaiting
+            || model.rowTaskDatesReading || model.rowTaskDatesError != nil
+    }
+    private var canCancel: Bool {
+        !model.busy && !model.retryNeeded && !model.rowTaskDatesPending && !model.rowTaskDatesSaveWaiting
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Button { model.cancelRowTaskDates() } label: { Color.black.opacity(0.35).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).ignoresSafeArea().disabled(!canCancel)
+                    .accessibilityLabel(model.label("common.cancel")).accessibilityIdentifier("row-dates-dismiss")
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(model.label("filters.taskDates")).rnFont(20, .semibold)
+                        .accessibilityAddTraits(.isHeader).accessibilityIdentifier("row-dates-title")
+                    if model.rowTaskDatesReading { ProgressView().frame(maxWidth: .infinity).accessibilityIdentifier("row-dates-loading") }
+                    if !model.rowTaskDatesModel.isEmpty {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 16) {
+                                field("startTime")
+                                field("dueDate")
+                                let issue = model.rowTaskDatesModel.object("fields").text("dateIssue")
+                                if !issue.isEmpty {
+                                    Text(issue).rnFont(13).foregroundStyle(palette.warning).fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityIdentifier("row-dates-issue")
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .frame(maxHeight: geometry.size.height * 0.6).accessibilityIdentifier("row-dates-scroll")
+                    }
+                    if let message = model.rowTaskDatesError {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                                .accessibilityIdentifier("row-dates-error")
+                            Button(model.label("common.retry")) {
+                                if model.rowTaskDatesPending { Task { await model.retry() } }
+                                else { model.readRowTaskDates() }
+                            }
+                            .frame(minWidth: 44, minHeight: 44)
+                            .disabled(model.busy || model.rowTaskDatesReading || model.rowTaskDatesEditing
+                                      || model.rowTaskDatesSaveWaiting || (model.retryNeeded && !model.rowTaskDatesPending))
+                            .accessibilityIdentifier("row-dates-read-retry")
+                        }
+                    }
+                    HStack(spacing: 12) {
+                        Button(model.label("common.cancel")) { model.cancelRowTaskDates() }
+                            .frame(maxWidth: .infinity, minHeight: 44).disabled(!canCancel)
+                            .accessibilityIdentifier("row-dates-cancel")
+                        Button {
+                            pickerField = ""
+                            Task { _ = await model.saveRowTaskDates() }
+                        } label: {
+                            HStack {
+                                if model.rowTaskDatesPending || model.rowTaskDatesSaveWaiting { ProgressView() }
+                                Text(model.label("common.save")).rnFont(14, .semibold)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(palette.onTint).background(palette.tint, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain).disabled(!model.rowTaskDatesCanSave).accessibilityIdentifier("row-dates-save")
+                    }
+                }
+                .padding(20).frame(maxWidth: 540)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 16)).padding(16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape) { model.cancelRowTaskDates() }
+    }
+
+    private func field(_ field: String) -> some View {
+        let part = model.rowTaskDatesModel.object("fields").object(field)
+        let label = model.label(field == "startTime" ? "taskEdit.startDateLabel" : "taskEdit.dueDateLabel")
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(label).rnFont(14).foregroundStyle(palette.secondary).accessibilityAddTraits(.isHeader)
+            Button {
+                let presentation = model.rowTaskDatesPresentationID
+                Task {
+                    guard await model.prepareRowTaskDatesPicker(), model.rowTaskDatesPresentationID == presentation,
+                          let date = TaskDatePickerComponents.date(model.rowTaskDatesModel.object("fields").object(field).object("picker")) else { return }
+                    pickerValue = date; pickerField = field
+                }
+            } label: {
+                Text(part.text("label")).rnFont(14).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12).frame(minHeight: 44)
+                    .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain).disabled(locked).accessibilityLabel(label).accessibilityValue(part.text("label"))
+            .accessibilityIdentifier("row-dates-" + field)
+            AppChipFlow {
+                ForEach(part.objects("quickDates").indices, id: \.self) { index in
+                    let choice = part.objects("quickDates")[index]
+                    Button {
+                        pickerField = ""; model.editRowTaskDates(field, preset: choice.text("preset"))
+                    } label: {
+                        Text(choice.text("label")).rnFont(14).fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(choice.flag("selected") ? palette.onTint : palette.secondary)
+                            .padding(.horizontal, 12).padding(.vertical, 10).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            .background(choice.flag("selected") ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 16))
+                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(choice.flag("selected") ? palette.tint : palette.border, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain).disabled(locked)
+                    .accessibilityLabel(label + ": " + choice.text("label"))
+                    .accessibilityAddTraits(choice.flag("selected") ? .isSelected : [])
+                    .accessibilityIdentifier("row-dates-" + field + "-quick-" + choice.text("preset"))
+                }
+            }
+            if pickerField == field {
+                HStack {
+                    Spacer()
+                    Button(model.label("common.done")) { pickerField = "" }
+                        .frame(minWidth: 44, minHeight: 44).disabled(locked)
+                        .accessibilityLabel(label + ": " + model.label("common.done"))
+                        .accessibilityIdentifier("row-dates-" + field + "-done")
+                }
+                DatePicker(label, selection: Binding(get: { pickerValue }, set: { date in
+                    let day = TaskDatePickerComponents.string(date, time: false)
+                    let previous = TaskDatePickerComponents.string(pickerValue, time: false)
+                    pickerValue = date
+                    // Filter a synthetic unchanged picker event only; Save's semantic
+                    // change/no-change decision remains entirely in core.
+                    if day != previous { model.pickRowTaskDate(field, date: day) }
+                }), displayedComponents: .date)
+                .datePickerStyle(.graphical).disabled(locked).labelsHidden()
+                .accessibilityLabel(label).accessibilityIdentifier("row-dates-" + field + "-picker")
+            }
+        }
     }
 }
 
@@ -2348,6 +2718,94 @@ private struct TaskBackdatedCompletionDraft {
     let instant: String
     let minutesText: String
     let showMinutes: Bool
+}
+
+private struct TaskPromotionDialog: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @FocusState private var titleFocused: Bool
+    private var frozen: Bool { model.busy || model.retryNeeded }
+    private var expandDisabled: Bool { frozen || (!model.taskPromotionExpand && !model.taskPromotionCanExpand) }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { cancel() }.accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(model.label("task.createProjectFromTask")).rnFont(18, .bold)
+                        .accessibilityAddTraits(.isHeader).accessibilityIdentifier("task-promote-title")
+                    ScrollView { form }
+                    .scrollDismissesKeyboard(.interactively)
+                    .frame(maxHeight: max(120, min(dynamicTypeSize.isAccessibilitySize ? .infinity : 360, geometry.size.height - 160)))
+                    .accessibilityElement(children: .contain)
+                    HStack {
+                        Spacer()
+                        Button(action: cancel) {
+                            Text(model.label("common.cancel")).frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).foregroundStyle(palette.secondary)
+                        .disabled(frozen).accessibilityIdentifier("task-promote-cancel")
+                        Button(action: confirm) {
+                            Text(model.label("task.createProjectFromTask")).multilineTextAlignment(.trailing)
+                                .frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).foregroundStyle(palette.tint)
+                        .disabled(!model.taskPromotionCanConfirm).accessibilityIdentifier("task-promote-confirm")
+                    }
+                }
+                .padding(16).frame(maxWidth: 420)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1)).padding(16)
+            }
+            .foregroundStyle(palette.text).frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { cancel() }
+        }
+    }
+
+    private var form: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(model.label("projects.projectName")).rnFont(14).foregroundStyle(palette.secondary)
+            TextField(model.label("projects.projectName"), text: Binding(
+                get: { model.taskPromotionTitle }, set: { model.setTaskPromotionTitle($0) }))
+                .focused($titleFocused).submitLabel(.done).rnFont(16)
+                .padding(12).frame(minHeight: 44)
+                .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+                .accessibilityLabel(model.label("projects.projectName"))
+                .accessibilityIdentifier("task-promote-name").disabled(frozen)
+            Toggle(isOn: Binding(get: { model.taskPromotionExpand }, set: { model.setTaskPromotionExpand($0) })) {
+                Text(model.label("task.expandChecklist")).rnFont(16)
+            }
+            .tint(palette.tint).frame(minHeight: 48).disabled(expandDisabled)
+            .accessibilityIdentifier("task-promote-expand")
+            Text(model.label(model.taskPromotionExpand ? "task.expandChecklistDescription" : "task.keepChecklistDescription"))
+                .rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("task-promote-description")
+            if model.taskPromotionOptionsPending {
+                ProgressView().accessibilityLabel(model.label("common.loading"))
+            } else if let blocked = model.taskPromotionBlockedMessage {
+                Text(blocked).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("task-promote-blocked")
+            } else if model.taskChecklistDirty {
+                Text(model.label("taskEdit.unsavedChanges")).rnFont(14).foregroundStyle(palette.secondary)
+                    .accessibilityIdentifier("task-promote-unsaved-checklist")
+            }
+        }
+    }
+
+    private func cancel() {
+        guard !frozen else { return }
+        titleFocused = false
+        model.cancelTaskPromotion()
+    }
+
+    private func confirm() {
+        guard model.taskPromotionCanConfirm else { return }
+        titleFocused = false
+        Task { await model.confirmTaskPromotion() }
+    }
 }
 
 private struct TaskBackdatedCompletionDialog: View {

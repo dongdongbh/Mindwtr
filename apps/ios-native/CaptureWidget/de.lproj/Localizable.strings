@@ -1,0 +1,6 @@
+// Existing canonical nav.addTask and widget.capture translations.
+"Add Task" = "Aufgabe hinzufügen";
+"Quick capture" = "Schnelleingabe";
+// Canonical nav.next plus the unavailable-cache refresh action.
+"Next Actions" = "Nächste Aktionen";
+"Open Mindwtr to refresh" = "Mindwtr zum Aktualisieren öffnen";

@@ -4,11 +4,13 @@ struct SomedayScreen: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
     @Environment(\.scenePhase) private var scenePhase
+    private var showsList: Bool { model.somedayCurrent || (model.busy && !model.someday.isEmpty) }
 
     var body: some View {
         VStack(spacing: 0) {
             if !model.someday.isEmpty { stats }
             if !model.somedayMoveNotice.isEmpty || model.somedayMoveUndoError != nil { moveNotice }
+            if model.statusListSelectionMode { StatusListBulkBar(model: model, palette: palette, idPrefix: "someday") }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if let error = model.somedayError {
@@ -18,19 +20,27 @@ struct SomedayScreen: View {
                             .rnFont(14, .semibold).frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
                             .accessibilityIdentifier("someday-retry")
                     }
-                    if model.somedayCurrent {
+                    if showsList {
                         deferredProjects
                         let items = model.someday.objects("items")
-                        ForEach(items.indices, id: \.self) { index in
-                            let item = items[index]
+                        ForEach(somedayItemKeys(items), id: \.identity) { key in
+                            let item = items[key.index]
                             if item.text("type") == "task" {
                                 let row = item.object("row")
-                                TaskCard(row: row, model: model, palette: palette,
-                                         showDetails: model.someday.flag("showDetails"),
-                                         onMoveToSection: row.text("status") == "someday" && !row.flag("readOnly")
-                                            ? { Task { await model.openSomedaySectionMove(row) } } : nil,
-                                         moveToSectionLabel: model.someday.object("text").text("moveToSection"))
-                                    .id(row.text("id"))
+                                let selecting = model.statusListSelectionMode
+                                let selectable = model.statusListTaskSelectable(row)
+                                HStack(spacing: 8) {
+                                    if selecting && selectable { StatusListSelectButton(model: model, row: row, palette: palette, idPrefix: "someday") }
+                                    TaskCard(row: row, model: model, palette: palette,
+                                             readOnly: selecting || row.flag("readOnly"), hideStatusBadge: selecting,
+                                             showDetails: model.someday.flag("showDetails"),
+                                             onMoveToSection: !selecting && row.text("status") == "someday" && !row.flag("readOnly")
+                                                ? { Task { await model.openSomedaySectionMove(row) } } : nil,
+                                             moveToSectionLabel: model.someday.object("text").text("moveToSection"),
+                                             onSelection: selecting && selectable ? { row in Task { await model.selectStatusListTask(row) } } : nil,
+                                             onSelectionStart: selectable ? { row in Task { await model.selectStatusListTask(row) } } : nil)
+                                }
+                                .id(row.text("id"))
                             } else if item.text("type") == "heading" {
                                 HStack(spacing: 8) {
                                     Text(item.text("title")).rnFont(13, .bold)
@@ -66,8 +76,10 @@ struct SomedayScreen: View {
                 .padding(16)
             }
             .accessibilityIdentifier("someday-scroll")
-            .refreshable { await model.refresh() }
+            .refreshable { await model.pullToRefresh() }
         }
+        .onChange(of: scenePhase) { model.statusListSelectionOwnerChanged(active: $0 == .active) }
+        .onDisappear { model.statusListSelectionOwnerChanged(active: false) }
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
@@ -325,7 +337,7 @@ struct SomedayPanel: View {
             }
             Text(model.somedayPanel == "menu" ? menu.text("moreLabel") : menu.object(model.somedayPanel).text("label"))
                 .rnFont(17, .bold).frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
-            Button { close() } label: { AppIcon(name: "x", size: 20).frame(width: 44, height: 44) }
+            Button { close() } label: { AppIcon(name: "x", size: 20).frame(width: 44, height: 44).contentShape(Rectangle()) }
                 .buttonStyle(.plain).accessibilityLabel(menu.text("closeLabel")).accessibilityIdentifier("someday-menu-close")
         }
         .frame(minHeight: 44).padding(.bottom, 12)
@@ -630,5 +642,20 @@ struct SomedayPanel: View {
         else if isPicker { model.closeSomedayPicker() }
         else if !isFilter && model.somedayPanel != "menu" { model.somedayPanel = "menu" }
         else { close() }
+    }
+}
+
+struct SomedayItemKey {
+    let identity: String
+    let index: Int
+}
+
+func somedayItemKeys(_ items: [CoreObject]) -> [SomedayItemKey] {
+    var seen: [String: Int] = [:]
+    return items.indices.map { index in
+        let item = items[index], type = item.text("type")
+        let base = type + ":" + (type == "task" ? item.object("row").text("id") : item.text("id"))
+        let occurrence = seen[base, default: 0]; seen[base] = occurrence + 1
+        return SomedayItemKey(identity: base + "#" + String(occurrence), index: index)
     }
 }

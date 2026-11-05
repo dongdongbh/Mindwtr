@@ -109,6 +109,12 @@ struct ListFilterControls: View {
                 filterInput(localized("search.placeholder"), label: localized("common.search"), id: prefix + "-filter-search",
                             value: $searchText)
             }
+            if !filters.objects("statuses").isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    sectionLabel(localized("taskEdit.statusLabel"))
+                    optionChips(filters.objects("statuses"), id: prefix + "-filter-status")
+                }
+            }
             let archived = data.object("archivedProjectsToggle")
             if !archived.isEmpty {
                 Toggle(archived.text("label"), isOn: Binding(get: { archived.flag("value") }, set: onArchived))
@@ -234,7 +240,7 @@ struct ListFilterControls: View {
     private func pickerOption(_ item: CoreObject) -> some View {
         let token = pickerName == "tokens"
         let selected = token ? item.text("state") == "included" : item.flag("selected")
-        let excluded = token && item.text("state") == "excluded"
+        let excluded = token ? item.text("state") == "excluded" : item.flag("excluded")
         let label = item.text(token ? "value" : "title")
         return Button { apply(item.object("edit")) } label: {
             HStack(spacing: 12) {
@@ -341,7 +347,7 @@ struct ListFilterControls: View {
     private var projectSummary: String {
         // Chips include selected projects beyond the first picker window.
         summary(data.objects("chips").filter {
-            $0.object("action").object("filterEdit").text("type") == "toggleProject"
+            ["toggleProject", "removeProject"].contains($0.object("action").object("filterEdit").text("type"))
         }.map { $0.text("label") })
     }
     private var moreSummary: String {

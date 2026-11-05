@@ -2,5 +2,7 @@
 .swiftpm/
 DerivedData/
 Resources/core-host.js
+Sources/MindwtrNativeCore/Resources/sandbox-host.js
 *.xcuserstate
 xcuserdata/
+__pycache__/

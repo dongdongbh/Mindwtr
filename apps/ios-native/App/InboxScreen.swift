@@ -1,5 +1,19 @@
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
+
+/// Synchronous content entry only; the closure keeps the ticket from this exact successful View value.
+struct NavigationReplayContentEntry: View {
+    let model: CoreModel
+    let ticket: CoreModel.NavigationReplayTicket
+    let uncovered: () -> Bool
+    var body: some View {
+        Color.clear.frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true)
+            .onAppear { model.navigationReplayContentEntered(ticket, uncovered: uncovered) }
+            .onDisappear { model.navigationReplayContentExited(ticket) }
+            .id(ticket.id)
+    }
+}
 
 struct InboxScreen: View {
     @ObservedObject var model: CoreModel
@@ -20,10 +34,189 @@ struct InboxScreen: View {
         model.area.objects("options").first(where: { $0.text("id") == "__all__" })?.text("state") == "included"
     }
     private var menuPanelPresented: Bool {
-        model.inboxSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented || (model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.morePresented || !model.somedayPanel.isEmpty || !model.referencePanel.isEmpty || !model.historyPanel.isEmpty
+        model.inboxSortPresented || model.contextsSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented || (model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.morePresented || !model.somedayPanel.isEmpty || !model.referencePanel.isEmpty || !model.historyPanel.isEmpty
     }
     private var menuListPrefix: String {
         model.selectedSurface == .savedSearch ? "saved-search" : model.selectedSurface == .contexts ? "contexts" : model.selectedSurface == .trash ? "trash" : model.selectedSurface == .history ? "history" : model.selectedSurface == .reference ? "reference" : model.selectedSurface == .someday ? "someday" : "waiting"
+    }
+
+    @ViewBuilder private var rowTaskBackdateRetryBanner: some View {
+        if let message = model.rowTaskBackdateRetryError {
+            HStack {
+                Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                Spacer()
+                Button(model.label("common.retry")) { Task { await model.retry() } }
+                    .frame(minWidth: 44, minHeight: 44).disabled(model.busy)
+                    .accessibilityIdentifier("row-backdate-retry")
+            }
+            .padding(12).accessibilityIdentifier("row-backdate-retry-error")
+        }
+    }
+
+    @ViewBuilder private var taskChecklistMoveRetryBanner: some View {
+        if let message = model.taskChecklistMoveRetryError {
+            HStack {
+                Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                Spacer()
+                Button(model.label("common.retry")) { Task { await model.retryTaskChecklistMoveUI() } }
+                    .frame(minWidth: 44, minHeight: 44).disabled(model.busy)
+                    .accessibilityIdentifier("checklist-move-retry")
+            }
+            .padding(12).accessibilityIdentifier("checklist-move-retry-error")
+        }
+    }
+    @ViewBuilder private var rowTaskDestinationRetryBanner: some View {
+        if let message = model.rowTaskDestinationRetryError {
+            HStack {
+                Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                Spacer()
+                Button(model.label("common.retry")) { Task { await model.retryRowTaskDestinationUI() } }
+                    .frame(minWidth: 44, minHeight: 44).disabled(model.busy)
+                    .accessibilityIdentifier("row-destination-retry")
+            }
+            .padding(12).accessibilityIdentifier("row-destination-retry-error")
+        }
+    }
+    @ViewBuilder private var rowTaskDatesRetryBanner: some View {
+        if let message = model.rowTaskDatesRetryError {
+            HStack {
+                Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                Spacer()
+                Button(model.label("common.retry")) { Task { await model.retryRowTaskDatesUI() } }
+                    .frame(minWidth: 44, minHeight: 44).disabled(model.busy)
+                    .accessibilityIdentifier("row-dates-retry")
+            }
+            .padding(12).accessibilityIdentifier("row-dates-retry-error")
+        }
+    }
+    @ViewBuilder private var rowSwipeMutationRetryBanner: some View {
+        if let message = model.rowSwipeMutationRetryError {
+            HStack {
+                Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                Spacer()
+                Button(model.label("common.retry")) { Task { await model.retryRowSwipeMutationUI() } }
+                    .frame(minWidth: 44, minHeight: 44).disabled(model.busy)
+                    .accessibilityIdentifier("row-swipe-retry")
+            }
+            .padding(12).accessibilityIdentifier("row-swipe-retry-error")
+        }
+    }
+    private var taskRowMutationRetryBanners: some View {
+        VStack(spacing: 0) { rowTaskBackdateRetryBanner; taskChecklistMoveRetryBanner; rowTaskDestinationRetryBanner; rowTaskDatesRetryBanner; rowSwipeMutationRetryBanner }
+    }
+
+    private var primarySurfaceContent: AnyView {
+        AnyView(Group {
+            if model.selectedSurface == .search {
+                SearchScreen(model: model, palette: palette)
+            } else if model.selectedSurface == .project {
+                ProjectDetailScreen(model: model, palette: palette)
+            } else if model.selectedSurface == .contexts {
+                menuListHeader
+                ContextsScreen(model: model, palette: palette)
+                    .accessibilityAction(.escape) {
+                        endContextsInput()
+                        if model.quickAccessView != "contexts" { Task { await model.closeContexts() } }
+                    }
+            } else if model.selectedSurface == .waiting {
+                menuListHeader
+                WaitingScreen(model: model, palette: palette)
+                    .accessibilityAction(.escape) { Task { await model.closeWaiting() } }
+            } else if model.selectedSurface == .someday {
+                menuListHeader
+                SomedayScreen(model: model, palette: palette)
+                    .accessibilityAction(.escape) { Task { await model.closeSomeday() } }
+            } else if model.selectedSurface == .settings {
+                SettingsScreen(model: model, palette: palette)
+            } else if model.selectedSurface == .savedSearch {
+                menuListHeader
+                SavedSearchScreen(model: model, palette: palette)
+                    .accessibilityAction(.escape) { Task { await model.closeSavedSearch() } }
+            } else if model.selectedSurface == .trash {
+                menuListHeader
+                TrashScreen(model: model, palette: palette)
+                    .accessibilityAction(.escape) { Task { await model.closeTrash() } }
+            } else if model.selectedSurface == .history {
+                menuListHeader
+                HistoryScreen(model: model, palette: palette)
+                    .accessibilityAction(.escape) { Task { await model.closeHistory() } }
+            } else if model.selectedSurface == .reference {
+                menuListHeader
+                ReferenceScreen(model: model, palette: palette)
+                    .accessibilityAction(.escape) { Task { await model.closeReference() } }
+            } else if model.selectedSurface == .focus && model.focusOrderPresented {
+                focusOrderContent
+            } else {
+                header
+                if model.ready {
+                    // Bound opaque metadata after an observed iOS 17 stack overflow.
+                    if model.selectedSurface == .inbox {
+                        AnyView(inboxContent)
+                            .onAppear { Task { await model.recordInboxViewBoundaryRendered() } }
+                    }
+                    else if model.selectedSurface == .review { ReviewScreen(model: model, palette: palette) }
+                    else if model.selectedSurface == .calendar { CalendarScreen(model: model, palette: palette) }
+                    else if model.selectedSurface == .board { BoardScreen(model: model, palette: palette) }
+                    else if model.selectedSurface == .projects { ProjectsScreen(model: model, palette: palette) }
+                    else { focusContent }
+                } else {
+                    Spacer()
+                    if model.busy { ProgressView().accessibilityLabel(model.label("common.loading")) }
+                    Spacer()
+                }
+            }
+        })
+    }
+
+    private var surfaceNotices: AnyView {
+        AnyView(Group {
+            if !model.referenceProjectNextActionPresented { taskActionNoticeView }
+            if let notice = model.taskReferenceCopyNotice, !model.taskPresented {
+                Text(notice).rnFont(14).padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(palette.text).background(palette.filter)
+                    .accessibilityIdentifier("task-copy-notice")
+            }
+            if !model.projectDeleteNotice.isEmpty && !model.taskPresented {
+                HStack(spacing: 12) {
+                    Text(model.projectDeleteNotice.text("message")).rnFont(14)
+                        .accessibilityIdentifier("project-delete-notice")
+                    Spacer(minLength: 0)
+                    if model.projectDeleteNotice.flag("undoEnabled") {
+                        Button {
+                            Task { await model.undoProjectDelete() }
+                        } label: {
+                            Text(model.projectDeleteNotice.text("undoLabel"))
+                                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                        }
+                        .disabled(model.busy || model.retryNeeded)
+                        .accessibilityIdentifier("project-delete-undo")
+                    }
+                }
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .foregroundStyle(palette.text).background(palette.filter)
+            }
+            if !model.projectDuplicateNotice.isEmpty && !model.taskPresented {
+                Text(model.projectDuplicateNotice.text("message")).rnFont(14)
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(palette.text).background(palette.filter)
+                    .accessibilityIdentifier("project-duplicate-notice")
+            }
+            if !model.taskFocusNotice.isEmpty && !model.reviewGuidePresented {
+                TaskFocusNotice(model: model, palette: palette)
+            }
+            if (model.error ?? model.inboxBulkRetryError) != nil && !model.capturePresented && !model.areaPickerPresented && !model.morePresented && !model.mindSweepPresented && !model.processInboxPresented && !model.calendarItemPresented
+                && !(model.somedayPanel == "newSection" && model.somedaySectionCreateError != nil)
+                && !(model.somedayPanel == "newSectionTask" && model.somedaySectionTaskError != nil)
+                && !(model.somedayPanel == "moveSection" && model.somedayMoveError != nil)
+                && !(model.selectedSurface == .someday && model.somedayMoveUndoError != nil)
+                && !(model.selectedSurface == .settings && model.somedaySectionRenameError != nil)
+                && !(model.selectedSurface == .settings && model.somedaySectionDeleteError != nil)
+                && !(model.selectedSurface == .settings && model.settingsAreaDeleteError != nil)
+                && !(model.selectedSurface == .settings && model.settingsAreaEditActive && model.areaRenameError != nil) {
+                FailureBanner(model: model, palette: palette)
+            }
+            if !model.reviewGuidePresented { taskRowMutationRetryBanners }
+        })
     }
 
     var body: some View {
@@ -32,112 +225,17 @@ struct InboxScreen: View {
             VStack(spacing: 0) {
                 ZStack(alignment: .bottom) {
                     VStack(spacing: 0) {
-                        if model.selectedSurface == .search {
-                            SearchScreen(model: model, palette: palette)
-                        } else if model.selectedSurface == .project {
-                            ProjectDetailScreen(model: model, palette: palette)
-                        } else if model.selectedSurface == .contexts {
-                            menuListHeader
-                            ContextsScreen(model: model, palette: palette)
-                                .accessibilityAction(.escape) {
-                                    endContextsInput()
-                                    if model.quickAccessView != "contexts" { Task { await model.closeContexts() } }
-                                }
-                        } else if model.selectedSurface == .waiting {
-                            menuListHeader
-                            WaitingScreen(model: model, palette: palette)
-                                .accessibilityAction(.escape) { Task { await model.closeWaiting() } }
-                        } else if model.selectedSurface == .someday {
-                            menuListHeader
-                            SomedayScreen(model: model, palette: palette)
-                                .accessibilityAction(.escape) { Task { await model.closeSomeday() } }
-                        } else if model.selectedSurface == .settings {
-                            SettingsScreen(model: model, palette: palette)
-                        } else if model.selectedSurface == .savedSearch {
-                            menuListHeader
-                            SavedSearchScreen(model: model, palette: palette)
-                                .accessibilityAction(.escape) { Task { await model.closeSavedSearch() } }
-                        } else if model.selectedSurface == .trash {
-                            menuListHeader
-                            TrashScreen(model: model, palette: palette)
-                                .accessibilityAction(.escape) { Task { await model.closeTrash() } }
-                        } else if model.selectedSurface == .history {
-                            menuListHeader
-                            HistoryScreen(model: model, palette: palette)
-                                .accessibilityAction(.escape) { Task { await model.closeHistory() } }
-                        } else if model.selectedSurface == .reference {
-                            menuListHeader
-                            ReferenceScreen(model: model, palette: palette)
-                                .accessibilityAction(.escape) { Task { await model.closeReference() } }
-                        } else if model.selectedSurface == .focus && model.focusOrderPresented {
-                            focusOrderContent
-                        } else {
-                            header
-                            if model.ready {
-                                // Bound opaque metadata after an observed iOS 17 stack overflow.
-                                if model.selectedSurface == .inbox {
-                                    AnyView(inboxContent)
-                                        .onAppear { Task { await model.recordInboxViewBoundaryRendered() } }
-                                }
-                                else if model.selectedSurface == .review { ReviewScreen(model: model, palette: palette) }
-                                else if model.selectedSurface == .calendar { CalendarScreen(model: model, palette: palette) }
-                                else if model.selectedSurface == .board { BoardScreen(model: model, palette: palette) }
-                                else if model.selectedSurface == .projects { ProjectsScreen(model: model, palette: palette) }
-                                else { focusContent }
-                            } else {
-                                Spacer()
-                                if model.busy { ProgressView().accessibilityLabel(model.label("common.loading")) }
-                                Spacer()
-                            }
-                        }
-                        if !model.referenceProjectNextActionPresented { taskActionNoticeView }
-                        if !model.projectDeleteNotice.isEmpty && !model.taskPresented {
-                            HStack(spacing: 12) {
-                                Text(model.projectDeleteNotice.text("message")).rnFont(14)
-                                    .accessibilityIdentifier("project-delete-notice")
-                                Spacer(minLength: 0)
-                                if model.projectDeleteNotice.flag("undoEnabled") {
-                                    Button {
-                                        Task { await model.undoProjectDelete() }
-                                    } label: {
-                                        Text(model.projectDeleteNotice.text("undoLabel"))
-                                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                                    }
-                                    .disabled(model.busy || model.retryNeeded)
-                                    .accessibilityIdentifier("project-delete-undo")
-                                }
-                            }
-                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundStyle(palette.text).background(palette.filter)
-                        }
-                        if !model.projectDuplicateNotice.isEmpty && !model.taskPresented {
-                            Text(model.projectDuplicateNotice.text("message")).rnFont(14)
-                                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                .foregroundStyle(palette.text).background(palette.filter)
-                                .accessibilityIdentifier("project-duplicate-notice")
-                        }
-                        if !model.taskFocusNotice.isEmpty && !model.reviewGuidePresented {
-                            TaskFocusNotice(model: model, palette: palette)
-                        }
-                        if (model.error ?? model.inboxBulkRetryError) != nil && !model.capturePresented && !model.areaPickerPresented && !model.morePresented && !model.mindSweepPresented && !model.processInboxPresented && !model.calendarItemPresented
-                            && !(model.somedayPanel == "newSection" && model.somedaySectionCreateError != nil)
-                            && !(model.somedayPanel == "newSectionTask" && model.somedaySectionTaskError != nil)
-                            && !(model.somedayPanel == "moveSection" && model.somedayMoveError != nil)
-                            && !(model.selectedSurface == .someday && model.somedayMoveUndoError != nil)
-                            && !(model.selectedSurface == .settings && model.somedaySectionRenameError != nil)
-                            && !(model.selectedSurface == .settings && model.somedaySectionDeleteError != nil)
-                            && !(model.selectedSurface == .settings && model.settingsAreaDeleteError != nil)
-                            && !(model.selectedSurface == .settings && model.settingsAreaEditActive && model.areaRenameError != nil) {
-                            FailureBanner(model: model, palette: palette)
-                        }
+                        primarySurfaceContent
+                        surfaceNotices
                     }
-                    .allowsHitTesting(!model.inboxGroupPresented && !model.inboxFiltersPresented && !(model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented))
+                    .allowsHitTesting(!model.morePresented && !model.inboxGroupPresented && !model.inboxFiltersPresented && !(model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented))
                     .accessibilityElement(children: menuPanelPresented ? .ignore : .contain)
                     .accessibilityHidden(menuPanelPresented)
                     if model.morePresented { MoreMenuSheet(model: model, palette: palette) }
                     if !model.somedayPanel.isEmpty { SomedayPanel(model: model, palette: palette) }
                     if !model.referencePanel.isEmpty { ReferencePanel(model: model, palette: palette) }
-                    if model.inboxSortPresented { InboxSortPanel(model: model, palette: palette) }
+                    if model.inboxSortPresented { TaskListSortPanel(model: model, palette: palette, caller: .inbox) }
+                    if model.contextsSortPresented { TaskListSortPanel(model: model, palette: palette, caller: .contexts) }
                     if model.inboxGroupPresented { InboxGroupPanel(model: model, palette: palette) }
                     if !model.historyPanel.isEmpty { HistoryPanel(model: model, palette: palette) }
                 }
@@ -146,8 +244,8 @@ struct InboxScreen: View {
                     && model.selectedSurface != .trash && model.selectedSurface != .savedSearch
                     && (model.selectedSurface != .contexts || model.quickAccessView == "contexts")
                     && model.selectedSurface != .settings {
-                    tabBar.disabled(model.inboxSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented)
-                        .accessibilityHidden(model.inboxSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented)
+                    tabBar.disabled(model.inboxSortPresented || model.contextsSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented)
+                        .accessibilityHidden(model.inboxSortPresented || model.contextsSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented)
                 }
             }
             .background(GeometryReader { proxy in
@@ -156,10 +254,10 @@ struct InboxScreen: View {
             })
             // More's content, dismissal backdrop and visible tabs share one modal boundary.
             .accessibilityElement(children: .contain)
-            .accessibilityAddTraits(model.morePresented || model.inboxSortPresented || model.inboxGroupPresented ? .isModal : [])
-            .disabled((model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || !model.focusPanel.isEmpty || (model.selectedSurface == .review
+            .accessibilityAddTraits(model.morePresented || model.inboxSortPresented || model.contextsSortPresented || model.inboxGroupPresented ? .isModal : [])
+            .disabled(model.rowTaskDatesPresented || model.rowTaskDestinationPresented || model.taskChecklistMovePresented || model.rowTaskBackdatePresented || (model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || !model.focusPanel.isEmpty || (model.selectedSurface == .review
                 && (model.reviewGuidePresented || model.reviewPickerPresented)))
-            .accessibilityHidden((model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || model.capturePresented || model.areaPickerPresented || !model.focusPanel.isEmpty
+            .accessibilityHidden(model.rowTaskDatesPresented || model.rowTaskDestinationPresented || model.taskChecklistMovePresented || model.rowTaskBackdatePresented || (model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || model.capturePresented || model.areaPickerPresented || !model.focusPanel.isEmpty
                 || (model.selectedSurface == .review && (model.reviewGuidePresented || model.reviewPickerPresented)))
             if model.inboxBulkTagPresented && model.selectedSurface == .inbox && !model.appLock.concealed {
                 InboxBulkTagDialog(model: model, palette: palette)
@@ -167,7 +265,7 @@ struct InboxScreen: View {
             if model.inboxBulkRemovePresented && model.selectedSurface == .inbox && !model.appLock.concealed {
                 InboxBulkRemoveTagDialog(model: model, palette: palette)
             }
-            if model.inboxBulkOrganizePresented && model.selectedSurface == .inbox && !model.appLock.concealed {
+            if model.bulkOrganizeVisible {
                 AnyView(InboxBulkOrganizeDialog(model: model, palette: palette))
             }
             if model.selectedSurface == .board && model.boardFiltersPresented {
@@ -181,8 +279,14 @@ struct InboxScreen: View {
             if model.savedSearchWritePresented { SavedSearchWriteDialog(model: model, palette: palette) }
             if model.selectedSurface == .review && model.reviewGuidePresented {
                 ReviewGuideScreen(model: model, palette: palette)
-                    .disabled(model.mindSweepPresented || model.processInboxPresented)
-                    .accessibilityHidden(model.areaPickerPresented || model.taskPresented || model.mindSweepPresented || model.processInboxPresented)
+                    .safeAreaInset(edge: .top) {
+                        VStack(spacing: 0) {
+                            taskRowMutationRetryBanners
+                            if model.taskActionNotice.text("source") == "rowDelete" { taskActionNoticeView }
+                        }
+                    }
+                    .disabled(model.rowTaskDatesPresented || model.rowTaskDestinationPresented || model.taskChecklistMovePresented || model.rowTaskBackdatePresented || model.mindSweepPresented || model.processInboxPresented)
+                    .accessibilityHidden(model.rowTaskDatesPresented || model.rowTaskDestinationPresented || model.taskChecklistMovePresented || model.rowTaskBackdatePresented || model.areaPickerPresented || model.taskPresented || model.mindSweepPresented || model.processInboxPresented)
             }
             if model.selectedSurface == .review && model.reviewPickerPresented {
                 ReviewStartPicker(model: model, palette: palette)
@@ -198,6 +302,7 @@ struct InboxScreen: View {
             }
             if model.processInboxPresented {
                 ProcessInboxSheet(model: model, palette: palette)
+                    .disabled(model.taskPresented).accessibilityHidden(model.taskPresented)
             }
             if model.capturePresented {
                 Color.black.opacity(0.35).ignoresSafeArea()
@@ -218,6 +323,10 @@ struct InboxScreen: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 }
             }
+            if model.rowTaskDatesPresented { AnyView(TaskRowDatesDialog(model: model, palette: palette).id(model.rowTaskDatesPresentationID)) }
+            if model.rowTaskDestinationPresented { AnyView(rowTaskDestinationContent) }
+            if model.taskChecklistMovePresented { AnyView(TaskChecklistMoveDialog(model: model, palette: palette)) }
+            if model.rowTaskBackdatePresented { AnyView(rowTaskBackdateContent) }
             if model.referenceProjectNextActionPresented {
                 VStack(spacing: 0) {
                     ReferenceProjectNextActionPrompt(model: model, palette: palette)
@@ -230,7 +339,8 @@ struct InboxScreen: View {
         .foregroundStyle(palette.text)
         .tint(palette.tint)
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
-        .sheet(isPresented: Binding(get: { model.taskPresented }, set: { if !$0 && !model.appLock.concealed { model.closeTask() } })) {
+        .sheet(isPresented: Binding(get: { model.taskPresented }, set: { if !$0 && !model.appLock.concealed { model.closeTask() } }),
+               onDismiss: { model.navigationReplayTaskSheetDismissed() }) {
             TaskViewSheet(model: model, palette: palette)
                 .presentationDetents([.large])
         }
@@ -242,6 +352,18 @@ struct InboxScreen: View {
         .onChange(of: model.selectedSurface) { _ in model.referenceProjectNextActionOwnerChanged() }
         .onChange(of: model.taskPresented) { _ in model.referenceProjectNextActionOwnerChanged() }
         .onChange(of: model.appLock.concealed) { _ in model.referenceProjectNextActionOwnerChanged() }
+        .onChange(of: model.rowTaskDatesPresentationCurrent) { current in
+            if !current && model.rowTaskDatesPresented { model.retireRowTaskDatesPresentation() }
+        }
+        .onChange(of: model.rowTaskDestinationPresentationCurrent) { current in
+            if !current && model.rowTaskDestinationPresented { model.retireRowTaskDestinationPresentation() }
+        }
+        .onChange(of: model.taskChecklistMovePresentationCurrent) { current in
+            if !current && model.taskChecklistMovePresented { model.retireTaskChecklistMovePresentation() }
+        }
+        .onChange(of: model.rowTaskBackdatePresentationCurrent) { current in
+            if !current && model.rowTaskBackdatePresented { model.retireRowTaskBackdatePresentation() }
+        }
         .onChange(of: model.taskStatusMenuPresented) { active in
             if !active { model.presentQueuedReferenceProjectNextAction() }
         }
@@ -257,6 +379,50 @@ struct InboxScreen: View {
         }
     }
 
+    private var rowTaskDestinationContent: some View {
+        TaskRowDestinationDialog(model: model, palette: palette,
+                                 pending: model.rowTaskDestinationPending, error: { model.rowTaskDestinationError },
+                                 identifierPrefix: "row-destination", retryIdentifier: "row-destination-retry",
+                                 retry: { await model.retry() }, close: model.cancelRowTaskDestination,
+                                 read: { query, offset in await model.rowTaskDestinationOptions(query: query, offset: offset) },
+                                 choose: { destination in await model.moveRowTaskDestination(destination) })
+            .id(model.rowTaskDestinationPresentationID)
+    }
+
+    @ViewBuilder private var rowTaskBackdateContent: some View {
+        if !model.rowTaskBackdateOptions.isEmpty {
+            TaskRowBackdateDialog(model: model, palette: palette, options: model.rowTaskBackdateOptions,
+                                  initialDate: model.rowTaskBackdateInitialDate,
+                                  pending: model.rowTaskBackdatePending, error: model.rowTaskBackdateError,
+                                  identifierPrefix: "row-backdate", retryIdentifier: "row-backdate-retry",
+                                  retry: { await model.retry() }, close: model.cancelRowTaskBackdate,
+                                  save: { instant, minutes in
+                await model.saveRowTaskBackdate(completedAt: instant, timeSpentText: minutes)
+            })
+            .id(model.rowTaskBackdatePresentationID)
+        } else {
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { model.cancelRowTaskBackdate() }.accessibilityHidden(true)
+                VStack(spacing: 12) {
+                    if model.rowTaskBackdateReading { ProgressView() }
+                    if let message = model.rowTaskBackdateError {
+                        Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                            .accessibilityIdentifier("row-backdate-error")
+                        Button(model.label("common.retry")) { model.readRowTaskBackdateOptions() }
+                            .frame(minHeight: 44).disabled(model.rowTaskBackdateReading || model.busy || model.retryNeeded)
+                            .accessibilityIdentifier("row-backdate-retry")
+                    }
+                    Button(model.label("common.cancel")) { model.cancelRowTaskBackdate() }
+                        .frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
+                        .accessibilityIdentifier("row-backdate-cancel")
+                }
+                .padding(24).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { model.cancelRowTaskBackdate() }
+        }
+    }
+
     @ViewBuilder private var taskActionNoticeView: some View {
         if !model.taskActionNotice.isEmpty && !model.taskPresented {
                             VStack(alignment: .leading, spacing: 8) {
@@ -269,7 +435,7 @@ struct InboxScreen: View {
                                         Text(model.taskActionNotice.text("undoLabel"))
                                             .frame(minWidth: 44, minHeight: 44)
                                             .contentShape(Rectangle())
-                                    }.disabled(model.busy || model.retryNeeded || model.referenceProjectNextActionPending)
+                                    }.disabled(model.busy || model.retryNeeded || model.referenceProjectNextActionPending || !model.projectTaskActionUndoEnabled || !model.taskChecklistMoveUndoEnabled || !model.rowTaskDeleteUndoEnabled)
                                         .accessibilityIdentifier("task-" + model.taskActionNotice.text("operation") + "-undo")
                                 }
                             }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -396,7 +562,8 @@ struct InboxScreen: View {
                                              readOnly: model.inboxSelectionMode || row.flag("readOnly"),
                                              hideStatusBadge: model.inboxSelectionMode,
                                              onSelection: model.inboxSelectionMode && !row.flag("readOnly") ? { row in Task { await model.selectInboxTask(row) } } : nil,
-                                             onSelectionStart: !row.flag("readOnly") ? { row in Task { await model.selectInboxTask(row) } } : nil)
+                                             onSelectionStart: !row.flag("readOnly") ? { row in Task { await model.selectInboxTask(row) } } : nil,
+                                             swipeHost: .list)
                                         .accessibilityIdentifier("inbox-item-" + item.text("groupId") + "-" + row.text("id"))
                                 }
                                     .disabled(!model.inboxActionsEnabled)
@@ -427,7 +594,13 @@ struct InboxScreen: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .accessibilityIdentifier("inbox-scroll")
-            .refreshable { await model.refresh() }
+            .refreshable { await model.pullToRefresh() }
+        }
+        .background {
+            if let ticket = model.navigationReplayTicket(for: "inbox"), !menuPanelPresented, !inboxBulkDeletePresented {
+                NavigationReplayContentEntry(model: model, ticket: ticket,
+                    uncovered: { !menuPanelPresented && !inboxBulkDeletePresented })
+            }
         }
         .alert(model.archiveBulkDeleteConfirmation.text("title"), isPresented: $inboxBulkDeletePresented) {
             Button(model.archiveBulkDeleteConfirmation.text("cancelLabel"), role: .cancel) {
@@ -580,22 +753,30 @@ struct InboxScreen: View {
                                 VStack(alignment: .leading, spacing: 0) {
                                     let groups = section.objects("groups").filter { $0.number("start") == rowIndex }
                                     ForEach(groups.indices, id: \.self) { groupIndex in
-                                        focusGroupHeader(groups[groupIndex]).id(key + ":" + groups[groupIndex].text("id"))
+                                        focusGroupHeader(groups[groupIndex], section: key).id(key + ":" + groups[groupIndex].text("id"))
                                     }
-                                    if row.flag("laterToday") && (rowIndex == 0 || !rows[rowIndex - 1].flag("laterToday")) {
-                                        Text(model.label("agenda.laterToday")).rnFont(13, .bold)
-                                            .foregroundStyle(palette.secondary).padding(.top, 10).padding(.bottom, 6)
-                                            .accessibilityAddTraits(.isHeader)
+                                    let rowGroup = section.objects("groups").first { group in
+                                        rowIndex >= group.number("start") &&
+                                            rowIndex - group.number("start") < group.number("count")
                                     }
-                                    TaskCard(row: row, model: model, palette: palette,
-                                             footer: row.text("revealLabel").isEmpty ? row.text("laterTodayLabel") : row.text("revealLabel"),
-                                             showDetails: model.focusShowDetails, showFocusToggle: true,
-                                             onProject: { project in Task { await model.openProject(project) } })
-                                        .padding(.leading, section.objects("groups").isEmpty ? 0 : 25)
-                                        .overlay(alignment: .leading) {
-                                            if !section.objects("groups").isEmpty { palette.border.frame(width: 2).padding(.leading, 13) }
-                                        }
-                                        .padding(.bottom, 8).disabled(!model.focusActionsEnabled)
+                                    let laterToday = key == "schedule" && row.flag("laterToday")
+                                    if laterToday && (rowIndex == 0 || !rows[rowIndex - 1].flag("laterToday")) {
+                                        focusLaterTodayHeader
+                                    }
+                                    let groupID = laterToday ? "focus:schedule:later-today" : rowGroup?.text("id")
+                                    let collapsed = groupID.map { (model.collapsedFocusGroups[key] ?? []).contains($0) } ?? false
+                                    if !collapsed {
+                                        TaskCard(row: row, model: model, palette: palette,
+                                                 footer: row.text("revealLabel").isEmpty ? row.text("laterTodayLabel") : row.text("revealLabel"),
+                                                 showDetails: model.focusShowDetails, showFocusToggle: true,
+                                                 onProject: { project in Task { await model.openProject(project) } })
+                                            .padding(.leading, section.objects("groups").isEmpty ? 0 : 25)
+                                            .overlay(alignment: .leading) {
+                                                if !section.objects("groups").isEmpty { palette.border.frame(width: 2).padding(.leading, 13) }
+                                            }
+                                            .accessibilityIdentifier("focus-group-item-" + (groupID ?? "none") + "-" + row.text("id"))
+                                            .padding(.bottom, 8).disabled(!model.focusActionsEnabled)
+                                    }
                                 }
                                 .id(key + ":" + String(rowIndex) + ":" + row.text("id"))
                             }
@@ -626,7 +807,8 @@ struct InboxScreen: View {
             }
             .padding(.horizontal, 12).padding(.bottom, 12)
         }
-        .refreshable { await model.refresh() }
+        .accessibilityIdentifier("focus-scroll")
+        .refreshable { await model.pullToRefresh() }
     }
 
     private var focusFilterRows: some View {
@@ -712,15 +894,42 @@ struct InboxScreen: View {
         .accessibilityAddTraits(selected ? .isSelected : []).accessibilityValue(excluded ? model.label("filters.excluded") : "")
     }
 
-    private func focusGroupHeader(_ group: CoreObject) -> some View {
-        HStack(spacing: 8) {
-            Circle().fill(group.flag("muted") ? palette.secondary : group.text("dotColor").isEmpty ? palette.tint : Color(hex: group.text("dotColor")))
-                .frame(width: 8, height: 8).accessibilityHidden(true)
-            Text(group.text("title").uppercased()).rnFont(13, .bold).tracking(0.6).foregroundStyle(group.flag("muted") ? palette.secondary : palette.text)
-                .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-            Text(String(group.number("count"))).rnFont(12, .semibold).foregroundStyle(palette.secondary)
+    private var focusLaterTodayHeader: some View {
+        let id = "focus:schedule:later-today"
+        let collapsed = (model.collapsedFocusGroups["schedule"] ?? []).contains(id)
+        return Button { model.toggleFocusGroup(section: "schedule", id: id) } label: {
+            HStack(spacing: 8) {
+                AppIcon(name: "chevron", size: 15).rotationEffect(.degrees(collapsed ? -90 : 0))
+                    .accessibilityHidden(true)
+                Text(model.label("agenda.laterToday")).rnFont(13, .bold)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .foregroundStyle(palette.secondary).frame(minHeight: 44).contentShape(Rectangle())
+            .padding(.top, 10).padding(.bottom, 6)
         }
-        .padding(.horizontal, 4).padding(.top, 10).padding(.bottom, 8)
+        .buttonStyle(.plain).disabled(!model.focusControlsEnabled)
+        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
+        .accessibilityValue(model.label(collapsed ? "markdown.expand" : "markdown.collapse"))
+        .accessibilityIdentifier("focus-group-header-" + id)
+    }
+
+    private func focusGroupHeader(_ group: CoreObject, section: String) -> some View {
+        let collapsed = (model.collapsedFocusGroups[section] ?? []).contains(group.text("id"))
+        return Button { model.toggleFocusGroup(section: section, id: group.text("id")) } label: {
+            HStack(spacing: 8) {
+                AppIcon(name: "chevron", size: 15).rotationEffect(.degrees(collapsed ? -90 : 0))
+                    .foregroundStyle(palette.secondary).accessibilityHidden(true)
+                Circle().fill(group.flag("muted") ? palette.secondary : group.text("dotColor").isEmpty ? palette.tint : Color(hex: group.text("dotColor")))
+                    .frame(width: 8, height: 8).accessibilityHidden(true)
+                Text(group.text("title").uppercased()).rnFont(13, .bold).tracking(0.6).foregroundStyle(group.flag("muted") ? palette.secondary : palette.text)
+                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                Text(String(group.number("count"))).rnFont(12, .semibold).foregroundStyle(palette.secondary)
+            }
+            .frame(minHeight: 44).contentShape(Rectangle())
+            .padding(.horizontal, 4).padding(.top, 10).padding(.bottom, 8)
+        }
+        .buttonStyle(.plain).disabled(!model.focusControlsEnabled)
+        .accessibilityValue(model.label(collapsed ? "markdown.expand" : "markdown.collapse"))
         .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("focus-group-header-" + group.text("id"))
     }
@@ -752,7 +961,7 @@ struct InboxScreen: View {
                 Button { model.openFocusPanel("filters") } label: {
                     AppIcon(name: "sliders", size: 20)
                         .foregroundStyle(controls.object("filters").flag("active") ? palette.tint : palette.secondary)
-                        .frame(width: 44, height: 44)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                         .overlay(alignment: .topTrailing) {
                             if !controls.object("filters").text("badge").isEmpty {
                                 Text(controls.object("filters").text("badge")).rnFont(9, .bold).foregroundStyle(palette.onTint)
@@ -972,7 +1181,7 @@ struct InboxScreen: View {
                 .accessibilityIdentifier("area-open")
                 Spacer()
                 Button { model.openSearch() } label: {
-                    AppIcon(name: "search", size: 22).frame(width: 44, height: 44)
+                    AppIcon(name: "search", size: 22).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).disabled(!model.ready || model.busy || model.retryNeeded)
                 .accessibilityLabel(model.label("search.title")).accessibilityIdentifier("search-open")
@@ -1046,7 +1255,7 @@ struct InboxScreen: View {
         .accessibilityLabel(model.label("projects.areaFilter") + ": " + model.area.text("summary"))
         .accessibilityValue(model.area.text("label")).accessibilityIdentifier("area-open")
         Button { endContextsInput(); model.openSearch() } label: {
-            AppIcon(name: "search", size: 22).frame(width: 44, height: 44)
+            AppIcon(name: "search", size: 22).frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
         .accessibilityLabel(model.label("search.title")).accessibilityIdentifier("search-open")
@@ -1207,7 +1416,8 @@ struct InboxScreen: View {
                     .offset(y: -4)
                     .frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).disabled(!model.ready || model.busy || model.retryNeeded || (model.selectedSurface == .inbox && model.inboxSelectionMode))
+            .buttonStyle(.plain).disabled(!model.ready || model.busy || model.retryNeeded || (model.selectedSurface == .inbox && model.inboxSelectionMode)
+                || (model.selectedSurface == .project && model.projectSelectionMode))
             .accessibilityLabel(model.label("nav.addTask"))
             .accessibilityIdentifier("capture-open")
             quickAccessTab
@@ -1309,12 +1519,81 @@ struct InboxScreen: View {
 private struct TaskCardSelectionLongPress: ViewModifier {
     @Environment(\.isEnabled) private var interactionEnabled
     let identity: String
+    let host: TaskRowSwipeHost
     let enabled: Bool
     let action: () -> Void
 
-    func body(content: Content) -> some View {
-        content.background(TaskCardLongPressRegistrar(identity: identity, enabled: enabled && interactionEnabled, action: action)
-            .allowsHitTesting(false))
+    @ViewBuilder func body(content: Content) -> some View {
+        if host == .list {
+            content.background(TaskCardLongPressRegistrar(identity: identity, enabled: enabled && interactionEnabled, action: action)
+                .allowsHitTesting(false))
+        } else {
+            content.modifier(TaskCardStackLongPress(identity: identity, enabled: enabled && interactionEnabled, action: action))
+        }
+    }
+}
+
+private struct TaskCardStackLongPress: ViewModifier {
+    let identity: String
+    let enabled: Bool
+    let action: () -> Void
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.gesture(TaskCardStackLongPressGesture(identity: identity, enabled: enabled, action: action))
+        } else {
+            content.simultaneousGesture(LongPressGesture(minimumDuration: 0.5, maximumDistance: 10).onEnded { _ in
+                if enabled { action() }
+            }, including: enabled ? .all : .subviews)
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct TaskCardStackLongPressGesture: UIGestureRecognizerRepresentable {
+    let identity: String
+    let enabled: Bool
+    let action: () -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let press = UILongPressGestureRecognizer()
+        press.minimumPressDuration = 0.5
+        press.allowableMovement = 10
+        press.delegate = context.coordinator
+        press.isEnabled = enabled
+        context.coordinator.adopt(self)
+        return press
+    }
+    func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        context.coordinator.adopt(self)
+        if recognizer.state != .began && recognizer.state != .changed { recognizer.isEnabled = enabled }
+    }
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        let current = context.coordinator
+        guard recognizer.state == .began, current.enabled,
+              current.pressedIdentity.utf8.elementsEqual(current.identity.utf8) else { return }
+        current.action()
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var identity = ""
+        var pressedIdentity = ""
+        var enabled = false
+        var action: () -> Void = {}
+
+        func adopt(_ gesture: TaskCardStackLongPressGesture) {
+            identity = gesture.identity; enabled = gesture.enabled; action = gesture.action
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            if gestureRecognizer.state == .possible { pressedIdentity = identity }
+            return true
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            other === (other.view as? UIScrollView)?.panGestureRecognizer
+        }
     }
 }
 
@@ -1452,6 +1731,254 @@ private struct TaskCardLongPressRegistrar: UIViewRepresentable {
     }
 }
 
+enum TaskRowSwipeHost { case local, list }
+
+private struct TaskRowSwipeButton: View {
+    let action: CoreObject
+    let palette: AppPalette
+    let rowID: String
+    let native: Bool
+    let activate: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var symbol: String {
+        switch action.text("id") {
+        case "done": return "checkmark.circle"
+        case "focus": return action.flag("focused") ? "star.fill" : "star"
+        case "organize": return "folder"
+        case "dates": return "calendar"
+        case "delete": return "trash"
+        case "restore": return "arrow.uturn.backward"
+        default: return "arrow.right"
+        }
+    }
+    private var color: Color {
+        switch action.text("id") {
+        case "delete": return palette.danger
+        case "focus": return Color(hex: "F59E0B")
+        case "done": return palette.success
+        case "dates": return palette.secondary
+        default: return palette.tint
+        }
+    }
+    @ViewBuilder var body: some View {
+        // Native List actions need the container's contextual button style.
+        if native { actionButton.buttonStyle(.automatic) }
+        else { actionButton.buttonStyle(.plain) }
+    }
+    private var actionButton: some View {
+        Button(action: activate) {
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 20)).accessibilityHidden(true)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text(action.text("label")).rnFont(12, .semibold).multilineTextAlignment(.center).lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+            .foregroundStyle(.white)
+            .background(native ? Color.clear : color)
+        }
+        .tint(color).disabled(!action.flag("enabled"))
+        .accessibilityLabel(action.text("label"))
+        .accessibilityIdentifier("task-swipe-" + action.text("id") + "-" + rowID)
+    }
+}
+
+/// A List uses its native reveal. Stack hosts share this small local tray;
+/// neither reveal engine owns an action or dispatches on drag release.
+private struct TaskRowSwipeTray: ViewModifier {
+    let host: TaskRowSwipeHost
+    let actions: CoreObject
+    let identity: String
+    let rowID: String
+    let palette: AppPalette
+    let enabled: Bool
+    let closeGeneration: Int
+    let layoutDirection: LayoutDirection
+    let activate: (CoreObject, String) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var offset: CGFloat = 0
+    @State private var openingOffset: CGFloat = 0
+    @State private var dragAxis = 0
+    @State private var width: CGFloat = 320
+    private var left: [CoreObject] { enabled ? actions.objects("swipeRight").filter { $0.flag("enabled") } : [] }
+    private var right: [CoreObject] { enabled ? actions.objects("swipeLeft").filter { $0.flag("enabled") } : [] }
+    private var buttonWidth: CGFloat { min(64, max(44, width / CGFloat(max(1, max(left.count, right.count))))) }
+    private var leftWidth: CGFloat { CGFloat(left.count) * buttonWidth }
+    private var rightWidth: CGFloat { CGFloat(right.count) * buttonWidth }
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if host == .list {
+            content
+                .swipeActions(edge: layoutDirection == .leftToRight ? .leading : .trailing, allowsFullSwipe: false) {
+                    // First native button is nearest its exposed outer edge.
+                    ForEach(left.indices, id: \.self) { index in button(left[index], native: true) }
+                }
+                .swipeActions(edge: layoutDirection == .leftToRight ? .trailing : .leading, allowsFullSwipe: false) {
+                    ForEach(right.indices.reversed(), id: \.self) { index in button(right[index], native: true) }
+                }
+        } else {
+            ZStack {
+                if offset > 0 {
+                    HStack(spacing: 0) {
+                        ForEach(left.indices, id: \.self) { index in button(left[index], native: false).frame(width: buttonWidth) }
+                        Spacer(minLength: 0)
+                    }
+                    .environment(\.layoutDirection, .leftToRight)
+                }
+                if offset < 0 {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        ForEach(right.indices, id: \.self) { index in button(right[index], native: false).frame(width: buttonWidth) }
+                    }
+                    .environment(\.layoutDirection, .leftToRight)
+                }
+                content
+                    .overlay {
+                        if offset != 0 {
+                            Color.clear.contentShape(Rectangle()).onTapGesture { close() }
+                        }
+                    }
+                    .offset(x: offset)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .background(GeometryReader { geometry in
+                Color.clear.onAppear { width = geometry.size.width }
+                    .onChange(of: geometry.size.width) { width = $0; close() }
+            })
+            .modifier(TaskRowSwipeDrag(active: !left.isEmpty || !right.isEmpty, began: dragBegan, changed: dragChanged, ended: dragEnded))
+            .accessibilityElement(children: .contain)
+            .accessibilityActions {
+                // Available while closed too; these call the very same dispatcher.
+                ForEach((left + right).indices, id: \.self) { index in
+                    let action = (left + right)[index]
+                    Button(action.text("label")) { activate(action, identity) }
+                }
+            }
+            .onChange(of: identity) { _ in close() }
+            .onChange(of: closeGeneration) { _ in close() }
+            .onChange(of: enabled) { if !$0 { close() } }
+            .onChange(of: scenePhase) { if $0 != .active { close() } }
+            .onDisappear { offset = 0; dragAxis = 0; openingOffset = 0 }
+        }
+    }
+    private func button(_ action: CoreObject, native: Bool) -> some View {
+        TaskRowSwipeButton(action: action, palette: palette, rowID: rowID, native: native) {
+            close(); activate(action, identity)
+        }
+    }
+    private func close() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { offset = 0 }
+        dragAxis = 0; openingOffset = 0
+    }
+    static func isHorizontalIntent(_ translation: CGSize) -> Bool {
+        translation.width.isFinite && translation.height.isFinite
+            && abs(translation.width) > abs(translation.height) * 1.25
+    }
+    private func dragBegan() {
+        guard enabled, !left.isEmpty || !right.isEmpty else { return }
+        dragAxis = 1; openingOffset = offset
+    }
+    private func dragChanged(_ translation: CGSize) {
+        guard enabled, !left.isEmpty || !right.isEmpty else { return }
+        if dragAxis == 0 {
+            if Self.isHorizontalIntent(translation) {
+                dragAxis = 1; openingOffset = offset
+            } else { dragAxis = -1 }
+        }
+        guard dragAxis == 1 else { return }
+        offset = min(leftWidth, max(-rightWidth, openingOffset + translation.width))
+    }
+    private func dragEnded() {
+        defer { dragAxis = 0; openingOffset = 0 }
+        guard dragAxis == 1 else { return }
+        let target: CGFloat = offset > min(72, leftWidth / 2) ? leftWidth
+            : offset < -min(72, rightWidth / 2) ? -rightWidth : 0
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { offset = target }
+    }
+}
+
+private struct TaskRowSwipeDrag: ViewModifier {
+    let active: Bool
+    let began: () -> Void
+    let changed: (CGSize) -> Void
+    let ended: () -> Void
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.gesture(TaskRowSwipePan(active: active, began: began, changed: changed, ended: ended))
+        } else {
+            content.simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { value in
+                changed(value.translation)
+            }.onEnded { _ in
+                ended()
+            })
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct TaskRowSwipePan: UIGestureRecognizerRepresentable {
+    let active: Bool
+    let began: () -> Void
+    let changed: (CGSize) -> Void
+    let ended: () -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = TaskRowSwipePanRecognizer()
+        pan.delegate = context.coordinator
+        pan.isEnabled = active
+        return pan
+    }
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        recognizer.isEnabled = active
+    }
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        switch recognizer.state {
+        case .began:
+            began()
+        case .changed:
+            guard let translation = context.converter.localTranslation else { return }
+            changed(CGSize(width: translation.x, height: translation.y))
+        case .ended, .cancelled:
+            ended()
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let translation = pan.translation(in: pan.view)
+            return TaskRowSwipeTray.isHorizontalIntent(CGSize(width: translation.x, height: translation.y))
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            other === (other.view as? UIScrollView)?.panGestureRecognizer
+        }
+    }
+}
+
+private final class TaskRowSwipePanRecognizer: UIPanGestureRecognizer {
+    private var origin: CGPoint?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if origin == nil { origin = touches.first?.location(in: view) }
+        super.touchesBegan(touches, with: event)
+    }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        if state == .possible, let origin, let point = touches.first?.location(in: view),
+           hypot(point.x - origin.x, point.y - origin.y) < 12 { return }
+        super.touchesMoved(touches, with: event)
+    }
+    override func reset() {
+        origin = nil
+        super.reset()
+    }
+}
+
 struct TaskCard: View {
     let row: CoreObject
     @ObservedObject var model: CoreModel
@@ -1471,11 +1998,57 @@ struct TaskCard: View {
     var onCompletedAt: ((CoreObject) -> Void)? = nil
     var onSelection: ((CoreObject) -> Void)? = nil
     var onSelectionStart: ((CoreObject) -> Void)? = nil
+    var swipeHost: TaskRowSwipeHost = .local
+    var onSwipeDelete: ((CoreObject) -> Void)? = nil
+    var onSwipeNext: ((CoreObject) -> Void)? = nil
+    var onSwipeOrganize: ((CoreObject) -> Void)? = nil
+    var swipeInteractionDisabled = false
+    @ScaledMetric(relativeTo: .body) private var assignedToFontSize: CGFloat = 12
+    @Environment(\.isEnabled) private var rowEnabled
+    // Native swipe edges follow the List host, not this card's text direction.
+    @Environment(\.layoutDirection) private var hostLayoutDirection
+    @State private var swipeDTO: CoreObject = [:]
+    @State private var swipePublishedKey = ""
+    @State private var swipePublishedRow: CoreObject = [:]
+    @State private var swipeCloseGeneration = 0
+    @State private var selectionPressStartedAt = Date.distantPast
     @State private var statusMenu = false
+    @State private var navigationReplayCoverID = UUID()
     @State private var statusRow: CoreObject = [:]
     @State private var statusOptions: CoreObject = [:]
     @State private var statusOptionsTask: Task<Void, Never>?
+    @State private var defaultStatusMenu = false
+    @State private var checklistMoveEntry: CoreObject = [:]
+    @State private var defaultStatusReadID = UUID()
+    @State private var checklistExpanded = false
+    @State private var checklistView: CoreObject = [:]
+    @State private var checklistInput = ""
+    @State private var checklistError: String?
+    @State private var checklistReadTask: Task<Void, Never>?
+    @State private var checklistReadID = UUID()
+    @FocusState private var checklistInputFocused: Bool
+    private var checklistIdentity: String { model.taskCardPresentationContext + ":" + row.text("id") }
+    private var hasInlineChecklist: Bool {
+        row.text("status") != "reference" && meta.objects("parts").contains { $0.text("kind") == "checklist" }
+    }
+    private var checklistSection: CoreObject {
+        checklistView.objects("rows").first { $0.text("type") == "checklist" } ?? [:]
+    }
+    private var checklistWritable: Bool {
+        !readOnly && onSelection == nil && !checklistView.isEmpty && !checklistView.flag("readOnly")
+            && checklistView.text("taskRevision").utf8.elementsEqual(row.text("taskRevision").utf8)
+            && model.inlineChecklistEnabled(row, writing: true)
+    }
     private var meta: CoreObject { row.object("meta") }
+    private var swipeEnabled: Bool {
+        rowEnabled && !readOnly && onSelection == nil && !swipeInteractionDisabled && model.taskRowSwipeActionsEnabled(row)
+    }
+    private var swipeReadIdentity: String {
+        checklistIdentity + ":" + row.text("taskRevision") + ":" + row.text("status")
+            + ":" + String(row.flag("isFocusedToday")) + ":" + String(onSelection != nil)
+            + ":" + String(readOnly) + ":" + String(rowEnabled) + ":" + String(swipeInteractionDisabled)
+            + ":" + String(swipeEnabled) + ":" + String(model.taskRowSwipeLanguageGeneration)
+    }
     private var statusColor: Color {
         Color(hex: model.theme.object("status").object(palette.dark ? "dark" : "light").object(row.text("status")).text("text"))
     }
@@ -1495,11 +2068,28 @@ struct TaskCard: View {
                 }
                 let parts = meta.objects("parts").filter { showDetails || !$0.flag("detail") }
                 if !parts.isEmpty {
-                    if onProject != nil || onToken != nil || onCompletedAt != nil {
+                    if onProject != nil || onToken != nil || onCompletedAt != nil || hasInlineChecklist {
                         AppChipFlow {
                             ForEach(parts.indices, id: \.self) { index in
                                 let part = parts[index]
-                                if part.text("kind") == "completed", row.text("status") == "done", let onCompletedAt {
+                                if part.text("kind") == "checklist", hasInlineChecklist {
+                                    Button {
+                                        beforeAction?()
+                                        checklistInputFocused = false
+                                        checklistExpanded.toggle()
+                                        if checklistExpanded { loadInlineChecklist() }
+                                        else { cancelInlineChecklistRead() }
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text(metadata([part])).rnFont(12, .medium)
+                                            Image(systemName: checklistExpanded ? "chevron.up" : "chevron.down").font(.system(size: 10))
+                                        }
+                                        .frame(minHeight: 44).contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain).disabled(onSelection != nil || !model.inlineChecklistEnabled(row))
+                                    .accessibilityValue(checklistExpanded ? model.label("common.close") : model.label("common.open"))
+                                    .accessibilityIdentifier("task-inline-checklist-" + row.text("id"))
+                                } else if part.text("kind") == "completed", row.text("status") == "done", let onCompletedAt {
                                     Button {
                                         beforeAction?()
                                         onCompletedAt(row)
@@ -1542,6 +2132,7 @@ struct TaskCard: View {
                             .contentShape(Rectangle()).onTapGesture { openTask() }
                     }
                 }
+                if checklistExpanded && hasInlineChecklist && onSelection == nil { inlineChecklistContent }
                 if !footer.isEmpty {
                     Text(footer).rnFont(12, .semibold).foregroundStyle(palette.secondary).padding(.top, 4)
                         .contentShape(Rectangle()).onTapGesture { openTask() }
@@ -1562,24 +2153,11 @@ struct TaskCard: View {
             .frame(minHeight: 44).contentShape(Rectangle())
             if !hideStatusBadge && !meta.text("statusLabel").isEmpty {
                 Button {
-                    beforeAction?()
-                    model.taskStatusMenuPresented = true
-                    if let onStatusOptions {
-                        let displayed = row
-                        statusRow = displayed
-                        statusOptionsTask = Task {
-                            defer { statusOptionsTask = nil }
-                            if let options = await onStatusOptions(displayed) {
-                                guard !Task.isCancelled else { return }
-                                statusOptions = options
-                                statusMenu = true
-                            } else { model.taskStatusMenuPresented = false }
-                        }
-                    } else { statusMenu = true }
+                    openRowStatusMenu(row)
                 } label: {
-                    AppIcon(name: "status", size: 20).foregroundStyle(statusColor).frame(width: 44, height: 44)
+                    AppIcon(name: "status", size: 20).foregroundStyle(statusColor).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || row.flag("readOnly") || readOnly || statusOptionsTask != nil)
+                .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.taskStatusMenuPresented || row.flag("readOnly") || readOnly || onSelection != nil || statusOptionsTask != nil)
                 .accessibilityLabel(model.label("task.aria.changeStatus").replacingOccurrences(of: "{{status}}", with: meta.text("statusLabel")))
                 .accessibilityHint(model.label("task.aria.changeStatusHint"))
                 .accessibilityIdentifier("task-status-" + row.text("id"))
@@ -1589,6 +2167,17 @@ struct TaskCard: View {
         .padding(.vertical, 10).padding(.horizontal, 16)
         .background(palette.row, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border, lineWidth: 1))
+        .modifier(TaskRowSwipeTray(host: swipeHost, actions: swipeDTO, identity: swipePublishedKey,
+            rowID: row.text("id"), palette: palette, enabled: swipeEnabled && swipePublishedKey == swipeReadIdentity,
+            closeGeneration: swipeCloseGeneration, layoutDirection: hostLayoutDirection, activate: activateSwipe))
+        .task(id: swipeReadIdentity) {
+            let identity = swipeReadIdentity, displayed = row
+            swipeDTO = [:]; swipePublishedKey = ""; swipePublishedRow = [:]
+            guard let value = await model.readTaskRowSwipeActions(displayed, selectionMode: onSelection != nil,
+                interactionDisabled: readOnly || !rowEnabled || swipeInteractionDisabled || !model.taskRowSwipeActionsEnabled(displayed)),
+                  !Task.isCancelled, identity == swipeReadIdentity else { return }
+            swipePublishedRow = displayed; swipePublishedKey = identity; swipeDTO = value
+        }
         .overlay(alignment: .leading) {
             if !meta.text("priority").isEmpty {
                 RoundedRectangle(cornerRadius: 2)
@@ -1600,11 +2189,14 @@ struct TaskCard: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(meta.text("accessibilityLabel"))
         // Observe the whole card without adding a hit-testing overlay or replacing taps.
-        .modifier(TaskCardSelectionLongPress(identity: row.text("id"), enabled: onSelectionStart != nil, action: {
+        .modifier(TaskCardSelectionLongPress(identity: row.text("id"), host: swipeHost, enabled: onSelectionStart != nil, action: {
+            recordStackSelectionPress()
             onSelectionStart?(row)
         }))
-        .confirmationDialog(onStatusOptions == nil ? meta.text("statusLabel") : statusOptions.text("title"),
-                            isPresented: $statusMenu, titleVisibility: .visible) {
+        .confirmationDialog(defaultStatusMenu ? statusOptions.text("title") : (onStatusOptions == nil ? meta.text("statusLabel") : statusOptions.text("title")),
+                            isPresented: Binding(get: { statusMenu }, set: {
+                                statusMenu = $0; model.navigationReplayLocalCover(navigationReplayCoverID, presented: $0)
+                            }), titleVisibility: .visible) {
             if let onStatusChange {
                 ForEach(statusOptions.objects("options").indices, id: \.self) { index in
                     let option = statusOptions.objects("options")[index]
@@ -1616,10 +2208,34 @@ struct TaskCard: View {
                         .accessibilityIdentifier("done-status-" + option.text("status"))
                 }
             } else {
-                Button(model.label("common.done")) {
-                    Task { await model.complete(row.text("id"), taskRevision: row.text("taskRevision")) }
+                ForEach(statusOptions.objects("options").indices, id: \.self) { index in
+                    let option = statusOptions.objects("options")[index]
+                    Button((option.flag("selected") ? "✓ " : "") + option.text("label")) {
+                        selectDefaultStatus(option)
+                    }
+                    .disabled(model.busy || model.retryNeeded || readOnly || onSelection != nil || statusRow.flag("readOnly")
+                              || option.flag("selected") || !model.rowQuickStatusMenuCurrent(navigationReplayCoverID, row: statusRow))
+                    .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
+                    .accessibilityIdentifier(option.text("status") == "done" ? "task-complete" : "task-status-" + option.text("status"))
                 }
-                    .accessibilityIdentifier("task-complete")
+                if !checklistMoveEntry.isEmpty {
+                    Button(checklistMoveEntry.text("title")) {
+                        beforeAction?()
+                        model.openTaskChecklistMove(statusRow, entry: checklistMoveEntry, presentation: navigationReplayCoverID)
+                    }
+                    .disabled(model.busy || model.retryNeeded || readOnly || onSelection != nil || statusRow.flag("readOnly")
+                              || !model.rowQuickStatusMenuCurrent(navigationReplayCoverID, row: statusRow))
+                    .accessibilityIdentifier("task-add-to-checklist")
+                }
+                if model.rowTaskBackdateAvailable(statusRow, presentation: navigationReplayCoverID) {
+                    Button(model.label("task.completedAtPromptTitle")) {
+                        beforeAction?()
+                        model.openRowTaskBackdate(statusRow, presentation: navigationReplayCoverID)
+                    }
+                    .disabled(model.busy || model.retryNeeded || readOnly || onSelection != nil || statusRow.flag("readOnly")
+                              || !model.rowTaskBackdateAvailable(statusRow, presentation: navigationReplayCoverID))
+                    .accessibilityIdentifier("task-status-completion-time")
+                }
                 if let onMoveToSection, !moveToSectionLabel.isEmpty {
                     Button(moveToSectionLabel) { onMoveToSection() }
                         .disabled(model.busy || model.retryNeeded || readOnly || row.flag("readOnly")
@@ -1627,17 +2243,304 @@ struct TaskCard: View {
                         .accessibilityIdentifier("task-move-section-" + row.text("id"))
                 }
             }
+            if model.rowTaskDatesAvailable(statusRow, presentation: navigationReplayCoverID) {
+                Button(model.label("filters.taskDates")) {
+                    beforeAction?()
+                    model.openRowTaskDates(statusRow, presentation: navigationReplayCoverID)
+                }
+                .disabled(model.busy || model.retryNeeded || readOnly || onSelection != nil || statusRow.flag("readOnly")
+                          || !model.rowTaskDatesAvailable(statusRow, presentation: navigationReplayCoverID))
+                .accessibilityIdentifier("task-status-dates")
+            }
+            if model.rowTaskDestinationAvailable(statusRow, presentation: navigationReplayCoverID) {
+                Button(model.label("task.moveToProjectOrArea")) {
+                    beforeAction?()
+                    model.openRowTaskDestination(statusRow, presentation: navigationReplayCoverID)
+                }
+                .disabled(model.busy || model.retryNeeded || readOnly || onSelection != nil || statusRow.flag("readOnly")
+                          || !model.rowTaskDestinationAvailable(statusRow, presentation: navigationReplayCoverID))
+                .accessibilityIdentifier("task-status-destination")
+            }
+            Button(model.label("task.copyTaskLink")) { model.copyTaskReference(row.text("id"), link: true) }
+                .accessibilityIdentifier("task-copy-link-" + row.text("id"))
+            Button(model.label("task.copyTaskId")) { model.copyTaskReference(row.text("id"), link: false) }
+                .accessibilityIdentifier("task-copy-id-" + row.text("id"))
             Button(model.label("common.cancel"), role: .cancel) {}
         }
-        .onChange(of: statusMenu) { model.taskStatusMenuPresented = $0 }
+        .onChange(of: statusMenu) {
+            model.taskStatusMenuPresented = $0
+            model.navigationReplayLocalCover(navigationReplayCoverID, presented: $0)
+            if !$0 {
+                model.retireRowTaskDestinationMenu(navigationReplayCoverID)
+                model.retireRowTaskDatesMenu(navigationReplayCoverID)
+                if defaultStatusMenu { model.retireRowQuickStatusOptions(navigationReplayCoverID) }
+            }
+        }
+        .onChange(of: checklistIdentity) { _ in resetInlineChecklist(); retireDefaultStatusMenu() }
+        .onChange(of: InlineChecklistRevision(row: row)) { current in
+            retireDefaultStatusMenu()
+            checklistView = [:]
+            if checklistExpanded { loadInlineChecklist(displayed: current.row) }
+        }
+        .onChange(of: model.busy) { busy in
+            if !busy && checklistExpanded && checklistReadTask == nil
+                && checklistView.text("taskRevision") != row.text("taskRevision") && model.inlineChecklistEnabled(row) {
+                loadInlineChecklist()
+            }
+        }
+        .onChange(of: onSelection != nil) { selecting in
+            if selecting { resetInlineChecklist(); retireDefaultStatusMenu() }
+        }
         .onDisappear {
+            resetInlineChecklist()
+            retireDefaultStatusMenu()
+            model.retireRowTaskDestinationMenu(navigationReplayCoverID)
+            model.retireRowTaskDatesMenu(navigationReplayCoverID)
+            model.navigationReplayLocalCover(navigationReplayCoverID, presented: false)
             let ownsMenu = statusMenu || statusOptionsTask != nil
             statusOptionsTask?.cancel()
             if ownsMenu { model.taskStatusMenuPresented = false }
         }
     }
 
+    private func activateSwipe(_ action: CoreObject, identity: String) {
+        guard identity == swipeReadIdentity, identity == swipePublishedKey, swipeEnabled, action.flag("enabled"),
+              (swipeDTO.objects("swipeRight") + swipeDTO.objects("swipeLeft")).contains(where: {
+                  NSDictionary(dictionary: $0).isEqual(to: action)
+              }) else { return }
+        let displayed = swipePublishedRow
+        // Capture before any callback or unstructured Task can retire this presentation.
+        guard let activation = model.captureTaskRowSwipeActivation(displayed) else { return }
+        swipeCloseGeneration += 1
+        if action.text("id") == "organize" {
+            if let onSwipeOrganize {
+                beforeAction?()
+                guard model.taskRowSwipeActivationCurrent(activation, row: displayed) else { return }
+                onSwipeOrganize(displayed)
+            }
+            else { openRowStatusMenu(displayed, activation: activation) }
+            return
+        }
+        beforeAction?()
+        guard model.taskRowSwipeActivationCurrent(activation, row: displayed) else { return }
+        switch action.text("id") {
+        case "done": Task { await model.completeTaskRowSwipe(displayed, activation: activation) }
+        case "focus": Task { await model.focusRowTask(displayed, focused: !action.flag("focused"), activation: activation) }
+        case "dates": model.openRowTaskDatesFromSwipe(displayed)
+        case "delete":
+            // Only this explicit action cancels the row's undispatched checklist input.
+            resetInlineChecklist()
+            if let onSwipeDelete { onSwipeDelete(displayed) }
+            else { Task { await model.deleteRowTask(displayed, activation: activation) } }
+        case "restore", "next":
+            guard !action.text("status").isEmpty else { return }
+            if let onSwipeNext { onSwipeNext(displayed) }
+            else if let onStatusChange { onStatusChange(displayed, action.text("status")) }
+            else { Task { await model.changeTaskRowSwipeStatus(displayed, status: action.text("status"), activation: activation) } }
+        default: break
+        }
+    }
+
+    private func openRowStatusMenu(_ displayed: CoreObject, activation: CoreModel.TaskRowSwipeActivation? = nil) {
+        guard !model.taskStatusMenuPresented, onSelection == nil, !readOnly, !displayed.flag("readOnly"),
+              model.taskRowSwipeRowCurrent(displayed) else { return }
+        beforeAction?()
+        if let activation, !model.taskRowSwipeActivationCurrent(activation, row: displayed) { return }
+        model.taskStatusMenuPresented = true
+        model.retainRowTaskDestinationMenu(displayed, presentation: navigationReplayCoverID)
+        model.retainRowTaskDatesMenu(displayed, presentation: navigationReplayCoverID)
+        if let onStatusOptions {
+            let identity = checklistIdentity, readID = UUID()
+            defaultStatusReadID = readID; statusRow = displayed
+            statusOptionsTask = Task {
+                defer { if defaultStatusReadID == readID { statusOptionsTask = nil } }
+                if let options = await onStatusOptions(displayed) {
+                    guard !Task.isCancelled, defaultStatusReadID == readID, identity == checklistIdentity,
+                          onSelection == nil, !readOnly, model.taskRowSwipeRowCurrent(displayed) else { return }
+                    statusOptions = options
+                    statusMenu = true; model.navigationReplayLocalCover(navigationReplayCoverID, presented: true)
+                } else if defaultStatusReadID == readID, identity == checklistIdentity {
+                    model.retireRowTaskDestinationMenu(navigationReplayCoverID)
+                    model.retireRowTaskDatesMenu(navigationReplayCoverID)
+                    model.taskStatusMenuPresented = false
+                }
+            }
+        } else { readDefaultStatusOptions() }
+    }
+
+    private func readDefaultStatusOptions() {
+        let displayed = row, identity = checklistIdentity, readID = UUID()
+        defaultStatusReadID = readID; defaultStatusMenu = true
+        statusRow = displayed; statusOptions = [:]; checklistMoveEntry = [:]
+        statusOptionsTask = Task {
+            var presented = false
+            defer {
+                if defaultStatusReadID == readID {
+                    statusOptionsTask = nil
+                    if !presented {
+                        model.retireRowQuickStatusOptions(navigationReplayCoverID)
+                        model.retireRowTaskDestinationMenu(navigationReplayCoverID)
+                        model.retireRowTaskDatesMenu(navigationReplayCoverID)
+                        model.taskStatusMenuPresented = false
+                    }
+                }
+            }
+            if let options = await model.readRowQuickStatusOptions(displayed, presentation: navigationReplayCoverID) {
+                guard !Task.isCancelled, defaultStatusReadID == readID, identity == checklistIdentity,
+                      onSelection == nil, !readOnly, model.rowQuickStatusMenuCurrent(navigationReplayCoverID, row: displayed) else { return }
+                guard let entry = await model.readTaskChecklistMoveEntry(displayed, presentation: navigationReplayCoverID),
+                      !Task.isCancelled, defaultStatusReadID == readID, identity == checklistIdentity,
+                      onSelection == nil, !readOnly, model.rowQuickStatusMenuCurrent(navigationReplayCoverID, row: displayed) else { return }
+                checklistMoveEntry = entry
+                statusOptions = options; presented = true
+                statusMenu = true; model.navigationReplayLocalCover(navigationReplayCoverID, presented: true)
+            }
+        }
+    }
+
+    private func selectDefaultStatus(_ option: CoreObject) {
+        guard !option.flag("selected"), onSelection == nil, !readOnly, !statusRow.flag("readOnly"),
+              model.rowQuickStatusMenuCurrent(navigationReplayCoverID, row: statusRow) else { return }
+        beforeAction?()
+        let displayed = statusRow
+        if option.text("status") == "done" {
+            model.retireRowQuickStatusOptions(navigationReplayCoverID)
+            model.taskStatusMenuPresented = false
+            Task { await model.complete(displayed.text("id"), taskRevision: displayed.text("taskRevision")) }
+        } else {
+            model.changeRowQuickStatus(displayed, options: statusOptions, status: option.text("status"), presentation: navigationReplayCoverID)
+        }
+    }
+
+    private func retireDefaultStatusMenu() {
+        guard defaultStatusMenu else { return }
+        let ownsMenu = statusMenu || statusOptionsTask != nil
+        defaultStatusReadID = UUID(); statusOptionsTask?.cancel(); statusOptionsTask = nil
+        model.retireRowQuickStatusOptions(navigationReplayCoverID)
+        model.retireRowTaskDestinationMenu(navigationReplayCoverID)
+        model.retireRowTaskDatesMenu(navigationReplayCoverID)
+        statusMenu = false; defaultStatusMenu = false; statusOptions = [:]; checklistMoveEntry = [:]
+        if ownsMenu { model.taskStatusMenuPresented = false }
+    }
+
+    private struct InlineChecklistEntry: Identifiable {
+        let value: CoreObject
+        var id: Data { Data(value.text("id").utf8) }
+    }
+
+    private struct InlineChecklistRevision: Equatable {
+        let row: CoreObject
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.row.text("taskRevision") == rhs.row.text("taskRevision") }
+    }
+
+    private var inlineChecklistContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(checklistSection.objects("items").map { InlineChecklistEntry(value: $0) }) { item in
+                let entry = item.value
+                Button {
+                    beforeAction?(); checklistInputFocused = false
+                    let displayed = row, view = checklistView
+                    Task { await model.submitInlineChecklist(displayed, view: view, itemID: entry.text("id"), completed: !entry.flag("completed")) }
+                } label: {
+                    HStack(alignment: .top, spacing: 8) {
+                        NativeMarkdownChecklistMarker(bullet: false, completed: entry.flag("completed"), palette: palette)
+                            .frame(width: 44, height: 44)
+                        Text(NativeMarkdownInline.attributedText(entry.objects("inline"), labels: checklistView.object("markdownLabels"), palette: palette))
+                            .rnFont(14).fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(!checklistWritable)
+                .accessibilityLabel(entry.text("title"))
+                .accessibilityValue(model.label(entry.flag("completed") ? "common.done" : "status.active"))
+                .accessibilityAddTraits(entry.flag("completed") ? .isSelected : [])
+                .accessibilityIdentifier("task-inline-checklist-toggle-" + row.text("id") + "-" + entry.text("id"))
+            }
+            if checklistReadTask != nil {
+                Text(model.label("common.loading")).rnFont(14).foregroundStyle(palette.secondary)
+            }
+            if let checklistError {
+                Text(checklistError).rnFont(14).foregroundStyle(palette.secondary)
+                Button(model.label("common.retry")) { beforeAction?(); loadInlineChecklist() }
+                    .buttonStyle(.plain).frame(minHeight: 44).disabled(!model.inlineChecklistEnabled(row))
+            }
+            if checklistSection.objects("items").count < checklistSection.number("total") {
+                Button(model.label("common.more")) {
+                    beforeAction?(); checklistInputFocused = false
+                    loadInlineChecklist(more: true)
+                }
+                .buttonStyle(.plain).frame(minHeight: 44).disabled(checklistReadTask != nil || !model.inlineChecklistEnabled(row))
+            }
+            if !readOnly && !row.flag("readOnly") && !checklistView.flag("readOnly"), !checklistSection.object("add").isEmpty {
+                let add = checklistSection.object("add")
+                HStack(spacing: 8) {
+                    TextField(add.text("placeholder"), text: $checklistInput)
+                        .rnFont(16).padding(12).frame(minHeight: 44)
+                        .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+                        .focused($checklistInputFocused).submitLabel(.done)
+                        .onSubmit { submitInlineChecklistInput() }
+                        .accessibilityLabel(add.text("label"))
+                        .accessibilityIdentifier("task-inline-checklist-input-" + row.text("id"))
+                    Button(add.text("label")) { submitInlineChecklistInput() }
+                        .buttonStyle(.plain).frame(minWidth: 44, minHeight: 44)
+                        .disabled(checklistInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("task-inline-checklist-add-" + row.text("id"))
+                }
+                .disabled(!checklistWritable)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func submitInlineChecklistInput() {
+        guard checklistWritable, !checklistInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        beforeAction?(); checklistInputFocused = false
+        let displayed = row, view = checklistView, input = checklistInput, identity = checklistIdentity
+        Task {
+            let accepted = await model.submitInlineChecklist(displayed, view: view, title: input)
+            if accepted && identity == checklistIdentity && checklistInput == input { checklistInput = "" }
+        }
+    }
+
+    private func loadInlineChecklist(more: Bool = false, displayed current: CoreObject? = nil) {
+        cancelInlineChecklistRead()
+        let readID = UUID(), identity = checklistIdentity, context = model.taskCardPresentationContext, displayed = current ?? row
+        let previous = more ? checklistView : nil
+        checklistReadID = readID; checklistError = nil
+        checklistReadTask = Task {
+            defer { if checklistReadID == readID { checklistReadTask = nil } }
+            do {
+                let view = try await model.readInlineChecklist(displayed, context: context, previous: previous)
+                guard !Task.isCancelled, checklistReadID == readID, checklistExpanded, identity == checklistIdentity else { return }
+                checklistView = view
+            } catch is CancellationError {} catch {
+                guard !Task.isCancelled, checklistReadID == readID, checklistExpanded, identity == checklistIdentity else { return }
+                checklistError = error.localizedDescription
+            }
+        }
+    }
+
+    private func cancelInlineChecklistRead() {
+        checklistReadID = UUID(); checklistReadTask?.cancel(); checklistReadTask = nil
+    }
+
+    private func resetInlineChecklist() {
+        cancelInlineChecklistRead(); checklistExpanded = false; checklistView = [:]
+        checklistInput = ""; checklistError = nil; checklistInputFocused = false
+    }
+
+    private var selectionPressJustStarted: Bool { Date().timeIntervalSince(selectionPressStartedAt) < 1.5 }
+
+    private func recordStackSelectionPress() {
+        guard swipeHost == .local else { return }
+        if #available(iOS 18.0, *) { return }
+        selectionPressStartedAt = Date()
+    }
+
     private func openTask() {
+        if selectionPressJustStarted { return }
         if let onSelection { onSelection(row); return }
         beforeAction?()
         Task { await model.openTask(row.text("id")) }
@@ -1660,17 +2563,21 @@ struct TaskCard: View {
             } else { return .discarded }
             return .handled
         }
-        if url.scheme?.lowercased() == "upnote",
+        if let scheme = url.scheme?.lowercased(), ["upnote", "obsidian"].contains(scheme),
            let original = NativeMarkdownLinkURL.originalHref(url, runs: meta.object("description").objects("inline")) {
             Task {
-                await NativeUpNoteLink.open(original, surface: "markdown", admission: { model.workspaceAdmissionsOpen }) { opened in
-                    await model.recordUpNoteHandoff(opened ? "opened" : "failed", surface: "markdown")
-                    if !opened { NativeUpNoteLink.showFailure(original, labels: model.strings, admission: { model.workspaceAdmissionsOpen }) }
+                await NativeNoteAppLink.open(original, surface: "markdown", admission: { model.workspaceAdmissionsOpen }) { opened in
+                    await model.recordNoteAppHandoff(opened ? "opened" : "failed", surface: "markdown", scheme: scheme)
+                    if !opened { NativeNoteAppLink.showFailure(original, labels: model.strings, admission: { model.workspaceAdmissionsOpen }) }
                 }
             }
             return .handled
         }
         return ["http", "https", "mailto", "tel"].contains(url.scheme?.lowercased() ?? "") ? .systemAction : .discarded
+    }
+
+    private var focusBlockedReason: String {
+        row.flag("isFocusedToday") ? "" : row.text("focusBlockedLabel")
     }
 
     private var titleContent: some View {
@@ -1681,6 +2588,16 @@ struct TaskCard: View {
                 .frame(minHeight: 44).contentShape(Rectangle()).onTapGesture { openTask() }
                 .accessibilityIdentifier("task-title-" + row.text("id"))
                 .accessibilityAction { openTask() }
+            if !showDetails && !meta.text("descriptionPreview").isEmpty {
+                Image(systemName: "text.alignleft").font(.system(size: 12)).foregroundStyle(palette.secondary)
+                    .accessibilityLabel(model.label("taskEdit.descriptionLabel"))
+                    .accessibilityIdentifier("task-description-cue-" + row.text("id"))
+            }
+            if !showDetails, let recurrence = meta.objects("parts").first(where: { $0.text("kind") == "recurrence" }) {
+                Image(systemName: "repeat").font(.system(size: 12)).foregroundStyle(palette.secondary)
+                    .accessibilityLabel(model.label("taskEdit.recurrenceLabel")).accessibilityValue(recurrence.text("text"))
+                    .accessibilityIdentifier("task-recurrence-cue-" + row.text("id"))
+            }
             if showFocusToggle, meta.flag("canFocus"), !readOnly, !row.flag("readOnly") {
                 Button {
                     beforeAction?()
@@ -1689,8 +2606,10 @@ struct TaskCard: View {
                     AppFocusStar(focused: row.flag("isFocusedToday"), inactiveColor: palette.secondary, size: 20)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled(!model.taskFocusInputEnabled(row))
-                .accessibilityLabel(model.label(row.flag("isFocusedToday") ? "agenda.removeFromFocus" : "agenda.addToFocus"))
+                .buttonStyle(.plain).disabled(!model.taskFocusInputEnabled(row) || !focusBlockedReason.isEmpty)
+                .accessibilityLabel(focusBlockedReason.isEmpty
+                    ? model.label(row.flag("isFocusedToday") ? "agenda.removeFromFocus" : "agenda.addToFocus")
+                    : focusBlockedReason)
                 .accessibilityIdentifier("task-focus-" + row.text("id"))
             }
         }
@@ -1708,6 +2627,10 @@ struct TaskCard: View {
             }
             var text = AttributedString(part.text("text") + (part.number("overflowCount") > 0 ? " +\(part.number("overflowCount"))" : ""))
             if kind == "context" { text.foregroundColor = Color(hex: "3B82F6") }
+            else if kind == "assignedTo" {
+                text.foregroundColor = palette.text
+                text.swiftUI.font = .system(size: assignedToFontSize, weight: .semibold)
+            }
             else if kind == "due" && part.text("tone") == "overdue" { text.foregroundColor = palette.danger }
             else if kind == "dateIssue" || kind == "projectDeadline" || (kind == "due" && part.text("tone") == "dueSoon") { text.foregroundColor = palette.warning }
             else { text.foregroundColor = palette.secondary }
@@ -1925,29 +2848,39 @@ private struct ReferenceProjectNextActionPrompt: View {
     }
 }
 
-private struct InboxSortPanel: View {
+private struct TaskListSortPanel: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
+    let caller: CoreModel.TaskListSortCaller
+    private var prefix: String { caller.rawValue }
+
+    private func close() {
+        switch caller {
+        case .inbox: model.closeInboxSort()
+        case .reference: model.closeReferencePanel()
+        case .contexts: model.closeContextsSort()
+        }
+    }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                Button { model.closeInboxSort() } label: { Color.black.opacity(0.28).contentShape(Rectangle()) }
+                Button { close() } label: { Color.black.opacity(0.28).contentShape(Rectangle()) }
                     .buttonStyle(.plain).ignoresSafeArea().accessibilityLabel(model.label("common.close"))
-                    .accessibilityIdentifier("inbox-sort-dismiss").disabled(model.busy || model.retryNeeded)
+                    .accessibilityIdentifier(prefix + "-sort-dismiss").disabled(model.busy || model.retryNeeded)
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 8) {
                         Text(model.label("sort.label")).rnFont(17, .bold).frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityAddTraits(.isHeader)
-                        Button { model.closeInboxSort() } label: { AppIcon(name: "x", size: 20).frame(width: 44, height: 44).contentShape(Rectangle()) }
+                        Button { close() } label: { AppIcon(name: "x", size: 20).frame(width: 44, height: 44).contentShape(Rectangle()) }
                             .buttonStyle(.plain).accessibilityLabel(model.label("common.close"))
-                            .accessibilityIdentifier("inbox-sort-close").disabled(model.busy || model.retryNeeded)
+                            .accessibilityIdentifier(prefix + "-sort-close").disabled(model.busy || model.retryNeeded)
                     }
                     .frame(minHeight: 44).padding(.bottom, 12)
                     ViewThatFits(in: .vertical) {
-                        TaskListSortChoices(model: model, palette: palette, caller: .inbox).fixedSize(horizontal: false, vertical: true)
-                        ScrollView { TaskListSortChoices(model: model, palette: palette, caller: .inbox) }
-                            .accessibilityIdentifier("inbox-sort-scroll")
+                        TaskListSortChoices(model: model, palette: palette, caller: caller).fixedSize(horizontal: false, vertical: true)
+                        ScrollView { TaskListSortChoices(model: model, palette: palette, caller: caller) }
+                            .accessibilityIdentifier(prefix + "-sort-scroll")
                     }
                 }
                 .padding(12).frame(maxWidth: 440, maxHeight: geometry.size.height * 0.82, alignment: .top)
@@ -1958,7 +2891,7 @@ private struct InboxSortPanel: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
-            .accessibilityAction(.escape) { model.closeInboxSort() }
+            .accessibilityAction(.escape) { close() }
         }
     }
 }
@@ -2275,6 +3208,7 @@ private struct InboxBulkOrganizeDialog: View {
     @State private var dateField: String?
     @State private var pickerDate = Date()
     private var view: CoreObject { model.inboxBulkOrganizeView }
+    private var prefix: String { model.bulkOrganizeIsProject ? "project-organize" : "inbox-organize" }
     private var locked: Bool { !model.inboxBulkOrganizeControlsEnabled }
 
     var body: some View {
@@ -2292,7 +3226,7 @@ private struct InboxBulkOrganizeDialog: View {
                         }
                         .buttonStyle(.plain).disabled(!model.inboxBulkOrganizeCloseEnabled)
                         .accessibilityLabel(view.text("closeLabel").isEmpty ? model.label("common.close") : view.text("closeLabel"))
-                        .accessibilityIdentifier("inbox-organize-close")
+                        .accessibilityIdentifier(prefix + "-close")
                     }
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
@@ -2306,16 +3240,16 @@ private struct InboxBulkOrganizeDialog: View {
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .frame(maxHeight: max(120, geometry.size.height - 230))
-                    .accessibilityIdentifier("inbox-organize-scroll")
+                    .accessibilityIdentifier(prefix + "-scroll")
                     if model.inboxBulkOrganizeReading || model.busy { ProgressView().frame(maxWidth: .infinity) }
                     if let error = model.inboxBulkOrganizeReadError {
                         Text(error).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("inbox-organize-error")
+                            .accessibilityIdentifier(prefix + "-error")
                         Button {
                             if model.retryNeeded { Task { await model.retry() } }
                             else { model.retryInboxBulkOrganizeRead() }
                         } label: { Text(model.label("common.retry")).frame(minHeight: 44).contentShape(Rectangle()) }
-                        .buttonStyle(.plain).disabled(model.busy).accessibilityIdentifier("inbox-organize-retry")
+                        .buttonStyle(.plain).disabled(model.busy).accessibilityIdentifier(prefix + "-retry")
                     }
                     HStack {
                         Button {
@@ -2326,7 +3260,7 @@ private struct InboxBulkOrganizeDialog: View {
                                 .frame(minWidth: 60, minHeight: 44).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain).disabled(!model.inboxBulkOrganizeCloseEnabled)
-                        .accessibilityIdentifier("inbox-organize-cancel")
+                        .accessibilityIdentifier(prefix + "-cancel")
                         Spacer(minLength: 0)
                         if model.inboxBulkOrganizePickerKind == nil {
                             Button { Task { await model.applyInboxBulkOrganize() } } label: {
@@ -2335,7 +3269,7 @@ private struct InboxBulkOrganizeDialog: View {
                                     .background(palette.tint, in: RoundedRectangle(cornerRadius: 10)).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain).disabled(!model.inboxBulkOrganizeApplyEnabled)
-                            .accessibilityIdentifier("inbox-organize-apply")
+                            .accessibilityIdentifier(prefix + "-apply")
                         }
                     }
                 }
@@ -2362,7 +3296,7 @@ private struct InboxBulkOrganizeDialog: View {
                     }
                     .buttonStyle(.plain).disabled(locked)
                     .accessibilityAddTraits(item.flag("selected") ? .isSelected : [])
-                    .accessibilityIdentifier("inbox-organize-status-" + item.text("value"))
+                    .accessibilityIdentifier(prefix + "-status-" + item.text("value"))
                 }
             }
             destination("project"); destination("area")
@@ -2376,7 +3310,7 @@ private struct InboxBulkOrganizeDialog: View {
             input("tags", part: view.object("tags"))
             if !view.isEmpty && !view.flag("canApply") {
                 Text(view.text("validationMessage")).rnFont(13).foregroundStyle(palette.danger)
-                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("inbox-organize-validation")
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier(prefix + "-validation")
             }
         }
         .padding(.bottom, 8)
@@ -2395,7 +3329,7 @@ private struct InboxBulkOrganizeDialog: View {
             .background(palette.input, in: RoundedRectangle(cornerRadius: 10)).contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(locked || !model.inboxBulkOrganizeCurrent || part.flag("disabled"))
-        .accessibilityLabel(part.text("accessibilityLabel")).accessibilityIdentifier("inbox-organize-" + kind)
+        .accessibilityLabel(part.text("accessibilityLabel")).accessibilityIdentifier(prefix + "-" + kind)
     }
     private func input(_ field: String, part: CoreObject) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -2406,7 +3340,7 @@ private struct InboxBulkOrganizeDialog: View {
                 .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .padding(12).frame(minHeight: 44).background(palette.input, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).disabled(locked)
-                .accessibilityLabel(part.text("label")).accessibilityIdentifier("inbox-organize-" + field)
+                .accessibilityLabel(part.text("label")).accessibilityIdentifier(prefix + "-" + field)
         }
     }
     private func date(_ part: CoreObject) -> some View {
@@ -2423,14 +3357,14 @@ private struct InboxBulkOrganizeDialog: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).disabled(locked).accessibilityLabel(quick.text("accessibilityLabel"))
-                    .accessibilityIdentifier("inbox-organize-" + field + "-" + quick.text("preset"))
+                    .accessibilityIdentifier(prefix + "-" + field + "-" + quick.text("preset"))
                 }
                 Button {
                     guard let date = TaskDatePickerComponents.date(["date": part.text("pickerStart"), "time": "12:00"]) else { return }
                     pickerDate = date; dateField = field
                 } label: { AppIcon(name: "calendar", size: 18).frame(width: 44, height: 44).contentShape(Rectangle()) }
                 .buttonStyle(.plain).disabled(locked).accessibilityLabel(part.text("calendarAccessibilityLabel"))
-                .accessibilityIdentifier("inbox-organize-" + field + "-calendar")
+                .accessibilityIdentifier(prefix + "-" + field + "-calendar")
             }
             if dateField == field {
                 DatePicker(part.text("label"), selection: Binding(get: { pickerDate }, set: { value in
@@ -2440,10 +3374,10 @@ private struct InboxBulkOrganizeDialog: View {
                     if next != previous { model.setInboxBulkOrganizeText(field, value: next) }
                 }), displayedComponents: .date)
                     .datePickerStyle(.wheel).labelsHidden().disabled(locked)
-                    .accessibilityIdentifier("inbox-organize-" + field + "-picker")
+                    .accessibilityIdentifier(prefix + "-" + field + "-picker")
                 Button { dateField = nil } label: { Text(part.text("doneText")).frame(minHeight: 44).contentShape(Rectangle()) }
                     .buttonStyle(.plain).disabled(locked).accessibilityLabel(part.text("doneLabel"))
-                    .accessibilityIdentifier("inbox-organize-" + field + "-done")
+                    .accessibilityIdentifier(prefix + "-" + field + "-done")
             }
         }
     }
@@ -2456,7 +3390,7 @@ private struct InboxBulkOrganizeDialog: View {
                 .onSubmit { Task { await model.submitInboxOrganizePicker() } }
                 .padding(12).frame(minHeight: 44).background(palette.input, in: RoundedRectangle(cornerRadius: 10))
                 .disabled(locked).accessibilityLabel(model.label("common.search"))
-                .accessibilityIdentifier("inbox-organize-picker-search")
+                .accessibilityIdentifier(prefix + "-picker-search")
             LazyVStack(alignment: .leading, spacing: 4) {
                 ForEach(items.indices, id: \.self) { index in
                     let item = items[index]
@@ -2470,7 +3404,7 @@ private struct InboxBulkOrganizeDialog: View {
                     }
                     .buttonStyle(.plain).disabled(locked || !model.inboxBulkOrganizePickerCurrent || model.inboxBulkOrganizePickerReading)
                     .accessibilityAddTraits(item.flag("selected") ? .isSelected : [])
-                    .accessibilityIdentifier("inbox-organize-picker-choice-" + String(index))
+                    .accessibilityIdentifier(prefix + "-picker-choice-" + String(index))
                 }
             }
             if !model.inboxBulkOrganizePicker.object("create").isEmpty {
@@ -2480,18 +3414,107 @@ private struct InboxBulkOrganizeDialog: View {
                 }
                 .buttonStyle(.plain).disabled(locked || !model.inboxBulkOrganizePickerCurrent || model.inboxBulkOrganizePickerReading)
                 .accessibilityLabel(model.inboxBulkOrganizePicker.object("create").text("accessibilityLabel"))
-                .accessibilityIdentifier("inbox-organize-picker-create")
+                .accessibilityIdentifier(prefix + "-picker-create")
             }
             if model.inboxBulkOrganizePickerReading { ProgressView().frame(maxWidth: .infinity) }
             if let error = model.inboxBulkOrganizePickerError {
                 Text(error).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
                 Button { model.retryInboxOrganizePicker() } label: { Text(model.label("common.retry")).frame(minHeight: 44).contentShape(Rectangle()) }
                     .buttonStyle(.plain).disabled(locked || model.inboxBulkOrganizePickerReading)
-                    .accessibilityIdentifier("inbox-organize-picker-retry")
+                    .accessibilityIdentifier(prefix + "-picker-retry")
             } else if model.inboxOrganizePickerCanLoadMore {
                 Button { model.loadMoreInboxOrganizePicker() } label: { Text(model.label("common.more")).frame(minHeight: 44).contentShape(Rectangle()) }
-                    .buttonStyle(.plain).accessibilityIdentifier("inbox-organize-picker-more")
+                    .buttonStyle(.plain).accessibilityIdentifier(prefix + "-picker-more")
             }
         }
+    }
+}
+
+private struct TaskChecklistMoveDialog: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @FocusState private var searchFocused: Bool
+    private var frozen: Bool { model.busy || model.retryNeeded || model.taskChecklistMovePending }
+    private var options: CoreObject { model.taskChecklistMoveOptions }
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { cancel() }.accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(options.text("title")).rnFont(18, .bold).accessibilityAddTraits(.isHeader)
+                    TextField(options.text("searchPlaceholder"), text: Binding(
+                        get: { model.taskChecklistMoveQuery }, set: model.setTaskChecklistMoveQuery))
+                        .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
+                        .focused($searchFocused).padding(12).frame(minHeight: 44)
+                        .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+                        .accessibilityLabel(options.text("searchPlaceholder"))
+                        .accessibilityIdentifier("checklist-move-search").disabled(frozen)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            ForEach(model.taskChecklistMoveItems.indices, id: \.self) { index in
+                                let target = model.taskChecklistMoveItems[index]
+                                Button {
+                                    guard !frozen, model.taskChecklistMovePickerCurrent else { return }
+                                    searchFocused = false
+                                    Task { await model.chooseTaskChecklistMoveTarget(target) }
+                                } label: {
+                                    HStack {
+                                        Text(target.text("title")).rnFont(16).multilineTextAlignment(.leading)
+                                        Spacer()
+                                        if target.number("totalCount") > 0 {
+                                            Text(String(target.number("completedCount")) + "/" + String(target.number("totalCount")))
+                                                .rnFont(13).foregroundStyle(palette.secondary)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 8).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain).disabled(frozen || model.taskChecklistMoveReading || !model.taskChecklistMovePickerCurrent)
+                                .accessibilityIdentifier("checklist-move-target-" + target.text("id"))
+                            }
+                            if model.taskChecklistMoveReading { ProgressView() }
+                            if model.taskChecklistMovePickerCurrent, model.taskChecklistMoveItems.isEmpty, !model.taskChecklistMoveReading {
+                                Text(options.text("noMatchesLabel")).rnFont(14).foregroundStyle(palette.secondary)
+                                    .accessibilityIdentifier("checklist-move-empty")
+                            }
+                            if options.flag("hasMore"), model.taskChecklistMovePickerCurrent {
+                                Button(model.label("common.more")) { model.readTaskChecklistMoveOptions(more: true) }
+                                    .frame(minHeight: 44).disabled(frozen || model.taskChecklistMoveReading)
+                                    .accessibilityIdentifier("checklist-move-more")
+                            }
+                            if let message = model.taskChecklistMoveError {
+                                Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                                    .accessibilityIdentifier("checklist-move-error")
+                                Button(model.label("common.retry")) {
+                                    if model.taskChecklistMovePending { Task { await model.retry() } }
+                                    else { model.readTaskChecklistMoveOptions() }
+                                }
+                                .frame(minHeight: 44).disabled(model.busy || model.taskChecklistMoveReading)
+                                .accessibilityIdentifier("checklist-move-retry")
+                            }
+                        }
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    .frame(maxHeight: max(120, min(dynamicTypeSize.isAccessibilitySize ? .infinity : 420, geometry.size.height - 180)))
+                    .accessibilityIdentifier("checklist-move-scroll")
+                    HStack {
+                        Spacer()
+                        Button(action: cancel) { Text(options.text("cancelLabel")).frame(minWidth: 48, minHeight: 48).contentShape(Rectangle()) }
+                            .buttonStyle(.plain).foregroundStyle(palette.secondary).disabled(frozen)
+                            .accessibilityIdentifier("checklist-move-cancel")
+                    }
+                }
+                .padding(16).frame(maxWidth: 480).foregroundStyle(palette.text)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1)).padding(16)
+            }
+            .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { cancel() }
+        }
+    }
+    private func cancel() {
+        guard !frozen else { return }
+        searchFocused = false; model.cancelTaskChecklistMove()
     }
 }

@@ -1,5 +1,7 @@
 # Native iOS development client
 
+Post-v1.3.2 RN mobile parity work and remaining migration acceptance are tracked in [the native iOS implementation backlog](../../docs/ios-native-rn-parity-backlog.md), with [public requirement references](../../docs/ios-native-rn-parity-references.md).
+
 This is the SwiftUI/JavaScriptCore foundation from [ADR 0029](../../docs/adr/0029-native-clients-host-the-typescript-core.md). React Native in `apps/mobile/` remains the production client. This project is not a replacement build or a TestFlight release.
 
 The app uses the existing bundle identifier only on a simulator, and normally stores its disposable library under its own `Application Support/NativeFoundation` directory. Physical alpha testing requires a Debug build with `NATIVE_DEVICE_TEST` and the separate `tech.dongdongbh.mindwtr.native.dev` identifier; startup rejects any other physical identity before opening storage. It does not open the live RN library, credentials, App Groups or sync destinations. Do not install it over the RN app. Device signing stays disabled by default; device testing uses existing development signing assets explicitly. Debug simulator builds use ad-hoc signing with a simulator-only Keychain group so real credential reads can run without a developer certificate. Debug simulator and isolated device builds also accept one lowercase UUID via `--native-ui-test-library` to use a separate `NativeUITests/<UUID>` library and preference suite. Physical builds reject authentication-mock and RN-rehearsal arguments. The isolated Debug device build permits a one-shot Project download interruption after staging, only within an isolated `NativeUITests/<UUID>` library; other injected failures remain simulator-only.
@@ -11,10 +13,40 @@ Process Inbox decision Undo is implemented for filing, completion and Trash, wit
 Use the repository's existing JavaScript dependencies. On a Mac with Xcode installed, from the repository root:
 
 ```sh
+python3 apps/mobile/modules/whisper-engine/scripts/prepare_vendor.py node_modules/whisper.rn
 bash apps/ios-native/scripts/validate.sh
 ```
 
+Whisper preparation copies and verifies the already installed, locked native engine into its ignored local Swift package directory. It performs no download and refuses changed existing vendor files. Its license notice is bundled with the native app.
+
 This generates `Resources/core-host.js`, runs the Swift package's real JavaScriptCore/SQLite tests, and compiles the simulator application without signing. This compile-only output does not prove Keychain behavior; runtime simulator tests must keep the Debug target’s signing and simulator entitlements enabled. Build artifacts and temporary files stay under `apps/ios-native/.build/`. The tracked `MindwtrNative.xcodeproj` and shared scheme are independent of Expo prebuild and CocoaPods.
+
+### Development app with Share and Capture widget
+
+To generate the separate `native.dev` App, Share extension and static Capture widget from maintained sources, use the Python stdlib generator below. It reads the base project with macOS `plutil`, writes a fresh sibling project and shared scheme, and never changes the base project. Existing output is refused; for a later fresh generation use `--output-project apps/ios-native/AnotherDev.generated.xcodeproj`, or rebuild the existing generated project directly. Generated files ignore themselves in Git.
+
+On the verified DevSSD Mac lane, from the repository root with the existing JavaScript dependencies installed:
+
+```sh
+set -eu
+python3 -c 'import plistlib,subprocess; v=plistlib.loads(subprocess.check_output(["/usr/sbin/diskutil","info","-plist","/Volumes/DevSSD"])); assert v.get("MountPoint")=="/Volumes/DevSSD" and v.get("VolumeUUID")=="D17C16FD-9411-4521-BFD6-4B5ED03B3FC5", "Expected DevSSD is not mounted"'
+lane=/Volumes/DevSSD/mindwtr/build-artifacts/native-dev-project
+mkdir -p "$lane/tmp"
+export TMPDIR="$lane/tmp" BUN_TMPDIR="$lane/tmp"
+python3 apps/mobile/modules/whisper-engine/scripts/prepare_vendor.py node_modules/whisper.rn
+python3 apps/ios-native/scripts/create-dev-project.py
+bun apps/ios-native/scripts/build-bundle.mjs
+xcodebuild -project apps/ios-native/MindwtrNativeDev.generated.xcodeproj \
+  -scheme MindwtrNative -configuration Debug -sdk iphonesimulator -jobs 1 \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /Volumes/DevSSD/xcode/DerivedData/MindwtrNativeDev \
+  -clonedSourcePackagesDirPath "$lane/SourcePackages" \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+  build-for-testing > "$lane/build.log" 2>&1
+```
+
+The mount check runs before any directory creation. The explicit ad-hoc signing overrides apply only to this `iphonesimulator` command. This is simulator SDK/build evidence only; runtime testing still needs an explicitly selected simulator and preserved data. Device signing remains disabled by default, with no team/profile/account changes; physical signing and release acceptance are separate. The generator adds only the native.dev App Group to the App, Share and widget targets; the Next widget reads its bounded derived cache in that dev group, and preserves the base App/test target IDs and relative package paths. Focused generator checks: `python3 apps/ios-native/scripts/create-dev-project.test.py -v`.
 
 ## Project download fixture preflight
 

@@ -1,0 +1,5 @@
+"common.retry" = "Erneut versuchen";
+"common.close" = "Schließen";
+"share.openLater" = "Geteilte Inhalte in der Warteschlange kannst du beim nächsten Öffnen von Mindwtr prüfen.";
+"share.preparing" = "Teilen wird vorbereitet…";
+"share.queueFailed" = "Es konnte nicht bestätigt werden, ob der Inhalt in die Warteschlange aufgenommen wurde. Versuche es erneut oder schließe dieses Fenster und prüfe Mindwtr.";

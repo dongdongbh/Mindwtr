@@ -1,0 +1,5 @@
+"common.retry" = "再試行";
+"common.close" = "閉じる";
+"share.openLater" = "キューに追加された共有内容は、次にMindwtrを開いたときに確認できます。";
+"share.preparing" = "共有の準備中…";
+"share.queueFailed" = "共有内容がキューに追加されたことを確認できませんでした。再試行するか、この画面を閉じてMindwtrを確認してください。";

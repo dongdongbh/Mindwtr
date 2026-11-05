@@ -1,0 +1,6 @@
+// Existing canonical nav.addTask and widget.capture translations.
+"Add Task" = "افزودن کار";
+"Quick capture" = "ثبت سریع";
+// Canonical nav.next plus the unavailable-cache refresh action.
+"Next Actions" = "اقدامات بعدی";
+"Open Mindwtr to refresh" = "برای تازه‌سازی، Mindwtr را باز کنید";
