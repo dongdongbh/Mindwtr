@@ -6,7 +6,7 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { check, connect, evidenced, fail, inboxCount, inEditor, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, taskRows, withDescription } from './device.mjs';
+import { check, connect, evidenced, fail, inboxCount, inEditor, isOn, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, taskRows, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
 import { serveWebdav, webdavDocument } from './sync-harness.mjs';
 
@@ -198,7 +198,8 @@ try {
         nodes = await tapTag('sync-backend-off', (next) => next.some((node) => node.text === en['settings.syncOff']), 'Sync off');
     }
     writeFileSync(resolve(work, 'sync-backend-selected.png'), adbRaw('exec-out', 'screencap', '-p'));
-    console.log('evidence - sync-backend-selected.png: Off is the selected backend, drawn with RN\'s 2 px outline and check (#1494)');
+    check(isOn(tagged(nodes, 'sync-backend-off')) && ['dropbox', 'file', 'webdav', 'selfhosted'].every((name) => !isOn(tagged(nodes, `sync-backend-${name}`))),
+        'Sync off is the one chosen backend, drawn with RN\'s 2 px outline and check (#1494, sync-backend-selected.png)');
     await tapTag('sync-backend-webdav', (next) => Boolean(tagged(next, 'sync-url')), 'the WebDAV form');
     syncSet = true;
     await fill('sync-url', `http://127.0.0.1:${PORT}${FOLDER}`);
