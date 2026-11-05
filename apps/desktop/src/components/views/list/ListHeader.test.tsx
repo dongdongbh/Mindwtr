@@ -102,7 +102,7 @@ describe('ListHeader', () => {
         expect(screen.getByRole('option', { name: 'Default' })).toHaveAttribute('aria-selected', 'true');
     });
 
-    it('labels sort and group controls visibly inside the compact header controls', () => {
+    it('labels sort and group controls accessibly inside the compact header controls', () => {
         render(
             <ListHeader
                 title="Focus"
@@ -125,8 +125,8 @@ describe('ListHeader', () => {
             />
         );
 
-        expect(screen.getByText('Sort')).toBeInTheDocument();
-        expect(screen.getByText('Group')).toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: 'Sort' })).toHaveAttribute('title', 'Sort');
+        expect(screen.getByRole('combobox', { name: 'Group' })).toHaveAttribute('title', 'Group');
         expect(screen.queryByRole('button', { name: 'View options' })).not.toBeInTheDocument();
         expect(screen.getByRole('combobox', { name: 'Sort' }).querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
         expect(screen.getByRole('combobox', { name: 'Sort' })).toBeInTheDocument();
