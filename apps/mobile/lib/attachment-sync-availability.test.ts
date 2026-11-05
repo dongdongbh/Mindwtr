@@ -168,14 +168,12 @@ describe('ensureAttachmentAvailable', () => {
   let ensureAttachmentAvailable: typeof import('./attachment-sync-availability')['ensureAttachmentAvailable'];
   let ensureAttachmentAvailableDetailed: typeof import('./attachment-sync-availability')['ensureAttachmentAvailableDetailed'];
   let getAttachmentAvailabilityPatch: typeof import('./attachment-sync-availability')['getAttachmentAvailabilityPatch'];
-  let getAttachmentUnrecoverablePatch: typeof import('./attachment-sync-availability')['getAttachmentUnrecoverablePatch'];
 
   beforeAll(async () => {
     ({
       ensureAttachmentAvailable,
       ensureAttachmentAvailableDetailed,
       getAttachmentAvailabilityPatch,
-      getAttachmentUnrecoverablePatch,
     } = await import('./attachment-sync-availability'));
   }, 30_000);
 
@@ -731,7 +729,7 @@ describe('ensureAttachmentAvailable', () => {
     });
   });
 
-  it('returns an explicit terminal patch when the CloudKit asset is confirmed missing', async () => {
+  it('keeps a confirmed missing CloudKit asset unavailable and its row live', async () => {
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloudkit');
     cloudKitSyncMock.fetchCloudKitAttachmentAsset.mockRejectedValue(
       new cloudKitSyncMock.CloudKitAttachmentNotFoundError(),
@@ -745,17 +743,7 @@ describe('ensureAttachmentAvailable', () => {
 
     const result = await ensureAttachmentAvailableDetailed(attachment);
 
-    expect(result).toMatchObject({
-      status: 'unrecoverable',
-      attachment: {
-        title: 'Current title.pdf',
-        mimeType: 'application/pdf',
-        cloudKey: undefined,
-        fileHash: undefined,
-        localStatus: 'missing',
-        deletedAt: expect.any(String),
-      },
-    });
+    expect(result).toEqual({ status: 'unavailable' });
     expect(attachment).toMatchObject({
       cloudKey: 'cloudkit:cloudkit-terminal-missing',
       fileHash: sha256Hex(REMOTE_BYTES),
@@ -766,14 +754,6 @@ describe('ensureAttachmentAvailable', () => {
       { idempotent: true },
     );
     expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
-    if (result.status !== 'unrecoverable') throw new Error('Expected terminal CloudKit outcome');
-    expect(getAttachmentUnrecoverablePatch(result.attachment)).toEqual({
-      cloudKey: undefined,
-      fileHash: undefined,
-      localStatus: 'missing',
-      deletedAt: result.attachment.deletedAt,
-      updatedAt: result.attachment.updatedAt,
-    });
   });
 
   it('patches only local availability and adopts a verified hash only for a legacy missing-hash record', () => {
@@ -855,7 +835,7 @@ describe('ensureAttachmentAvailable', () => {
     vi.mocked(getSyncEncryptionMaterial).mockResolvedValue(null);
   });
 
-  it('treats a self-hosted cloud 404 as terminal, as WebDAV: the row loses its Download button and a retry asks the server nothing', async () => {
+  it('keeps a self-hosted cloud 404 unavailable and retries the same live row', async () => {
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloud');
     asyncStorageMock.store.set('@mindwtr_cloud_url', 'https://cloud.example/v1/data');
     asyncStorageMock.store.set('@mindwtr_cloud_token', 'cloud-token');
@@ -865,20 +845,21 @@ describe('ensureAttachmentAvailable', () => {
 
     const result = await ensureAttachmentAvailableDetailed(attachment);
 
-    if (result.status !== 'unrecoverable') throw new Error(`Expected a terminal outcome, got ${result.status}`);
-    const patched = { ...attachment, ...getAttachmentUnrecoverablePatch(result.attachment) };
-    expect(core.getAttachmentRowState(patched)).toMatchObject({ canDownload: false });
-    await expect(ensureAttachmentAvailableDetailed(patched)).resolves.toEqual({ status: 'unavailable' });
-    expect(core.cloudGetFile).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: 'unavailable' });
+    expect(attachment.deletedAt).toBeUndefined();
+    expect(attachment.cloudKey).toBeTruthy();
+    expect(core.getAttachmentRowState(attachment)).toMatchObject({ canDownload: true });
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({ status: 'unavailable' });
+    expect(core.cloudGetFile).toHaveBeenCalledTimes(2);
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith('file://document/attachments/cloud-gone.txt', expect.anything());
     const appLog = await import('./app-log');
     expect(appLog.logWarn).toHaveBeenCalledWith(
-      'Cloud attachment cloud-gone is no longer available',
-      expect.objectContaining({ extra: expect.objectContaining({ releaseCheck: 'v1.3.4/cloud-download-not-found' }) }),
+      'Cloud attachment cloud-gone not found; row kept',
+      expect.objectContaining({ extra: expect.objectContaining({ releaseCheck: 'v1.3.8/attachment-not-found-kept' }) }),
     );
   });
 
-  it('treats a Dropbox not-found as terminal, as WebDAV', async () => {
+  it('keeps a Dropbox not-found unavailable and its row live', async () => {
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloud');
     asyncStorageMock.store.set('@mindwtr_cloud_provider', 'dropbox');
     const dropbox = await import('./dropbox-sync');
@@ -887,14 +868,15 @@ describe('ensureAttachmentAvailable', () => {
 
     const result = await ensureAttachmentAvailableDetailed(attachment);
 
-    if (result.status !== 'unrecoverable') throw new Error(`Expected a terminal outcome, got ${result.status}`);
-    const patched = { ...attachment, ...getAttachmentUnrecoverablePatch(result.attachment) };
-    await expect(ensureAttachmentAvailableDetailed(patched)).resolves.toEqual({ status: 'unavailable' });
-    expect(dropbox.downloadDropboxFile).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: 'unavailable' });
+    expect(attachment.deletedAt).toBeUndefined();
+    expect(attachment.cloudKey).toBeTruthy();
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({ status: 'unavailable' });
+    expect(dropbox.downloadDropboxFile).toHaveBeenCalledTimes(2);
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith('file://document/attachments/dropbox-gone.txt', expect.anything());
   });
 
-  it('treats a WebDAV 404 as terminal: the row loses its Download button and a retry asks the server nothing', async () => {
+  it('keeps a WebDAV 404 unavailable and its Download action retryable', async () => {
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'webdav');
     asyncStorageMock.store.set('@mindwtr_webdav_url', 'https://dav.example/data.json');
     asyncStorageMock.store.set('@mindwtr_webdav_username', 'u');
@@ -906,17 +888,17 @@ describe('ensureAttachmentAvailable', () => {
 
     const result = await ensureAttachmentAvailableDetailed(attachment);
 
-    if (result.status !== 'unrecoverable') throw new Error(`Expected a terminal outcome, got ${result.status}`);
-    const patched = { ...attachment, ...getAttachmentUnrecoverablePatch(result.attachment) };
-    expect(core.getAttachmentRowState(patched)).toMatchObject({ canDownload: false });
-    expect(patched.deletedAt).toEqual(expect.any(String));
-    await expect(ensureAttachmentAvailableDetailed(patched)).resolves.toEqual({ status: 'unavailable' });
-    expect(core.webdavGetFile).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: 'unavailable' });
+    expect(attachment.deletedAt).toBeUndefined();
+    expect(attachment.cloudKey).toBeTruthy();
+    expect(core.getAttachmentRowState(attachment)).toMatchObject({ canDownload: true });
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({ status: 'unavailable' });
+    expect(core.webdavGetFile).toHaveBeenCalledTimes(2);
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith('file://document/attachments/dav-gone.txt', expect.anything());
     const appLog = await import('./app-log');
     expect(appLog.logWarn).toHaveBeenCalledWith(
-      'WebDAV attachment dav-gone is no longer available',
-      expect.objectContaining({ extra: expect.objectContaining({ releaseCheck: 'v1.3.4/webdav-download-not-found' }) }),
+      'WebDAV attachment dav-gone not found; row kept',
+      expect.objectContaining({ extra: expect.objectContaining({ releaseCheck: 'v1.3.8/attachment-not-found-kept' }) }),
     );
   });
 

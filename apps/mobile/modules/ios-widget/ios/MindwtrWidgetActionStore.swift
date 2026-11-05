@@ -362,6 +362,23 @@ final class MindwtrWidgetActionStore: @unchecked Sendable {
         }
     }
 
+    func claimReadyForNative(now: Date = Date(),
+                             admitting: ([MindwtrWidgetPendingAction]) throws -> Void) throws -> [MindwtrWidgetPendingAction] {
+        let nowMilliseconds = try milliseconds(for: now)
+        return try withLockedState(readAdmission: Self.validateNativeShape) { state in
+            try Self.validateNativeIdentifiers(state.pending)
+            try admitting(state.pending)
+            var changed = false
+            for index in state.pending.indices where
+                !state.pending[index].claimed && state.pending[index].notBefore <= nowMilliseconds
+            {
+                state.pending[index].claimed = true
+                changed = true
+            }
+            return (state.pending.filter(\.claimed), changed)
+        }
+    }
+
     func acknowledge(id: String) throws {
         try validateInput(id, field: "action id")
         _ = try withLockedState { state in
@@ -381,6 +398,37 @@ final class MindwtrWidgetActionStore: @unchecked Sendable {
                 token: action.token,
                 consumedAt: Date().timeIntervalSince1970 * 1_000.0
             ))
+            if state.receipts.count > Self.maximumConsumedReceipts {
+                state.receipts.removeFirst(state.receipts.count - Self.maximumConsumedReceipts)
+            }
+            return ((), true)
+        }
+    }
+
+    func acknowledgeForNative(_ expected: MindwtrWidgetPendingAction, admitting: () throws -> Void) throws {
+        guard let identifier = UUID(uuidString: expected.id),
+              identifier.uuidString.lowercased() == expected.id.lowercased(), expected.claimed else {
+            throw MindwtrWidgetActionStoreError.corruptState("invalid native acknowledgment")
+        }
+        _ = try withLockedState(readAdmission: Self.validateNativeShape) { state in
+            try Self.validateNativeIdentifiers(state.pending)
+            guard let index = state.pending.firstIndex(where: {
+                UUID(uuidString: $0.id)?.uuidString.lowercased() == identifier.uuidString.lowercased()
+            }) else { return ((), false) }
+            let action = state.pending[index]
+            guard action.claimed, Data(action.id.utf8) == Data(expected.id.utf8),
+                  Data(action.taskId.utf8) == Data(expected.taskId.utf8),
+                  Data(action.token.utf8) == Data(expected.token.utf8),
+                  action.createdAt == expected.createdAt, action.notBefore == expected.notBefore else {
+                throw MindwtrWidgetActionStoreError.corruptState("native action changed before acknowledgment")
+            }
+            try admitting()
+            state.pending.remove(at: index)
+            state.receipts.removeAll { receipt in
+                Data(receipt.taskId.utf8) == Data(action.taskId.utf8) && Data(receipt.token.utf8) == Data(action.token.utf8)
+            }
+            state.receipts.append(MindwtrWidgetConsumedReceipt(taskId: action.taskId, token: action.token,
+                consumedAt: Date().timeIntervalSince1970 * 1_000.0))
             if state.receipts.count > Self.maximumConsumedReceipts {
                 state.receipts.removeFirst(state.receipts.count - Self.maximumConsumedReceipts)
             }
@@ -416,6 +464,7 @@ final class MindwtrWidgetActionStore: @unchecked Sendable {
     }
 
     private func withLockedState<Result>(
+        readAdmission: ((Data) throws -> Void)? = nil,
         _ body: (inout MindwtrWidgetActionState) throws -> (Result, Bool)
     ) throws -> Result {
         Self.processLock.lock()
@@ -423,7 +472,7 @@ final class MindwtrWidgetActionStore: @unchecked Sendable {
 
         try ensureDirectoryExists()
         return try withExclusiveFileLock {
-            var state = try readState()
+            var state = try readState(readAdmission: readAdmission)
             let (result, changed) = try body(&state)
             if changed {
                 try validate(state)
@@ -470,7 +519,7 @@ final class MindwtrWidgetActionStore: @unchecked Sendable {
         return try body()
     }
 
-    private func readState() throws -> MindwtrWidgetActionState {
+    private func readState(readAdmission: ((Data) throws -> Void)? = nil) throws -> MindwtrWidgetActionState {
         let stateURL = directory.appendingPathComponent(Self.stateFileName, isDirectory: false)
         guard FileManager.default.fileExists(atPath: stateURL.path) else {
             return .empty
@@ -483,6 +532,7 @@ final class MindwtrWidgetActionStore: @unchecked Sendable {
             throw MindwtrWidgetActionStoreError.fileOperation("read its state", currentErrno())
         }
 
+        try readAdmission?(data)
         let state: MindwtrWidgetActionState
         do {
             state = try JSONDecoder().decode(MindwtrWidgetActionState.self, from: data)
@@ -491,6 +541,61 @@ final class MindwtrWidgetActionStore: @unchecked Sendable {
         }
         try validate(state)
         return state
+    }
+
+    private static func validateNativeIdentifiers(_ pending: [MindwtrWidgetPendingAction]) throws {
+        var identifiers = Set<String>()
+        for action in pending {
+            guard let id = UUID(uuidString: action.id),
+                  id.uuidString.lowercased() == action.id.lowercased(),
+                  identifiers.insert(id.uuidString.lowercased()).inserted else {
+                throw MindwtrWidgetActionStoreError.corruptState("invalid or duplicate native action id")
+            }
+        }
+    }
+
+    private static func validateNativeShape(_ data: Data) throws {
+        guard let text = String(data: data, encoding: .utf8), !text.utf8.contains(0),
+              nativeMemberNamesAreSupportedAndUnique(text),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(root.keys) == ["version", "pending", "receipts"],
+              let pending = root["pending"] as? [[String: Any]],
+              let receipts = root["receipts"] as? [[String: Any]],
+              pending.allSatisfy({ Set($0.keys) == ["id", "taskId", "token", "createdAt", "notBefore", "claimed"] }),
+              receipts.allSatisfy({ Set($0.keys) == ["taskId", "token", "consumedAt"] }) else {
+            throw MindwtrWidgetActionStoreError.corruptState("unsupported native queue shape")
+        }
+    }
+
+    private static func nativeMemberNamesAreSupportedAndUnique(_ text: String) -> Bool {
+        let bytes = Array(text.utf8)
+        let decoder = JSONDecoder()
+        let names = Set(["version", "pending", "receipts", "id", "taskId", "token", "createdAt", "notBefore", "claimed", "consumedAt"].map { Data($0.utf8) })
+        var index = 0, objects: [Set<Data>] = []
+        while index < bytes.count {
+            if bytes[index] == 0x7b { objects.append([]); index += 1; continue }
+            if bytes[index] == 0x7d {
+                guard !objects.isEmpty else { return false }
+                objects.removeLast(); index += 1; continue
+            }
+            guard bytes[index] == 0x22 else { index += 1; continue }
+            let start = index; index += 1
+            while index < bytes.count {
+                if bytes[index] == 0x5c { index += 2; continue }
+                if bytes[index] == 0x22 { index += 1; break }
+                index += 1
+            }
+            let end = index
+            var next = end
+            while next < bytes.count, [0x20, 0x09, 0x0a, 0x0d].contains(bytes[next]) { next += 1 }
+            if next < bytes.count, bytes[next] == 0x3a {
+                guard !objects.isEmpty,
+                      let key = try? decoder.decode(String.self, from: Data(bytes[start..<end])),
+                      names.contains(Data(key.utf8)),
+                      objects[objects.count - 1].insert(Data(key.utf8)).inserted else { return false }
+            }
+        }
+        return objects.isEmpty
     }
 
     private func validate(_ state: MindwtrWidgetActionState) throws {

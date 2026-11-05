@@ -1,0 +1,10 @@
+/Vendor/
+/.vendor-stage-*/
+/.prepare.lock
+/.tests-tmp/
+/.build/
+/.swiftpm/
+/.gate-logs/
+/scripts/__pycache__/
+/Tests/MindwtrWhisperEngineTests/Fixtures/*
+!/Tests/MindwtrWhisperEngineTests/Fixtures/README.md

@@ -1,3 +1,17 @@
+import Foundation
+
+/// Frozen, receiver-owned WAV bytes bound to one published queue generation.
+public struct MindwtrWatchPendingAudio: Sendable {
+    public let command: MindwtrWatchPendingCommand
+    public let bytes: Data
+    fileprivate let wave: MindwtrWatchFileProof
+    fileprivate let receipt: MindwtrWatchFileProof
+    fileprivate init(command: MindwtrWatchPendingCommand, audio: MindwtrWatchRetainedAudio, receipt: MindwtrWatchFileProof) {
+        self.command = command; bytes = audio.bytes; wave = audio.proof; self.receipt = receipt
+    }
+}
+
+#if os(iOS)
 import AudioToolbox
 import Darwin
 import Foundation
@@ -50,9 +64,9 @@ private struct MindwtrWatchReceipt {
     let originalAudioPath: String?
 }
 
-final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
-    static let shared = MindwtrWatchConnectivityReceiver()
-    static let pendingCaptureNotification = Notification.Name(
+public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
+    public static let shared = MindwtrWatchConnectivityReceiver()
+    public static let pendingCaptureNotification = Notification.Name(
         "tech.dongdongbh.mindwtr.watchConnectivity.pendingCapture"
     )
 
@@ -74,7 +88,7 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
     private var activationRequested = false
     private var activationWaiters: [CheckedContinuation<Void, Error>] = []
 
-    var isAvailable: Bool {
+    public var isAvailable: Bool {
         Self.isFeatureEnabled && WCSession.isSupported()
     }
 
@@ -82,7 +96,7 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         Bundle.main.object(forInfoDictionaryKey: featureFlag) as? Bool == true
     }
 
-    func activateAtLaunch() {
+    public func activateAtLaunch() {
         guard isAvailable else { return }
         workQueue.async { [weak self] in
             self?.recoverReceiptsLocked()
@@ -90,7 +104,7 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         }
     }
 
-    func activate() async throws {
+    public func activate() async throws {
         guard isAvailable else { throw MindwtrWatchConnectivityError.featureUnavailable }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             workQueue.async { [weak self] in
@@ -99,6 +113,7 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
                     return
                 }
                 if WCSession.default.activationState == .activated {
+                    self.recoverAudioCleanupLocked()
                     continuation.resume()
                     return
                 }
@@ -109,7 +124,7 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         }
     }
 
-    func updateApplicationContext(_ context: [String: Any]) async throws {
+    public func updateApplicationContext(_ context: [String: Any], isCurrent: @escaping @Sendable () -> Bool = { true }) async throws {
         let normalized: [String: Any]
         do {
             normalized = try MindwtrWatchPayloadValidator.normalizeApplicationContext(context)
@@ -118,30 +133,246 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         }
         try await activate()
         try workQueue.sync {
-            guard WCSession.default.activationState == .activated else {
+            guard isCurrent(), WCSession.default.activationState == .activated else {
                 throw MindwtrWatchConnectivityError.sessionInactive
             }
             try WCSession.default.updateApplicationContext(normalized)
         }
     }
 
-    func settleChecklist(id rawID: String, outcome: String) async throws {
+    public func settleChecklist(id rawID: String, outcome: String) async throws {
+        try workQueue.sync { try settleChecklistLocked(id: rawID, outcome: outcome) }
+    }
+
+    private func settleChecklistLocked(id rawID: String, outcome: String) throws {
         guard let uuid = UUID(uuidString: rawID),
               ["applied", "stale", "missing", "terminal", "changed"].contains(outcome) else {
             throw MindwtrWatchConnectivityError.invalidPayload
         }
-        try workQueue.sync {
-            let id = uuid.uuidString.lowercased()
-            guard let receipt = try loadReceiptLocked(id: id), receipt.kind == .checklist,
-                  receipt.state == .published else { throw MindwtrWatchConnectivityError.invalidReceipt }
-            let url = try ensuredDirectory(named: "watch-checklist-results").appendingPathComponent("\(id).json")
-            if !FileManager.default.fileExists(atPath: url.path) {
-                let result: [String: Any] = ["outcome": outcome, "settledAt": Date().timeIntervalSince1970]
-                try atomicWrite(try jsonData(result), to: url, replacing: false)
+        let id = uuid.uuidString.lowercased()
+        guard let receipt = try loadReceiptLocked(id: id), receipt.kind == .checklist,
+              receipt.state == .published else { throw MindwtrWatchConnectivityError.invalidReceipt }
+        let url = try ensuredDirectory(named: "watch-checklist-results").appendingPathComponent("\(id).json")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            let result: [String: Any] = ["outcome": outcome, "settledAt": Date().timeIntervalSince1970]
+            try atomicWrite(try jsonData(result), to: url, replacing: false)
+        }
+        sendDeliveryReceiptLocked(id: id)
+        NotificationCenter.default.post(name: Self.pendingCaptureNotification, object: nil)
+    }
+
+    public func pendingCommands() async throws -> [MindwtrWatchPendingCommand] {
+        try await withCheckedThrowingContinuation { continuation in
+            workQueue.async {
+                continuation.resume(with: Result {
+                    let directory = try self.pendingDirectory()
+                    var result: [MindwtrWatchPendingCommand] = []
+                    for name in try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() {
+                        guard name.hasSuffix(".json"), let id = UUID(uuidString: String(name.dropLast(5))),
+                              name == id.uuidString.lowercased() + ".json",
+                              let receipt = try self.loadReceiptLocked(id: id.uuidString.lowercased()), receipt.state == .published,
+                              [.text, .audio, .complete, .deferTask, .checklist, .pomodoro].contains(receipt.kind) else { continue }
+                        let command = try MindwtrWatchPendingCommand.read(directory: directory, name: name)
+                        guard let payload = try JSONSerialization.jsonObject(with: Data(command.body.utf8)) as? [String: Any] else {
+                            throw MindwtrWatchConnectivityError.invalidPayload
+                        }
+                        try self.validatePreparedQueuePayload(payload, receipt: receipt, requireAudioFile: false)
+                        result.append(command)
+                    }
+                    return result
+                })
             }
-            sendDeliveryReceiptLocked(id: id)
-            // Wake the snapshot publisher after the durable task save, even for a no-op/rejection.
-            NotificationCenter.default.post(name: Self.pendingCaptureNotification, object: nil)
+        }
+    }
+
+    public func pendingAudio(for command: MindwtrWatchPendingCommand) async throws -> MindwtrWatchPendingAudio {
+        try await withCheckedThrowingContinuation { continuation in
+            workQueue.async {
+                continuation.resume(with: Result {
+                    let (url, receipt) = try self.pendingAudioSourceLocked(command)
+                    guard let audio = try MindwtrWatchRetainedAudio.read(at: url) else {
+                        throw MindwtrWatchConnectivityError.invalidAudioFile
+                    }
+                    try command.validate()
+                    try self.validateAudioReceiptLocked(receipt, id: String(command.name.dropLast(5)))
+                    try self.retainAudioAdmissionLocked(MindwtrWatchAudioAdmission(id: String(command.name.dropLast(5)),
+                        source: command.proof, receipt: receipt, wave: audio.proof))
+                    return MindwtrWatchPendingAudio(command: command, audio: audio, receipt: receipt)
+                })
+            }
+        }
+    }
+
+    /// May be called by the native Engine queue; never invokes Engine or UI work.
+    public func validatePendingAudio(_ audio: MindwtrWatchPendingAudio) throws {
+        try workQueue.sync { try validatePendingAudioLocked(audio) }
+    }
+
+    public func retirePendingAudio(_ audio: MindwtrWatchPendingAudio) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            workQueue.async {
+                continuation.resume(with: Result {
+                    let id = String(audio.command.name.dropLast(5))
+                    guard let admission = try self.loadAudioAdmissionLocked(id: id), admission.record.wave == audio.wave else {
+                        throw MindwtrWatchConnectivityError.invalidReceipt
+                    }
+                    let marker = try admission.record.confirmedCleanup(source: audio.command.proof, receipt: audio.receipt,
+                        audioDirectory: try self.documentsDirectory().appendingPathComponent(Self.audioDirectoryName))
+                    try self.acknowledgeAudioCleanupLocked(marker, command: audio.command)
+                })
+            }
+        }
+    }
+
+    /// For a host-proven committed receipt: absence of WAV must not prevent source retirement.
+    public func retirePendingAudio(for command: MindwtrWatchPendingCommand) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            workQueue.async {
+                continuation.resume(with: Result {
+                    let (url, receipt) = try self.pendingAudioSourceLocked(command)
+                    let id = String(command.name.dropLast(5))
+                    let marker: MindwtrWatchAudioCleanup
+                    if let admission = try self.loadAudioAdmissionLocked(id: id) {
+                        marker = try admission.record.confirmedCleanup(source: command.proof, receipt: receipt,
+                                                                        audioDirectory: url.deletingLastPathComponent())
+                    } else {
+                        let wave = try MindwtrWatchRetainedAudio.proofForRetirement(at: url)
+                        marker = MindwtrWatchAudioCleanup(id: id, source: command.proof, receipt: receipt, wave: wave)
+                    }
+                    try self.acknowledgeAudioCleanupLocked(marker, command: command)
+                })
+            }
+        }
+    }
+
+    private func pendingAudioSourceLocked(_ command: MindwtrWatchPendingCommand) throws -> (URL, MindwtrWatchFileProof) {
+        try command.validate()
+        let id = String(command.name.dropLast(5))
+        guard let receipt = try loadReceiptLocked(id: id), receipt.kind == .audio, receipt.state == .published,
+              let payload = try JSONSerialization.jsonObject(with: Data(command.body.utf8)) as? [String: Any] else {
+            throw MindwtrWatchConnectivityError.invalidReceipt
+        }
+        try validatePreparedQueuePayload(payload, receipt: receipt, requireAudioFile: false)
+        guard let path = payload["audioPath"] as? String,
+              let url = MindwtrWatchAudioPathResolver.rebase(absoluteString: path, id: id, kind: .wave,
+                                                          currentDocumentsURL: try documentsDirectory()),
+              let file = try MindwtrWatchFileProof.read(directory: try receiptDirectory(), name: id + ".json",
+                                                       maximumBytes: Self.maxReceiptBytes) else {
+            throw MindwtrWatchConnectivityError.invalidReceipt
+        }
+        try validateAudioReceiptLocked(file.proof, id: id)
+        return (url, file.proof)
+    }
+
+    private func validateAudioReceiptLocked(_ proof: MindwtrWatchFileProof, id: String) throws {
+        try proof.validate(directory: try receiptDirectory(), name: id + ".json", maximumBytes: Self.maxReceiptBytes)
+        guard let receipt = try loadReceiptLocked(id: id), receipt.kind == .audio, receipt.state == .published else {
+            throw MindwtrWatchConnectivityError.invalidReceipt
+        }
+    }
+
+    private func validatePendingAudioLocked(_ audio: MindwtrWatchPendingAudio) throws {
+        let (url, receipt) = try pendingAudioSourceLocked(audio.command)
+        guard receipt == audio.receipt,
+              let admission = try loadAudioAdmissionLocked(id: String(audio.command.name.dropLast(5))),
+              admission.record.source == audio.command.proof, admission.record.receipt == receipt,
+              admission.record.wave == audio.wave else { throw MindwtrWatchConnectivityError.invalidReceipt }
+        try audio.wave.validate(directory: url.deletingLastPathComponent(), name: url.lastPathComponent,
+                                maximumBytes: MindwtrWatchRetainedAudio.maximumBytes)
+    }
+
+    private func loadAudioAdmissionLocked(id: String) throws -> (record: MindwtrWatchAudioAdmission, proof: MindwtrWatchFileProof)? {
+        let directory = try ensuredDirectory(named: "watch-audio-admissions")
+        guard let file = try MindwtrWatchFileProof.read(directory: directory, name: id + ".json", maximumBytes: Self.maxReceiptBytes) else { return nil }
+        let record = try JSONDecoder().decode(MindwtrWatchAudioAdmission.self, from: file.bytes)
+        try record.validateName(id + ".json")
+        return (record, file.proof)
+    }
+
+    private func retainAudioAdmissionLocked(_ admission: MindwtrWatchAudioAdmission) throws {
+        let directory = try ensuredDirectory(named: "watch-audio-admissions")
+        if let existing = try loadAudioAdmissionLocked(id: admission.id) {
+            guard existing.record == admission else { throw MindwtrWatchConnectivityError.invalidReceipt }
+            try syncDirectory(directory)
+        } else {
+            try atomicWrite(try JSONEncoder().encode(admission), to: directory.appendingPathComponent(admission.id + ".json"), replacing: false)
+        }
+    }
+
+    private func acknowledgeAudioCleanupLocked(_ marker: MindwtrWatchAudioCleanup, command: MindwtrWatchPendingCommand) throws {
+        let directory = try ensuredDirectory(named: "watch-audio-cleanup")
+        let name = marker.id + ".json"
+        let url = directory.appendingPathComponent(name)
+        if let existing = try MindwtrWatchFileProof.read(directory: directory, name: name, maximumBytes: Self.maxReceiptBytes) {
+            guard try JSONDecoder().decode(MindwtrWatchAudioCleanup.self, from: existing.bytes) == marker else {
+                throw MindwtrWatchConnectivityError.invalidReceipt
+            }
+        } else {
+            try command.validate()
+            try validateAudioReceiptLocked(marker.receipt, id: marker.id)
+            if let wave = marker.wave {
+                try wave.validateForRetirement(directory: try documentsDirectory().appendingPathComponent(Self.audioDirectoryName),
+                                               name: marker.id + ".wav", maximumBytes: MindwtrWatchRetainedAudio.maximumBytes)
+            }
+            try atomicWrite(try JSONEncoder().encode(marker), to: url, replacing: false)
+        }
+        try finishAudioCleanupLocked(marker, markerDirectory: directory)
+    }
+
+    private func finishAudioCleanupLocked(_ marker: MindwtrWatchAudioCleanup, markerDirectory: URL) throws {
+        let name = marker.id + ".json"
+        try marker.validateName(name)
+        guard let stored = try MindwtrWatchFileProof.read(directory: markerDirectory, name: name, maximumBytes: Self.maxReceiptBytes),
+              try JSONDecoder().decode(MindwtrWatchAudioCleanup.self, from: stored.bytes) == marker else {
+            throw MindwtrWatchConnectivityError.invalidReceipt
+        }
+        try validateAudioReceiptLocked(marker.receipt, id: marker.id)
+        let admission = try loadAudioAdmissionLocked(id: marker.id)
+        if let admission {
+            guard admission.record.source == marker.source, admission.record.receipt == marker.receipt,
+                  admission.record.wave == marker.wave else { throw MindwtrWatchConnectivityError.invalidReceipt }
+        }
+        try marker.retire(pendingDirectory: try pendingDirectory(),
+                          audioDirectory: try documentsDirectory().appendingPathComponent(Self.audioDirectoryName))
+        if let admission {
+            try admission.proof.retire(directory: try ensuredDirectory(named: "watch-audio-admissions"),
+                                       name: name, maximumBytes: Self.maxReceiptBytes)
+        }
+        try stored.proof.retire(directory: markerDirectory, name: name, maximumBytes: Self.maxReceiptBytes)
+    }
+
+    private func recoverAudioCleanupLocked() {
+        guard let directory = try? ensuredDirectory(named: "watch-audio-cleanup"),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return }
+        for name in names where name.hasSuffix(".json") {
+            do {
+                guard let file = try MindwtrWatchFileProof.read(directory: directory, name: name, maximumBytes: Self.maxReceiptBytes) else { continue }
+                let marker = try JSONDecoder().decode(MindwtrWatchAudioCleanup.self, from: file.bytes)
+                try marker.validateName(name)
+                try finishAudioCleanupLocked(marker, markerDirectory: directory)
+            } catch { continue }
+        }
+    }
+
+    public func retirePendingCommand(_ command: MindwtrWatchPendingCommand, checklistOutcome: String? = nil) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            workQueue.async {
+                continuation.resume(with: Result {
+                    let id = String(command.name.dropLast(5))
+                    guard let receipt = try self.loadReceiptLocked(id: id), receipt.state == .published,
+                          [.text, .complete, .deferTask, .checklist, .pomodoro].contains(receipt.kind),
+                          let payload = try JSONSerialization.jsonObject(with: Data(command.body.utf8)) as? [String: Any] else {
+                        throw MindwtrWatchConnectivityError.invalidReceipt
+                    }
+                    try self.validatePreparedQueuePayload(payload, receipt: receipt, requireAudioFile: false)
+                    guard (receipt.kind == .checklist) == (checklistOutcome != nil) else {
+                        throw MindwtrWatchConnectivityError.invalidPayload
+                    }
+                    try command.retire {
+                        if let checklistOutcome { try self.settleChecklistLocked(id: id, outcome: checklistOutcome) }
+                    }
+                })
+            }
         }
     }
 
@@ -172,7 +403,7 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
 
     // MARK: - WCSessionDelegate
 
-    func session(
+    public func session(
         _ session: WCSession,
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
@@ -190,11 +421,11 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         }
     }
 
-    func sessionDidBecomeInactive(_ session: WCSession) {
+    public func sessionDidBecomeInactive(_ session: WCSession) {
         // iOS can briefly make the session inactive while the paired Watch changes.
     }
 
-    func sessionDidDeactivate(_ session: WCSession) {
+    public func sessionDidDeactivate(_ session: WCSession) {
         workQueue.async { [weak self] in
             guard let self, self.isAvailable else { return }
             self.activationRequested = false
@@ -202,7 +433,7 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         }
     }
 
-    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+    public func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
         workQueue.sync {
             if let id = try? receivePayloadLocked(userInfo) {
                 sendDeliveryReceiptLocked(id: id)
@@ -210,13 +441,13 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         }
     }
 
-    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+    public func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         workQueue.sync {
             _ = try? receivePayloadLocked(message)
         }
     }
 
-    func session(
+    public func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
@@ -235,7 +466,7 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         replyHandler(reply)
     }
 
-    func session(_ session: WCSession, didReceive file: WCSessionFile) {
+    public func session(_ session: WCSession, didReceive file: WCSessionFile) {
         var retainedID: String?
         workQueue.sync {
             retainedID = try? retainTransferredAudioLocked(file)
@@ -375,6 +606,7 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
     }
 
     private func recoverReceiptsLocked() {
+        recoverAudioCleanupLocked()
         guard let directory = try? receiptDirectory() else { return }
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: directory,
@@ -787,28 +1019,6 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         guard let inputFile else { throw MindwtrWatchConnectivityError.invalidAudioFile }
         defer { ExtAudioFileDispose(inputFile) }
 
-        var sourceFormat = AudioStreamBasicDescription()
-        var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        try checkAudioStatus(ExtAudioFileGetProperty(
-            inputFile,
-            kExtAudioFileProperty_FileDataFormat,
-            &formatSize,
-            &sourceFormat
-        ))
-        guard sourceFormat.mSampleRate.isFinite,
-              (8_000.0...96_000.0).contains(sourceFormat.mSampleRate),
-              (1...8).contains(sourceFormat.mChannelsPerFrame) else {
-            throw MindwtrWatchConnectivityError.invalidAudioFile
-        }
-
-        var pcmFormat = MindwtrCanonicalWave.clientFormat()
-        try checkAudioStatus(ExtAudioFileSetProperty(
-            inputFile,
-            kExtAudioFileProperty_ClientDataFormat,
-            UInt32(MemoryLayout<AudioStreamBasicDescription>.size),
-            &pcmFormat
-        ))
-
         guard FileManager.default.createFile(atPath: temp.path, contents: nil) else {
             throw MindwtrWatchConnectivityError.fileOperationFailed
         }
@@ -824,40 +1034,10 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         }
         try outputHandle.write(contentsOf: MindwtrCanonicalWave.header(dataByteCount: 0))
 
-        var samples = [Int16](repeating: 0, count: Int(Self.audioBufferFrames))
-        var writtenBytes = 0
-        try samples.withUnsafeMutableBufferPointer { buffer in
-            guard let baseAddress = buffer.baseAddress else {
-                throw MindwtrWatchConnectivityError.fileOperationFailed
-            }
-            let byteCount = buffer.count * MemoryLayout<Int16>.size
-            while true {
-                var frames = Self.audioBufferFrames
-                var list = AudioBufferList(
-                    mNumberBuffers: 1,
-                    mBuffers: AudioBuffer(
-                        mNumberChannels: 1,
-                        mDataByteSize: UInt32(byteCount),
-                        mData: UnsafeMutableRawPointer(baseAddress)
-                    )
-                )
-                try checkAudioStatus(ExtAudioFileRead(inputFile, &frames, &list))
-                guard frames > 0 else { break }
-                let dataByteCount = Int(frames * pcmFormat.mBytesPerFrame)
-                writtenBytes += dataByteCount
-                guard writtenBytes <= Self.maxWaveBytes - MindwtrCanonicalWave.headerSize else {
-                    throw MindwtrWatchConnectivityError.invalidAudioFile
-                }
-                try outputHandle.write(contentsOf: Data(
-                    bytes: UnsafeRawPointer(baseAddress),
-                    count: dataByteCount
-                ))
-            }
+        let writtenBytes = try MindwtrCanonicalWave.streamPCM(inputFile, maximumDataBytes: Self.maxWaveBytes - MindwtrCanonicalWave.headerSize) { bytes in
+            try outputHandle.write(contentsOf: bytes)
         }
 
-        guard writtenBytes > 0 else {
-            throw MindwtrWatchConnectivityError.invalidAudioFile
-        }
         try outputHandle.seek(toOffset: 0)
         try outputHandle.write(contentsOf: MindwtrCanonicalWave.header(dataByteCount: writtenBytes))
         try outputHandle.synchronize()
@@ -1052,3 +1232,5 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         }
     }
 }
+
+#endif

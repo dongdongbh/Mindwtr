@@ -30,7 +30,7 @@ import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
 import { isSyncPathBookmarksAvailable, resolveSyncPathBookmark } from './sync-path-bookmarks';
-import { getBaseSyncUrl, getCloudBaseUrl, syncCloudAttachments, syncCloudKitAttachments, syncDropboxAttachments, syncFileAttachments, syncWebdavAttachments, cleanupAttachmentTempFiles, hasCompletedAttachmentPresenceReconciliation, hasPendingAttachmentSyncWork } from './attachment-sync';
+import { getBaseSyncUrl, getCloudBaseUrl, syncCloudAttachments, syncCloudKitAttachments, syncDropboxAttachments, syncFileAttachments, syncWebdavAttachments, cleanupAttachmentTempFiles, clearWebdavDownloadBackoffs, hasCompletedAttachmentPresenceReconciliation, hasPendingAttachmentSyncWork } from './attachment-sync';
 import { runMobileAttachmentCleanup } from './sync-attachment-cleanup';
 import { getExternalCalendars, saveExternalCalendars } from './external-calendar';
 import {
@@ -183,6 +183,7 @@ const mobileSyncService = (): MobileSyncService<MobileFileSyncLease> => {
       syncDropbox: (data, clientId, fetcher, options) => syncDropboxAttachments(data, clientId, fetcher, options),
       syncFile: (data, syncPath, signal, options) => syncFileAttachments(data, syncPath, signal, options),
       cleanupTempFiles: () => cleanupAttachmentTempFiles(),
+      clearDownloadBackoff: () => clearWebdavDownloadBackoffs(),
       hasCompletedPresenceReconciliation: () => hasCompletedAttachmentPresenceReconciliation(),
       hasPendingWork: (data, options) => hasPendingAttachmentSyncWork(data, options),
       runCleanup: (options) => runMobileAttachmentCleanup(options),

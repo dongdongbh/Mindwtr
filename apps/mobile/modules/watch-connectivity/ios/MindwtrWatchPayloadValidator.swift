@@ -22,7 +22,7 @@ enum MindwtrWatchPayloadValidationError: Error, Equatable {
     case unsupportedKind
 }
 
-enum MindwtrWatchPayloadValidator {
+public enum MindwtrWatchPayloadValidator {
     static let protocolVersion = 1
     static let source = "apple-watch"
     static let maxTitleCharacters = 2_000
@@ -156,7 +156,35 @@ enum MindwtrWatchPayloadValidator {
         )
     }
 
-    static func normalizeApplicationContext(_ raw: [String: Any]) throws -> [String: Any] {
+    public static func normalizePendingCommand(_ raw: [String: Any]) throws -> [String: Any] {
+        let validated = try validateTransport(raw)
+        guard [.text, .complete, .deferTask, .checklist].contains(validated.kind) else {
+            throw MindwtrWatchPayloadValidationError.unsupportedKind
+        }
+        return validated.queuePayload
+    }
+
+    public static func normalizePendingPomodoro(_ raw: [String: Any]) throws -> [String: Any] {
+        try validateTransport(raw, expectedKind: .pomodoro).queuePayload
+    }
+
+    public static func normalizePendingAudio(_ raw: [String: Any]) throws -> [String: Any] {
+        var transport = raw
+        guard let path = transport.removeValue(forKey: "audioPath") as? String else {
+            throw MindwtrWatchPayloadValidationError.invalidField("audioPath")
+        }
+        let validated = try validateTransport(transport, expectedKind: .audio)
+        // Validate the owned suffix here; only the receiver rebases and opens it.
+        guard MindwtrWatchAudioPathResolver.rebase(absoluteString: path, id: validated.id, kind: .wave,
+                                                  currentDocumentsURL: URL(fileURLWithPath: "/Documents", isDirectory: true)) != nil else {
+            throw MindwtrWatchPayloadValidationError.invalidField("audioPath")
+        }
+        var normalized = validated.queuePayload
+        normalized["audioPath"] = path
+        return normalized
+    }
+
+    public static func normalizeApplicationContext(_ raw: [String: Any]) throws -> [String: Any] {
         guard let stripped = stripNullValues(raw) as? [String: Any],
               Set(stripped.keys) == Set(["protocolVersion", "generatedAt", "focus", "pomodoro"]) else {
             throw MindwtrWatchPayloadValidationError.invalidPayload
@@ -237,7 +265,7 @@ enum MindwtrWatchPayloadValidator {
               ["focus", "break"].contains(phase) else {
             throw MindwtrWatchPayloadValidationError.invalidField("pomodoro.phase")
         }
-        guard let isRunning = rawPomodoro["isRunning"] as? Bool else {
+        guard let isRunning = strictBoolean(rawPomodoro["isRunning"]) else {
             throw MindwtrWatchPayloadValidationError.invalidField("pomodoro.isRunning")
         }
         guard let remainingSeconds = integer(rawPomodoro["remainingSeconds"]),
@@ -274,7 +302,7 @@ enum MindwtrWatchPayloadValidator {
             pomodoro["taskTitle"] = taskTitle
         }
         if rawPomodoro.keys.contains("completionAlert") {
-            guard let completionAlert = rawPomodoro["completionAlert"] as? Bool else {
+            guard let completionAlert = strictBoolean(rawPomodoro["completionAlert"]) else {
                 throw MindwtrWatchPayloadValidationError.invalidField("pomodoro.completionAlert")
             }
             pomodoro["completionAlert"] = completionAlert

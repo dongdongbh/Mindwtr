@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Darwin
 import XCTest
 import AttachmentFileInstallerEngine
 
@@ -7,6 +8,155 @@ import AttachmentFileInstallerEngine
 final class AttachmentFileInstallerImmutableFacadeTests: XCTestCase {
   private let bytes = Data([0, 255, 10, 17, 128, 42])
   private let operationId = String(repeating: "1", count: 32)
+
+  func testRetainedDirectoryPreparePublishAndPrivateRetirementUseHeldGeneration() throws {
+    try withFixture { fixture in
+      let root = fixture.attachments.resolvingSymlinksInPath(), target = root.appendingPathComponent("retained.bin")
+      let descriptor = Darwin.open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+      guard descriptor >= 0 else { return XCTFail("Retained fixture root is unavailable") }
+      defer { Darwin.close(descriptor) }
+      let check = try retainedAuthority(root, descriptor: descriptor)
+      let facade = try fixture.facade()
+      let prepared = try facade.prepareImmutableStage(targetInput: target, operationId: operationId,
+        directoryDescriptor: descriptor, requireAuthority: check)
+      try bytes.write(to: prepared.stagedUrl)
+      guard case .published = try facade.publishImmutable(stagedInput: prepared.stagedUrl, targetInput: target,
+        expectedStagedSha256: digest(bytes), expectedStagedIdentity: prepared.stagedIdentity,
+        expectedDirectoryIdentity: prepared.directoryIdentity, expectedPrivateDirectoryIdentity: prepared.privateDirectoryIdentity,
+        directoryDescriptor: descriptor, requireAuthority: check) else { return XCTFail("Retained publication did not complete") }
+      XCTAssertEqual(try Data(contentsOf: target), bytes)
+      let second = String(repeating: "2", count: 32)
+      let partial = try facade.prepareImmutableStage(targetInput: target, operationId: second,
+        directoryDescriptor: descriptor, requireAuthority: check)
+      try Data([17]).write(to: partial.stagedUrl)
+      guard case .removed = try facade.retireOwnedPrivateStage(stagedInput: partial.stagedUrl, targetInput: target, operationId: second,
+        expectedStagedIdentity: partial.stagedIdentity, expectedDirectoryIdentity: partial.directoryIdentity,
+        expectedPrivateDirectoryIdentity: partial.privateDirectoryIdentity, directoryDescriptor: descriptor, requireAuthority: check)
+      else { return XCTFail("Retained partial stage was not retired") }
+      XCTAssertFalse(FileManager.default.fileExists(atPath: partial.stagedUrl.deletingLastPathComponent().path))
+      XCTAssertEqual(try Data(contentsOf: target), bytes)
+    }
+  }
+
+  func testRetainedDirectoryLockWaitRefusesAncestorDirectoryAndSymlinkReplacement() throws {
+    for symlink in [false, true] {
+      try withFixture { fixture in
+        let documents = fixture.root.appendingPathComponent("Documents", isDirectory: true)
+        let managed = documents.appendingPathComponent("attachments", isDirectory: true)
+        try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
+        let root = managed.resolvingSymlinksInPath(), descriptor = Darwin.open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+        guard descriptor >= 0 else { return XCTFail("Retained fixture root is unavailable") }
+        defer { Darwin.close(descriptor) }
+        let lock = Darwin.openat(descriptor, ".mindwtr-attachment-installer.lock", O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard lock >= 0, flock(lock, LOCK_EX) == 0 else { return XCTFail("Fixture lock is unavailable") }
+        defer { _ = flock(lock, LOCK_UN); Darwin.close(lock) }
+        let facade = try AttachmentFileInstaller(targetRoot: root, sourceRoots: [fixture.cache])
+        let authority = try retainedAuthority(root, descriptor: descriptor), attempt = RetainedFacadeAttempt()
+        let entered = DispatchSemaphore(value: 0), completed = DispatchSemaphore(value: 0)
+        let operation = operationId
+        let check: () throws -> Void = {
+          try authority()
+          if attempt.recordAuthority() { entered.signal() }
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+          do {
+            _ = try facade.prepareImmutableStage(targetInput: root.appendingPathComponent("target.bin"),
+              operationId: operation, directoryDescriptor: descriptor, requireAuthority: check)
+            attempt.finish(refused: false)
+          } catch { attempt.finish(refused: true) }
+          completed.signal()
+        }
+        let waiting = entered.wait(timeout: .now() + 5)
+        XCTAssertEqual(waiting, .success)
+        guard waiting == .success else { _ = flock(lock, LOCK_UN); _ = completed.wait(timeout: .now() + 5); return }
+        XCTAssertEqual(completed.wait(timeout: .now() + 0.05), .timedOut)
+        let retained = fixture.root.appendingPathComponent("retained-documents", isDirectory: true)
+        try FileManager.default.moveItem(at: documents, to: retained)
+        let replacement = symlink ? fixture.root.appendingPathComponent("replacement-documents", isDirectory: true) : documents
+        try FileManager.default.copyItem(at: retained, to: replacement)
+        if symlink { try FileManager.default.createSymbolicLink(at: documents, withDestinationURL: replacement) }
+        let replacementRoot = replacement.appendingPathComponent("attachments", isDirectory: true)
+        let before = try FileManager.default.contentsOfDirectory(atPath: replacementRoot.path).sorted()
+        XCTAssertEqual(flock(lock, LOCK_UN), 0)
+        XCTAssertEqual(completed.wait(timeout: .now() + 5), .success)
+        XCTAssertTrue(attempt.refused)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: replacementRoot.path).sorted(), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retained.appendingPathComponent("attachments/.mindwtr-install-" + operationId + ".candidate").path))
+      }
+    }
+  }
+
+  private func retainedAuthority(_ root: URL, descriptor: Int32) throws -> () throws -> Void {
+    var expected = stat()
+    guard Darwin.fstat(descriptor, &expected) == 0 else { throw NSError(domain: "RetainedFixture", code: 1) }
+    let device = expected.st_dev, inode = expected.st_ino
+    return {
+      let current = Darwin.open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+      guard current >= 0 else { throw NSError(domain: "RetainedFixture", code: 2) }
+      defer { Darwin.close(current) }
+      var value = stat()
+      guard Darwin.fstat(current, &value) == 0, value.st_dev == device, value.st_ino == inode else {
+        throw NSError(domain: "RetainedFixture", code: 3)
+      }
+    }
+  }
+
+  func testTypedReservedWriterAppendsSameInodeAndPublishesVerifiedBytes() throws {
+    try withFixture { fixture in
+      let facade = try fixture.facade(), target = fixture.target("typed-writer.bin")
+      let prepared = try facade.prepareImmutableStage(targetInput: target, operationId: operationId)
+      let writer = try facade.openPreparedStageForWriting(prepared, targetInput: target)
+      try writer.append(bytes.prefix(2)); try writer.append(bytes.dropFirst(2)); try writer.synchronize(); writer.close()
+      XCTAssertThrowsError(try writer.append(Data([1])))
+      guard case .published = try facade.publishImmutable(stagedInput: prepared.stagedUrl, targetInput: target,
+        expectedStagedSha256: digest(bytes), expectedStagedIdentity: prepared.stagedIdentity,
+        expectedDirectoryIdentity: prepared.directoryIdentity, expectedPrivateDirectoryIdentity: prepared.privateDirectoryIdentity)
+      else { return XCTFail("Typed writer should retain the prepared publication inode") }
+      XCTAssertEqual(try Data(contentsOf: target), bytes)
+    }
+  }
+
+  func testTypedReservedWriterRefusesReplacedStageAndHardlink() throws {
+    try withFixture { fixture in
+      let facade = try fixture.facade(), target = fixture.target("typed-replaced.bin")
+      let prepared = try facade.prepareImmutableStage(targetInput: target, operationId: operationId)
+      let writer = try facade.openPreparedStageForWriting(prepared, targetInput: target); defer { writer.close() }
+      try bytes.write(to: prepared.stagedUrl, options: .atomic)
+      XCTAssertThrowsError(try writer.append(Data([1])))
+      XCTAssertEqual(try Data(contentsOf: prepared.stagedUrl), bytes)
+    }
+    try withFixture { fixture in
+      let facade = try fixture.facade(), target = fixture.target("typed-linked.bin")
+      let prepared = try facade.prepareImmutableStage(targetInput: target, operationId: operationId)
+      let writer = try facade.openPreparedStageForWriting(prepared, targetInput: target); defer { writer.close() }
+      try FileManager.default.linkItem(at: prepared.stagedUrl, to: fixture.target("linked.bin"))
+      XCTAssertThrowsError(try writer.append(Data([1])))
+      XCTAssertEqual(try Data(contentsOf: prepared.stagedUrl), Data())
+    }
+  }
+
+  func testTypedReservedWriterRefusesChangedParentAndBetweenChunkMutation() throws {
+    try withFixture { fixture in
+      let facade = try fixture.facade(), target = fixture.target("typed-parent.bin")
+      let prepared = try facade.prepareImmutableStage(targetInput: target, operationId: operationId)
+      let writer = try facade.openPreparedStageForWriting(prepared, targetInput: target); defer { writer.close() }
+      let parent = prepared.stagedUrl.deletingLastPathComponent(), moved = fixture.target("retained-parent")
+      try FileManager.default.moveItem(at: parent, to: moved)
+      try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
+      try Data().write(to: prepared.stagedUrl)
+      XCTAssertThrowsError(try writer.append(Data([1])))
+      XCTAssertEqual(try Data(contentsOf: moved.appendingPathComponent("stage")), Data())
+    }
+    try withFixture { fixture in
+      let facade = try fixture.facade(), target = fixture.target("typed-mutated.bin")
+      let prepared = try facade.prepareImmutableStage(targetInput: target, operationId: operationId)
+      let writer = try facade.openPreparedStageForWriting(prepared, targetInput: target); defer { writer.close() }
+      try writer.append(Data([1, 2]))
+      try Data([9, 9, 9]).write(to: prepared.stagedUrl)
+      XCTAssertThrowsError(try writer.synchronize())
+      XCTAssertEqual(try Data(contentsOf: prepared.stagedUrl), Data([9, 9, 9]))
+    }
+  }
 
   func testPrepareWriteSnapshotPublishExposesTypedPublicProofAndExactBytes() throws {
     try withFixture { fixture in
@@ -351,8 +501,8 @@ private struct ImmutableFacadeFixture {
   let cache: URL
 
   init() throws {
-    root = FileManager.default.temporaryDirectory
-      .appendingPathComponent("attachment-immutable-facade-xctest-\(UUID().uuidString)", isDirectory: true)
+    root = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".mindwtr-native-tests/attachment-immutable-facade-xctest-\(UUID().uuidString)", isDirectory: true)
     attachments = root.appendingPathComponent("attachments", isDirectory: true)
     cache = root.appendingPathComponent("cache", isDirectory: true)
     try FileManager.default.createDirectory(at: attachments, withIntermediateDirectories: true)
@@ -364,4 +514,13 @@ private struct ImmutableFacadeFixture {
   }
 
   func target(_ name: String) -> URL { attachments.appendingPathComponent(name) }
+}
+
+private final class RetainedFacadeAttempt: @unchecked Sendable {
+  private let lock = NSLock()
+  private var stored = false
+  private var calls = 0
+  func recordAuthority() -> Bool { lock.lock(); defer { lock.unlock() }; calls += 1; return calls == 2 }
+  func finish(refused: Bool) { lock.lock(); stored = refused; lock.unlock() }
+  var refused: Bool { lock.lock(); defer { lock.unlock() }; return stored }
 }

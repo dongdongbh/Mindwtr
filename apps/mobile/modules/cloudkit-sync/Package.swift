@@ -13,6 +13,7 @@ let package = Package(
             name: "CloudKitAttachmentErrorClassifier",
             targets: ["CloudKitAttachmentErrorClassifier"]
         ),
+        .library(name: "NativeCloudKitTransport", targets: ["CloudKitAttachmentErrorClassifier"]),
     ],
     targets: [
         .target(
@@ -20,15 +21,16 @@ let package = Package(
             path: "ios",
             exclude: [
                 "CloudKitChangeTracker.swift",
-                "CloudKitRecordMapper.swift",
                 "CloudKitSync.podspec",
                 "CloudKitSyncAppDelegateSubscriber.swift",
-                "CloudKitSyncManager.swift",
                 "CloudKitSyncModule.swift",
             ],
             sources: [
                 "CloudKitAttachmentErrorClassifier.swift",
                 "CloudKitOperationTimeouts.swift",
+                "CloudKitRecordMapper.swift",
+                "CloudKitSyncManager.swift",
+                "NativeCloudKitTransport.swift",
             ]
         ),
         .testTarget(

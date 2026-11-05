@@ -205,6 +205,9 @@ export const getWebdavDownloadBackoff: Files['getWebdavDownloadBackoff'] = (...a
 export const setWebdavDownloadBackoff: Files['setWebdavDownloadBackoff'] = (...args) => (
   mobileAttachmentFiles().setWebdavDownloadBackoff(...args)
 );
+export const clearWebdavDownloadBackoffs: Files['clearWebdavDownloadBackoffs'] = () => (
+  mobileAttachmentFiles().clearWebdavDownloadBackoffs()
+);
 export const clearWebdavDownloadBackoff: Files['clearWebdavDownloadBackoff'] = (...args) => (
   mobileAttachmentFiles().clearWebdavDownloadBackoff(...args)
 );

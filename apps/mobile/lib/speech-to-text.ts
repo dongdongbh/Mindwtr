@@ -10,7 +10,7 @@ import type {
 } from '@mindwtr/core';
 import {
   normalizeSpeechLanguage,
-  OPENAI_DEFAULT_MODEL,
+  resolveOpenAIParseModel,
   runRemoteSpeechToTaskCapture,
   runSpeechToTaskCapture,
 } from '@mindwtr/core';
@@ -476,15 +476,6 @@ const withOpenAIUpload = async <T>(
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'OpenAI transcription failed'));
-};
-
-const resolveOpenAIParseModel = (value?: string) => {
-  // The transcript parse step wants a cheap fast model; gpt-4o-mini (the old
-  // choice) is retiring, so route to the current cost-efficient default.
-  if (!value) return OPENAI_DEFAULT_MODEL;
-  const lower = value.toLowerCase();
-  if (lower.startsWith('gpt-4o')) return OPENAI_DEFAULT_MODEL;
-  return value;
 };
 
 const MIN_WHISPER_MODEL_BYTES = 5 * 1024 * 1024;

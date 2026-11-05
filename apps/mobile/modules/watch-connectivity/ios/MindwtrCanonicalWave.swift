@@ -5,12 +5,13 @@ import Foundation
 
 enum MindwtrCanonicalWaveError: Error {
     case invalidDataSize
+    case audioConversion(Int32)
 }
 
 /// whisper.rn's iOS decoder removes exactly 44 bytes, then interprets every
 /// remaining byte as little-endian Int16 PCM. Keep this layout deliberately
 /// narrower than the many valid RIFF/WAVE layouts accepted by AVFoundation.
-enum MindwtrCanonicalWave {
+public enum MindwtrCanonicalWave {
     static let headerSize = 44
     static let sampleRate: UInt32 = 16_000
     static let channelCount: UInt16 = 1
@@ -35,7 +36,91 @@ enum MindwtrCanonicalWave {
             mReserved: 0
         )
     }
+
+    /// The receiver and local voice decoder share the same bounded resampling lane.
+    static func streamPCM(_ input: ExtAudioFileRef, maximumDataBytes: Int,
+                          checkCancellation: () throws -> Void = {}, consume: (Data) throws -> Void) throws -> Int {
+        var source = AudioStreamBasicDescription(), size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        try audioStatus(ExtAudioFileGetProperty(input, kExtAudioFileProperty_FileDataFormat, &size, &source))
+        guard source.mSampleRate.isFinite, (8_000.0...96_000.0).contains(source.mSampleRate),
+              (1...8).contains(source.mChannelsPerFrame) else { throw MindwtrCanonicalWaveError.invalidDataSize }
+        var format = clientFormat()
+        try audioStatus(ExtAudioFileSetProperty(input, kExtAudioFileProperty_ClientDataFormat, size, &format))
+        var samples = [Int16](repeating: 0, count: 16_384), total = 0
+        try samples.withUnsafeMutableBytes { buffer in
+            guard let address = buffer.baseAddress else { throw MindwtrCanonicalWaveError.invalidDataSize }
+            while true {
+                try checkCancellation()
+                var frames: UInt32 = 16_384
+                var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(mNumberChannels: 1,
+                    mDataByteSize: UInt32(buffer.count), mData: address))
+                try audioStatus(ExtAudioFileRead(input, &frames, &list))
+                if frames == 0 { break }
+                let count = Int(frames) * Int(bytesPerFrame)
+                guard count <= maximumDataBytes - total else { throw MindwtrCanonicalWaveError.invalidDataSize }
+                total += count
+                try consume(Data(bytes: address, count: count))
+            }
+        }
+        guard total > 0 else { throw MindwtrCanonicalWaveError.invalidDataSize }
+        return total
+    }
+
+    private static func audioStatus(_ code: OSStatus) throws {
+        if code != noErr { throw MindwtrCanonicalWaveError.audioConversion(code) }
+    }
+
+    private final class MemoryAudio {
+        let bytes: Data
+        init(_ bytes: Data) { self.bytes = bytes }
+        static func owner(_ pointer: UnsafeMutableRawPointer?) -> MemoryAudio? {
+            pointer.map { Unmanaged<MemoryAudio>.fromOpaque($0).takeUnretainedValue() }
+        }
+        func read(position: Int64, requested: UInt32, buffer: UnsafeMutableRawPointer?, actual: UnsafeMutablePointer<UInt32>?) -> OSStatus {
+            guard position >= 0, position <= Int64(bytes.count), let buffer, let actual else { return kAudioFileUnspecifiedError }
+            let count = min(Int(requested), bytes.count - Int(position))
+            if count > 0 { bytes.withUnsafeBytes { buffer.copyMemory(from: $0.baseAddress!.advanced(by: Int(position)), byteCount: count) } }
+            actual.pointee = UInt32(count); return noErr
+        }
+    }
+
+    /// Converts immutable proof-checked audio without reopening a caller path.
+    public static func samplesFromAudio(_ bytes: Data, maximumSamples: Int, checkCancellation: () throws -> Void = {}) throws -> [Float] {
+        guard !bytes.isEmpty, bytes.count <= 4 * 1024 * 1024, maximumSamples > 0, maximumSamples <= 120 * 16_000 else {
+            throw MindwtrCanonicalWaveError.invalidDataSize
+        }
+        let owner = Unmanaged.passRetained(MemoryAudio(bytes)); defer { owner.release() }
+        var file: AudioFileID?
+        let read: AudioFile_ReadProc = { data, position, count, buffer, actual in
+            MemoryAudio.owner(data)?.read(position: position, requested: count, buffer: buffer, actual: actual) ?? kAudioFileUnspecifiedError
+        }
+        let size: AudioFile_GetSizeProc = { data in Int64(MemoryAudio.owner(data)?.bytes.count ?? 0) }
+        try audioStatus(AudioFileOpenWithCallbacks(owner.toOpaque(), read, nil, size, nil, 0, &file))
+        guard let file else { throw MindwtrCanonicalWaveError.invalidDataSize }; defer { AudioFileClose(file) }
+        var extended: ExtAudioFileRef?
+        try audioStatus(ExtAudioFileWrapAudioFileID(file, false, &extended))
+        guard let extended else { throw MindwtrCanonicalWaveError.invalidDataSize }; defer { ExtAudioFileDispose(extended) }
+        var pcm = Data()
+        _ = try streamPCM(extended, maximumDataBytes: maximumSamples * 2, checkCancellation: checkCancellation) { pcm.append($0) }
+        return floats(pcm)
+    }
     #endif
+
+    public static func samplesFromCanonicalWave(_ bytes: Data, maximumSamples: Int) throws -> [Float] {
+        guard maximumSamples > 0, maximumSamples <= 120 * 16_000,
+              validateHeader(Data(bytes.prefix(headerSize)), fileSize: bytes.count, maximumFileSize: headerSize + maximumSamples * 2) else {
+            throw MindwtrCanonicalWaveError.invalidDataSize
+        }
+        return floats(Data(bytes.dropFirst(headerSize)))
+    }
+
+    private static func floats(_ bytes: Data) -> [Float] {
+        bytes.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
+            stride(from: 0, to: buffer.count, by: 2).map { offset in
+                Float(Int16(bitPattern: UInt16(buffer[offset]) | UInt16(buffer[offset + 1]) << 8)) / 32768
+            }
+        }
+    }
 
     static func header(dataByteCount: Int) throws -> Data {
         guard dataByteCount >= 0,

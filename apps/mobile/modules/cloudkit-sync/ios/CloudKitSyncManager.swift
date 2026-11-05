@@ -7,9 +7,11 @@ final class CloudKitSyncManager {
 
     static let shared = CloudKitSyncManager()
 
-    let containerID = "iCloud.tech.dongdongbh.mindwtr"
-    let zoneName = "MindwtrZone"
-    let subscriptionID = "MindwtrZoneSubscription"
+    let containerID: String
+    let zoneName: String
+    let subscriptionID: String
+    let operations = NativeCloudKitOperationRegistry()
+    private let operationScheduler: ((CKDatabaseOperation) -> Void)?
 
     private(set) lazy var container = CKContainer(identifier: containerID)
     private(set) lazy var privateDB = container.privateCloudDatabase
@@ -20,7 +22,21 @@ final class CloudKitSyncManager {
     private var zoneTask: Task<Void, Error>?
     private var subscriptionTask: Task<Void, Error>?
 
-    private init() {}
+    init(containerIdentifier: String = "iCloud.tech.dongdongbh.mindwtr", zoneName: String = "MindwtrZone",
+         subscriptionID: String = "MindwtrZoneSubscription", operationScheduler: ((CKDatabaseOperation) -> Void)? = nil) {
+        containerID = containerIdentifier; self.zoneName = zoneName; self.subscriptionID = subscriptionID
+        self.operationScheduler = operationScheduler
+    }
+
+    func cancelOperations() { operations.cancelOperations() }
+    private func schedule(_ operation: CKDatabaseOperation, onFailure: (Error) -> Void) {
+        do {
+            try operations.schedule(operation) { operation in
+                if let operationScheduler { operationScheduler(operation) }
+                else { privateDB.add(operation) }
+            }
+        } catch { onFailure(error) }
+    }
 
     private static func preservingRecordErrors(_ errors: [Error]) -> Error {
         let primary = errors[0] as NSError
@@ -102,6 +118,7 @@ final class CloudKitSyncManager {
     }
 
     func saveAttachmentAsset(recordName: String, filePath: String, metadata: [String: Any]) async throws -> [String: Any] {
+        try operations.checkActive()
         let recordID = CKRecord.ID(recordName: recordName, zoneID: zoneID)
         let fetched = try await fetchRecordsByID([recordID])
         let record = fetched[recordID] ?? CKRecord(recordType: attachmentRecordType, recordID: recordID)
@@ -122,6 +139,7 @@ final class CloudKitSyncManager {
                 }
             }
             op.modifyRecordsResultBlock = { result in
+                defer { self.operations.complete(op) }
                 switch result {
                 case .success:
                     if let perRecordError {
@@ -133,13 +151,15 @@ final class CloudKitSyncManager {
                     continuation.resume(throwing: perRecordError ?? error)
                 }
             }
-            self.privateDB.add(op)
+            self.schedule(op) { continuation.resume(throwing: $0) }
         }
 
+        try operations.checkActive()
         return attachmentMetadata(from: savedRecord)
     }
 
-    func fetchAttachmentAsset(recordName: String, targetPath: String) async throws -> [String: Any] {
+    private func attachmentAsset(recordName: String) async throws -> (record: CKRecord, sourceURL: URL) {
+        try operations.checkActive()
         let recordID = CKRecord.ID(recordName: recordName, zoneID: zoneID)
         let fetched = try await fetchRecordsByID([recordID])
         guard let record = fetched[recordID] else {
@@ -157,6 +177,24 @@ final class CloudKitSyncManager {
             )
         }
 
+        return (record, sourceURL)
+    }
+
+    /// Native caller consumes the SDK-owned asset while its CKRecord is still retained.
+    func fetchAttachmentAsset(recordName: String, consume: @Sendable (URL, String) async throws -> Void) async throws -> String {
+        let (record, sourceURL) = try await attachmentAsset(recordName: recordName)
+        defer { withExtendedLifetime(record) {} }
+        try operations.checkActive()
+        let metadataJSON = try NativeCloudKitTransport.encode(attachmentMetadata(from: record))
+        try await consume(sourceURL, metadataJSON)
+        try operations.checkActive()
+        return metadataJSON
+    }
+
+    func fetchAttachmentAsset(recordName: String, targetPath: String) async throws -> [String: Any] {
+        let (record, sourceURL) = try await attachmentAsset(recordName: recordName)
+        defer { withExtendedLifetime(record) {} }
+        try operations.checkActive()
         let destinationURL = try fileURL(from: targetPath)
         let parentURL = destinationURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
@@ -172,6 +210,7 @@ final class CloudKitSyncManager {
         }
         do {
             try FileManager.default.copyItem(at: sourceURL, to: tempURL)
+            try operations.checkActive()
             if FileManager.default.fileExists(atPath: destinationURL.path) {
                 _ = try FileManager.default.replaceItemAt(destinationURL, withItemAt: tempURL)
             } else {
@@ -190,14 +229,19 @@ final class CloudKitSyncManager {
     // MARK: - Account Status
 
     func accountStatus() async throws -> CKAccountStatus {
-        return try await container.accountStatus()
+        try operations.checkActive()
+        let result = try await container.accountStatus()
+        try operations.checkActive()
+        return result
     }
 
     // MARK: - Zone Management
 
     func ensureZone() async throws {
+        try operations.checkActive()
         if let existing = zoneTask {
             try await existing.value
+            try operations.checkActive()
             return
         }
         let task = Task<Void, Error> {
@@ -207,6 +251,7 @@ final class CloudKitSyncManager {
             CloudKitOperationTimeouts.apply(to: op)
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 op.modifyRecordZonesResultBlock = { result in
+                    defer { self.operations.complete(op) }
                     switch result {
                     case .success:
                         continuation.resume()
@@ -214,12 +259,13 @@ final class CloudKitSyncManager {
                         continuation.resume(throwing: error)
                     }
                 }
-                privateDB.add(op)
+                self.schedule(op) { continuation.resume(throwing: $0) }
             }
         }
         zoneTask = task
         do {
             try await task.value
+            try operations.checkActive()
         } catch {
             zoneTask = nil // Allow retry on failure
             throw error
@@ -264,6 +310,7 @@ final class CloudKitSyncManager {
             CloudKitOperationTimeouts.apply(to: op)
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 op.modifySubscriptionsResultBlock = { result in
+                    defer { self.operations.complete(op) }
                     switch result {
                     case .success:
                         continuation.resume()
@@ -271,7 +318,7 @@ final class CloudKitSyncManager {
                         continuation.resume(throwing: error)
                     }
                 }
-                privateDB.add(op)
+                self.schedule(op) { continuation.resume(throwing: $0) }
             }
         }
         subscriptionTask = task
@@ -291,6 +338,7 @@ final class CloudKitSyncManager {
         _ jsonRecords: [[String: Any]],
         recordType: String
     ) async throws -> [String] {
+        try operations.checkActive()
         if jsonRecords.isEmpty { return [] }
 
         // Step 1: Fetch existing records so we have their system fields (changeTag etc).
@@ -353,6 +401,7 @@ final class CloudKitSyncManager {
             return true
         }
         while batchStart < recordsToSave.count {
+            try operations.checkActive()
             let batchEnd = min(batchStart + saveBatchSize, recordsToSave.count)
             let batch = Array(recordsToSave[batchStart..<batchEnd])
 
@@ -386,6 +435,7 @@ final class CloudKitSyncManager {
                         }
                     }
                     op.modifyRecordsResultBlock = { result in
+                        defer { self.operations.complete(op) }
                         cbQueue.sync {
                             switch result {
                             case .success:
@@ -401,7 +451,7 @@ final class CloudKitSyncManager {
                             }
                         }
                     }
-                    privateDB.add(op)
+                    self.schedule(op) { continuation.resume(throwing: $0) }
                 }
             } catch {
                 operationError = error
@@ -460,11 +510,13 @@ final class CloudKitSyncManager {
             throw NSError(domain: "CloudKitSync", code: 2, userInfo: userInfo)
         }
 
+        try operations.checkActive()
         return conflictIDs
     }
 
     /// Fetch records by ID, returning only those that exist on the server.
     private func fetchRecordsByID(_ ids: [CKRecord.ID]) async throws -> [CKRecord.ID: CKRecord] {
+        try operations.checkActive()
         if ids.isEmpty { return [:] }
         let op = CKFetchRecordsOperation(recordIDs: ids)
         op.qualityOfService = .userInitiated
@@ -495,6 +547,7 @@ final class CloudKitSyncManager {
                 }
             }
             op.fetchRecordsResultBlock = { overallResult in
+                defer { self.operations.complete(op) }
                 cbQueue.sync {
                     switch overallResult {
                     case .success:
@@ -522,18 +575,20 @@ final class CloudKitSyncManager {
                     }
                 }
             }
-            privateDB.add(op)
+            self.schedule(op) { continuation.resume(throwing: $0) }
         }
     }
 
     // MARK: - Batch Delete
 
     func deleteRecords(recordType: String, recordIDs: [String]) async throws {
+        try operations.checkActive()
         if recordIDs.isEmpty { return }
         let ckIDs = recordIDs.map { CKRecord.ID(recordName: $0, zoneID: zoneID) }
 
         let batchSize = 400
         for batchStart in stride(from: 0, to: ckIDs.count, by: batchSize) {
+            try operations.checkActive()
             let batchEnd = min(batchStart + batchSize, ckIDs.count)
             let batch = Array(ckIDs[batchStart..<batchEnd])
 
@@ -559,6 +614,7 @@ final class CloudKitSyncManager {
                 }
 
                 op.modifyRecordsResultBlock = { result in
+                    defer { self.operations.complete(op) }
                     cbQueue.sync {
                         switch result {
                         case .success:
@@ -580,7 +636,7 @@ final class CloudKitSyncManager {
                         }
                     }
                 }
-                privateDB.add(op)
+                self.schedule(op) { continuation.resume(throwing: $0) }
             }
         }
     }
@@ -596,8 +652,22 @@ final class CloudKitSyncManager {
     /// Returns an empty array when the record type does not exist yet in the
     /// CloudKit schema (first sync). The subsequent write phase auto-creates
     /// the record type in the Development environment.
-    func fetchAllRecords(recordType: String) async throws -> [CKRecord] {
+    func fetchAllRecords(recordType: String, maximumRecords: Int? = nil, maximumEncodedBytes: Int? = nil) async throws -> [CKRecord] {
+        try operations.checkActive()
         var allRecords: [CKRecord] = []
+        var encodedBytes = 2
+        func append(_ records: [CKRecord]) throws {
+            if let maximumRecords, allRecords.count + records.count > maximumRecords { throw NativeCloudKitTransportError(.invalidInput) }
+            if let maximumEncodedBytes {
+                var count = allRecords.count
+                for record in records {
+                    encodedBytes += try JSONSerialization.data(withJSONObject: CloudKitRecordMapper.json(from: record), options: [.sortedKeys]).count + (count > 0 ? 1 : 0)
+                    count += 1
+                    if encodedBytes > maximumEncodedBytes { throw NativeCloudKitTransportError(.invalidInput) }
+                }
+            }
+            allRecords.append(contentsOf: records)
+        }
         var cursor: CKQueryOperation.Cursor?
 
         let query = CKQuery(recordType: recordType, predicate: NSPredicate(value: true))
@@ -608,7 +678,8 @@ final class CloudKitSyncManager {
 
         do {
             let firstResult = try await runQueryOperation(initialOp)
-            allRecords.append(contentsOf: firstResult.records)
+            try operations.checkActive()
+            try append(firstResult.records)
             cursor = firstResult.cursor
         } catch {
             if Self.isUnknownRecordTypeError(error) { return [] }
@@ -616,15 +687,18 @@ final class CloudKitSyncManager {
         }
 
         while let nextCursor = cursor {
+            try operations.checkActive()
             let continueOp = CKQueryOperation(cursor: nextCursor)
             continueOp.zoneID = zoneID
             continueOp.qualityOfService = .userInitiated
             CloudKitOperationTimeouts.apply(to: continueOp)
             let result = try await runQueryOperation(continueOp)
-            allRecords.append(contentsOf: result.records)
+            try operations.checkActive()
+            try append(result.records)
             cursor = result.cursor
         }
 
+        try operations.checkActive()
         return allRecords
     }
 
@@ -645,22 +719,15 @@ final class CloudKitSyncManager {
     }
 
     private func runQueryOperation(_ op: CKQueryOperation) async throws -> (records: [CKRecord], cursor: CKQueryOperation.Cursor?) {
+        let collector = NativeCloudKitQueryCollector()
         return try await withCheckedThrowingContinuation { continuation in
-            var records: [CKRecord] = []
-            op.recordMatchedBlock = { _, result in
-                if case .success(let record) = result {
-                    records.append(record)
-                }
-            }
+            op.recordMatchedBlock = { _, result in collector.matched(result) }
             op.queryResultBlock = { result in
-                switch result {
-                case .success(let cursor):
-                    continuation.resume(returning: (records, cursor))
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
+                defer { self.operations.complete(op) }
+                do { continuation.resume(returning: try collector.finish(result)) }
+                catch { continuation.resume(throwing: error) }
             }
-            privateDB.add(op)
+            self.schedule(op) { continuation.resume(throwing: $0) }
         }
     }
 }

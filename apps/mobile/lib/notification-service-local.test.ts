@@ -856,7 +856,7 @@ describe('notification-service-local', () => {
       const row = (id: number, data: string, scheduleType = 'once') => ({ id, data, scheduleType, year: 2099, month: 1, day: 1, hour: 9, minute: 0, second: 0 });
       mockAlarmGetScheduledAlarms.mockResolvedValue([
         row(99, 'kind==>task-due;;alarmKey==>task:live;;'),
-        row(100, 'kind==>task-due;;alarmKey==>task:live;;'),
+        row(100, 'kind==>task-start-advance;;alarmKey==>task:live:sa15:4070955600000;;'),
         row(101, 'kind==>task-due;;alarmKey==>task:gone;;'),
         row(102, 'kind==>pomodoro;;'),
         row(103, 'unknown==>value;;'),
@@ -882,6 +882,17 @@ describe('notification-service-local', () => {
       expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(100);
       expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(101);
       expect(mockNativeModule.rearmAlarms).toHaveBeenCalledExactlyOnceWith([101]);
+    });
+
+    it('rearms a future start prealert with explicit Send under the device default Skip', async () => {
+      mockStoreState.tasks = [{ id: 'live', title: 'Live', reminderPolicy: 'send' }];
+      mockStoreState.settings = { taskReminderDefault: 'skip' };
+      const row = { id: 100, data: 'kind==>task-start-advance;;alarmKey==>task:live:sa15:4070955600000;;',
+        scheduleType: 'once', year: 2099, month: 1, day: 1, hour: 9, minute: 0, second: 0 };
+      mockAlarmGetScheduledAlarms.mockResolvedValue([row]);
+      await startLocalMobileNotifications();
+      expect(mockNativeModule.rearmAlarms).toHaveBeenCalledExactlyOnceWith([100]);
+      expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(100);
     });
 
     it('recovers a persisted unchanged signature on cold startup without allocating a new row', async () => {

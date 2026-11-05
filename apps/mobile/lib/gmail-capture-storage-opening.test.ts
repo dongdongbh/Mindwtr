@@ -1,5 +1,5 @@
 import {
-    existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync,
+    existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -8,13 +8,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as coreReceiptStore from '@mindwtr/core/gmail-receipt-store';
 import type { GmailReceiptDatabase, GmailReceiptStore } from './gmail-capture-storage';
 
 const mobile = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const expoSources = resolve(mobile, '../../node_modules/expo-file-system/src');
 
-// The opener deliberately uses lazy require; evaluate its real source with native bindings,
-// leaving Expo's constructors/path utilities and the maintained RN URL shim intact.
+
 function evaluate<T>(file: string, dependencies: Record<string, unknown>, runtimeURL?: typeof URL): T {
     const module = { exports: {} as T };
     const source = transpileModule(readFileSync(file, 'utf8'), {
@@ -44,7 +44,7 @@ function openerHarness(fileCreationError?: Error) {
     const createdDirectories: string[] = [];
     const createdFiles: string[] = [];
     const databases: DatabaseSync[] = [];
-    const closeDatabases = () => databases.splice(0).forEach((database) => database.close());
+    const closeDatabases = () => databases.splice(0).forEach((database) => { if (database.isOpen) database.close(); });
     cleanUp = () => { closeDatabases(); rmSync(root, { recursive: true, force: true }); };
 
     class NativeDirectory {
@@ -60,9 +60,14 @@ function openerHarness(fileCreationError?: Error) {
             mkdirSync(fileURLToPath(this.uri), { recursive: true });
             createdDirectories.push(this.uri);
         }
+        listAsRecords() {
+            return readdirSync(fileURLToPath(this.uri), { withFileTypes: true }).map((entry) => ({
+                isDirectory: entry.isDirectory(), uri: `${this.uri}${entry.name}${entry.isDirectory() ? '/' : ''}`,
+            }));
+        }
     }
     class NativeFile {
-        constructor(readonly uri: string) {}
+        constructor(public uri: string) {}
         validatePath() {
             if (existsSync(fileURLToPath(this.uri)) && statSync(fileURLToPath(this.uri)).isDirectory()) {
                 throw new Error('File path is a directory');
@@ -74,6 +79,13 @@ function openerHarness(fileCreationError?: Error) {
             if (fileCreationError) throw fileCreationError;
             writeFileSync(fileURLToPath(this.uri), '', { flag: 'wx' });
             createdFiles.push(this.uri);
+        }
+        delete() { rmSync(fileURLToPath(this.uri)); }
+        rename(name: string) {
+            const target = join(dirname(fileURLToPath(this.uri)), name);
+            if (existsSync(target)) throw new Error('Destination exists');
+            renameSync(fileURLToPath(this.uri), target);
+            this.uri = pathToFileURL(target).href;
         }
     }
 
@@ -101,15 +113,18 @@ function openerHarness(fileCreationError?: Error) {
                 statement.run(...params);
                 return { rows: [] };
             },
-        } satisfies GmailReceiptDatabase;
+            close() { if (database.isOpen) database.close(); },
+        } satisfies GmailReceiptDatabase & { close: () => void };
     });
     const logWarn = vi.fn();
-    const reload = () => evaluate<{ getGmailReceiptStore: () => GmailReceiptStore }>(join(mobile, 'lib/gmail-capture-storage.ts'), {
+    const reload = () => evaluate<{ getGmailReceiptStore: () => GmailReceiptStore; gmailReceiptsWereReset: () => boolean;
+        clearGmailReceiptsReset: () => void }>(join(mobile, 'lib/gmail-capture-storage.ts'), {
+        '@mindwtr/core/gmail-receipt-store': coreReceiptStore,
         'expo-file-system': fileSystem,
         '@op-engineering/op-sqlite': { open },
         './app-log': { logWarn },
     }, fallback.URL);
-    return { reload, document, createdDirectories, createdFiles, open, closeDatabases, logWarn };
+    return { reload, document, createdDirectories, createdFiles, open, closeDatabases, logWarn, databases };
 }
 
 describe('Gmail receipt storage opening under the RN URL shim', () => {
@@ -148,5 +163,41 @@ describe('Gmail receipt storage opening under the RN URL shim', () => {
             } },
         ));
         expect(harness.open).not.toHaveBeenCalled();
+    });
+
+
+    it.each([
+        ['an empty file', (path: string) => writeFileSync(path, ''), 'file', '0'],
+        ['a file whose schema fails the check', (path: string) => {
+            const damaged = new DatabaseSync(path);
+            damaged.exec("CREATE TABLE receipts (account TEXT, message TEXT); INSERT INTO receipts VALUES ('a', 'kept'), ('a', NULL)");
+            damaged.close();
+        }, 'schema', '1'],
+    ])('moves %s aside and starts a fresh store with capture off', async (_name, damage, stage, carried) => {
+        const harness = openerHarness();
+        const receiptDirectory = join(harness.document, 'GmailCapture');
+        mkdirSync(receiptDirectory);
+        damage(join(receiptDirectory, 'receipts.sqlite'));
+
+        const module = harness.reload();
+        expect(module.gmailReceiptsWereReset()).toBe(false);
+        const store = module.getGmailReceiptStore();
+        expect(store.config()).toEqual({ account: null, label: null, enabled: false, blocked: true });
+
+        expect(harness.reload().gmailReceiptsWereReset()).toBe(true);
+        module.clearGmailReceiptsReset();
+        expect(module.gmailReceiptsWereReset()).toBe(false);
+        expect(store.seen('a', 'kept')).toBe(stage === 'schema');
+        const aside = readdirSync(receiptDirectory).filter((name) => /^receipts\.corrupt-\d+\.sqlite$/.test(name));
+        expect(aside).toHaveLength(1);
+        if (stage === 'schema') {
+            harness.closeDatabases();
+            const kept = new DatabaseSync(join(receiptDirectory, aside[0]));
+            expect(kept.prepare('SELECT message FROM receipts').all()).toEqual([{ message: 'kept' }, { message: null }]);
+            kept.close();
+        }
+        await vi.waitFor(() => expect(harness.logWarn).toHaveBeenCalledExactlyOnceWith('Gmail receipt storage recovered', {
+            force: true, scope: 'gmail-capture', extra: { releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage, count: carried },
+        }));
     });
 });

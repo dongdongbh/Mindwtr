@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import XCTest
 import AttachmentFileInstallerEngine
@@ -188,8 +189,58 @@ final class AttachmentFileInstallerFacadeTests: XCTestCase {
     }
   }
 
-  private func withFixture(_ body: (FacadeFixture) throws -> Void) throws {
-    let fixture = try FacadeFixture()
+  func testPublicRetainedProviderOverloadsPreserveTypedResultsAndDigestNormalization() throws {
+    try withFixture(retainedProvider: true) { fixture in
+      let managed = try physicalManagedDirectory(fixture)
+      let descriptor = Darwin.open(managed.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+      guard descriptor >= 0 else { return XCTFail("Managed fixture unavailable") }
+      defer { Darwin.close(descriptor) }
+      let facade = try AttachmentFileInstaller(targetRoot: managed, sourceRoots: [fixture.cache])
+      let stage = managed.appendingPathComponent(".mindwtr-download-public.staged"), target = managed.appendingPathComponent("public.txt")
+      try write("old", to: target); try write("new", to: stage)
+      let authority: () throws -> Void = {
+        var value = stat()
+        guard Darwin.fstat(descriptor, &value) == 0, value.st_mode & S_IFMT == S_IFDIR else { throw NSError(domain: "FacadeFixture", code: 1) }
+      }
+      let outcome = try facade.install(stagedInput: stage, targetInput: target,
+        expected: .present(sha256: " " + digest("old").uppercased() + "\n"),
+        expectedDownloadSha256: "\t" + digest("new").uppercased() + " ", directoryDescriptor: descriptor, requireAuthority: authority)
+      guard case .installed(let preserved) = outcome else { return XCTFail("Expected install") }
+      XCTAssertEqual(try contents(XCTUnwrap(preserved)), "old")
+      let hash: AttachmentFileHashSnapshot = try facade.hash(target, directoryDescriptor: descriptor, requireAuthority: authority)
+      XCTAssertEqual(hash.sha256, digest("new")); XCTAssertEqual(hash.size, 3)
+      XCTAssertGreaterThan(hash.modificationTimeMs, 0)
+      XCTAssertFalse(FileManager.default.fileExists(atPath: stage.path))
+      XCTAssertThrowsError(try facade.hash(target, directoryDescriptor: descriptor, requireAuthority: { throw NSError(domain: "FacadeFixture", code: 2) }))
+      XCTAssertEqual(try contents(target), "new")
+    }
+  }
+
+  func testPublicRetainedProviderRefusesDecodedNulAndForeignStageWithoutMutation() throws {
+    try withFixture(retainedProvider: true) { fixture in
+      let managed = try physicalManagedDirectory(fixture)
+      let descriptor = Darwin.open(managed.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+      guard descriptor >= 0 else { return XCTFail("Managed fixture unavailable") }
+      defer { Darwin.close(descriptor) }
+      let facade = try AttachmentFileInstaller(targetRoot: managed, sourceRoots: [fixture.cache])
+      let target = managed.appendingPathComponent("target.txt"), stage = try fixture.stage("new")
+      try write("old", to: target)
+      XCTAssertThrowsError(try facade.install(stagedInput: stage, targetInput: target, expected: .absent,
+        expectedDownloadSha256: digest("new"), directoryDescriptor: descriptor, requireAuthority: {}))
+      let nul = try XCTUnwrap(URL(string: target.absoluteString + "%00ignored"))
+      XCTAssertThrowsError(try facade.hash(nul, directoryDescriptor: descriptor, requireAuthority: {}))
+      XCTAssertEqual(try contents(target), "old"); XCTAssertEqual(try contents(stage), "new")
+    }
+  }
+
+  private func physicalManagedDirectory(_ fixture: FacadeFixture) throws -> URL {
+    guard let path = Darwin.realpath(fixture.attachments.path, nil) else { throw NSError(domain: "FacadeFixture", code: 3) }
+    defer { free(path) }
+    return URL(fileURLWithPath: String(cString: path), isDirectory: true)
+  }
+
+  private func withFixture(retainedProvider: Bool = false, _ body: (FacadeFixture) throws -> Void) throws {
+    let fixture = try FacadeFixture(retainedProvider: retainedProvider)
     defer { try? FileManager.default.removeItem(at: fixture.root) }
     try body(fixture)
   }
@@ -209,9 +260,11 @@ private struct FacadeFixture {
   let attachments: URL
   let cache: URL
 
-  init() throws {
-    root = FileManager.default.temporaryDirectory
-      .appendingPathComponent("attachment-facade-xctest-\(UUID().uuidString)", isDirectory: true)
+  init(retainedProvider: Bool = false) throws {
+    let base = retainedProvider
+      ? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".mindwtr-native-tests", isDirectory: true)
+      : FileManager.default.temporaryDirectory
+    root = base.appendingPathComponent("attachment-facade-xctest-\(UUID().uuidString)", isDirectory: true)
     attachments = root.appendingPathComponent("attachments", isDirectory: true)
     cache = root.appendingPathComponent("cache", isDirectory: true)
     try FileManager.default.createDirectory(at: attachments, withIntermediateDirectories: true)

@@ -5,6 +5,29 @@ import XCTest
 final class MindwtrWatchPayloadValidatorTests: XCTestCase {
     private let id = "9D8A4448-255F-4C49-A40B-1855FA86BE2D"
 
+    func testPendingAudioNormalizerRequiresExactOwnedWAVPathAndAudioWire() throws {
+        var payload = basePayload(kind: "audio")
+        let path = "file:///old-container/Documents/watch-audio/" + id.lowercased() + ".wav"
+        payload["audioPath"] = path
+        let normalized = try MindwtrWatchPayloadValidator.normalizePendingAudio(payload)
+        XCTAssertEqual(normalized["id"] as? String, id.lowercased())
+        XCTAssertEqual(normalized["audioPath"] as? String, path)
+        for invalid in ["file:///outside/" + id.lowercased() + ".wav", path + "?query=1",
+                        "file:///old/Documents/watch-audio/" + id + ".wav"] {
+            payload["audioPath"] = invalid
+            XCTAssertThrowsError(try MindwtrWatchPayloadValidator.normalizePendingAudio(payload))
+        }
+        payload["audioPath"] = path
+        payload["unexpected"] = true
+        XCTAssertThrowsError(try MindwtrWatchPayloadValidator.normalizePendingAudio(payload))
+        payload.removeValue(forKey: "unexpected")
+        payload["kind"] = "pomodoro"
+        payload["action"] = "pause"
+        XCTAssertThrowsError(try MindwtrWatchPayloadValidator.normalizePendingAudio(payload))
+        payload.removeValue(forKey: "audioPath")
+        XCTAssertThrowsError(try MindwtrWatchPayloadValidator.normalizePendingAudio(payload))
+    }
+
     func testChecklistCommandUsesExplicitBooleanAndRejectsExtraFields() throws {
         var payload = basePayload(kind: "checklist")
         payload["taskId"] = "task"
@@ -228,6 +251,27 @@ final class MindwtrWatchPayloadValidatorTests: XCTestCase {
         pomodoro["phaseEndTime"] = NSNumber(value: true)
         context["pomodoro"] = pomodoro
         XCTAssertThrowsError(try MindwtrWatchPayloadValidator.normalizeApplicationContext(context))
+    }
+
+    func testPomodoroFlagsRequireBooleansAndAcceptActualTrueValues() throws {
+        for field in ["isRunning", "completionAlert"] {
+            for invalid: Any in [NSNumber(value: 1), NSNumber(value: 0), "true"] {
+                var context = applicationContext(remainingSeconds: 1)
+                var pomodoro = try XCTUnwrap(context["pomodoro"] as? [String: Any])
+                pomodoro[field] = invalid
+                context["pomodoro"] = pomodoro
+                XCTAssertThrowsError(try MindwtrWatchPayloadValidator.normalizeApplicationContext(context), field)
+            }
+            for valid: Any in [true, false, NSNumber(value: true), NSNumber(value: false)] {
+                var context = applicationContext(remainingSeconds: 1)
+                var pomodoro = try XCTUnwrap(context["pomodoro"] as? [String: Any])
+                pomodoro[field] = valid
+                context["pomodoro"] = pomodoro
+                let normalized = try MindwtrWatchPayloadValidator.normalizeApplicationContext(context)
+                let timer = try XCTUnwrap(normalized["pomodoro"] as? [String: Any])
+                XCTAssertEqual(timer[field] as? Bool, valid as? Bool)
+            }
+        }
     }
 
     func testPhaseEndTimeAcceptsNumericNSNumber() throws {

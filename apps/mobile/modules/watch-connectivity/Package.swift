@@ -22,9 +22,11 @@ let package = Package(
                 "MindwtrWatchConnectivity.podspec",
                 "MindwtrWatchConnectivityAppDelegateSubscriber.swift",
                 "MindwtrWatchConnectivityModule.swift",
-                "MindwtrWatchConnectivityReceiver.swift",
             ],
             sources: [
+                "MindwtrWatchConnectivityReceiver.swift",
+                "MindwtrWatchPendingCommand.swift",
+                "MindwtrWatchRetainedAudio.swift",
                 "MindwtrCanonicalWave.swift",
                 "MindwtrWatchAudioPathResolver.swift",
                 "MindwtrWatchPayloadValidator.swift",

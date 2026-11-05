@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { OPENAI_DEFAULT_MODEL } from '@mindwtr/core';
 
 const fileSystemMock = vi.hoisted(() => ({
   bytes: vi.fn(),
@@ -659,5 +660,34 @@ describe('processAudioCapture openai transcription against a custom base URL', (
     const legacyModelForm = (fetchMock.mock.calls[1] as [string, RequestInit])[1].body as FormData;
     expect(legacyModelForm.get('language')).toBe('en');
     expect(legacyModelForm.get('languages[]')).toBeNull();
+  });
+
+  it('preserves RN effective default and legacy parse models through the shared resolver', async () => {
+    const fetchMock = vi.fn(async (url: string, _init: RequestInit) => new Response(JSON.stringify(
+      url.endsWith('/audio/transcriptions') ? { text: 'Transcript' } : { output_text: JSON.stringify({ transcript: 'Transcript', title: 'Parsed' }) }
+    )));
+    vi.stubGlobal('fetch', fetchMock);
+    for (const parseModel of [undefined, 'gpt-4o-mini', 'GPT-4O', 'custom-parse-model']) {
+      fetchMock.mockClear();
+      expect(await processAudioCapture('file:///tmp/audio.wav', {
+        provider: 'openai', model: 'whisper-1', apiKey: 'secret-key', mode: 'smart_parse', parseModel,
+      })).toEqual({ transcript: 'Transcript', title: 'Parsed' });
+      const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+      expect(body.model).toBe(parseModel === 'custom-parse-model' ? parseModel : OPENAI_DEFAULT_MODEL);
+    }
+  });
+
+  it('preserves RN retry model resolution after Responses and Chat both fail', async () => {
+    const models: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith('/audio/transcriptions')) return new Response(JSON.stringify({ text: 'Transcript' }));
+      const body = JSON.parse(String(init.body)); models.push(body.model);
+      if (body.model === 'custom-first') return new Response('Parse unavailable', { status: 500 });
+      return new Response(JSON.stringify({ output_text: JSON.stringify({ transcript: 'Transcript', title: 'Retried' }) }));
+    }));
+    expect(await processAudioCapture('file:///tmp/audio.wav', {
+      provider: 'openai', model: 'whisper-1', apiKey: 'secret-key', mode: 'smart_parse', parseModel: 'custom-first',
+    })).toEqual({ transcript: 'Transcript', title: 'Retried' });
+    expect(models).toEqual(['custom-first', 'custom-first', OPENAI_DEFAULT_MODEL]);
   });
 });

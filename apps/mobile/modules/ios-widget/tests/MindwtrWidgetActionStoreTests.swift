@@ -522,6 +522,322 @@ final class MindwtrWidgetActionStoreTests: XCTestCase {
         }
     }
 
+    func testNativeClaimKeepsOriginalUppercaseIDDelayedUndoAndReceipts() throws {
+        try withStore { store, directory in
+            let id = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+            let pending = nativePending(id: id, notBefore: 1_010_000)
+            let receipt: [String: Any] = ["taskId": "already-consumed", "token": "older-token", "consumedAt": 900_000.0]
+            let bytes = try writeNativeState(["version": 1, "pending": [pending], "receipts": [receipt]], directory)
+            let early = try store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_003)) { actions in
+                XCTAssertEqual(actions.map(\.id), [id]); XCTAssertFalse(actions[0].claimed)
+            }
+            XCTAssertTrue(early.isEmpty)
+            XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("mindwtr-widget-actions-v1.json")), bytes)
+            XCTAssertFalse(try store.cancel(id: id, now: Date(timeIntervalSince1970: 1_010)))
+            let claimed = try store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in }
+            XCTAssertEqual(claimed.map(\.id), [id]); XCTAssertTrue(try XCTUnwrap(claimed.first).claimed)
+            let cold = MindwtrWidgetActionStore(directory: directory)
+            XCTAssertEqual(try cold.claimReadyForNative(now: Date(timeIntervalSince1970: 1_011)) { _ in }, claimed)
+            try cold.acknowledge(id: id.lowercased())
+            XCTAssertEqual(try cold.pendingActions().map(\.id), [id])
+            try cold.acknowledge(id: id)
+            XCTAssertTrue(try cold.pendingActions().isEmpty)
+            let state = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("mindwtr-widget-actions-v1.json"))) as? [String: Any])
+            let receipts = try XCTUnwrap(state["receipts"] as? [[String: Any]])
+            XCTAssertEqual(receipts.count, 2)
+            XCTAssertEqual(receipts[0] as NSDictionary, receipt as NSDictionary)
+            XCTAssertEqual(receipts[1]["taskId"] as? String, "native-task")
+            XCTAssertEqual(receipts[1]["token"] as? String, "native-token")
+        }
+    }
+
+    func testNativeClaimRefusesMalformedUUIDWithoutAdmissionOrByteMutation() throws {
+        try withStore { store, directory in
+            let id = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+            for invalid in ["invalid", " " + id, id + "x", "{" + id + "}"] {
+                let bytes = try writeNativeState(["version": 1, "pending": [nativePending(id: invalid)], "receipts": []], directory)
+                var admitted = false
+                XCTAssertThrowsError(try store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in admitted = true })
+                XCTAssertFalse(admitted)
+                XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("mindwtr-widget-actions-v1.json")), bytes)
+            }
+        }
+    }
+
+    func testNativeClaimRefusesCaseCollidingIDsIncludingUnreadyRowsWithoutMutation() throws {
+        try withStore { store, directory in
+            let id = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+            var later = nativePending(id: id.lowercased(), notBefore: 1_100_000)
+            later["taskId"] = "other-task"; later["token"] = "other-token"
+            let bytes = try writeNativeState(["version": 1, "pending": [nativePending(id: id), later], "receipts": []], directory)
+            var admitted = false
+            XCTAssertThrowsError(try store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in admitted = true })
+            XCTAssertFalse(admitted)
+            XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("mindwtr-widget-actions-v1.json")), bytes)
+            XCTAssertEqual(try store.pendingActions().map(\.claimed), [false, false])
+        }
+    }
+
+    func testNativeClaimRefusesUnsupportedRootPendingAndReceiptShapesWithoutMutation() throws {
+        try withStore { store, directory in
+            let pending = nativePending(id: "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF")
+            var extraPending = pending; extraPending["future"] = "preserve"
+            let receipt: [String: Any] = ["taskId": "earlier", "token": "earlier-token", "consumedAt": 900_000]
+            var extraReceipt = receipt; extraReceipt["future"] = false
+            var missingPending = pending; missingPending.removeValue(forKey: "claimed")
+            let invalid: [Any] = [
+                ["version": 1, "pending": [pending], "receipts": [], "future": ["opaque": true]],
+                ["version": 1, "pending": [extraPending], "receipts": []],
+                ["version": 1, "pending": [pending], "receipts": [extraReceipt]],
+                ["version": 1, "pending": [missingPending], "receipts": []],
+                ["version": 1, "pending": [pending], "receipts": ["unsupported"]],
+                ["version": 2, "pending": [pending], "receipts": []],
+                ["version": true, "pending": [pending], "receipts": []],
+                ["version": 1, "pending": [NSNull()], "receipts": []],
+                ["version": 1, "pending": [pending]],
+                ["version", "pending", "receipts"]]
+            for value in invalid {
+                let bytes = try writeNativeState(value, directory)
+                var admitted = false
+                XCTAssertThrowsError(try store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in admitted = true })
+                XCTAssertFalse(admitted)
+                XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("mindwtr-widget-actions-v1.json")), bytes)
+            }
+        }
+    }
+
+    func testNativeAdmissionFailurePreservesEveryOriginalClaimFlagAndByte() throws {
+        try withStore { store, directory in
+            let id = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+            let bytes = try writeNativeState(["version": 1, "pending": [nativePending(id: id)], "receipts": []], directory)
+            var admitted = false
+            XCTAssertThrowsError(try store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { actions in
+                admitted = true
+                XCTAssertEqual(actions.map(\.id), [id]); XCTAssertFalse(actions[0].claimed)
+                throw MindwtrWidgetActionStoreError.invalidValue("synthetic admission")
+            })
+            XCTAssertTrue(admitted)
+            XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("mindwtr-widget-actions-v1.json")), bytes)
+            XCTAssertEqual(try store.pendingActions().map(\.claimed), [false])
+        }
+    }
+
+    func testNativeAdmissionHoldsExistingStoreLockUntilClaimFinishes() throws {
+        try withStore { store, directory in
+            let now = Date(timeIntervalSince1970: 1_000)
+            try store.enqueue(taskId: "first", token: "first-token", now: now)
+            let other = MindwtrWidgetActionStore(directory: directory)
+            let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+            let enqueueStarted = DispatchSemaphore(value: 0), enqueueFinished = DispatchSemaphore(value: 0)
+            let group = DispatchGroup(), errors = LockedErrors()
+            group.enter()
+            DispatchQueue.global().async {
+                defer { group.leave() }
+                do {
+                    _ = try store.claimReadyForNative(now: now.addingTimeInterval(3)) { _ in
+                        entered.signal()
+                        guard release.wait(timeout: .now() + 10) == .success else {
+                            throw MindwtrWidgetActionStoreError.corruptState("synthetic admission timeout")
+                        }
+                    }
+                } catch { errors.append(error) }
+            }
+            XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+            group.enter()
+            DispatchQueue.global().async {
+                defer { group.leave(); enqueueFinished.signal() }
+                enqueueStarted.signal()
+                do { try other.enqueue(taskId: "second", token: "second-token", now: now) }
+                catch { errors.append(error) }
+            }
+            XCTAssertEqual(enqueueStarted.wait(timeout: .now() + 5), .success)
+            let whileAdmitting = enqueueFinished.wait(timeout: .now() + 0.05)
+            release.signal()
+            XCTAssertEqual(group.wait(timeout: .now() + 10), .success)
+            XCTAssertEqual(whileAdmitting, .timedOut)
+            XCTAssertEqual(errors.count, 0)
+            let pending = try store.pendingActions()
+            XCTAssertEqual(pending.map(\.taskId), ["first", "second"])
+            XCTAssertEqual(pending.map(\.claimed), [true, false])
+        }
+    }
+
+    func testOrdinaryRNClaimKeepsItsExistingDecodingAndIDBehavior() throws {
+        try withStore { store, directory in
+            var pending = nativePending(id: "legacy-non-uuid")
+            pending["future"] = "ordinary decoding"
+            let bytes = try writeNativeState(["version": 1, "pending": [pending], "receipts": [], "future": true], directory)
+            XCTAssertThrowsError(try store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in })
+            XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("mindwtr-widget-actions-v1.json")), bytes)
+            let claimed = try store.claimReady(now: Date(timeIntervalSince1970: 1_010))
+            XCTAssertEqual(claimed.map(\.id), ["legacy-non-uuid"])
+            XCTAssertTrue(try XCTUnwrap(claimed.first).claimed)
+        }
+    }
+
+    func testNativeClaimRefusesDuplicateRootMembersBeforeEitherDecoderCollapses() throws {
+        try withStore { store, directory in
+            let row = try rawNativeRow()
+            var unsupported = nativePending(id: "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF")
+            unsupported["future"] = true
+            let futureRow = String(decoding: try JSONSerialization.data(withJSONObject: unsupported, options: [.sortedKeys]), as: UTF8.self)
+            let receipt = #"{"taskId":"earlier","token":"earlier-token","consumedAt":900000}"#
+            let futureReceipt = #"{"taskId":"earlier","token":"earlier-token","consumedAt":900000,"future":true}"#
+            let values = [
+                #"{"version":1,"version":1,"pending":[\#(row)],"receipts":[]}"#,
+                #"{"version":1,"pending":[\#(row)],"pending":[\#(row)],"receipts":[]}"#,
+                #"{"version":1,"pending":[\#(row)],"\u0070ending":[\#(row)],"receipts":[]}"#,
+                #"{"version":1,"pending":[\#(futureRow)],"pending":[\#(row)],"receipts":[]}"#,
+                #"{"version":1,"pending":[\#(futureRow)],"\u0070ending":[\#(row)],"receipts":[]}"#,
+                #"{"version":1,"pending":[\#(row)],"receipts":[\#(futureReceipt)],"receipts":[\#(receipt)]}"#,
+                #"{"version":1,"pending":[\#(row)],"receipts":[\#(futureReceipt)],"\u0072eceipts":[\#(receipt)]}"#]
+            for raw in values { try assertNativeRawRefused(Data((" \n" + raw + "\n ").utf8), store, directory) }
+        }
+    }
+
+    func testNativeClaimRefusesDuplicatePendingRowMembersIncludingEscapedAliases() throws {
+        try withStore { store, directory in
+            let row = try rawNativeRow()
+            let duplicateRows = [
+                #"{"id":"ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",\#(row.dropFirst())"#,
+                #"{"\u0069d":"ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",\#(row.dropFirst())"#,
+                #"{"\u0074askId":"native-task",\#(row.dropFirst())"#]
+            for duplicate in duplicateRows {
+                let raw = #"{"version":1,"pending":[\#(duplicate)],"receipts":[]}"#
+                try assertNativeRawRefused(Data((" \n" + raw + "\n ").utf8), store, directory)
+            }
+        }
+    }
+
+    func testNativeClaimRefusesDuplicateReceiptRowMembersIncludingEscapedAliases() throws {
+        try withStore { store, directory in
+            let row = try rawNativeRow()
+            let receipts = [
+                #"{"taskId":"earlier","token":"earlier-token","token":"earlier-token","consumedAt":900000}"#,
+                #"{"taskId":"earlier","token":"earlier-token","\u0074oken":"earlier-token","consumedAt":900000}"#,
+                #"{"taskId":"earlier","token":"earlier-token","consumedAt":900000,"\u0063onsumedAt":900000}"#]
+            for receipt in receipts {
+                let raw = #"{"version":1,"pending":[\#(row)],"receipts":[\#(receipt)]}"#
+                try assertNativeRawRefused(Data((" \n" + raw + "\n ").utf8), store, directory)
+            }
+        }
+    }
+
+    func testNativeClaimRefusesAlternateEncodingRawNULAndEscapedNULMember() throws {
+        try withStore { store, directory in
+            let row = try rawNativeRow()
+            let raw = #"{"version":1,"pending":[\#(row)],"receipts":[]}"#
+            for encoding in [String.Encoding.utf16LittleEndian, .utf16BigEndian, .utf32LittleEndian, .utf32BigEndian] {
+                try assertNativeRawRefused(XCTUnwrap(raw.data(using: encoding)), store, directory)
+            }
+            try assertNativeRawRefused(Data((raw + "\u{0000}").utf8), store, directory)
+            let nulMember = #"{"version":1,"pending":[\#(row)],"receipts":[],"\u0000":true}"#
+            try assertNativeRawRefused(Data(nulMember.utf8), store, directory)
+            let bomMember = #"{"version":1,"pending":[\#(row)],"receipts":[],"\uFEFFpending":[]}"#
+            try assertNativeRawRefused(Data(bomMember.utf8), store, directory)
+        }
+    }
+
+    func testNativeAcknowledgmentKeepsOriginalCaseAndIsIdempotentWhenAbsent() throws {
+        try withStore { store, directory in
+            let id = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+            _ = try writeNativeState(["version": 1, "pending": [nativePending(id: id)], "receipts": []], directory)
+            let expected = try XCTUnwrap(store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in }.first)
+            var admitted = 0
+            try store.acknowledgeForNative(expected) { admitted += 1 }
+            XCTAssertEqual(admitted, 1); XCTAssertTrue(try store.pendingActions().isEmpty)
+            let path = directory.appendingPathComponent("mindwtr-widget-actions-v1.json"), bytes = try Data(contentsOf: path)
+            try store.acknowledgeForNative(expected) { admitted += 1 }
+            XCTAssertEqual(admitted, 1); XCTAssertEqual(try Data(contentsOf: path), bytes)
+        }
+    }
+
+    func testNativeAcknowledgmentRefusesChangedOriginalTupleWithoutMutation() throws {
+        try withStore { store, directory in
+            let id = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+            var pending = nativePending(id: id)
+            pending["taskId"] = "e\u{301}"
+            _ = try writeNativeState(["version": 1, "pending": [pending], "receipts": []], directory)
+            let expected = try XCTUnwrap(store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in }.first)
+            pending["claimed"] = true
+            let edits: [[String: Any]] = [["id": id.lowercased()], ["taskId": "é"], ["token": "native-token "],
+                ["createdAt": 999_999.0], ["notBefore": 1_004_000.0], ["claimed": false]]
+            for edit in edits {
+                var changed = pending; changed.merge(edit) { _, new in new }
+                let bytes = try writeNativeState(["version": 1, "pending": [changed], "receipts": []], directory)
+                var admitted = false
+                XCTAssertThrowsError(try store.acknowledgeForNative(expected) { admitted = true })
+                XCTAssertFalse(admitted)
+                XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("mindwtr-widget-actions-v1.json")), bytes)
+            }
+        }
+    }
+
+    func testNativeAcknowledgmentRefusesNewUnknownFieldsAndNormalizedCollision() throws {
+        try withStore { store, directory in
+            let id = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+            var pending = nativePending(id: id)
+            _ = try writeNativeState(["version": 1, "pending": [pending], "receipts": []], directory)
+            let expected = try XCTUnwrap(store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in }.first)
+            pending["claimed"] = true
+            var extra = pending; extra["future"] = true
+            var colliding = pending; colliding["id"] = id.lowercased(); colliding["taskId"] = "other"; colliding["token"] = "other-token"
+            let states: [[String: Any]] = [["version": 1, "pending": [pending], "receipts": [], "future": true],
+                ["version": 1, "pending": [extra], "receipts": []],
+                ["version": 1, "pending": [pending, colliding], "receipts": []]]
+            for state in states {
+                let bytes = try writeNativeState(state, directory)
+                var admitted = false
+                XCTAssertThrowsError(try store.acknowledgeForNative(expected) { admitted = true })
+                XCTAssertFalse(admitted)
+                XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("mindwtr-widget-actions-v1.json")), bytes)
+            }
+        }
+    }
+
+    func testNativeAcknowledgmentReadmissionFailureRetainsClaimedBytes() throws {
+        try withStore { store, directory in
+            let id = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+            _ = try writeNativeState(["version": 1, "pending": [nativePending(id: id)], "receipts": []], directory)
+            let expected = try XCTUnwrap(store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in }.first)
+            let path = directory.appendingPathComponent("mindwtr-widget-actions-v1.json"), bytes = try Data(contentsOf: path)
+            var admitted = false
+            XCTAssertThrowsError(try store.acknowledgeForNative(expected) {
+                admitted = true
+                throw MindwtrWidgetActionStoreError.invalidValue("synthetic native acknowledgment admission")
+            })
+            XCTAssertTrue(admitted); XCTAssertEqual(try Data(contentsOf: path), bytes)
+            XCTAssertEqual(try store.pendingActions(), [expected])
+        }
+    }
+
+    private func rawNativeRow() throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: nativePending(id: "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"), options: [.sortedKeys]), as: UTF8.self)
+    }
+
+    private func assertNativeRawRefused(_ bytes: Data, _ store: MindwtrWidgetActionStore, _ directory: URL,
+                                        file: StaticString = #filePath, line: UInt = #line) throws {
+        let path = directory.appendingPathComponent("mindwtr-widget-actions-v1.json")
+        try bytes.write(to: path)
+        var admitted = false
+        XCTAssertThrowsError(try store.claimReadyForNative(now: Date(timeIntervalSince1970: 1_010)) { _ in admitted = true }, file: file, line: line)
+        XCTAssertFalse(admitted, file: file, line: line)
+        XCTAssertEqual(try Data(contentsOf: path), bytes, file: file, line: line)
+    }
+
+    private func nativePending(id: String, notBefore: Double = 1_003_000) -> [String: Any] {
+        ["id": id, "taskId": "native-task", "token": "native-token", "createdAt": 1_000_000.0,
+         "notBefore": notBefore, "claimed": false]
+    }
+
+    private func writeNativeState(_ value: Any, _ directory: URL) throws -> Data {
+        var bytes = Data(" \n".utf8)
+        bytes.append(try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]))
+        bytes.append(Data("\n ".utf8))
+        try bytes.write(to: directory.appendingPathComponent("mindwtr-widget-actions-v1.json"))
+        return bytes
+    }
+
     private func withStore(
         _ body: (MindwtrWidgetActionStore, URL) throws -> Void
     ) throws {
