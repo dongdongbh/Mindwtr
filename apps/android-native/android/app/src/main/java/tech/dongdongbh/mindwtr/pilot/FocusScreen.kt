@@ -268,7 +268,7 @@ private fun ReviewProjectCard(model: InboxViewModel, project: ReviewProject) = w
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val tile = RoundedCornerShape(10.dp)
-        Box(Modifier.size(36.dp).clip(tile).background(c.filterBg).rnBorder(1.dp, coreColorOrNull(project.color) ?: c.border, tile),
+        Box(Modifier.size(36.dp).clip(tile).background(c.filterBg).rnBorder(1.dp, LocalTheme.current.identityColorOrNull(project.color) ?: c.border, tile),
             contentAlignment = Alignment.Center) {
             Icon(Lucide.Folder, null, tint = c.text, modifier = Modifier.size(18.dp))
         }

@@ -1099,7 +1099,7 @@ private fun AreaRow(model: InboxViewModel, label: String, area: JSONObject?) {
     val c = LocalTheme.current.colors
     Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).clickable(role = Role.Button) { model.projectDetails.setArea(area) }.padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        if (area != null) Box(Modifier.padding(end = 8.dp).size(10.dp).clip(CircleShape).background(coreColorOrNull(area.menuText("color")) ?: c.tint))
+        if (area != null) Box(Modifier.padding(end = 8.dp).size(10.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(area.menuText("color")) ?: c.tint))
         Text(label, style = rnText(14, 600), color = c.text)
     }
 }

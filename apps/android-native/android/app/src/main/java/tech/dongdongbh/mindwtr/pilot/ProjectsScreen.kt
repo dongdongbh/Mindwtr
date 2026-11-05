@@ -275,7 +275,7 @@ private fun AreaHeader(model: InboxViewModel, group: ProjectGroup, areaKey: Stri
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val icon = group.areaIcon
-        val dot = coreColorOrNull(group.areaColor)
+        val dot = LocalTheme.current.identityColorOrNull(group.areaColor)
         if (icon != null) Text(icon, style = rnText(14, 400, 18), color = c.secondaryText, modifier = Modifier.padding(end = 8.dp))
         else if (dot != null) Box(Modifier.padding(end = 8.dp).size(8.dp).clip(CircleShape).background(dot).rnBorder(1.dp, c.border, CircleShape))
         Text(area.uppercase(), style = rnText(12, 700, letterSpacing = 0.4f), color = c.secondaryText, maxLines = 1,

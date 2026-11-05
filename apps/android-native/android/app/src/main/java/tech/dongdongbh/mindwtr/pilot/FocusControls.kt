@@ -211,7 +211,7 @@ fun FocusGroupHeading(heading: JSONObject, onToggle: () -> Unit) {
         .clickable(onClick = onToggle).padding(top = 4.dp, start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(if (collapsed) "▸" else "▾", style = rnText(12, 400), color = c.secondaryText, textAlign = TextAlign.Center, modifier = Modifier.width(14.dp))
-        Box(Modifier.size(8.dp).clip(CircleShape).background(if (muted) c.secondaryText else coreColorOrNull(heading.menuText("dotColor")) ?: c.tint))
+        Box(Modifier.size(8.dp).clip(CircleShape).background(if (muted) c.secondaryText else LocalTheme.current.identityColorOrNull(heading.menuText("dotColor")) ?: c.tint))
         Text(title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (muted) c.secondaryText else c.text, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         Text("$count", style = rnText(12, 700), color = c.secondaryText)

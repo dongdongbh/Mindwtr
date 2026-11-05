@@ -89,7 +89,7 @@ fun AreaOrderSheet(model: InboxViewModel, sheet: JSONObject) = with(model) {
                     val shown = area.menuText("color")
                     val inUse = area.getBoolean("inUse")
                     Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(vertical = 8.dp).testTag("project-area-row-$id"), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(coreColorOrNull(shown) ?: c.tint))
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(shown) ?: c.tint))
                         Text(name, style = rnText(14, 600), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 8.dp, end = 8.dp))
                         val up = index > 0
                         val label = "${t("projects.moveUp")}: $name"

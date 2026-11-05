@@ -606,7 +606,7 @@ private fun RowButton(icon: ImageVector, label: String, tint: Color, enabled: Bo
 @Composable
 private fun Swatch(color: String) {
     val c = LocalTheme.current.colors
-    Box(Modifier.padding(end = 12.dp).size(24.dp).clip(RoundedCornerShape(6.dp)).background(coreColorOrNull(color) ?: c.tint))
+    Box(Modifier.padding(end = 12.dp).size(24.dp).clip(RoundedCornerShape(6.dp)).background(LocalTheme.current.identityColorOrNull(color) ?: c.tint))
 }
 
 

@@ -164,7 +164,7 @@ private fun ReviewArea(model: InboxViewModel, area: JSONObject) = with(model.men
         .semantics { contentDescription = area.getString("accessibilityLabel"); stateDescription = t(if (expanded) "markdown.collapse" else "markdown.expand") }
         .padding(horizontal = 4.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.padding(end = 10.dp).size(8.dp).clip(CircleShape).background(coreColorOrNull(area.menuText("color")) ?: c.tint))
+            Box(Modifier.padding(end = 10.dp).size(8.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(area.menuText("color")) ?: c.tint))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(area.getString("title"), style = rnText(16, 700), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(area.getString("summary"), style = rnText(12, 500, 17), color = c.secondaryText, maxLines = 2, overflow = TextOverflow.Ellipsis)

@@ -573,7 +573,7 @@ private fun OptionChip(option: JSONObject, prefix: String, locked: Boolean, send
     Row(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, shape)
         .semantics { contentDescription = "$prefix: $label" }.selectable(selected = on, enabled = !locked, role = Role.Tab) { send(edit) }
         .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (!edit.isNull("value")) Box(Modifier.padding(end = 8.dp).size(8.dp).clip(CircleShape).background(coreColorOrNull(option.text("color")) ?: c.secondaryText))
+        if (!edit.isNull("value")) Box(Modifier.padding(end = 8.dp).size(8.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(option.text("color")) ?: c.secondaryText))
         Text(label, style = rnText(14, 600), color = c.text)
     }
 }

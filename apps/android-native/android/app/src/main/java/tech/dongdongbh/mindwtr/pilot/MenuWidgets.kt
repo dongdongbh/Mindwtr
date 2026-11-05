@@ -446,7 +446,7 @@ internal fun ParkedProject(model: InboxViewModel, project: JSONObject, activate:
                     listOfNotNull(moveLabel?.let { CustomAccessibilityAction(it) { if (enabled) menu.openProjectMove(id, revision); enabled } })
             }.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(Lucide.Folder, null, tint = coreColorOrNull(project.menuText("color")) ?: c.secondaryText, modifier = Modifier.size(18.dp))
+            Icon(Lucide.Folder, null, tint = LocalTheme.current.identityColorOrNull(project.menuText("color")) ?: c.secondaryText, modifier = Modifier.size(18.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, style = rnText(14, 600), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 project.menuText("areaName")?.let { Text(it, style = rnText(12, 400), color = c.secondaryText, maxLines = 1, modifier = Modifier.padding(top = 2.dp)) }

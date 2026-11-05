@@ -457,7 +457,7 @@ private fun ProjectCard(model: InboxViewModel, project: JSONObject, labels: JSON
     Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .clickable(enabled = menu.idle, role = Role.Button) { menu.expandProject(id) }.semantics { contentDescription = title }.padding(12.dp)) {
         Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.padding(end = 8.dp).size(12.dp).clip(CircleShape).background(coreColorOrNull(project.menuText("areaColor")) ?: c.tint))
+            Box(Modifier.padding(end = 8.dp).size(12.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(project.menuText("areaColor")) ?: c.tint))
             Text(title, style = rnText(16, 600), color = c.text, modifier = Modifier.weight(1f))
             val small = RoundedCornerShape(8.dp)
             Text(labels.getString("addTask"), style = rnText(12, 600), color = c.text, modifier = Modifier.padding(end = 8.dp).clip(small).rnBorder(1.dp, c.border, small)

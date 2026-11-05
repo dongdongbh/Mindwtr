@@ -325,7 +325,7 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
                 if (meta.optBoolean("showMetaRow")) {
                     FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         meta.menuText("projectTitle")?.let { project ->
-                            val color = coreColorOrNull(meta.menuText("projectColor")) ?: c.secondaryText
+                            val color = LocalTheme.current.identityColorOrNull(meta.menuText("projectColor")) ?: c.secondaryText
                             Row(Modifier.clip(RoundedCornerShape(10.dp)).background(c.filterBg).rnBorder(1.dp, color, RoundedCornerShape(10.dp))
                                 .padding(horizontal = 8.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Icon(Lucide.Folder, null, tint = c.text, modifier = Modifier.size(12.dp))

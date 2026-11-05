@@ -136,7 +136,10 @@ class RnSwitchProps(val trackOff: Color, val trackOn: Color, val thumbOff: Color
 
 
 @Immutable
-class MindwtrTheme(val colors: ThemeColors, val isDark: Boolean, val isMaterial: Boolean, private val statuses: Map<String, StatusColors>, private val priorities: Map<String, Color>) {
+class MindwtrTheme(val colors: ThemeColors, val isDark: Boolean, val isMaterial: Boolean, private val statuses: Map<String, StatusColors>, private val priorities: Map<String, Color>,
+                   private val isEink: Boolean = false) {
+
+    fun identityColorOrNull(hex: String?): Color? = coreColorOrNull(hex)?.let { if (isEink) Color.Black else it }
 
     fun status(value: String): StatusColors = statuses[value] ?: StatusColors(colors.filterBg, colors.secondaryText, colors.border)
 
@@ -279,7 +282,7 @@ fun mindwtrTheme(reply: ThemeChoice.Reply?, systemDark: Boolean): MindwtrTheme {
         else -> if (dark) DARK else LIGHT
     }
     val statuses = reply?.let { if (dark) it.statusDark else it.statusLight }.orEmpty()
-    return MindwtrTheme(colors, dark, material, statuses, reply?.priority.orEmpty())
+    return MindwtrTheme(colors, dark, material, statuses, reply?.priority.orEmpty(), preset == "eink")
 }
 
 val LocalTheme = staticCompositionLocalOf { mindwtrTheme(null, false) }
