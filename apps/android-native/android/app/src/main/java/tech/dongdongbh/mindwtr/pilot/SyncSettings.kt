@@ -427,11 +427,14 @@ private fun BackendChip(sync: SyncSettingsModel, option: JSONObject) {
     val selected = option.getBoolean("selected")
     val label = option.getString("label")
     val shape = RoundedCornerShape(16.dp)
-    Box(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).rnBorder(1.dp, if (selected) c.tint else c.border, shape)
+    Row(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).rnBorder(selectedOptionBorder(selected), if (selected) c.tint else c.border, shape)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; this.selected = selected; testTag = "sync-backend-${option.getString("option")}"
             onClick { sync.select(option.getString("option")); true } }
-        .clickable { sync.select(option.getString("option")) }.padding(horizontal = 10.dp, vertical = 6.dp)) {
-        Text(label, style = rnText(13, 700, 17), color = if (selected) c.tint else c.secondaryText, maxLines = 2, textAlign = TextAlign.Center)
+        .clickable { sync.select(option.getString("option")) }.padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = rnText(13, 700, 17), color = if (selected) c.tint else c.secondaryText, maxLines = 2, textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f, fill = false))
+        if (selected) Icon(Lucide.CheckPicked, null, tint = c.tint, modifier = Modifier.size(14.dp))
     }
 }
 

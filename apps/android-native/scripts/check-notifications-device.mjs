@@ -3,7 +3,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { check, connect, evidenced, fail, inEditor, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
@@ -661,6 +661,8 @@ try {
     check(pomodoro(linked).minutes === before + 1, '(9) a further restart gives nothing more');
     nodes = await idleCard();
     nodes = await tapExpecting(await control('pomodoro-link'), (current) => Boolean(tagged(current, 'pomodoro-picker')), 'the task picker');
+    writeFileSync(resolve(work, 'pomodoro-picker-selected.png'), adbRaw('exec-out', 'screencap', '-p'));
+    console.log('evidence - pomodoro-picker-selected.png: the linked task is the selected option, drawn with RN\'s 2 px outline and check (#1494)');
     await tapExpecting(await control('pomodoro-timer-only'), (current) => !tagged(current, 'pomodoro-picker') && !tagged(current, 'pomodoro-done'), 'Timer only');
     closeShade();
 

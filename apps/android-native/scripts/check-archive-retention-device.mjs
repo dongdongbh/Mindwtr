@@ -3,7 +3,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { check, connect, evidenced, fail, inboxCount, inEditor, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, taskRows, withDescription } from './device.mjs';
@@ -44,7 +44,7 @@ const OLD = { id: randomUUID(), title: `Retention old ${run}`, days: 7300 };
 const RECENT = { id: randomUUID(), title: `Retention recent ${run}`, days: 5 };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
-const { sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
+const { sh, adbRaw, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
 const runAs = (command) => sh(`run-as ${PKG} sh -c '${command}'`);
 const allLogs = () => execFileSync(adbBin, ['-s', serial, 'logcat', '-d', '-s', `${TAG}:*`], { encoding: 'utf8', maxBuffer: 64 << 20 }).replace(/\\/g, '');
 const RAN = 'Native archive retention ran';
@@ -195,8 +195,10 @@ try {
 
     let nodes = await openSync();
     if (!nodes.some((node) => node.text === en['settings.syncOff'])) {
-        await tapTag('sync-backend-off', (next) => next.some((node) => node.text === en['settings.syncOff']), 'Sync off');
+        nodes = await tapTag('sync-backend-off', (next) => next.some((node) => node.text === en['settings.syncOff']), 'Sync off');
     }
+    writeFileSync(resolve(work, 'sync-backend-selected.png'), adbRaw('exec-out', 'screencap', '-p'));
+    console.log('evidence - sync-backend-selected.png: Off is the selected backend, drawn with RN\'s 2 px outline and check (#1494)');
     await tapTag('sync-backend-webdav', (next) => Boolean(tagged(next, 'sync-url')), 'the WebDAV form');
     syncSet = true;
     await fill('sync-url', `http://127.0.0.1:${PORT}${FOLDER}`);

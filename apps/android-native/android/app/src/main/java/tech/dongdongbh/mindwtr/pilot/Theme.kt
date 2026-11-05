@@ -304,6 +304,8 @@ fun MindwtrTheme(reply: ThemeChoice.Reply?, content: @Composable () -> Unit) {
 
 fun Modifier.rnBorder(width: Dp, color: Color, shape: Shape): Modifier = border(width, color, shape).padding(width)
 
+fun selectedOptionBorder(selected: Boolean): Dp = if (selected) 2.dp else 1.dp
+
 
 fun Modifier.rnBorderBottom(color: Color): Modifier = drawBehind {
     drawRect(color, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx()))

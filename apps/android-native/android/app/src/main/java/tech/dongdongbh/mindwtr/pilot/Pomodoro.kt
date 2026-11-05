@@ -455,9 +455,11 @@ fun PomodoroPicker(model: InboxViewModel) = with(model.pomodoro) {
 private fun Option(label: String, selected: Boolean, lines: Int, tag: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Box(Modifier.fillMaxWidth().clip(shape).background(if (selected) c.tint.copy(alpha = 0x18 / 255f) else c.filterBg).rnBorder(1.dp, if (selected) c.tint else c.border, shape)
+    Row(Modifier.fillMaxWidth().clip(shape).background(if (selected) c.tint.copy(alpha = 0x18 / 255f) else c.filterBg)
+        .rnBorder(selectedOptionBorder(selected), if (selected) c.tint else c.border, shape)
         .clearAndSetSemantics { testTag = tag; contentDescription = label; role = Role.Button; this.selected = selected; onClick { onClick(); true } }
-        .clickable(onClick = onClick).padding(10.dp)) {
-        Text(label, style = cardText(14, 700), color = if (selected) c.tint else c.text, maxLines = lines, overflow = TextOverflow.Ellipsis)
+        .clickable(onClick = onClick).padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = cardText(14, 700), color = if (selected) c.tint else c.text, maxLines = lines, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (selected) Icon(Lucide.CheckPicked, null, tint = c.tint, modifier = Modifier.size(16.dp))
     }
 }
