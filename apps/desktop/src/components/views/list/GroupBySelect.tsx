@@ -1,3 +1,4 @@
+import { Rows3 } from 'lucide-react';
 import { resolveFeatureFlags, tFallback, useTaskStore } from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
 import { ToolbarSelect } from './ToolbarSelect';
@@ -33,8 +34,14 @@ export function GroupBySelect<Axis extends TaskGroupAxis>({
     return (
         <ToolbarSelect
             active={defaultValue !== undefined && value !== defaultValue}
-            className={cn('w-[180px] min-w-0 max-w-full', className)}
+            className={cn('w-auto max-w-full min-w-0', className)}
             label={groupLabel}
+            icon={(
+                <Rows3
+                    className="mr-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                />
+            )}
             value={value}
             options={visibleAxes.map((axis) => ({
                 value: axis,
