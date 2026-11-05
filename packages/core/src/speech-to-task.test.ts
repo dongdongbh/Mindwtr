@@ -1,10 +1,73 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+    buildRemoteOpenAISpeechParseRequest,
+    buildRemoteOpenAISpeechTranscriptionRequest,
+    decodeRemoteOpenAISpeechParseResponse,
+    decodeRemoteOpenAISpeechTranscriptionResponse,
+    resolveOpenAIParseModel,
     runRemoteSpeechToTaskCapture,
     runSpeechToTaskCapture,
     type SpeechToTaskResult,
 } from './speech-to-task';
+import { OPENAI_DEFAULT_MODEL } from './ai/catalog';
+
+describe('credential-free OpenAI speech projections', () => {
+    it('projects multipart fields using the existing endpoint and language policy without credentials', () => {
+        const config = { model: 'gpt-transcribe', language: 'English', baseUrl: 'http://localhost:8000/v1/', apiKey: 'PRIVATE_CREDENTIAL' };
+        const projected = buildRemoteOpenAISpeechTranscriptionRequest(config);
+        expect(projected).toEqual({ url: 'http://localhost:8000/v1/audio/transcriptions', method: 'POST', timeoutMs: 30_000,
+            fields: [['model', 'gpt-transcribe'], ['languages[]', 'en'], ['response_format', 'json']] });
+        expect(JSON.stringify(projected)).not.toContain(config.apiKey);
+        expect(buildRemoteOpenAISpeechTranscriptionRequest({ model: 'whisper-1', language: 'es-MX' }).fields)
+            .toEqual([['model', 'whisper-1'], ['language', 'es'], ['response_format', 'json']]);
+        expect(buildRemoteOpenAISpeechTranscriptionRequest({ model: 'whisper-1', language: 'auto' }))
+            .toMatchObject({ url: 'https://api.openai.com/v1/audio/transcriptions', fields: [['model', 'whisper-1'], ['response_format', 'json']] });
+        expect(buildRemoteOpenAISpeechTranscriptionRequest({ model: 'custom', baseUrl: 'https://speech.example/custom/audio/transcriptions' }).url)
+            .toBe('https://speech.example/custom/audio/transcriptions');
+    });
+    it('decodes transcription text with the existing trim and empty-text behavior', () => {
+        expect(decodeRemoteOpenAISpeechTranscriptionResponse({ text: ' \nBuy milk\t' })).toBe('Buy milk');
+        for (const value of [null, [], {}, { text: null }, { text: 42 }, { text: '  ' }])
+            expect(decodeRemoteOpenAISpeechTranscriptionResponse(value)).toBe('');
+    });
+    it.each(['responses', 'chat'] as const)('projects the existing full smart-parse prompt and JSON format for %s', api => {
+        const config = { fieldStrategy: 'description_only' as const, language: 'Spanish', now: new Date('2026-10-10T12:00:00Z'),
+            timeZone: 'America/New_York', apiKey: 'PRIVATE_CREDENTIAL' };
+        const request = buildRemoteOpenAISpeechParseRequest(config, 'Exact transcript', 'custom-parse-model', api);
+        expect(request).toMatchObject({ url: `https://api.openai.com/v1/${api === 'responses' ? 'responses' : 'chat/completions'}`,
+            method: 'POST', headers: [['Content-Type', 'application/json']], timeoutMs: 30_000 });
+        const body = JSON.parse(request.body);
+        expect(body).toMatchObject({ model: 'custom-parse-model', temperature: 0.2 });
+        const messages = api === 'responses' ? body.input : body.messages;
+        expect(messages[0].content).toContain('description_only'); expect(messages[0].content).toContain('es');
+        expect(messages[0].content).toContain('Time zone: America/New_York'); expect(messages[0].content).toContain('2026-10-10');
+        expect(messages[1]).toEqual({ role: 'user', content: 'Exact transcript' });
+        expect(api === 'responses' ? body.text.format : body.response_format).toEqual({ type: 'json_object' });
+        expect(JSON.stringify(request)).not.toContain(config.apiKey);
+    });
+    it('preserves every parsed field across direct Responses, message Responses and Chat replies', () => {
+        const parsed: SpeechToTaskResult = { transcript: 'Full transcript', title: 'Title', description: 'Description', dueDate: '2026-10-11',
+            startTime: '2026-10-10', projectTitle: 'Project', tags: ['tag'], contexts: ['context'], language: 'en' };
+        const content = `\`\`\`json\n${JSON.stringify(parsed)}\n\`\`\``;
+        expect(decodeRemoteOpenAISpeechParseResponse({ output_text: content }, 'responses')).toEqual(parsed);
+        expect(decodeRemoteOpenAISpeechParseResponse({ output_text: ' ', output: [{ type: 'reasoning' },
+            { type: 'message', content: [{ type: 'output_text', text: content }] }] }, 'responses')).toEqual(parsed);
+        expect(decodeRemoteOpenAISpeechParseResponse({ output: [{ type: 'message', content: [{ type: 'text', text: content }] }] }, 'responses')).toEqual(parsed);
+        expect(decodeRemoteOpenAISpeechParseResponse({ choices: [{ message: { content } }] }, 'chat')).toEqual(parsed);
+    });
+    it.each(['responses', 'chat'] as const)('refuses missing or malformed %s parse content', api => {
+        for (const value of [null, [], {}, { output_text: 42 }, { output: [{ type: 'message', content: [{ type: 'output_text', text: 42 }] }] },
+            { choices: [{ message: { content: 42 } }] }]) expect(() => decodeRemoteOpenAISpeechParseResponse(value, api)).toThrow('OpenAI returned no content.');
+        const invalid = api === 'responses' ? { output_text: 'not JSON' } : { choices: [{ message: { content: 'not JSON' } }] };
+        expect(() => decodeRemoteOpenAISpeechParseResponse(invalid, api)).toThrow();
+    });
+    it('moves the RN parse-model resolution unchanged, including legacy routing and custom models', () => {
+        for (const model of [undefined, '', 'gpt-4o-mini', 'GPT-4O', 'gpt-4o-legacy']) expect(resolveOpenAIParseModel(model)).toBe(OPENAI_DEFAULT_MODEL);
+        expect(resolveOpenAIParseModel('custom-model')).toBe('custom-model');
+        expect(resolveOpenAIParseModel(' custom-model ')).toBe(' custom-model ');
+    });
+});
 
 describe('runRemoteSpeechToTaskCapture', () => {
     it('times out and cancels a stalled remote speech error body', async () => {
@@ -205,6 +268,9 @@ describe('runRemoteSpeechToTaskCapture', () => {
         ]);
         expect(JSON.parse(String(requests[1]?.init?.body)).model).toBe('gpt-4o-mini');
         expect(JSON.parse(String(requests[2]?.init?.body)).model).toBe('gpt-4o-mini');
+        const config = { now: new Date('2026-08-01T12:00:00.000Z'), timeZone: 'America/New_York' };
+        expect(requests[1]?.init?.body).toBe(buildRemoteOpenAISpeechParseRequest(config, 'Buy milk tomorrow', 'gpt-4o-mini', 'responses').body);
+        expect(requests[2]?.init?.body).toBe(buildRemoteOpenAISpeechParseRequest(config, 'Buy milk tomorrow', 'gpt-4o-mini', 'chat').body);
         expect(warnings).toEqual([{
             message: 'OpenAI responses parse failed, retrying with chat completions',
             error: expect.objectContaining({ message: 'Responses unavailable' }),

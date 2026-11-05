@@ -48,7 +48,7 @@ type Translate = (key: string) => string;
 /** The statuses Review's bulk "Move to" offers, in order. */
 export const REVIEW_BULK_STATUSES: readonly TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done', 'reference'];
 
-export function getReviewOverviewText(t: Translate) {
+export function getReviewOverviewText(t: Translate, sequenceAware = false) {
     return {
         noArea: t('review.noArea'),
         singleActions: t('review.singleActions'),
@@ -65,6 +65,7 @@ export function getReviewOverviewText(t: Translate) {
         collapseEverything: tFallback(t, 'review.collapseEverything', 'Collapse all'),
         hasNextAction: t('review.hasNextAction'),
         waiting: t('status.waiting'),
+        ...(sequenceAware ? { projectDeferred: t('review.projectDeferred'), laterInSequence: t('projects.laterInSequence') } : {}),
         needsAction: t('review.needsAction'),
         empty: t('review.noTasks'),
         dueEmpty: t('review.dueEmpty'),
@@ -102,6 +103,8 @@ export type ReviewProjectSection = {
     title: string;
     nextActionState: ProjectNextActionState;
     tasks: Task[];
+    currentTasks?: Task[];
+    laterTasks?: Task[];
     /** "2 active tasks · Has Next Action", or "8 tasks" for single actions. */
     summary: string;
     /** What the header shows: single actions add " · Single actions". */
@@ -174,7 +177,7 @@ export function decorateReviewOverviewGroups(
                 const isSingleActions = !projectGroup.project;
                 const groupTitle = projectGroup.project?.title || text.singleActions;
                 const state = projectGroup.nextActionState;
-                const stateLabel = state === 'next' ? text.hasNextAction : state === 'waiting' ? text.waiting : text.needsAction;
+                const stateLabel = state === 'next' ? text.hasNextAction : state === 'waiting' ? text.waiting : state === 'deferred' ? text.projectDeferred ?? 'Scheduled' : text.needsAction;
                 const projectSummary = scope === 'due'
                     ? text.countTask(projectGroup.tasks.length)
                     : isSingleActions
@@ -187,11 +190,12 @@ export function decorateReviewOverviewGroups(
                     title: groupTitle,
                     nextActionState: state,
                     tasks: projectGroup.tasks,
+                    ...(projectGroup.currentTasks ? { currentTasks: projectGroup.currentTasks, laterTasks: projectGroup.laterTasks ?? [] } : {}),
                     summary: projectSummary,
                     summaryText: isSingleActions ? `${projectSummary} · ${text.singleActions}` : projectSummary,
                     accessibilityLabel: `${groupTitle}, ${projectSummary}`,
                     // Delegated (waiting) stays amber; truly stuck turns red (#1086).
-                    statusTone: scope === 'due' || isSingleActions ? null : state === 'next' ? 'success' : state === 'waiting' ? 'warning' : 'danger',
+                    statusTone: scope === 'due' || isSingleActions ? null : state === 'next' ? 'success' : state === 'waiting' || state === 'deferred' ? 'warning' : 'danger',
                     summaryTone: scope === 'all' && !isSingleActions && state === 'none' ? 'warning' : 'secondary',
                 };
             }),
@@ -398,13 +402,16 @@ const defaultWeeklyReviewLabels = {
     back: 'Back',
     hasNext: '✓ Has Next',
     waitingStatus: 'Waiting',
+    projectDeferred: 'Scheduled',
+    laterInSequence: 'Later in sequence',
     needsAction: '! Needs Action',
     activeTask: 'active task',
     activeTasks: 'active tasks',
     moreItems: 'more items',
 };
 
-export type WeeklyReviewLabels = Record<keyof typeof defaultWeeklyReviewLabels, string>;
+type SequenceLabel = 'projectDeferred' | 'laterInSequence';
+export type WeeklyReviewLabels = Record<Exclude<keyof typeof defaultWeeklyReviewLabels, SequenceLabel>, string> & Partial<Record<SequenceLabel, string>>;
 
 const weeklyReviewLabelKeys: WeeklyReviewLabels = {
     weeklyReview: 'settings.weeklyReview',
@@ -481,6 +488,8 @@ const weeklyReviewLabelKeys: WeeklyReviewLabels = {
     back: 'review.back',
     hasNext: 'review.hasNextAction',
     waitingStatus: 'status.waiting',
+    projectDeferred: 'review.projectDeferred',
+    laterInSequence: 'projects.laterInSequence',
     needsAction: 'review.needsAction',
     activeTask: 'review.activeTask',
     activeTasks: 'review.activeTasks',
@@ -488,11 +497,11 @@ const weeklyReviewLabelKeys: WeeklyReviewLabels = {
 };
 
 /** Every Weekly Review label in the current language, with English where a key is missing. */
-export function getWeeklyReviewLabels(t?: Translate): WeeklyReviewLabels {
+export function getWeeklyReviewLabels(t?: Translate, sequenceAware = false): WeeklyReviewLabels {
     return Object.fromEntries(
-        (Object.keys(defaultWeeklyReviewLabels) as (keyof WeeklyReviewLabels)[]).map((key) => [
+        (Object.keys(defaultWeeklyReviewLabels) as (keyof WeeklyReviewLabels)[]).filter((key) => sequenceAware || key !== 'projectDeferred' && key !== 'laterInSequence').map((key) => [
             key,
-            t ? tFallback(t, weeklyReviewLabelKeys[key], defaultWeeklyReviewLabels[key]) : defaultWeeklyReviewLabels[key],
+            t ? tFallback(t, weeklyReviewLabelKeys[key]!, defaultWeeklyReviewLabels[key]) : defaultWeeklyReviewLabels[key],
         ]),
     ) as WeeklyReviewLabels;
 }
@@ -618,6 +627,7 @@ const PROJECT_BADGES: Record<ProjectNextActionState, { label: keyof WeeklyReview
     next: { label: 'hasNext', color: '#10B981', background: '#10B98120' },
     // Delegated (waiting) is amber, not the red alarm (#1086).
     waiting: { label: 'waitingStatus', color: '#F59E0B', background: '#F59E0B20' },
+    deferred: { label: 'projectDeferred', color: '#F59E0B', background: '#F59E0B20' },
     none: { label: 'needsAction', color: '#EF4444', background: '#EF444420' },
 };
 
@@ -638,7 +648,7 @@ export function getWeeklyReviewProjects(
         return {
             ...entry,
             areaColor: getProjectAccentColor(entry.project, areaById) || null,
-            badge: { label: labels[badge.label], color: badge.color, background: badge.background },
+            badge: { label: labels[badge.label] ?? defaultWeeklyReviewLabels[badge.label], color: badge.color, background: badge.background },
             countLabel: `${entry.tasks.length} ${entry.tasks.length === 1 ? labels.activeTask : labels.activeTasks}`,
         };
     });

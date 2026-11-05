@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { FILE_SYNC_ABSENT_FINGERPRINT, createMobileFileSync, type MobileFileSyncFullHost } from './mobile-file-sync';
 import { FileSyncPathOwnerTerminatedError, fileSyncErrorCode, type MobileFileSyncObservedPublication } from './mobile-file-sync-remote';
-import { SyncEncryptionRemoteConflictError } from './sync-encryption';
+import { defaultSyncCryptoPrimitives } from './sync-crypto';
+import { compareSyncTransitionEntryNames, runEnableSyncEncryptionOverRemote, SyncEncryptionRemoteConflictError, type SyncEncryptionLocalState } from './sync-encryption';
 import type { AppData } from './types';
 
 // File Sync's log contexts never carry the sync folder's path or a document URI: a provider's or the file system's error text
@@ -749,5 +750,34 @@ describe('observed publication capability', () => {
             expect(folder.calls.filter(call => call.operation === 'delete').map(call => call.bytes)).toEqual([current]);
         }
         expect(folder.counters().legacyCalls).toBe(0);
+    });
+});
+
+describe('File Sync encryption enable order', () => {
+    it('seals attachments/ one entry at a time in compareSyncTransitionEntryNames order, whatever the case or punctuation', async () => {
+        const folder = pathFolder();
+        const encode = (text: string) => new TextEncoder().encode(text);
+        folder.files.set(`${PATH_DIR}/data.json`, encode(JSON.stringify(data)));
+        const names = ['b.txt', 'B.txt', 'a-1.txt', 'a.1.txt', 'A.txt', '10.txt', '9.txt', '_x.txt', 'Z-z.txt'];
+        for (const name of names) folder.files.set(`${PATH_DIR}/attachments/${name}`, encode(name));
+        folder.port.list = async (dir: string) => [...new Set([...folder.files.keys()]
+            .filter((key) => key.startsWith(dir)).map((key) => key.slice(dir.length).split('/')[0]))];
+        const sealed: string[] = [];
+        const rename = folder.port.rename;
+        folder.port.rename = (uri: string, name: string) => {
+            const leaf = uri.slice(uri.lastIndexOf('/') + 1);
+            if (uri.startsWith(`${PATH_DIR}/attachments/`) && names.includes(leaf)) sealed.push(leaf);
+            return rename(uri, name);
+        };
+        const { host } = fakeHost({ path: folder.port, crypto: defaultSyncCryptoPrimitives });
+        const remote = await createMobileFileSync(host).createFileSyncEncryptionRemotePort(`${PATH_DIR}/data.json`);
+        let state: SyncEncryptionLocalState | null = null;
+        let key: Uint8Array | null = null;
+        await runEnableSyncEncryptionOverRemote('correct horse', remote!, {
+            getKey: async () => key, setKey: async (next) => { key = next; }, clearKey: async () => { key = null; },
+        }, { read: () => state, write: (next) => { state = next; } }, undefined, defaultSyncCryptoPrimitives, { mKib: 8, t: 1, p: 1 });
+
+        expect(sealed).toEqual([...names].sort(compareSyncTransitionEntryNames));
+        expect(sealed).toEqual(['10.txt', '9.txt', 'A.txt', 'B.txt', 'Z-z.txt', '_x.txt', 'a-1.txt', 'a.1.txt', 'b.txt']);
     });
 });

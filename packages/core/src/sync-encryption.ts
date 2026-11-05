@@ -157,6 +157,8 @@ export type SyncEncryptionLocalStatePort = {
 
 export const SYNC_ENCRYPTION_PARTLY_ENCRYPTED = 'SYNC_ENCRYPTION_PARTLY_ENCRYPTED';
 
+export const compareSyncTransitionEntryNames = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+
 /** The sync location holds encrypted files beside plaintext ones (an encryption change was cut off) while this device has
  *  no key: it never writes there, so plaintext never lands beside ciphertext. */
 export class SyncEncryptionPartlyEncryptedError extends Error {

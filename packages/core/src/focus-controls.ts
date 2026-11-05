@@ -476,6 +476,7 @@ export function resolveFocusFilterState(
         tokens: state.tokens,
         excludedTokens: state.excludedTokens,
         projects: state.projects,
+        excludedProjects: state.excludedProjects, statuses: state.statuses,
         locations: visibility.location && state.location.trim() ? [state.location.trim()] : [],
         priorities: visibility.priority ? state.priorities : [],
         energyLevels: visibility.energyLevel ? state.energyLevels : [],
@@ -531,6 +532,7 @@ export function applyFocusSavedFilter(state: FocusControlState, filter: SavedFil
             tokens: selections.tokens,
             excludedTokens: selections.excludedTokens,
             projects: selections.projects,
+            ...(filter.view === 'contexts' ? { excludedProjects: selections.excludedProjects ?? [], statuses: selections.statuses ?? [] } : {}),
             priorities: selections.priorities,
             energyLevels: selections.energyLevels,
             timeEstimates: selections.timeEstimates,
@@ -567,7 +569,10 @@ export function applyFocusControlEdit(
                 case 'setAnyDateRange': forget('anyDateRange'); break;
                 case 'removeToken':
                 case 'toggleToken': forget('contexts', 'tags', 'excludedContexts', 'excludedTags'); break;
-                case 'toggleProject': forget('projects'); break;
+                case 'toggleProject':
+                case 'cycleProject':
+                case 'removeProject': forget('projects', 'excludedProjects'); break;
+                case 'toggleStatus': forget('statuses'); break;
                 case 'togglePriority': forget('priority'); break;
                 case 'toggleEnergyLevel': forget('energy'); break;
                 case 'toggleTimeEstimate': forget('timeEstimates', 'timeEstimateRange'); break;

@@ -294,12 +294,24 @@ describe('native host contract: Board', () => {
         expect(retried).toEqual({ changed: true, open: { taskId: copies[0].id, projectId: 'p-launch', tab: 'task' } });
     });
 
-    it('replays a duplicate after restart without a second copy and refuses a different source', async () => {
+    it.each(['next', 'reference'] as const)('replays a %s duplicate with mixed checklist progress after restart without a second copy and refuses a different source', async (status) => {
         freezeClock();
         const { host } = await openHost();
+        await useTaskStore.getState().updateTask('n-draft', { status, checklist: [
+            { id: 'done-step', title: 'Completed step', isCompleted: true },
+            { id: 'open-step', title: 'Remaining step', isCompleted: false },
+        ] });
+        await flushPendingSave();
+        const source = structuredClone(useTaskStore.getState()._tasksById.get('n-draft')!);
         const requestId = generateUUID();
         const action = { type: 'duplicateTask' as const, taskId: 'n-draft' };
         const first = value(await host.runBoardAction({ requestId, action }));
+        const copy = useTaskStore.getState()._tasksById.get(requestId)!;
+        expect(copy.checklist).toMatchObject([{ title: 'Completed step', isCompleted: true },
+            { title: 'Remaining step', isCompleted: false }]);
+        expect(copy.checklist!.every((item) => !source.checklist!.some((original) => original.id === item.id))).toBe(true);
+        expect(new Set(copy.checklist!.map((item) => item.id)).size).toBe(2);
+        expect(useTaskStore.getState()._tasksById.get(source.id)).toEqual(source);
         expect(first).toMatchObject({ changed: true, open: { taskId: requestId } });
         const before = useTaskStore.getState()._allTasks.map((task) => [task.id, task.rev]);
         const restarted = createNativeHostContract();

@@ -138,6 +138,9 @@ type Translate = (key: string) => string;
 
 /** What a host binds for Settings › Sync. */
 export type NativeSyncSettingsHost = {
+    /** Private foreground ownership; never serialized in a Settings read. */
+    beforeDropboxPromotion?: () => Promise<void>;
+    beforeActivation?: () => Promise<void>;
     platform: {
         os: 'android' | 'ios';
         /** FOSS builds never offer Dropbox. */
@@ -161,7 +164,7 @@ export type NativeSyncSettingsHost = {
         /** Selected host capability: only unlock an existing saved WebDAV location. */
         unlockOnly?: boolean;
         /** Selected capabilities; saved-webdav-or-local adds only local Enable and Disable. */
-        mode?: 'saved-webdav-enable-unlock' | 'saved-webdav' | 'saved-webdav-or-local';
+        mode?: 'saved-webdav-enable-unlock' | 'saved-webdav' | 'saved-webdav-or-local' | 'saved-dropbox';
         getStatus(): Promise<SyncEncryptionStatus>;
         getIncompleteTransition(): Promise<SyncEncryptionTransitionKind | null>;
         /** True while no durable sync backend exists (transitions then run local-only). */
@@ -413,6 +416,7 @@ const readConfigSnapshot = async (host: NativeSyncSettingsHost) => {
     return {
         revision: fingerprint([entries, secretPrint(password), secretPrint(token)]),
         backend: entries.find(([name]) => name === SYNC_BACKEND_KEY)?.[1],
+        cloudProvider: entries.find(([name]) => name === CLOUD_PROVIDER_KEY)?.[1],
     };
 };
 const readConfigRevision = async (host: NativeSyncSettingsHost): Promise<string> => (await readConfigSnapshot(host)).revision;
@@ -504,6 +508,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
     };
 
     const createTransport = (host: NativeSyncSettingsHost, uncertain: () => void) => createSyncSettingsTransport({
+        ...(host.beforeDropboxPromotion ? { beforeDropboxPromotion: host.beforeDropboxPromotion } : {}),
+        ...(host.beforeActivation ? { beforeActivation: host.beforeActivation } : {}),
         params: () => params(host),
         storage: host.storage,
         secrets: host.secrets,
@@ -874,7 +880,11 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         const proven = current.transport.getProven();
         return current.transport.getState().syncBackend === 'webdav' && proven.backend === 'webdav' && !proven.pending;
     };
-    const selectedEncryptionTarget = (current: Screen): 'webdav' | 'local' | null => {
+    const selectedEncryptionTarget = (current: Screen): 'webdav' | 'local' | 'dropbox' | null => {
+        const dropbox = current.transport.getProven();
+        if (encryptionMode(current) === 'saved-dropbox' && current.host.dropbox
+            && current.transport.getState().syncBackend === 'cloud' && current.transport.getState().cloudProvider === 'dropbox'
+            && dropbox.backend === 'cloud' && dropbox.cloudProvider === 'dropbox' && !dropbox.pending) return 'dropbox';
         if (hasProvenWebDavBackend(current)) return 'webdav';
         const proven = current.transport.getProven();
         return encryptionMode(current) === 'saved-webdav-or-local'
@@ -882,13 +892,14 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             && current.card?.getState().pendingFirstSync ? 'local' : null;
     };
     const hasAllWebDavTransitions = (current: Screen) => (
-        encryptionMode(current) === 'saved-webdav' || encryptionMode(current) === 'saved-webdav-or-local'
+        encryptionMode(current) === 'saved-webdav' || encryptionMode(current) === 'saved-webdav-or-local' || encryptionMode(current) === 'saved-dropbox'
     );
-    const refuseSelectedEncryptionTarget = async (current: Screen, captured: 'webdav' | 'local' | null, revision: string) => {
+    const refuseSelectedEncryptionTarget = async (current: Screen, captured: 'webdav' | 'local' | 'dropbox' | null, revision: string) => {
         await settle(current);
         const snapshot = await readConfigSnapshot(current.host), stored = snapshot.backend;
         const durable = stored == null || stored.trim() === 'off' ? 'local'
-            : stored.trim() === 'webdav' ? 'webdav' : null;
+            : stored.trim() === 'webdav' ? 'webdav'
+                : stored.trim() === 'cloud' && snapshot.cloudProvider === 'dropbox' && encryptionMode(current) === 'saved-dropbox' ? 'dropbox' : null;
         // A selection started during the read is not a settled target proof.
         const refused = snapshot.revision !== revision
             ? fail('STALE_REVISION', 'The stored sync configuration changed since this form was read; read the screen again')
@@ -1306,7 +1317,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             if (!host) return fail('ACTION_FAILED', 'Sync is not available on this host yet');
             if (host.encryption.mode !== undefined
                 && ((host.encryption.mode !== 'saved-webdav-enable-unlock' && host.encryption.mode !== 'saved-webdav'
-                    && host.encryption.mode !== 'saved-webdav-or-local')
+                    && host.encryption.mode !== 'saved-webdav-or-local' && host.encryption.mode !== 'saved-dropbox')
                     || host.encryption.unlockOnly !== undefined)) {
                 return fail('ACTION_FAILED', 'The selected sync encryption mode cannot be combined with unlockOnly');
             }

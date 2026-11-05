@@ -3,7 +3,7 @@ import { createNativeHostContract, type NativeHostResult } from './native-host-c
 import type { PendingCaptureQueuePort, PendingCaptureRecordPort } from './pending-captures';
 import { acquireWorkspaceTransitionLock } from './sandbox';
 import { openScreenHost, requestId, restartScreenHost, value } from './screen-parity.replay';
-import { flushPendingSave, resetForTests, useTaskStore } from './store';
+import { flushPendingSave, getStorageAdapter, resetForTests, useTaskStore } from './store';
 import type { Task } from './types';
 
 const CAPTURE_ID = '0b6f1c4e-7a3d-4c55-9e21-4f7a8a1d2c01';
@@ -109,6 +109,22 @@ describe('ingestPendingCaptures', () => {
         expect([...queue.stored.keys()].sort()).toEqual([`${AUDIO_ID}.json`, 'timer.json']);
         expect(vi.mocked(queue.port.delete).mock.calls.map(([name]) => name)).not.toContain(`${AUDIO_ID}.json`);
         expect(vi.mocked(queue.port.delete).mock.calls.map(([name]) => name)).not.toContain('timer.json');
+    });
+
+    it('validates the optional audio port before queue access and passes an owned port to shared assembly', async () => {
+        const host = await openScreenHost({ data: {}, record: {}, log: [] });
+        const queue = fakeQueue({ [`${AUDIO_ID}.json`]: queueItems[`${AUDIO_ID}.json`] });
+        for (const audio of [null, {}, { resolvePath: () => '/owned', delete: async () => undefined, transcribe: true },
+            { resolvePath: () => '/owned', delete: async () => undefined, extra: true }]) {
+            expect(await host.ingestPendingCaptures({ requestId: requestId(), queue: queue.port, lastApplied: record(), audio } as never))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(queue.port.list).not.toHaveBeenCalled();
+        const audio = { resolvePath: () => '/owned', transcribe: vi.fn(async () => 'Transcript /next'), delete: vi.fn(async () => undefined) };
+        expect(value(await host.ingestPendingCaptures({ requestId: requestId(), queue: queue.port, lastApplied: record(), audio })))
+            .toEqual({ ingested: 1 });
+        expect(useTaskStore.getState()._allTasks.find(task => task.id === AUDIO_ID)).toMatchObject({ title: 'Transcript', status: 'next' });
+        expect(audio.transcribe).toHaveBeenCalledOnce(); expect(audio.delete).toHaveBeenCalledOnce();
     });
 
     it('replayed after a restart that followed a kill between the save and the deletes, stores nothing twice', async () => {
@@ -244,6 +260,51 @@ describe('ingestPendingCaptures', () => {
         expect(useTaskStore.getState()._allTasks.find((entry) => entry.id === 'open')?.status).toBe('next');
         expect(useTaskStore.getState()._allTasks.filter((entry) => entry.id === CAPTURE_ID)).toHaveLength(1);
         expect(queue.stored.size).toBe(0);
+    });
+
+    it('settles Watch checklist only after durable task and ordering writes, and retains a failed receipt for replay', async () => {
+        const original = task('checklist', { checklist: [{ id: 'item', title: 'Milk', isCompleted: false }] });
+        const host = await openScreenHost({ data: { tasks: [original] }, record: {}, log: [] });
+        const command = { kind: 'checklist', id: CAPTURE_ID, taskId: original.id,
+            taskCreatedAt: original.createdAt, itemId: 'item', itemTitle: 'Milk', isCompleted: true,
+            createdAt: '2026-10-30T12:00:00.000Z', source: 'apple-watch' };
+        const queue = fakeQueue({ 'checklist.json': command });
+        let failReceipt = true;
+        const settleWatchChecklist = vi.fn(async (id: string, outcome: string) => {
+            expect(id).toBe(CAPTURE_ID);
+            expect(outcome).toBe('applied');
+            expect(deviceRecord).toContain(CAPTURE_ID);
+            const saved = await getStorageAdapter().getData();
+            expect(saved?.tasks.find(t => t.id === original.id)?.checklist?.[0].isCompleted).toBe(true);
+            expect(queue.stored.has('checklist.json')).toBe(true);
+            if (failReceipt) throw new Error('receipt not durable');
+        });
+        expect(await host.ingestPendingCaptures({ requestId: requestId(), queue: queue.port,
+            lastApplied: record(), settleWatchChecklist })).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        expect(queue.stored.has('checklist.json')).toBe(true);
+        failReceipt = false;
+        const restarted = await restartScreenHost();
+        const before = useTaskStore.getState()._allTasks;
+        expect(value(await restarted.ingestPendingCaptures({ requestId: requestId(), queue: queue.port,
+            lastApplied: record(), settleWatchChecklist }))).toEqual({ ingested: 1 });
+        expect(useTaskStore.getState()._allTasks).toEqual(before);
+        expect(settleWatchChecklist).toHaveBeenCalledTimes(2);
+        expect(queue.stored.size).toBe(0);
+    });
+
+    it('retains Watch checklist without a settlement port and rejects a malformed port before reading', async () => {
+        const original = task('checklist', { checklist: [{ id: 'item', title: 'Milk', isCompleted: false }] });
+        const host = await openScreenHost({ data: { tasks: [original] }, record: {}, log: [] });
+        const queue = fakeQueue({ 'checklist.json': { kind: 'checklist', id: CAPTURE_ID, taskId: original.id,
+            taskCreatedAt: original.createdAt, itemId: 'item', itemTitle: 'Milk', isCompleted: true,
+            createdAt: '2026-10-30T12:00:00.000Z', source: 'apple-watch' } });
+        expect(await host.ingestPendingCaptures({ requestId: requestId(), queue: queue.port,
+            lastApplied: record(), settleWatchChecklist: true as never })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(queue.port.list).not.toHaveBeenCalled();
+        expect(await host.ingestPendingCaptures({ requestId: requestId(), queue: queue.port,
+            lastApplied: record() })).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        expect(queue.stored.size).toBe(1);
+        expect(useTaskStore.getState()._allTasks.find(t => t.id === original.id)?.checklist?.[0].isCompleted).toBe(false);
     });
 
     it('reads nothing during a workspace switch', async () => {

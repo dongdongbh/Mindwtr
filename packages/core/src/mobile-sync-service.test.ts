@@ -186,6 +186,15 @@ const WEBDAV_VALUES = {
 };
 
 describe('mobile sync service behind fake ports', () => {
+  it('invalidating sync configuration clears attachment download backoff', () => {
+    const { host } = createFakeHost();
+    const clearDownloadBackoff = vi.fn();
+    host.attachments.clearDownloadBackoff = clearDownloadBackoff;
+    const service = createMobileSyncService(host);
+    service.clearMobileSyncConfigCache();
+    expect(clearDownloadBackoff).toHaveBeenCalledTimes(1);
+  });
+
   it('bounds forced follow-up receipts and one large-store comparison without changing queue or writes', async () => {
     const fake = createFakeHost({ values: { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'selfhosted',
       [CLOUD_URL_KEY]: 'https://private.example.com', }, secrets: { [CLOUD_TOKEN_KEY]: 'private-credential' } });

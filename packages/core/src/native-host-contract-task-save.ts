@@ -4,7 +4,8 @@ import type { Area, Attachment, Project, Section, Task } from './types';
 import { getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
 import { applyTaskUpdates, createProjectOrderReserver, ensureDeviceId, findTaskProjectReactivationTarget,
     getNextProjectOrder, nextRevision, normalizeTaskUpdate } from './store-helpers';
-import { applyPreparedTaskEditChanges, buildPreparedTaskEditChanges, prepareTaskUpdatesForStore, taskEditValuesEqual } from './store-tasks';
+import { applyPreparedTaskEditChanges, buildPreparedTaskEditChanges, prepareTaskUpdatesForStore } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import { createTaskDraft, resolveTaskDraftTitle, taskDraftToUpdatePatch, type TaskDraft, type TaskDraftField } from './task-draft';
 import { applyTaskDraftPatch, buildTaskEditUpdatePatch } from './task-editor-model';
 import { isStatusListTaskReadOnly } from './menu-views-model';
@@ -36,9 +37,11 @@ export type NativeTaskRecurrenceBase = {
 type SaveField = 'title' | 'description' | 'location' | 'assignedTo' | 'priority' | 'energyLevel' | 'timeEstimate' | 'contexts' | 'tags' | 'status'
     | 'focusedToday' | 'completedAt' | 'timeSpentMinutes'
     | 'projectId' | 'areaId' | 'sectionId' | 'startTime' | 'dueDate' | 'reviewAt' | 'relativeStartOffset'
-    | 'recurrence' | 'preserveChecklistOnRepeat' | 'recurrenceStrategy' | 'recurrenceRRule' | 'showFutureRecurrence';
+    | 'recurrence' | 'preserveChecklistOnRepeat' | 'recurrenceStrategy' | 'recurrenceRRule' | 'showFutureRecurrence'
+    | 'reminderPolicy' | 'dueReminderLeadMinutes' | 'startReminderLeadMinutes';
+type NullableSaveField = 'relativeStartOffset' | 'timeSpentMinutes' | 'dueReminderLeadMinutes' | 'startReminderLeadMinutes';
 type SaveFields = Partial<{ [K in SaveField]: Exclude<TaskDraft[K], undefined>
-    | (K extends 'relativeStartOffset' | 'timeSpentMinutes' ? null : never) }>;
+    | (K extends NullableSaveField ? null : never) }>;
 export type NativeTaskDraftSaveRequest = {
     id: string;
     base: SaveFields;
@@ -78,7 +81,11 @@ export type NativeReviewTaskWriteInput = Extract<NativeReviewAction, { type: 'ma
 
 const FIELDS: readonly SaveField[] = ['title', 'description', 'location', 'assignedTo', 'priority', 'energyLevel', 'timeEstimate', 'contexts', 'tags', 'status', 'focusedToday', 'completedAt', 'timeSpentMinutes',
     'projectId', 'areaId', 'sectionId', 'startTime', 'dueDate', 'reviewAt', 'relativeStartOffset',
-    'recurrence', 'preserveChecklistOnRepeat', 'recurrenceStrategy', 'recurrenceRRule', 'showFutureRecurrence'];
+    'recurrence', 'preserveChecklistOnRepeat', 'recurrenceStrategy', 'recurrenceRRule', 'showFutureRecurrence',
+    'reminderPolicy', 'dueReminderLeadMinutes', 'startReminderLeadMinutes'];
+export const NATIVE_NULLABLE_DRAFT_FIELDS: readonly string[] = ['relativeStartOffset', 'timeSpentMinutes', 'dueReminderLeadMinutes', 'startReminderLeadMinutes'];
+const REMINDER_FIELDS: readonly string[] = ['reminderPolicy', 'dueReminderLeadMinutes', 'startReminderLeadMinutes'];
+const REMINDER_LEAD_FIELDS: readonly string[] = ['dueReminderLeadMinutes', 'startReminderLeadMinutes'];
 const STORED_FIELDS = FIELDS.filter((field) => field !== 'preserveChecklistOnRepeat' && field !== 'recurrenceStrategy' && field !== 'recurrenceRRule' && field !== 'focusedToday');
 export const SCHEDULE = ['startTime', 'dueDate', 'relativeStartOffset', 'reviewAt'] as const;
 export const RECURRENCE = ['recurrence', 'preserveChecklistOnRepeat', 'recurrenceStrategy', 'recurrenceRRule', 'showFutureRecurrence'] as const;
@@ -146,7 +153,7 @@ export const readNativeTaskDraftSaveRequest = (input: unknown, validateField: (f
         || (!allowChecklist && !allowPlain && !(editsRecurrence || fields.some((field) => (SCHEDULE as readonly string[]).includes(field))))
         || !keys(value.base, fields) || fields.some((field) => !(FIELDS as readonly string[]).includes(field)
             || (!allowChecklist && ['status', 'focusedToday', 'completedAt'].includes(field))
-            || (field === 'timeSpentMinutes' && !allowChecklist && !allowPlain))) return null;
+            || ((field === 'timeSpentMinutes' || REMINDER_FIELDS.includes(field)) && !allowChecklist && !allowPlain))) return null;
     // Older saved drafts own the recurrence group without the newly added checklist flag.
     if (editsRecurrence && (!RECURRENCE.every((field) => field === 'preserveChecklistOnRepeat' || own(value.patch as object, field))
         || !record(value.recurrenceBase) || !keys(value.recurrenceBase, ['recurrence', 'showFutureRecurrence'])
@@ -165,9 +172,9 @@ export const readNativeTaskDraftSaveRequest = (input: unknown, validateField: (f
             ? !validateField(field, base)
             : field === 'focusedToday' ? typeof base !== 'boolean'
             : field === 'completedAt' ? !validateField(field, base)
-            : field === 'timeSpentMinutes' ? !(base === null || validateField(field, base))
+            : field === 'timeSpentMinutes' || REMINDER_LEAD_FIELDS.includes(field) ? !(base === null || validateField(field, base))
             : field === 'relativeStartOffset' ? !(base === null || record(base)) : typeof base !== 'string') return null;
-        if (!validateField(field, next === null && ['relativeStartOffset', 'timeSpentMinutes'].includes(field) ? undefined : next)) return null;
+        if (!validateField(field, next === null && NATIVE_NULLABLE_DRAFT_FIELDS.includes(field) ? undefined : next)) return null;
     }
     return { ...value, ...(attachments ? { attachments } : {}) } as unknown as NativeTaskDraftSaveRequest;
 };
@@ -356,6 +363,7 @@ const draftSaveEffect = (before: Task, request: NativeTaskDraftSaveRequest,
     if (dependent) ['status', 'startTime', 'dueDate', 'relativeStartOffset', 'reviewAt',
         'isFocusedToday', 'focusOrder', 'pushCount', 'boardOrder'].forEach((field) => owned.add(field));
     if (moves) ['projectId', 'sectionId', 'areaId', 'order', 'orderNum'].forEach((field) => owned.add(field));
+    if (own(request.patch, 'reminderPolicy')) owned.add('suppressMindwtrReminders');
     // The shared update computes dependent fields, but a title-only edit must
     // not copy its unrelated legacy lifecycle normalization into the raw row.
     const unstamped = { ...before } as Task;
@@ -402,8 +410,10 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
             || typeof before.updatedAt !== 'string' || !['inbox', 'next', 'waiting', 'someday', 'done', 'archived',
                 ...(preserveRaw ? ['reference'] : [])].includes(before.status)
             || before.deletedAt || before.purgedAt || !validBases(before, request, preserveRaw)) return false;
+        const policyEdited = own(request.patch, 'reminderPolicy');
         if (Object.keys(changes).some((field) => !(STORED_FIELDS as readonly string[]).includes(field)
-            && !EFFECTS.includes(field) && !(allowAttachments && field === 'attachments'))) return false;
+            && !EFFECTS.includes(field) && !(allowAttachments && field === 'attachments')
+            && !(policyEdited && field === 'suppressMindwtrReminders'))) return false;
         const after = applyPreparedTaskEditChanges(prepared);
         if (!taskEditValuesEqual(changes, buildPreparedTaskEditChanges(before, after))) return false;
         const direct = serializedDirect(before, request);
@@ -420,6 +430,8 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
             if (own(changes, field) && !own(request.patch, field)) return false;
             if (own(request.patch, field) && !taskEditValuesEqual(after[field as keyof Task], direct[field as keyof Task])) return false;
         }
+        if (policyEdited && !taskEditValuesEqual(after.suppressMindwtrReminders,
+            normalizeTaskUpdate(before, { reminderPolicy: request.patch.reminderPolicy }).suppressMindwtrReminders)) return false;
         // Match RN's narrowed recurrence write, preserving untouched legacy raw
         // values. Only the recurrence projection is normalized here; clock and
         // timezone-dependent schedule/focus effects remain frozen in changes.
@@ -541,6 +553,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
             }
             if (own(request.patch, 'dueDate')) allowed.add('pushCount');
             if (request.attachments) allowed.add('attachments');
+            if (own(request.patch, 'reminderPolicy')) allowed.add('suppressMindwtrReminders');
             const changedKeys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
                 .filter((field) => !['rev', 'revBy', 'updatedAt'].includes(field)
                     && !sameSectionDeleteJson(before[field as keyof Task], after[field as keyof Task]));

@@ -58,6 +58,43 @@ beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new 
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave().catch(() => undefined); resetForTests(); });
 
 describe('prepared saved-search writes', () => {
+    it('sorts only the selected search, persists through reload, replays, and clears to global', async () => {
+        const sibling = { id: 'sibling', name: 'Other', query: '#work', sort: 'dueDate' };
+        const host = harness({ savedSearches: [row, sibling], taskSortBy: 'title' });
+        let view = await host.open();
+        const options = view.methods.getSavedSearchSortOptions({ id: row.id });
+        expect(options.ok && options.value.choices.find((choice) => choice.selected)?.value).toBe(null);
+        const request = view.request({ type: 'sort', id: row.id, sort: 'priority' });
+        const prepared = view.prepared(request);
+        expect(await view.methods.commitPreparedSavedSearchWrite({ request, prepared })).toEqual({ ok: true,
+            value: { id: row.id, existing: true, changed: true } });
+        expect(host.disk().settings.savedSearches).toEqual([{ ...row, sort: 'priority' }, sibling]);
+        expect(host.disk().settings.taskSortBy).toBe('title');
+        const writes = host.saves();
+        view = await host.open();
+        expect(await view.methods.commitPreparedSavedSearchWrite({ request, prepared })).toEqual({ ok: true, value: prepared.result });
+        expect(host.saves()).toBe(writes);
+        const clear = view.request({ type: 'sort', id: row.id, sort: null }, null, otherUUID);
+        const cleared = view.prepared(clear);
+        expect(await view.methods.commitPreparedSavedSearchWrite({ request: clear, prepared: cleared })).toEqual({ ok: true, value: cleared.result });
+        expect(host.disk().settings.savedSearches).toEqual([row, sibling]);
+    });
+
+    it('refuses stale sort collections, missing searches and unavailable choices', async () => {
+        const host = harness({ savedSearches: [row], features: { priorities: false } });
+        const view = await host.open();
+        const options = view.methods.getSavedSearchSortOptions({ id: row.id });
+        expect(options.ok && options.value.choices.some((choice) => choice.value === 'priority')).toBe(false);
+        const hidden = view.request({ type: 'sort', id: row.id, sort: 'priority' });
+        expect(view.methods.prepareSavedSearchWrite(hidden)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const stale = view.request({ type: 'sort', id: row.id, sort: 'title' });
+        await useTaskStore.getState().updateSettings({ savedSearches: [{ ...row, name: 'Changed' }] });
+        expect(view.methods.prepareSavedSearchWrite(stale)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(view.methods.getSavedSearchSortOptions({ id: 'missing' })).toMatchObject({ ok: false });
+        expect(view.methods.prepareSavedSearchWrite(view.request({ type: 'sort', id: 'missing', sort: 'title' })))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    });
+
     it('saves the RN plan under the request UUID, preserves raw siblings and replays after reload without writing', async () => {
         const host = harness({ savedSearches: [row], savedSearchesUpdatedAt: now, theme: 'light' });
         let view = await host.open();

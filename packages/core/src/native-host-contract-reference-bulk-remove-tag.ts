@@ -1,3 +1,4 @@
+import type { NativeProjectTasksRemoveTagRequest, NativeProjectTasksRemoveTagPrepared } from './native-host-contract-project-bulk-remove-tag';
 import type { NativeHostResult } from './native-host-contract';
 import type { NativeInboxTasksRemoveTagRequest, NativeInboxTasksRemoveTagPrepared } from './native-host-contract-inbox-bulk-remove-tag';
 import type { AppData, Project, Section, Task } from './types';
@@ -7,7 +8,7 @@ import { validSection } from './native-host-contract-project-section-rename';
 import { validFrozenFocusDate } from './native-host-contract-task-focus';
 import { historyRowLoadProjection } from './native-host-contract-task-checklist';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
-import { createNativeRequestReceipts, NativeReceiptSqliteAdapter } from './native-request-receipts';
+import { createNativeRequestReceipts, isNativeRequestReceiptDurable, NativeReceiptSqliteAdapter } from './native-request-receipts';
 import { taskEditValuesEqual } from './json-value-equality';
 import { buildEntityMap, ensureDeviceId } from './store-helpers';
 import { referenceTasksTagEffect } from './native-host-contract-reference-bulk-tag';
@@ -39,8 +40,8 @@ export type NativeReferenceTasksRemoveTagEnvelope = { request: NativeReferenceTa
 export type NativeReferenceTasksRemoveTagPreparation = { kind: 'noop'; result: { count: 0; changed: false } }
     | { kind: 'prepared'; prepared: NativeReferenceTasksRemoveTagPrepared };
 
-type TagSource = 'reference' | 'inbox';
-type TagRequest = NativeReferenceTasksRemoveTagRequest | NativeInboxTasksRemoveTagRequest;
+type TagSource = 'reference' | 'inbox' | 'project';
+type TagRequest = NativeReferenceTasksRemoveTagRequest | NativeInboxTasksRemoveTagRequest | NativeProjectTasksRemoveTagRequest;
 type TagPrepared = Omit<NativeReferenceTasksRemoveTagPrepared, 'request'> & { request: TagRequest };
 type TagEnvelope = { request: TagRequest; prepared: TagPrepared };
 const same = taskEditValuesEqual;
@@ -55,8 +56,8 @@ const selectionRequest = (request: TagRequest) => ({
     requestId: request.requestId, taskIds: request.taskIds, taskRevisions: request.taskRevisions, params: request.params, status: 'next' as const, ...('source' in request ? { source: request.source } : {}) });
 const readRequest = (input: unknown, source: TagSource): TagRequest | null => {
     const request = detachReferenceBatchJson<TagRequest>(input);
-    return request && exact(request, ['requestId', 'taskIds', 'taskRevisions', 'tags', 'params', ...(source === 'inbox' ? ['source'] : [])])
-        && (source !== 'inbox' || ('source' in request && request.source === 'inbox'))
+    return request && exact(request, ['requestId', 'taskIds', 'taskRevisions', 'tags', 'params', ...(source !== 'reference' ? ['source'] : [])])
+        && (source === 'reference' || ('source' in request && request.source === source))
         && Array.isArray(request.tags) && request.tags.length > 0 && request.tags.length <= 10_000
         && request.tags.every((tag) => text(tag, 2_000_000)) && new Set(request.tags).size === request.tags.length
         && readStatusBatchSelectionRequest(selectionRequest(request), source) ? request : null;
@@ -119,10 +120,12 @@ export const referenceTasksRemoveTagAuthorityMatches = (prepared: TagPrepared, d
 export function createTasksRemoveTagMethods(deps: {
     readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>;
 }, source: TagSource) {
-    const label = source === 'inbox' ? 'Inbox' : 'Reference';
-    const family = source === 'inbox' ? 'inboxTasksRemoveTag' : 'referenceTasksRemoveTag';
+    const label = source === 'project' ? 'Project' : source === 'inbox' ? 'Inbox' : 'Reference';
+    const family = `${source}TasksRemoveTag`;
     const guardedAdapter = (): NativeHostResult<null> => {
         const adapter = getStorageAdapter();
+        if (source === 'project' && !isNativeRequestReceiptDurable('projectTasksRemoveTag'))
+            return fail('SAVE_FAILED', 'Project Remove tag receipt storage is unavailable');
         return adapter instanceof NativeReceiptSqliteAdapter && adapter.concurrentWritesGuarded
             ? { ok: true, value: null } : fail('SAVE_FAILED', `${label} Remove tag requires guarded canonical SQLite storage`);
     };
@@ -152,7 +155,9 @@ export function createTasksRemoveTagMethods(deps: {
         catch { return fail('STALE_REVISION', `${label} Remove tag destination changed since preparation`); }
     };
     const apply = (envelope: TagEnvelope, authority: PreparedAreaAuthority) =>
-        source === 'inbox'
+        source === 'project'
+            ? useTaskStore.getState().commitPreparedProjectTasksRemoveTag(envelope.prepared as NativeProjectTasksRemoveTagPrepared, authority)
+            : source === 'inbox'
             ? useTaskStore.getState().commitPreparedInboxTasksRemoveTag(envelope.prepared as NativeInboxTasksRemoveTagPrepared, authority)
             : useTaskStore.getState().commitPreparedReferenceTasksRemoveTag(envelope.prepared as NativeReferenceTasksRemoveTagPrepared, authority);
     const receipts = createNativeRequestReceipts({ save: async (requestId) => {
@@ -188,7 +193,7 @@ export function createTasksRemoveTagMethods(deps: {
             if (!referenceBatchSettingsReadable(data.settings)) return fail('SAVE_FAILED', `Saved ${label} settings JSON is unreadable`);
             const scope = rawReferenceBatchScope(referenceTasksRemoveTagScope(request, data));
             if (!scope) return fail('SAVE_FAILED', `Saved ${label} raw JSON could not be bound safely`);
-            if (source === 'inbox' && !detachReferenceBatchValue(scope))
+            if (source !== 'reference' && !detachReferenceBatchValue(scope))
                 return fail('INVALID_INPUT', 'Inbox Remove tag selection witness is too large; select a smaller library');
             if (!statusBatchSourcesMatch(selectionRequest(request), scope, now.toISOString())) return fail('STALE_REVISION', `Saved ${label} selection changed`);
             if (!tagUpdates(request, scope, now.toISOString()).length) return { ok: true, value: { kind: 'noop', result: { count: 0, changed: false } } };
@@ -217,7 +222,10 @@ export function createTasksRemoveTagMethods(deps: {
                 : fail('INVALID_INPUT', `Prepared ${label} Remove tag is malformed`);
         },
         tasksRemoveTagOutcome(input: TagEnvelope): NativeHostResult<NativeReferenceTasksRemoveTagResult | null> {
-            const envelope = readTasksRemoveTagEnvelope(input, source); return envelope
+            const envelope = readTasksRemoveTagEnvelope(input, source);
+            if (source === 'project' && !isNativeRequestReceiptDurable('projectTasksRemoveTag'))
+                return fail('SAVE_FAILED', 'Project Remove tag receipt storage is unavailable');
+            return envelope
                 ? receipts.saved<NativeReferenceTasksRemoveTagResult>(envelope.request.requestId, payload(envelope)) ?? { ok: true, value: null }
                 : fail('INVALID_INPUT', `Prepared ${label} Remove tag is malformed`);
         },
@@ -246,8 +254,8 @@ export function createTasksRemoveTagMethods(deps: {
             if (prewriteFailure) return prewriteFailure;
             if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Remove tag result does not match its journal`);
             if (confirmed.ok) {
-                try { logInfo(`Native ${label} bulk Remove tag confirmed`, { scope: 'native-host', category: 'storage',
-                    context: { releaseCheck: source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-remove-tag' : 'v1.3.4/ios-reference-bulk-remove-tag', count: confirmed.value.count, outcome: 'removed' } }); }
+                try { logInfo(`Native ${label} bulk Remove tag confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' ? { force: true } : {}),
+                    context: { releaseCheck: source === 'project' ? 'v1.3.8/ios-project-bulk-remove-tag' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-remove-tag' : 'v1.3.4/ios-reference-bulk-remove-tag', count: confirmed.value.count, outcome: 'removed' } }); }
                 catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
             }
             return confirmed;
@@ -268,7 +276,8 @@ export function createReferenceTasksRemoveTagMethods(deps: Parameters<typeof cre
 }
 
 // The store's Reference removeTag action reads these here: it cannot import this module (store-reference-batch-modules.ts).
-referenceBatchModules.shared = { historyRowLoadProjection, NativeReceiptSqliteAdapter };
+referenceBatchModules.shared = { get historyRowLoadProjection() { return historyRowLoadProjection; },
+    get NativeReceiptSqliteAdapter() { return NativeReceiptSqliteAdapter; } };
 referenceBatchModules.removeTag = (input) => {
     const prepared = input as NativeReferenceTasksRemoveTagPrepared;
     return {

@@ -1,5 +1,7 @@
+import type { NativeProjectTasksAddTagRequest, NativeProjectTasksAddTagPrepared } from './native-host-contract-project-bulk-tag';
 import type { NativeHostResult } from './native-host-contract';
 import type { NativeInboxTasksAddTagRequest, NativeInboxTasksAddTagPrepared } from './native-host-contract-inbox-bulk-tag';
+import type { NativeStatusListTasksMoveRequest } from './native-host-contract-inbox-bulk-status';
 import type { TaskLoadTemporalContext } from './task-status';
 import type { AppData, Project, Section, Task } from './types';
 import type { PreparedAreaAuthority, PreparedNativeSaveBoundary } from './store-types';
@@ -8,7 +10,7 @@ import { validSection } from './native-host-contract-project-section-rename';
 import { validFrozenFocusDate } from './native-host-contract-task-focus';
 import { historyRowLoadProjection } from './native-host-contract-task-checklist';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
-import { createNativeRequestReceipts, NativeReceiptSqliteAdapter } from './native-request-receipts';
+import { createNativeRequestReceipts, isNativeRequestReceiptDurable, NativeReceiptSqliteAdapter } from './native-request-receipts';
 import { taskEditValuesEqual } from './json-value-equality';
 import { buildEntityMap, ensureDeviceId } from './store-helpers';
 import { planTaskBatchUpdateEffects, prepareTaskBatchUpdatesForStore } from './store-tasks';
@@ -21,7 +23,7 @@ import { detachReferenceBatchJson, detachReferenceBatchValue, readStatusBatchSel
     rawReferenceBatchScope, loadedReferenceBatchProject, referenceBatchSettingsReadable,
     requiredReferenceBatchDates, validReferenceBatchTask,
     validReferenceBatchProject, validReferenceBatchArea, referenceTasksMoveScope,
-    type NativeReferenceTasksMoveParams,
+    type NativeReferenceTasksMoveParams, type NativeShownSelection,
     type NativeReferenceTasksMoveScope } from './native-host-contract-reference-bulk-status';
 
 export type NativeReferenceTasksAddTagRequest = { requestId: string; taskIds: string[];
@@ -40,8 +42,15 @@ export type NativeReferenceTasksAddTagEnvelope = { request: NativeReferenceTasks
 export type NativeReferenceTasksAddTagPreparation = { kind: 'noop'; result: { count: 0; changed: false } }
     | { kind: 'prepared'; prepared: NativeReferenceTasksAddTagPrepared };
 
-type TagSource = 'reference' | 'inbox';
-type TagRequest = NativeReferenceTasksAddTagRequest | NativeInboxTasksAddTagRequest;
+type TagSource = 'reference' | 'inbox' | 'project';
+type StatusListTagRequest = Omit<NativeInboxTasksAddTagRequest, 'source' | 'params'>
+    & ({ source: NativeStatusListTasksMoveRequest['source']; params: NativeStatusListTasksMoveRequest['params'] }
+        | { source: 'review' | 'contexts'; params: Record<string, unknown> });
+type TagRequest = NativeReferenceTasksAddTagRequest | NativeInboxTasksAddTagRequest | NativeProjectTasksAddTagRequest | StatusListTagRequest;
+const tagSourceOf = (request: TagRequest) => 'source' in request ? request.source : 'reference' as const;
+const TAG_LABELS = { reference: 'Reference', inbox: 'Inbox', project: 'Project', waiting: 'Waiting', someday: 'Someday', review: 'Review', contexts: 'Contexts' } as const;
+const SHOWN_SOURCES: readonly unknown[] = ['review', 'contexts'];
+const SELECTION_SOURCES: readonly unknown[] = ['waiting', 'someday', ...SHOWN_SOURCES];
 type TagPrepared = Omit<NativeReferenceTasksAddTagPrepared, 'request'> & { request: TagRequest };
 type TagEnvelope = { request: TagRequest; prepared: TagPrepared };
 const same = taskEditValuesEqual;
@@ -53,13 +62,15 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'TASK_NOT_FOUND' | 'SAV
 const canonicalPayload = (value: unknown): string => JSON.stringify(value, (_name, item) => record(item)
     ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
 const selectionRequest = (request: TagRequest) => ({
-    requestId: request.requestId, taskIds: request.taskIds, taskRevisions: request.taskRevisions, params: request.params, status: 'next' as const, ...('source' in request ? { source: request.source } : {}) });
+    requestId: request.requestId, taskIds: request.taskIds, taskRevisions: request.taskRevisions, params: request.params, status: 'next' as const, ...('source' in request ? { source: request.source } : {}) }) as Parameters<typeof referenceTasksMoveScope>[0];
 const readRequest = (input: unknown, source: TagSource): TagRequest | null => {
     const request = detachReferenceBatchJson<TagRequest>(input);
-    return request && exact(request, ['requestId', 'taskIds', 'taskRevisions', 'tag', 'params', ...(source === 'inbox' ? ['source'] : [])])
-        && (source !== 'inbox' || ('source' in request && request.source === 'inbox'))
+    const requested = record(input) ? input.source : undefined;
+    const selectionSource = source === 'inbox' && SELECTION_SOURCES.includes(requested) ? requested as 'waiting' : source;
+    return request && exact(request, ['requestId', 'taskIds', 'taskRevisions', 'tag', 'params', ...(source !== 'reference' ? ['source'] : [])])
+        && (source === 'reference' || ('source' in request && request.source === selectionSource))
         && typeof request.tag === 'string' && request.tag.length <= 2000
-        && readStatusBatchSelectionRequest(selectionRequest(request), source) ? request : null;
+        && readStatusBatchSelectionRequest(selectionRequest(request), selectionSource) ? request : null;
 };
 export const referenceTasksAddTagScope = (request: TagRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>): NativeReferenceTasksMoveScope =>
@@ -108,7 +119,7 @@ export const readTasksAddTagEnvelope = (input: unknown, source: TagSource): TagE
         || !Array.isArray(raw.scope.sections) || !raw.scope.sections.every((row) => record(row) && text(row.id, 500)
             && text(row.projectId, 500) && validSection(row, row.id, row.projectId)) || !unique(raw.scope.sections)
         || !Array.isArray(raw.scope.areas) || !raw.scope.areas.every(validReferenceBatchArea) || !unique(raw.scope.areas)
-        || !record(raw.scope.settings) || !same(statusBatchSettings(raw.scope.settings, source), raw.scope.settings)
+        || !record(raw.scope.settings) || !same(statusBatchSettings(raw.scope.settings, tagSourceOf(request)), raw.scope.settings)
         || !record(raw.effect) || !exact(raw.effect, ['tasks', 'projects', 'sections'])
         || !Array.isArray(raw.effect.tasks) || !Array.isArray(raw.effect.projects) || !Array.isArray(raw.effect.sections)
         || (raw.deviceIdBefore !== null && !text(raw.deviceIdBefore, 500))
@@ -140,12 +151,14 @@ export const referenceTasksAddTagAuthorityMatches = (prepared: TagPrepared, data
 };
 
 export function createTasksAddTagMethods(deps: {
-    readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>;
+    readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>; shown?: NativeShownSelection;
 }, source: TagSource) {
-    const label = source === 'inbox' ? 'Inbox' : 'Reference';
-    const family = source === 'inbox' ? 'inboxTasksAddTag' : 'referenceTasksAddTag';
+    const label = source === 'project' ? 'Project' : source === 'inbox' ? 'Inbox' : 'Reference';
+    const family = `${source}TasksAddTag`;
     const guardedAdapter = (): NativeHostResult<null> => {
         const adapter = getStorageAdapter();
+        if (source === 'project' && !isNativeRequestReceiptDurable('projectTasksAddTag'))
+            return fail('SAVE_FAILED', 'Project Add tag receipt storage is unavailable');
         return adapter instanceof NativeReceiptSqliteAdapter && adapter.concurrentWritesGuarded
             ? { ok: true, value: null } : fail('SAVE_FAILED', `${label} Add tag requires guarded canonical SQLite storage`);
     };
@@ -175,7 +188,9 @@ export function createTasksAddTagMethods(deps: {
         catch { return fail('STALE_REVISION', `${label} Add tag destination changed since preparation`); }
     };
     const apply = (envelope: TagEnvelope, authority: PreparedAreaAuthority) =>
-        source === 'inbox'
+        source === 'project'
+            ? useTaskStore.getState().commitPreparedProjectTasksAddTag(envelope.prepared as NativeProjectTasksAddTagPrepared, authority)
+            : source === 'inbox'
             ? useTaskStore.getState().commitPreparedInboxTasksAddTag(envelope.prepared as NativeInboxTasksAddTagPrepared, authority)
             : useTaskStore.getState().commitPreparedReferenceTasksAddTag(envelope.prepared as NativeReferenceTasksAddTagPrepared, authority);
     const receipts = createNativeRequestReceipts({ save: async (requestId) => {
@@ -200,10 +215,12 @@ export function createTasksAddTagMethods(deps: {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const guarded = guardedAdapter(); if (!guarded.ok) return guarded;
             const request = readRequest(input, source);
-            if (!request) return fail('INVALID_INPUT', `Select saved ${label} tasks with exact revisions, tag and list scope`);
+            if (!request) return fail('INVALID_INPUT', `Select saved ${TAG_LABELS[source]} tasks with exact revisions, tag and list scope`);
+            const label = TAG_LABELS[tagSourceOf(request)];
             const memory = useTaskStore.getState(); const now = new Date();
             if (!statusBatchSourcesMatch(selectionRequest(request), { tasks: memory._allTasks, projects: memory._allProjects,
-                sections: memory._allSections, areas: memory._allAreas, settings: memory.settings }, now.toISOString()))
+                sections: memory._allSections, areas: memory._allAreas, settings: memory.settings }, now.toISOString())
+                || (SHOWN_SOURCES.includes(tagSourceOf(request)) && deps.shown?.(request as never) !== true))
                 return fail('STALE_REVISION', `${label} selection changed since it was shown`);
             const read = await readAreaDurableData(false, true); if (!read.ok) return read;
             const foreignKeys = await checkForeignKeyAuthority(read.value.adapter); if (!foreignKeys.ok) return foreignKeys;
@@ -211,7 +228,7 @@ export function createTasksAddTagMethods(deps: {
             if (!referenceBatchSettingsReadable(data.settings)) return fail('SAVE_FAILED', `Saved ${label} settings JSON is unreadable`);
             const scope = rawReferenceBatchScope(referenceTasksAddTagScope(request, data));
             if (!scope) return fail('SAVE_FAILED', `Saved ${label} raw JSON could not be bound safely`);
-            if (source === 'inbox' && !detachReferenceBatchValue(scope))
+            if (source !== 'reference' && !detachReferenceBatchValue(scope))
                 return fail('INVALID_INPUT', 'Inbox Add tag selection witness is too large; select a smaller library');
             if (!statusBatchSourcesMatch(selectionRequest(request), scope, now.toISOString())) return fail('STALE_REVISION', `Saved ${label} selection changed`);
             if (!tagUpdates(request, scope, now.toISOString()).length) return { ok: true, value: { kind: 'noop', result: { count: 0, changed: false } } };
@@ -225,7 +242,7 @@ export function createTasksAddTagMethods(deps: {
             let effect;
             try {
                 const fullScope = rawReferenceBatchScope({ tasks: data.tasks, projects: data.projects, sections: data.sections,
-                    areas: data.areas, settings: statusBatchSettings(data.settings, source) });
+                    areas: data.areas, settings: statusBatchSettings(data.settings, tagSourceOf(request)) });
                 if (!fullScope) return fail('SAVE_FAILED', `Saved ${label} raw JSON could not be bound safely`);
                 const first = referenceTasksAddTagEffect({ ...base, scope: fullScope, dates: projectFocusDateValues(requiredReferenceBatchDates(fullScope)) });
                 effect = referenceTasksAddTagEffect(base);
@@ -240,7 +257,10 @@ export function createTasksAddTagMethods(deps: {
                 : fail('INVALID_INPUT', `Prepared ${label} Add tag is malformed`);
         },
         tasksAddTagOutcome(input: TagEnvelope): NativeHostResult<NativeReferenceTasksAddTagResult | null> {
-            const envelope = readTasksAddTagEnvelope(input, source); return envelope
+            const envelope = readTasksAddTagEnvelope(input, source);
+            if (source === 'project' && !isNativeRequestReceiptDurable('projectTasksAddTag'))
+                return fail('SAVE_FAILED', 'Project Add tag receipt storage is unavailable');
+            return envelope
                 ? receipts.saved<NativeReferenceTasksAddTagResult>(envelope.request.requestId, payload(envelope)) ?? { ok: true, value: null }
                 : fail('INVALID_INPUT', `Prepared ${label} Add tag is malformed`);
         },
@@ -269,8 +289,9 @@ export function createTasksAddTagMethods(deps: {
             if (prewriteFailure) return prewriteFailure;
             if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Add tag result does not match its journal`);
             if (confirmed.ok) {
-                try { logInfo(`Native ${label} bulk tag confirmed`, { scope: 'native-host', category: 'storage',
-                    context: { releaseCheck: source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-tag' : 'v1.3.4/ios-reference-bulk-tag', count: confirmed.value.count, outcome: 'added' } }); }
+                const kind = tagSourceOf(envelope.request), statusList = kind === 'waiting' || kind === 'someday' || SHOWN_SOURCES.includes(kind);
+                try { logInfo(`Native ${TAG_LABELS[kind]} bulk tag confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' || statusList ? { force: true } : {}),
+                    context: { releaseCheck: source === 'project' ? 'v1.3.8/ios-project-bulk-tag' : statusList ? 'v1.3.8/ios-status-list-bulk-tag' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-tag' : 'v1.3.4/ios-reference-bulk-tag', count: confirmed.value.count, outcome: 'added' } }); }
                 catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
             }
             return confirmed;
@@ -292,7 +313,8 @@ export function createReferenceTasksAddTagMethods(deps: Parameters<typeof create
 }
 
 // The store's Reference addTag action reads these here: it cannot import this module (store-reference-batch-modules.ts).
-referenceBatchModules.shared = { historyRowLoadProjection, NativeReceiptSqliteAdapter };
+referenceBatchModules.shared = { get historyRowLoadProjection() { return historyRowLoadProjection; },
+    get NativeReceiptSqliteAdapter() { return NativeReceiptSqliteAdapter; } };
 referenceBatchModules.addTag = (input) => {
     const prepared = input as NativeReferenceTasksAddTagPrepared;
     return {

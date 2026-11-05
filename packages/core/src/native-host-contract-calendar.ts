@@ -116,6 +116,11 @@ import {
     getCalendarTaskSheet,
     getCalendarToasts,
     getCalendarVisibleRange,
+    CALENDAR_DAY_ALL_DAY_ITEMS,
+    CALENDAR_WEEK_ALL_DAY_ITEMS,
+    getCalendarAllDayLane,
+    formatCalendarAllDayMore,
+    getCalendarAllDayChipTones,
     getCalendarWeekAllDayItems,
     getCalendarWeekAllDayTones,
     getCalendarWeekDays,
@@ -256,6 +261,7 @@ export type NativeCalendarEntry =
         preview: NativeCalendarItem[];
         /** Pressing a week column header opens this day in the day view. */
         opens: NativeCalendarState | null;
+        allDayMore?: string | null;
     }
     /** An item in a lane of a day: the week's all-day lane or timeline, the day view's, a schedule day, or the month details' lists. */
     | { type: 'item'; dayKey: string; lane: 'allDay' | 'timed' | 'deadlineMarker' | 'list' | 'events' | 'deadlines' | 'scheduled'; item: NativeCalendarItem }
@@ -284,7 +290,7 @@ export type NativeCalendarView = {
     /** The mode switch; choosing one also runs setViewMode, which the screen saves. */
     modes: { mode: CalendarViewMode; label: string; selected: boolean; state: NativeCalendarState }[];
     showCompleted: { label: string; hint: string; on: boolean };
-    text: Omit<ReturnType<typeof getCalendarScreenText>, 'weekDensityValue' | 'weekDensityChoice'> & { toasts: NativeCalendarToasts };
+    text: Omit<ReturnType<typeof getCalendarScreenText>, 'weekDensityValue' | 'weekDensityChoice'> & { toasts: NativeCalendarToasts; allDayLess?: string };
     content:
         | {
             mode: 'month';
@@ -312,6 +318,8 @@ export type NativeCalendarView = {
         }
         | {
             mode: 'day';
+            allDayLimit?: number;
+            allDayMore?: string | null;
             dayKey: string;
             hourLabels: string[];
             nowMinutes: number | null;
@@ -1335,7 +1343,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         return { startMinutes, endMinutes, durationMinutes: durationMinutes ?? endMinutes - startMinutes, column: layout ?? null };
     };
 
-    const build = (ctx: Context, period: CalendarPeriodState, feed: Feed, query: string): BuiltView => {
+    const build = (ctx: Context, period: CalendarPeriodState, feed: Feed, query: string, includeAllDayLanes = false): BuiltView => {
         const { t, formatDate, dates, now, projectedLabel } = ctx;
         const periodData = periodIndex(ctx, period, feed);
         const { lists, availabilityEvents, currentMonthDate, weekStartTime } = periodData;
@@ -1458,21 +1466,26 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             const weekDays = getCalendarWeekDays(weekStartTime);
             title = formatCalendarWeekTitle(weekDays, dates);
             for (const date of weekDays) {
+                const lane = includeAllDayLanes ? getCalendarAllDayLane(getCalendarDayItems(lists(date)), CALENDAR_WEEK_ALL_DAY_ITEMS) : null;
                 entries.push({
                     type: 'day', key: dayKey(date), title: `${getCalendarWeekdayLabel(date, dates)} ${date.getDate()}`,
                     dayNumber: String(date.getDate()), weekday: getCalendarWeekdayLabel(date, dates),
                     isToday: isSameCalendarDate(date, now), selected: Boolean(selected && isSameCalendarDate(date, selected)),
                     accessibilityLabel: null, counts: null, preview: [],
                     opens: toState(selectCalendarViewMode({ ...period, selectedDate: date }, 'day', now)),
+                    ...(lane ? { allDayMore: lane.hiddenCount > 0 ? formatCalendarAllDayMore(lane.hiddenCount, t) : null } : {}),
                 });
             }
             for (const date of weekDays) {
-                for (const entry of getCalendarWeekAllDayItems(getCalendarDayItems(lists(date)))) {
-                    const tones = getCalendarWeekAllDayTones(entry);
+                const dayItems = getCalendarDayItems(lists(date));
+                const allDayItems = includeAllDayLanes ? getCalendarAllDayLane(dayItems, CALENDAR_WEEK_ALL_DAY_ITEMS).items : getCalendarWeekAllDayItems(dayItems);
+                for (const entry of allDayItems) {
+                    const legacy = getCalendarWeekAllDayTones(entry);
+                    const tones = includeAllDayLanes ? getCalendarAllDayChipTones(entry, 'week') : { ...legacy, text: 'text' as const, struck: false };
                     const event = sourceEvent(entry);
                     entries.push({ type: 'item', dayKey: dayKey(date), lane: 'allDay', item: item(entry, {
                         title: getCalendarItemTitle(entry, projectedLabel, formatDate), projected: tones.dashed, pressable: !tones.disabled,
-                        tones: { fill: tones.fill, accent: tones.accent, text: 'text', dashed: tones.dashed, struck: false, faded: false },
+                        tones: { fill: tones.fill, accent: tones.accent, text: tones.text, dashed: tones.dashed, struck: tones.struck, faded: false },
                         sourceColor: event ? sourceColor(event.sourceId) : null,
                     }, sourceTask(entry), event) });
                 }
@@ -1514,12 +1527,18 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             const day = selected!;
             title = dateLabels.dayTitle;
             const dayLists = lists(day);
-            for (const entry of getCalendarDayItems(dayLists).filter(isCalendarAllDayItem)) {
+            const dayItems = getCalendarDayItems(dayLists);
+            const allDayLane = includeAllDayLanes ? getCalendarAllDayLane(dayItems, CALENDAR_DAY_ALL_DAY_ITEMS, true) : null;
+            for (const entry of allDayLane ? allDayLane.items : dayItems.filter(isCalendarAllDayItem)) {
                 const event = sourceEvent(entry);
+                const legacy = getCalendarDayAllDayTones(entry);
+                const tones = includeAllDayLanes ? getCalendarAllDayChipTones(entry, 'day')
+                    : { fill: null, accent: null, text: legacy.text, dashed: false, struck: false, disabled: legacy.disabled };
                 entries.push({ type: 'item', dayKey: dayKey(day), lane: 'allDay', item: item(entry, {
                     title: getCalendarItemTitle(entry, projectedLabel, formatDate),
-                    projected: getCalendarDayAllDayTones(entry).text === 'tint', pressable: !getCalendarDayAllDayTones(entry).disabled,
-                    tones: { fill: null, accent: null, text: getCalendarDayAllDayTones(entry).text, dashed: false, struck: false, faded: false },
+                    projected: includeAllDayLanes ? tones.dashed : legacy.text === 'tint', pressable: !tones.disabled,
+                    tones: { fill: tones.fill, accent: tones.accent, text: tones.text, dashed: tones.dashed, struck: tones.struck, faded: false },
+                    ...(includeAllDayLanes ? { sourceColor: event ? sourceColor(event.sourceId) : null } : {}),
                 }, sourceTask(entry), event) });
             }
             const { dayStart, dayEnd } = getCalendarDayBounds(day);
@@ -1545,6 +1564,8 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             for (const task of searchResults) entries.push(scheduleRow(task, 'search'));
             content = {
                 mode: 'day',
+                ...(allDayLane ? { allDayLimit: CALENDAR_DAY_ALL_DAY_ITEMS,
+                    allDayMore: allDayLane.hiddenCount > 0 ? formatCalendarAllDayMore(allDayLane.hiddenCount, t) : null } : {}),
                 dayKey: dayKey(day),
                 hourLabels: getCalendarHourLabels(formatDate),
                 nowMinutes: isSameCalendarDate(day, now) ? getCalendarNowMinutes(now) : null,
@@ -1604,7 +1625,8 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                 state: toState(selectCalendarViewMode(period, option.value, parseDayKey(dayKey(now))!)),
             })),
             showCompleted: { label: screen.showCompleted, hint: screen.showCompletedHint, on: ctx.showCompleted },
-            text: { ...fixedText, toasts: { ...toasts, saveFailed: toasts.saveFailed() } },
+            text: { ...fixedText, toasts: { ...toasts, saveFailed: toasts.saveFailed() },
+                ...(includeAllDayLanes ? { allDayLess: t('common.less') } : {}) },
             content,
             entries,
         };
@@ -1938,6 +1960,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             state?: NativeCalendarState;
             scheduleQuery?: string;
             calendar?: NativeCalendarFeed;
+            includeAllDayLanes?: boolean;
             offset: number;
             limit: number;
             revision?: string;
@@ -1950,13 +1973,15 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             const feed = isObjectRecord(input) ? readFeed(input.calendar) : null;
             const period = isObjectRecord(input) ? readState(input.state, { settings, now }) : null;
             const query = isObjectRecord(input) ? input.scheduleQuery ?? '' : null;
-            if (!isObjectRecord(input) || !isPaging(input) || !feed || !period || !isText(query, 2000)) {
+            if (!isObjectRecord(input) || !isPaging(input) || !feed || !period || !isText(query, 2000)
+                || (input.includeAllDayLanes !== undefined && typeof input.includeAllDayLanes !== 'boolean')) {
                 return fail('INVALID_INPUT', 'A valid state, calendar, schedule query, offset, bounded limit and revision for later pages are required');
             }
-            const revision = `${deps.revision(now)}:${paramsKey([toState(period), query, feed, projectedAt.iso])}`;
+            const legacyRevision = `${deps.revision(now)}:${paramsKey([toState(period), query, feed, projectedAt.iso])}`;
+            const revision = input.includeAllDayLanes === true ? `${legacyRevision}:all-day-lanes-v1` : legacyRevision;
             if (input.revision !== undefined && input.revision !== revision) return fail('STALE_REVISION', 'The calendar changed; restart paging from offset zero');
             // The store, settings and language are in the revision; a later page reuses the build.
-            if (cachedView?.key !== revision) cachedView = { key: revision, value: build(context(now), period, feed, query) };
+            if (cachedView?.key !== revision) cachedView = { key: revision, value: build(context(now), period, feed, query, input.includeAllDayLanes === true) };
             return { ok: true, value: finish(cachedView.value, revision, input as { offset: number; limit: number }, now) };
         },
 

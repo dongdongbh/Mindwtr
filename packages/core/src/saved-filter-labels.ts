@@ -11,6 +11,7 @@ export type SavedFilterCriteriaChipOptions = {
     formatDate?: (value: string) => string;
     getAreaColor?: (areaId: string) => string | undefined;
     getAreaLabel?: (areaId: string) => string | undefined;
+    getProjectLabel?: (projectId: string) => string | undefined;
     resolveText?: (key: string, fallback: string) => string;
     translate?: (key: string) => string;
 };
@@ -106,6 +107,10 @@ export function buildAdvancedFilterCriteriaChips(
     });
 
     const statusLabel = resolveText(options, 'taskEdit.statusLabel', 'Status');
+    criteria.excludedProjects?.forEach((projectId) => chips.push({
+        id: `excluded-project:${projectId}`,
+        label: `${resolveText(options, 'filters.excluded', 'Excluded')}: ${options.getProjectLabel?.(projectId) ?? projectId}`,
+    }));
     criteria.statuses?.forEach((status) => {
         chips.push({
             id: `status:${status}`,
@@ -175,6 +180,13 @@ function removeListItem<T extends string>(values: T[] | undefined, target: strin
 }
 
 export function removeAdvancedFilterCriteriaChip(criteria: FilterCriteria, chipId: string): FilterCriteria {
+    if (chipId.startsWith('excluded-project:')) {
+        const next = { ...criteria };
+        const projects = removeListItem(criteria.excludedProjects, chipId.slice('excluded-project:'.length));
+        if (projects) next.excludedProjects = projects;
+        else delete next.excludedProjects;
+        return next;
+    }
     if (chipId.startsWith(AREA_CHIP_PREFIX)) {
         const next = { ...criteria };
         const areas = removeListItem(criteria.areas, chipId.slice(AREA_CHIP_PREFIX.length));

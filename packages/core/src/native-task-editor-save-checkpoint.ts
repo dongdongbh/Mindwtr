@@ -1,6 +1,6 @@
 import type { NativeHostResult } from './native-host-contract';
 import { validateNativeTaskEditorOpeningFields } from './native-host-contract-task-editor-resume';
-import { ASSOCIATIONS, LIFECYCLE, RECURRENCE, SCHEDULE, readNativeTaskDraftSaveRequest, validRawTask,
+import { ASSOCIATIONS, LIFECYCLE, NATIVE_NULLABLE_DRAFT_FIELDS, RECURRENCE, SCHEDULE, readNativeTaskDraftSaveRequest, validRawTask,
     type NativeTaskRecurrenceBase, type NativeTaskScheduleBase } from './native-host-contract-task-save';
 import { readNativeAttachments } from './native-host-contract-attachments';
 import { isNativeJsonWithinBytes, readChecklist } from './native-host-contract-task-view';
@@ -15,7 +15,8 @@ const PAYLOAD_BYTES = 1_000_000;
 const REQUEST_BYTES = 8 * 1024 * 1024;
 const TASK_BYTES = 16 * 1024 * 1024;
 const FIELDS = ['title', 'description', 'location', 'assignedTo', 'priority', 'energyLevel', 'timeEstimate',
-    'projectId', 'areaId', 'sectionId', 'contexts', 'tags', ...SCHEDULE, ...RECURRENCE, 'timeSpentMinutes'];
+    'projectId', 'areaId', 'sectionId', 'contexts', 'tags', ...SCHEDULE, ...RECURRENCE, 'timeSpentMinutes',
+    'reminderPolicy', 'dueReminderLeadMinutes', 'startReminderLeadMinutes'];
 const TOKEN_FIELDS = ['contexts', 'tags', 'assignedTo'] as const;
 const RAW_FIELDS = ['title', 'note', 'location', 'estimate', 'estimateResolved', 'timeSpent', 'timeSpentResolved',
     'tokens', 'tokenCanonical', 'tokenResolved', 'tokenEdited', 'checklistInputs', 'checklistAppend',
@@ -149,7 +150,7 @@ function validateEditorSaveCheckpoint(input: NativeTaskEditorSaveCheckpointInput
             ...(recurrenceOwned ? { recurrenceBase: payload.recurrenceBase } : {}) }, validateField, true, true);
         if (!editedGrammar) return invalid();
         const current = { ...opening.value.freshDraft, ...Object.fromEntries(Object.entries(edited)
-            .map(([key, value]) => [key, value === null && ['relativeStartOffset', 'timeSpentMinutes'].includes(key) ? undefined : value])) } as TaskDraft;
+            .map(([key, value]) => [key, value === null && NATIVE_NULLABLE_DRAFT_FIELDS.includes(key) ? undefined : value])) } as TaskDraft;
         const attachmentBase = readNativeAttachments(payload.attachmentsBase), attachments = readNativeAttachments(payload.attachments);
         if (!attachmentBase || !attachments || !record(captured.saveRequest)) return invalid();
         const request = captured.saveRequest;

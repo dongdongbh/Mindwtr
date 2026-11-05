@@ -309,6 +309,42 @@ describe('native prepared Process Inbox writer', () => {
             .toEqual({ amount: -1, unit: 'day' });
     });
 
+    it.each(['dueDate', 'followUp'] as const)('binds the chosen %s clock against a coherently altered prepared effect', async (field) => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(fixture.now));
+        await seedProcessInboxStore(fixture, scenario('start later'), createWriteRecorder());
+        const host = createNativeHostContract();
+        const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        ok(await host.activate({ writeSafetyReady: true }));
+        let view = ok(host.startInboxProcessing({ includeDetails: true })).view!;
+        const choices = field === 'followUp' ? ['actionable', 'no', 'delegate'] : ['actionable', 'no', 'defer', 'single'];
+        for (const choice of choices) view = ok(await host.commitInboxProcessingStep({ sessionId: view.sessionId,
+            taskId: view.taskId, step: view.step, decision: { choice }, requestId: generateUUID() })).view!;
+        const owner = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
+        for (const edit of [
+            { type: 'setPickedDate', field, day: '2030-07-21' },
+            { type: 'setTime', field, time: '17:35' },
+            { type: 'setPickedDate', field, day: '2030-07-22' },
+        ] as const) view = ok(host.getInboxProcessingStep({ ...owner, edit }));
+        if (field === 'followUp') view = ok(host.getInboxProcessingStep({ ...owner, edit: { type: 'set', field: 'delegateWho', value: 'Alice' } }));
+        const request = { ...owner, decision: { choice: 'fileIt' }, requestId: generateUUID() };
+        const plan = ok(host.inboxCommitPrepare(request));
+        if (plan.kind !== 'prepared') throw new Error('missing timed journal');
+        const envelope = { request, prepared: plan.prepared };
+        expect(host.inboxPreparedValidate(envelope)).toMatchObject({ ok: true });
+        const persisted = field === 'followUp' ? 'reviewAt' : 'dueDate';
+        expect(plan.prepared.effect.tasks.find((row) => row.after.id === view.taskId)?.after[persisted]).toBe('2030-07-22T17:35');
+        const forged = JSON.parse(JSON.stringify(envelope).replaceAll('2030-07-22T17:35', '2030-07-22T18:35'));
+        expect(forged.prepared.witness.draft[field]).toMatchObject({ date: '2030-07-22', time: '17:35' });
+        expect(host.inboxPreparedValidate(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.inboxPreparedCommit(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        ok(await host.inboxPreparedCommit(envelope));
+        expect(useTaskStore.getState()._tasksById.get(view.taskId)?.[persisted]).toBe('2030-07-22T17:35');
+    });
+
     it('freezes every member of an archived project larger than 64 rows', async () => {
         await seedProcessInboxStore(fixture, scenario('skipping the last item'), createWriteRecorder());
         const baseline = useTaskStore.getState();

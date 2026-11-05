@@ -44,7 +44,8 @@ import {
 import { canCompleteNativeBoardTask } from './native-host-contract-task-checklist';
 import { matchesPickerQuery } from './native-host-contract-menu-views';
 import { createProjectOrderReserver, ensureDeviceId, matchesDuplicateSource, nextRevision } from './store-helpers';
-import { boardMoveEffect, boardMoveScope, boardReactivationContainerAllowed, samePreparedTask, buildDuplicateTask, sanitizeRestoredTaskContainerReferences, taskEditValuesEqual } from './store-tasks';
+import { boardMoveEffect, boardMoveScope, boardReactivationContainerAllowed, samePreparedTask, buildDuplicateTask, sanitizeRestoredTaskContainerReferences } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import { TASK_SYNC_FIELD_SCHEMA } from './task-sync-schema';
 import { boardOrderForDuplicate, projectFocusDateValues } from './task-utils';
 import { validFrozenFocusDate } from './native-host-contract-task-focus';
@@ -170,7 +171,7 @@ export type NativeBoardWriteRequest = {
         | { type: 'moveCard'; taskId: string; status: NativeBoardMoveStatus; taskRevision: string; filters: NativeBoardFilters };
 };
 export type NativePreparedBoardAction = {
-    version: 1;
+    version: 1 | 2;
     request: NativeBoardWriteRequest;
     /** Duplicate: a before-only source guard. Trash: the target preimage. */
     before: Task;
@@ -633,9 +634,11 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
     };
     const readPrepared = (input: unknown): NativePreparedBoardAction | null => {
         const detached = detach(input);
-        if (!isObjectRecord(detached) || detached.version !== 1 || !taskRecord(detached.before) || !taskRecord(detached.after)) return null;
+        if (!isObjectRecord(detached) || (detached.version !== 1 && detached.version !== 2)
+            || !taskRecord(detached.before) || !taskRecord(detached.after)) return null;
         const request = readWriteRequest(detached.request);
-        if (!request || !exactKeys(detached, ['version', 'request', 'before', 'after', 'deviceIdToInitialize', 'result',
+        if (!request || (detached.version === 2 && request.action.type !== 'duplicateTask')
+            || !exactKeys(detached, ['version', 'request', 'before', 'after', 'deviceIdToInitialize', 'result',
             ...(request.action.type === 'moveCard' ? ['move'] : [])])) return null;
         const prepared = detached as unknown as NativePreparedBoardAction;
         const { before, after, deviceIdToInitialize } = prepared;
@@ -664,7 +667,9 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 if (!ids.every((id) => typeof id === 'string' && deps.requestIdPattern.test(id) && !sourceIds.has(id))
                     || new Set([after.id, ...ids]).size !== ids.length + 1) return null;
                 let index = 0;
-                expected = buildDuplicateTask({ sourceTask: before, copyId: request.requestId, now: after.createdAt, deviceId: after.revBy,
+                const sourceTask = prepared.version === 1
+                    ? { ...before, checklist: before.checklist?.map((item) => ({ ...item, isCompleted: false })) } : before;
+                expected = buildDuplicateTask({ sourceTask, copyId: request.requestId, now: after.createdAt, deviceId: after.revBy,
                     projectOrder: after.order, boardOrder: after.boardOrder, generateId: () => ids[index++] });
                 if (index !== ids.length) return null;
                 result = { changed: true, open: { taskId: after.id, projectId: after.projectId ?? null, tab: 'task' } };
@@ -908,7 +913,8 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 boardOrder: boardOrderForDuplicate(before.boardOrder, state._allTasks.filter((task) => task.status === before.status && !task.deletedAt)) });
         const result: NativeBoardActionResult = { changed: true, open: request.action.type === 'duplicateTask'
             ? { taskId: after.id, projectId: after.projectId ?? null, tab: 'task' } : null };
-        const prepared = readPrepared({ version: 1, request, before, after, deviceIdToInitialize: device.updated ? device.deviceId : null, result });
+        const prepared = readPrepared({ version: request.action.type === 'duplicateTask' ? 2 : 1,
+            request, before, after, deviceIdToInitialize: device.updated ? device.deviceId : null, result });
         return prepared ? { ok: true, value: { kind: 'prepared', prepared } }
             : fail('INVALID_INPUT', 'Board action cannot produce a valid bounded journal');
     };
@@ -1168,8 +1174,14 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             if (!ready.ok) return ready;
             const prepared = readPreparedCommand(input);
             if (!prepared) return fail('INVALID_INPUT', 'Prepared Board request or journal does not match');
-            return prepared.request.action.type === 'moveCard' && prepared.before.status === 'done'
-                ? commitReactivation(prepared) : commitPreparedBoard(prepared, 'preparedBoard');
+            const result = await (prepared.request.action.type === 'moveCard' && prepared.before.status === 'done'
+                ? commitReactivation(prepared) : commitPreparedBoard(prepared, 'preparedBoard'));
+            if (result.ok && prepared.request.action.type === 'duplicateTask') {
+                try { logInfo('Native duplicate checklist state confirmed', { scope: 'native-host', category: 'storage', force: true,
+                    context: { releaseCheck: 'v1.3.8/duplicate-checklist-state', version: prepared.version, outcome: 'confirmed' } }); }
+                catch {}
+            }
+            return result;
         },
 
         /** Calendar's Delete uses the Board Trash journal, with a visible-row revision and read-only parent guard. */

@@ -1,3 +1,4 @@
+import { applyPreparedCaptureData, applyPreparedCaptureLinesData } from './prepared-capture-data';
 /**
  * The native host contract for the capture popup: React Native's quick capture
  * sheet, the one the tab bar's center + opens. Kept in its own file and spread
@@ -49,7 +50,7 @@ import { findSelectableProjectByTitleAndArea, isSelectableProjectForTaskAssignme
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { isSandboxMode } from './sandbox';
 import { flushPendingSave, getStorageAdapter, useTaskStore } from './store';
-import type { AppSettings, Project, Task, TaskPriority } from './types';
+import type { AppData, AppSettings, Project, Task, TaskPriority, TimeEstimate } from './types';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { buildNewTask } from './task-creation';
 import { buildNewProject } from './store-projects/project-actions';
@@ -62,6 +63,12 @@ import { projectToSqliteRow, PROJECT_SYNC_FIELD_SCHEMA } from './project-sync-sc
 import { toStableSyncJson } from './sync-helpers';
 import { generateUUID } from './uuid';
 import { logInfo } from './logger';
+import { applyCaptureModalCopilotProps } from './capture-modal-model';
+import { exact, isNativeJsonWithinBytes } from './native-json';
+import { buildNativeCaptureCopilotEdit, buildNativeCaptureCopilotOptions, isNativeCaptureCopilotEstimate,
+    nativeCaptureCopilotRevision, readNativeCaptureCopilotApplied, readNativeCaptureCopilotEdit,
+    readNativeCaptureCopilotSuggestion, type NativeCaptureCopilotApplied, type NativeCaptureCopilotEditInput,
+    type NativeCaptureCopilotOptionsInput } from './native-capture-copilot';
 
 type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['error']['code'];
 
@@ -128,6 +135,16 @@ export type NativePreparedQuickCapture = {
     result: Extract<NativeQuickCaptureSubmitResult, { kind: 'saved' }>;
     deviceIdToInitialize: string | null;
 };
+
+export type NativeQuickCaptureCopilotInput = { capture: NativeQuickCaptureInput; applied: NativeCaptureCopilotApplied };
+export type NativePreparedQuickCaptureV2 = Omit<NativePreparedQuickCapture, 'version' | 'request'> & {
+    version: 2; request: NativeQuickCaptureCopilotInput; timeEstimatesEnabled: boolean; typedTimeEstimate: TimeEstimate | null;
+};
+type AnyPreparedQuickCapture = NativePreparedQuickCapture | NativePreparedQuickCaptureV2;
+export type NativePreparedQuickCaptureCommand = { request: NativeQuickCaptureInput; prepared: NativePreparedQuickCapture }
+    | { request: NativeQuickCaptureCopilotInput; prepared: NativePreparedQuickCaptureV2 };
+export type NativeQuickCaptureCopilotPrepareResult = { kind: 'prepared'; prepared: NativePreparedQuickCaptureV2 }
+    | Extract<NativeQuickCaptureSubmitResult, { kind: 'refused' }>;
 
 export type NativeQuickCapturePrepareResult =
     | { kind: 'prepared'; prepared: NativePreparedQuickCapture }
@@ -235,6 +252,16 @@ const readCaptureRequest = (value: unknown): NativeQuickCaptureInput | null => {
     return options ? { text: value.text, options, captureId: value.captureId.toLowerCase(), openAfterSave: value.openAfterSave === true } : null;
 };
 
+/** Pure input decoder reused by the separately versioned native audio capture. */
+export const readNativeQuickCaptureInput = readCaptureRequest;
+
+const readCopilotCaptureRequest = (value: unknown): NativeQuickCaptureCopilotInput | null => {
+    if (!isObjectRecord(value) || !hasKeys(value, ['capture', 'applied'])) return null;
+    const capture = readCaptureRequest(value.capture);
+    const applied = readNativeCaptureCopilotApplied(value.applied);
+    return capture && applied && planQuickCaptureSave(capture.text).kind === 'single' ? { capture, applied } : null;
+};
+
 const sameJson = (left: unknown, right: unknown) => toStableSyncJson(left) === toStableSyncJson(right);
 const canonicalMetadata = (row: Record<string, unknown>) => isText(row.id, 36) && UUID_PATTERN.test(row.id)
     && row.id === row.id.toLowerCase() && row.rev === 1 && isNonemptyText(row.revBy)
@@ -268,16 +295,17 @@ const CAPTURE_TASK_CHECKS: Partial<Record<keyof Task, (value: unknown) => boolea
         && (v.until === undefined || isCaptureDate(v.until)),
     attachments: (v) => Array.isArray(v) && v.length <= 1000 && v.every(isLinkAttachment),
 };
-const readPreparedTask = (value: unknown): Task | null => {
+const readPreparedTask = (value: unknown, version: 1 | 2 = 1): Task | null => {
     if (!isObjectRecord(value) || !canonicalMetadata(value)
         || !['id', 'title', 'status', 'taskMode', 'tags', 'contexts', 'pushCount', 'isFocusedToday'].every((key) => key in value)
         || !Object.keys(value).every((key) => TASK_SYNC_FIELD_SCHEMA.some((field) => field.name === key)
-            && (value[key] === undefined || CAPTURE_TASK_CHECKS[key as keyof Task]?.(value[key]) === true))) return null;
+            && (value[key] === undefined || CAPTURE_TASK_CHECKS[key as keyof Task]?.(value[key]) === true
+                || version === 2 && key === 'timeEstimate' && isNativeCaptureCopilotEstimate(value[key])))) return null;
     const task = value as unknown as Task;
     if (task.order !== task.orderNum || (task.projectId && task.areaId) || (task.sectionId && !task.projectId)) return null;
     if (task.projectId ? !Number.isFinite(task.order) : task.order !== undefined) return null;
     if (!sameJson(taskToSqliteRow(task), taskToSqliteRow(normalizeTaskLifecycleFields(task)))) return null;
-    if (task.status === 'reference' && !sameJson(taskToSqliteRow(task), taskToSqliteRow({ ...task, ...getReferenceTaskFieldClears() }))) return null;
+    if (task.status === 'reference' && !sameJson(taskToSqliteRow(task), taskToSqliteRow({ ...task, ...getReferenceTaskFieldClears(task.dueReminderLeadMinutes, task.startReminderLeadMinutes) }))) return null;
     // Creation promotes a starred Inbox row; lifecycle/reference checks above
     // cover terminal states. Review-due Someday can also receive a valid star.
     if (task.isFocusedToday && task.status === 'inbox') return null;
@@ -307,10 +335,16 @@ const readPreparedProject = (value: unknown): Project | null => {
     return sameJson(project, canonical) && sameJson(projectToSqliteRow(project), projectToSqliteRow(canonical)) ? project : null;
 };
 
-const readPreparedCapture = (value: unknown): NativePreparedQuickCapture | null => {
-    if (!isObjectRecord(value) || !hasKeys(value, ['version', 'request', 'task', 'project', 'result', 'deviceIdToInitialize']) || value.version !== 1) return null;
-    const request = readCaptureRequest(value.request);
-    const task = readPreparedTask(value.task);
+const readPreparedCapture = (value: unknown): AnyPreparedQuickCapture | null => {
+    if (!isObjectRecord(value) || (value.version !== 1 && value.version !== 2)
+        || !hasKeys(value, ['version', 'request', 'task', 'project', 'result', 'deviceIdToInitialize',
+            ...(value.version === 2 ? ['timeEstimatesEnabled', 'typedTimeEstimate'] : [])])
+        || value.version === 2 && (typeof value.timeEstimatesEnabled !== 'boolean'
+            || value.typedTimeEstimate !== null && !isNativeCaptureCopilotEstimate(value.typedTimeEstimate)
+            || !isNativeJsonWithinBytes(value))) return null;
+    const copilot = value.version === 2 ? readCopilotCaptureRequest(value.request) : null;
+    const request = value.version === 2 ? copilot?.capture : readCaptureRequest(value.request);
+    const task = readPreparedTask(value.task, value.version);
     const project = value.project === null ? null : readPreparedProject(value.project);
     if (!request || !task || (value.project !== null && !project) || request.captureId !== task.id
         || (project && (task.projectId !== project.id || project.createdAt !== task.createdAt || project.revBy !== task.revBy))
@@ -326,8 +360,34 @@ const readPreparedCapture = (value: unknown): NativePreparedQuickCapture | null 
         if (!options || !sameJson(options, createQuickCaptureOptions({ projects: [], defaultAreaId: options.areaId, addAnother: true }))) return null;
         reset = { text: '', options };
     } else if (result.reset !== null) return null;
-    return { version: 1, request, task, project, deviceIdToInitialize: value.deviceIdToInitialize as string | null,
-        result: { kind: 'saved', taskId: task.id, ...(task.projectId ? { projectId: task.projectId } : { projectId: undefined }), next, reset } };
+    const common: Omit<NativePreparedQuickCapture, 'version' | 'request'> = { task, project, deviceIdToInitialize: value.deviceIdToInitialize as string | null,
+        result: { kind: 'saved' as const, taskId: task.id, ...(task.projectId ? { projectId: task.projectId } : { projectId: undefined }), next, reset } };
+    if (value.version === 2) {
+        if (!copilot || typeof value.timeEstimatesEnabled !== 'boolean'
+            || value.typedTimeEstimate !== null && !isNativeCaptureCopilotEstimate(value.typedTimeEstimate)) return null;
+        // The planner's estimate is frozen before Apply: deriving it from the
+        // final task would let any valid forged estimate preserve itself.
+        // Reference creation clears estimates after both typed and AI props.
+        const estimate = task.status === 'reference' ? undefined
+            : value.typedTimeEstimate ?? (value.timeEstimatesEnabled ? copilot.applied.timeEstimate : undefined);
+        if (task.timeEstimate !== estimate || !sameJson(task, applyCaptureModalCopilotProps(task, copilot.applied, false))) return null;
+        return { version: 2, request: copilot, timeEstimatesEnabled: value.timeEstimatesEnabled,
+            typedTimeEstimate: value.typedTimeEstimate, ...common };
+    }
+    return { version: 1, request, ...common };
+};
+
+/** Pure cold-journal validation; does not inspect current settings, provider state or credentials. */
+export const validatePreparedQuickCapture = (input: unknown): NativeHostResult<NativePreparedQuickCapture['result']> => {
+    if (!isObjectRecord(input) || !hasKeys(input, ['request', 'prepared'])) return fail('INVALID_INPUT', 'A prepared capture command is required');
+    if (isObjectRecord(input.prepared) && input.prepared.version === 2 && !isNativeJsonWithinBytes(input))
+        return fail('INVALID_INPUT', 'Prepared copilot capture exceeds the bounded journal');
+    try {
+        const prepared = readPreparedCapture(JSON.parse(JSON.stringify(input.prepared)));
+        const request = prepared?.version === 2 ? readCopilotCaptureRequest(input.request) : readCaptureRequest(input.request);
+        return prepared && request && sameJson(request, prepared.request) ? { ok: true, value: prepared.result }
+            : fail('INVALID_INPUT', 'Prepared capture request or journal does not match');
+    } catch { return fail('INVALID_INPUT', 'Prepared capture journal is malformed'); }
 };
 
 // Count the closed JSON grammar incrementally, before building a full journal
@@ -543,6 +603,31 @@ const windowed = <T extends { items: unknown[] }>(picker: T): Windowed<T> => ({
     total: picker.items.length,
 });
 
+export type NativeShareCaptureMethod = 'captureSubmit' | 'captureCopilotSubmit' | 'captureLinesSubmit';
+/** Share-only pure admission. Ordinary captures use the same prepared decoders and post-plan effects. */
+export function buildPreparedShareCaptureDocument(method: NativeShareCaptureMethod, command: unknown, before: AppData):
+    NativeHostResult<{ data: AppData; result: AnyPreparedQuickCapture['result'] | NativePreparedQuickCaptureLines['result'] }> {
+    if (!isObjectRecord(command) || !hasKeys(command, ['request', 'prepared'])) return fail('INVALID_INPUT', 'Prepared share capture is invalid');
+    const collections = { _allTasks: before.tasks, _allProjects: before.projects, _allSections: before.sections ?? [],
+        _allAreas: before.areas ?? [], settings: before.settings };
+    if (method === 'captureLinesSubmit') {
+        const prepared = readPreparedLines(command.prepared), request = readLinesRequest(command.request);
+        if (!prepared || !request || !sameJson(request, prepared.request)) return fail('INVALID_INPUT', 'Prepared share lines are invalid');
+        if (prepared.tasks.some(task => before.tasks.some(existing => existing.id === task.id))) return fail('STALE_REVISION', 'Share task already exists without its receipt');
+        const next = applyPreparedCaptureLinesData(collections, prepared);
+        return next ? { ok: true, value: { data: { ...before, tasks: next.tasks, projects: next.projects, settings: next.settings }, result: prepared.result } }
+            : fail('STALE_REVISION', 'Prepared share lines changed');
+    }
+    const prepared = readPreparedCapture(command.prepared);
+    const request = method === 'captureCopilotSubmit' ? readCopilotCaptureRequest(command.request) : readCaptureRequest(command.request);
+    if (!prepared || !request || (prepared.version === 2) !== (method === 'captureCopilotSubmit') || !sameJson(request, prepared.request))
+        return fail('INVALID_INPUT', 'Prepared share capture is invalid');
+    if (before.tasks.some(existing => existing.id === prepared.task.id)) return fail('STALE_REVISION', 'Share task already exists without its receipt');
+    const next = applyPreparedCaptureData(collections, prepared);
+    return next ? { ok: true, value: { data: { ...before, tasks: next.tasks, projects: next.projects, settings: next.settings }, result: prepared.result } }
+        : fail('STALE_REVISION', 'Prepared share capture changed');
+}
+
 export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
     // The popup's one parse-options bag; see the module comment.
     let parseOptions: QuickAddParseOptions | null = null;
@@ -659,7 +744,112 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         return { ok: true, value: { text: input.text, options } };
     };
 
+    function prepareQuickCapture(input: NativeQuickCaptureInput): NativeHostResult<NativeQuickCapturePrepareResult>;
+    function prepareQuickCapture(input: NativeQuickCaptureInput, applied: NativeCaptureCopilotApplied): NativeHostResult<NativeQuickCaptureCopilotPrepareResult>;
+    function prepareQuickCapture(input: NativeQuickCaptureInput, applied?: NativeCaptureCopilotApplied): NativeHostResult<NativeQuickCapturePrepareResult | NativeQuickCaptureCopilotPrepareResult> {
+        const ready = deps.readiness();
+        if (!ready.ok) return ready;
+        const request = readCaptureRequest(input);
+        if (!request) return fail('INVALID_INPUT', 'A complete capture request and UUID are required');
+        const options = readOptions(request.options)!;
+        const plan = planQuickCaptureSave(request.text);
+        if (plan.kind === 'empty') return fail('INVALID_INPUT', 'Type something to capture');
+        if (plan.kind === 'bulk') return applied ? fail('INVALID_INPUT', 'Copilot metadata is limited to a single capture')
+            : { ok: true, value: { kind: 'confirmLines', confirm: getQuickCaptureBulkConfirm(plan.lines, deps.t()), lineCount: plan.lines.length } };
+        const ctx = context();
+        const planned = planQuickCaptureTask({ text: plan.text, options }, ctx);
+        if (!planned.success) return planned.reason === 'invalid-date-command'
+            ? { ok: true, value: { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(deps.t(), planned.invalidDateCommands) } }
+            : fail('INVALID_INPUT', 'Type something to capture');
+        const state = useTaskStore.getState();
+        if (state._allTasks.some((task) => task.id === request.captureId)) return fail('INVALID_INPUT', 'Capture ID already exists; replay its prepared journal');
+        const device = ensureDeviceId(state.settings);
+        const now = ctx.now.toISOString();
+        let project: Project | null = null;
+        let props = planned.props;
+        if (planned.projectToCreate) {
+            const create = planned.projectToCreate;
+            const duplicate = findSelectableProjectByTitleAndArea(state._allProjects, create.title, create.initialProps?.areaId);
+            project = duplicate ? null : buildNewProject({
+                ...create, id: generateUUID(), existingProjects: state._allProjects, existingAreas: state._allAreas,
+                settings: state.settings, deviceId: device.deviceId, now,
+            });
+            props = applyCapturedProject(props, duplicate?.id ?? project!.id);
+        }
+        const projects = project ? [...state._allProjects, project] : state._allProjects;
+        if (props.projectId && !projects.some((entry) => entry.id === props.projectId && isSelectableProjectForTaskAssignment(entry))) return fail('INVALID_INPUT', 'Project is not available for capture');
+        if (project?.areaId && !state._allAreas.some((entry) => entry.id === project.areaId && !entry.deletedAt)) return fail('INVALID_INPUT', 'Area is not available for capture');
+        const timeEstimatesEnabled = resolveFeatureFlags(state.settings).timeEstimates;
+        const typedTimeEstimate = props.timeEstimate ?? null;
+        if (applied) props = applyCaptureModalCopilotProps(props, applied, timeEstimatesEnabled);
+        const built = buildNewTask({
+            title: planned.title.trim(), initialTaskProps: props, id: request.captureId, now, deviceId: device.deviceId,
+            state: { ...state, _allProjects: projects }, tasks: state._allTasks,
+            focusedCount: state.getFocusedCount(), focusTaskLimit: normalizeFocusTaskLimit(state.settings.gtd?.focusTaskLimit),
+            projectOrderReserver: createProjectOrderReserver(state._allTasks),
+        });
+        if (!built.ok) return fail('INVALID_INPUT', built.error);
+        const next = request.openAfterSave ? 'open' : request.options.addAnother ? 'addAnother' : 'close';
+        const common: Omit<NativePreparedQuickCapture, 'version' | 'request'> = {
+            task: built.task, project, deviceIdToInitialize: device.updated ? device.deviceId : null,
+            result: { kind: 'saved', taskId: built.task.id, projectId: built.task.projectId, next,
+                reset: next === 'addAnother' ? { text: '', options: freshOptions(true) } : null },
+        };
+        const prepared: AnyPreparedQuickCapture = applied
+            ? { version: 2, request: { capture: request, applied }, timeEstimatesEnabled, typedTimeEstimate, ...common }
+            : { version: 1, request, ...common };
+        // Detach every nested row/option from live state, and exercise the same
+        // decoder used after a journal JSON round-trip before handing it out.
+        const decoded = readPreparedCapture(JSON.parse(JSON.stringify(prepared)));
+        if (!decoded) return fail('INVALID_INPUT', 'Capture could not produce a valid prepared journal');
+        if (decoded.version === 2 && !isNativeJsonWithinBytes({ request: decoded.request, prepared: decoded }))
+            return fail('INVALID_INPUT', 'Prepared copilot capture exceeds the bounded journal');
+        return decoded.version === 1 ? { ok: true, value: { kind: 'prepared', prepared: decoded } }
+            : { ok: true, value: { kind: 'prepared', prepared: decoded } };
+    }
+
     return {
+        getCaptureCopilotOptions(input: NativeCaptureCopilotOptionsInput) {
+            const draft = readDraft(input);
+            if (!draft.ok) return draft;
+            const applied = readNativeCaptureCopilotApplied(input.applied);
+            if (!isObjectRecord(input) || !exact(input, ['text', 'options', 'applied', 'aiKey']) || !applied
+                || !isObjectRecord(input.aiKey) || !exact(input.aiKey, ['required', 'available'])
+                || typeof input.aiKey.required !== 'boolean' || typeof input.aiKey.available !== 'boolean')
+                return fail('INVALID_INPUT', 'A bounded capture copilot draft and key metadata are required');
+            const ctx = context();
+            const plan = planQuickCaptureSave(draft.value.text);
+            const planned = plan.kind === 'single' ? planQuickCaptureTask({ text: plan.text, options: draft.value.options }, ctx) : null;
+            return { ok: true as const, value: buildNativeCaptureCopilotOptions({ ...draft.value, applied, aiKey: input.aiKey }, {
+                settings: ctx.settings, tasks: useTaskStore.getState().tasks, t: deps.t(), revision: deps.revision(ctx.now),
+                title: planned?.success ? planned.title : null,
+            }) };
+        },
+
+        editCaptureCopilot(input: NativeCaptureCopilotEditInput) {
+            const draft = readDraft(input);
+            if (!draft.ok) return draft;
+            const applied = readNativeCaptureCopilotApplied(input.applied);
+            const suggestion = readNativeCaptureCopilotSuggestion(input.suggestion);
+            const edit = readNativeCaptureCopilotEdit(input.edit);
+            if (!isObjectRecord(input) || !exact(input, ['text', 'options', 'revision', 'suggestion', 'applied', 'edit'])
+                || !applied || suggestion === undefined || edit === undefined || !isText(input.revision, 5000))
+                return fail('INVALID_INPUT', 'A current bounded copilot suggestion and offered edit are required');
+            if (planQuickCaptureSave(draft.value.text).kind === 'single'
+                && input.revision !== nativeCaptureCopilotRevision(deps.revision(new Date()), draft.value.text, draft.value.options))
+                return fail('STALE_REVISION', 'Capture changed; ask for a current suggestion');
+            const result = buildNativeCaptureCopilotEdit({ ...input, ...draft.value, applied, suggestion, edit }, useTaskStore.getState().settings, deps.t());
+            return result ? { ok: true as const, value: result } : fail('INVALID_INPUT', 'Only currently offered copilot parts can be applied');
+        },
+
+        prepareQuickCaptureCopilot(input: NativeQuickCaptureCopilotInput): NativeHostResult<NativeQuickCaptureCopilotPrepareResult> {
+            const request = readCopilotCaptureRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'A single capture and bounded applied metadata are required');
+            return prepareQuickCapture(request.capture, request.applied);
+        },
+
+        validatePreparedQuickCapture,
+
         /** Read-only prerequisite; the native owner must write its backup and journal before commit. */
         prepareQuickCaptureLines(input: NativeQuickCaptureLinesInput): NativeHostResult<
             { kind: 'prepared'; prepared: NativePreparedQuickCaptureLines } | Extract<NativeQuickCaptureLinesResult, { kind: 'refused' }>
@@ -748,67 +938,19 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         },
 
         /** Read-only. The serial native owner must journal this result before commit. */
-        prepareQuickCapture(input: NativeQuickCaptureInput): NativeHostResult<NativeQuickCapturePrepareResult> {
-            const ready = deps.readiness();
-            if (!ready.ok) return ready;
-            const request = readCaptureRequest(input);
-            if (!request) return fail('INVALID_INPUT', 'A complete capture request and UUID are required');
-            const options = readOptions(request.options)!;
-            const plan = planQuickCaptureSave(request.text);
-            if (plan.kind === 'empty') return fail('INVALID_INPUT', 'Type something to capture');
-            if (plan.kind === 'bulk') return { ok: true, value: { kind: 'confirmLines', confirm: getQuickCaptureBulkConfirm(plan.lines, deps.t()), lineCount: plan.lines.length } };
-            const ctx = context();
-            const planned = planQuickCaptureTask({ text: plan.text, options }, ctx);
-            if (!planned.success) return planned.reason === 'invalid-date-command'
-                ? { ok: true, value: { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(deps.t(), planned.invalidDateCommands) } }
-                : fail('INVALID_INPUT', 'Type something to capture');
-            const state = useTaskStore.getState();
-            if (state._allTasks.some((task) => task.id === request.captureId)) return fail('INVALID_INPUT', 'Capture ID already exists; replay its prepared journal');
-            const device = ensureDeviceId(state.settings);
-            const now = ctx.now.toISOString();
-            let project: Project | null = null;
-            let props = planned.props;
-            if (planned.projectToCreate) {
-                const create = planned.projectToCreate;
-                const duplicate = findSelectableProjectByTitleAndArea(state._allProjects, create.title, create.initialProps?.areaId);
-                project = duplicate ? null : buildNewProject({
-                    ...create, id: generateUUID(), existingProjects: state._allProjects, existingAreas: state._allAreas,
-                    settings: state.settings, deviceId: device.deviceId, now,
-                });
-                props = applyCapturedProject(props, duplicate?.id ?? project!.id);
-            }
-            const projects = project ? [...state._allProjects, project] : state._allProjects;
-            if (props.projectId && !projects.some((entry) => entry.id === props.projectId && isSelectableProjectForTaskAssignment(entry))) return fail('INVALID_INPUT', 'Project is not available for capture');
-            if (project?.areaId && !state._allAreas.some((entry) => entry.id === project.areaId && !entry.deletedAt)) return fail('INVALID_INPUT', 'Area is not available for capture');
-            const built = buildNewTask({
-                title: planned.title.trim(), initialTaskProps: props, id: request.captureId, now, deviceId: device.deviceId,
-                state: { ...state, _allProjects: projects }, tasks: state._allTasks,
-                focusedCount: state.getFocusedCount(), focusTaskLimit: normalizeFocusTaskLimit(state.settings.gtd?.focusTaskLimit),
-                projectOrderReserver: createProjectOrderReserver(state._allTasks),
-            });
-            if (!built.ok) return fail('INVALID_INPUT', built.error);
-            const next = request.openAfterSave ? 'open' : request.options.addAnother ? 'addAnother' : 'close';
-            const prepared: NativePreparedQuickCapture = {
-                version: 1, request, task: built.task, project, deviceIdToInitialize: device.updated ? device.deviceId : null,
-                result: { kind: 'saved', taskId: built.task.id, projectId: built.task.projectId, next,
-                    reset: next === 'addAnother' ? { text: '', options: freshOptions(true) } : null },
-            };
-            // Detach every nested row/option from live state, and exercise the same
-            // decoder used after a journal JSON round-trip before handing it out.
-            const decoded = readPreparedCapture(JSON.parse(JSON.stringify(prepared)));
-            return decoded ? { ok: true, value: { kind: 'prepared', prepared: decoded } }
-                : fail('INVALID_INPUT', 'Capture could not produce a valid prepared journal');
-        },
+        prepareQuickCapture: (input: NativeQuickCaptureInput): NativeHostResult<NativeQuickCapturePrepareResult> => prepareQuickCapture(input),
 
         /** Replay only the journaled rows; no parsing, clock, settings or focus policy runs here. */
-        async commitPreparedQuickCapture(input: { request: NativeQuickCaptureInput; prepared: NativePreparedQuickCapture }): Promise<NativeHostResult<Extract<NativeQuickCaptureSubmitResult, { kind: 'saved' }>>> {
+        async commitPreparedQuickCapture(input: NativePreparedQuickCaptureCommand): Promise<NativeHostResult<Extract<NativeQuickCaptureSubmitResult, { kind: 'saved' }>>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || !hasKeys(input, ['request', 'prepared'])) return fail('INVALID_INPUT', 'A prepared capture command is required');
-            let prepared: NativePreparedQuickCapture | null;
+            if (isObjectRecord(input.prepared) && input.prepared.version === 2 && !isNativeJsonWithinBytes(input))
+                return fail('INVALID_INPUT', 'Prepared copilot capture exceeds the bounded journal');
+            let prepared: AnyPreparedQuickCapture | null;
             try {
-                const request = readCaptureRequest(input.request);
                 prepared = readPreparedCapture(JSON.parse(JSON.stringify(input.prepared)));
+                const request = prepared?.version === 2 ? readCopilotCaptureRequest(input.request) : readCaptureRequest(input.request);
                 if (!request || !prepared || !sameJson(request, prepared.request)) return fail('INVALID_INPUT', 'Prepared capture request or journal does not match');
             } catch {
                 return fail('INVALID_INPUT', 'Prepared capture journal is malformed');

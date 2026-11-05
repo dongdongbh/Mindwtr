@@ -1,3 +1,4 @@
+import { NATIVE_WIDGET_NAMESPACE, nativeWidgetIdentifier, nativeWidgetCompletionPayload } from './native-widget-completion';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NativeHostResult } from './native-host-contract';
 import { createNativeRequestReceipts, isNativeRequestReceiptDurable, loadNativeRequestReceipts, pruneNativeRequestReceipts, resetNativeRequestReceipts,
@@ -26,6 +27,41 @@ function createSave() {
 }
 
 describe('native request receipts', () => {
+    it('never grants durable receipt storage to private extra body JSON edits', async () => {
+        const client: SqliteClient = { run: async () => {}, all: async <T,>() => [] as T[], get: async () => undefined };
+        expect(isNativeRequestReceiptDurable('setAIExtraBodyParams')).toBe(false);
+        await loadNativeRequestReceipts(client, { durableCommands: ['setAIExtraBodyParams'] });
+        expect(isNativeRequestReceiptDurable('setAIExtraBodyParams')).toBe(false);
+    });
+
+    it('retains literal bounded widget source tuples beyond the App lock cap and validates cold result/source binding', async () => {
+        const directory = mkdtempSync(join(tmpdir(), 'mindwtr-widget-receipts-'));
+        const sqlite = openScratchSqlite(join(directory, 'receipts.sqlite'));
+        const actionId = generateUUID(), token = JSON.stringify(['task', 0, 'stamp', 'next']) + ' '.repeat(8100);
+        const source = { namespace: NATIVE_WIDGET_NAMESPACE, actionId, identifier: nativeWidgetIdentifier('task'), token, createdAt: 100 };
+        const payload = nativeWidgetCompletionPayload(source), result = { actionId, outcome: 'discarded' };
+        expect(Buffer.byteLength(payload)).toBeGreaterThan(8192);
+        try {
+            await loadNativeRequestReceipts(sqlite.client, { durableCommands: ['iosWidgetCompletion'] });
+            await sqlite.client.run('INSERT INTO native_request_receipts VALUES (?,?,?,?)', [actionId, payload, JSON.stringify(result), '2026-10-30T00:00:00.000Z']);
+            await loadNativeRequestReceipts(sqlite.client, { durableCommands: ['iosWidgetCompletion'] });
+            const receipts = createNativeRequestReceipts({ save: async () => ok(null) });
+            expect(receipts.saved(actionId, payload)).toEqual(ok(result));
+            expect(receipts.saved(actionId, nativeWidgetCompletionPayload({ ...source, createdAt: 101 })))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            const baseline = await sqlite.client.all('SELECT * FROM native_request_receipts');
+            for (const reply of [{ actionId, outcome: 'completed', extra: true }, { actionId: generateUUID(), outcome: 'completed' },
+                { actionId, outcome: 'unknown' }]) {
+                await sqlite.client.run('UPDATE native_request_receipts SET reply=? WHERE request_id=?', [JSON.stringify(reply), actionId]);
+                await expect(loadNativeRequestReceipts(sqlite.client, { durableCommands: ['iosWidgetCompletion'] }))
+                    .rejects.toThrow('Invalid saved widget completion receipt');
+            }
+            await sqlite.client.run('UPDATE native_request_receipts SET reply=? WHERE request_id=?', [JSON.stringify(result), actionId]);
+            expect(await sqlite.client.all('SELECT * FROM native_request_receipts')).toEqual(baseline);
+            await loadNativeRequestReceipts(sqlite.client, { durableCommands: ['iosWidgetCompletion'] });
+        } finally { sqlite.close(); rmSync(directory, { recursive: true, force: true }); }
+    });
+
     it('reports loaded exact-command durable readiness without granting unjournaled commands', async () => {
         const client: SqliteClient = { run: async () => undefined, all: async () => [], get: async () => undefined };
         expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(false);

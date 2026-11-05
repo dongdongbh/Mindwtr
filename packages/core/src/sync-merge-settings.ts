@@ -82,8 +82,11 @@ const chooseDeletedSavedFilter = (localFilter: SavedFilter, incomingFilter: Save
 // missing createdAt became its load time (`inventedAt`) — and kept updatedAt.
 const legacySavedFilterProjection = (filter: SavedFilter, inventedAt: string | undefined): SavedFilter | null => {
     const value = filter as unknown as Record<string, unknown>;
+    const criteria = isObjectRecord(value.criteria) ? { ...value.criteria } : value.criteria;
+    if (isObjectRecord(criteria)) delete criteria.excludedProjects;
     const legacy = {
         ...value,
+        criteria,
         id: typeof value.id === 'string' ? value.id.trim() : value.id,
         createdAt: typeof value.createdAt === 'string' && value.createdAt.trim() ? value.createdAt : inventedAt,
     };

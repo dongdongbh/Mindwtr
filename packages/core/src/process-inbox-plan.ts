@@ -157,6 +157,8 @@ function resolveSelectionFields(
     const includeContainers = plan.visibleFields.project || plan.visibleFields.area;
     return {
         ...(includeContainers ? resolveProcessInboxContainerFields(projectId, areaId) : {}),
+        ...(plan.visibleFields.project && Object.prototype.hasOwnProperty.call(fields, 'sectionId')
+            ? { sectionId: projectId ? fields.sectionId || undefined : undefined } : {}),
         ...(plan.visibleFields.contexts ? { contexts: fields.contexts ?? [] } : {}),
         ...(plan.visibleFields.tags ? { tags: fields.tags ?? [] } : {}),
         // Someday sections are destination metadata, not a generic editor

@@ -28,6 +28,7 @@ import { resolveFeatureFlags } from './resolve-feature-flags';
 import { isSandboxMode } from './sandbox';
 import type { StoreActionResult } from './store-types';
 import { sanitizeAttachmentUriForSyncMerge } from './sync-normalization';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { getUsedTaskTokens } from './task-token-usage';
 import type { AppSettings, Area, Attachment, Project, Task, TimeEstimate } from './types';
 
@@ -214,6 +215,22 @@ export type CaptureModalCopilotApplied = { context?: string; timeEstimate?: Time
 /** One separately applicable piece of a suggestion. */
 export type CaptureModalCopilotPart = { kind: 'context' | 'timeEstimate' | 'tag'; value: string };
 
+/** Capture copilot choices: used tokens first, followed by live saved tokens not already used. */
+export const getCaptureModalCopilotTokens = (settings: AppSettings, tasks: Task[]) => ({
+    contexts: Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' }), ...getSavedTaxonomyTokens(settings, 'context')])),
+    tags: Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.tags, { prefix: '#' }), ...getSavedTaxonomyTokens(settings, 'tag')])),
+});
+
+/** Add explicitly applied metadata without interpreting it as quick-add command text. A typed estimate wins. */
+export function applyCaptureModalCopilotProps(props: Partial<Task>, applied: CaptureModalCopilotApplied,
+    timeEstimatesEnabled: boolean): Partial<Task> {
+    return { ...props,
+        ...(applied.context ? { contexts: Array.from(new Set([...(props.contexts ?? []), applied.context])) } : {}),
+        ...(timeEstimatesEnabled && applied.timeEstimate && !props.timeEstimate ? { timeEstimate: applied.timeEstimate } : {}),
+        ...(applied.tags.length ? { tags: Array.from(new Set([...(props.tags ?? []), ...applied.tags])) } : {}),
+    };
+}
+
 /** Whether the screen asks the AI about this title: AI on, a key when one is required, and 4 characters or more. */
 export function shouldRequestCaptureModalCopilot(input: { aiEnabled: boolean; keyRequired: boolean; hasKey: boolean; title: string }): boolean {
     if (!input.aiEnabled || (input.keyRequired && !input.hasKey)) return false;
@@ -334,16 +351,7 @@ export function buildCaptureModalRequest(input: {
                         ? `${description}\n${parsedDescription}`
                         : description;
                 }
-                if (copilot.context) {
-                    taskProps.contexts = Array.from(new Set([...(taskProps.contexts ?? []), copilot.context]));
-                }
-                if (input.timeEstimatesEnabled && copilot.timeEstimate && !taskProps.timeEstimate) {
-                    taskProps.timeEstimate = copilot.timeEstimate;
-                }
-                if (copilot.tags.length) {
-                    taskProps.tags = Array.from(new Set([...(taskProps.tags ?? []), ...copilot.tags]));
-                }
-                return taskProps;
+                return applyCaptureModalCopilotProps(taskProps, copilot, input.timeEstimatesEnabled);
             },
         },
     };
@@ -644,8 +652,7 @@ export function buildCaptureModalView(draft: CaptureModalDraft, context: {
             request: asksCopilot(copilotSettings, title)
                 ? {
                     title,
-                    contexts: getUsedTaskTokens(context.tasks, (task) => task.contexts, { prefix: '@' }),
-                    tags: getUsedTaskTokens(context.tasks, (task) => task.tags, { prefix: '#' }),
+                    ...getCaptureModalCopilotTokens(settings, context.tasks),
                 }
                 : null,
             suggested: parts.length > 0

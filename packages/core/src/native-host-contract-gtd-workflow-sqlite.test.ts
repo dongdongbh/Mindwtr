@@ -126,10 +126,14 @@ async function planArea(host: ReturnType<typeof createNativeHostContract>, value
 }
 
 async function planCaptureParse(host: ReturnType<typeof createNativeHostContract>,
-    edit: { type: 'quickAddAutoClean' | 'naturalLanguageDates'; value: boolean }) {
-    const options = await host.getGtdCaptureParseOptions({});
+    edit: { type: 'quickAddAutoClean' | 'naturalLanguageDates' | 'saveAudioAttachments'; value: boolean }) {
+    const options = await (edit.type === 'saveAudioAttachments' ? host.getGtdCaptureAudioOptions({}) : host.getGtdCaptureParseOptions({}));
     if (!options.ok) throw new Error(JSON.stringify(options));
-    const request: NativeGtdWorkflowRequest = { requestId: ID, edit, expected: options.value.expected[edit.type] };
+    const expected = options.value.expected;
+    const witness = edit.type === 'saveAudioAttachments' && 'saveAudioAttachments' in expected ? expected.saveAudioAttachments
+        : edit.type !== 'saveAudioAttachments' && 'quickAddAutoClean' in expected ? expected[edit.type] : null;
+    if (!witness) throw new Error('Selected Capture scalar is unavailable');
+    const request: NativeGtdWorkflowRequest = { requestId: ID, edit, expected: witness };
     const prepared = await host.prepareGtdWorkflow(request);
     if (!prepared.ok || prepared.value.kind !== 'prepared') throw new Error(JSON.stringify(prepared));
     return { request, prepared: prepared.value.prepared };
@@ -400,18 +404,21 @@ describe('GTD Capture Default Area paired SQLite recovery', () => {
     }, 20_000);
 });
 
-describe('GTD Capture parser scalar SQLite recovery', () => {
+describe('GTD Capture parser and audio scalar SQLite recovery', () => {
     it.each([
         { type: 'naturalLanguageDates', value: false },
         { type: 'quickAddAutoClean', value: true },
-    ] as const)('retries $type from raw rows and requires exact cold field/group receipt', async (edit) => {
+        { type: 'saveAudioAttachments', value: false },
+        { type: 'saveAudioAttachments', value: true },
+    ] as const)('retries $type=$value from raw rows and requires exact cold field/group receipt', async (edit) => {
         const dir = mkdtempSync(join(tempRoot, 'gtd-capture-parse-')); directories.push(dir);
         const path = join(dir, 'library.db');
         const first = await open(path, true);
         // Store migrations normalize this legacy sibling on load. Stage the
         // saved raw row after bootstrap to prove the writer itself preserves it.
         const raw = await first.adapter.getData();
-        raw.settings.gtd = { ...raw.settings.gtd, pomodoro: 'malformed-unrelated' as never };
+        raw.settings.gtd = { ...raw.settings.gtd, pomodoro: 'malformed-unrelated' as never,
+            ...(edit.type === 'saveAudioAttachments' ? { defaultCaptureMethod: 'text', saveAudioAttachments: !edit.value } : {}) };
         await first.adapter.saveData(raw);
         const before = nineTables(first.db);
         const beforeSettings = (await first.adapter.getData()).settings;
@@ -431,10 +438,11 @@ describe('GTD Capture parser scalar SQLite recovery', () => {
         const after = nineTables(first.db);
         for (const table of tables.filter((table) => table !== 'settings')) expect(after[table]).toEqual(before[table]);
         const saved = await first.adapter.getData();
-        expect(edit.type === 'naturalLanguageDates'
-            ? saved.settings.gtd?.naturalLanguageDates : saved.settings.quickAddAutoClean).toBe(edit.value);
+        expect(edit.type === 'quickAddAutoClean'
+            ? saved.settings.quickAddAutoClean : saved.settings.gtd?.[edit.type]).toBe(edit.value);
         expect(saved.settings.gtd).toMatchObject({ ...beforeSettings.gtd,
-            pomodoro: 'malformed-unrelated' });
+            pomodoro: 'malformed-unrelated',
+            ...(edit.type === 'saveAudioAttachments' ? { saveAudioAttachments: edit.value } : {}) });
         expect(saved.settings.syncPreferencesUpdatedAt?.gtd).toBe(envelope.prepared.after.stamp);
         first.db.close(); databases.splice(databases.indexOf(first.db), 1);
         const cold = await open(path);
@@ -455,8 +463,10 @@ describe('GTD Capture parser scalar SQLite recovery', () => {
             error: { code: 'STALE_REVISION' } });
         expect(nineTables(changed.db)).toEqual(changedRows);
         const aba = await changed.adapter.getData();
-        if (edit.type === 'naturalLanguageDates') delete aba.settings.gtd?.naturalLanguageDates;
-        else delete aba.settings.quickAddAutoClean;
+        if (edit.type === 'quickAddAutoClean') delete aba.settings.quickAddAutoClean;
+        else delete aba.settings.gtd?.[edit.type];
+        aba.settings.syncPreferencesUpdatedAt = { ...aba.settings.syncPreferencesUpdatedAt,
+            gtd: envelope.prepared.after.stamp };
         await changed.adapter.saveData(aba);
         changed.db.close(); databases.splice(databases.indexOf(changed.db), 1);
         const reopened = await open(path);

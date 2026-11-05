@@ -138,6 +138,30 @@ const createHarness = (
 };
 
 describe('commitProvenMobileSyncConfiguration', () => {
+    it('refuses a retired owner before initial Dropbox promotion without guarding rollback', async () => {
+        const harness = createHarness({ [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' }, {}, OLD_DROPBOX_TOKENS);
+        harness.dependencies.beforeDropboxPromotion = async () => { throw new Error('Promotion owner retired'); };
+        await expect(commitProvenMobileSyncConfiguration({ backend: 'cloud', cloudProvider: 'dropbox', dropbox: { tokens: NEW_DROPBOX_TOKENS } }, harness.dependencies))
+            .rejects.toThrow('Promotion owner retired');
+        expect(harness.getDropboxTokens()).toEqual(OLD_DROPBOX_TOKENS); expect(harness.storage.get(SYNC_BACKEND_KEY)).toBe('cloud');
+        expect(harness.events.filter(event => event.startsWith('save-dropbox:'))).toEqual([]);
+    });
+
+    it('refuses a retired owner after token promotion and restores prior credentials/configuration', async () => {
+        const harness = createHarness({ [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' }, {}, OLD_DROPBOX_TOKENS);
+        const before = new Map(harness.storage); let current = true;
+        const save = harness.dependencies.saveDropboxTokens;
+        harness.dependencies.saveDropboxTokens = async tokens => { await save(tokens); if (tokens.accessToken === NEW_DROPBOX_TOKENS.accessToken) current = false; };
+        harness.dependencies.beforeActivation = async () => { if (!current) throw new Error('Activation owner retired'); };
+        await expect(commitProvenMobileSyncConfiguration({ backend: 'cloud', cloudProvider: 'dropbox', dropbox: { tokens: NEW_DROPBOX_TOKENS } }, harness.dependencies))
+            .rejects.toThrow('Activation owner retired');
+        expect(harness.getDropboxTokens()).toEqual(OLD_DROPBOX_TOKENS); expect(harness.storage.get(SYNC_BACKEND_KEY)).toBe('cloud');
+        expect(harness.storage.get(CLOUD_PROVIDER_KEY)).toBe(before.get(CLOUD_PROVIDER_KEY));
+        const promotion = harness.events.indexOf('save-dropbox:new-access'), rollback = harness.events.indexOf('save-dropbox:old-access');
+        expect(promotion).toBeGreaterThan(-1); expect(rollback).toBeGreaterThan(promotion);
+        expect(harness.events.slice(promotion + 1, rollback)).not.toContain(backendWrite('cloud'));
+    });
+
     it('blocks destination changes while an encryption transition journal exists', async () => {
         const harness = createHarness({ [SYNC_BACKEND_KEY]: 'webdav' });
         harness.dependencies.getIncompleteSyncEncryptionTransition = async () => 'enable';

@@ -20,7 +20,7 @@
  * - Android system search (Android 12+ only): `mindwtr:appSearchIndexingEnabled`
  *   is 'true' while on and removed when off. The host also indexes or wipes its
  *   search documents (platform wiring). Send `appSearch` to getGeneralSettings.
- * - App lock: synced (`settings.security.mobileAppLockEnabled`). Before turning
+ * - App lock: device-local (`settings.security.mobileAppLockEnabled`). Before turning
  *   it on, the host asks the device lock with `appLock.enablePrompt`; only a
  *   success sends the edit, a failure shows `appLock.errors[reason]`.
  * - Regional formats open or closed: screen state only, closed on every visit.
@@ -77,7 +77,18 @@ import { buildTaskNotesExportZip } from './tasknotes-export';
 import { getInMemoryAppDataSnapshot } from './sync-client-helpers';
 import { isSandboxMode, isWorkspaceTransitionActive } from './sandbox';
 import { canUseJalaliCalendar, createDateFormatter, getSystemWeekStart, normalizeClockTimeInput, type DateFormattingConfig } from './date';
-import { buildDataSettingsModel, buildDataSettingsUpdate, isDataSettingStored, type DataSettingsEdit, type DataSettingsModel } from './data-settings-model';
+import { isArchiveRetentionDays } from './archive-retention';
+import {
+    buildArchiveRetentionCard,
+    buildArchiveRetentionReview,
+    buildDataSettingsModel,
+    buildDataSettingsUpdate,
+    isDataSettingStored,
+    type ArchiveRetentionCard,
+    type ArchiveRetentionReview,
+    type DataSettingsEdit,
+    type DataSettingsModel,
+} from './data-settings-model';
 import {
     buildNotificationsSettingsModel,
     buildNotificationsSettingsUpdate,
@@ -408,14 +419,22 @@ const persistentCaptureOn = (capture: NativePersistentCaptureHost): boolean => {
 };
 
 /** A Data edit as a host sends it back; the analytics switch only in a build with the heartbeat. */
-const readDataEdit = (value: unknown, analyticsAvailable: boolean): DataSettingsEdit | null => (
-    isObjectRecord(value) && Object.keys(value).length === 2 && typeof value.value === 'boolean'
-        && (value.type === 'debugLogging' || (value.type === 'analyticsOptOut' && analyticsAvailable))
+const readDataEdit = (value: unknown, analyticsAvailable: boolean): DataSettingsEdit | null => {
+    if (!isObjectRecord(value) || Object.keys(value).length !== 2) return null;
+    if (value.type === 'archiveRetentionDays') return isArchiveRetentionDays(value.value) ? { type: value.type, value: value.value } : null;
+    return typeof value.value === 'boolean' && (value.type === 'debugLogging' || (value.type === 'analyticsOptOut' && analyticsAvailable))
         ? { type: value.type, value: value.value }
-        : null
-);
+        : null;
+};
+
+export type NativeArchiveRetentionRun = {
+    outcome: 'purged' | 'unchanged' | 'skipped' | 'failed';
+    purged: { tasks: number; projects: number; sections: number };
+    skipped: 'editor-open' | 'off' | 'not-ready' | 'waiting-for-sync' | null;
+};
 
 export function createSettingsMethods(deps: SettingsDeps) {
+    let lastRetentionLine = '';
     const durableSave = async (): Promise<NativeHostResult<null>> => {
         try {
             if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
@@ -1140,6 +1159,54 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: manageRevision(), ...model } };
         },
 
+        getArchiveRetentionOptions(): NativeHostResult<{ revision: string; card: ArchiveRetentionCard }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            return { ok: true, value: { revision: manageRevision(),
+                card: buildArchiveRetentionCard(useTaskStore.getState().settings, deps.t()) } };
+        },
+
+        /** RN reviews enabling retention or shortening it before the existing Data setting write. */
+        getArchiveRetentionReview(input: { days: number }): NativeHostResult<{ review: ArchiveRetentionReview | null; edit: DataSettingsEdit }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || Object.keys(input).length !== 1 || !isArchiveRetentionDays(input.days)) {
+                return fail('INVALID_INPUT', 'Archive retention must be an integer from 0 to 36500 days');
+            }
+            const state = useTaskStore.getState();
+            return { ok: true, value: { review: buildArchiveRetentionReview(
+                { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections, settings: state.settings },
+                input.days, deps.t()), edit: { type: 'archiveRetentionDays', value: input.days } } };
+        },
+
+        /** The host schedules this while in front; only explicit off bypasses this session's first-sync gate. */
+        async runArchiveRetention(input: { editorOpen: boolean; selectedBackend: string | null }): Promise<NativeHostResult<NativeArchiveRetentionRun>> {
+            if (!isObjectRecord(input) || Object.keys(input).length !== 2 || typeof input.editorOpen !== 'boolean'
+                || (input.selectedBackend !== null && typeof input.selectedBackend !== 'string')) {
+                return fail('INVALID_INPUT', 'An editor state and a selected sync backend are required');
+            }
+            const none = { tasks: 0, projects: 0, sections: 0 };
+            let run: NativeArchiveRetentionRun;
+            if (input.editorOpen) run = { outcome: 'skipped', purged: none, skipped: 'editor-open' };
+            else if (!deps.readiness().ok) run = { outcome: 'skipped', purged: none, skipped: 'not-ready' };
+            else {
+                const result = await useTaskStore.getState().runArchiveRetention({ syncConfigured: input.selectedBackend !== 'off' });
+                const purged = result.purged ?? none;
+                run = !result.success ? { outcome: 'failed', purged: none, skipped: null }
+                    : result.skipped ? { outcome: 'skipped', purged: none, skipped: result.skipped }
+                        : { outcome: purged.tasks || purged.projects || purged.sections ? 'purged' : 'unchanged', purged, skipped: null };
+            }
+            const logged = `${run.outcome}/${run.skipped}`;
+            if (run.outcome === 'purged' || logged !== lastRetentionLine) {
+                lastRetentionLine = logged;
+                logInfo('Native archive retention ran', { scope: 'store', category: 'storage', context: {
+                    releaseCheck: 'v1.3.8/native-archive-retention', outcome: run.outcome, skipped: run.skipped ?? 'none',
+                    taskCount: run.purged.tasks, projectCount: run.purged.projects, sectionCount: run.purged.sections,
+                } });
+            }
+            return { ok: true, value: run };
+        },
+
         /** RN's export snapshot and serializers. Never flushes or acknowledges an owed save. */
         getDataBackup(format: 'json' | 'csv' | 'tasknotes' = 'json'): NativeHostResult<{ fileName: string; content: string; encoding: 'utf8' | 'base64' }> {
             if (format !== 'json' && format !== 'csv' && format !== 'tasknotes') return fail('INVALID_INPUT', 'Unsupported export format');
@@ -1172,6 +1239,16 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 // Serialization errors can contain data; the host receives only a fixed message.
                 return fail('ACTION_FAILED', 'Could not prepare the backup');
             }
+        },
+
+        /** Read only the exact saved receipt, even while ordinary write admission is unavailable. */
+        probeGettingStartedOutcome(input: { requestId: string; language: string }): NativeHostResult<{ projectId: string | null } | null> {
+            if (!isObjectRecord(input) || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
+                || typeof input.language !== 'string' || !isSupportedLanguage(input.language)) {
+                return fail('INVALID_INPUT', 'A request UUID and a supported language are required');
+            }
+            return receipts.saved<{ projectId: string | null }>(input.requestId, JSON.stringify(['gettingStarted', input.language]))
+                ?? { ok: true, value: null };
         },
 
         /**
@@ -1226,6 +1303,9 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return receipts.run<NativeSettingsWriteResult>(input.requestId, JSON.stringify(['data', edit]), async () => {
                 const settings = useTaskStore.getState().settings;
                 if (isDataSettingStored(settings, edit)) return { ok: true, value: { changed: false, deviceWrites: [] } };
+                if (edit.type === 'archiveRetentionDays') {
+                    return settleWrite(await runStoreWrite(() => useTaskStore.getState().setArchiveRetentionDays(edit.value)), { changed: true, deviceWrites: [] });
+                }
                 const written = await runStoreWrite(() => useTaskStore.getState().updateSettings(buildDataSettingsUpdate(settings, edit)));
                 if (written.ok && edit.type === 'debugLogging' && edit.value) logInfo('Debug logging enabled', { scope: 'diagnostics', force: true });
                 // RN's analytics switch, after the setting saved: turning the heartbeat on clears the opt-out marker; opting out

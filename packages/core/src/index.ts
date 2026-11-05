@@ -203,6 +203,8 @@ export * from './uuid';
 export * from './date';
 export * from './email-capture';
 export * from './gmail-capture';
+export * from './gmail-capture-transport';
+export * from './gmail-receipt-store';
 export * from './quick-add';
 export * from './area-filter';
 export * from './area-utils';
@@ -302,6 +304,7 @@ export * from './capture-deeplink';
 export * from './dropbox-auth-callback';
 export * from './entry-points';
 export * from './capture-modal-model';
+export * from './native-capture-copilot';
 export * from './share-capture-files';
 export * from './session-restore';
 export * from './app-search-projection';
@@ -410,15 +413,65 @@ export type { NativeInboxTasksMoveRequest, NativeInboxTasksMovePrepared, NativeI
 
 export type { NativeInboxTasksAddTagRequest, NativeInboxTasksAddTagPrepared, NativeInboxTasksAddTagEnvelope,
     NativeInboxTasksAddTagResult, NativeInboxTasksAddTagPreparation } from './native-host-contract-inbox-bulk-tag';
+export type { NativeProjectTasksAddTagRequest, NativeProjectTasksAddTagPrepared, NativeProjectTasksAddTagEnvelope,
+    NativeProjectTasksAddTagResult, NativeProjectTasksAddTagPreparation } from './native-host-contract-project-bulk-tag';
 
 export type { NativeInboxTasksRemoveTagRequest, NativeInboxTasksRemoveTagPrepared, NativeInboxTasksRemoveTagEnvelope,
     NativeInboxTasksRemoveTagResult, NativeInboxTasksRemoveTagPreparation } from './native-host-contract-inbox-bulk-remove-tag';
+export type { NativeProjectTasksRemoveTagRequest, NativeProjectTasksRemoveTagPrepared, NativeProjectTasksRemoveTagEnvelope,
+    NativeProjectTasksRemoveTagResult, NativeProjectTasksRemoveTagPreparation } from './native-host-contract-project-bulk-remove-tag';
 
+export type { NativeProjectTasksOrganizeRequest, NativeProjectTasksOrganizePrepared, NativeProjectTasksOrganizeEnvelope,
+    NativeProjectTasksOrganizeResult, NativeProjectTasksOrganizePreparation } from './native-host-contract-project-bulk-organize';
 export type { NativeInboxTasksOrganizeRequest, NativeInboxTasksOrganizePrepared, NativeInboxTasksOrganizeEnvelope,
     NativeInboxTasksOrganizeResult, NativeInboxTasksOrganizePreparation } from './native-host-contract-inbox-bulk-organize';
 
+export type { NativeProjectOrganizeDestinationCreateRequest, NativeProjectOrganizeDestinationCreatePrepared,
+    NativeProjectOrganizeDestinationCreateEnvelope, NativeProjectOrganizeDestinationCreateResult,
+    NativeProjectOrganizeDestinationCreatePreparation } from './native-host-contract-project-organize-create';
 export type { NativeInboxOrganizeDestinationCreateRequest, NativeInboxOrganizeDestinationCreatePrepared,
     NativeInboxOrganizeDestinationCreateEnvelope, NativeInboxOrganizeDestinationCreateResult,
     NativeInboxOrganizeDestinationCreatePreparation } from './native-host-contract-inbox-organize-create';
 
 export { getSavedTaxonomyTokens, normalizeTaxonomyToken, isTaxonomyCatalog, mergeTaxonomyCatalog } from './taxonomy-catalog';
+
+export { createNativeAITextConfigurationMethods, nativeAITextConfigurationWitness, readNativeAITextConfigurationRequest,
+    buildNativeAITextConfigurationOptions, planNativeAITextConfigurationChange } from './native-ai-text-configuration';
+export type { AITextConfigurationChange, AITextConfigurationWitness, AITextConfigurationRequest, AITextConfigurationResult,
+    AITextConfigurationOptions, PreparedAITextConfiguration } from './native-ai-text-configuration';
+
+export { nativeAITextConfigurationWitnessV2, readNativeAITextConfigurationRequestV2, readAITextConfigurationChangeV2,
+    buildNativeAITextConfigurationOptionsV2, planNativeAITextConfigurationChangeV2,
+    nativeAITextConfigurationConsentTarget } from './native-ai-text-configuration';
+export type { AITextConfigurationChangeV2, AITextConfigurationWitnessV2, AITextConfigurationRequestV2, AITextConfigurationResultV2,
+    AITextConfigurationOptionsV2, PreparedAITextConfigurationV2 } from './native-ai-text-configuration';
+
+export * from './quick-capture-audio';
+export * from './native-voice';
+
+export * from './native-widget-completion';
+
+export * from './mobile-cloudkit-attachment-sync';
+
+export * from './watch-snapshot';
+
+export type { NativeProjectTasksMoveRequest, NativeProjectTasksMovePrepared, NativeProjectTasksMoveEnvelope,
+    NativeProjectTasksMoveResult, NativeProjectTasksMovePreparation, NativeProjectTasksMoveParams, NativeProjectTasksMoveStatus } from './native-host-contract-project-bulk-status';
+
+export type { NativeProjectTasksDeleteRequest, NativeProjectTasksDeleteResult, NativeProjectTasksDeletePrepared,
+    NativeProjectTasksDeleteEnvelope, NativeProjectTasksDeletePreparation, NativeProjectTasksDeleteUndoRequest,
+    NativeProjectTasksDeleteUndoResult, NativeProjectTasksDeleteUndoPrepared, NativeProjectTasksDeleteUndoEnvelope,
+    NativeProjectTasksDeleteUndoPreparation, NativeProjectTasksDeleteUndoPrepareRequest } from './native-host-contract-project-bulk-delete';
+
+export type { NativeRowTaskDatesRequest, NativePreparedRowTaskDates, NativeRowTaskDatesEnvelope } from './native-host-contract-task-checklist';
+export type { NativeRowTaskDestinationRequest, NativePreparedRowTaskDestination, NativeRowTaskDestinationEnvelope, NativeRowTaskDestinationOptionsInput, NativeRowTaskDestinationOptions } from './native-host-contract-task-checklist';
+export type { NativeRowTaskBackdateRequest, NativePreparedRowTaskBackdate, NativeRowTaskBackdateEnvelope } from './native-host-contract-task-checklist';
+
+export { canMoveTaskToChecklist, isChecklistMoveTarget, getChecklistMoveTargets, checklistItemIdForMovedTask } from './task-checklist-move';
+export type { NativeTaskChecklistMoveRequest, NativeTaskChecklistMoveUndoRequest, NativePreparedTaskChecklistMove,
+    NativeTaskChecklistMoveEnvelope, NativePreparedTaskChecklistMoveUndo, NativeTaskChecklistMoveUndoEnvelope,
+    NativeTaskChecklistMoveOptionsInput, NativeTaskChecklistMoveOptions } from './native-host-contract-task-checklist-move';
+
+export * from './task-row-swipe-actions';
+export type { NativeTaskRowSwipeActionsInput } from './native-host-contract-row-swipe';
+export type { NativeRowTaskFocusRequest, NativeRowTaskFocusResult, NativePreparedRowTaskFocus, NativeRowTaskFocusEnvelope, NativeRowTaskFocusPreparation } from './native-host-contract-task-checklist';

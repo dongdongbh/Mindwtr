@@ -2260,6 +2260,8 @@ export function buildNextRecurringTask(
         reminderPolicy: task.reminderPolicy,
         suppressMindwtrReminders: task.suppressMindwtrReminders ? true : undefined,
         repeatReminderMinutes: task.repeatReminderMinutes,
+        dueReminderLeadMinutes: task.dueReminderLeadMinutes,
+        startReminderLeadMinutes: task.startReminderLeadMinutes,
         tags: [...(task.tags || [])],
         contexts: [...(task.contexts || [])],
         checklist: copyRecurringChecklist(task.checklist, createId, task.taskMode !== 'list' && recurrence?.preserveChecklistOnRepeat === true),

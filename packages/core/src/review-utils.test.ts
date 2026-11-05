@@ -5,6 +5,7 @@ import {
     getDailyReviewBuckets,
     getExternalCalendarDaySummaries,
     getReviewOverviewGroups,
+    getReviewSequenceBlockedNextIds,
     getReviewOverviewTasks,
     getStaleItems,
     getWeeklyReviewBuckets,
@@ -851,5 +852,66 @@ describe('parseStoredReviewStepSession', () => {
             dailySteps,
             { cadence: 'daily', now: new Date('2026-03-08T09:00:00.000Z') },
         )).toBeNull();
+    });
+});
+
+
+describe('opt-in Review sequence grouping', () => {
+    const project = createProject({ isSequential: true });
+    const head = createTask({ id: 'head', projectId: project.id, status: 'waiting', order: 0 });
+    const tail = createTask({ id: 'tail', projectId: project.id, order: 1 });
+    const derive = (tasks: Task[], projects = [project], sections: Section[] = []) => getWeeklyReviewBuckets(tasks, projects, { now, sections, ...{ sequenceAware: true } });
+
+    it('keeps the legacy bucket bytes while excluding blocked tails from opted-in stale candidates', () => {
+        const tasks = [tail, head];
+        const legacy = getWeeklyReviewBuckets(tasks, [project], { now });
+        expect(legacy.staleItems.map((item) => item.id)).toContain('tail');
+        expect(legacy.projectEntries[0]).not.toHaveProperty('currentTasks');
+        const detailed = derive(tasks);
+        expect(detailed.projectEntries[0]).toMatchObject({ currentTasks: [head], laterTasks: [tail], nextActionState: 'waiting' });
+        expect(detailed.staleItems.map((item) => item.id)).toEqual(['head', `project:${project.id}`]);
+        expect(getWeeklyReviewBuckets(tasks, [project], { now })).toEqual(legacy);
+    });
+
+    it('advances independent section heads, respects manual order and keeps explicitly due review tasks current', () => {
+        const sections: Section[] = [{ id: 'sequence', projectId: project.id, title: 'Sequence', order: 0, isSequential: true, createdAt: staleUpdatedAt, updatedAt: staleUpdatedAt }];
+        const mixed = { ...project, isSequential: false, perSectionFlow: true };
+        const current = { ...head, sectionId: 'sequence' }, later = { ...tail, sectionId: 'sequence' };
+        const parallel = createTask({ id: 'parallel', projectId: project.id });
+        expect(derive([later, current, parallel], [mixed], sections).projectEntries[0]).toMatchObject({ currentTasks: [current, parallel], laterTasks: [later], nextActionState: 'next' });
+        expect(derive([{ ...head, status: 'done' }, tail]).projectEntries[0]).toMatchObject({ currentTasks: [tail], laterTasks: [] });
+        expect(derive([head, { ...tail, order: -1 }]).projectEntries[0]).toMatchObject({ nextActionState: 'next', laterTasks: [] });
+        const due = { ...tail, reviewAt: '2026-02-28', dueDate: '2026-03-02' };
+        expect(derive([head, due]).staleItems.some((item) => item.id === tail.id)).toBe(true);
+        const overview = getReviewOverviewGroups({ tasks: [head, due], projects: [project], orderedAreas: [], areaFilter: { included: [], excluded: [] }, sortBy: 'title', scope: 'due', now, ...{ sequenceAware: true } });
+        expect(overview[0].projectGroups[0]).toMatchObject({ currentTasks: [due], laterTasks: [], nextActionState: 'waiting' });
+    });
+
+    it('orders later section chains without changing parallel projects or task history', () => {
+        const sections: Section[] = [
+            { id: 'b', projectId: project.id, title: 'B', order: 1, createdAt: staleUpdatedAt, updatedAt: staleUpdatedAt },
+            { id: 'a', projectId: project.id, title: 'A', order: 0, createdAt: staleUpdatedAt, updatedAt: staleUpdatedAt },
+        ];
+        const tasks = [{ ...tail, id: 'b-tail', sectionId: 'b', order: 1 }, { ...tail, id: 'a-tail', sectionId: 'a', order: 2 },
+            { ...head, sectionId: 'a' }, { ...tail, id: 'b-head', sectionId: 'b', order: 0 }];
+        const before = JSON.stringify(tasks);
+        expect(derive(tasks, [project], sections).projectEntries[0].laterTasks?.map(task => task.id)).toEqual(['a-tail', 'b-head', 'b-tail']);
+        expect(derive(tasks, [{ ...project, sequentialScope: 'section' }], sections).projectEntries[0].laterTasks?.map(task => task.id)).toEqual(['a-tail', 'b-tail']);
+        expect(derive(tasks, [{ ...project, isSequential: false }], sections).projectEntries[0]).toMatchObject({ currentTasks: tasks, laterTasks: [] });
+        expect(JSON.stringify(tasks)).toBe(before);
+    });
+
+    it('uses the same later predicate for new Apply without imposing stale-age or Waiting requirements', () => {
+        const fresh = { ...tail, updatedAt: now.toISOString() };
+        expect([...getReviewSequenceBlockedNextIds([head, fresh], [project], [], now)]).toEqual(['tail']);
+        expect([...getReviewSequenceBlockedNextIds([head, { ...fresh, reviewAt: '2026-02-28' }], [project], [], now)]).toEqual([]);
+        expect([...getReviewSequenceBlockedNextIds([head, { ...fresh, status: 'waiting' }], [project], [], now)]).toEqual([]);
+        expect([...getReviewSequenceBlockedNextIds([head, { ...fresh, status: 'someday' }], [project], [], now)]).toEqual([]);
+    });
+
+    it('treats a future head as Scheduled without exposing its blocked tail as a stale next action', () => {
+        const future = { ...head, status: 'next' as const, startTime: '2026-04-01' };
+        expect(derive([tail, future]).projectEntries[0]).toMatchObject({ nextActionState: 'deferred', currentTasks: [future], laterTasks: [tail] });
+        expect(derive([tail, future]).staleItems.filter((item) => item.status !== 'project')).toEqual([]);
     });
 });

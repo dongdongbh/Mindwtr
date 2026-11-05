@@ -7,6 +7,13 @@ import {
     seedCalendarStore,
 } from './calendar-view-model.replay';
 import {
+    CALENDAR_DAY_ALL_DAY_ITEMS,
+    CALENDAR_WEEK_ALL_DAY_ITEMS,
+    getCalendarAllDayLane,
+    formatCalendarAllDayMore,
+    getCalendarAllDayChipTones,
+    getCalendarDayAllDayTones,
+    getCalendarWeekAllDayTones,
     compactHourLabel,
     createCalendarLocaleDates,
     createCalendarPatternDates,
@@ -33,7 +40,7 @@ import {
     getCalendarWeekStart,
 } from './calendar-view-model';
 import { configureDateFormatting, createDateFormatter } from './date';
-import { getCalendarTimedDeadlines } from './calendar-day-items';
+import { getCalendarTimedDeadlines, type CalendarDayItem } from './calendar-day-items';
 import { createNativeHostContract } from './native-host-contract';
 import { resetForTests } from './store';
 import type { Task } from './types';
@@ -53,6 +60,47 @@ describe('calendar views parity with the frozen React Native fixture', () => {
         resetForTests();
         if (originalTz === undefined) delete process.env.TZ;
         else process.env.TZ = originalTz;
+    });
+
+    it('counts bounded all-day lanes, expands without mutating them, and excludes timed duplicates', () => {
+        const base = { ...fixture.tasks[0], areaId: undefined, startTime: '2026-10-28', dueDate: '2026-10-28' };
+        const all = Array.from({ length: 6 }, (_, index): CalendarDayItem => ({ id: `all-${index}`, kind: 'scheduled', start: null,
+            task: { ...base, id: `all-${index}` }, title: `All ${index}` }));
+        expect(getCalendarAllDayLane([], CALENDAR_DAY_ALL_DAY_ITEMS)).toEqual({ items: [], hiddenCount: 0 });
+        expect(getCalendarAllDayLane(all.slice(0, 4), CALENDAR_DAY_ALL_DAY_ITEMS)).toEqual({ items: all.slice(0, 4), hiddenCount: 0 });
+        expect(getCalendarAllDayLane(all, CALENDAR_DAY_ALL_DAY_ITEMS)).toEqual({ items: all.slice(0, 4), hiddenCount: 2 });
+        expect(getCalendarAllDayLane(all, CALENDAR_DAY_ALL_DAY_ITEMS, true)).toEqual({ items: all, hiddenCount: 2 });
+        expect(getCalendarAllDayLane(all, CALENDAR_WEEK_ALL_DAY_ITEMS)).toEqual({ items: all.slice(0, 3), hiddenCount: 3 });
+        const timed: CalendarDayItem = { id: 'timed', kind: 'scheduled', start: new Date(fixture.now),
+            task: { ...base, id: 'timed', startTime: fixture.now }, title: 'Timed' };
+        expect(getCalendarAllDayLane([...all, timed], 4).hiddenCount).toBe(2);
+        const duplicate = getCalendarDayItems({ scheduled: [base], deadlines: [base], events: [], completed: [] });
+        expect(getCalendarAllDayLane(duplicate, 4).items).toHaveLength(1);
+        expect(formatCalendarAllDayMore(2, (key) => key === 'calendar.more' ? 'more' : key)).toBe('+2 more');
+    });
+
+    it('keeps real lane order before recurring projections and uses new chip tones without changing legacy helpers', () => {
+        const base = { ...fixture.tasks[0], startTime: '2026-10-28', dueDate: '2026-10-28' };
+        const scheduled: CalendarDayItem = { id: 'scheduled', kind: 'scheduled', start: null, task: base, title: 'Scheduled' };
+        const deadline: CalendarDayItem = { ...scheduled, id: 'deadline', kind: 'deadline' };
+        const completed: CalendarDayItem = { ...scheduled, id: 'completed', kind: 'completed', task: { ...base, status: 'done' } };
+        const projectedTask = { ...base, isProjectedRecurringTask: true, sourceTaskId: base.id };
+        const projected: CalendarDayItem = { ...scheduled, id: 'projected', task: projectedTask };
+        const event: CalendarDayItem = { id: 'event', kind: 'event', title: 'Event', start: null,
+            event: { ...fixture.calendarEvents[0], allDay: true } };
+        const input = [projected, scheduled, event, deadline, completed];
+        expect(getCalendarAllDayLane(input, 3).items).toEqual([scheduled, event, deadline]);
+        expect(getCalendarAllDayLane(input, 3, true).items).toEqual([scheduled, event, deadline, completed, projected]);
+        expect(input[0]).toBe(projected);
+        expect(getCalendarAllDayChipTones(scheduled, 'week')).toMatchObject({ fill: 'input', accent: 'tint', text: 'text', struck: false });
+        expect(getCalendarAllDayChipTones(deadline, 'day')).toMatchObject({ fill: 'input', accent: 'danger', disabled: false });
+        expect(getCalendarAllDayChipTones(event, 'day')).toMatchObject({ fill: 'secondary', accent: 'source', text: 'text' });
+        expect(getCalendarAllDayChipTones(completed, 'week')).toEqual(getCalendarAllDayChipTones(completed, 'day'));
+        expect(getCalendarAllDayChipTones(completed, 'day')).toEqual({ fill: 'secondary', accent: 'secondary', text: 'secondary', dashed: false, struck: true, disabled: true });
+        expect(getCalendarAllDayChipTones(projected, 'week')).toMatchObject({ text: 'tint', accent: 'tint', dashed: true, disabled: true });
+        expect(getCalendarAllDayChipTones(projected, 'day').disabled).toBe(false);
+        expect(getCalendarDayAllDayTones(completed)).toEqual({ text: 'text', disabled: true });
+        expect(getCalendarWeekAllDayTones(scheduled)).toMatchObject({ accent: 'danger' });
     });
 
     it('was captured from React Native before the screen changed', () => {

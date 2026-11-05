@@ -5,6 +5,7 @@ import type {
     MultiValueFilterMatchMode,
     TaskEnergyLevel,
     TaskPriority,
+    TaskStatus,
     TimeEstimate,
 } from './types';
 
@@ -24,6 +25,8 @@ export type FilterSelections = {
     /** Mixed @context / #tag tokens whose presence excludes a task. */
     excludedTokens: string[];
     projects: string[];
+    excludedProjects?: string[];
+    statuses?: TaskStatus[];
     locations: string[];
     priorities: TaskPriority[];
     energyLevels: TaskEnergyLevel[];
@@ -59,6 +62,8 @@ export function criteriaFromSelections(selections: Partial<FilterSelections>): F
         ...(excludedContexts.length > 0 ? { excludedContexts } : {}),
         ...(excludedTags.length > 0 ? { excludedTags } : {}),
         ...(projects.length > 0 ? { projects } : {}),
+        ...(selections.excludedProjects?.length ? { excludedProjects: selections.excludedProjects } : {}),
+        ...(selections.statuses?.length ? { statuses: selections.statuses } : {}),
         ...(locations.length > 0 ? { locations } : {}),
         ...(priorities.length > 0 ? { priority: priorities } : {}),
         ...(energyLevels.length > 0 ? { energy: energyLevels } : {}),
@@ -80,6 +85,8 @@ export function selectionsFromCriteria(criteria: FilterCriteria | undefined): Fi
         tokens: [...(normalized.contexts ?? []), ...(normalized.tags ?? [])],
         excludedTokens: [...(normalized.excludedContexts ?? []), ...(normalized.excludedTags ?? [])],
         projects: normalized.projects ?? [],
+        ...(normalized.excludedProjects ? { excludedProjects: normalized.excludedProjects } : {}),
+        ...(normalized.statuses ? { statuses: normalized.statuses } : {}),
         locations: normalized.locations ?? [],
         priorities: (normalized.priority ?? []).filter((priority): priority is TaskPriority => priority !== 'none'),
         energyLevels: normalized.energy ?? [],
@@ -99,6 +106,7 @@ export function countActiveFilterCriteria(criteria: FilterCriteria | undefined):
         + (normalized.excludedContexts?.length ?? 0)
         + (normalized.excludedTags?.length ?? 0)
         + (normalized.projects?.length ?? 0)
+        + (normalized.excludedProjects?.length ?? 0)
         + (normalized.areas?.length ?? 0)
         + (normalized.priority?.length ?? 0)
         + (normalized.energy?.length ?? 0)

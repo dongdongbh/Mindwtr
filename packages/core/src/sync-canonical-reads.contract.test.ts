@@ -67,6 +67,10 @@ import { PROJECT_SQLITE_COLUMNS, projectFromSqliteRow, projectToSqliteRow } from
 import { SECTION_SQLITE_COLUMNS, sectionFromSqliteRow, sectionToSqliteRow } from './section-sync-schema';
 import { AREA_SQLITE_COLUMNS, areaFromSqliteRow, areaToSqliteRow } from './area-sync-schema';
 import { PERSON_SQLITE_COLUMNS, personFromSqliteRow, personToSqliteRow } from './person-sync-schema';
+import { createNativeAITextConfigurationMethods } from './native-ai-text-configuration';
+import { createNativeVoiceMethods } from './native-voice';
+import { createQuickCaptureOptions } from './quick-capture-model';
+import { getTranslator } from './i18n';
 import type { AppData, Area, Attachment, Person, Project, Section, Task } from './types';
 
 /**
@@ -845,6 +849,8 @@ describe('canonical local reads contract', () => {
         // Exact raw snapshot retry of the calendar subscription write covered below;
         // failed-save and foreign-failure ownership are checked in real SQLite tests.
         'retryPreparedCalendarSubscriptionSettingSnapshot',
+        'retryPreparedAITextConfigurationSnapshot',
+        'retryPreparedVoiceSnapshot',
     ]);
 
     it('leaves canonical persisted and read-back documents after Inbox Add tag', async () => {
@@ -921,6 +927,9 @@ describe('canonical local reads contract', () => {
             'retryPreparedAIGeminiThinkingBudgetSnapshot', 'retryPreparedAIReasoningEffortSnapshot', 'retryPreparedAIRequestTimeoutSnapshot',
             'commitPreparedBoardOrder', 'commitPreparedCaptureLines', 'commitPreparedInboxOrganizeDestinationCreate',
             'commitPreparedInboxTasksOrganize', 'commitPreparedTrashItemsPurge', 'commitPreparedTrashItemsRestore',
+            'commitPreparedAITextConfiguration', 'commitPreparedProjectOrganizeDestinationCreate', 'commitPreparedProjectTasksAddTag',
+            'commitPreparedProjectTasksMove', 'commitPreparedProjectTasksOrganize', 'commitPreparedProjectTasksRemoveTag',
+            'commitPreparedTaskChecklistMove', 'commitPreparedVoiceRows', 'commitPreparedVoiceSettings',
         ]);
         const runMutation = async (
             label: string,
@@ -1094,6 +1103,53 @@ describe('canonical local reads contract', () => {
                 expect(written.settings.ai).toEqual({ ...before.settings.ai,
                     [kind === 'timeout' ? 'requestTimeoutSeconds' : kind === 'reasoning' ? 'reasoningEffort' : 'thinkingBudget']:
                         kind === 'timeout' ? 60 : kind === 'reasoning' ? 'high' : 256 });
+            });
+        };
+
+        const throughStoreAction = async <T,>(action: string, run: () => Promise<T>): Promise<T> => {
+            const original = (useTaskStore.getState() as unknown as Record<string, unknown>)[action];
+            const called = vi.fn(original as (...args: never[]) => Promise<unknown>);
+            useTaskStore.setState({ [action]: called });
+            try {
+                const result = await run();
+                expect(called, action).toHaveBeenCalledTimes(1);
+                return result;
+            } finally { useTaskStore.setState({ [action]: original }); }
+        };
+        const voiceMethods = () => createNativeVoiceMethods({ ...aiDependencies, t: () => getTranslator('en'),
+            revision: () => 'contract-voice', formatDate: () => () => 'contract date', requestIdPattern: /^[0-9a-f-]{36}$/ });
+        const projectBulkBase = (requestId: string) => {
+            const state = useTaskStore.getState();
+            const openRows = (id: string) => state._allTasks.filter((row) => row.projectId === id && !row.deletedAt
+                && (row.status === 'next' || row.status === 'waiting'));
+            const owner = state._allProjects.find((row) => row.status === 'active' && !row.deletedAt && openRows(row.id).length >= 2);
+            if (!owner) throw new Error('Project bulk fixture needs an active Project with two open tasks');
+            const sources = openRows(owner.id).slice(0, 2);
+            return { requestId, source: 'project' as const, taskIds: sources.map((row) => row.id),
+                params: { projectId: owner.id, showCompleted: true, completedCollapsed: false, filters: {} },
+                taskRevisions: Object.fromEntries(sources.map((row) => [row.id, taskRevisionOf(row)])) };
+        };
+        const expectProjectBulkPersisted = (control: MutationControl, before: AppData,
+            effect: { tasks: Array<{ after: Task }> }) => {
+            const after = new Map(effect.tasks.map((pair) => [pair.after.id, pair.after]));
+            control.expectPersisted((written) => {
+                expect(written.tasks).toEqual(before.tasks.map((row) => after.get(row.id) ?? row));
+                expect(written.projects).toEqual(before.projects);
+                expect(written.sections).toEqual(before.sections);
+                expect(written.areas).toEqual(before.areas);
+                expect(written.people).toEqual(before.people);
+                expectRetainedSettings(written, before);
+            });
+            return after;
+        };
+        const expectOnlyAISettingsPersisted = (control: MutationControl, before: AppData, ai: NonNullable<AppData['settings']['ai']>) => {
+            control.expectPersisted((written) => {
+                expect(written.tasks).toEqual(before.tasks);
+                expect(written.projects).toEqual(before.projects);
+                expect(written.sections).toEqual(before.sections);
+                expect(written.areas).toEqual(before.areas);
+                expect(written.people).toEqual(before.people);
+                expect(written.settings.ai).toEqual(ai);
             });
         };
 
@@ -1863,6 +1919,173 @@ describe('canonical local reads contract', () => {
                 control.resetBaseline();
                 expect(await useTaskStore.getState().commitPreparedReferenceTasksRemoveTag(planned.prepared, durable.authority))
                     .toEqual({ success: true, ids: taskIds, outcome: 'applied' });
+            },
+            commitPreparedProjectTasksMove: async (control) => {
+                const host = await nativeHost(control);
+                const request = { ...projectBulkBase('d41122ed-aef4-4691-8bdd-bcd70104d801'), status: 'someday' as const };
+                const planned = nativeValue(await host.prepareProjectTasksMove(request));
+                expect(nativeValue(host.validatePreparedProjectTasksMove({ request, prepared: planned.prepared })))
+                    .toEqual({ count: 2, status: 'someday' });
+                const durable = nativeValue(await readAreaDurableData(false, true));
+                const moved = expectProjectBulkPersisted(control, durable.authority.snapshot, planned.prepared.effect);
+                expect([...moved.keys()].sort()).toEqual([...request.taskIds].sort());
+                for (const row of moved.values()) expect(row.status).toBe('someday');
+                control.resetBaseline();
+                expect(await useTaskStore.getState().commitPreparedProjectTasksMove(planned.prepared, durable.authority))
+                    .toEqual({ success: true, ids: request.taskIds, outcome: 'applied' });
+            },
+            commitPreparedProjectTasksAddTag: async (control) => {
+                const host = await nativeHost(control);
+                const request = { ...projectBulkBase('c79d9455-74a4-4cb6-a543-4b5f7a717802'), tag: ' ###contract-project ' };
+                const planned = nativeValue(await host.prepareProjectTasksAddTag(request));
+                if (planned.kind !== 'prepared') throw new Error('Project Add-tag fixture unexpectedly produced a no-op');
+                expect(nativeValue(host.validatePreparedProjectTasksAddTag({ request, prepared: planned.prepared })))
+                    .toEqual({ count: 2, changed: true });
+                const durable = nativeValue(await readAreaDurableData(false, true));
+                const tagged = expectProjectBulkPersisted(control, durable.authority.snapshot, planned.prepared.effect);
+                for (const id of request.taskIds) expect(tagged.get(id)?.tags).toContain('#contract-project');
+                control.resetBaseline();
+                expect(await useTaskStore.getState().commitPreparedProjectTasksAddTag(planned.prepared, durable.authority))
+                    .toEqual({ success: true, ids: request.taskIds, outcome: 'applied' });
+            },
+            commitPreparedProjectTasksRemoveTag: async (control) => {
+                await call('batchUpdateTasks', projectBulkBase('unused').taskIds.map((id) => ({ id,
+                    updates: { tags: [...(useTaskStore.getState()._tasksById.get(id)?.tags ?? []), '#contract-remove'] } })));
+                const host = await nativeHost(control);
+                const request = { ...projectBulkBase('c79d9455-74a4-4cb6-a543-4b5f7a717803'), tags: [' ###contract-remove '] };
+                const planned = nativeValue(await host.prepareProjectTasksRemoveTag(request));
+                if (planned.kind !== 'prepared') throw new Error('Project Remove-tag fixture unexpectedly produced a no-op');
+                expect(nativeValue(host.validatePreparedProjectTasksRemoveTag({ request, prepared: planned.prepared })))
+                    .toEqual({ count: 2, changed: true });
+                const durable = nativeValue(await readAreaDurableData(false, true));
+                const untagged = expectProjectBulkPersisted(control, durable.authority.snapshot, planned.prepared.effect);
+                for (const id of request.taskIds) expect(untagged.get(id)?.tags).not.toContain('#contract-remove');
+                control.resetBaseline();
+                expect(await useTaskStore.getState().commitPreparedProjectTasksRemoveTag(planned.prepared, durable.authority))
+                    .toEqual({ success: true, ids: request.taskIds, outcome: 'applied' });
+            },
+            commitPreparedProjectTasksOrganize: async (control) => {
+                const host = await nativeHost(control);
+                const request = { ...projectBulkBase('00000000-0000-4000-8000-000000000804'),
+                    draft: { ...EMPTY_BULK_ORGANIZE_DRAFT, tags: '#canonical-project-organize', contexts: '@canonical-project' } };
+                const planned = nativeValue(await host.prepareProjectTasksOrganize(request));
+                if (planned.kind !== 'prepared') throw new Error('Project Organize did not prepare');
+                const durable = nativeValue(await readAreaDurableData(false, true));
+                const organized = expectProjectBulkPersisted(control, durable.authority.snapshot, planned.prepared.effect);
+                expect([...organized.keys()].sort()).toEqual([...request.taskIds].sort());
+                for (const row of organized.values()) {
+                    expect(row.tags).toContain('#canonical-project-organize');
+                    expect(row.contexts).toContain('@canonical-project');
+                }
+                control.resetBaseline();
+                expect(await useTaskStore.getState().commitPreparedProjectTasksOrganize(planned.prepared, durable.authority))
+                    .toEqual({ success: true, ids: request.taskIds, outcome: 'applied' });
+            },
+            commitPreparedProjectOrganizeDestinationCreate: async (control) => {
+                const host = await nativeHost(control);
+                const draft = { ...EMPTY_BULK_ORGANIZE_DRAFT };
+                const base = projectBulkBase('00000000-0000-4000-8000-000000000805');
+                const name = 'Contract Project Organize destination';
+                const view = nativeValue(host.getBulkActions({ list: 'project', taskIds: base.taskIds, params: base.params,
+                    organize: { draft }, picker: { kind: 'project', query: name, offset: 0, limit: 100 } }));
+                const request = { ...base, kind: 'project' as const, name, draft, offerRevision: view.revision, taskRevisions: view.taskRevisions };
+                const planned = nativeValue(await host.prepareProjectOrganizeDestinationCreate(request));
+                if (planned.kind !== 'prepared') throw new Error('Project Organize creation did not prepare');
+                const before = nativeValue(await readAreaDurableData(false, true)).authority.snapshot;
+                control.expectPersisted((written) => {
+                    expect(written.tasks).toEqual(before.tasks);
+                    expect(written.projects.find((row) => row.id === request.requestId)).toMatchObject({ title: name, status: 'active', rev: 1 });
+                    expect(written.projects.filter((row) => row.id !== request.requestId)).toEqual(before.projects);
+                    expect(written.sections).toEqual(before.sections);
+                    expect(written.areas).toEqual(before.areas);
+                });
+                await throughStoreAction('commitPreparedProjectOrganizeDestinationCreate', async () => {
+                    expect(nativeValue(await host.commitPreparedProjectOrganizeDestinationCreate({ request, prepared: planned.prepared })))
+                        .toEqual({ id: request.requestId, changed: true });
+                });
+            },
+            commitPreparedTaskChecklistMove: async (control) => {
+                const added = await useTaskStore.getState().addTask('Contract checklist move source', { status: 'inbox' });
+                if (!added.success || !added.id) throw new Error('Checklist move source missing');
+                const host = await nativeHost(control);
+                const source = useTaskStore.getState()._tasksById.get(added.id)!;
+                const target = useTaskStore.getState()._tasksById.get(checklistTaskId)!;
+                expect(target.status === 'done' || target.status === 'archived').toBe(false);
+                const request = { requestId: '00000000-0000-4000-8000-000000000806', id: source.id, taskRevision: taskRevisionOf(source),
+                    targetId: target.id, targetRevision: taskRevisionOf(target) };
+                const planned = nativeValue(await host.prepareTaskChecklistMove(request));
+                expect(nativeValue(host.validatePreparedTaskChecklistMove({ request, prepared: planned.prepared }))).toEqual({ id: target.id });
+                const before = nativeValue(await readAreaDurableData(false, true)).authority.snapshot;
+                const after = new Map(planned.prepared.effect.tasks.map((pair) => [pair.after.id, pair.after]));
+                expect([...after.keys()].sort()).toEqual([source.id, target.id].sort());
+                expect(after.get(source.id)?.deletedAt).toBeTruthy();
+                expect(after.get(target.id)?.checklist?.at(-1)).toMatchObject({ title: 'Contract checklist move source', isCompleted: false });
+                control.resetBaseline();
+                control.expectPersisted((written) => {
+                    expect(written.tasks).toEqual(before.tasks.map((row) => after.get(row.id) ?? row));
+                    expect(written.projects).toEqual(before.projects);
+                    expect(written.sections).toEqual(before.sections);
+                    expect(written.areas).toEqual(before.areas);
+                    expect(written.people).toEqual(before.people);
+                    expectRetainedSettings(written, before);
+                });
+                await throughStoreAction('commitPreparedTaskChecklistMove', async () => {
+                    expect(nativeValue(await host.commitPreparedTaskChecklistMove({ request, prepared: planned.prepared }))).toEqual({ id: target.id });
+                });
+            },
+            commitPreparedAITextConfiguration: async (control) => {
+                await nativeHost(control);
+                const methods = createNativeAITextConfigurationMethods({ ...aiDependencies, t: () => getTranslator('en') });
+                const options = nativeValue(await methods.options({}));
+                const request = { requestId: '00000000-0000-4000-8000-000000000807',
+                    change: { type: 'copilotModel' as const, value: 'contract-copilot' }, expected: options.expected, consent: false };
+                const planned = nativeValue(await methods.prepare(request));
+                if (planned.kind !== 'prepared') throw new Error('AI text configuration fixture produced a no-op');
+                const before = nativeValue(await readAreaDurableData(false, true)).authority.snapshot;
+                expectOnlyAISettingsPersisted(control, before, { ...before.settings.ai, copilotModel: 'contract-copilot' });
+                control.resetBaseline();
+                await throughStoreAction('commitPreparedAITextConfiguration', async () => {
+                    expect(nativeValue(await methods.commit({ request, prepared: planned.prepared })))
+                        .toEqual({ change: request.change, changed: true });
+                });
+            },
+            commitPreparedVoiceSettings: async (control) => {
+                await nativeHost(control);
+                const methods = voiceMethods();
+                const options = nativeValue(await methods.settingsOptions({}));
+                const request = { version: 1, requestId: '00000000-0000-4000-8000-000000000808', expected: options.expected,
+                    change: { type: 'language', value: '  fr  ' } };
+                const planned = nativeValue(await methods.prepareSettings(request));
+                if (planned.kind !== 'prepared') throw new Error('Voice settings fixture produced a no-op');
+                const before = nativeValue(await readAreaDurableData(false, true)).authority.snapshot;
+                expectOnlyAISettingsPersisted(control, before, { ...before.settings.ai,
+                    speechToText: { ...before.settings.ai?.speechToText, language: 'fr' } });
+                control.resetBaseline();
+                await throughStoreAction('commitPreparedVoiceSettings', async () => {
+                    expect(nativeValue(await methods.commitSettings({ request, prepared: planned.prepared }))).toEqual({ changed: true });
+                });
+            },
+            commitPreparedVoiceRows: async (control) => {
+                await nativeHost(control);
+                const methods = voiceMethods();
+                const request = { version: 1, requestId: '00000000-0000-4000-8000-000000000809', text: 'Contract voice capture',
+                    options: createQuickCaptureOptions({ projects: [], defaultAreaId: null }), recordedAt: '2026-10-11T00:00:00.000Z',
+                    openAfterSave: false, applied: null, attachment: null };
+                const planned = nativeValue(await methods.prepareCapture(request));
+                if (planned.kind !== 'prepared') throw new Error('Voice capture fixture did not prepare');
+                const before = nativeValue(await readAreaDurableData(false, true)).authority.snapshot;
+                control.resetBaseline();
+                control.expectPersisted((written) => {
+                    expect(written.tasks).toEqual([...before.tasks, planned.prepared.task]);
+                    expect(written.projects).toEqual(before.projects);
+                    expect(written.sections).toEqual(before.sections);
+                    expect(written.areas).toEqual(before.areas);
+                    expect(written.people).toEqual(before.people);
+                });
+                await throughStoreAction('commitPreparedVoiceRows', async () => {
+                    expect(nativeValue(await methods.commitCapture({ request, prepared: planned.prepared })))
+                        .toMatchObject({ kind: 'saved', taskId: request.requestId });
+                });
             },
             commitPreparedArchivedTasksRestore: async (control) => {
                 const host = await nativeHost(control);
@@ -2661,6 +2884,14 @@ describe('canonical local reads contract', () => {
                 expect(nativeValue(await host.commitPreparedTaskDraftSave({ request: prepared.request, prepared })).id).toBe(taskId);
                 expect(useTaskStore.getState()._tasksById.get(taskId)?.title).toBe('Contract prepared edit');
                 expect(useTaskStore.getState()._tasksById.get(taskId)?.dueDate).toBe(request.patch.dueDate);
+            },
+            commitPreparedTaskEdits: async (control) => {
+                const before = useTaskStore.getState()._tasksById.get(taskId)!;
+                control.expectPersisted((written) => {
+                    expect(written.tasks.find((entry) => entry.id === taskId)?.viewSectionIds?.someday).toBe('contract-section');
+                });
+                expect(await useTaskStore.getState().commitPreparedTaskEdits([{ before,
+                    changes: { viewSectionIds: { ...before.viewSectionIds, someday: 'contract-section' } } }])).toMatchObject({ success: true });
             },
             commitPreparedTaskDraftV2: async (control) => {
                 const host = await nativeHost(control);

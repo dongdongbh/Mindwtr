@@ -2,6 +2,7 @@ import { resolveAreaFilterSelection } from './area-filter';
 import type { NativeHostResult } from './native-host-contract';
 import { detach, exact, iso, record } from './native-host-contract-project-shared';
 import { isNativeJsonWithinBytes, readChecklist } from './native-host-contract-task-view';
+import { logInfo } from './logger';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 import { createNativeRequestReceipts, revisionOf, runStoreWrite, settleWrite } from './native-request-receipts';
 import { buildSomedaySectionMoveDialog, formatSomedaySectionMoved, getSomedaySectionMoveTasks,
@@ -11,7 +12,7 @@ import { sameSectionDeleteJson, sameTaskSqliteRow } from './store-projects/secti
 import { nextRevision } from './sync-revision';
 import { TASK_SQLITE_COLUMNS, TASK_SYNC_FIELD_SCHEMA, taskFromSqliteRow, taskToSqliteRow } from './task-sync-schema';
 import type { Task, ViewSectionDefinition } from './types';
-import { buildTaskViewSectionUndoUpdates, sortViewSectionDefinitions } from './view-sections';
+import { buildTaskViewSectionUndoUpdates, setTaskViewSectionId, sortViewSectionDefinitions } from './view-sections';
 
 export type NativeSomedaySectionMoveRequest = {
     requestId: string; taskId: string; taskRevision: string; sectionId: string | null;
@@ -138,15 +139,18 @@ const persistedSame = (left: Task, right: Task): boolean => {
     try { return sameTaskSqliteRow(hydrated(left), hydrated(right)); }
     catch { return false; }
 };
-const eligibleTask = (id: string): Task | null => {
+const eligibleTasks = (ids: readonly string[]): Task[] | null => {
     const state = useTaskStore.getState();
     const tasks = getSomedaySectionMoveTasks({ tasks: state.tasks, projects: state.projects,
-        areas: state.areas, ids: [id],
+        areas: state.areas, ids,
         resolvedAreaFilter: resolveAreaFilterSelection(state.settings.filters, state.areas) });
-    const task = tasks?.[0];
-    return task && !isStatusListTaskReadOnly(task, state._allProjects)
-        && state._allTasks.filter((row) => row.id === id).length === 1 ? task : null;
+    if (!tasks) return null;
+    const wanted = new Set(ids);
+    const stored = new Map<string, number>();
+    for (const row of state._allTasks) if (wanted.has(row.id)) stored.set(row.id, (stored.get(row.id) ?? 0) + 1);
+    return tasks.every((task) => !isStatusListTaskReadOnly(task, state._allProjects) && stored.get(task.id) === 1) ? tasks : null;
 };
+const eligibleTask = (id: string): Task | null => eligibleTasks([id])?.[0] ?? null;
 const moveChanges = (before: Task, sectionId: string | null): MapChange | null => {
     const planned = planSomedaySectionMove({ ids: [before.id], tasks: [before], destination: sectionId ?? undefined });
     return planned.updates.length === 1 && planned.updates[0].updates.viewSectionIds
@@ -399,6 +403,323 @@ export function createSomedaySectionMoveMethods(deps: {
         async commitPreparedSomedaySectionMoveUndo(input: NativeSomedaySectionMoveUndoEnvelope): Promise<NativeHostResult<NativeSomedaySectionMoveResult>> {
             const envelope = readUndoEnvelope(input);
             if (!envelope) return fail('INVALID_INPUT', 'Prepared Someday section Undo is malformed');
+            const ready = deps.readiness();
+            return ready.ok ? commit(envelope) : ready;
+        },
+    };
+}
+
+export type NativeSomedaySectionBulkMoveRequest = {
+    requestId: string; taskIds: string[]; taskRevisions: Record<string, string>; sectionId: string | null;
+};
+export type NativeSomedaySectionBulkMoveResult = { taskIds: string[]; changed: boolean; sectionId: string | null };
+export type NativeSomedaySectionBulkMoveUndoResult = { taskIds: string[]; changed: boolean };
+type SectionMap = NonNullable<Task['viewSectionIds']>;
+type BulkRow = { id: string; revision: string; before: SectionMap | null; after: SectionMap };
+export type NativePreparedSomedaySectionBulkMove = {
+    version: 1; kind: 'move'; request: NativeSomedaySectionBulkMoveRequest; rows: BulkRow[];
+    deviceId: string; sectionWitness: ViewSectionDefinition | null; result: NativeSomedaySectionBulkMoveResult;
+};
+export type NativeSomedaySectionBulkMoveEnvelope = {
+    request: NativeSomedaySectionBulkMoveRequest; prepared: NativePreparedSomedaySectionBulkMove;
+};
+export type NativePreparedSomedaySectionBulkMoveUndo = {
+    version: 1; kind: 'undo'; request: NativeSomedaySectionMoveUndoRequest; move: NativeSomedaySectionBulkMoveEnvelope;
+    rows: BulkRow[]; deviceId: string; result: NativeSomedaySectionBulkMoveUndoResult;
+};
+export type NativeSomedaySectionBulkMoveUndoEnvelope = {
+    request: NativeSomedaySectionMoveUndoRequest; prepared: NativePreparedSomedaySectionBulkMoveUndo;
+};
+
+const BULK_TASKS = 10_000;
+const BULK_MOVE_BYTES = 4_000_000;
+const BULK_UNDO_BYTES = 8_100_000;
+const bulkDetached = <T>(value: unknown, limit: number): T | null => {
+    const valid = (item: unknown, depth: number): boolean => depth <= 24 && (item === null
+        || typeof item === 'string' || typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item))
+        || (Array.isArray(item) && item.length <= 100_000 && item.every((part) => valid(part, depth + 1)))
+        || (record(item) && [Object.prototype, null].includes(Object.getPrototypeOf(item))
+            && Object.entries(item).every(([key, part]) => !['__proto__', 'constructor', 'prototype'].includes(key)
+                && valid(part, depth + 1))));
+    if (!isNativeJsonWithinBytes(value, limit) || !valid(value, 0)) return null;
+    const copy = JSON.parse(JSON.stringify(value)) as T;
+    return safeJsonStrings(copy) ? copy : null;
+};
+const somedayOf = (map: SectionMap | null | undefined): string | undefined => map?.someday || undefined;
+const revOf = (revision: string): number | null => {
+    const match = /^(\d{1,15}):/.exec(revision);
+    return match ? Number(match[1]) : null;
+};
+const readBulkMoveRequest = (value: unknown): NativeSomedaySectionBulkMoveRequest | null => {
+    const input = bulkDetached<Record<string, unknown>>(value, BULK_MOVE_BYTES);
+    if (!input || !exact(input, ['requestId', 'taskIds', 'taskRevisions', 'sectionId'])
+        || typeof input.requestId !== 'string' || !UUID.test(input.requestId)
+        || !Array.isArray(input.taskIds) || !input.taskIds.length || input.taskIds.length > BULK_TASKS
+        || !input.taskIds.every((id) => nonempty(id, 500)) || new Set(input.taskIds).size !== input.taskIds.length
+        || !record(input.taskRevisions) || !exact(input.taskRevisions, input.taskIds as string[])
+        || !Object.values(input.taskRevisions).every((revision) => nonempty(revision, 200))
+        || !(input.sectionId === null || nonempty(input.sectionId, 500))) return null;
+    return input as NativeSomedaySectionBulkMoveRequest;
+};
+const readBulkRows = (value: unknown, ids: readonly string[], moved: (row: BulkRow) => boolean,
+    destination: (id: string) => string | undefined): BulkRow[] | null => {
+    if (!Array.isArray(value) || !value.length || value.length > ids.length) return null;
+    const order = new Map(ids.map((id, index) => [id, index]));
+    let last = -1;
+    for (const row of value) {
+        if (!record(row) || !exact(row, ['id', 'revision', 'before', 'after']) || typeof row.id !== 'string'
+            || (order.get(row.id) ?? -1) <= last || !nonempty(row.revision, 200) || revOf(row.revision) === null
+            || !(row.before === null || validMap(row.before)) || !validMap(row.after)) return null;
+        last = order.get(row.id)!;
+        const typed = row as BulkRow;
+        const target = destination(typed.id);
+        if (!moved(typed) || somedayOf(typed.before) === target
+            || !sameSectionDeleteJson(typed.after, setTaskViewSectionId(typed.before ?? undefined, 'someday', target))) return null;
+    }
+    return value as BulkRow[];
+};
+const readBulkMoveEnvelope = (value: unknown): NativeSomedaySectionBulkMoveEnvelope | null => {
+    const envelope = bulkDetached<Record<string, unknown>>(value, BULK_MOVE_BYTES);
+    if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
+    const request = readBulkMoveRequest(envelope.request);
+    const raw = envelope.prepared;
+    if (!request || !exact(raw, ['version', 'kind', 'request', 'rows', 'deviceId', 'sectionWitness', 'result'])
+        || raw.version !== 1 || raw.kind !== 'move' || !sameSectionDeleteJson(raw.request, request)
+        || !nonempty(raw.deviceId, 500)) return null;
+    const rows = readBulkRows(raw.rows, request.taskIds,
+        (row) => request.taskRevisions[row.id] === row.revision, () => request.sectionId ?? undefined);
+    if (!rows || !sameSectionDeleteJson(raw.result, { taskIds: rows.map((row) => row.id), changed: true, sectionId: request.sectionId }))
+        return null;
+    if (request.sectionId === null ? raw.sectionWitness !== null
+        : !record(raw.sectionWitness) || raw.sectionWitness.id !== request.sectionId
+            || !selectedSection([raw.sectionWitness as unknown as ViewSectionDefinition], request.sectionId)) return null;
+    return envelope as unknown as NativeSomedaySectionBulkMoveEnvelope;
+};
+const readBulkUndoEnvelope = (value: unknown): NativeSomedaySectionBulkMoveUndoEnvelope | null => {
+    const envelope = bulkDetached<Record<string, unknown>>(value, BULK_UNDO_BYTES);
+    if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
+    const request = readUndoRequest(envelope.request);
+    const raw = envelope.prepared;
+    const move = readBulkMoveEnvelope(raw.move);
+    if (!request || !move || !exact(raw, ['version', 'kind', 'request', 'move', 'rows', 'deviceId', 'result'])
+        || raw.version !== 1 || raw.kind !== 'undo' || !sameSectionDeleteJson(raw.request, request)
+        || request.moveRequestId !== move.request.requestId || !nonempty(raw.deviceId, 500)) return null;
+    const moved = new Map(move.prepared.rows.map((row) => [row.id, row]));
+    const rows = readBulkRows(raw.rows, move.prepared.rows.map((row) => row.id),
+        (row) => somedayOf(row.before) === (move.request.sectionId ?? undefined)
+            && (revOf(row.revision) ?? 0) >= nextRevision(revOf(moved.get(row.id)!.revision)),
+        (id) => somedayOf(moved.get(id)!.before));
+    return rows && sameSectionDeleteJson(raw.result, { taskIds: rows.map((row) => row.id), changed: true })
+        ? envelope as unknown as NativeSomedaySectionBulkMoveUndoEnvelope : null;
+};
+
+/** Pure cold-journal validation before SQLite opens. */
+export const validatePreparedSomedaySectionBulkMove = (value: unknown): NativeHostResult<NativeSomedaySectionBulkMoveResult> => {
+    const envelope = readBulkMoveEnvelope(value);
+    return envelope ? { ok: true, value: envelope.prepared.result }
+        : fail('INVALID_INPUT', 'Prepared Someday bulk section move is malformed');
+};
+/** Pure cold-journal validation before SQLite opens. */
+export const validatePreparedSomedaySectionBulkMoveUndo = (value: unknown): NativeHostResult<NativeSomedaySectionBulkMoveUndoResult> => {
+    const envelope = readBulkUndoEnvelope(value);
+    return envelope ? { ok: true, value: envelope.prepared.result }
+        : fail('INVALID_INPUT', 'Prepared Someday bulk section Undo is malformed');
+};
+
+export function createSomedaySectionBulkMoveMethods(deps: {
+    readiness: () => NativeHostResult<null>;
+    save: () => Promise<NativeHostResult<null>>;
+    revision: () => string;
+    t: () => (key: string) => string;
+}) {
+    const durableSave = async (): Promise<NativeHostResult<null>> => {
+        try { if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence(); }
+        catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
+        return deps.save();
+    };
+    const receipts = createNativeRequestReceipts({ save: durableSave });
+    type Prepared = NativePreparedSomedaySectionBulkMove | NativePreparedSomedaySectionBulkMoveUndo;
+    const currentRow = (id: string): Task | null => {
+        const matches = useTaskStore.getState()._allTasks.filter((task) => task.id === id);
+        return matches.length === 1 ? matches[0] : null;
+    };
+    const applied = <T extends Prepared>(prepared: T): NativeHostResult<T['result']> => prepared.rows.every((row) => {
+        const current = currentRow(row.id);
+        return current && !current.deletedAt && !current.purgedAt && current.status === 'someday'
+            && current.rev === nextRevision(revOf(row.revision)) && current.revBy === prepared.deviceId
+            && sameSectionDeleteJson(current.viewSectionIds ?? null, row.after);
+    }) ? { ok: true, value: prepared.result } : fail('STALE_REVISION', 'Someday bulk section move outcome is not present');
+    const firstApply = async (prepared: Prepared) => {
+        const state = useTaskStore.getState();
+        const before: Task[] = [];
+        for (const row of prepared.rows) {
+            const current = currentRow(row.id);
+            if (!current || revisionOf(current) !== row.revision || current.deletedAt || current.purgedAt
+                || current.status !== 'someday' || isStatusListTaskReadOnly(current, state._allProjects)
+                || !sameSectionDeleteJson(current.viewSectionIds ?? null, row.before))
+                return fail('STALE_REVISION', 'Someday task changed before its section move');
+            before.push(current);
+        }
+        if (prepared.kind === 'move') {
+            if (!eligibleTasks(prepared.rows.map((row) => row.id))) return fail('STALE_REVISION', 'Someday tasks are no longer eligible');
+            const sections = rawSections();
+            if (!sections.ok) return sections;
+            if (prepared.request.sectionId !== null) {
+                const section = selectedSection(sections.value, prepared.request.sectionId);
+                if (!section || !sameSectionDeleteJson(section, prepared.sectionWitness))
+                    return fail('STALE_REVISION', 'Someday section changed before the move');
+            }
+        }
+        if (state.settings.deviceId !== prepared.deviceId)
+            return fail('STALE_REVISION', 'Device identity changed before the move');
+        const written = await runStoreWrite(() => useTaskStore.getState().commitPreparedTaskEdits(
+            before.map((task, index) => ({ before: task, changes: { viewSectionIds: prepared.rows[index].after } }))));
+        return settleWrite(written, prepared.result);
+    };
+    const commit = async <T extends Prepared>(envelope: { request: T['request']; prepared: T }): Promise<NativeHostResult<T['result']>> => {
+        const prepared = envelope.prepared;
+        const payload = JSON.stringify([prepared.kind === 'move' ? 'somedaySectionBulkMove' : 'somedaySectionBulkMoveUndo', envelope]);
+        const outcome = await receipts.run(prepared.request.requestId, payload, async () => {
+            const done = applied(prepared);
+            return done.ok ? done : firstApply(prepared);
+        });
+        const confirmed = outcome.ok ? applied(prepared) : outcome;
+        if (!confirmed.ok) return confirmed;
+        try {
+            logInfo('Native Someday bulk section move confirmed', { scope: 'native-host', category: 'storage', force: true,
+                context: { releaseCheck: 'v1.3.8/ios-someday-section-bulk-move', operation: prepared.kind,
+                    count: prepared.result.taskIds.length, outcome: 'confirmed' } });
+        } catch {
+            return confirmed;
+        }
+        return confirmed;
+    };
+    const frozen = <T>(prepared: T, valid: (envelope: unknown) => unknown, request: unknown, limit: number): T | null => {
+        const copy = bulkDetached<T>(JSON.parse(JSON.stringify(prepared)), limit);
+        return copy && valid({ request, prepared: copy }) ? copy : null;
+    };
+    return {
+        getSomedaySectionBulkMoveOptions(input: { taskIds: string[]; offset?: number; limit?: number; revision?: string }): NativeHostResult<{
+            revision: string; taskIds: string[]; taskRevisions: Record<string, string>; title: string;
+            choices: { total: number; items: Array<{ sectionId: string | null; title: string; selected: boolean; toast: string }> };
+            cancelLabel: string; undoLabel: string; errorTitle: string; moveFailed: string; undoFailed: string;
+        }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const request = bulkDetached<Record<string, unknown>>(input, BULK_MOVE_BYTES);
+            if (!request || !Object.keys(request).every((key) => ['taskIds', 'offset', 'limit', 'revision'].includes(key))
+                || !Array.isArray(request.taskIds) || !request.taskIds.length || request.taskIds.length > BULK_TASKS
+                || !request.taskIds.every((id) => nonempty(id, 500)) || new Set(request.taskIds).size !== request.taskIds.length
+                || (request.offset !== undefined && (!Number.isSafeInteger(request.offset) || (request.offset as number) < 0))
+                || (request.limit !== undefined && (!Number.isSafeInteger(request.limit) || (request.limit as number) < 1
+                    || (request.limit as number) > 100))
+                || (request.revision !== undefined && !nonempty(request.revision, 500))
+                || ((request.offset as number | undefined ?? 0) > 0 && request.revision === undefined))
+                return fail('INVALID_INPUT', 'Bounded Someday tasks and a window are required');
+            const tasks = eligibleTasks(request.taskIds as string[]);
+            if (!tasks) return fail('INVALID_INPUT', 'Someday tasks are unavailable');
+            const taskRevisions = Object.fromEntries(tasks.map((task) => [task.id, revisionOf(task)]));
+            if (!Object.values(taskRevisions).every((revision) => nonempty(revision, 200)))
+                return fail('INVALID_INPUT', 'Someday task revision is too large');
+            const sections = rawSections();
+            if (!sections.ok) return sections;
+            const dialog = buildSomedaySectionMoveDialog(tasks, sections.value, deps.t());
+            if (dialog.choices.some((row) => row.sectionId !== null && !selectedSection(sections.value, row.sectionId)))
+                return fail('INVALID_INPUT', 'Someday sections are ambiguous');
+            const revision = deps.revision();
+            if (request.revision !== undefined && request.revision !== revision)
+                return fail('STALE_REVISION', 'Someday move choices changed');
+            const offset = request.offset as number | undefined ?? 0;
+            const limit = request.limit as number | undefined ?? 100;
+            const moving = (sectionId: string | null) => tasks.filter((task) => somedayOf(task.viewSectionIds) !== (sectionId ?? undefined)).length;
+            const value = { revision, taskIds: tasks.map((task) => task.id), taskRevisions, title: dialog.title,
+                choices: { total: dialog.choices.length, items: dialog.choices.slice(offset, offset + limit).map((row) => ({
+                    ...row, toast: formatSomedaySectionMoved(deps.t(), moving(row.sectionId), row.sectionId === null ? undefined : row.title),
+                })) }, cancelLabel: dialog.cancelLabel, ...getSomedaySectionMoveText(deps.t()) };
+            return isNativeJsonWithinBytes(value, BULK_MOVE_BYTES) && safeJsonStrings(value)
+                ? { ok: true, value } : fail('INVALID_INPUT', 'Someday move choices exceed the bounded response');
+        },
+
+        prepareSomedaySectionBulkMove(input: NativeSomedaySectionBulkMoveRequest): NativeHostResult<{
+            kind: 'noop'; result: NativeSomedaySectionBulkMoveResult;
+        } | { kind: 'prepared'; prepared: NativePreparedSomedaySectionBulkMove }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const request = readBulkMoveRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'A bounded Someday bulk move request is required');
+            const tasks = eligibleTasks(request.taskIds);
+            if (!tasks || tasks.some((task) => revisionOf(task) !== request.taskRevisions[task.id]))
+                return fail('STALE_REVISION', 'Someday tasks changed before the move');
+            const sections = rawSections();
+            if (!sections.ok) return sections;
+            const section = request.sectionId === null ? null : selectedSection(sections.value, request.sectionId);
+            if (request.sectionId !== null && !section) return fail('INVALID_INPUT', 'Someday section is unavailable');
+            const planned = planSomedaySectionMove({ ids: request.taskIds, tasks, destination: request.sectionId ?? undefined });
+            const byId = new Map(tasks.map((task) => [task.id, task]));
+            const rows: BulkRow[] = planned.updates.map((update) => ({ id: update.id, revision: request.taskRevisions[update.id],
+                before: byId.get(update.id)!.viewSectionIds ?? null, after: update.updates.viewSectionIds! }));
+            const result: NativeSomedaySectionBulkMoveResult = { taskIds: rows.map((row) => row.id), changed: true, sectionId: request.sectionId };
+            if (!rows.length) return { ok: true, value: { kind: 'noop', result: { ...result, changed: false } } };
+            const deviceId = useTaskStore.getState().settings.deviceId;
+            if (!nonempty(deviceId, 500)) return fail('INVALID_INPUT', 'Loaded device identity is required');
+            const prepared = frozen<NativePreparedSomedaySectionBulkMove>({ version: 1, kind: 'move', request, rows, deviceId,
+                sectionWitness: section, result }, readBulkMoveEnvelope, request, BULK_MOVE_BYTES);
+            return prepared ? { ok: true, value: { kind: 'prepared', prepared } }
+                : fail('INVALID_INPUT', 'Someday bulk move exceeds the bounded journal');
+        },
+
+        validatePreparedSomedaySectionBulkMove,
+        probeSomedaySectionBulkMoveOutcome(input: NativeSomedaySectionBulkMoveEnvelope): NativeHostResult<NativeSomedaySectionBulkMoveResult> {
+            const envelope = readBulkMoveEnvelope(input);
+            if (!envelope) return fail('INVALID_INPUT', 'Prepared Someday bulk section move is malformed');
+            const ready = deps.readiness();
+            return ready.ok ? applied(envelope.prepared) : ready;
+        },
+        async commitPreparedSomedaySectionBulkMove(input: NativeSomedaySectionBulkMoveEnvelope): Promise<NativeHostResult<NativeSomedaySectionBulkMoveResult>> {
+            const envelope = readBulkMoveEnvelope(input);
+            if (!envelope) return fail('INVALID_INPUT', 'Prepared Someday bulk section move is malformed');
+            const ready = deps.readiness();
+            return ready.ok ? commit(envelope) : ready;
+        },
+
+        prepareSomedaySectionBulkMoveUndo(input: { request: NativeSomedaySectionMoveUndoRequest; move: NativeSomedaySectionBulkMoveEnvelope }): NativeHostResult<{
+            kind: 'noop'; result: NativeSomedaySectionBulkMoveUndoResult;
+        } | { kind: 'prepared'; prepared: NativePreparedSomedaySectionBulkMoveUndo }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const outer = bulkDetached<Record<string, unknown>>(input, BULK_MOVE_BYTES + 1_000);
+            const request = outer && exact(outer, ['request', 'move']) ? readUndoRequest(outer.request) : null;
+            const move = outer && readBulkMoveEnvelope(outer.move);
+            if (!request || !move || request.moveRequestId !== move.request.requestId)
+                return fail('INVALID_INPUT', 'A confirmed Someday bulk move and new Undo UUID are required');
+            const state = useTaskStore.getState();
+            const editable = move.prepared.rows.map((row) => currentRow(row.id)).filter((task): task is Task => Boolean(task
+                && !task.deletedAt && !task.purgedAt && task.status === 'someday' && !isStatusListTaskReadOnly(task, state._allProjects)));
+            const previous = move.prepared.rows.map((row) => ({ id: row.id, sectionId: somedayOf(row.before) }));
+            const byId = new Map(editable.map((task) => [task.id, task]));
+            const rows: BulkRow[] = buildTaskViewSectionUndoUpdates(editable, 'someday', previous, move.request.sectionId ?? undefined)
+                .map((update) => ({ id: update.id, revision: revisionOf(byId.get(update.id)!),
+                    before: byId.get(update.id)!.viewSectionIds ?? null, after: update.updates.viewSectionIds! }));
+            const result: NativeSomedaySectionBulkMoveUndoResult = { taskIds: rows.map((row) => row.id), changed: true };
+            if (!rows.length) return { ok: true, value: { kind: 'noop', result: { ...result, changed: false } } };
+            const deviceId = state.settings.deviceId;
+            if (!nonempty(deviceId, 500)) return fail('INVALID_INPUT', 'Loaded device identity is required');
+            const prepared = frozen<NativePreparedSomedaySectionBulkMoveUndo>({ version: 1, kind: 'undo', request, move, rows,
+                deviceId, result }, readBulkUndoEnvelope, request, BULK_UNDO_BYTES);
+            return prepared ? { ok: true, value: { kind: 'prepared', prepared } }
+                : fail('INVALID_INPUT', 'Someday bulk Undo exceeds the bounded journal');
+        },
+
+        validatePreparedSomedaySectionBulkMoveUndo,
+        probeSomedaySectionBulkMoveUndoOutcome(input: NativeSomedaySectionBulkMoveUndoEnvelope): NativeHostResult<NativeSomedaySectionBulkMoveUndoResult> {
+            const envelope = readBulkUndoEnvelope(input);
+            if (!envelope) return fail('INVALID_INPUT', 'Prepared Someday bulk section Undo is malformed');
+            const ready = deps.readiness();
+            return ready.ok ? applied(envelope.prepared) : ready;
+        },
+        async commitPreparedSomedaySectionBulkMoveUndo(input: NativeSomedaySectionBulkMoveUndoEnvelope): Promise<NativeHostResult<NativeSomedaySectionBulkMoveUndoResult>> {
+            const envelope = readBulkUndoEnvelope(input);
+            if (!envelope) return fail('INVALID_INPUT', 'Prepared Someday bulk section Undo is malformed');
             const ready = deps.readiness();
             return ready.ok ? commit(envelope) : ready;
         },

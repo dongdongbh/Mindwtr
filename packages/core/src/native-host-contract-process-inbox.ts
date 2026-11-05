@@ -1,4 +1,5 @@
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
+import { logInfo } from './logger';
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { safeParseDate } from './date';
 import { countFocusedTasksBeforeBoundary } from './task-utils';
@@ -28,7 +29,8 @@ import { buildNewProject } from './store-projects/project-actions';
 import { buildNewTask } from './task-creation';
 import { getTaskReminderDefault } from './task-reminder-policy';
 import { createProjectOrderReserver, ensureDeviceId, getNextProjectOrder, getTaskOrder, nextRevision } from './store-helpers';
-import { planTaskUpdateEffects, prepareTaskUpdatesForStore, taskEditValuesEqual } from './store-tasks';
+import { planTaskUpdateEffects, prepareTaskUpdatesForStore } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import type { PreparedInboxEffect, TaskStore } from './store-types';
 import type { AppData, Area, Project, Section, Task } from './types';
 import { generateUUID } from './uuid';
@@ -152,7 +154,8 @@ const withFrozenDateValues = (value: unknown): unknown => {
     return value;
 };
 const pending = (value: ProcessInboxDraft['startTime']): ProcessInboxPendingDate => value
-    ? { value: value.date, dateOnly: value.dateOnly, ...(value.useDefaultTime ? { useDefaultTime: true } : {}) }
+    ? { value: value.date, dateOnly: value.dateOnly, ...(value.useDefaultTime ? { useDefaultTime: true } : {}),
+        ...(value.time ? { time: value.time } : {}) }
     : { value: null, dateOnly: false };
 const isCommit = (value: NativeInboxWriteRequest): value is NativeInboxCommitRequest => 'decision' in value;
 export const isNativeInboxWriteRequest = (value: unknown, kind?: 'commit' | 'skip'): value is NativeInboxWriteRequest => {
@@ -328,7 +331,13 @@ const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscov
                         throw new Error('Parsed Inbox date was altered');
                     }
                     if (selected && draft.dirtyScheduleFields.includes(field)) {
-                        if (selected.dateOnly ? frozen !== selected.date : typeof frozen !== 'string'
+                        if (selected.time && !selected.dateOnly) {
+                            if (!/^\d{4}-\d{2}-\d{2}$/.test(selected.date)
+                                || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(selected.time)
+                                || frozen !== `${selected.date}T${selected.time}`) {
+                                throw new Error('Picked Inbox time was altered');
+                            }
+                        } else if (selected.dateOnly ? frozen !== selected.date : typeof frozen !== 'string'
                             || (frozen !== selected.date && !frozen.startsWith(`${selected.date}T`))) {
                             throw new Error('Picked Inbox date was altered');
                         }
@@ -518,6 +527,7 @@ export function prepareNativeInboxWrite(input: {
     const relevantSections = new Set<string>([
         ...planned.effect.sections.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
         ...planned.effect.guards.reactivation?.sectionIds ?? [],
+        ...[source.sectionId, input.draft.sectionId].filter((id): id is string => Boolean(id)),
     ]);
     witness.lists = {
         tasks: state._allTasks.filter((task) => relevantTasks.has(task.id)),
@@ -631,11 +641,31 @@ export function readNativePreparedInboxWrite(input: unknown): NativePreparedInbo
                 if (!id) throw new Error('Missing frozen Inbox ID');
                 return id;
             } });
-        if (recomputed.reason !== undefined || idIndex !== witness.ids.length
-            || seen.size !== witness.parser.length || !same(recomputed.effect, prepared.effect)
+        if (recomputed.reason !== undefined) return null;
+        const legacyReferenceFields = (['dueReminderLeadMinutes', 'startReminderLeadMinutes'] as const).filter((field) => {
+            const hasAdvance = (task: Task) => Object.prototype.hasOwnProperty.call(task, field);
+            return witness.decisionKind === 'reference' && witness.committed === 'reference'
+                && witness.source.status !== 'reference' && !hasAdvance(witness.source)
+                && witness.lists.tasks.every((task) => !hasAdvance(task))
+                && prepared.effect.tasks.every((row) => !hasAdvance(row.after) && (!row.before || !hasAdvance(row.before)))
+                && recomputed.effect.tasks.some((row) => row.after.id === witness.source.id
+                    && row.after.status === 'reference' && row.after[field] === 0);
+        });
+        // Old v1 journals retain their exact effect bytes before each field's transition-only Off value existed.
+        const legacyReference = legacyReferenceFields.length > 0;
+        const effect = legacyReference ? { ...recomputed.effect, tasks: recomputed.effect.tasks.map((row) => {
+            if (row.after.id !== witness.source.id) return row;
+            const after = { ...row.after };
+            for (const field of legacyReferenceFields) delete after[field];
+            return { ...row, after };
+        }) } : recomputed.effect;
+        if (idIndex !== witness.ids.length
+            || seen.size !== witness.parser.length || !same(effect, prepared.effect)
             || !same(recomputed.result, prepared.result) || prepared.kind !== prepared.result.kind
             || !same(recomputed.decisionRequest, witness.decisionRequest)
             || !same(recomputed.preparedDecision, witness.preparedDecision)) return null;
+        if (legacyReference) logInfo('Legacy Reference decision validated', { scope: 'native-host', force: true,
+            context: { releaseCheck: 'v1.3.8/native-reference-legacy-decision', outcome: 'validated' } });
         return prepared;
     } catch {
         return null;

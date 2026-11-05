@@ -4,10 +4,11 @@ import { detach, exact, iso, record, validProject } from './native-host-contract
 import { validSection } from './native-host-contract-project-section-rename';
 import { validRawTask } from './native-host-contract-task-save';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
-import { createNativeRequestReceipts, revisionOf } from './native-request-receipts';
+import { createNativeRequestReceipts, revisionOf, revisionsToken } from './native-request-receipts';
 import { ensureDeviceId } from './store-helpers';
 import { logInfo } from './logger';
 import { useTaskStore } from './store';
+import { isTaskFinished } from './task-status';
 import { projectLifecycleEffect } from './store-projects/project-actions';
 import type { PreparedProjectLifecycle } from './store-types';
 import type { Project, Task } from './types';
@@ -18,6 +19,9 @@ export type NativePreparedProjectLifecycle = PreparedProjectLifecycle;
 export type NativeProjectLifecycleEnvelope = { request: NativeProjectLifecycleRequest;
     prepared: NativePreparedProjectLifecycle };
 export type NativeProjectLifecyclePreparation = { kind: 'prepared'; prepared: NativePreparedProjectLifecycle };
+
+export type NativeReviewProjectCompletionOptions = { projectId: string; title: string; projectRevision: string;
+    scopeRevision: string; requiresConfirmation: boolean };
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const same = taskEditValuesEqual;
@@ -99,6 +103,19 @@ const readEnvelope = (input: unknown): NativeProjectLifecycleEnvelope | null => 
     } catch { return null; }
 };
 
+const projectScope = (project: Project): PreparedProjectLifecycle['scope'] => {
+    const state = useTaskStore.getState();
+    const sections = state._allSections.filter((row) => row.projectId === project.id);
+    const sectionIds = new Set(sections.map((row) => row.id));
+    return { project, sections, tasks: state._allTasks.filter((row) => row.projectId === project.id
+        || (!row.projectId && row.sectionId !== undefined && sectionIds.has(row.sectionId))) };
+};
+const scopeRevision = (scope: PreparedProjectLifecycle['scope']): string => revisionsToken([
+    JSON.stringify(['project', scope.project.id, revisionOf(scope.project)]),
+    ...scope.sections.map((row) => JSON.stringify(['section', row.id, revisionOf(row)])),
+    ...scope.tasks.map((row) => JSON.stringify(['task', row.id, revisionOf(row)])),
+].sort());
+
 export function createProjectLifecycleMethods(deps: {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
@@ -110,7 +127,34 @@ export function createProjectLifecycleMethods(deps: {
         }
         return deps.save();
     } });
-    return {
+    const methods = {
+        getReviewProjectCompletionOptions(input: { projectId: string }): NativeHostResult<NativeReviewProjectCompletionOptions> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!record(input) || !exact(input, ['projectId']) || !text(input.projectId))
+                return fail('INVALID_INPUT', 'A bounded Review Project identifier is required');
+            const project = useTaskStore.getState()._projectsById.get(input.projectId);
+            if (!project || project.deletedAt || project.purgedAt || project.status !== 'active')
+                return fail('STALE_REVISION', 'Project changed since the review was read');
+            const scope = projectScope(project);
+            return { ok: true, value: { projectId: project.id, title: project.title, projectRevision: revisionOf(project),
+                scopeRevision: scopeRevision(scope), requiresConfirmation: scope.tasks.some((task) => !task.deletedAt
+                    && !isTaskFinished(task) && task.status !== 'reference') } };
+        },
+        prepareReviewProjectCompletion(input: { request: NativeProjectLifecycleRequest; scopeRevision: string }): NativeHostResult<NativeProjectLifecyclePreparation> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!record(input) || !exact(input, ['request', 'scopeRevision']) || !text(input.scopeRevision))
+                return fail('INVALID_INPUT', 'A bounded Review Project completion scope is required');
+            const request = readRequest(input.request);
+            if (!request || request.action !== 'complete')
+                return fail('INVALID_INPUT', 'Review can only complete an active Project');
+            const options = methods.getReviewProjectCompletionOptions({ projectId: request.projectId });
+            if (!options.ok) return options;
+            if (options.value.projectRevision !== request.projectRevision || options.value.scopeRevision !== input.scopeRevision)
+                return fail('STALE_REVISION', 'Project or its tasks changed since completion was offered');
+            return methods.prepareProjectLifecycle(request);
+        },
         prepareProjectLifecycle(input: NativeProjectLifecycleRequest): NativeHostResult<NativeProjectLifecyclePreparation> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -123,11 +167,7 @@ export function createProjectLifecycleMethods(deps: {
                 || request.action !== 'reactivate' && target.status === 'archived'
                 || request.action === 'reactivate' && target.status !== 'archived')
                 return fail('STALE_REVISION', 'Project changed since the detail was read');
-            const sections = state._allSections.filter((row) => row.projectId === target.id);
-            const sectionIds = new Set(sections.map((row) => row.id));
-            const scope: PreparedProjectLifecycle['scope'] = { project: target, sections,
-                tasks: state._allTasks.filter((row) => row.projectId === target.id
-                    || (!row.projectId && row.sectionId !== undefined && sectionIds.has(row.sectionId))) };
+            const scope = projectScope(target);
             const device = ensureDeviceId(state.settings);
             const updateAt = new Date().toISOString();
             const effect = projectLifecycleEffect(scope, request.action, device.deviceId, updateAt);
@@ -170,4 +210,5 @@ export function createProjectLifecycleMethods(deps: {
             return confirmed;
         },
     };
+    return methods;
 }

@@ -39,7 +39,8 @@ import {
 } from '../tombstone-compaction';
 import { actionFail, actionOk, mutateEntities, projectDeleteUndoReattachments,
     type DetachedProjectTask } from './shared';
-import { sameSectionSqliteRow, sameTaskSqliteRow } from './section-actions';
+import { sameSectionSqliteRow, sameTaskSqliteRow, sectionFlowEffect } from './section-actions';
+import { getProjectFlowMode } from '../task-utils';
 import { buildTaskContainerMovePatch, reserveTaskContainerProjectOrder } from '../task-container-rules';
 import type { PreparedAreaAuthority, SelectedProjectAvailabilityWrite } from '../store-types';
 import { getAttachmentAvailabilityPatch } from '../mobile-attachment-availability';
@@ -399,8 +400,8 @@ export const projectRenameEffect = (project: Project, title: string, deviceId: s
 };
 
 /** RN updateProject's nonstatus flow-field lifecycle result, without child writes. */
-export const projectFlowEffect = (project: Project, action: ProjectFlowAction, deviceId: string,
-    now: string): PreparedProjectFlow['effect'] | null => {
+export const projectFlowEffect = (project: Project, action: Extract<ProjectFlowAction, { kind: 'toggleType' | 'setScope' }>, deviceId: string,
+    now: string): Extract<PreparedProjectFlow, { version: 1 }>['effect'] | null => {
     if (action.kind === 'setScope' && (!project.isSequential || project.sequentialScope === action.scope)) return null;
     // A native toggle leaves Per section (#1429) the way the desktop/RN picker does:
     // perSectionFlow is written false, so turning Sequential off later lands on Parallel.
@@ -412,6 +413,34 @@ export const projectFlowEffect = (project: Project, action: ProjectFlowAction, d
         ...project, ...transition.projectUpdates,
         updatedAt: now, rev: nextRevision(project.rev), revBy: deviceId,
     }) } };
+};
+
+/** Freeze all related rows, including tombstones, in an order independent of store array order. */
+export const projectFlowSections = (projectId: string, sections: readonly Section[]): Section[] =>
+    sections.filter((section) => section.projectId === projectId)
+        .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+
+const sameProjectFlowSections = (left: readonly Section[], right: readonly Section[]): boolean =>
+    left.length === right.length && left.every((section, index) =>
+        section.id === right[index].id && sameSectionSqliteRow(section, right[index]));
+
+/** Uses the shared mode planner; no native-specific defaults or lifecycle policy. */
+export const projectFlowModeEffect = (project: Project, sections: readonly Section[], mode: ProjectFlowMode,
+    deviceId: string, now: string): Extract<PreparedProjectFlow, { version: 2 }>['effect'] | null => {
+    const plan = planProjectFlowModeChange(project, sections, mode);
+    if (!plan) return null;
+    const transition = applyProjectLifecycleTransition(project, plan.project, [], [], now, deviceId);
+    const choiceById = new Map(plan.sections.map((entry) => [entry.id, entry.isSequential]));
+    return {
+        project: { before: project, after: normalizeProjectLifecycleFields({
+            ...project, ...transition.projectUpdates,
+            updatedAt: now, rev: nextRevision(project.rev), revBy: deviceId,
+        }) },
+        sections: sections.filter((section) => choiceById.has(section.id)).map((before) => ({
+            before, after: { ...before, isSequential: choiceById.get(before.id),
+                updatedAt: now, rev: nextRevision(before.rev), revBy: deviceId },
+        })),
+    };
 };
 
 /** RN updateProject's Project-only sort result, normalized for synced storage. */
@@ -735,9 +764,11 @@ export const projectPurgeEffect = (project: Project, tasks: readonly Task[], sec
  * Release check for #1429: proves a Flow mode write (project mode, or one
  * section's choice) reached durable storage. No titles or identifiers.
  */
-export const logProjectFlowModeSaved = (mode: string, sectionDefaults: number): void => {
+export const logProjectFlowModeSaved = (mode: string, sectionDefaults: number,
+    releaseCheck: 'v1.3.7/section-flow-mode' | 'v1.3.8/ios-project-flow-mode' = 'v1.3.7/section-flow-mode'): void => {
     logInfo('Project flow mode saved', { scope: 'store', category: 'storage',
-        context: { releaseCheck: 'v1.3.7/section-flow-mode', mode, sectionDefaults } });
+        context: { releaseCheck: releaseCheck === 'v1.3.8/ios-project-flow-mode'
+            ? 'v1.3.8/ios-project-flow-mode' : 'v1.3.7/section-flow-mode', mode, sectionDefaults } });
 };
 
 export const createProjectCoreActions = ({
@@ -905,27 +936,69 @@ export const createProjectCoreActions = ({
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict',
             error: 'Prepared Project flow conflicts with current data' };
         set((state) => {
+            if (input.version === 3) {
+                const section = state._allSections.find((row) => row.id === input.request.action.sectionId);
+                // A complete Section receipt survives later parent changes after a lost reply.
+                if (section && !section.deletedAt && !('purgedAt' in section)
+                    && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
+                    && sameSectionSqliteRow(section, input.effect.section.after)) {
+                    result = { success: true, id: input.request.projectId, outcome: 'replayed' };
+                    return state;
+                }
+                const parent = state._projectsById.get(input.request.projectId);
+                if (!parent || parent.deletedAt || parent.purgedAt || parent.status === 'archived'
+                    || getProjectFlowMode(parent) !== 'perSection' || !sameProjectSqliteRow(parent, input.scope.project)
+                    || !section || section.deletedAt || 'purgedAt' in section || section.projectId !== parent.id
+                    || !sameSectionSqliteRow(section, input.scope.section)
+                    || (state.settings.deviceId ?? null) !== input.deviceIdBefore
+                    || (input.deviceIdBefore === null ? !input.deviceIdToInitialize : input.deviceIdToInitialize !== null)) return state;
+                const planned = sectionFlowEffect(section, input.request.action.sequential,
+                    input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
+                if (!planned || !taskEditValuesEqual(planned, input.effect)) return state;
+                const sections = replaceEntitiesInArray(state._allSections, [planned.section.after]);
+                const settings = input.deviceIdToInitialize
+                    ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
+                persist(set, debouncedSave, state, { sections,
+                    ...(settings !== state.settings ? { settings } : {}) });
+                result = { success: true, id: parent.id, outcome: 'applied' };
+                return { _allSections: sections, settings,
+                    lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt) };
+            }
             const current = state._projectsById.get(input.request.projectId);
+            const sections = input.version === 2 ? projectFlowSections(input.request.projectId, state._allSections) : [];
+            const sectionAfterById = input.version === 2
+                ? new Map(input.effect.sections.map((pair) => [pair.after.id, pair.after])) : new Map<string, Section>();
+            const receiptSections = input.version === 2
+                ? input.scope.sections.map((section) => sectionAfterById.get(section.id) ?? section) : [];
             // Complete after-row receipt precedes mutable status, token, and device guards.
             if (current && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
-                && sameProjectSqliteRow(current, input.effect.project.after)) {
+                && sameProjectSqliteRow(current, input.effect.project.after)
+                && (input.version === 1 || sameProjectFlowSections(sections, receiptSections))) {
                 result = { success: true, id: current.id, outcome: 'replayed' };
                 return state;
             }
             if (!current || current.deletedAt || current.purgedAt || current.status === 'archived'
                 || (state.settings.deviceId ?? null) !== input.deviceIdBefore
                 || (input.deviceIdBefore === null ? !input.deviceIdToInitialize : input.deviceIdToInitialize !== null)
-                || !sameProjectSqliteRow(current, input.scope.project)) return state;
-            const planned = projectFlowEffect(current, input.request.action,
-                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
+                || !sameProjectSqliteRow(current, input.scope.project)
+                || input.version === 2 && !sameProjectFlowSections(sections, input.scope.sections)) return state;
+            const planned = input.version === 2
+                ? projectFlowModeEffect(current, sections, input.request.action.mode,
+                    input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt)
+                : projectFlowEffect(current, input.request.action,
+                    input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
             if (!planned || !taskEditValuesEqual(planned, input.effect)) return state;
             const projects = replaceEntitiesInArray(state._allProjects, [planned.project.after]);
+            const nextSections = input.version === 2 && input.effect.sections.length > 0
+                ? replaceEntitiesInArray(state._allSections, input.effect.sections.map((pair) => pair.after)) : state._allSections;
             const settings = input.deviceIdToInitialize
                 ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
             persist(set, debouncedSave, state, { projects,
+                ...(input.version === 2 ? { sections: nextSections } : {}),
                 ...(settings !== state.settings ? { settings } : {}) });
             result = { success: true, id: current.id, outcome: 'applied' };
             return { _allProjects: projects, settings,
+                ...(input.version === 2 ? { _allSections: nextSections } : {}),
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt) };
         });
         return result;

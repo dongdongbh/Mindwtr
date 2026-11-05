@@ -7,7 +7,7 @@ import { useTaskStore } from './store';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
 import { areaDeleteEffect, sameAreaAdditionRow, selectAreaDeleteScope } from './store-projects/area-actions';
 import type { PreparedAreaDelete } from './store-types';
-import { taskEditValuesEqual } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import { taskToSqliteRow } from './task-sync-schema';
 import { projectToSqliteRow } from './project-sync-schema';
 import type { Area, Project, Task } from './types';

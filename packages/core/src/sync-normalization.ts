@@ -268,6 +268,8 @@ export const normalizeTaskForSyncMerge = (
         suppressMindwtrReminders: normalizeSyncedBoolean(normalized.suppressMindwtrReminders),
         reminderPolicy: normalizeTaskReminderPolicy(normalized.reminderPolicy),
         repeatReminderMinutes: normalized.repeatReminderMinutes,
+        dueReminderLeadMinutes: normalized.dueReminderLeadMinutes,
+        startReminderLeadMinutes: normalized.startReminderLeadMinutes,
         reviewAt: normalized.reviewAt,
         completedAt: normalized.completedAt,
         cancelledAt: normalized.cancelledAt,

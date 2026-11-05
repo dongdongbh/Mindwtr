@@ -344,6 +344,7 @@ export type MobileSyncAttachmentsPort = {
     transferAdmission?: AttachmentTransferAdmission;
   }): AttachmentPassResult;
   cleanupTempFiles(): Promise<void>;
+  clearDownloadBackoff?(): void;
   /** #1119: a completed attachment pass is recorded for the stored sync location. */
   hasCompletedPresenceReconciliation(): Promise<boolean>;
   hasPendingWork(data: AppData, options: { contentCheckEnabled?: boolean }): Promise<boolean>;
@@ -781,6 +782,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
 
   const clearMobileSyncConfigCache = (): void => {
     syncConfigCache.clear();
+    host.attachments.clearDownloadBackoff?.();
   };
 
   const getCachedConfigValue = async (key: string): Promise<string | null> => {
@@ -1617,7 +1619,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     /**
      * With no key, a WebDAV or Dropbox attachment pass first asks whether the location holds ciphertext (an encryption
      * change cut off there): its plaintext must never land beside it. Once per cycle. File Sync's own lock is held by the
-     * cycle, so it relies on the download refusal and on the location a change was abandoned at.
+     * cycle, so it checks its folder inside the attachment pass instead (assertFolderHoldsNoCiphertext).
      */
     private async assertLocationNotPartlyEncrypted(): Promise<void> {
       if (this.encryptionMaterial) return;

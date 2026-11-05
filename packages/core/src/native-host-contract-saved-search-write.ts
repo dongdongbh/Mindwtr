@@ -1,12 +1,14 @@
+import { logInfo } from './logger';
 import { resolveSavedSearch } from './global-search-model';
 import type { NativeHostResult } from './native-host-contract';
 import { detach, exact, iso, record } from './native-host-contract-project-shared';
-import { removeSavedSearch } from './saved-search-view-model';
+import { findSavedSearch, getSavedSearchGlobalSortLabel, getSavedSearchOwnSortBy, removeSavedSearch } from './saved-search-view-model';
+import { getTaskSortByLabel, getVisibleTaskSortOptions, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
 import { useTaskStore } from './store';
 import { focusSavedFilterToken, savedSearchWriteScope, timestampAtLeastAfter } from './store-settings';
 import type { PreparedSavedSearchWrite, SavedSearchWriteOperation, SavedSearchWriteRequest,
     SavedSearchWriteResult, SavedSearchWriteScope } from './store-types';
-import type { SavedSearch } from './types';
+import type { SavedSearch, TaskSortBy } from './types';
 
 export type NativeSavedSearchWriteRequest = SavedSearchWriteRequest;
 export type NativePreparedSavedSearchWrite = PreparedSavedSearchWrite;
@@ -30,6 +32,10 @@ const readOperation = (value: unknown): SavedSearchWriteOperation | null => {
     if (value.type === 'delete' && exact(value, ['type', 'id'])
         && typeof value.id === 'string' && !!value.id && value.id.length <= 200)
         return { type: 'delete', id: value.id };
+    if (value.type === 'sort' && exact(value, ['type', 'id', 'sort'])
+        && typeof value.id === 'string' && !!value.id && value.id.length <= 200
+        && (value.sort === null || TASK_LIST_SORT_OPTIONS.includes(value.sort as TaskSortBy)))
+        return { type: 'sort', id: value.id, sort: value.sort as TaskSortBy | null };
     return null;
 };
 
@@ -84,6 +90,15 @@ const plan = (request: SavedSearchWriteRequest, before: SavedSearchWriteScope, p
         result = { id: resolved.search.id, existing: resolved.existing, changed: !resolved.existing };
         if (resolved.existing) return { kind: 'noop', result };
         afterSearches = [...searches, resolved.search];
+    } else if (request.operation.type === 'sort') {
+        const { id, sort } = request.operation;
+        const target = findSavedSearch(searches, id);
+        if (!target) return null;
+        result = { id, existing: true, changed: (target.sort ?? null) !== sort };
+        if (!result.changed) return { kind: 'noop', result };
+        const { sort: _previous, ...rest } = target;
+        const next = sort === null ? rest : { ...rest, sort };
+        afterSearches = searches.map((search) => search === target ? next : search);
     } else {
         const id = request.operation.id;
         if (!searches.some((search) => search.id === id)) {
@@ -121,8 +136,29 @@ const readPrepared = (value: unknown): PreparedSavedSearchWrite | null => {
 export function createSavedSearchWriteMethods(deps: {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
+    t?: (key: string) => string;
 }) {
     return {
+        getSavedSearchSortOptions(input: { id: string }): NativeHostResult<{ id: string; expected: string;
+            choices: { value: TaskSortBy | null; label: string; selected: boolean }[] }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!record(input) || !exact(input, ['id']) || typeof input.id !== 'string' || !input.id || input.id.length > 200)
+                return fail('INVALID_INPUT', 'A saved search ID is required');
+            const scope = currentScope();
+            const expected = scope && token(scope);
+            const settings = useTaskStore.getState().settings;
+            const target = findSavedSearch(settings.savedSearches, input.id);
+            if (!target || !expected) return fail('STALE_REVISION', 'The saved search is no longer available');
+            const own = getSavedSearchOwnSortBy(target, settings);
+            const t = deps.t ?? ((key: string) => key);
+            return { ok: true, value: { id: input.id, expected, choices: [
+                { value: null, label: getSavedSearchGlobalSortLabel(settings, t), selected: own === null },
+                ...getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, settings)
+                    .map((value) => ({ value, label: getTaskSortByLabel(value, t), selected: value === own })),
+            ] } };
+        },
+
         getSavedSearchWriteOptions(input: { operation: SavedSearchWriteOperation }): NativeHostResult<{ expected: string }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -147,6 +183,9 @@ export function createSavedSearchWriteMethods(deps: {
             if (!ready.ok) return ready;
             const request = readRequest(input);
             if (!request) return fail('INVALID_INPUT', 'Saved search request is invalid');
+            if (request.operation.type === 'sort' && request.operation.sort !== null
+                && !getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, useTaskStore.getState().settings).includes(request.operation.sort))
+                return fail('INVALID_INPUT', 'That saved search sort is not offered');
             const before = currentScope();
             if (!before || request.expected !== token(before))
                 return fail('STALE_REVISION', 'Saved searches changed; refresh before writing');
@@ -178,6 +217,11 @@ export function createSavedSearchWriteMethods(deps: {
                 if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
             } catch { return fail('SAVE_FAILED', 'Saved search could not be saved'); }
             const saved = await deps.save();
+            if (saved.ok && prepared.request.operation.type === 'sort') {
+                try { logInfo('Native saved search sort saved', { scope: 'native-host', category: 'storage',
+                    context: { releaseCheck: 'v1.3.8/native-saved-search-sort', outcome: 'saved' } }); }
+                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            }
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
     };

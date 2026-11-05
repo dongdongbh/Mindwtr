@@ -8,8 +8,9 @@ import {
     safeParseDate,
     safeParseDueDate,
 } from './date';
-import { resolveAreaFilterSelection, isTaskVisibleInArea } from './area-filter';
+import { resolveAreaFilterSelection, isTaskVisibleInArea, isTaskVisibleInInbox } from './area-filter';
 import { TASK_PRIORITY_COLORS } from './color-constants';
+import { buildFocusTaskGroups } from './focus-grouping';
 import { buildFocusPools, buildFocusTaskSections, deriveFocusTaskLists } from './focus-sections';
 import { NO_FOCUS_WIDGET_FILTER, type FocusWidgetFilter } from './focus-widget-filter';
 import { computeTodayFocusTasks, resolveWidgetTaskSort } from './focus-widget-selection';
@@ -32,19 +33,19 @@ import {
     buildWidgetTokenOptions,
     buildWidgetTokenTaskIndex,
     buildWidgetTaskList,
+    parseWidgetListSelection,
     WIDGET_FIXED_LIST_IDS,
+    WIDGET_FOCUS_AVAILABLE_LIST_ID,
     type WidgetTaskList,
     WIDGET_SAVED_FILTER_LIST_PREFIX,
     widgetListTitles,
 } from './widget-lists';
 
-// Read-only substrate for the "Get Mindwtr Tasks" Shortcuts action and
-// Spotlight indexing (#980), published next to the widget payloads.
+
 export const SHORTCUTS_SNAPSHOT_VERSION = 2;
 export const SHORTCUTS_SNAPSHOT_ITEM_CAP = 50;
-// Global ceiling on project groups (not just items per group) -- otherwise a
-// library with hundreds of active projects has no bound on snapshot size or
-// how many entities get handed to Spotlight indexing per launch.
+
+
 export const SHORTCUTS_SNAPSHOT_PROJECT_CAP = 50;
 export const WIDGET_FOCUS_URI = 'mindwtr:///focus';
 export const WIDGET_QUICK_CAPTURE_URI = 'mindwtr:///capture-quick?mode=text';
@@ -61,39 +62,39 @@ export type WidgetSystemColorScheme = 'light' | 'dark' | null | undefined;
 export interface WidgetTaskItem {
     id: string;
     completionToken?: string;
-    /** Upcoming preview marker: calendar date, floating local datetime or canonical UTC instant. */
+
     upcomingDate?: string;
-    /** Localized Starts/Returns prefix, so native can reformat after a timezone change. */
+
     upcomingLabel?: string;
     title: string;
     statusLabel: string;
+    showStatus?: boolean;
     dueLabel: string | null;
     dueEmphasis: boolean;
-    // Deep link that opens this task (the app routes mindwtr://open?task=<id>);
-    // shared by Android and iOS widget rows.
+
+
     openUri: string;
-    // Priority heat-ramp hex (core TASK_PRIORITY_COLORS); null when the task has
-    // none or the Priorities feature is off.
+
+
     priorityColor: string | null;
-    // Project title, else area name, else null.
+
     contextLabel: string | null;
-    // The task's identity colour (core getTaskAccentColor: chosen project
-    // colour, else area colour); null when neither is set.
+
+
     identityColor: string | null;
-    // How the due label should read: overdue (warning), today (accent), normal.
+
     dueTone: WidgetDueTone;
-    // Existing task contexts, also shown in iOS widget rows. Omitted when empty.
+
     contexts?: string[];
-    // The rest is only read by the Android task sheet (#1173), so every field
-    // is left out when it is empty: they ride every row of every list.
+
+
     description?: string;
     tags?: string[];
     startLabel?: string;
     priorityLabel?: string;
 }
 
-// The sheet shows an excerpt, not the note: a description is per-row payload
-// weight, and the app is one tap away for the whole thing.
+
 export const WIDGET_PEEK_DESCRIPTION_MAX = 600;
 export const WIDGET_PEEK_TOKEN_MAX = 8;
 
@@ -102,13 +103,12 @@ export type WidgetDueTone = 'overdue' | 'today' | 'normal';
 export interface WidgetTaskSection {
     key: string;
     title: string;
-    // Secondary part next to the title (the short date for Today); null otherwise.
+
     detail: string | null;
     items: WidgetTaskItem[];
 }
 
-// Hex only: the Android provider (apps/mobile/modules/android-widget
-// WidgetPayload.kt) and the iOS widget parse these themselves.
+
 export type WidgetColor = `#${string}`;
 
 export interface WidgetPalette {
@@ -120,22 +120,21 @@ export interface WidgetPalette {
     accent: WidgetColor;
     onAccent: WidgetColor;
     warning: WidgetColor;
-    // Accent wash for the widget header band over the card (core getAccentTint).
+
     headerWash: WidgetColor;
 }
 
-// One list a placed Tasks widget can show (#1173); `focus` mirrors the
-// payload's curated Today's Focus + Today sections/items.
+
 export interface WidgetListPayload {
     title: string;
     dateLabel?: string;
     sections?: WidgetTaskSection[];
     items: WidgetTaskItem[];
-    // Eligible rows before the bounded publication slice. Android uses this to
-    // distinguish a complete list from one that needs an in-widget overflow row.
+
+
     totalCount: number;
-    // Backward-compatible list-level destination. Next and saved filters use
-    // the host-owned widget-list route; existing list screens stay direct.
+
+
     openUri?: string;
 }
 
@@ -145,25 +144,25 @@ export interface WidgetSavedFilterOption {
 }
 
 export interface TasksWidgetPayload {
+    prioritiesEnabled?: boolean;
     headerTitle: string;
-    // Today's date for the widget header band, localized ("Saturday, Sep 6").
+
     dateLabel: string;
     subtitle: string;
     inboxLabel: string;
     inboxCount: number;
     focusedCount: number;
     items: WidgetTaskItem[];
-    // The calm default from the Focus screen (#1173): Today's Focus + Today,
-    // empty sections dropped, with `maxItems` shared across the two sections.
-    // `items` stays for flat/legacy widget layouts and the QuickCapture kind.
+
+
     sections: WidgetTaskSection[];
-    // Cached list snapshots (always `focus`), keyed by list id.
+
     lists: Record<string, WidgetListPayload>;
-    // Titles of the fixed lists for the configuration screen.
+
     listTitles: Record<string, string>;
-    // Saved filters the configuration screen offers.
+
     savedFilters: WidgetSavedFilterOption[];
-    /** Android chooser only: IDs already include context:/tag: and canonical tokens. */
+
     contexts?: WidgetSavedFilterOption[];
     tags?: WidgetSavedFilterOption[];
     emptyMessage: string;
@@ -175,10 +174,19 @@ export interface TasksWidgetPayload {
     quickCaptureUri: string;
     themeMode?: string;
     palette: WidgetPalette;
+
+    upcomingDays?: WidgetUpcomingDays;
 }
 
-// Labels for the native Android quick-capture dialog (#1169). Localized here
-// so the Kotlin side (modules/android-widget) carries no string tables.
+
+export interface WidgetUpcomingDays {
+    today: string;
+    tomorrow: string;
+    weekdays: string[];
+    dayFirst: boolean;
+}
+
+
 export interface AndroidQuickCaptureLabels {
     descriptionPlaceholder: string;
     title: string;
@@ -199,7 +207,7 @@ export interface AndroidQuickCaptureLabels {
     audioPermissionDenied: string;
 }
 
-// Labels for the native Android task sheet a widget row opens (#1173).
+
 export interface AndroidTaskPeekLabels {
     complete: string;
     open: string;
@@ -211,12 +219,11 @@ export interface AndroidTaskPeekLabels {
 export interface AndroidTasksWidgetPayload extends TasksWidgetPayload {
     quickCapture: AndroidQuickCaptureLabels;
     taskPeek: AndroidTaskPeekLabels;
-    // Localized template formatted natively after parcel-budget truncation.
+
     viewAllLabel: string;
 }
 
-// Core's translator owns the locale-then-English chain; a second raw dictionary
-// read in this module would be the hand-rolled fallback the i18n ratchet forbids.
+
 export function buildAndroidQuickCaptureLabels(language: Language, audioEnabled = false): AndroidQuickCaptureLabels {
     void loadTranslations(language);
     const t = getTranslator(language);
@@ -263,7 +270,7 @@ export interface ShortcutsSnapshotTaskItem {
     startDate?: string;
     projectId?: string;
     projectName?: string;
-    /** Stable-id deep link; titles are display data and never identity. */
+
     deepLink: string;
 }
 
@@ -289,8 +296,7 @@ export interface ShortcutsSnapshot {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FALLBACK_SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// The widget renderer runs in a headless JS context where Intl may be missing,
-// so every Intl call falls back to plain strings.
+
 const formatShortWeekday = (date: Date, language: string): string => {
     try {
         return new Intl.DateTimeFormat(language, { weekday: 'short' }).format(date);
@@ -299,9 +305,7 @@ const formatShortWeekday = (date: Date, language: string): string => {
     }
 };
 
-// A headless background sync rewrites the widget payload without ever mounting
-// the app, so core's date formatting is unconfigured there: the widget has to
-// name the device locale itself instead of reading core's ambient state.
+
 const getDeviceLocaleTag = (): string => {
     try {
         return String(Intl.DateTimeFormat().resolvedOptions().locale || '');
@@ -310,11 +314,7 @@ const getDeviceLocaleTag = (): string => {
     }
 };
 
-// The compact date follows the app's date-format setting, not the UI language:
-// "en" alone always produced US month/day order for a dd/MM/yyyy user (#1242).
-// An explicit setting decides the order; System asks core about the device
-// locale, so the widget and the app can never disagree about a region (core's
-// table calls en-ZA day-first where CLDR does not).
+
 export const resolveWidgetDayFirst = (
     dateFormat: string | null | undefined,
     systemLocale?: string,
@@ -331,8 +331,7 @@ const formatNumericDate = (date: Date, dayFirst: boolean): string => {
     return dayFirst ? `${day}/${month}` : `${month}/${day}`;
 };
 
-// Today / Tomorrow / weekday inside the week / a short date, shared by the row
-// due label and the task sheet's start line.
+
 const formatRelativeDayLabel = (
     date: Date,
     tr: Record<string, string>,
@@ -366,12 +365,7 @@ const computeDueLabel = (
     return { dueLabel, dueEmphasis: false, dueTone: 'normal' };
 };
 
-// A time reads exactly as the app's own times do: core's 'p' under the date
-// settings the app configures (its language input, date format, calendar,
-// time format and the device locale), so an en-GB phone shows 21:30 on both.
-// It needs no Intl, so an engine without it formats the same. The row inside a
-// dated section shows only this time (Todoist shows "17:00", not the date,
-// under a "Today" header).
+
 const createWidgetDateFormatter = (
     settings: AppData['settings'] | undefined,
     language: Language,
@@ -389,7 +383,7 @@ const createWidgetDateFormatter = (
 const FALLBACK_LONG_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const FALLBACK_SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// "Saturday, Sep 6" for the header band; "Sat Sep 6" for a section detail.
+
 const formatDateLabel = (date: Date, language: string, weekday: 'long' | 'short'): string => {
     try {
         return new Intl.DateTimeFormat(language, { weekday, month: 'short', day: 'numeric' }).format(date);
@@ -399,13 +393,12 @@ const formatDateLabel = (date: Date, language: string, weekday: 'long' | 'short'
     }
 };
 
-// Widgets follow the feature toggles too (#1107).
+
 const resolveWidgetSort = (data: AppData): TaskSortBy => (
     resolveTaskSortByForFeatures(resolveWidgetTaskSort(data.settings?.taskSortBy), data.settings)
 );
 
-// The app shows the chosen language, else the device's (its language context
-// falls back to getSystemDefaultLanguage), so the widget falls back the same way.
+
 export function resolveWidgetLanguage(saved: string | null, setting?: string, systemLanguage: Language = 'en'): Language {
     const candidate = setting && setting !== 'system' ? setting : saved;
     if (candidate && SUPPORTED_LANGUAGES.includes(candidate as Language)) return candidate as Language;
@@ -468,19 +461,19 @@ export interface WidgetPayloadBuildOptions {
     systemColorScheme?: WidgetSystemColorScheme;
     maxItems?: number;
     listIds?: readonly string[];
-    /** Include every bounded saved-filter list offered by the platform chooser. */
+
     includeSavedFilterLists?: boolean;
-    /** Android's chooser offers every known context and tag (names only: their lists come with `listIds`). */
+
     includeTokenLists?: boolean;
-    /** What the Focus screen is filtering and sorting by right now (#1173). */
+
     focusFilter?: FocusWidgetFilter;
-    /** Device locale for the "System" date format; defaults to the runtime's. */
+
     systemLocale?: string;
 }
 
 export interface WidgetPayloadProjection {
     build: (maxItems?: number) => TasksWidgetPayload;
-    /** Fresh uncapped task list for the host-owned widget-list route. */
+
     getTaskList: (listId: string) => WidgetTaskList | null;
 }
 
@@ -507,9 +500,7 @@ export function createWidgetPayloadProjection(
         options?.systemColorScheme,
     );
 
-    // The device's area selection hides tasks on every screen of the app, so it
-    // hides them in every widget list too (#1173) — it is a stored setting, not
-    // transient screen state, so the widget can read it directly.
+
     const sortedAreas = (data.areas || [])
         .filter((area) => !area.deletedAt)
         .sort((left, right) => (left.order !== right.order ? left.order - right.order : left.name.localeCompare(right.name)));
@@ -525,6 +516,11 @@ export function createWidgetPayloadProjection(
         if (!isTaskInActiveProject(task, projectById)) return false;
         return isTaskVisibleInArea(task, areaVisibility);
     });
+
+
+    const inboxTasks = undeletedActionableTasks.filter((task) => (
+        task.status === 'inbox' && isTaskVisibleInInbox(task, areaVisibility)
+    ));
 
     const widgetSort = resolveWidgetSort(data);
 
@@ -580,18 +576,19 @@ export function createWidgetPayloadProjection(
         const source = getTaskDeferUntilSource(task);
         const parsed = safeParseDate(source);
         if (!source || !parsed) return item;
-        // Native parsers accept one datetime spelling; retain floating local intent and date-only precision.
+
         const upcomingDate = !hasTimeComponent(source) ? format(parsed, 'yyyy-MM-dd')
             : /(?:Z|[+-]\d{2}(?::?\d{2})?)$/.test(source) ? parsed.toISOString()
                 : format(parsed, "yyyy-MM-dd'T'HH:mm:ss.SSS");
         const upcomingLabel = safeParseDate(task.startTime)
             ? tr['widget.upcomingStarts'] ?? 'Starts'
             : tr['widget.upcomingReturns'] ?? 'Returns';
-        const label = formatAbsoluteDate(upcomingDate, hasTimeComponent(upcomingDate) ? 'P p' : 'P');
+        const day = formatRelativeDayLabel(parsed, tr, language, dayFirst, startOfToday, endOfToday);
+        const label = hasTimeComponent(source) ? `${day} ${formatTime(parsed)}` : day;
         return { ...item, upcomingDate, upcomingLabel, dueLabel: `${upcomingLabel} ${label}`, dueTone: 'normal', dueEmphasis: false };
     };
-    // The Focus screen's own pools through the shared derivation (#1173),
-    // narrowed by the screen's area selection, filters and sort.
+
+
     const focusFilter = options?.focusFilter ?? NO_FOCUS_WIDGET_FILTER;
     const pools = buildFocusPools({
         tasks: undeletedActionableTasks,
@@ -610,17 +607,25 @@ export function createWidgetPayloadProjection(
         sortOrder: focusFilter.sortOrder,
         focusIncludeStartDates: data.settings?.gtd?.focusIncludeStartDates,
     });
-    // A home-screen glance should stay calm: reuse the app's canonical Focus
-    // derivation, but publish only Today's Focus followed by Today. The other
-    // Focus-screen sections remain available through their explicit widget
-    // lists and must never become an implicit fallback here.
+
+
     const curatedTasks = [...lists.focusedTasks, ...lists.schedule];
-    const curatedSections = buildFocusTaskSections(lists, (key) => tr[key])
+    const curatedSections: { key: string; title: string; items: Task[] }[] = buildFocusTaskSections(lists, (key) => tr[key])
         .filter((section) => section.key === 'focus' || section.key === 'schedule');
-    const inboxCount = activeTasks.filter((task) => task.status === 'inbox').length;
+
+
+    const curatedIds = new Set(curatedTasks.map((task) => task.id));
+    const availableTasks = lists.nextActions.filter((task) => {
+        const start = safeParseDate(task.startTime);
+        return start !== null && start.getTime() <= now.getTime() && !curatedIds.has(task.id);
+    });
+    const inboxCount = inboxTasks.length;
     const dateLabel = formatDateLabel(now, language, 'long');
-    const listContext = { data, activeTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
-        tokenTaskIndex: options?.listIds?.some((id) => id.startsWith('context:') || id.startsWith('tag:'))
+    const listContext = { data, activeTasks, inboxTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
+        tokenTaskIndex: options?.listIds?.some((id) => {
+            const base = parseWidgetListSelection(id)?.listId ?? '';
+            return base.startsWith('context:') || base.startsWith('tag:');
+        })
             ? buildWidgetTokenTaskIndex(activeTasks) : undefined };
     const listTitles = widgetListTitles(tr);
     const savedFilters = buildWidgetSavedFilterOptions(data);
@@ -630,10 +635,14 @@ export function createWidgetPayloadProjection(
     const tags = options?.includeTokenLists ? buildWidgetTokenOptions(tokenSources, 'tags') : undefined;
     const taskLists = new Map<string, NonNullable<ReturnType<typeof buildWidgetTaskList>>>();
     const requestedListIds = new Set(options?.listIds ?? []);
+    const includeFocusAvailable = requestedListIds.has(WIDGET_FOCUS_AVAILABLE_LIST_ID);
     if (options?.includeSavedFilterLists) {
         for (const { id } of savedFilters) requestedListIds.add(`${WIDGET_SAVED_FILTER_LIST_PREFIX}${id}`);
     }
-    for (const listId of requestedListIds) {
+    for (const selection of requestedListIds) {
+        const parsed = parseWidgetListSelection(selection);
+        if (!parsed) continue;
+        const { listId, groupBy } = parsed;
         if (listId === 'focus') continue;
         const projectId = listId.startsWith(WIDGET_PROJECT_LIST_PREFIX)
             ? listId.slice(WIDGET_PROJECT_LIST_PREFIX.length)
@@ -647,12 +656,11 @@ export function createWidgetPayloadProjection(
             }
             : null;
         const list = projectId ? projectList : buildWidgetTaskList(listId, listContext);
-        if (list) taskLists.set(listId, list);
+        if (list) taskLists.set(selection, { ...list, ...(groupBy ? { groupBy } : {}) });
     }
     const scheduleById = new Map(lists.schedule.map((task) => [task.id, task]));
 
-    // In a dated section the row's date is the header's date: hide it, show the
-    // due time when there is one, keep an overdue date (it says the task slipped).
+
     const dropSameDayDue = (item: WidgetTaskItem, task: Task): WidgetTaskItem => {
         if (item.dueTone === 'overdue' || !item.dueLabel) return item;
         const due = safeParseDueDate(task.dueDate);
@@ -674,25 +682,30 @@ export function createWidgetPayloadProjection(
             const items = curatedTasks.slice(0, maxItems).map(toItem);
             const hiddenTaskCount = Math.max(curatedTasks.length - items.length, 0);
 
-            let remaining = maxItems;
-            const sections: WidgetTaskSection[] = [];
-            for (const section of curatedSections) {
-                if (remaining <= 0) break;
-                if (section.items.length === 0) continue;
-                const sectionItems = section.items.slice(0, remaining).map(toItem);
-                remaining -= sectionItems.length;
-                sections.push({
-                    key: section.key,
-                    title: section.title,
-                    detail: section.key === 'schedule' ? formatDateLabel(now, language, 'short') : null,
-                    items: section.key === 'schedule'
-                        ? sectionItems.map((item) => {
-                            const task = scheduleById.get(item.id);
-                            return task ? dropSameDayDue(item, task) : item;
-                        })
-                        : sectionItems,
-                });
-            }
+
+            const buildSections = (source: typeof curatedSections): WidgetTaskSection[] => {
+                let remaining = maxItems;
+                const built: WidgetTaskSection[] = [];
+                for (const section of source) {
+                    if (remaining <= 0) break;
+                    if (section.items.length === 0) continue;
+                    const sectionItems = section.items.slice(0, remaining).map(toItem);
+                    remaining -= sectionItems.length;
+                    built.push({
+                        key: section.key,
+                        title: section.title,
+                        detail: section.key === 'schedule' ? formatDateLabel(now, language, 'short') : null,
+                        items: section.key === 'schedule'
+                            ? sectionItems.map((item) => {
+                                const task = scheduleById.get(item.id);
+                                return task ? dropSameDayDue(item, task) : item;
+                            })
+                            : sectionItems,
+                    });
+                }
+                return built;
+            };
+            const sections = buildSections(curatedSections);
 
             const subtitleParts = [`${tr['nav.inbox'] ?? 'Inbox'}: ${inboxCount}`];
             if (hiddenTaskCount > 0) {
@@ -709,19 +722,58 @@ export function createWidgetPayloadProjection(
                     openUri: WIDGET_LIST_DIRECT_URIS.focus,
                 },
             };
-            for (const [listId, list] of taskLists) {
+            if (includeFocusAvailable) {
+                const focusAvailableTasks = [...curatedTasks, ...availableTasks];
+                listPayloads[WIDGET_FOCUS_AVAILABLE_LIST_ID] = {
+                    title: listTitles.focus,
+                    dateLabel,
+                    sections: buildSections([...curatedSections, {
+                        key: 'available',
+                        title: tr['widget.availableActions'] ?? 'Available actions',
+                        items: availableTasks,
+                    }]),
+                    items: focusAvailableTasks.slice(0, maxItems).map(toItem),
+                    totalCount: focusAvailableTasks.length,
+                    openUri: WIDGET_LIST_DIRECT_URIS.focus,
+                };
+            }
+            let hasUpcoming = false;
+            for (const [selection, list] of taskLists) {
+                const listId = parseWidgetListSelection(selection)!.listId;
+                if (listId === 'upcoming') hasUpcoming = true;
                 const directUri = WIDGET_LIST_DIRECT_URIS[listId as keyof typeof WIDGET_LIST_DIRECT_URIS];
                 const openUri = directUri
                     ?? `mindwtr:///widget-list/${encodeURIComponent(listId)}`;
-                listPayloads[listId] = {
+                const toListItem = (task: Task): WidgetTaskItem => ({
+                    ...(listId === 'upcoming' ? toUpcomingItem(task) : toItem(task)),
+                    ...(list.showStatus ? { showStatus: true } : {}),
+                });
+                const groupBy = list.groupBy === 'priority' && !prioritiesEnabled ? 'none' : list.groupBy;
+                const groups = groupBy && groupBy !== 'none' ? buildFocusTaskGroups({
+                    groupBy, tasks: list.tasks, projects, areas: data.areas || [],
+                    resolveText: (key, fallback) => tr[key] || fallback,
+                }) : [];
+                let budget = maxItems;
+                const groupedSections: WidgetTaskSection[] = [];
+                for (const group of groups) {
+                    if (budget <= 0) break;
+                    const visible = group.tasks.slice(0, budget);
+                    budget -= visible.length;
+                    groupedSections.push({ key: group.key, title: group.label,
+                        detail: String(group.tasks.length), items: visible.map(toListItem) });
+                }
+                listPayloads[selection] = {
                     title: list.title,
-                    items: list.tasks.slice(0, maxItems).map(listId === 'upcoming' ? toUpcomingItem : toItem),
+                    items: groups.length ? groupedSections.flatMap((section) => section.items)
+                        : list.tasks.slice(0, maxItems).map(toListItem),
+                    ...(groups.length ? { sections: groupedSections } : {}),
                     totalCount: list.tasks.length,
                     openUri,
                 };
             }
 
             return {
+                prioritiesEnabled,
                 headerTitle: tr['agenda.todaysFocus'] ?? 'Today',
                 dateLabel,
                 subtitle: subtitleParts.join(' · '),
@@ -734,6 +786,7 @@ export function createWidgetPayloadProjection(
                 listTitles: options?.includeTokenLists ? { ...listTitles,
                     contexts: tr['contexts.title'] ?? 'Contexts', tags: tr['tags.title'] ?? 'Tags',
                     search: tr['common.search'] ?? 'Search',
+                    focusAvailable: tr['widget.includeAvailableActions'] ?? 'Add Next Actions whose start date has arrived',
                 } : listTitles,
                 savedFilters,
                 ...(contexts ? { contexts } : {}),
@@ -746,6 +799,13 @@ export function createWidgetPayloadProjection(
                 focusUri: WIDGET_FOCUS_URI,
                 quickCaptureUri: WIDGET_QUICK_CAPTURE_URI,
                 themeMode: typeof data.settings?.theme === 'string' ? data.settings.theme : 'system',
+                ...(hasUpcoming ? { upcomingDays: {
+                    today: tr['quickDate.today'] ?? 'Today',
+                    tomorrow: tr['quickDate.tomorrow'] ?? 'Tomorrow',
+
+                    weekdays: Array.from({ length: 7 }, (_, day) => formatShortWeekday(new Date(2026, 0, 4 + day), language)),
+                    dayFirst,
+                } } : {}),
                 palette,
             };
         },
@@ -761,18 +821,10 @@ export function buildWidgetPayload(
     return createWidgetPayloadProjection(data, language, projectionOptions).build(maxItems);
 }
 
-// ---------------------------------------------------------------------------
-// What each platform publishes. The host keeps the IO (native module calls,
-// storage, the render skip); these decide what the payload holds.
 
-// The native Android widget's task list scrolls (RemoteViewsService), so the
-// payload carries a fixed slice instead of a per-widget-height budget.
 export const ANDROID_WIDGET_MAX_ITEMS = 200;
 
-// The iOS widget decides what fits from its actual geometry and Dynamic Type.
-// Each family snapshot carries eight bounded refill rows beyond the old family
-// caps, so queued completions can disappear without waiting for the app to
-// republish.
+
 export const IOS_WIDGET_FAMILY_CACHE_ITEMS = {
     default: 20,
     small: 11,
@@ -783,27 +835,14 @@ export const IOS_WIDGET_FAMILY_CACHE_ITEMS = {
 
 export interface WidgetPublicationInput {
     systemColorScheme?: WidgetSystemColorScheme;
-    /** What the Focus screen is filtering and sorting by right now (#1173). */
+
     focusFilter?: FocusWidgetFilter;
-    /**
-     * The device locale for the "System" date and time formats. A host without
-     * Intl (QuickJS) must pass it; React Native leaves it to the runtime's.
-     */
+
+
     systemLocale?: string;
 }
 
-/**
- * Which lists the Android payload carries. The widget's own header chooser
- * switches lists with no app running, so it can only show a list the payload
- * already holds. Publish all bounded GTD lists even before placement:
- * Compact needs Next Actions as its empty-today fallback, and a new Tasks
- * widget can switch to Inbox without an extra app opening (#1211). The chooser
- * offers every saved filter, context and tag by name, but their lists (and
- * legacy project lists) are built only for what placed widgets chose
- * (`listSelections`): one list per label made every refresh grow with the
- * labels (#1399). A newly chosen one shows under its name, empty, until the
- * app's next publication.
- */
+
 export function androidWidgetProjectionOptions(
     input: WidgetPublicationInput & { listSelections: readonly string[] },
 ): WidgetPayloadProjectionOptions {
@@ -816,24 +855,19 @@ export function androidWidgetProjectionOptions(
     };
 }
 
-/**
- * Edit Widget can switch lists while the app is not running, so every iOS
- * family snapshot carries the bounded chooser's lists, not just Focus.
- */
+
 export function iosWidgetProjectionOptions(input: WidgetPublicationInput): WidgetPayloadProjectionOptions {
     return {
         systemColorScheme: input.systemColorScheme,
         focusFilter: input.focusFilter,
         systemLocale: input.systemLocale,
-        listIds: WIDGET_FIXED_LIST_IDS,
+
+        listIds: [...WIDGET_FIXED_LIST_IDS, WIDGET_FOCUS_AVAILABLE_LIST_ID],
         includeSavedFilterLists: true,
     };
 }
 
-/**
- * The projection a platform publishes: Android Compact and iOS Tasks both
- * combine starred and scheduled rows under one short localized Today header.
- */
+
 export function createPublishedWidgetProjection(
     projection: WidgetPayloadProjection,
     language: Language,
@@ -850,12 +884,12 @@ export function createPublishedWidgetProjection(
     };
 }
 
-/** Native capture reads only availability, never provider credentials or model paths. */
+
 export function isWidgetAudioCaptureEnabled(settings: AppData['settings']): boolean {
     return settings.ai?.speechToText?.enabled === true;
 }
 
-/** The Android payload: the published rows plus the native dialog's and task sheet's words. */
+
 export function buildAndroidTasksWidgetPayload(
     rendered: TasksWidgetPayload,
     language: Language,
@@ -869,10 +903,7 @@ export function buildAndroidTasksWidgetPayload(
     };
 }
 
-/**
- * The whole Android publication in one call, for a host with no render skip
- * of its own: what React Native hands the widget module's setPayload.
- */
+
 export function buildAndroidWidgetPublication(
     data: AppData,
     language: Language,
@@ -909,10 +940,7 @@ const buildSnapshotItem = (
     };
 };
 
-// Read-only substrate for the "Get Mindwtr Tasks" Shortcuts action and
-// Spotlight indexing (#980): a capped, per-list + per-project snapshot of
-// task metadata, refreshed on the same cadence as the widget payload. App
-// Intents only ever read this; they never touch the live database.
+
 export function buildShortcutsSnapshot(data: AppData): ShortcutsSnapshot {
     const tasks = data.tasks || [];
     const projects = data.projects || [];
@@ -956,9 +984,7 @@ export function buildShortcutsSnapshot(data: AppData): ShortcutsSnapshot {
         return acc;
     }, {} as Record<ShortcutsSnapshotListKey, ShortcutsSnapshotTaskItem[]>);
 
-    // One grouping pass over activeTasks (O(tasks)) instead of filtering the
-    // full task list once per project (O(projects x tasks) -- measurably
-    // slow at a few hundred projects).
+
     const tasksByProjectId = new Map<string, AppData['tasks']>();
     for (const task of activeTasks) {
         if (!task.projectId) continue;
@@ -970,9 +996,8 @@ export function buildShortcutsSnapshot(data: AppData): ShortcutsSnapshot {
     const eligibleProjects = projects
         .filter((project) => project.status === 'active' && !project.deletedAt)
         .filter((project) => (tasksByProjectId.get(project.id)?.length ?? 0) > 0)
-        // Deterministic global cap on project groups (below): manual project
-        // order, same ordering the Projects list itself shows, so which
-        // projects survive the cap matches what the user already sees first.
+
+
         .sort((a, b) => a.order - b.order);
 
     const projectGroups: ShortcutsSnapshotProjectGroup[] = eligibleProjects
@@ -986,9 +1011,8 @@ export function buildShortcutsSnapshot(data: AppData): ShortcutsSnapshot {
             return {
                 id: project.id,
                 name: project.title,
-                // Every remaining status on an active task is one of the four
-                // list keys above (activeTasks already excludes done/archived/
-                // reference), so the cast is safe.
+
+
                 items: projectTasks.map((task) => buildSnapshotItem(task, task.status as ShortcutsSnapshotListKey, projectById)),
                 coverage: {
                     eligible: eligibleProjectTasks.length,

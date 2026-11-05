@@ -135,7 +135,7 @@ describe('guarded Inbox bulk Move status', () => {
     });
 
     it('retains normal startup promotion and refuses a past-scheduled row as an Inbox source', async () => {
-        clock(); const sqlite = await openSqliteHost({ tasks: [task('scheduled', { dueDate: '2026-10-01' })], settings: { deviceId: DEVICE } });
+        clock(); const sqlite = await openSqliteHost({ tasks: [task('scheduled', { dueDate: '2026-10-01', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' })], settings: { deviceId: DEVICE } });
         try {
             await flushPendingSave();
             expect(useTaskStore.getState()._tasksById.get('scheduled')?.status).toBe('next');

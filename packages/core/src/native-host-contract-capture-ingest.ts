@@ -22,6 +22,8 @@ import { fail, isObjectRecord, isText } from './native-host-contract-menu-views'
 import {
     drainPendingCaptureQueue,
     type PendingCaptureLog,
+    type PendingCaptureAudioPort,
+    type PendingCaptureDrainDeps,
     type PendingCaptureQueuePort,
     type PendingCaptureRecordPort,
 } from './pending-captures';
@@ -57,6 +59,12 @@ const isRecordPort = (value: unknown): value is PendingCaptureRecordPort => (
     isObjectRecord(value) && typeof value.read === 'function' && typeof value.write === 'function'
 );
 
+const isAudioPort = (value: unknown): value is PendingCaptureAudioPort => (
+    isObjectRecord(value) && Object.keys(value).every(name => ['resolvePath', 'transcribe', 'delete'].includes(name))
+    && typeof value.resolvePath === 'function' && typeof value.delete === 'function'
+    && (value.transcribe === undefined || typeof value.transcribe === 'function')
+);
+
 const isOptionalText = (value: unknown) => value === undefined || value === null || isText(value, 2000);
 
 export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
@@ -84,8 +92,8 @@ export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
          * reads and writes the device's record of the last queued command applied to
          * each task, React Native's RKStorage value under
          * PENDING_CAPTURE_LAST_APPLIED_STORAGE_KEY; a write resolves once durable. Captures,
-         * check-offs and defers are stored; `audio` and `pomodoro` items stay in the
-         * queue untouched. A file is deleted only after its write is durable.
+         * check-offs and defers are stored; `audio` requires the optional owned
+         * audio port and `pomodoro` stays untouched. A file is deleted only after its write is durable.
          * `ingested` counts the items stored and removed. A capture, check-off or
          * defer a failure keeps queued fails the call, so the caller drains again:
          * SAVE_FAILED once its store write landed but its save, its lastApplied
@@ -104,11 +112,15 @@ export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
             requestId: string;
             queue: PendingCaptureQueuePort;
             lastApplied: PendingCaptureRecordPort;
+            audio?: PendingCaptureAudioPort;
+            settleWatchChecklist?: PendingCaptureDrainDeps['settleWatchChecklist'];
         }): Promise<NativeHostResult<{ ingested: number }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
-                || !isQueuePort(input.queue) || !isRecordPort(input.lastApplied)) {
+                || !isQueuePort(input.queue) || !isRecordPort(input.lastApplied)
+                || (input.audio !== undefined && !isAudioPort(input.audio))
+                || (input.settleWatchChecklist !== undefined && typeof input.settleWatchChecklist !== 'function')) {
                 return fail('INVALID_INPUT', 'A request UUID, a queue with list, read and delete, and a lastApplied record with read and write are required');
             }
             const { queue, lastApplied } = input;
@@ -130,6 +142,8 @@ export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
                     flushPendingSave: flushDurably,
                     queue,
                     lastApplied,
+                    audio: input.audio,
+                    settleWatchChecklist: input.settleWatchChecklist,
                     log,
                     onUnfinished: (state) => { unfinished[state] += 1; },
                 });

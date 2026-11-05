@@ -75,6 +75,8 @@ export type PersistedSyncConfiguration = {
 };
 
 export type SyncConfigurationPort = {
+    /** Optional native owner admission immediately before enabling the candidate; rollback never calls it. */
+    beforeActivation?: () => Promise<void>;
     recoverDropboxCredentialsBeforeConfiguration: () => Promise<void>;
     readConfiguration: (
         requirements?: SyncConfigurationSecretRequirements,
@@ -529,6 +531,7 @@ export async function commitProvenSyncConfiguration(
             }
         }
 
+        await dependencies.beforeActivation?.();
         await dependencies.writeBackend(candidate.backend);
         const expectedActive = { ...expectedDisabled, backend: candidate.backend };
         const persistedActive = await dependencies.readConfiguration(verificationRequirements);

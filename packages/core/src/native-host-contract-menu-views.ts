@@ -92,7 +92,7 @@ import { TASK_EDITOR_ENERGY_LEVEL_OPTIONS, TASK_EDITOR_PRIORITY_OPTIONS } from '
 import type { TaskGroupBy } from './task-group-sections';
 import { DONE_TASK_LIST_SORT_OPTIONS, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
 import { tFallback } from './i18n';
-import type { MultiValueFilterMatchMode, Task, TaskEnergyLevel, TaskPriority, TaskSortBy, TimeEstimate, ViewSectionDefinition } from './types';
+import type { MultiValueFilterMatchMode, Task, TaskEnergyLevel, TaskPriority, TaskSortBy, TaskStatus, TimeEstimate, ViewSectionDefinition } from './types';
 import { buildTaskViewSectionUndoUpdates, sortViewSectionDefinitions } from './view-sections';
 
 type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['error']['code'];
@@ -132,7 +132,7 @@ export type NativeMoreMenu = Omit<MoreMenuModel, 'savedSearches'> & {
 };
 
 export type TokenOption = { value: string; state: 'included' | 'excluded' | 'none'; edit: ListFilterEdit };
-type ProjectOption = { id: string; title: string; selected: boolean; edit: ListFilterEdit };
+type ProjectOption = { id: string; title: string; selected: boolean; excluded?: boolean; edit: ListFilterEdit };
 /** A match mode control (the picker's footer): Any, then All, each with the edit that chooses it. */
 export type NativeMatchModeControl = {
     kind: 'context' | 'tag';
@@ -154,6 +154,7 @@ export type NativeListFilterView = {
     matchModes: NativeMatchModeControl[];
     tokens: NativeWindow<TokenOption>;
     projects: NativeWindow<ProjectOption> | null;
+    statuses?: { value: TaskStatus; label: string; selected: boolean; edit: ListFilterEdit }[];
     priorities: { value: TaskPriority; label: string; selected: boolean; edit: ListFilterEdit }[];
     energyLevels: { value: TaskEnergyLevel; label: string; selected: boolean; edit: ListFilterEdit }[];
     timeEstimates: { value: TimeEstimate; label: string; selected: boolean; edit: ListFilterEdit }[];
@@ -306,7 +307,7 @@ export const isTimeEstimate = (value: unknown): value is TimeEstimate => (
 /** Known fields keep their wire shapes; future JSON criteria survive a date-only edit. */
 export const isPreservedFilterCriteria = (value: unknown): value is FilterCriteria => {
     if (!isObjectRecord(value) || !isNativeJsonWithinBytes(value)) return false;
-    const arrays = ['contexts', 'excludedContexts', 'areas', 'projects', 'tags', 'excludedTags',
+    const arrays = ['contexts', 'excludedContexts', 'areas', 'projects', 'excludedProjects', 'tags', 'excludedTags',
         'energy', 'priority', 'statuses', 'assignedTo', 'locations', 'timeEstimates'];
     return arrays.every((key) => value[key] == null || isTextList(value[key]))
         && ['dueDateRange', 'startDateRange', 'anyDateRange', 'timeEstimateRange'].every((key) => value[key] == null || isObjectRecord(value[key]))
@@ -327,6 +328,8 @@ const FILTER_STATE_CHECKS: Record<keyof ListFilterState, (value: unknown) => boo
     tokens: (value) => isTextList(value, NATIVE_HOST_MAX_WINDOW),
     excludedTokens: (value) => isTextList(value, NATIVE_HOST_MAX_WINDOW),
     projects: (value) => isTextList(value, NATIVE_HOST_MAX_WINDOW),
+    excludedProjects: (value) => isTextList(value, NATIVE_HOST_MAX_WINDOW),
+    statuses: (value) => isTextList(value, 7) && value.every((status) => ['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'].includes(status)),
     priorities: (value) => Array.isArray(value) && value.every((entry) => TASK_EDITOR_PRIORITY_OPTIONS.includes(entry as TaskPriority)),
     energyLevels: (value) => Array.isArray(value) && value.every((entry) => TASK_EDITOR_ENERGY_LEVEL_OPTIONS.includes(entry as TaskEnergyLevel)),
     timeEstimates: (value) => Array.isArray(value) && value.length <= 50 && value.every(isTimeEstimate),
@@ -353,7 +356,11 @@ export const isFilterEdit = (edit: unknown): edit is ListFilterEdit => {
         case 'toggleToken':
         case 'removeToken':
         case 'toggleProject':
+        case 'cycleProject':
+        case 'removeProject':
             return isText(edit.value) && (edit.value as string).length > 0;
+        case 'toggleStatus':
+            return typeof edit.value === 'string' && ['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'].includes(edit.value);
         case 'togglePriority':
             return TASK_EDITOR_PRIORITY_OPTIONS.includes(edit.value as TaskPriority);
         case 'toggleEnergyLevel':

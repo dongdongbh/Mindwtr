@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNativeHostContract } from './native-host-contract';
-import type { NativePreparedQuickCapture, NativeQuickCaptureInput } from './native-host-contract-quick-capture';
+import type { NativePreparedQuickCapture, NativePreparedQuickCaptureV2, NativeQuickCaptureCopilotInput, NativeQuickCaptureInput } from './native-host-contract-quick-capture';
 import { projectToSqliteRow } from './project-sync-schema';
 import { loadQuickCaptureFixture, seedQuickCaptureStore } from './quick-capture-model.replay';
-import { flushPendingSave, resetForTests, useTaskStore } from './store';
+import { flushPendingSave, getStorageAdapter, resetForTests, useTaskStore } from './store';
 import { taskToSqliteRow, TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { mapSqliteTaskRow } from './sqlite-adapter';
 import type { Task } from './types';
@@ -66,7 +66,7 @@ describe('prepared native quick capture', () => {
         const { host, options, saveData } = await open();
         process.env.TZ = 'Pacific/Honolulu';
         vi.setSystemTime(new Date('2026-09-26T23:50:00.000Z'));
-        const command = prepare(host, { text: 'Review /due:tomorrow', options: { ...options, note: 'Frozen note', addAnother: true, startTime: '2026-10-01T14:30:00.000Z' }, captureId: generateUUID() });
+        const command = prepare(host, { text: 'Review /due:2026-09-28', options: { ...options, note: 'Frozen note', addAnother: true, startTime: '2026-10-01T14:30:00.000Z' }, captureId: generateUUID() });
         expect(command.prepared.task.status).toBe('inbox');
         value(await host.commitPreparedQuickCapture(command));
         const row = taskToSqliteRow(command.prepared.task);
@@ -379,5 +379,180 @@ describe('prepared native quick capture', () => {
         expect(value(host.prepareQuickCapture({ text: 'One\nTwo', options, captureId: generateUUID() }))).toMatchObject({ kind: 'confirmLines' });
         expect(host.prepareQuickCapture({ text: 'One\nTwo', options, captureId: 'bad' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(saveData).not.toHaveBeenCalled();
+    });
+});
+
+describe('prepared native capture copilot v2', () => {
+    const copilotCommand = (host: ReturnType<typeof createNativeHostContract>, request: NativeQuickCaptureCopilotInput) => {
+        const plan = value(host.prepareQuickCaptureCopilot(request));
+        if (plan.kind !== 'prepared') throw new Error('Copilot capture was not prepared');
+        return JSON.parse(JSON.stringify({ request, prepared: plan.prepared })) as
+            { request: NativeQuickCaptureCopilotInput; prepared: NativePreparedQuickCaptureV2 };
+    };
+
+    it.each(['close', 'open', 'addAnother'] as const)('durably saves additive metadata through the factory, SQL codec and exported JSON (%s)', async (next) => {
+        const { host, options, saveData } = await open();
+        const request = { capture: { text: 'Call bank #typed', options: { ...options, contexts: ['@typed'], addAnother: next === 'addAnother' },
+            captureId: generateUUID(), openAfterSave: next === 'open' },
+        applied: { context: '@phone', tags: ['#finance', '#typed'], timeEstimate: '15min' as const } };
+        const before = useTaskStore.getState()._allTasks.length;
+        const command = copilotCommand(host, request);
+        expect(Object.keys(command.prepared).sort()).toEqual(['deviceIdToInitialize', 'project', 'request', 'result', 'task', 'timeEstimatesEnabled', 'typedTimeEstimate', 'version']);
+        expect(command.prepared).toMatchObject({ version: 2, timeEstimatesEnabled: true, typedTimeEstimate: null,
+            task: { title: 'Call bank', contexts: ['@typed', '@phone'], tags: ['#typed', '#finance'], timeEstimate: '15min', rev: 1 } });
+        expect(saveData).not.toHaveBeenCalled();
+        expect(value(host.validatePreparedQuickCapture(command))).toEqual(command.prepared.result);
+        expect(value(await host.commitPreparedQuickCapture(command))).toMatchObject({ kind: 'saved', next });
+        expect(useTaskStore.getState()._allTasks).toHaveLength(before + 1);
+        const row = taskToSqliteRow(command.prepared.task);
+        const decoded = mapSqliteTaskRow(Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, row[index]])));
+        expect(decoded).toMatchObject({ contexts: ['@typed', '@phone'], tags: ['#typed', '#finance'], timeEstimate: '15min' });
+        const persisted = await getStorageAdapter().getData();
+        expect(persisted.tasks.find((task) => task.id === request.capture.captureId)).toMatchObject({ timeEstimate: '15min' });
+        const exported = JSON.parse(value(host.getDataBackup('json')).content);
+        expect(exported.tasks.find((task: Task) => task.id === request.capture.captureId)).toMatchObject({ timeEstimate: '15min', tags: ['#typed', '#finance'] });
+        if (next === 'addAnother') expect(command.prepared.result.reset).toEqual({ text: '', options: { ...value(host.openQuickCapture()).options, addAnother: true } });
+    });
+
+    it('keeps a typed custom estimate, feature gating, and metadata command text separate from parsing', async () => {
+        const { host, options } = await open();
+        const command = copilotCommand(host, { capture: { text: 'Call bank /estimate:45m', options, captureId: generateUUID() },
+            applied: { context: '@phone /due:tomorrow', tags: ['#finance +Unwanted project'], timeEstimate: '15min' } });
+        expect(command.prepared.typedTimeEstimate).toBe('custom:45');
+        expect(command.prepared.task).toMatchObject({ title: 'Call bank', timeEstimate: 'custom:45' });
+        expect(command.prepared.project).toBeNull();
+        expect(command.prepared.task.dueDate).toBeUndefined();
+        value(await host.commitPreparedQuickCapture(command));
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, features: { ...state.settings.features, timeEstimates: false } } }));
+        const off = copilotCommand(host, { capture: { text: 'Call bank', options, captureId: generateUUID() },
+            applied: { tags: ['#finance'], timeEstimate: '15min' } });
+        expect(off.prepared.timeEstimatesEnabled).toBe(false);
+        expect(off.prepared.typedTimeEstimate).toBeNull();
+        expect(off.prepared.task.timeEstimate).toBeUndefined();
+        expect(off.prepared.task.tags).toEqual(['#finance']);
+    });
+
+    it('retries failed persistence with the exact UUID, rows and applied request after the clock advances', async () => {
+        const { host, options, saveData } = await open();
+        const command = copilotCommand(host, { capture: { text: 'Call bank +New project', options, captureId: generateUUID() },
+            applied: { context: '@phone', tags: ['#finance'], timeEstimate: '15min' } });
+        saveData.mockRejectedValue(new Error('copilot disk failure'));
+        const failed = await host.commitPreparedQuickCapture(command);
+        saveData.mockResolvedValue(undefined);
+        expect(failed).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        const frozen = taskToSqliteRow(command.prepared.task);
+        vi.setSystemTime(new Date('2026-10-02T12:00:00.000Z'));
+        expect(value(await host.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
+        expect(taskToSqliteRow(useTaskStore.getState()._tasksById.get(command.prepared.task.id)!)).toEqual(frozen);
+        expect(useTaskStore.getState()._allTasks.filter((task) => task.id === command.prepared.task.id)).toHaveLength(1);
+        expect(useTaskStore.getState()._allProjects.filter((project) => project.id === command.prepared.project!.id)).toHaveLength(1);
+    });
+
+    it('cold-validates and first-applies frozen metadata after provider, feature and language changes, then replays its receipt', async () => {
+        const { host, options, saveData } = await open();
+        const command = copilotCommand(host, { capture: { text: 'Call bank', options, captureId: generateUUID(), openAfterSave: true },
+            applied: { context: '@phone', tags: ['#finance'], timeEstimate: '15min' } });
+        await useTaskStore.getState().updateSettings({ ai: { enabled: false, provider: 'anthropic' }, features: { timeEstimates: false } });
+        await flushPendingSave();
+        const cold = await activate(true);
+        value(await cold.setLanguage({ storedLanguage: 'zh', systemLocale: 'zh-CN' }));
+        expect(value(cold.validatePreparedQuickCapture(command))).toEqual(command.prepared.result);
+        expect(value(await cold.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
+        const saved = taskToSqliteRow(useTaskStore.getState()._tasksById.get(command.prepared.task.id)!);
+        expect(useTaskStore.getState()._tasksById.get(command.prepared.task.id)).toMatchObject({ timeEstimate: '15min', contexts: ['@phone'], tags: ['#finance'] });
+        const restarted = await activate(true);
+        saveData.mockClear();
+        expect(value(await restarted.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
+        expect(saveData).not.toHaveBeenCalled();
+        expect(taskToSqliteRow(useTaskStore.getState()._tasksById.get(command.prepared.task.id)!)).toEqual(saved);
+    });
+
+    it('bounds the whole v2 command in UTF-8 bytes before a journal or task can be written', async () => {
+        const { host, options, saveData } = await open();
+        expect(host.prepareQuickCaptureCopilot({ capture: { text: '漢'.repeat(50_000),
+            options: { ...options, note: '漢'.repeat(200_000) }, captureId: generateUUID() }, applied: { tags: ['#finance'] } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it('rejects a valid but different frozen estimate before validation or commit can persist it', async () => {
+        const { host, options, saveData } = await open();
+        const command = copilotCommand(host, { capture: { text: 'Call bank', options, captureId: generateUUID() },
+            applied: { tags: [], timeEstimate: '15min' } });
+        expect(command.prepared.typedTimeEstimate).toBeNull();
+        const forged = { ...command, prepared: { ...command.prepared, task: { ...command.prepared.task, timeEstimate: '30min' } } };
+        const before = useTaskStore.getState()._allTasks.map(taskToSqliteRow);
+        expect(host.validatePreparedQuickCapture(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.commitPreparedQuickCapture(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(saveData).not.toHaveBeenCalled();
+        expect(useTaskStore.getState()._allTasks.map(taskToSqliteRow)).toEqual(before);
+    });
+
+    it.each([true, false])('keeps typed-estimate priority and the frozen estimate feature flag on cold replay (enabled=%s)', async (enabled) => {
+        const { host, saveData } = await open();
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, features: { ...state.settings.features, timeEstimates: enabled } } }));
+        const options = value(host.openQuickCapture()).options;
+        const command = copilotCommand(host, { capture: { text: 'Call bank /estimate:45m', options, captureId: generateUUID() },
+            applied: { tags: [], timeEstimate: '15min' } });
+        expect(command.prepared.timeEstimatesEnabled).toBe(enabled);
+        expect(command.prepared.typedTimeEstimate).toBe(enabled ? 'custom:45' : null);
+        expect(command.prepared.task.timeEstimate).toBe(enabled ? 'custom:45' : undefined);
+        await useTaskStore.getState().updateSettings({ features: { timeEstimates: !enabled } });
+        await flushPendingSave();
+        const cold = await activate(true);
+        saveData.mockClear();
+        const forged = { ...command, prepared: { ...command.prepared, task: { ...command.prepared.task, timeEstimate: '15min' } } };
+        expect(cold.validatePreparedQuickCapture(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await cold.commitPreparedQuickCapture(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(saveData).not.toHaveBeenCalled();
+        expect(value(cold.validatePreparedQuickCapture(command))).toEqual(command.prepared.result);
+        expect(value(await cold.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
+        expect(useTaskStore.getState()._tasksById.get(command.prepared.task.id)?.timeEstimate).toBe(enabled ? 'custom:45' : undefined);
+        const restarted = await activate(true);
+        saveData.mockClear();
+        expect(value(await restarted.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it.each(['Call bank /reference', 'Call bank /reference /estimate:45m'])('clears both typed and applied estimates for Reference capture (%s)', async (text) => {
+        const { host, options, saveData } = await open();
+        const command = copilotCommand(host, { capture: { text, options, captureId: generateUUID() },
+            applied: { context: '@phone', tags: ['#finance'], timeEstimate: '15min' } });
+        expect(command.prepared.typedTimeEstimate).toBe(text.includes('/estimate:') ? 'custom:45' : null);
+        expect(command.prepared.task).toMatchObject({ status: 'reference', contexts: ['@phone'], tags: ['#finance'] });
+        expect(command.prepared.task.timeEstimate).toBeUndefined();
+        const forged = { ...command, prepared: { ...command.prepared, task: { ...command.prepared.task, timeEstimate: '15min' } } };
+        expect(host.validatePreparedQuickCapture(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.commitPreparedQuickCapture(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(saveData).not.toHaveBeenCalled();
+        expect(value(host.validatePreparedQuickCapture(command))).toEqual(command.prepared.result);
+        value(await host.commitPreparedQuickCapture(command));
+        expect(useTaskStore.getState()._tasksById.get(command.prepared.task.id)?.timeEstimate).toBeUndefined();
+    });
+
+    it('rejects mismatched/forged v2 requests and rows while preserving exact v1 schema acceptance', async () => {
+        const { host, options, saveData } = await open();
+        const command = copilotCommand(host, { capture: { text: 'Call bank', options, captureId: generateUUID() },
+            applied: { context: '@phone', tags: ['#finance'], timeEstimate: '15min' } });
+        const missingFlag = JSON.parse(JSON.stringify(command)); delete missingFlag.prepared.timeEstimatesEnabled;
+        const missingTypedEstimate = JSON.parse(JSON.stringify(command)); delete missingTypedEstimate.prepared.typedTimeEstimate;
+        for (const forged of [missingFlag, missingTypedEstimate,
+            { ...command, prepared: { ...command.prepared, typedTimeEstimate: 'tomorrow' } },
+            { ...command, request: { ...command.request, applied: { tags: ['#other'] } } },
+            { ...command, prepared: { ...command.prepared, task: { ...command.prepared.task, tags: [] } } },
+            { ...command, prepared: { ...command.prepared, task: { ...command.prepared.task, contexts: [] } } },
+            { ...command, prepared: { ...command.prepared, task: { ...command.prepared.task, timeEstimate: 'tomorrow' } } },
+            { ...command, prepared: { ...command.prepared, version: 1 } },
+        ]) {
+            expect(host.validatePreparedQuickCapture(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            expect(await host.commitPreparedQuickCapture(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(saveData).not.toHaveBeenCalled();
+        const v1 = prepare(host, { text: 'Plain capture', options, captureId: generateUUID() });
+        expect(Object.keys(v1.prepared).sort()).toEqual(['deviceIdToInitialize', 'project', 'request', 'result', 'task', 'version']);
+        expect(value(host.validatePreparedQuickCapture(v1))).toEqual(v1.prepared.result);
+        value(await host.commitPreparedQuickCapture(v1));
+        expect(host.prepareQuickCaptureCopilot({ capture: { text: 'One\nTwo', options, captureId: generateUUID() }, applied: { tags: ['#finance'] } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 });

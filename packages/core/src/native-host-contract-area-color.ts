@@ -5,7 +5,7 @@ import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
 import { areaColorEffect, sameAreaAdditionRow, selectAreaColorScope } from './store-projects/area-actions';
 import type { PreparedAreaColor } from './store-types';
-import { taskEditValuesEqual } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import type { Area } from './types';
 
 export type NativeAreaColorToken = { name: string; color: string | null; rev: number | null;

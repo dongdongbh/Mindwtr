@@ -180,7 +180,8 @@ const LOCAL_STATUSES = new Set(['available', 'missing', 'uploading', 'downloadin
 const isAttachment = (value: unknown): value is Attachment => isObjectRecord(value)
     && Object.keys(value).every((key) => ATTACHMENT_KEYS.has(key))
     && isText(value.id, ID_LIMIT) && Boolean(value.id) && (value.kind === 'file' || value.kind === 'link')
-    && isText(value.title, TEXT_LIMIT) && isText(value.uri, TEXT_LIMIT) && STAMP(value.createdAt) && STAMP(value.updatedAt)
+    && isText(value.title, TEXT_LIMIT) && isText(value.uri, TEXT_LIMIT) && STAMP(value.createdAt)
+    && (value.updatedAt === undefined || isText(value.updatedAt, 100))
     && ['mimeType', 'deletedAt', 'cloudKey', 'fileHash'].every((key) => value[key] === undefined || isText(value[key], TEXT_LIMIT))
     && ['size', 'contentRev', 'contentMtimeMs', 'contentSize'].every((key) => value[key] === undefined
         || (typeof value[key] === 'number' && Number.isFinite(value[key])))
@@ -194,6 +195,10 @@ export const readNativeAttachments = (value: unknown): Attachment[] | null => (
         && new Set(value.map((attachment) => attachment.id)).size === value.length && isNativeJsonWithinBytes(value)
         ? JSON.parse(JSON.stringify(value)) as Attachment[]
         : null
+);
+
+export const readNativeSavedAttachmentsForView = (value: unknown): Attachment[] | null => (
+    readNativeAttachments(Array.isArray(value) ? value.filter(isAttachment) : value)
 );
 
 export type NativeTaskLinkHalf = { base: Attachment[]; value: Attachment[] };

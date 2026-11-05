@@ -143,6 +143,7 @@ export function normalizeFilterCriteria(value: unknown): FilterCriteria {
     const contexts = normalizeStringArray(value.contexts, { prefix: '@' });
     const areas = normalizeStringArray(value.areas);
     const projects = normalizeStringArray(value.projects);
+    const excludedProjects = normalizeStringArray(value.excludedProjects);
     const tags = normalizeStringArray(value.tags, { prefix: '#' });
     // Exclude lists never override an include of the same token: a token on
     // both sides would filter every task out, so include wins and the token
@@ -162,6 +163,7 @@ export function normalizeFilterCriteria(value: unknown): FilterCriteria {
     if (excludedContexts) criteria.excludedContexts = excludedContexts;
     if (areas) criteria.areas = areas;
     if (projects) criteria.projects = projects;
+    if (excludedProjects) criteria.excludedProjects = excludedProjects;
     if (tags) criteria.tags = tags;
     const tagMatchMode = normalizeMultiValueFilterMatchMode(value.tagMatchMode);
     if (tags && tagMatchMode) criteria.tagMatchMode = tagMatchMode;
@@ -206,6 +208,7 @@ export function hasActiveFilterCriteria(criteria: FilterCriteria | undefined): b
         || normalized.excludedContexts?.length
         || normalized.areas?.length
         || normalized.projects?.length
+        || normalized.excludedProjects?.length
         || normalized.tags?.length
         || normalized.excludedTags?.length
         || normalized.energy?.length
@@ -407,6 +410,9 @@ const taskMatchesPreparedFilterCriteria = (
         if (!taskAreaId || !normalized.areas.includes(taskAreaId)) return false;
     }
 
+    if (normalized.excludedProjects?.some((projectId) => (
+        projectId === SAVED_FILTER_NO_PROJECT_ID ? !task.projectId : task.projectId === projectId
+    ))) return false;
     if (normalized.projects?.length) {
         const matchesProject = normalized.projects.some((projectId) => (
             projectId === SAVED_FILTER_NO_PROJECT_ID ? !task.projectId : task.projectId === projectId

@@ -1,3 +1,4 @@
+import { readProjectBulkParams, type NativeProjectBulkParams as ProjectBulkParams } from './native-host-project-task-list';
 /**
  * The native host contract for selection mode on the Inbox, Waiting, Someday,
  * Reference and Done lists: React Native's bulk bar (move to a status, Range, add
@@ -59,7 +60,8 @@ import { collectBulkTaskTokens, type BulkTaskTokenMode } from './bulk-task-token
 import { safeParseDate, type DateFormatter } from './date';
 import { tFallback } from './i18n';
 import { isStatusListTaskReadOnly } from './menu-views-model';
-import { NATIVE_HOST_CONTRACT_VERSION, NATIVE_HOST_MAX_WINDOW, type NativeHostResult, type NativeListActionResult, type NativeListToast } from './native-host-contract';
+import { buildReviewShareText } from './review-views-model';
+import { NATIVE_HOST_CONTRACT_VERSION, NATIVE_HOST_MAX_WINDOW, type NativeHostResult, type NativeListActionResult, type NativeListToast, type NativeProjectDetailFilterView } from './native-host-contract';
 import type { createInboxViewMethods } from './native-host-contract-inbox-view';
 import {
     fail,
@@ -83,6 +85,7 @@ import {
     type NativeUnsavedWrite,
 } from './native-request-receipts';
 import { updateRangeSelection } from './range-selection';
+import { isProjectedRecurringTaskId } from './recurrence';
 import { compareProjectsByPickerOrder, getProjectChoiceState } from './project-utils';
 import { useTaskStore } from './store';
 import {
@@ -120,6 +123,14 @@ import type { Area, Project, Task, TaskStatus } from './types';
 
 export type NativeBulkList = 'inbox' | 'waiting' | 'someday' | 'reference' | 'done';
 const BULK_LISTS: readonly NativeBulkList[] = ['inbox', 'waiting', 'someday', 'reference', 'done'];
+/** Project selection reads share presentation; its writes require separate prepared commands. */
+export type NativeBulkReadList = NativeBulkList | 'project' | 'review' | 'contexts';
+const BULK_READ_LISTS: readonly NativeBulkReadList[] = [...BULK_LISTS, 'project', 'review', 'contexts'];
+const BULK_READ_SCREENS: Record<NativeBulkReadList, (typeof TASK_LIST_BULK_SCREENS)[keyof typeof TASK_LIST_BULK_SCREENS]> = {
+    ...TASK_LIST_BULK_SCREENS,
+    review: { status: 'all', organize: false, moveToSection: false, removeTags: false },
+    contexts: { status: 'all', organize: false, moveToSection: false, removeTags: false },
+};
 
 /** Select all: every selectable row on screen for the view's `params`, less `except`. */
 export type NativeBulkSelectAll = {
@@ -171,7 +182,7 @@ export type NativeBulkActionsView = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
     /** The list view's revision; later picker pages send it back as `picker.revision`. */
     revision: string;
-    list: NativeBulkList;
+    list: NativeBulkReadList;
     /** The explicit selection still on screen, in the order it was made; send it back as `taskIds`. Empty under Select all. */
     selectedIds: string[];
     /** Each of `selectedIds`' revision: an action on them sends it as `taskRevisions`. */
@@ -200,10 +211,15 @@ export type NativeBulkActionsView = {
     organize: NativeBulkOrganizeView | null;
     /** Only when `picker` is sent. */
     picker: NativeBulkPicker | null;
+    shareText?: string;
 };
 
+
 type ListViews = Pick<ReturnType<typeof createMenuViewMethods>, 'getWaitingView' | 'getSomedayView' | 'getReferenceView' | 'getDoneView'>
-    & Pick<ReturnType<typeof createInboxViewMethods>, 'getInboxView'>;
+    & Pick<ReturnType<typeof createInboxViewMethods>, 'getInboxView'>
+    & { getProjectDetailFilterView: (input: ProjectBulkParams & { offset: number; limit: number; revision?: string }) => NativeHostResult<NativeProjectDetailFilterView> }
+    & { getContextsView: (input: Record<string, unknown>) => NativeHostResult<{ revision: string; total: number; rows: { id: string; readOnly?: boolean }[] }> }
+    & { getReviewOverview: (input: Record<string, unknown>) => NativeHostResult<{ revision: string; total: number; items: { type: string; row?: { id: string; readOnly?: boolean } }[] }> };
 
 export type BulkActionDeps = {
     readiness: () => NativeHostResult<null>;
@@ -233,6 +249,9 @@ const TEXT_LIMITS: Record<BulkOrganizeTextField, number> = {
 };
 const DRAFT_KEYS = new Set(Object.keys(EMPTY_BULK_ORGANIZE_DRAFT));
 const PARAM_ONLY_KEYS = ['filterEdit', 'offset', 'limit', 'revision'];
+const REVIEW_PARAMS = ['scope', 'expandedAreaIds', 'expandedProjectIds', 'expandedLaterProjectIds'];
+const CONTEXTS_PARAMS = ['tokens', 'matchMode', 'searchQuery', 'filters', 'savedFilterId', 'preservedCriteria'];
+
 
 /**
  * The option a picker search names exactly, as mobile's pickers match it: a project
@@ -401,19 +420,28 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
     };
 
     /** Every row the list shows for these params, in list order, paged through the list's own view. */
-    const listRows = (list: NativeBulkList, params: unknown): NativeHostResult<{ revision: string; rows: Row[] }> => {
+    const listRows = (list: NativeBulkReadList, params: unknown): NativeHostResult<{ revision: string; rows: Row[] }> => {
         if (!isObjectRecord(params) || PARAM_ONLY_KEYS.some((key) => params[key] !== undefined)) {
             return fail('INVALID_INPUT', 'The list view\'s own params are required (filters as returned, no filterEdit or paging)');
         }
+        const projectParams = list === 'project' ? readProjectBulkParams(params) : null;
+        if (list === 'project' && !projectParams) return fail('INVALID_INPUT', 'Project selection requires its accepted task view params');
         const read = (offset: number, revision?: string) => {
             const input = { ...params, offset, limit: NATIVE_HOST_MAX_WINDOW, ...(revision ? { revision } : {}) };
             const { views } = deps;
             switch (list) {
+                case 'project': return projectParams
+                    ? views.getProjectDetailFilterView({ ...projectParams, offset, limit: NATIVE_HOST_MAX_WINDOW, ...(revision ? { revision } : {}) })
+                    : fail('INVALID_INPUT', 'Project selection requires its accepted task view params');
                 case 'inbox': return views.getInboxView(input as Parameters<ListViews['getInboxView']>[0]);
                 case 'waiting': return views.getWaitingView(input as Parameters<ListViews['getWaitingView']>[0]);
                 case 'someday': return views.getSomedayView(input as Parameters<ListViews['getSomedayView']>[0]);
                 case 'reference': return views.getReferenceView(input as Parameters<ListViews['getReferenceView']>[0]);
                 case 'done': return views.getDoneView(input as Parameters<ListViews['getDoneView']>[0]);
+                case 'review': return Object.keys(params).every((key) => REVIEW_PARAMS.includes(key))
+                    ? views.getReviewOverview(input) : fail('INVALID_INPUT', 'Review selection requires its scope and expansion params');
+                case 'contexts': return Object.keys(params).every((key) => CONTEXTS_PARAMS.includes(key)) && isObjectRecord(params.filters)
+                    ? views.getContextsView(input) : fail('INVALID_INPUT', 'Contexts selection requires its selection, search and filters');
             }
         };
         const rows: Row[] = [];
@@ -423,15 +451,20 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             const result = read(offset, revision);
             if (!result.ok) return result;
             revision = result.value.revision;
-            const value = result.value as { total: number; rows?: { id: string }[]; items?: { type: string; row?: { id: string; readOnly?: boolean } }[] };
+            const value = result.value as { total: number; readOnly?: boolean; rows?: { id: string }[]; items?: { type: string; row?: { id: string; readOnly?: boolean } }[] };
+            if (list === 'project' && value.readOnly) return fail('INVALID_INPUT', 'An archived Project has no task selection');
             const entries: Row[] = value.rows
-                ? value.rows.map((row) => ({ id: row.id, readOnly: false }))
+                ? value.rows.map((row) => ({ id: row.id, readOnly: list === 'contexts' && (row as { readOnly?: boolean }).readOnly === true }))
                 : (value.items ?? []).flatMap((item) => (item.type === 'task' && item.row ? [{ id: item.row.id, readOnly: item.row.readOnly === true }] : []));
             // A task grouped under several headings is one row to select.
             for (const entry of entries) {
                 if (seen.has(entry.id)) continue;
                 seen.add(entry.id);
-                rows.push(entry);
+                if (list === 'project') {
+                    const task = useTaskStore.getState()._tasksById.get(entry.id);
+                    rows.push({ ...entry, readOnly: entry.readOnly || !task || Boolean(task.deletedAt || task.purgedAt)
+                        || isProjectedRecurringTaskId(entry.id) || readOnly(task) });
+                } else rows.push(entry);
             }
             if (offset + NATIVE_HOST_MAX_WINDOW >= value.total) return { ok: true, value: { revision, rows } };
         }
@@ -511,7 +544,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
          * open picker's options. `list` names the list, `params` are its view's inputs.
          */
         getBulkActions(input: {
-            list: NativeBulkList;
+            list: NativeBulkReadList;
             params?: Record<string, unknown>;
             taskIds?: string[];
             selectAll?: { except?: string[] };
@@ -527,7 +560,8 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
         }): NativeHostResult<NativeBulkActionsView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            if (!isObjectRecord(input) || !BULK_LISTS.includes(input.list)
+            if (!isObjectRecord(input) || !BULK_READ_LISTS.includes(input.list)
+                || (input.list === 'project' && input.selectAll !== undefined)
                 || (input.taskIds !== undefined && !isIdList(input.taskIds, true))
                 || (input.selectAll !== undefined && (!isObjectRecord(input.selectAll) || input.taskIds !== undefined
                     || (input.selectAll.except !== undefined && !isIdList(input.selectAll.except, true))))
@@ -544,7 +578,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
                     || !isPaging({ offset: input.picker.offset ?? 0, limit: input.picker.limit ?? NATIVE_HOST_MAX_WINDOW, revision: input.picker.revision })))) {
                 return fail('INVALID_INPUT', 'A list, its view params, one selection, and valid selection, organize and picker inputs are required');
             }
-            const screen = TASK_LIST_BULK_SCREENS[input.list];
+            const screen = BULK_READ_SCREENS[input.list];
             if ((input.organize !== undefined || input.picker?.kind === 'project' || input.picker?.kind === 'area') && !screen.organize) {
                 return fail('INVALID_INPUT', 'This list does not offer Bulk organize');
             }
@@ -553,9 +587,9 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             if (!read.ok) return read;
             const { revision: listRevision, rows } = read.value;
             const removeTagPicker = input.picker?.kind === 'removeTag';
-            const inboxOrganizePicker = input.list === 'inbox' && input.organize !== undefined
+            const organizePicker = (input.list === 'inbox' || input.list === 'project') && input.organize !== undefined
                 && (input.picker?.kind === 'project' || input.picker?.kind === 'area');
-            if (!removeTagPicker && !inboxOrganizePicker && (input.picker?.offset ?? 0) > 0 && input.picker?.revision !== listRevision) return fail('STALE_REVISION', 'The list changed; open the picker again');
+            if (!removeTagPicker && !organizePicker && (input.picker?.offset ?? 0) > 0 && input.picker?.revision !== listRevision) return fail('STALE_REVISION', 'The list changed; open the picker again');
             const selectable = selectableIds(rows);
             const onScreen = new Set(selectable);
 
@@ -608,7 +642,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
                 organize = buildNativeBulkOrganizeView(input.organize, { selectedCount: selection.length, t, formatDate: deps.formatDate() });
                 if (!organize) return fail('INVALID_INPUT', 'A Bulk organize draft and edit with choices the dialog offers are required');
             }
-            if (inboxOrganizePicker) {
+            if (organizePicker) {
                 // Display minutes do not change an offer; re-read eligibility and bind its complete picker context.
                 revision = `${deps.pickerRevision()}:${revisionsToken([
                     JSON.stringify({ list: input.list, params: input.params ?? {}, kind: input.picker!.kind, query: (input.picker!.query ?? '').trim() }),
@@ -616,7 +650,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
                     JSON.stringify(selection.map((id) => [id, taskRevisionOf(state._tasksById.get(id)!)])),
                     JSON.stringify(organize!.draft),
                 ])}`;
-                if ((input.picker?.offset ?? 0) > 0 && input.picker?.revision !== revision) return fail('STALE_REVISION', 'The selection or Inbox destination offer changed; open the picker again');
+                if ((input.picker?.offset ?? 0) > 0 && input.picker?.revision !== revision) return fail('STALE_REVISION', `The selection or ${input.list === 'project' ? 'Project' : 'Inbox'} destination offer changed; open the picker again`);
             }
 
             let picker: NativeBulkPicker | null = null;
@@ -654,6 +688,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
                     moveToSection: screen.moveToSection ? { taskIds: selection, taskRevisions: taskRevisionsOf(selection) } : null,
                     organize,
                     picker,
+                    ...(input.list === 'review' ? { shareText: buildReviewShareText(selection.map((id) => state._tasksById.get(id)!)) } : {}),
                 },
             };
         },

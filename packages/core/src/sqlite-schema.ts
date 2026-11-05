@@ -1,4 +1,4 @@
-export const SQLITE_SCHEMA_VERSION = 14;
+export const SQLITE_SCHEMA_VERSION = 15;
 
 // temp_store = MEMORY: Android has no writable /tmp and op-sqlite leaves
 // sqlite3_temp_directory unset, so a statement journal that spills to disk
@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   timeSpentMinutes INTEGER,
   suppressMindwtrReminders INTEGER,
   repeatReminderMinutes INTEGER,
+  dueReminderLeadMinutes INTEGER,
+  startReminderLeadMinutes INTEGER,
   reviewAt TEXT,
   completedAt TEXT,
   cancelledAt TEXT,

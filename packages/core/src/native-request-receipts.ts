@@ -1,3 +1,5 @@
+import { isTaskChecklistMoveSourceDetailsEmpty, type TaskChecklistMoveSourceDetails } from './task-checklist-move';
+import { readNativeWidgetCompletionSource, nativeWidgetCompletionPayload, readNativeWidgetCompletionResult, NATIVE_WIDGET_SOURCE_BYTES } from './native-widget-completion';
 import type { NativeHostResult } from './native-host-contract';
 import { SqliteAdapter, type SqliteAdapterOptions, type SqliteClient } from './sqlite-adapter';
 import { getPersistenceStatus, getSaveSnapshotGeneration, getStorageAdapter, trackSaveSnapshotGenerations, useTaskStore } from './store';
@@ -11,7 +13,7 @@ import { logInfo } from './logger';
 import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { stripSensitiveSettings } from './store-helpers';
 import { runStoreCommand } from './store-write-gate';
-import { decodeNativePomodoroSession, nativePomodoroReceiptPayload, NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS, validatePreparedNativePomodoroTransition,
+import { decodeNativePomodoroSession, nativePomodoroReceiptPayload, NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS, parseNativeWatchPomodoroSource, validatePreparedNativePomodoroTransition,
     type NativePomodoroSessionRead, type NativePomodoroResult, type PreparedNativePomodoroTransition } from './native-pomodoro-session';
 
 /**
@@ -246,7 +248,7 @@ export const withRequestProject = (projects: readonly Project[], id: string, tit
  * Settings › Sync's screen commands (NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS in native-host-contract-settings-sync.ts,
  * the same names).
  */
-export const NATIVE_UNJOURNALED_COMMANDS: ReadonlySet<string> = new Set<string>(['calendarFeedAdd', 'setAIKey', 'setAIEndpoint', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction']);
+export const NATIVE_UNJOURNALED_COMMANDS: ReadonlySet<string> = new Set<string>(['calendarFeedAdd', 'setAIKey', 'setAIEndpoint', 'setAIExtraBodyParams', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction']);
 
 const commandOf = (payload: string): string => /^\["([^"\\]{1,64})"/.exec(payload)?.[1] ?? '';
 /** Bounded non-sensitive domain tuples are exact; established commands keep their compact hash. */
@@ -259,10 +261,29 @@ const fingerprintOf = (payload: string): string => {
             return payload;
         } catch { throw new Error('Invalid Pomodoro receipt payload'); }
     }
-    return ['appLock', 'backupDocument'].includes(commandOf(payload)) ? payload : `${commandOf(payload)}:${hash128Hex(payload)}`;
+    if (commandOf(payload) === 'iosWidgetCompletion') {
+        try {
+            if (payload.length > NATIVE_WIDGET_SOURCE_BYTES || new TextEncoder().encode(payload).length > NATIVE_WIDGET_SOURCE_BYTES) throw new Error();
+            const tuple: unknown = JSON.parse(payload);
+            const source = Array.isArray(tuple) && tuple.length === 2 ? readNativeWidgetCompletionSource(tuple[1]) : null;
+            if (!source || nativeWidgetCompletionPayload(source) !== payload) throw new Error();
+            return payload;
+        } catch { throw new Error('Invalid widget completion receipt payload'); }
+    }
+    return ['appLock', 'backupDocument', 'iosShareCapture'].includes(commandOf(payload)) ? payload : `${commandOf(payload)}:${hash128Hex(payload)}`;
 };
 const fingerprintCommand = (value: string): string => value.startsWith('[')
     ? commandOf(value) : value.split(':', 1)[0] ?? '';
+const validWidgetCompletionReceipt = (row: { request_id: string; method: string; reply: string }): boolean => {
+    try {
+        if (row.method.length > NATIVE_WIDGET_SOURCE_BYTES || new TextEncoder().encode(row.method).length > NATIVE_WIDGET_SOURCE_BYTES) return false;
+        const tuple: unknown = JSON.parse(row.method);
+        const source = Array.isArray(tuple) && tuple.length === 2 && tuple[0] === 'iosWidgetCompletion'
+            ? readNativeWidgetCompletionSource(tuple[1]) : null;
+        return !!source && source.actionId === row.request_id && nativeWidgetCompletionPayload(source) === row.method
+            && readNativeWidgetCompletionResult(JSON.parse(row.reply), source) !== null;
+    } catch { return false; }
+};
 const validAppLockStoredReceipt = (row: { request_id: string; method: string; reply: string; saved_at: string },
     reply: unknown): boolean => {
     if (!REQUEST_ID_PATTERN.test(row.request_id) || row.request_id !== row.request_id.toLowerCase()
@@ -323,6 +344,14 @@ const isDocumentPayload = (payload: unknown): payload is string => {
         && typeof tuple[3] === 'string' && /^[a-f0-9]{64}$/u.test(tuple[3])
         && JSON.stringify(tuple) === payload;
 };
+const isShareCapturePayload = (payload: unknown): payload is string => {
+    if (typeof payload !== 'string' || payload.length > 256) return false;
+    let tuple: unknown;
+    try { tuple = JSON.parse(payload); } catch { return false; }
+    return Array.isArray(tuple) && tuple.length === 3 && tuple[0] === 'iosShareCapture'
+        && isCanonicalRequestId(tuple[1]) && typeof tuple[2] === 'string' && /^[a-f0-9]{64}$/u.test(tuple[2])
+        && JSON.stringify(tuple) === payload;
+};
 const documentReplyJson = (reply: unknown): string => {
     let json: string | undefined;
     try { json = JSON.stringify(reply); } catch { /* Refuse unserializable input without exposing it. */ }
@@ -334,7 +363,7 @@ const documentReplyJson = (reply: unknown): string => {
 };
 type DocumentReceiptRow = { request_id: string; method: string; reply: string; saved_at: string };
 const validDocumentReceiptRow = (row: DocumentReceiptRow): boolean => {
-    if (!isCanonicalRequestId(row.request_id) || !isDocumentPayload(row.method)
+    if (!isCanonicalRequestId(row.request_id) || !(isDocumentPayload(row.method) || isShareCapturePayload(row.method))
         || typeof row.reply !== 'string' || row.reply.length > MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES
         || strToU8(row.reply).length > MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES
         || typeof row.saved_at !== 'string' || row.saved_at.length > 40
@@ -409,6 +438,8 @@ export async function loadNativeRequestReceipts(client: SqliteClient,
     );
     let legacyPomodoroReceipts = 0;
     durableReceipts = new Map(rows.map((row) => {
+        if (fingerprintCommand(row.method) === 'iosWidgetCompletion' && !validWidgetCompletionReceipt(row))
+            throw new Error('Invalid saved widget completion receipt');
         if (fingerprintCommand(row.method) === 'backupDocument' && !validDocumentReceiptRow(row))
             throw new Error('Invalid saved document receipt');
         if (fingerprintCommand(row.method) === 'pomodoroTransition') {
@@ -445,14 +476,18 @@ export async function pruneNativeRequestReceipts(client: SqliteClient, now = new
     const retainedCommands = new Set(retention?.retainedCommands);
     // One receipt proves the timer was established even if its singleton row is later lost.
     let latestPomodoro: [string, StoredReceipt] | undefined;
+    const watchPomodoroIds = new Set<string>();
     for (const entry of durableReceipts ?? []) {
-        if (fingerprintCommand(entry[1].fingerprint) === 'pomodoroTransition'
-            && (!latestPomodoro || entry[1].savedAt > latestPomodoro[1].savedAt
-                || (entry[1].savedAt === latestPomodoro[1].savedAt && entry[0] > latestPomodoro[0]))) latestPomodoro = entry;
+        if (fingerprintCommand(entry[1].fingerprint) !== 'pomodoroTransition') continue;
+        const plan = pomodoroReceiptPlan({ request_id: entry[0], method: entry[1].fingerprint,
+            reply: JSON.stringify(entry[1].reply), saved_at: entry[1].savedAt });
+        if (plan.request.action === 'watch') watchPomodoroIds.add(entry[0]);
+        if (!latestPomodoro || entry[1].savedAt > latestPomodoro[1].savedAt
+            || (entry[1].savedAt === latestPomodoro[1].savedAt && entry[0] > latestPomodoro[0])) latestPomodoro = entry;
     }
     const expires = (id: string, receipt: StoredReceipt): boolean => receipt.savedAt < cutoff
         && (durableCommands === null || durableCommands.has(fingerprintCommand(receipt.fingerprint)))
-        && id !== latestPomodoro?.[0] && !retainedIds.has(id) && !retainedCommands.has(fingerprintCommand(receipt.fingerprint));
+        && id !== latestPomodoro?.[0] && !watchPomodoroIds.has(id) && !retainedIds.has(id) && !retainedCommands.has(fingerprintCommand(receipt.fingerprint));
     if (durableCommands === null && retention === undefined && !latestPomodoro) await client.run('DELETE FROM native_request_receipts WHERE saved_at < ?', [cutoff]);
     else for (const [id, receipt] of durableReceipts ?? []) {
         if (expires(id, receipt))
@@ -493,6 +528,8 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     private readonly receiptClient: SqliteClient;
     private readonly carried = new WeakMap<AppData, { ids: string[]; savedAt: string }>();
     private prerequisite: { requestId: string; fingerprint: string; originId: string; originFingerprint: string; reply: unknown } | null = null;
+    private checklistMoveCompatibility: { requestId: string; fingerprint: string; sourceId: string; expected: TaskChecklistMoveSourceDetails } | null = null;
+    private rowFocusAuthority: { requestId: string; fingerprint: string; check: (read: SqliteClient['all']) => Promise<boolean> } | null = null;
     private documentBusy = false;
     private ordinaryWrites = 0;
     private baselineReads = 0;
@@ -619,6 +656,36 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         if (this.pomodoroBusy) throw new Error('Pomodoro storage is busy');
         try { return await this.exclusive('readPomodoroSession', () => this.readPomodoroCell()); }
         catch { throw new Error('Pomodoro session could not be read'); }
+    }
+
+    async readWatchPomodoroPlan(sourceJSON: string): Promise<PreparedNativePomodoroTransition | null> {
+        if (this.pomodoroBusy) throw new Error('Pomodoro storage is busy');
+        try {
+            const source = parseNativeWatchPomodoroSource(sourceJSON);
+            return await this.exclusive('readWatchPomodoroPlan', async () => {
+                let opened = false;
+                try {
+                    // A receipt inside an unresolved writer transaction is not durable proof.
+                    await this.receiptClient.run('BEGIN DEFERRED'); opened = true;
+                    const rows = await this.receiptClient.all<DocumentReceiptRow>(
+                        'SELECT request_id, method, reply, saved_at FROM native_request_receipts WHERE request_id = ?', [source.id]);
+                    if (rows.length === 0) {
+                        if (durableReceipts?.has(source.id) || this.pomodoroUncertainRequest === source.id || requestPayloads.has(source.id)
+                            || pendingReceipts.has(source.id)) throw new Error('Saved Watch Pomodoro receipt is missing');
+                        await this.receiptClient.run('ROLLBACK'); opened = false;
+                        return null;
+                    }
+                    if (rows.length !== 1) throw new Error('Invalid saved Watch Pomodoro receipt');
+                    const plan = pomodoroReceiptPlan(rows[0]);
+                    if (plan.request.action !== 'watch' || plan.request.sourceJSON !== sourceJSON)
+                        throw new Error('Watch Pomodoro receipt identity changed');
+                    await this.receiptClient.run('ROLLBACK'); opened = false;
+                    return plan;
+                } finally {
+                    if (opened) { try { await this.receiptClient.run('ROLLBACK'); } catch { /* Recovery must reopen the connection. */ } }
+                }
+            });
+        } catch { throw new Error('Watch Pomodoro receipt could not be read'); }
     }
 
     private async readPomodoroProof(plan: PreparedNativePomodoroTransition, payload: string): Promise<NativePomodoroResult | null> {
@@ -789,7 +856,8 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             || typeof row.saved_at !== 'string' || row.saved_at.length > 40
             || !Number.isFinite(Date.parse(row.saved_at)) || new Date(row.saved_at).toISOString() !== row.saved_at
             || typeof row.reply !== 'string') return changed();
-        if (fingerprintCommand(fingerprint) === 'backupDocument' && !validDocumentReceiptRow(row)) return changed();
+        if (['backupDocument', 'iosShareCapture'].includes(fingerprintCommand(fingerprint)) && !validDocumentReceiptRow(row)) return changed();
+        if (fingerprintCommand(fingerprint) === 'iosWidgetCompletion' && !validWidgetCompletionReceipt(row)) return changed();
         if (fingerprintCommand(fingerprint) === 'pomodoroTransition') {
             try { pomodoroReceiptPlan(row); } catch { return changed(); }
         }
@@ -810,6 +878,53 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         if (this.prerequisite?.requestId === requestId && this.prerequisite.fingerprint === fingerprintOf(payload)) this.prerequisite = null;
     }
 
+    /** Row Focus alone re-proves its raw source and policy context before snapshot DML. */
+    armRowFocusAuthority(requestId: string, payload: string, check: (read: SqliteClient['all']) => Promise<boolean>): void {
+        this.refusePomodoroWriteFence();
+        const fingerprint = fingerprintOf(payload), owned = this.rowFocusAuthority;
+        if (fingerprintCommand(fingerprint) !== 'rowTaskFocus' || owned && (owned.requestId !== requestId || owned.fingerprint !== fingerprint))
+            throw new Error('Another request owns Row Focus authority');
+        this.rowFocusAuthority = { requestId, fingerprint, check };
+    }
+
+    clearRowFocusAuthority(requestId: string, payload: string): void {
+        if (this.rowFocusAuthority?.requestId === requestId && this.rowFocusAuthority.fingerprint === fingerprintOf(payload)) this.rowFocusAuthority = null;
+    }
+
+    /** One feature's compatibility cell; never changes the older Task codec or schema. */
+    async readTaskChecklistMoveSourceDetails(sourceId: string): Promise<NativeHostResult<TaskChecklistMoveSourceDetails>> {
+        return this.exclusive('readTaskChecklistMoveSourceDetails', () => this.readTaskChecklistMoveSourceDetailsNow(sourceId));
+    }
+
+    private async readTaskChecklistMoveSourceDetailsNow(sourceId: string): Promise<NativeHostResult<TaskChecklistMoveSourceDetails>> {
+        try {
+            const columns = await this.receiptClient.all<{ name: string }>('PRAGMA table_info(tasks)');
+            if (!columns.some(column => column.name === 'id')) throw new Error('Task schema is unavailable');
+            if (!columns.some(column => column.name === 'dueReminderLeadMinutes')) return { ok: true, value: { column: false } };
+            const rows = await this.receiptClient.all<{ dueReminderLeadMinutes: unknown }>('SELECT dueReminderLeadMinutes FROM tasks WHERE id = ?', [sourceId]);
+            if (rows.length !== 1) return { ok: false, error: { code: 'STALE_REVISION', message: 'Checklist move source is unavailable' } };
+            const value = rows[0].dueReminderLeadMinutes;
+            if (value === null || typeof value === 'number' && Number.isFinite(value) || typeof value === 'string' && value.length <= 200)
+                return { ok: true, value: { column: true, value } };
+        } catch { /* Optional newer metadata must never be inferred empty after a read error. */ }
+        return { ok: false, error: { code: 'SAVE_FAILED', message: 'Checklist move source details could not be read' } };
+    }
+
+    armTaskChecklistMoveCompatibility(requestId: string, payload: string, sourceId: string, expected: TaskChecklistMoveSourceDetails): void {
+        this.refusePomodoroWriteFence();
+        const fingerprint = fingerprintOf(payload), owned = this.checklistMoveCompatibility;
+        if (fingerprintCommand(fingerprint) !== 'taskChecklistMove' || !isTaskChecklistMoveSourceDetailsEmpty(expected))
+            throw new Error('Invalid checklist move compatibility prerequisite');
+        if (owned && (owned.requestId !== requestId || owned.fingerprint !== fingerprint))
+            throw new Error('Another request owns checklist move compatibility');
+        this.checklistMoveCompatibility = { requestId, fingerprint, sourceId, expected: JSON.parse(JSON.stringify(expected)) as TaskChecklistMoveSourceDetails };
+    }
+
+    clearTaskChecklistMoveCompatibility(requestId: string, payload: string): void {
+        if (this.checklistMoveCompatibility?.requestId === requestId && this.checklistMoveCompatibility.fingerprint === fingerprintOf(payload))
+            this.checklistMoveCompatibility = null;
+    }
+
     /**
      * Saves an owned document and its exact reply in one transaction, without store generations.
      * Requires a guarded adapter and native receipt boot. Inputs are detached before the first
@@ -817,6 +932,17 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
      * SQL is always the replay authority; the session cache cannot establish a document outcome.
      */
     async saveDocumentWithReceipt(input: NativeDocumentReceiptInput): Promise<NativeDocumentReceiptResult> {
+        return this.saveAtomicDocumentWithReceipt(input, 'backupDocument');
+    }
+
+    /** Share-only admission to the existing atomic data+receipt transaction; ordinary document inputs stay closed. */
+    async saveShareCaptureWithReceipt(input: NativeDocumentReceiptInput): Promise<NativeDocumentReceiptResult> {
+        if (!isNativeRequestReceiptDurable('iosShareCapture')) throw new Error('Share capture receipt storage is unavailable');
+        return this.saveAtomicDocumentWithReceipt(input, 'iosShareCapture');
+    }
+
+    private async saveAtomicDocumentWithReceipt(input: NativeDocumentReceiptInput,
+        family: 'backupDocument' | 'iosShareCapture'): Promise<NativeDocumentReceiptResult> {
         this.refusePomodoroWriteFence();
         if (this.documentBusy || this.ordinaryWrites > 0 || this.prerequisite
             || pendingReceipts.size > 0 || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork()) {
@@ -825,7 +951,9 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         if (!this.concurrentWritesGuarded || durableReceipts === null) {
             throw new Error('Document receipt write requires guarded native receipt storage');
         }
-        if (!input || !isCanonicalRequestId(input.requestId) || !isDocumentPayload(input.payload)) {
+        if (!input || !isCanonicalRequestId(input.requestId)
+            || !(family === 'backupDocument' ? isDocumentPayload(input.payload) : isShareCapturePayload(input.payload))
+            || family === 'iosShareCapture' && JSON.parse(input.payload)[1] !== input.requestId) {
             throw new Error('Invalid document receipt identity');
         }
         const { requestId, payload } = input;
@@ -886,7 +1014,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             durableReceipts!.set(requestId, { fingerprint: payload, reply: JSON.parse(replyJson) as unknown, savedAt: context.savedAt });
             succeeded = true;
             try {
-                logInfo('Native backup document committed', {
+                if (family === 'backupDocument') logInfo('Native backup document committed', {
                     scope: 'transfer', force: true, context: {
                         releaseCheck: 'v1.3.4/native-backup-document',
                         operation: (JSON.parse(payload) as unknown[])[1], outcome: 'committed',
@@ -917,6 +1045,15 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         const count = (rows: unknown): number => Array.isArray(rows) ? rows.length : 0;
         return { step, tasks: count(data.tasks), projects: count(data.projects),
             sections: count(data.sections), areas: count(data.areas), people: count(data.people) };
+    }
+
+    protected override async beforeDataWrite(data: AppData): Promise<void> {
+        const proof = this.rowFocusAuthority;
+        if (!proof) return;
+        const receipt = pendingReceipts.get(proof.requestId), generation = getSaveSnapshotGeneration(data);
+        if (!receipt || generation === undefined || receipt.generation > generation) return;
+        if (receipt.fingerprint !== proof.fingerprint || !await proof.check((sql, params) => this.receiptClient.all(sql, params)))
+            throw new Error('Row Focus saved authority changed before write');
     }
 
     protected override async beforeCommit(write: { data: AppData } | { task: Task }): Promise<void> {
@@ -956,6 +1093,13 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         const ids: string[] = [];
         for (const [id, receipt] of pendingReceipts) {
             if (receipt.generation > generation) continue;
+            const compatibility = this.checklistMoveCompatibility;
+            if (compatibility?.requestId === id) {
+                if (compatibility.fingerprint !== receipt.fingerprint) throw new Error('Checklist move compatibility ownership changed');
+                const current = await this.readTaskChecklistMoveSourceDetailsNow(compatibility.sourceId);
+                if (!current.ok || !isTaskChecklistMoveSourceDetailsEmpty(current.value) || !taskEditValuesEqual(current.value, compatibility.expected))
+                    throw new Error('Checklist move source details changed');
+            }
             const prerequisite = this.prerequisite;
             if (prerequisite?.requestId === id) {
                 if (prerequisite.fingerprint !== receipt.fingerprint) throw new Error('Receipt prerequisite ownership changed');
@@ -989,6 +1133,9 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                 pendingReceipts.delete(id);
                 durableReceipts?.set(id, { fingerprint: receipt.fingerprint, reply: receipt.reply, savedAt: carried!.savedAt });
                 if (this.prerequisite?.requestId === id && this.prerequisite.fingerprint === receipt.fingerprint) this.prerequisite = null;
+                if (this.rowFocusAuthority?.requestId === id && this.rowFocusAuthority.fingerprint === receipt.fingerprint) this.rowFocusAuthority = null;
+                if (this.checklistMoveCompatibility?.requestId === id && this.checklistMoveCompatibility.fingerprint === receipt.fingerprint)
+                    this.checklistMoveCompatibility = null;
             }
         } finally { this.ordinaryWrites -= 1; }
     }

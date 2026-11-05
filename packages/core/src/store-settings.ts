@@ -1,6 +1,9 @@
 import { nativeAIGeminiThinkingBudgetWitness, readNativeAIGeminiThinkingBudgetRequest } from './native-ai-gemini-thinking-budget-request';
 import { nativeAIReasoningEffortWitness, readNativeAIReasoningEffortRequest } from './native-ai-reasoning-effort-request';
 import { nativeAIRequestTimeoutWitness, readNativeAIRequestTimeoutRequest } from './native-ai-request-timeout-request';
+import { nativeVoiceSettingsWitness, readNativeVoiceSettingsRequest, planNativeVoiceSettings } from './native-voice-settings';
+import { nativeAITextConfigurationWitness, readNativeAITextConfigurationRequest, planNativeAITextConfigurationChange,
+    nativeAITextConfigurationWitnessV2, readNativeAITextConfigurationRequestV2, planNativeAITextConfigurationChangeV2 } from './native-ai-text-configuration-request';
 import { logInfo, logWarn } from './logger';
 import { baseTextCollator, summarizeTaskLifecycleCounts } from './task-utils';
 import { markCoreStartupPhase, measureCoreStartupPhase } from './startup-profiler';
@@ -165,7 +168,7 @@ export const gtdWorkflowPomodoroField = (type: Exclude<GtdWorkflowPomodoroType, 
 } as const)[type];
 export type GtdWorkflowTaskEditorSection = 'scheduling' | 'organization' | 'details';
 export type GtdWorkflowType = GtdWorkflowDirectType | GtdWorkflowReviewType | GtdWorkflowInboxType
-    | GtdWorkflowCaptureParseType | GtdWorkflowPomodoroType | 'defaultArea' | 'taskEditorSectionOpen' | 'taskEditorPreset'
+    | GtdWorkflowCaptureParseType | 'saveAudioAttachments' | GtdWorkflowPomodoroType | 'defaultArea' | 'taskEditorSectionOpen' | 'taskEditorPreset'
     | 'taskEditorFieldVisible' | 'taskEditorFieldSection' | 'taskEditorOrder' | 'taskEditorReset';
 export type GtdWorkflowDirectWitness = { present: boolean; value: string | number | boolean | null;
     stampPresent: boolean; stamp: string | null };
@@ -265,6 +268,7 @@ export function gtdWorkflowWitness(settings: AppSettings, type: 'pomodoroDuratio
 export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowReviewType): GtdWorkflowReviewWitness | null;
 export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowInboxType): GtdWorkflowInboxWitness | null;
 export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowCaptureParseType): GtdWorkflowCaptureParseWitness | null;
+export function gtdWorkflowWitness(settings: AppSettings, type: 'saveAudioAttachments'): GtdWorkflowCaptureParseWitness | null;
 export function gtdWorkflowWitness(settings: AppSettings, type: 'defaultArea'): GtdWorkflowAreaWitness | null;
 export function gtdWorkflowWitness(settings: AppSettings, type: 'taskEditorSectionOpen', section: GtdWorkflowTaskEditorSection): GtdWorkflowTaskEditorWitness | null;
 export function gtdWorkflowWitness(settings: AppSettings, type: 'taskEditorPreset'): GtdWorkflowPresetWitness | null;
@@ -319,12 +323,12 @@ export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowType,
             idPresent, id: idPresent ? id as string | null : null,
             stampPresent, stamp: stampPresent ? stamp! : null };
     }
-    if (type === 'quickAddAutoClean' || type === 'naturalLanguageDates') {
+    if (type === 'quickAddAutoClean' || type === 'naturalLanguageDates' || type === 'saveAudioAttachments') {
         const present = type === 'quickAddAutoClean'
             ? owns(settings, 'quickAddAutoClean') && settings.quickAddAutoClean !== undefined
-            : group !== undefined && owns(group, 'naturalLanguageDates') && group.naturalLanguageDates !== undefined;
+            : group !== undefined && owns(group, type) && group[type] !== undefined;
         const value = present ? type === 'quickAddAutoClean'
-            ? settings.quickAddAutoClean : group?.naturalLanguageDates : null;
+            ? settings.quickAddAutoClean : group?.[type] : null;
         if (present && typeof value !== 'boolean') return null;
         return { present, value: present ? value as boolean : null,
             stampPresent, stamp: stampPresent ? stamp! : null };
@@ -479,7 +483,7 @@ type SettingsActionContext = {
     getStorage: () => StorageAdapter;
 };
 
-type SettingsActions = Pick<TaskStore, 'fetchData' | 'seedGettingStarted' | 'updateSettings' | 'commitPreparedGeneralPreference' | 'commitPreparedGtdWorkflow' | 'commitPreparedAppLock' | 'retryPreparedAppLockSnapshot' | 'commitPreparedNotificationSetting' | 'retryPreparedNotificationSettingSnapshot' | 'commitPreparedAIRequestTimeout' | 'retryPreparedAIRequestTimeoutSnapshot' | 'applyPreparedAIReasoningEffort' | 'retryPreparedAIReasoningEffortSnapshot' | 'applyPreparedAIGeminiThinkingBudget' | 'retryPreparedAIGeminiThinkingBudgetSnapshot' | 'commitPreparedCalendarSubscriptionSetting' | 'commitPreparedCalendarSubscriptionAdd' | 'retryPreparedCalendarSubscriptionSettingSnapshot' | 'commitPreparedFocusSavedFilter' | 'commitPreparedSavedSearchWrite' | 'persistSnapshot' | 'getDerivedState' | 'getFocusedCount' | 'setHighlightTask'>;
+type SettingsActions = Pick<TaskStore, 'fetchData' | 'seedGettingStarted' | 'updateSettings' | 'commitPreparedGeneralPreference' | 'commitPreparedGtdWorkflow' | 'commitPreparedAppLock' | 'retryPreparedAppLockSnapshot' | 'commitPreparedNotificationSetting' | 'retryPreparedNotificationSettingSnapshot' | 'commitPreparedAIRequestTimeout' | 'retryPreparedAIRequestTimeoutSnapshot' | 'commitPreparedVoiceSettings' | 'retryPreparedVoiceSnapshot' | 'commitPreparedAITextConfiguration' | 'retryPreparedAITextConfigurationSnapshot' | 'applyPreparedAIReasoningEffort' | 'retryPreparedAIReasoningEffortSnapshot' | 'applyPreparedAIGeminiThinkingBudget' | 'retryPreparedAIGeminiThinkingBudgetSnapshot' | 'commitPreparedCalendarSubscriptionSetting' | 'commitPreparedCalendarSubscriptionAdd' | 'retryPreparedCalendarSubscriptionSettingSnapshot' | 'commitPreparedFocusSavedFilter' | 'commitPreparedSavedSearchWrite' | 'persistSnapshot' | 'getDerivedState' | 'getFocusedCount' | 'setHighlightTask'>;
 
 // Whether the store's last completed load was a recovery load (raw adapter rows). The next normal load then reuses no
 // row object (reuseEntities below), so it is not a no-op even for an unchanged document (D9b W6 refresh drop).
@@ -1085,8 +1089,11 @@ export const createSettingsActions = ({
             const group = edit.type === 'showTaskAge' || edit.type === 'quickAccessView' || edit.type === 'theme'
                 ? 'appearance' : 'language';
             const settings: AppData['settings'] = { ...durable.settings, ...update,
-                syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}),
-                    [group]: input.after.stamp },
+                ...(edit.type === 'appLockRelockDelay'
+                    ? { security: { ...durable.settings.security, ...update.security,
+                        mobileAppLockRelockDelayUpdatedAt: input.after.stamp } }
+                    : { syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}),
+                        [group]: input.after.stamp } }),
                 ...(input.deviceIdToInitialize ? { deviceId: input.deviceIdToInitialize } : {}) };
             const fresh = generalPreferenceWitness(settings, edit.type);
             if (!fresh || !fresh.present || !taskEditValuesEqual(fresh.value, input.after.value)
@@ -1360,6 +1367,124 @@ export const createSettingsActions = ({
     retryPreparedAIRequestTimeoutSnapshot: async (authority) => {
         let result: import('./store-types').PreparedTaskEditResult = { success: false,
             reason: 'conflict', error: 'AI timeout save ownership changed' };
+        set((memory) => {
+            const boundary = authority.saveBoundary, raw = authority.rawSavedSnapshot;
+            if (!boundary || !raw || memory._allTasks !== boundary.taskReference
+                || memory.lastDataChangeAt !== boundary.lastDataChangeAt
+                || memory.settings !== raw.settings || memory.persistenceFailure === null
+                || memory.persistenceFailure !== boundary.failure
+                || boundary.generation !== getSaveGeneration()) return memory;
+            persist(set, debouncedSave, { ...memory, _allTasks: raw.tasks,
+                _allProjects: raw.projects, _allSections: raw.sections ?? [],
+                _allAreas: raw.areas ?? [], _allPeople: raw.people ?? [] }, raw);
+            authority.saveBoundary = { ...boundary, generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            result = { success: true, outcome: 'applied' };
+            return { ...memory };
+        });
+        return result;
+    },
+
+    commitPreparedVoiceSettings: async (request, authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI text configuration setting changed; refresh AI settings' };
+        set((memory) => {
+            const before = authority.state;
+            if (memory.persistenceFailure || memory._allTasks !== before._allTasks || memory._allProjects !== before._allProjects
+                || memory._allAreas !== before._allAreas || memory._allSections !== before._allSections
+                || memory._allPeople !== before._allPeople || memory.settings !== before.settings
+                || memory.lastDataChangeAt !== before.lastDataChangeAt) return memory;
+            const durable = authority.snapshot;
+            const validated = readNativeVoiceSettingsRequest(request), current = nativeVoiceSettingsWitness(durable.settings);
+            if (!validated || !current || !taskEditValuesEqual(current, validated.expected)) return memory;
+            let patch;
+            try { patch = planNativeVoiceSettings(current, validated.change); } catch { return memory; }
+            if (!patch) return memory;
+            const settings = { ...durable.settings, ai: { ...(durable.settings.ai ?? {}),
+                speechToText: { ...(durable.settings.ai?.speechToText ?? {}), ...patch } },
+                syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}),
+                    ai: timestampAtLeastAfter(new Date().toISOString(), current.stamp ?? undefined) } };
+            const rawSnapshot = { ...durable, settings };
+            const freshTasks = durable.tasks.map((row) => normalizeTaskForLoad(row));
+            const freshProjects = durable.projects.map(normalizeProjectLifecycleFields);
+            clearDerivedCache();
+            persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks,
+                _allProjects: durable.projects, _allSections: durable.sections ?? [],
+                _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings }, rawSnapshot);
+            const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
+            authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
+                generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            authority.rawSavedSnapshot = rawSnapshot;
+            result = { success: true, outcome: 'applied' };
+            return { _allTasks: freshTasks, _allProjects: freshProjects,
+                _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [],
+                _allPeople: durable.people ?? [], settings, lastDataChangeAt };
+        });
+        return result;
+    },
+
+    retryPreparedVoiceSnapshot: async (authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI text configuration save ownership changed' };
+        set((memory) => {
+            const boundary = authority.saveBoundary, raw = authority.rawSavedSnapshot;
+            if (!boundary || !raw || memory._allTasks !== boundary.taskReference
+                || memory.lastDataChangeAt !== boundary.lastDataChangeAt
+                || memory.settings !== raw.settings || memory.persistenceFailure === null
+                || memory.persistenceFailure !== boundary.failure
+                || boundary.generation !== getSaveGeneration()) return memory;
+            persist(set, debouncedSave, { ...memory, _allTasks: raw.tasks,
+                _allProjects: raw.projects, _allSections: raw.sections ?? [],
+                _allAreas: raw.areas ?? [], _allPeople: raw.people ?? [] }, raw);
+            authority.saveBoundary = { ...boundary, generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            result = { success: true, outcome: 'applied' };
+            return { ...memory };
+        });
+        return result;
+    },
+
+    commitPreparedAITextConfiguration: async (request, authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI text configuration setting changed; refresh AI settings' };
+        set((memory) => {
+            const before = authority.state;
+            if (memory.persistenceFailure || memory._allTasks !== before._allTasks || memory._allProjects !== before._allProjects
+                || memory._allAreas !== before._allAreas || memory._allSections !== before._allSections
+                || memory._allPeople !== before._allPeople || memory.settings !== before.settings
+                || memory.lastDataChangeAt !== before.lastDataChangeAt) return memory;
+            const durable = authority.snapshot;
+            const v2 = readNativeAITextConfigurationRequestV2(request);
+            const v1 = v2 ? null : readNativeAITextConfigurationRequest(request);
+            if (!v1 && !v2) return memory;
+            const current = v2 ? nativeAITextConfigurationWitnessV2(durable.settings) : nativeAITextConfigurationWitness(durable.settings);
+            if (!current || !taskEditValuesEqual(current, request.expected)) return memory;
+            const patch = v2 ? planNativeAITextConfigurationChangeV2(v2.expected, v2.change)
+                : v1 ? planNativeAITextConfigurationChange(v1.expected, v1.change) : null;
+            if (!patch) return memory;
+            const settings = { ...durable.settings, ai: { ...(durable.settings.ai ?? {}), ...patch },
+                syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}),
+                    ai: timestampAtLeastAfter(new Date().toISOString(), current.stamp ?? undefined) } };
+            const rawSnapshot = { ...durable, settings };
+            const freshTasks = durable.tasks.map((row) => normalizeTaskForLoad(row));
+            const freshProjects = durable.projects.map(normalizeProjectLifecycleFields);
+            clearDerivedCache();
+            persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks,
+                _allProjects: durable.projects, _allSections: durable.sections ?? [],
+                _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings }, rawSnapshot);
+            const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
+            authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
+                generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            authority.rawSavedSnapshot = rawSnapshot;
+            result = { success: true, outcome: 'applied' };
+            return { _allTasks: freshTasks, _allProjects: freshProjects,
+                _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [],
+                _allPeople: durable.people ?? [], settings, lastDataChangeAt };
+        });
+        return result;
+    },
+
+    retryPreparedAITextConfigurationSnapshot: async (authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI text configuration save ownership changed' };
         set((memory) => {
             const boundary = authority.saveBoundary, raw = authority.rawSavedSnapshot;
             if (!boundary || !raw || memory._allTasks !== boundary.taskReference

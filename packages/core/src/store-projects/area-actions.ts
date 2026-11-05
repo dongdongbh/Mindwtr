@@ -209,16 +209,17 @@ const areaDurableState = (state: TaskStore, data: AppData): TaskStore => ({ ...s
     _allAreas: data.areas ?? [], _allPeople: data.people ?? [], settings: data.settings });
 
 /** Apply only the Area policy changes to the current Task display projection. */
-const areaMemoryTasks = (memory: Task[], durable: Task[], effects: Array<{ before: Task; after: Task }>): Task[] => {
+const areaMemoryTasks = (memory: Task[], durable: Task[], effects: Array<{ before: Task; after: Task }>,
+    loadTask: (task: Task) => Task = normalizeTaskForLoad): Task[] => {
     const existing = new Map(memory.map((row) => [row.id, row]));
     const changes = new Map(effects.map((pair) => [pair.before.id, pair]));
     const fields = ['areaId', 'deletedAt', 'purgedAt', 'sectionId', 'updatedAt', 'rev', 'revBy'] as const;
     return durable.map((row) => {
         const current = existing.get(row.id);
         const pair = changes.get(row.id);
-        if (!current) return normalizeTaskForLoad(row);
-        if (!pair) return sameAreaAdditionRow.task(current, row) ? current : normalizeTaskForLoad(row);
-        const freshBefore = normalizeTaskForLoad(pair.before);
+        if (!current) return loadTask(row);
+        if (!pair) return sameAreaAdditionRow.task(current, row) ? current : loadTask(row);
+        const freshBefore = loadTask(pair.before);
         const projected = { ...(sameAreaAdditionRow.task(current, freshBefore) ? current : freshBefore) };
         for (const field of fields) {
             if (taskEditValuesEqual(pair.before[field], pair.after[field])) continue;
@@ -234,9 +235,9 @@ export const createAreaActions = ({
     debouncedSave,
 }: ProjectActionContext): AreaActions => {
     const persistPreparedArea = (memory: TaskStore, durable: AppData, next: AppData,
-        effects: Array<{ before: Task; after: Task }>, authority: PreparedAreaAuthority): Partial<TaskStore> => {
+        effects: Array<{ before: Task; after: Task }>, authority: PreparedAreaAuthority, loadTask?: (task: Task) => Task): Partial<TaskStore> => {
         persist(set, debouncedSave, areaDurableState(memory, durable), next);
-        const taskReference = areaMemoryTasks(memory._allTasks, next.tasks, effects);
+        const taskReference = areaMemoryTasks(memory._allTasks, next.tasks, effects, loadTask);
         const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
         // Capture the intended write before Zustand notifies synchronous or microtask subscribers.
         authority.saveBoundary = { taskReference, lastDataChangeAt,
@@ -244,6 +245,55 @@ export const createAreaActions = ({
         return { _allAreas: next.areas ?? [], _allProjects: next.projects.map(normalizeProjectLifecycleFields), _allSections: next.sections ?? [],
             _allPeople: next.people ?? [], _allTasks: taskReference,
             settings: next.settings, lastDataChangeAt };
+    };
+    /** A first raw creation effect only; a completed retry needs its typed receipt. */
+    const commitPreparedOrganizeDestinationCreate = async (
+        input: Parameters<TaskStore['commitPreparedInboxOrganizeDestinationCreate']>[0] | Parameters<TaskStore['commitPreparedProjectOrganizeDestinationCreate']>[0],
+        authority: PreparedAreaAuthority, family: typeof referenceBatchModules.inboxOrganizeCreate,
+        conflictMessage: string,
+    ): Promise<PreparedTaskEditResult> => {
+        let result: PreparedTaskEditResult = { success: false, reason: 'conflict', error: conflictMessage };
+        const adapter = getStorageAdapter();
+        // Match the existing registered prepared-batch seam and recheck every authority after yielding.
+        await Promise.resolve();
+        const shared = referenceBatchModules.shared;
+        const checks = family?.(input);
+        if (!shared || !checks || getStorageAdapter() !== adapter
+            || !(adapter instanceof shared.NativeReceiptSqliteAdapter) || !adapter.concurrentWritesGuarded
+            || !checks.validateEnvelope()) return result;
+        const temporal = checks.temporal;
+        const captured = new Set([...input.scope.inbox.tasks, ...(input.scope.restoration?.tasks ?? [])].map(row => row.id));
+        const loadTask = temporal ? (row: Task) => captured.has(row.id)
+            ? shared.historyRowLoadProjection(row, input.preparedAt, temporal) : normalizeTaskForLoad(row) : undefined;
+        set(memory => {
+            if (!areaAuthorityMatches(memory, authority) || getStorageAdapter() !== adapter) return memory;
+            const durable = authority.snapshot;
+            try { if (!checks.authorityMatches(durable)) return memory; } catch { return memory; }
+            const bind = <T extends { id: string }>(rows: T[], pairs: { before: T | null; after: T }[],
+                snapshot: (row: T) => T | null): T[] | null => {
+                const current = new Map(rows.map(row => [row.id, row]));
+                const updates = new Map<string, T>(); const created: T[] = [];
+                for (const pair of pairs) {
+                    const id = pair.after.id; const before = current.get(id);
+                    if (updates.has(id) || (pair.before === null ? Boolean(before)
+                        : !before || pair.before.id !== id || !taskEditValuesEqual(snapshot(before), pair.before))) return null;
+                    updates.set(id, pair.after); if (pair.before === null) created.push(pair.after);
+                }
+                return [...rows.map(row => updates.get(row.id) ?? row), ...created];
+            };
+            const tasks = bind(durable.tasks, input.effect.tasks, rawReadTaskSnapshot);
+            const projects = bind(durable.projects, input.effect.projects, rawReadProjectSnapshot);
+            const sections = bind(durable.sections ?? [], input.effect.sections, row => row);
+            const areas = bind(durable.areas ?? [], input.effect.areas, rawReadAreaSnapshot);
+            if (!tasks || !projects || !sections || !areas) return memory;
+            const settings = input.deviceIdToInitialize ? { ...durable.settings, deviceId: input.deviceIdToInitialize } : durable.settings;
+            clearDerivedCache();
+            result = { success: true, id: input.result.id, outcome: 'applied' };
+            return persistPreparedArea(memory, durable, { ...durable, tasks, projects, sections,
+                areas: input.request.kind === 'area' ? areas.sort((a, b) => a.order - b.order) : areas, settings },
+            input.effect.tasks.flatMap(pair => pair.before ? [{ before: pair.before, after: pair.after }] : []), authority, loadTask);
+        });
+        return result;
     };
     return ({
     addArea: async (name: string, initialProps?: Partial<Area>) => {
@@ -280,47 +330,10 @@ export const createAreaActions = ({
         return area;
     },
 
-    /** A first raw creation effect only; a completed retry is answered by its typed receipt, never target equality. */
-    commitPreparedInboxOrganizeDestinationCreate: async (input, authority): Promise<PreparedTaskEditResult> => {
-        let result: PreparedTaskEditResult = { success: false, reason: 'conflict', error: 'Inbox destination creation conflicts with saved data' };
-        const adapter = getStorageAdapter();
-        // Match the existing registered prepared-batch seam and recheck every authority after yielding.
-        await Promise.resolve();
-        const shared = referenceBatchModules.shared;
-        const checks = referenceBatchModules.inboxOrganizeCreate?.(input);
-        if (!shared || !checks || getStorageAdapter() !== adapter
-            || !(adapter instanceof shared.NativeReceiptSqliteAdapter) || !adapter.concurrentWritesGuarded
-            || !checks.validateEnvelope()) return result;
-        set(memory => {
-            if (!areaAuthorityMatches(memory, authority) || getStorageAdapter() !== adapter) return memory;
-            const durable = authority.snapshot;
-            try { if (!checks.authorityMatches(durable)) return memory; } catch { return memory; }
-            const bind = <T extends { id: string }>(rows: T[], pairs: { before: T | null; after: T }[],
-                snapshot: (row: T) => T | null): T[] | null => {
-                const current = new Map(rows.map(row => [row.id, row]));
-                const updates = new Map<string, T>(); const created: T[] = [];
-                for (const pair of pairs) {
-                    const id = pair.after.id; const before = current.get(id);
-                    if (updates.has(id) || (pair.before === null ? Boolean(before)
-                        : !before || pair.before.id !== id || !taskEditValuesEqual(snapshot(before), pair.before))) return null;
-                    updates.set(id, pair.after); if (pair.before === null) created.push(pair.after);
-                }
-                return [...rows.map(row => updates.get(row.id) ?? row), ...created];
-            };
-            const tasks = bind(durable.tasks, input.effect.tasks, rawReadTaskSnapshot);
-            const projects = bind(durable.projects, input.effect.projects, rawReadProjectSnapshot);
-            const sections = bind(durable.sections ?? [], input.effect.sections, row => row);
-            const areas = bind(durable.areas ?? [], input.effect.areas, rawReadAreaSnapshot);
-            if (!tasks || !projects || !sections || !areas) return memory;
-            const settings = input.deviceIdToInitialize ? { ...durable.settings, deviceId: input.deviceIdToInitialize } : durable.settings;
-            clearDerivedCache();
-            result = { success: true, id: input.result.id, outcome: 'applied' };
-            return persistPreparedArea(memory, durable, { ...durable, tasks, projects, sections,
-                areas: input.request.kind === 'area' ? areas.sort((a, b) => a.order - b.order) : areas, settings },
-            input.effect.tasks.flatMap(pair => pair.before ? [{ before: pair.before, after: pair.after }] : []), authority);
-        });
-        return result;
-    },
+    commitPreparedInboxOrganizeDestinationCreate: async (input, authority) =>
+        commitPreparedOrganizeDestinationCreate(input, authority, referenceBatchModules.inboxOrganizeCreate, 'Inbox destination creation conflicts with saved data'),
+    commitPreparedProjectOrganizeDestinationCreate: async (input, authority) =>
+        commitPreparedOrganizeDestinationCreate(input, authority, referenceBatchModules.projectOrganizeCreate, 'Project destination creation conflicts with saved data'),
 
     commitPreparedAreaCreate: async (input, authority): Promise<PreparedTaskEditResult> => {
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict', error: 'Prepared Area conflicts with current data' };

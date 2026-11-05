@@ -9,6 +9,7 @@ import type { GtdWorkflowEdit, NativeGtdWorkflowRequest } from './native-host-co
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Area, Task } from './types';
 import { generateUUID } from './uuid';
+import { getTranslator } from './i18n';
 import { buildGtdSettingsModel, resolveGtdPomodoroDurations } from './gtd-settings-model';
 
 const ID = '00000000-0000-4000-8000-000000000103';
@@ -130,6 +131,17 @@ async function plannedCaptureParse(env: Awaited<ReturnType<typeof open>>,
     const options = await env.host.getGtdCaptureParseOptions({});
     if (!options.ok) throw new Error(JSON.stringify(options));
     const request: NativeGtdWorkflowRequest = { requestId: ID, edit, expected: options.value.expected[edit.type] };
+    const plan = await env.host.prepareGtdWorkflow(request);
+    if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+    return { options: options.value, request, prepared: plan.value.prepared,
+        envelope: { request, prepared: plan.value.prepared } };
+}
+
+async function plannedCaptureAudio(env: Awaited<ReturnType<typeof open>>, value: boolean) {
+    const options = await env.host.getGtdCaptureAudioOptions({});
+    if (!options.ok) throw new Error(JSON.stringify(options));
+    const request: NativeGtdWorkflowRequest = { requestId: ID,
+        edit: { type: 'saveAudioAttachments', value }, expected: options.value.expected.saveAudioAttachments };
     const plan = await env.host.prepareGtdWorkflow(request);
     if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
     return { options: options.value, request, prepared: plan.value.prepared,
@@ -2519,5 +2531,110 @@ describe('durable Pomodoro Settings', () => {
             value: frozen.prepared.result });
         expect(env.data().settings.gtd?.pomodoro?.customDurations).toEqual({ focusMinutes: 33, breakMinutes: 8 });
         expect(env.data().tasks).toEqual(before.tasks);
+    });
+});
+
+
+describe('GTD Capture audio retention uses the existing workflow receipt', () => {
+    it.each([undefined, true, false])('shows the canonical default and saves an explicit flip from %s without changing capture method', async (stored) => {
+        const start = initial();
+        start.settings.gtd = { ...start.settings.gtd, defaultCaptureMethod: 'text',
+            taskEditor: 'malformed-unrelated' as never,
+            ...(stored === undefined ? {} : { saveAudioAttachments: stored }) };
+        const env = await open(start);
+        const shown = stored !== false;
+        const { options, envelope, prepared } = await plannedCaptureAudio(env, !shown);
+        expect(Object.keys(options).sort()).toEqual(['capture', 'expected']);
+        expect(Object.keys(options.capture).sort()).toEqual(['description', 'saveAudio', 'title']);
+        expect(Object.keys(options.expected)).toEqual(['saveAudioAttachments']);
+        expect(options.capture.saveAudio).toMatchObject({ value: shown,
+            edit: { type: 'saveAudioAttachments', value: !shown } });
+        expect(options.expected.saveAudioAttachments).toEqual({ present: stored !== undefined,
+            value: stored ?? null, stampPresent: true, stamp: AT });
+        expect(env.saves()).toBe(0);
+        const canonical = buildGtdSettingsModel({ settings: { gtd: { defaultCaptureMethod: 'audio',
+            ...(stored === undefined ? {} : { saveAudioAttachments: stored }) } }, areas: [],
+            taskOpenMode: 'automatic', t: getTranslator('en') });
+        expect(options.capture.saveAudio).toEqual(canonical.capture.saveAudio);
+        const parsing = await env.host.getGtdCaptureParseOptions({});
+        const area = await env.host.getGtdCaptureAreaOptions({ offset: 0, limit: 50 });
+        if (!parsing.ok || !area.ok) throw new Error('Existing Capture reads failed');
+        expect(Object.keys(parsing.value.capture).sort()).toEqual(['description', 'naturalLanguageDates', 'quickAddAutoClean', 'title']);
+        expect(Object.keys(parsing.value.expected).sort()).toEqual(['naturalLanguageDates', 'quickAddAutoClean']);
+        expect(Object.keys(area.value.capture).sort()).toEqual(['defaultArea', 'description', 'title']);
+        expect(env.host.validatePreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: prepared.result });
+        expect(await env.host.commitPreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: prepared.result });
+        expect(env.data().settings.gtd).toEqual({ ...start.settings.gtd, saveAudioAttachments: !shown });
+        expect(env.data().settings.syncPreferencesUpdatedAt).toEqual({ ...start.settings.syncPreferencesUpdatedAt,
+            gtd: prepared.after.stamp });
+        expect(env.data().tasks).toEqual(start.tasks);
+        expect(JSON.stringify(envelope)).not.toContain('legacySibling');
+    });
+
+    it('rejects malformed saved values, read extras, numeric edits and forged witnesses without writing', async () => {
+        for (const bad of [null, 'false', 0, 1]) {
+            const start = initial();
+            start.settings.gtd = Object.assign({}, start.settings.gtd, { saveAudioAttachments: bad });
+            const env = await open(start);
+            expect(await env.host.getGtdCaptureAudioOptions({})).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            expect(env.saves()).toBe(0);
+        }
+        const env = await open(initial());
+        const { envelope, request } = await plannedCaptureAudio(env, false);
+        expect(await env.host.getGtdCaptureAudioOptions({ extra: true })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        for (const value of [0, 1, 'false', null]) {
+            expect(await env.host.prepareGtdWorkflow({ ...request, edit: { type: 'saveAudioAttachments', value } }))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(await env.host.prepareGtdWorkflow({ ...request,
+            expected: { ...request.expected, present: true, value: 1 } })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const forged = structuredClone(envelope);
+        Object.assign(forged.request.edit, { value: true });
+        Object.assign(forged.prepared.request.edit, { value: true });
+        forged.prepared.after.value = true;
+        Object.assign(forged.prepared.result, { value: true });
+        expect(env.host.validatePreparedGtdWorkflow(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await env.host.prepareGtdWorkflow({ ...request, edit: { type: 'saveAudioAttachments', value: true } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(env.saves()).toBe(0);
+        const malformed = initial(); Object.assign(malformed.settings, { gtd: 'unsupported' });
+        const badGroup = await open(malformed);
+        expect(await badGroup.host.getGtdCaptureAudioOptions({})).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('rejects stale selected fields and GTD stamps while preserving independent writes', async () => {
+        for (const change of [
+            (data: AppData) => ({ ...data, settings: { ...data.settings,
+                gtd: { ...data.settings.gtd, saveAudioAttachments: false } } }),
+            (data: AppData) => ({ ...data, settings: { ...data.settings,
+                syncPreferencesUpdatedAt: { ...data.settings.syncPreferencesUpdatedAt, gtd: '2026-09-02T00:00:00.000Z' } } }),
+        ]) {
+            const env = await open(initial());
+            const { envelope } = await plannedCaptureAudio(env, false);
+            env.changeSaved(change);
+            const independent = structuredClone(env.data());
+            expect(await env.host.commitPreparedGtdWorkflow(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(env.data()).toEqual(independent);
+            expect(env.saves()).toBe(0);
+        }
+    });
+
+    it('keeps failed saves pending and cold-replays only the exact durable field and stamp', async () => {
+        let fail = false;
+        const env = await open(initial(), () => fail);
+        const { envelope, prepared } = await plannedCaptureAudio(env, false);
+        const before = structuredClone(env.data());
+        fail = true;
+        expect(await env.host.commitPreparedGtdWorkflow(envelope)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        expect(env.data()).toEqual(before);
+        fail = false;
+        expect(await env.host.commitPreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: prepared.result });
+        const cold = await env.reopen();
+        expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: prepared.result });
+        expect(cold.saves()).toBe(0);
+        cold.changeSaved((data) => ({ ...data, settings: { ...data.settings,
+            syncPreferencesUpdatedAt: { ...data.settings.syncPreferencesUpdatedAt, gtd: '2026-10-01T00:00:00.000Z' } } }));
+        expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(cold.saves()).toBe(0);
     });
 });

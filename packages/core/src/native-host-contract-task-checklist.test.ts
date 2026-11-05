@@ -464,6 +464,26 @@ describe('prepared native checklist Save and Reset', () => {
             checklist: [item('one', 'Revised'), item('two', 'Second')] });
     });
 
+    it('saves reminder policy and advance reminders with a checklist edit as one prepared effect', async () => {
+        const timed = { startTime: '2026-09-28T13:00:00.000Z', dueDate: '2026-09-28T14:00:00.000Z' };
+        const original = source({ ...timed, reminderPolicy: 'inherit' });
+        const { host } = await open(original);
+        const request = { id: original.id, requestId: id,
+            base: { reminderPolicy: 'inherit', dueReminderLeadMinutes: null, startReminderLeadMinutes: null },
+            patch: { reminderPolicy: 'send', dueReminderLeadMinutes: 60, startReminderLeadMinutes: 5 },
+            scheduleBase: { ...scheduleBase, ...timed },
+            checklist: { base: original.checklist!, value: [item('one', 'Revised'), item('two', 'Second')] } };
+        const plan = unwrap(host.prepareTaskChecklistSave(request));
+        expect(plan.kind).toBe('prepared');
+        if (plan.kind !== 'prepared') return;
+        expect(unwrap(host.validatePreparedTaskChecklistWrite({ request, prepared: plan.prepared })))
+            .toEqual({ id: original.id });
+        expect(unwrap(await host.commitPreparedTaskChecklistWrite({ request, prepared: plan.prepared })))
+            .toEqual({ id: original.id });
+        expect(savedTask()).toMatchObject({ reminderPolicy: 'send', dueReminderLeadMinutes: 60, startReminderLeadMinutes: 5, rev: 4,
+            checklist: [item('one', 'Revised'), item('two', 'Second')] });
+    });
+
     it('saves Assigned To with a checklist edit as one prepared effect', async () => {
         const original = source({ assignedTo: 'Old person' });
         const { host } = await open(original);

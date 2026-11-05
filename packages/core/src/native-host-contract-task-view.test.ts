@@ -35,6 +35,17 @@ const TASKS: Task[] = [
     task({ id: 't-empty', title: 'No list', status: 'next' }),
     task({ id: 't-archived', title: 'Old', status: 'next', projectId: 'p-archived', checklist: [item('x1')] }),
     task({ id: 't-long', title: 'Long', status: 'next', checklist: Array.from({ length: 150 }, (_, index) => item(`l${index}`)) }),
+    task({
+        id: 't-legacy-link', title: 'Legacy link', status: 'waiting', checklist: [item('g1', true)],
+        attachments: [{ id: 'g-link', kind: 'link', title: 'Fixture link', uri: 'https://example.com', createdAt: T0, updatedAt: '' }],
+    }),
+    task({
+        id: 't-odd-link', title: 'Odd link', status: 'next', checklist: [item('k1')],
+        attachments: [
+            { id: 'k-good', kind: 'link', title: 'Good', uri: 'https://good.example.com', createdAt: T0, updatedAt: T0 },
+            { id: 'k-odd', kind: 'link', title: 'Newer client', uri: 'https://odd.example.com', createdAt: T0, updatedAt: T0, futureField: 1 } as never,
+        ],
+    }),
 ];
 
 type Host = ReturnType<typeof createNativeHostContract>;
@@ -181,6 +192,37 @@ describe('native host contract: task View tab', () => {
         expect(value(host.getTaskView({ id: 't-archived', attachments: draftAttachments })).rows.some((entry) => entry.type === 'attachments')).toBe(false);
         expect(host.getTaskView({ id: 't-list', attachments: [{ id: 'x' }] as never })).toMatchObject(invalid);
         expect(writes).toEqual([]);
+    });
+
+    it('opens a task whose saved attachment has a legacy empty updatedAt, and saves it without rewriting the record', async () => {
+        const host = await openHost();
+        const saved = TASKS.find((entry) => entry.id === 't-legacy-link')!.attachments!;
+        const view = value(host.getTaskView({ id: 't-legacy-link' }));
+        expect(view.attachmentsBase).toEqual(saved);
+        const row = view.rows.find((entry) => entry.type === 'attachments');
+        expect(row?.type === 'attachments' && row.items.map((entry) => entry.id)).toEqual(['g-link']);
+        expect(view.rows.find((entry) => entry.type === 'checklist')).toMatchObject({ total: 1 });
+        value(await host.saveTaskDraft({
+            requestId: generateUUID(), id: 't-legacy-link', base: { title: 'Legacy link' }, patch: { title: 'Legacy link renamed' },
+            attachments: { base: view.attachmentsBase, value: view.attachmentsBase },
+        }));
+        expect(stored('t-legacy-link')).toMatchObject({ title: 'Legacy link renamed', attachments: saved });
+    });
+
+    it('shows the rest of the task when one saved attachment is malformed, and never drops it on a later save', async () => {
+        const host = await openHost();
+        const saved = TASKS.find((entry) => entry.id === 't-odd-link')!.attachments!;
+        const view = value(host.getTaskView({ id: 't-odd-link' }));
+        expect(view.attachmentsBase).toEqual([saved[0]]);
+        const row = view.rows.find((entry) => entry.type === 'attachments');
+        expect(row?.type === 'attachments' && row.items.map((entry) => entry.id)).toEqual(['k-good']);
+        expect(view.rows.find((entry) => entry.type === 'checklist')).toMatchObject({ total: 1 });
+        expect(writes).toEqual([]);
+        value(await host.saveTaskDraft({
+            requestId: generateUUID(), id: 't-odd-link', base: { title: 'Odd link' }, patch: { title: 'Odd link renamed' },
+            attachments: { base: view.attachmentsBase, value: view.attachmentsBase },
+        }));
+        expect(stored('t-odd-link')).toMatchObject({ title: 'Odd link renamed', attachments: saved });
     });
 
     it('shows a task in an archived project as saved, read-only', async () => {

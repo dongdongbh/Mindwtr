@@ -222,6 +222,22 @@ describe('saved search screen: core and the native host contract', () => {
         });
     });
 
+    it('applies the saved search sort before paging without changing the iOS read shape', async () => {
+        freezeClock();
+        const tasks = Array.from({ length: 105 }, (_, index) => ({
+            ...fixture.tasks[0], id: `sort-${index}`, title: `Errand ${String(104 - index).padStart(3, '0')}`,
+            contexts: ['@errand'], areaId: undefined, projectId: undefined,
+        }));
+        const settings = { ...fixture.settings.base, taskSortBy: 'created' as const,
+            savedSearches: [{ id: 'sort-search', name: 'Sorted', query: '@errand', sort: 'title' as const }] };
+        const host = await openScreenHost({ data: { tasks, projects: [], areas: [], settings }, record: RECORD, log: [] });
+        const first = value(host.getSavedSearchView({ id: 'sort-search', limit: 100 }));
+        expect(Object.keys(first).sort()).toEqual(['delete', 'empty', 'found', 'id', 'query', 'revision', 'rows', 'title', 'total', 'version']);
+        const second = value(host.getSavedSearchView({ id: 'sort-search', offset: 100, limit: 100, revision: first.revision }));
+        expect([...first.rows, ...second.rows].map(row => row.id)).toEqual(tasks.map(task => task.id).reverse());
+        expect(useTaskStore.getState().settings.taskSortBy).toBe('created');
+    });
+
     it('deletes as mobile does, and a replay after it landed writes nothing', async () => {
         freezeClock();
         const core = await open();

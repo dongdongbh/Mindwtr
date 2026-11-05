@@ -5,7 +5,7 @@ import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
 import { areaOrderEffect, sameAreaAdditionRow } from './store-projects/area-actions';
 import type { PreparedAreaOrder } from './store-types';
-import { taskEditValuesEqual } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import type { Area } from './types';
 
 export type NativeAreaOrderToken = { id: string; name: string; color: string | null; order: number;

@@ -1,6 +1,6 @@
 import type { AppSettings } from './types';
 
-export type GeneralPreferenceType = 'showTaskAge' | 'quickAccessView' | 'weekStart' | 'dateFormat' | 'timeFormat' | 'calendarSystem' | 'theme' | 'language';
+export type GeneralPreferenceType = 'appLockRelockDelay' | 'showTaskAge' | 'quickAccessView' | 'weekStart' | 'dateFormat' | 'timeFormat' | 'calendarSystem' | 'theme' | 'language';
 export type GeneralPreferenceWitness = { present: boolean; value: boolean | string | number | null;
     stampPresent: boolean; stamp: string | null };
 
@@ -12,8 +12,18 @@ const iso = (value: unknown): value is string => typeof value === 'string' && va
 export const legacyGeneralPreferenceNumber = (value: unknown): value is number =>
     typeof value === 'number' && Number.isSafeInteger(value) && Math.abs(value) <= 1_000_000;
 
-/** The one raw value and sync-group stamp that may enter a General journal. */
+/** The raw value and its local or sync-group revision used by a General journal. */
 export const generalPreferenceWitness = (settings: AppSettings, type: GeneralPreferenceType): GeneralPreferenceWitness | null => {
+    if (type === 'appLockRelockDelay') {
+        const security = settings.security;
+        if (security !== undefined && !record(security)) return null;
+        const value = security?.mobileAppLockRelockDelayMinutes;
+        const present = value !== undefined;
+        const stamp = security?.mobileAppLockRelockDelayUpdatedAt;
+        const stampPresent = stamp !== undefined;
+        if (present && !legacyGeneralPreferenceNumber(value) || stampPresent && !iso(stamp)) return null;
+        return { present, value: present ? value! : null, stampPresent, stamp: stampPresent ? stamp! : null };
+    }
     const appearanceKey = type === 'showTaskAge' ? 'showTaskAge'
         : type === 'quickAccessView' ? 'mobileQuickAccessView' : null;
     const value = appearanceKey ? settings.appearance?.[appearanceKey]

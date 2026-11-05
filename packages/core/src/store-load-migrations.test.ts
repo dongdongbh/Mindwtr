@@ -323,11 +323,64 @@ describe('runLoadMigrations', () => {
 
     it('promote-scheduled-tasks: promotes an inbox task whose due date has passed', () => {
         const data = settledData({
-            tasks: [{ id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: NOW_ISO, updatedAt: NOW_ISO } as unknown as Task],
+            tasks: [{ id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '2026-03-20T00:00:00.000Z' } as unknown as Task],
         });
         const { data: result, applied } = runLoadMigrations(data, ctxFor(data));
         expect(applied).toEqual(['promote-scheduled-tasks']);
         expect(result.tasks[0].status).toBe('next');
+    });
+
+    it('promote-scheduled-tasks: preserves an Inbox choice after its dates through reload and sync (#1452)', () => {
+        const task: Task = {
+            id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [],
+            startTime: '2026-04-01', dueDate: '2026-04-01T21:00:00.000Z',
+            createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '2026-04-05T00:00:00.000Z',
+            rev: 7, revBy: 'device-b',
+        };
+        const data = settledData({ tasks: [task] });
+        const logs: LogPayload[] = [];
+        setLogger((payload) => logs.push(payload));
+        try {
+            const first = runLoadMigrations(data, ctxFor(data));
+            const synced = repairMergedSyncReferences(structuredClone(first.data), NOW_ISO);
+            const second = runLoadMigrations(synced, ctxFor(synced));
+            expect(first.applied).toEqual([]);
+            expect(first.data).toBe(data);
+            expect(first.data.tasks[0]).toBe(task);
+            expect(second.applied).toEqual([]);
+            expect(second.data.tasks).toEqual([task]);
+            expect(logs.filter((log) => log.message === 'Dated Inbox task kept in Inbox after its date'))
+                .toMatchObject([{ context: { releaseCheck: 'v1.3.8/inbox-choice-after-date-kept' } }]);
+        } finally {
+            setLogger(consoleLogger);
+        }
+    });
+
+    it.each([
+        { name: 'start after last edit', startTime: '2026-04-02T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z', status: 'next' },
+        { name: 'due after last edit', dueDate: '2026-04-02T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z', status: 'next' },
+        { name: 'start at last edit', startTime: '2026-04-02T00:00:00.000Z', updatedAt: '2026-04-02T00:00:00.000Z', status: 'inbox' },
+        { name: 'due before last edit', dueDate: '2026-04-02T00:00:00.000Z', updatedAt: '2026-04-03T00:00:00.000Z', status: 'inbox' },
+        { name: 'future start', startTime: '2026-04-11T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z', status: 'inbox' },
+        { name: 'newly arrived due after a retained past start', startTime: '2026-04-01T00:00:00.000Z', dueDate: NOW_ISO, updatedAt: '2026-04-03T00:00:00.000Z', status: 'next' },
+        { name: 'missing historical timestamp', startTime: '2026-04-02T00:00:00.000Z', updatedAt: undefined, status: 'next' },
+        { name: 'invalid historical timestamp', dueDate: '2026-04-02T00:00:00.000Z', updatedAt: 'invalid', status: 'next' },
+    ])('promote-scheduled-tasks: $name', ({ startTime, dueDate, updatedAt, status }) => {
+        const task: Task = {
+            id: 'scheduled', title: 'T', status: 'inbox', tags: [], contexts: [],
+            startTime, dueDate, createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '',
+            rev: 7, revBy: 'device-b',
+        };
+        Object.assign(task, { updatedAt });
+        const data = settledData({ tasks: [task] });
+        const first = runLoadMigrations(data, ctxFor(data));
+        const second = runLoadMigrations(first.data, ctxFor(first.data));
+        expect(first.data.tasks[0]).toMatchObject(status === 'next'
+            ? { status, updatedAt: NOW_ISO, rev: 8, revBy: 'device-a' }
+            : { status, updatedAt, rev: 7, revBy: 'device-b' });
+        expect(first.applied).toEqual(status === 'next' ? ['promote-scheduled-tasks'] : []);
+        expect(second.applied).toEqual([]);
+        expect(second.data).toBe(first.data);
     });
 
     // `settledSettings` carries `lastAutoArchiveAt: NOW_ISO`, i.e. a pass that just
@@ -438,7 +491,7 @@ describe('runLoadMigrations', () => {
         // tombstone to purge. Everything else in this fixture is already settled.
         const data = settledData({
             tasks: [
-                { id: 't-due', title: 'Due', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: NOW_ISO, updatedAt: NOW_ISO } as unknown as Task,
+                { id: 't-due', title: 'Due', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '2026-03-20T00:00:00.000Z' } as unknown as Task,
                 {
                     id: 't-tombstone', title: 'Old', status: 'done', tags: [], contexts: [],
                     createdAt: '2000-01-01T00:00:00.000Z', updatedAt: '2000-01-01T00:00:00.000Z',
@@ -608,7 +661,7 @@ describe('runLoadMigrations', () => {
                 {
                     id: 't-scheduled', title: 'Was due', status: 'inbox',
                     tags: [], contexts: [], dueDate: '2026-04-01',
-                    createdAt: RECENT_AT, updatedAt: RECENT_AT,
+                    createdAt: ARCHIVED_AT, updatedAt: ARCHIVED_AT,
                 } as unknown as Task,
             ],
             projects: [

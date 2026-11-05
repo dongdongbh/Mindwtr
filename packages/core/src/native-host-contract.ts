@@ -1,8 +1,14 @@
+import { focusSavedFilterToken } from './store-settings';
+import { buildContextsFilterModel, CONTEXTS_FILTER_STATUSES, getContextsSaveCriteria } from './contexts-filter';
+import type { FilterCriteria } from './types';
+import { nativeTaskRowSwipeActions, type NativeTaskRowSwipeActionsInput } from './native-host-contract-row-swipe';
+import { createProjectTasksMoveMethods } from './native-host-contract-project-bulk-status';
+import { nativeProjectTaskSources, nativeProjectTaskModel, nativeProjectFilterVisibility } from './native-host-project-task-list';
 import { getFocusHiddenByAreaLabel } from './focus-controls';
 import { getPomodoroTaskChoices } from './pomodoro';
 import { createReferenceProjectNextActionMethods } from './native-host-contract-project-next-action';
 import { MAX_FOCUSED_PROJECTS } from './store-projects/project-actions';
-import { AREA_FILTER_ALL, AREA_FILTER_NONE, areaFilterSelectionToFilters, areaFilterSelectionToValue, cycleAreaFilterSelection, isAreaFilterSelectionActive, isTaskVisibleInArea, isTaskVisibleInInbox, resolveAreaFilterSelection, taskMatchesAreaFilterSelection, type AreaFilterSelection } from './area-filter';
+import { AREA_FILTER_ALL, AREA_FILTER_NONE, areaFilterSelectionToFilters, areaFilterSelectionToValue, cycleAreaFilterSelection, isAreaFilterSelectionActive, isTaskVisibleInArea, isTaskVisibleInInbox, resolveAreaFilterSelection, type AreaFilterSelection } from './area-filter';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import { flushPendingSave, getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
 import { gateStoreCommands } from './store-write-gate';
@@ -11,14 +17,12 @@ import { getTaskSortByLabel, getVisibleTaskSortOptions, resolveNonDoneTaskSortBy
 import { getProjectSectionsForView, getSequentialProjectTaskCues, isSelectableProjectForTaskAssignment, type ProjectSequenceTaskCue } from './project-utils';
 import { getProjectDetailsPresentation, type ProjectDetailsMetadata } from './project-details-presentation';
 import {
-    buildProjectTaskListModel,
     getProjectDetailTaskListOptions,
-    selectProjectTaskListTasks,
     type ProjectTaskListItem,
 } from './project-task-list-model';
 import { buildProjectTaskReorderModel, projectTaskOrderIdentities, projectTaskOrderToken } from './project-task-reorder';
 import { buildProjectGroups, type ProjectAreaGroup, type ProjectTagFilter } from './project-grouping';
-import { resolveTaskSortByForFeatures, sortTasksBy, splitTodayTasksByStartTime } from './task-utils';
+import { isTaskFutureFocusCandidate, resolveTaskSortByForFeatures, sortTasksBy, splitTodayTasksByStartTime } from './task-utils';
 import { isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { isRecurrenceRule, parseRRuleString } from './recurrence';
 import { createTaskDraft, isTaskDraftDateInputBaseline, resolveTaskDraftTitle, serializeTaskDraftTokens, TASK_DRAFT_FIELD_KEYS, type TaskDraft, type TaskDraftField } from './task-draft';
@@ -48,6 +52,7 @@ import { clearGlobalSearchActiveChip, DEFAULT_GLOBAL_SEARCH_FILTERS, fetchGlobal
 import type { SearchProjectResult } from './storage';
 import { createSearchHighlighter } from './search-highlight';
 import { createDateFormatter, hasTimeComponent, normalizeClockTimeInput, safeParseDate, setHostSystemLocale, type DateFormatter, type DateFormattingConfig } from './date';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './schedule-utils';
 import { WEEKDAY_ORDER } from './recurrence-constants';
 import {
     editTaskDraftRecurrence,
@@ -59,6 +64,7 @@ import {
     parseTaskEditorTimeEstimate,
     parseTaskEditorTimeSpent,
     setTaskDraftDate,
+    setTaskDraftReviewTime,
     setTaskDraftTime,
     type TaskDraftRecurrenceEdit,
     type TaskEditorDateField,
@@ -253,6 +259,7 @@ import {
     createMenuViewMethods,
     isFoldIdList,
     isFilterEdit,
+    isPreservedFilterCriteria,
     matchesPickerQuery,
     nativeFilterView,
     paramsKey,
@@ -266,12 +273,13 @@ import {
 import { createReviewViewMethods } from './native-host-contract-review-views';
 import { createQuickCaptureMethods } from './native-host-contract-quick-capture';
 import { createMindSweepMethods } from './native-host-contract-mind-sweep';
+import { createReviewProjectTaskMethods } from './native-host-contract-review-project-task';
 import { createOwnedEditorCompleteTaskDraftSaveMethods, createOwnedEditorFileEditTaskDraftSaveMethods } from './native-host-contract-owned-file-edit-save';
 import { createOwnedEditorFileAddTaskDraftSaveMethods } from './native-host-contract-owned-editor-save';
 import { createOwnedFileAddTaskDraftSaveMethods } from './native-host-contract-owned-file-save';
 import { createTaskDraftSaveMethods, getNativeTaskScheduleBase, getNativeTaskRecurrenceBase, type NativeTaskScheduleBase, type NativeTaskRecurrenceBase } from './native-host-contract-task-save';
 import { createOwnedTaskEditorResumeMethods, createTaskEditorResumeMethods } from './native-host-contract-task-editor-resume';
-import { canCancelNativeTask, canSkipNativeTaskOccurrence, createTaskChecklistSaveMethods } from './native-host-contract-task-checklist';
+import { canCancelNativeTask, canSkipNativeTaskOccurrence, createTaskChecklistSaveMethods, createNativeWidgetCompletionMethods } from './native-host-contract-task-checklist';
 import { createTaskFocusMethods } from './native-host-contract-task-focus';
 import { createFocusOrderMethods } from './native-host-contract-focus-order';
 import { createFocusSavedFilterMethods } from './native-host-contract-focus-saved-filter';
@@ -289,7 +297,7 @@ import { createUnassignedAreaColorMethods } from './native-host-contract-unassig
 import { createSomedaySectionDeleteMethods } from './native-host-contract-someday-section-delete';
 import { createSomedaySectionOrderMethods } from './native-host-contract-someday-section-order';
 import { createSomedaySectionTaskMethods } from './native-host-contract-someday-section-task';
-import { createSomedaySectionMoveMethods } from './native-host-contract-someday-section-move';
+import { createSomedaySectionBulkMoveMethods, createSomedaySectionMoveMethods } from './native-host-contract-someday-section-move';
 import { createProjectNotesWriteMethods } from './native-host-contract-project-notes';
 import { createProjectTagsWriteMethods } from './native-host-contract-project-tags';
 import { createProjectAttachmentWriteMethods, createProjectFileRemoveWriteMethods } from './native-host-contract-project-attachments';
@@ -301,17 +309,24 @@ import { createTrashItemsRestoreMethods } from './native-host-contract-trash-bul
 import { createTrashItemsPurgeMethods } from './native-host-contract-trash-purge';
 import { createProjectDeleteMethods } from './native-host-contract-project-delete';
 import { createProjectDuplicateMethods } from './native-host-contract-project-duplicate';
+import { createProjectToSectionMethods } from './native-host-contract-project-to-section';
 import { createProjectLifecycleMethods } from './native-host-contract-project-lifecycle';
 import { createArchivedTaskRestoreMethods } from './native-host-contract-archive-task-restore';
 import { createInboxTasksMoveMethods } from './native-host-contract-inbox-bulk-status';
 import { createReferenceTasksMoveMethods } from './native-host-contract-reference-bulk-status';
 import { createInboxTasksAddTagMethods } from './native-host-contract-inbox-bulk-tag';
+import { createProjectTasksAddTagMethods } from './native-host-contract-project-bulk-tag';
 import { createInboxTasksRemoveTagMethods } from './native-host-contract-inbox-bulk-remove-tag';
+import { createProjectTasksRemoveTagMethods } from './native-host-contract-project-bulk-remove-tag';
+import { createProjectTasksOrganizeMethods } from './native-host-contract-project-bulk-organize';
 import { createInboxTasksOrganizeMethods } from './native-host-contract-inbox-bulk-organize';
 import { createInboxOrganizeDestinationCreateMethods } from './native-host-contract-inbox-organize-create';
+import { createProjectOrganizeDestinationCreateMethods } from './native-host-contract-project-organize-create';
 import { createReferenceTasksAddTagMethods } from './native-host-contract-reference-bulk-tag';
 import { createReferenceTasksRemoveTagMethods } from './native-host-contract-reference-bulk-remove-tag';
 import { createArchivedTasksRestoreMethods } from './native-host-contract-archive-bulk-restore';
+import { createProjectTasksDeleteMethods } from './native-host-contract-project-bulk-delete';
+import { createTaskChecklistMoveMethods } from './native-host-contract-task-checklist-move';
 import { createArchivedTasksDeleteMethods } from './native-host-contract-archive-bulk-delete';
 import { createProjectDateMethods } from './native-host-contract-project-date';
 import { createProjectEditMethods } from './native-host-contract-project-edit';
@@ -463,6 +478,8 @@ export type NativeTaskRow = Pick<Task, 'id' | 'title' | 'status'> & {
     laterToday: boolean;
     /** Focus Today footer, already formatted with the user's clock preference. */
     laterTodayLabel?: string | null;
+    /** Focus rows only: the translated deferred-star reason, or null when no deferred block applies. */
+    focusBlockedLabel?: string | null;
     /** The task's revision: send it with a command that writes this task (compare-and-set). */
     taskRevision: string;
     /**
@@ -762,7 +779,7 @@ const normalizeEditorValue = (field: keyof NativeEditableFields, value: unknown)
 
 const DRAFT_FIELD_SET = new Set<string>(TASK_DRAFT_FIELD_KEYS);
 // JSON has no undefined: these draft fields accept null for "not set".
-const UNSET_DRAFT_FIELDS = new Set<string>(['relativeStartOffset', 'viewSectionIds', 'timeSpentMinutes', 'repeatReminderMinutes']);
+const UNSET_DRAFT_FIELDS = new Set<string>(['relativeStartOffset', 'viewSectionIds', 'timeSpentMinutes', 'repeatReminderMinutes', 'dueReminderLeadMinutes', 'startReminderLeadMinutes']);
 const isString = (value: unknown): value is string => typeof value === 'string';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 const isDraftDate = (value: unknown) => value === '' || isValidEditorDate(value);
@@ -798,6 +815,8 @@ const DRAFT_VALUE_CHECKS: Record<TaskDraftField, (value: unknown) => boolean> = 
     energyLevel: isOneOf(['', ...TASK_EDITOR_ENERGY_LEVEL_OPTIONS]),
     assignedTo: isString,
     reviewAt: isDraftDate,
+    dueReminderLeadMinutes: (value) => value === undefined || normalizeDueReminderLeadMinutes(value) !== undefined,
+    startReminderLeadMinutes: (value) => value === undefined || normalizeStartReminderLeadMinutes(value) !== undefined,
     repeatReminderMinutes: isUnsetOrMinutes,
     suppressMindwtrReminders: isBoolean,
     reminderPolicy: (value) => value === 'inherit' || value === 'send' || value === 'skip',
@@ -824,7 +843,7 @@ export type NativeTaskDraftEdit =
     /** A day from the date picker, yyyy-MM-dd: an existing time is kept, else the default schedule time is added. */
     | { type: 'pickDate'; field: TaskEditorDateField; date: string }
     /** A time from the time picker, HH:mm, on the field's day (today when unset). */
-    | { type: 'pickTime'; field: 'startTime' | 'dueDate'; time: string }
+    | { type: 'pickTime'; field: TaskEditorDateField; time: string }
     /** "Start N units before due"; `amount` as typed. */
     | { type: 'relativeStart'; amount: number | string; unit: RelativeStartOffsetUnit }
     | { type: 'recurrence'; edit: NativeTaskDraftRecurrenceEdit }
@@ -860,7 +879,7 @@ const isMonthlyCustom = (value: unknown): value is TaskEditorMonthlyCustom => (
 );
 
 /** A whole draft from a host: every field present and valid (JSON drops unset fields, or sends null). */
-const readTaskDraft = (value: unknown): TaskDraft | null => {
+const readTaskDraft = (value: unknown, source?: Task): TaskDraft | null => {
     if (!isObjectRecord(value) || Object.keys(value).some((field) => !DRAFT_FIELD_SET.has(field) && field !== 'dateInputBaseline')) return null;
     if (Object.prototype.hasOwnProperty.call(value, 'dateInputBaseline') && !isTaskDraftDateInputBaseline(value.dateInputBaseline)) return null;
     const draft = toDraftValues(value) as TaskDraft;
@@ -869,7 +888,12 @@ const readTaskDraft = (value: unknown): TaskDraft | null => {
     return TASK_DRAFT_FIELD_KEYS.every((field) => (
         (Object.prototype.hasOwnProperty.call(value, field) || UNSET_DRAFT_FIELDS.has(field) || field === 'reminderPolicy' || field === 'preserveChecklistOnRepeat')
         // Stored history must round-trip without making Archived an editable status.
-        && ((field === 'status' && draft.status === 'archived') || DRAFT_VALUE_CHECKS[field](draft[field]))
+        && ((field === 'status' && draft.status === 'archived') || DRAFT_VALUE_CHECKS[field](draft[field])
+            || Boolean(source && ['startTime', 'dueDate', 'reviewAt'].includes(field)
+                && draft.dateInputBaseline?.taskId === source.id
+                && draft.dateInputBaseline[field as 'startTime' | 'dueDate' | 'reviewAt'].raw === (source[field as 'startTime' | 'dueDate' | 'reviewAt'] ?? null)
+                && draft.dateInputBaseline[field as 'startTime' | 'dueDate' | 'reviewAt'].input === source[field as 'startTime' | 'dueDate' | 'reviewAt']
+                && draft[field] === source[field as 'startTime' | 'dueDate' | 'reviewAt']))
     )) ? draft : null;
 };
 
@@ -933,10 +957,12 @@ const applyNativeTaskDraftEdit = (
             return withPatch(getTaskDraftDateEdit(field, value));
         }
         case 'pickTime': {
-            // The React Native editor has no review time: its review field offers a date only.
-            if ((field !== 'startTime' && field !== 'dueDate') || typeof edit.time !== 'string' || !CLOCK_TIME_PATTERN.test(edit.time)) return null;
+            if (!EDITOR_DATE_FIELDS.includes(field) || typeof edit.time !== 'string' || !CLOCK_TIME_PATTERN.test(edit.time)) return null;
             const [hours, minutes] = edit.time.split(':').map(Number);
-            return withPatch(getTaskDraftDateEdit(field, setTaskDraftTime(draft[field], { hours, minutes }, null, context.now)));
+            const value = field === 'reviewAt'
+                ? setTaskDraftReviewTime(draft.reviewAt, { hours, minutes }, context.formatDate, context.now)
+                : setTaskDraftTime(draft[field], { hours, minutes }, null, context.now);
+            return withPatch(getTaskDraftDateEdit(field, value));
         }
         case 'relativeStart': {
             if (!RELATIVE_START_UNITS.includes(edit.unit as string)
@@ -1199,6 +1225,7 @@ export function createNativeHostContract(options: {
             t: translate,
             now,
         });
+        if (state.settings.gtd?.taskEditor?.hidden?.includes('status')) base.statusLabel = null;
         if (!base.descriptionPreview) return base;
         if (cachedMarkdownLookup?.tasks !== state._allTasks || cachedMarkdownLookup.projects !== state._allProjects) {
             cachedMarkdownLookup = {
@@ -1319,6 +1346,9 @@ export function createNativeHostContract(options: {
 
     const focusRows = (section: CachedFocusSection, offset: number, limit: number, now: Date): NativeTaskRow[] => {
         const formatDate = createDateFormatter(dateFormatting());
+        const blockedLabel = section.key === 'upcoming'
+            ? getFocusStarBlockedText(translate, { blockedReason: 'deferred' }, normalizeFocusTaskLimit(useTaskStore.getState().settings.gtd?.focusTaskLimit))
+            : null;
         return section.items.slice(offset, offset + limit).map((task) => {
             const appearsAt = section.key === 'upcoming' ? cachedRevealDates.get(task.id) : undefined;
             const laterToday = section.key === 'schedule' && cachedLaterTodayIds.has(task.id);
@@ -1333,6 +1363,7 @@ export function createNativeHostContract(options: {
                 revealLabel: appearsAt ? formatDate(appearsAt, 'P') : null,
                 laterToday,
                 laterTodayLabel: laterToday ? formatDate(task.startTime, 'p') : null,
+                focusBlockedLabel: blockedLabel && !isTaskFutureFocusCandidate(task, now) ? blockedLabel : null,
             };
         });
     };
@@ -1340,20 +1371,10 @@ export function createNativeHostContract(options: {
     // RN TaskList filters its project rows by area, including completed and reference tasks.
     const projectTaskSources = (projectId: string, showCompleted: boolean) => {
         const state = useTaskStore.getState();
-        const project = state._allProjects.find((candidate) => candidate.id === projectId);
-        if (!project || project.deletedAt) return null;
-        const options = getProjectDetailTaskListOptions(project, showCompleted);
-        const projectTasks = state._allTasks.filter((task) => task.projectId === project.id && !task.deletedAt);
-        const areaById = new Map(sortAreasForDisplay(state.areas).map((area) => [area.id, area]));
-        const selection = resolveAreaFilterSelection(state.settings.filters, state.areas);
-        const filterableTasks = selectProjectTaskListTasks(projectTasks, {
-            projectId: project.id,
-            statusFilter: 'all',
-            includeArchived: options.includeArchived,
-            includeDone: options.includeDone,
-            isVisible: (task) => taskMatchesAreaFilterSelection(task, selection, state._projectsById, areaById),
-        });
-        return { state, project, options, projectTasks, filterableTasks };
+        const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
+            areas: state._allAreas, settings: state.settings };
+        const sources = nativeProjectTaskSources(data, projectId, showCompleted);
+        return sources ? { ...sources, state, data } : null;
     };
 
     const projectDetail = (projectId: string, currentRevision: string, showCompleted = false, completedCollapsed = false,
@@ -1362,26 +1383,11 @@ export function createNativeHostContract(options: {
         if (cachedProjectDetailKey === key && cachedProjectDetail) return cachedProjectDetail;
         const sources = projectTaskSources(projectId, showCompleted);
         if (!sources) return null;
-        const { state, project, options, projectTasks, filterableTasks } = sources;
+        const { state, project, options, projectTasks } = sources;
         // Mobile: ProjectDetailModal resolves the saved sort for features (it gates
         // the cues); TaskList then resolves that for the all-status list.
         const projectSortBy = resolveTaskSortByForFeatures(project.taskSortBy ?? 'default', state.settings);
-        const model = buildProjectTaskListModel({
-            project,
-            tasks: filterableTasks,
-            visibleTasks: state.tasks,
-            sections: state.sections,
-            allSections: state._allSections,
-            statusFilter: 'all',
-            criteria: filter?.resolved.criteria ?? {},
-            searchQuery: filter?.resolved.searchQuery ?? '',
-            sortBy: resolveNonDoneTaskSortBy(projectSortBy, state.settings),
-            projectOrder: options.enableProjectReorder,
-            reorderMode: false,
-            groupCompletedTasksLast: options.groupCompletedTasksLast,
-            completedCollapsed,
-            t: translate,
-        });
+        const model = nativeProjectTaskModel(sources.data, sources, completedCollapsed, filter?.resolved, translate);
         const area = state.areas.find((candidate) => candidate.id === project.areaId);
         cachedProjectDetail = {
             readOnly: options.readOnly,
@@ -1473,10 +1479,7 @@ export function createNativeHostContract(options: {
     ) => {
         const sources = projectTaskSources(projectId, showCompleted);
         if (!sources) return null;
-        const visibility = getTaskMetadataFilterVisibility(sources.filterableTasks, {
-            prioritiesEnabled: resolveFeatureFlags(sources.state.settings).priorities,
-            timeEstimatesEnabled: false,
-        });
+        const visibility = nativeProjectFilterVisibility(sources, sources.state.settings);
         const resolve = (state: ListFilterState) => resolveListFilterState(state, { visibility, t: translate });
         let resolved = resolve(filters);
         if (filterEdit) resolved = resolve(applyListFilterEdit(resolved.state, filterEdit));
@@ -1669,9 +1672,18 @@ export function createNativeHostContract(options: {
     const bulkActionMethods = createBulkActionMethods({
         readiness, save, t: () => translate,
         formatDate: () => createDateFormatter(dateFormatting()),
-        views: { ...menuViewMethods, ...inboxViewMethods },
+        views: { ...menuViewMethods, ...inboxViewMethods,
+            getProjectDetailFilterView: (input) => contract.getProjectDetailFilterView(input),
+            getContextsView: (input) => contract.getContextsView(input as never),
+            getReviewOverview: (input) => contract.getReviewOverview(input as never) },
         pickerRevision: () => `${revision()}:${settingsRevision()}:${language}:${systemLocale ?? ''}`,
     });
+
+    const bulkSelectionShown = (request: { source: string; params: Record<string, unknown>; taskIds: string[]; taskRevisions: Record<string, string> }): boolean => {
+        const view = bulkActionMethods.getBulkActions({ list: request.source as 'review' | 'contexts', params: request.params, taskIds: request.taskIds });
+        return view.ok && view.value.selectedIds.length === request.taskIds.length
+            && request.taskIds.every((id) => view.value.taskRevisions[id] === request.taskRevisions[id]);
+    };
 
     // Built before the contract object: Process Inbox's Clarify reads the current step's draft.
     const inboxProcessingMethods = createInboxProcessingMethods({
@@ -1680,11 +1692,12 @@ export function createNativeHostContract(options: {
     });
 
     const taskChecklistMethods = createTaskChecklistSaveMethods({ readiness, save, receipts, language: () => language,
-        validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value), isReadOnly: isInArchivedProject });
+        validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value), isReadOnly: isInArchivedProject }, readTaskDraft);
     // The contract itself, for the commands that run its own methods (Project details' journaled edit).
     let self: Record<string, unknown> | null = null;
     const contract = {
         version: NATIVE_HOST_CONTRACT_VERSION,
+        getTaskRowSwipeActions(input: NativeTaskRowSwipeActionsInput) { return nativeTaskRowSwipeActions(input, translate); },
         ...createProjectEditMethods({ readiness, save, contract: () => self ?? {} }),
         ...createTaskDraftSaveMethods({ readiness, save, validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value) }),
         ...createOwnedFileAddTaskDraftSaveMethods({ readiness, save, validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value) }),
@@ -1697,8 +1710,10 @@ export function createNativeHostContract(options: {
         ...createOwnedTaskEditorResumeMethods({ readiness, validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value),
             isReadOnly: isInArchivedProject }),
         ...taskChecklistMethods,
+        ...createNativeWidgetCompletionMethods({ readiness, save, receipts, language: () => language,
+            validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value), isReadOnly: isInArchivedProject }),
         ...createReferenceProjectNextActionMethods({ readiness, save, t: () => translate, originMethods: taskChecklistMethods }),
-        ...createTaskPromotionMethods({ readiness, save, isReadOnly: isInArchivedProject }),
+        ...createTaskPromotionMethods({ readiness, save, isReadOnly: isInArchivedProject, t: () => translate }),
         ...inboxProcessingMethods,
         // Settings › AI and the AI actions: native-host-contract-ai.ts.
         ...createAIMethods({
@@ -1762,6 +1777,7 @@ export function createNativeHostContract(options: {
         // Selection mode on those lists: native-host-contract-bulk-actions.ts.
         ...bulkActionMethods,
         ...createInboxOrganizeDestinationCreateMethods({ readiness, save, getBulkActions: bulkActionMethods.getBulkActions }),
+        ...createProjectOrganizeDestinationCreateMethods({ readiness, save, getBulkActions: bulkActionMethods.getBulkActions }),
         // The Board: native-host-contract-board.ts.
         ...createBoardViewMethods({
             readiness,
@@ -1820,6 +1836,11 @@ export function createNativeHostContract(options: {
             revision: () => `${revision()}:${settingsRevision()}:${language}`,
             t: () => translate,
         }),
+        ...createSomedaySectionBulkMoveMethods({
+            readiness, save,
+            revision: () => `${revision()}:${settingsRevision()}:${language}`,
+            t: () => translate,
+        }),
         ...createFocusOrderMethods({ readiness, save,
             revision: () => `${revision()}:${settingsRevision()}:${language}`,
             t: () => translate,
@@ -1830,7 +1851,7 @@ export function createNativeHostContract(options: {
             t: () => translate,
             formatDate: (value) => createDateFormatter(dateFormatting())(value, 'P', value),
         }),
-        ...createSavedSearchWriteMethods({ readiness, save }),
+        ...createSavedSearchWriteMethods({ readiness, save, t: (key) => translate(key) }),
         // Settings: the menu, General and Manage: native-host-contract-settings.ts.
         // Settings › About, the heartbeat and the store review prompt: native-host-contract-about.ts.
         ...createAboutMethods({ readiness, t: () => translate, language: () => language, host: () => options.about ?? null }),
@@ -1873,6 +1894,7 @@ export function createNativeHostContract(options: {
 
         // The Mind Sweep screen: native-host-contract-mind-sweep.ts.
         ...createMindSweepMethods({ readiness, save, t: () => translate, revision: (now) => `${revision()}:${displayRevision(now)}` }),
+        ...createReviewProjectTaskMethods({ readiness, save, t: () => translate }),
         // The pending-captures queue and context automation: native-host-contract-capture-ingest.ts.
         ...createCaptureIngestMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
         // Reminder alarms and notification taps: native-host-contract-reminders.ts.
@@ -1949,17 +1971,24 @@ export function createNativeHostContract(options: {
         ...createTrashItemsPurgeMethods({ readiness, save }),
         ...createProjectDeleteMethods({ readiness, save, t: () => translate }),
         ...createProjectDuplicateMethods({ readiness, save, t: () => translate }),
+        ...createProjectToSectionMethods({ readiness, save, t: () => translate }),
         ...createProjectLifecycleMethods({ readiness, save }),
         ...createArchivedTaskRestoreMethods({ readiness, save }),
         ...createArchivedTasksRestoreMethods({ readiness, save }),
         ...createReferenceTasksMoveMethods({ readiness, save }),
-        ...createInboxTasksMoveMethods({ readiness, save }),
+        ...createInboxTasksMoveMethods({ readiness, save, shown: bulkSelectionShown }),
+        ...createProjectTasksMoveMethods({ readiness, save }),
         ...createReferenceTasksAddTagMethods({ readiness, save }),
-        ...createInboxTasksAddTagMethods({ readiness, save }),
+        ...createInboxTasksAddTagMethods({ readiness, save, shown: bulkSelectionShown }),
+        ...createProjectTasksAddTagMethods({ readiness, save }),
         ...createInboxTasksRemoveTagMethods({ readiness, save }),
+        ...createProjectTasksRemoveTagMethods({ readiness, save }),
         ...createInboxTasksOrganizeMethods({ readiness, save }),
+        ...createProjectTasksOrganizeMethods({ readiness, save }),
         ...createReferenceTasksRemoveTagMethods({ readiness, save }),
-        ...createArchivedTasksDeleteMethods({ readiness, save, t: () => translate }),
+        ...createArchivedTasksDeleteMethods({ readiness, save, t: () => translate, shown: bulkSelectionShown }),
+        ...createTaskChecklistMoveMethods({ readiness, save, t: () => translate }),
+        ...createProjectTasksDeleteMethods({ readiness, save, t: () => translate }),
         ...createProjectDateMethods({ readiness, save,
             revision: projectMutationRevision }),
         ...createProjectAreaMethods({ readiness, save,
@@ -2999,11 +3028,11 @@ export function createNativeHostContract(options: {
                 || typeof input.id !== 'string' || !input.id.trim() || typeof input.query !== 'string') {
                 return fail('INVALID_INPUT', 'A task ID, whole draft and query string are required');
             }
-            const draft = readTaskDraft(input.draft);
-            if (!draft) return fail('INVALID_INPUT', 'draft must hold every task draft field with a valid value');
             const state = useTaskStore.getState();
             const task = state._tasksById.get(input.id);
             if (!task || task.deletedAt) return fail('TASK_NOT_FOUND', 'Task not found');
+            const draft = readTaskDraft(input.draft, task);
+            if (!draft) return fail('INVALID_INPUT', 'draft must hold every task draft field with a valid value');
             const editor = taskEditorModel(task, draft, new Date());
             return { ok: true, value: {
                 version: NATIVE_HOST_CONTRACT_VERSION,
@@ -3244,15 +3273,15 @@ export function createNativeHostContract(options: {
             const ready = readiness();
             if (!ready.ok) return ready;
             if (!input || typeof input.id !== 'string' || !input.id.trim()) return fail('INVALID_INPUT', 'Task ID is required');
-            const draft = readTaskDraft(input.draft);
+            const state = useTaskStore.getState();
+            const task = state._tasksById.get(input.id);
+            if (!task || task.deletedAt) return fail('TASK_NOT_FOUND', 'Task not found');
+            const draft = readTaskDraft(input.draft, task);
             if (!draft) return fail('INVALID_INPUT', 'draft must hold every task draft field with a valid value');
             const checklist = input.checklist === undefined ? undefined : readChecklist(input.checklist);
             if (checklist === null || (input.checklist !== undefined && !isNativeJsonWithinBytes(input.checklist))) {
                 return fail('INVALID_INPUT', 'checklist must be a bounded complete editor list of at most 1,000 items');
             }
-            const state = useTaskStore.getState();
-            const task = state._tasksById.get(input.id);
-            if (!task || task.deletedAt) return fail('TASK_NOT_FOUND', 'Task not found');
             const now = new Date();
             const edited = input.edit === undefined ? draft : applyNativeTaskDraftEdit(draft, input.edit, {
                 task,
@@ -3459,6 +3488,7 @@ type InboxProcessingDeps = {
 type InboxProcessingEntry = {
     id: string;
     mode: ProcessInboxMode;
+    includeDetails: boolean;
     session: ProcessInboxSession;
     answers: ProcessInboxAnswers;
     draft: ProcessInboxDraft;
@@ -3512,6 +3542,8 @@ function isValidInboxEdit(edit: unknown): edit is ProcessInboxDraftEdit {
                 && (state.settings.gtd?.viewSections?.someday ?? []).some((section) => section.id === value));
         case 'setArea':
             return value === null || state.areas.some((area) => area.id === value && !area.deletedAt);
+        case 'setSection':
+            return value === null || state.sections.some((section) => section.id === value && !section.deletedAt);
         case 'selectProject': {
             if (value === null) return true;
             const project = typeof value === 'string' ? state._projectsById.get(value) : undefined;
@@ -3530,6 +3562,9 @@ function isValidInboxEdit(edit: unknown): edit is ProcessInboxDraftEdit {
         case 'setPickedDate':
             return typeof edit.field === 'string' && INBOX_DATE_FIELDS.has(edit.field)
                 && typeof edit.day === 'string' && DATE_ONLY_PATTERN.test(edit.day) && safeParseDate(edit.day) !== null;
+        case 'setTime':
+            return typeof edit.field === 'string' && INBOX_DATE_FIELDS.has(edit.field)
+                && typeof edit.time === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(edit.time);
         case 'setDateOnly':
             return typeof edit.field === 'string' && INBOX_DATE_FIELDS.has(edit.field) && typeof value === 'boolean';
         case 'toggleAdvancedOptions':
@@ -3575,7 +3610,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
         const task = getProcessInboxCurrentCandidate(entry.session, queue);
         if (!task) return false;
         entry.answers = { ...INITIAL_PROCESS_INBOX_ANSWERS };
-        entry.draft = createProcessInboxDraft(task);
+        entry.draft = createProcessInboxDraft(task, entry.includeDetails);
         entry.taskRevision = inboxTaskRevision(task);
         return true;
     };
@@ -3608,6 +3643,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 settings: state.settings,
                 tasks: state.tasks,
                 projects: state.projects,
+                ...(entry.includeDetails ? { sections: state.sections, includeDetails: true } : {}),
                 areas: state.areas,
                 people: state.people,
                 similarityIndex: similarity.index,
@@ -3753,14 +3789,15 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
     return {
         ...createInboxUndoMethods({ readiness: deps.readiness, receipts: deps.receipts }),
         /** Open the queue: Inbox items and returning Someday items, in store order. */
-        startInboxProcessing(input: { mode?: ProcessInboxMode } = {}): NativeHostResult<{
+        startInboxProcessing(input: { mode?: ProcessInboxMode; includeDetails?: boolean } = {}): NativeHostResult<{
             sessionId: string | null;
             queue: { total: number; taskIds: string[] };
             view: NativeInboxProcessingView | null;
         }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            if (!isObjectRecord(input) || (input.mode !== undefined && !INBOX_PROCESSING_MODES.has(input.mode as string))) {
+            if (!isObjectRecord(input) || (input.mode !== undefined && !INBOX_PROCESSING_MODES.has(input.mode as string))
+                || (input.includeDetails !== undefined && typeof input.includeDetails !== 'boolean')) {
                 return fail('INVALID_INPUT', 'mode must be guided or quick');
             }
             const { queue } = context();
@@ -3774,9 +3811,10 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             const entry: InboxProcessingEntry = {
                 id: generateUUID(),
                 mode: input.mode ?? 'guided',
+                includeDetails: input.includeDetails === true,
                 session: startProcessInboxSession(queue),
                 answers: { ...INITIAL_PROCESS_INBOX_ANSWERS },
-                draft: createProcessInboxDraft(queue[0]),
+                draft: createProcessInboxDraft(queue[0], input.includeDetails === true),
                 taskRevision: inboxTaskRevision(queue[0]),
                 progress: { total: 0, processed: 0 },
                 ended: false,
@@ -3785,6 +3823,34 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             };
             sessions.set(entry.id, entry);
             return { ok: true, value: { sessionId: entry.id, queue: { total: queue.length, taskIds }, view: buildView(entry)! } };
+        },
+
+        reloadInboxProcessingTask(input: { sessionId: string; taskId: string; step: string }): NativeHostResult<NativeInboxProcessingResult> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || Object.keys(input).length !== 3
+                || !(['sessionId', 'taskId', 'step'] as const).every((field) => typeof input[field] === 'string'
+                    && input[field].length > 0 && input[field].length <= 500))
+                return fail('INVALID_INPUT', 'An exact bounded Process Inbox editor return is required');
+            const entry = sessions.get(input.sessionId);
+            if (!entry || entry.ended || entry.session.currentTaskId !== input.taskId)
+                return fail('STALE_REVISION', 'The processing editor no longer owns this item');
+            const { plan, queue, state } = context();
+            if (owesSave(entry) || awaitingNextView(entry) || state.persistenceFailure) return busy();
+            if (resolveProcessInboxStep(entry.answers, entry.mode, plan) !== input.step)
+                return fail('STALE_REVISION', 'The processing editor no longer owns this step');
+            const latest = getProcessInboxCurrentCandidate(entry.session, queue);
+            if (!latest) {
+                entry.session = advanceProcessInboxSession(entry.session, queue);
+                if (!openCurrent(entry, queue)) entry.ended = true;
+            } else if (inboxTaskRevision(latest) !== entry.taskRevision) {
+                const previous = entry.draft;
+                entry.draft = { ...createProcessInboxDraft(latest, entry.includeDetails), delegateWho: previous.delegateWho,
+                    followUp: previous.followUp, convertToProject: previous.convertToProject,
+                    nextAction: previous.nextAction, extraActions: previous.extraActions };
+                entry.taskRevision = inboxTaskRevision(latest);
+            }
+            return { ok: true, value: result(entry, null, null) };
         },
 
         /**
@@ -3811,6 +3877,12 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             const checked = current(input);
             if (!checked.ok) return checked;
             const { entry } = checked.value;
+            if (input.edit?.type === 'setTime' && !entry.includeDetails)
+                return fail('INVALID_INPUT', 'Time editing requires the detailed processing view');
+            const sectionEdit = input.edit?.type === 'setSection' ? input.edit.value : null;
+            if (input.edit?.type === 'setSection' && (!entry.includeDetails || sectionEdit !== null
+                && useTaskStore.getState().sections.find((section) => section.id === sectionEdit)?.projectId !== entry.draft.projectId))
+                return fail('INVALID_INPUT', 'The section is not in the chosen project');
             if (input.edit) entry.draft = applyProcessInboxDraftEdit(entry.draft, input.edit, context().plan);
             if (input.mode) entry.mode = input.mode;
             return { ok: true, value: buildView(entry)! };
@@ -4140,6 +4212,15 @@ export type NativeContextsView = {
     revision: string;
     /** The selection as the screen applies it: an empty selection matches with All. */
     selection: { tokens: string[]; matchMode: ContextOrTagMatchMode };
+    filters?: NativeListFilterView;
+    filterChips?: NativeListChip[];
+    criteria?: FilterCriteria;
+    preservedCriteria?: FilterCriteria;
+    savedFilterId?: string | null;
+    savedFilters?: NativeWindow<{ id: string; name: string; selected: boolean }>;
+    canSave?: boolean;
+    saveControls?: FocusControlState | null;
+    filterPicker?: { name: 'projects' | 'tokens'; query: string; total: number; items: unknown[] } | null;
     searchPlaceholder: string;
     chips: NativeContextsChip[];
     matchMode: { label: string; options: { mode: ContextOrTagMatchMode; label: string; selected: boolean }[] } | null;
@@ -4559,14 +4640,127 @@ function createListViewMethods(deps: ListViewDeps) {
     return {
         getContextsView(input: {
             tokens?: string[]; matchMode?: ContextOrTagMatchMode; searchQuery?: string; selectedIds?: string[];
-            /** The bulk bar's open token picker, searched by `query`; later pages send the view's `revision`. */
+            filters?: Partial<ListFilterState>; filterEdit?: ListFilterEdit; savedFilterId?: string | null;
+            preservedCriteria?: FilterCriteria; filterSheetOpen?: boolean;
+            filterPicker?: { name: 'projects' | 'tokens'; query?: string; offset?: number; limit?: number; revision?: string };
+            savedFiltersWindow?: { offset: number; limit: number; revision?: string };
             picker?: { field: BulkTaskTokenField; mode: BulkTaskTokenMode; query?: string; offset?: number; limit?: number; revision?: string };
             offset: number; limit: number; revision?: string;
         }): NativeHostResult<NativeContextsView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || input.filters === undefined) {
+                if (isObjectRecord(input) && (['filterEdit', 'savedFilterId', 'preservedCriteria', 'filterSheetOpen', 'filterPicker', 'savedFiltersWindow'] as const).some(key => input[key] !== undefined)) return fail('INVALID_INPUT', 'Enhanced Contexts inputs require filters');
+                const picker = isObjectRecord(input) ? input.picker : undefined;
+                if (!isObjectRecord(input) || !isWindow(input)
+                    || (input.tokens !== undefined && !isStringList(input.tokens, 500))
+                    || (input.matchMode !== undefined && input.matchMode !== 'all' && input.matchMode !== 'any')
+                    || (input.searchQuery !== undefined && (typeof input.searchQuery !== 'string' || input.searchQuery.length > 2000))
+                    || (input.selectedIds !== undefined && !isIdList(input.selectedIds, true))
+                    || (picker !== undefined && !(isObjectRecord(picker)
+                        && (picker.field === 'tags' || picker.field === 'contexts') && (picker.mode === 'add' || picker.mode === 'remove')
+                        && (picker.query === undefined || (typeof picker.query === 'string' && picker.query.length <= 500))
+                        && isWindow({ offset: picker.offset ?? 0, limit: picker.limit ?? NATIVE_HOST_MAX_WINDOW, revision: picker.revision })))) {
+                    return fail('INVALID_INPUT', 'Valid tokens, match mode, search, selected ids, picker, offset, bounded limit, and revision for later pages are required');
+                }
+                const now = new Date();
+                const revision = deps.revision(now);
+                if (input.revision !== undefined && input.revision !== revision) return fail('STALE_REVISION', 'Contexts changed; restart paging from offset zero');
+                if ((picker?.offset ?? 0) > 0 && picker?.revision !== revision) return fail('STALE_REVISION', 'Contexts changed; open the picker again');
+                const t = deps.t();
+                const tokens = input.tokens ?? [];
+                const matchMode = resolveContextsMatchMode(tokens, input.matchMode ?? 'all');
+                const selectedIds = input.selectedIds ?? [];
+                const tokenPicker = (actions: NativeContextsTokenAction[]): NonNullable<NativeContextsView['bulk']>['picker'] => {
+                    if (!picker) return null;
+                    const { field, mode, query } = picker;
+                    const items = actions.find((action) => action.field === field && action.mode === mode)!.tokens
+                        .filter((token) => query === undefined || matchesPickerQuery(token, query));
+                    const offset = picker.offset ?? 0;
+                    return { field, mode, total: items.length, items: items.slice(offset, offset + (picker.limit ?? NATIVE_HOST_MAX_WINDOW)) };
+                };
+                const view = cached('contexts', JSON.stringify([revision, tokens, matchMode, input.searchQuery ?? '', selectedIds]), () => {
+                    const { state, areaById, projectById, selection } = areaScope();
+                    const index = cached('contexts-index', deps.dataRevision(), () => buildContextsTokenIndex(
+                        state.tasks.filter((task) => isTaskVisibleInArea(task, { areaById, projectById, resolvedAreaFilter: selection })),
+                    ));
+                    const model = buildContextsViewModel({ index, settings: state.settings, selectedTokens: tokens, matchMode, searchQuery: input.searchQuery ?? '' });
+                    const next = (nextTokens: string[], nextMode: ContextOrTagMatchMode) => ({ tokens: nextTokens, matchMode: resolveContextsMatchMode(nextTokens, nextMode) });
+                    const labels = getContextsMatchModeLabels(t);
+                    const onScreen = new Set(model.tasks.map((task) => task.id));
+                    const selected = selectedIds.filter((id) => onScreen.has(id));
+                    const tasksById = Object.fromEntries(state.tasks.map((task) => [task.id, task]));
+                    const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
+                    return {
+                        model,
+                        selected,
+                        taskRevisions: taskRevisionsOf(selected),
+                        chips: [
+                            { id: 'all', kind: 'all' as const, label: t('common.all'), accessibilityLabel: t('contexts.all'), count: model.allCount, selected: tokens.length === 0, next: next([], 'all') },
+                            { id: 'none', kind: 'none' as const, label: t('contexts.none'), accessibilityLabel: t('contexts.none'), count: model.noContextCount, selected: model.noContextSelected, next: next(toggleContextsNoContext(tokens), 'all') },
+                            ...model.tokenChips.map((chip, index) => ({
+                                id: chip.token, kind: chip.kind, label: chipLabels[index].label, accessibilityLabel: `${chip.token} (${chip.count})`,
+                                count: chip.count, selected: chip.selected, next: next(selectContextsToken(tokens, chip.token), matchMode),
+                                additive: { label: chip.selected ? t('filters.remove') : t('common.add'), next: next(toggleContextsToken(tokens, chip.token), matchMode) },
+                            })),
+                        ],
+                        matchMode: model.showMatchMode ? {
+                            label: labels.label,
+                            options: (['all', 'any'] as const).map((mode) => ({ mode, label: mode === 'all' ? labels.all : labels.any, selected: matchMode === mode })),
+                        } : null,
+                        sort: {
+                            title: t('sort.label'),
+                            accessibilityLabel: getTaskListHeaderText({
+                                sortByLabel: getTaskSortByLabel(model.sortBy, t), hasActiveFilters: false, filterActiveCount: 0, t,
+                            }).sortAccessibilityLabel,
+                            options: getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, state.settings)
+                                .map((value) => ({ value, label: getTaskSortByLabel(value, t), selected: value === model.sortBy })),
+                        },
+                        empty: model.tasks.length === 0 ? getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: tokens }, t) : null,
+                        bulk: selected.length === 0 ? null : {
+                            countLabel: `${selected.length} ${t('bulk.selected')}`,
+                            exitLabel: t('bulk.exitSelect'),
+                            statuses: CONTEXTS_BULK_STATUSES.map((status) => ({ status, label: t(`status.${status}`) })),
+                            tokenActions: (['tags', 'contexts'] as const).flatMap((field) => (['add', 'remove'] as const).map((mode) => {
+                                const picker = getContextsTokenPicker({ field, action: mode, activeTasks: model.activeTasks, settings: state.settings, selectedIds: selected, tasksById, t });
+                                return { ...picker, field, mode, enabled: mode === 'add' || picker.tokens.length > 0 };
+                            })),
+                            deleteLabel: t('common.delete'),
+                            deleteConfirmation: getBulkTrashConfirmation(t),
+                        },
+                        titles: projectTitles(),
+                    };
+                });
+                return { ok: true, value: {
+                    version: NATIVE_HOST_CONTRACT_VERSION,
+                    revision,
+                    selection: { tokens, matchMode },
+                    searchPlaceholder: t('contexts.search'),
+                    chips: view.chips,
+                    matchMode: view.matchMode,
+                    sort: view.sort,
+                    total: view.model.tasks.length,
+                    rows: view.model.tasks.slice(input.offset, input.offset + input.limit).map((task) => toNativeTaskRow(task, view.titles, deps.rowMeta(task, now))),
+                    empty: view.empty,
+                    selectedIds: view.selected,
+                    taskRevisions: view.taskRevisions,
+                    bulk: view.bulk && { ...view.bulk, picker: tokenPicker(view.bulk.tokenActions) },
+                } };
+        
+            }
             const picker = isObjectRecord(input) ? input.picker : undefined;
+            const filterPicker = isObjectRecord(input) ? input.filterPicker : undefined;
+            const filters = readFilterState(isObjectRecord(input) ? input.filters : undefined);
             if (!isObjectRecord(input) || !isWindow(input)
+                || (input.savedFiltersWindow !== undefined && !isWindow(input.savedFiltersWindow))
+                || !filters || (input.filterEdit !== undefined && !isFilterEdit(input.filterEdit))
+                || (input.savedFilterId !== undefined && input.savedFilterId !== null && (typeof input.savedFilterId !== 'string' || input.savedFilterId.length > 200))
+                || (input.preservedCriteria !== undefined && !isPreservedFilterCriteria(input.preservedCriteria))
+                || (input.filterSheetOpen !== undefined && typeof input.filterSheetOpen !== 'boolean')
+                || (filterPicker !== undefined && !(isObjectRecord(filterPicker)
+                    && (filterPicker.name === 'projects' || filterPicker.name === 'tokens')
+                    && (filterPicker.query === undefined || (typeof filterPicker.query === 'string' && filterPicker.query.length <= 500))
+                    && isWindow({ offset: filterPicker.offset ?? 0, limit: filterPicker.limit ?? NATIVE_HOST_MAX_WINDOW, revision: filterPicker.revision })))
                 || (input.tokens !== undefined && !isStringList(input.tokens, 500))
                 || (input.matchMode !== undefined && input.matchMode !== 'all' && input.matchMode !== 'any')
                 || (input.searchQuery !== undefined && (typeof input.searchQuery !== 'string' || input.searchQuery.length > 2000))
@@ -4578,14 +4772,11 @@ function createListViewMethods(deps: ListViewDeps) {
                 return fail('INVALID_INPUT', 'Valid tokens, match mode, search, selected ids, picker, offset, bounded limit, and revision for later pages are required');
             }
             const now = new Date();
-            const revision = deps.revision(now);
-            if (input.revision !== undefined && input.revision !== revision) return fail('STALE_REVISION', 'Contexts changed; restart paging from offset zero');
-            if ((picker?.offset ?? 0) > 0 && picker?.revision !== revision) return fail('STALE_REVISION', 'Contexts changed; open the picker again');
+            const baseRevision = deps.revision(now);
             const t = deps.t();
             const tokens = input.tokens ?? [];
             const matchMode = resolveContextsMatchMode(tokens, input.matchMode ?? 'all');
             const selectedIds = input.selectedIds ?? [];
-            // RN's token picker search: the open picker's tokens that match its query.
             const tokenPicker = (actions: NativeContextsTokenAction[]): NonNullable<NativeContextsView['bulk']>['picker'] => {
                 if (!picker) return null;
                 const { field, mode, query } = picker;
@@ -4594,13 +4785,15 @@ function createListViewMethods(deps: ListViewDeps) {
                 const offset = picker.offset ?? 0;
                 return { field, mode, total: items.length, items: items.slice(offset, offset + (picker.limit ?? NATIVE_HOST_MAX_WINDOW)) };
             };
-            const view = cached('contexts', JSON.stringify([revision, tokens, matchMode, input.searchQuery ?? '', selectedIds]), () => {
+            const view = cached('contexts-filtered-v1', JSON.stringify([baseRevision, tokens, matchMode, input.searchQuery ?? '', selectedIds, filters, input.filterEdit, input.savedFilterId, input.preservedCriteria, input.filterSheetOpen]), () => {
                 const { state, areaById, projectById, selection } = areaScope();
-                // Counted once per data change, whatever the selection.
-                const index = cached('contexts-index', deps.dataRevision(), () => buildContextsTokenIndex(
-                    // Mobile's visible tasks: the store's tasks in the selected area, outside parked projects.
-                    state.tasks.filter((task) => isTaskVisibleInArea(task, { areaById, projectById, resolvedAreaFilter: selection })),
-                ));
+                const filter = buildContextsFilterModel({
+                    tasks: state.tasks.filter((task) => isTaskVisibleInArea(task, { areaById, projectById, resolvedAreaFilter: selection })),
+                    projects: state.projects, settings: state.settings,
+                    filters, edit: input.filterEdit, filterSheetOpen: input.filterSheetOpen,
+                    savedFilterId: input.savedFilterId, preservedCriteria: input.preservedCriteria, t,
+                });
+                const index = buildContextsTokenIndex(filter.tasks, { includeFinished: true });
                 const model = buildContextsViewModel({ index, settings: state.settings, selectedTokens: tokens, matchMode, searchQuery: input.searchQuery ?? '' });
                 const next = (nextTokens: string[], nextMode: ContextOrTagMatchMode) => ({ tokens: nextTokens, matchMode: resolveContextsMatchMode(nextTokens, nextMode) });
                 const labels = getContextsMatchModeLabels(t);
@@ -4610,12 +4803,12 @@ function createListViewMethods(deps: ListViewDeps) {
                 const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
                 return {
                     model,
+                    filter,
                     selected,
                     taskRevisions: taskRevisionsOf(selected),
                     chips: [
                         { id: 'all', kind: 'all' as const, label: t('common.all'), accessibilityLabel: t('contexts.all'), count: model.allCount, selected: tokens.length === 0, next: next([], 'all') },
                         { id: 'none', kind: 'none' as const, label: t('contexts.none'), accessibilityLabel: t('contexts.none'), count: model.noContextCount, selected: model.noContextSelected, next: next(toggleContextsNoContext(tokens), 'all') },
-                        // A child chip after its parent shows "/leaf"; id and accessibility label keep the full token (#1428).
                         ...model.tokenChips.map((chip, index) => ({
                             id: chip.token, kind: chip.kind, label: chipLabels[index].label, accessibilityLabel: `${chip.token} (${chip.count})`,
                             count: chip.count, selected: chip.selected, next: next(selectContextsToken(tokens, chip.token), matchMode),
@@ -4649,10 +4842,52 @@ function createListViewMethods(deps: ListViewDeps) {
                     titles: projectTitles(),
                 };
             });
+            const revision = `${baseRevision}:contexts-filters-v1:${paramsKey(focusSavedFilterToken([tokens, matchMode, input.searchQuery ?? '', selectedIds,
+                view.filter.resolved.state, view.filter.criteria, view.filter.activeSavedFilter?.id ?? null, view.filter.preservedCriteria ?? null,
+                Boolean(input.filterSheetOpen), filterPicker ? [filterPicker.name, filterPicker.query ?? ''] : null]))}`;
+            if (input.revision !== undefined && input.revision !== revision) return fail('STALE_REVISION', 'Contexts changed; restart paging from offset zero');
+            if ((picker?.offset ?? 0) > 0 && picker?.revision !== revision) return fail('STALE_REVISION', 'Contexts changed; open the picker again');
+            if ((filterPicker?.offset ?? 0) > 0 && filterPicker?.revision !== revision) return fail('STALE_REVISION', 'Contexts changed; open the filter picker again');
+            if ((input.savedFiltersWindow?.offset ?? 0) > 0 && input.savedFiltersWindow?.revision !== revision) return fail('STALE_REVISION', 'Contexts changed; restart saved filter paging');
             return { ok: true, value: {
                 version: NATIVE_HOST_CONTRACT_VERSION,
                 revision,
                 selection: { tokens, matchMode },
+                filters: {
+                    ...nativeFilterView(view.filter.resolved, view.filter.options, [], view.filter.options.projects?.map((project) => ({
+                        ...project, selected: view.filter.resolved.state.projects.includes(project.id),
+                        excluded: view.filter.resolved.state.excludedProjects?.includes(project.id) ?? false,
+                        edit: { type: 'cycleProject' as const, value: project.id },
+                    })) ?? null, t),
+                    statuses: CONTEXTS_FILTER_STATUSES.map((value) => ({ value, label: t(`status.${value}`),
+                        selected: view.filter.resolved.state.statuses?.includes(value) ?? false,
+                        edit: { type: 'toggleStatus' as const, value } })),
+                },
+                filterChips: view.filter.resolved.chips.map((chip) => ({ ...chip, action: { filterEdit: chip.edit } })),
+                criteria: getContextsSaveCriteria(view.filter.criteria, tokens, matchMode, [input.searchQuery ?? '', view.filter.resolved.searchQuery]) ?? view.filter.criteria,
+                preservedCriteria: view.filter.preservedCriteria,
+                savedFilterId: view.filter.activeSavedFilter?.id ?? null,
+                savedFilters: { total: view.filter.savedFilters.length, items: view.filter.savedFilters
+                    .slice(input.savedFiltersWindow?.offset ?? 0, (input.savedFiltersWindow?.offset ?? 0) + (input.savedFiltersWindow?.limit ?? NATIVE_HOST_MAX_WINDOW))
+                    .map(filter => ({ id: filter.id, name: filter.name, selected: view.filter.activeSavedFilter?.id === filter.id })) },
+                canSave: !view.filter.activeSavedFilter && (tokens.length > 0 || view.filter.resolved.hasActive)
+                    && getContextsSaveCriteria(view.filter.criteria, tokens, matchMode, [input.searchQuery ?? '', view.filter.resolved.searchQuery]) !== null && !(input.searchQuery ?? '').trim()
+                    && !view.filter.resolved.searchQuery.trim(),
+                saveControls: (() => {
+                    const criteria = getContextsSaveCriteria(view.filter.criteria, tokens, matchMode, [input.searchQuery ?? '', view.filter.resolved.searchQuery]);
+                    return criteria && !(input.searchQuery ?? '').trim() && !view.filter.resolved.searchQuery.trim()
+                        ? { ...DEFAULT_FOCUS_CONTROL_STATE, preservedCriteria: criteria, sortBy: view.model.sortBy } : null;
+                })(),
+                filterPicker: filterPicker ? (() => {
+                    const query = filterPicker.query ?? '';
+                    const items = (filterPicker.name === 'projects' ? view.filter.options.projects ?? [] : [])
+                        .filter((project) => matchesPickerQuery(project.title, query))
+                        .map((project) => ({ ...project, selected: view.filter.resolved.state.projects.includes(project.id),
+                            excluded: view.filter.resolved.state.excludedProjects?.includes(project.id) ?? false,
+                            edit: { type: 'cycleProject' as const, value: project.id } }));
+                    return { name: filterPicker.name, query, total: items.length,
+                        items: items.slice(filterPicker.offset ?? 0, (filterPicker.offset ?? 0) + (filterPicker.limit ?? NATIVE_HOST_MAX_WINDOW)) };
+                })() : null,
                 searchPlaceholder: t('contexts.search'),
                 chips: view.chips,
                 matchMode: view.matchMode,
@@ -4664,6 +4899,7 @@ function createListViewMethods(deps: ListViewDeps) {
                 taskRevisions: view.taskRevisions,
                 bulk: view.bulk && { ...view.bulk, picker: tokenPicker(view.bulk.tokenActions) },
             } };
+        
         },
 
         /**

@@ -34,6 +34,9 @@ type StorageEntry = readonly [string, string];
 type StorageSnapshotEntry = readonly [string, string | null];
 
 export type MobileSyncConfigurationTransactionDependencies = {
+    /** Native foreground owner only; absent preserves existing mobile transaction behavior. */
+    beforeActivation?: () => Promise<void>;
+    beforeDropboxPromotion?: () => Promise<void>;
     clearConfigCache: () => void;
     clearDropboxTokens: () => Promise<void>;
     deleteSecret: (key: string) => Promise<void>;
@@ -116,6 +119,7 @@ const createPort = (
     };
 
     return {
+        ...(dependencies.beforeActivation ? { beforeActivation: dependencies.beforeActivation } : {}),
         recoverDropboxCredentialsBeforeConfiguration: async () => undefined,
 
         // Deliberately reads the whole configuration and BOTH secrets every time,
@@ -215,6 +219,7 @@ const createPort = (
         },
 
         promoteDropboxCredentials: async () => {
+            await dependencies.beforeDropboxPromotion?.();
             if (!capturedPreviousTokens) {
                 previousTokens = await dependencies.getDropboxTokens();
                 capturedPreviousTokens = true;

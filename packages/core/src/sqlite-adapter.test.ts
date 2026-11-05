@@ -804,6 +804,36 @@ describeSqlite('SqliteAdapter', () => {
         expect(reloaded.tasks.find((task) => task.id === 'legacy')?.reminderPolicy).toBeUndefined();
     });
 
+    it('migrates advance reminder absence and round-trips explicit Off without resurrecting the old value', async () => {
+        db.exec(SQLITE_BASE_SCHEMA.replace('  dueReminderLeadMinutes INTEGER,\n', ''));
+        runSql(db, "INSERT INTO tasks (id,title,status,createdAt,updatedAt) VALUES ('legacy','Legacy','next','2026-01-01','2026-01-01')");
+        const loaded = await adapter.getData();
+        expect(loaded.tasks[0].dueReminderLeadMinutes).toBeUndefined();
+        expect(allSql(db, 'SELECT dueReminderLeadMinutes FROM tasks')).toEqual([{ dueReminderLeadMinutes: null }]);
+        await adapter.saveTask({ ...loaded.tasks[0], dueReminderLeadMinutes: 1440, rev: 1 });
+        expect((await adapter.getData()).tasks[0].dueReminderLeadMinutes).toBe(1440);
+        await adapter.saveTask({ ...loaded.tasks[0], dueReminderLeadMinutes: 0, rev: 2 });
+        const cleared = await adapter.getData();
+        expect(cleared.tasks[0].dueReminderLeadMinutes).toBe(0);
+        await adapter.saveData(cleared);
+        expect((await adapter.getData()).tasks[0].dueReminderLeadMinutes).toBe(0);
+    });
+
+    it('migrates start advance reminder absence and round-trips explicit Off without resurrecting the old value', async () => {
+        db.exec(SQLITE_BASE_SCHEMA.replace('  startReminderLeadMinutes INTEGER,\n', ''));
+        runSql(db, "INSERT INTO tasks (id,title,status,createdAt,updatedAt) VALUES ('legacy','Legacy','next','2026-01-01','2026-01-01')");
+        const loaded = await adapter.getData();
+        expect(loaded.tasks[0].startReminderLeadMinutes).toBeUndefined();
+        expect(allSql(db, 'SELECT startReminderLeadMinutes FROM tasks')).toEqual([{ startReminderLeadMinutes: null }]);
+        await adapter.saveTask({ ...loaded.tasks[0], startReminderLeadMinutes: 30, rev: 1 });
+        expect((await adapter.getData()).tasks[0].startReminderLeadMinutes).toBe(30);
+        await adapter.saveTask({ ...loaded.tasks[0], startReminderLeadMinutes: 0, rev: 2 });
+        const cleared = await adapter.getData();
+        expect(cleared.tasks[0].startReminderLeadMinutes).toBe(0);
+        await adapter.saveData(cleared);
+        expect((await adapter.getData()).tasks[0].startReminderLeadMinutes).toBe(0);
+    });
+
     it('declares repeat reminder minutes in the base task schema', () => {
         db.exec(SQLITE_BASE_SCHEMA);
 
@@ -3327,6 +3357,21 @@ describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
 
     afterEach(() => {
         db.close();
+    });
+
+    it('retains Contexts statuses and excluded projects through settings JSON and saved-filter table recovery', async () => {
+        const filters = [{ ...older, view: 'contexts' as const, criteria: { statuses: ['someday' as const, 'waiting' as const],
+            excludedProjects: ['project'], futureCriterion: { retained: true } } }];
+        const adapter = new SqliteAdapter(createClient(db));
+        await adapter.saveData(doc(filters));
+        expect((await new SqliteAdapter(createClient(db)).getData()).settings.savedFilters).toEqual(filters);
+        const row = JSON.parse(getSql<{ data: string }>(db, 'SELECT data FROM settings WHERE id = 1')!.data);
+        delete row.savedFilters;
+        runSql(db, 'UPDATE settings SET data = ? WHERE id = 1', [JSON.stringify(row)]);
+        const recovered = await new SqliteAdapter(createClient(db)).getData();
+        expect(recovered.settings.savedFilters).toEqual(filters);
+        await adapter.saveData(recovered);
+        expect((await new SqliteAdapter(createClient(db)).getData()).settings.savedFilters).toEqual(filters);
     });
 
     it('retains rolling task date criteria through settings JSON, table recovery, and a second save', async () => {

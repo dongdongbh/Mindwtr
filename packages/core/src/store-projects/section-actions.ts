@@ -6,7 +6,7 @@ import { sectionToSqliteRow } from '../section-sync-schema';
 import { TASK_SQLITE_COLUMNS, taskToSqliteRow } from '../task-sync-schema';
 import { toStableSyncJson } from '../sync-helpers';
 import { logProjectFlowModeSaved, sameProjectSqliteRow } from './project-actions';
-import type { PreparedProjectSectionCreate, PreparedProjectSectionDelete, PreparedProjectSectionRename, PreparedTaskEditResult } from '../store-types';
+import type { PreparedProjectFlowV3, PreparedProjectSectionCreate, PreparedProjectSectionDelete, PreparedProjectSectionRename, PreparedTaskEditResult } from '../store-types';
 import type { ProjectActionContext, Section, SectionActions, Task } from './shared';
 import { actionFail, actionOk, mutateEntities } from './shared';
 
@@ -77,6 +77,14 @@ export const sectionRenameEffect = (before: Section, title: string, deviceId: st
     section: { before, after: { ...before, title: title.trim(), updatedAt: now,
         rev: nextRevision(before.rev), revBy: deviceId } },
 });
+
+/** RN updateSection's flow-only patch, preserving the stored title and stamping its revision. */
+export const sectionFlowEffect = (before: Section, sequential: boolean, deviceId: string,
+    now: string): PreparedProjectFlowV3['effect'] | null => {
+    if (!before.title || (before.isSequential === true) === sequential) return null;
+    return { section: { before, after: { ...before, isSequential: sequential,
+        updatedAt: now, rev: nextRevision(before.rev), revBy: deviceId } } };
+};
 
 /** The existing deleteSection tombstone and every sectionId-linked Task detach. */
 export const sectionDeleteEffect = (section: Section, tasks: readonly Task[], deviceId: string,

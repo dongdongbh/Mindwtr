@@ -16,8 +16,8 @@ import { taskDraftToUpdatePatch, type TaskDraft } from './task-draft';
  * The Today's Focus star as one module: every surface that toggles a task's
  * star (row star, quick-action menu, editor, review modals, mobile swipe)
  * resolves the same action here, so eligibility, the cap, labels, and the
- * update patch cannot drift per surface. Status promotion on starring is NOT
- * part of the patch — the store's star↔status rules own it at the write path.
+ * update patch cannot drift per surface. The explicit row resolver includes
+ * Inbox promotion; the default resolver preserves its plain-star contract.
  */
 export type FocusStarBlockedReason = 'deferred' | 'sequential' | 'clarify' | 'limit' | null;
 
@@ -44,8 +44,8 @@ export type FocusStarAction = {
     blockedReason: FocusStarBlockedReason;
     /** i18n key for the control label. */
     labelKey: 'agenda.addToFocus' | 'agenda.removeFromFocus';
-    /** Patch to apply when toggling; store rules handle status promotion. */
-    patch: Pick<Task, 'isFocusedToday'>;
+    /** Patch to apply when toggling; only the explicit row resolver may promote Inbox. */
+    patch: Pick<Task, 'isFocusedToday'> & Partial<Pick<Task, 'status'>>;
 };
 
 export type TaskFocusCreationOutcome =
@@ -103,6 +103,16 @@ export function resolveFocusStarAction(task: Task, context: FocusStarContext): F
         labelKey: 'agenda.addToFocus',
         patch: { isFocusedToday: true },
     };
+}
+
+const withCandidate = (tasks: Task[], candidate: Task): Task[] => tasks.some(task => task.id === candidate.id)
+    ? tasks.map(task => task.id === candidate.id ? candidate : task) : [...tasks, candidate];
+
+export function resolveRowFocusStarAction(task: Task, context: FocusStarContext): FocusStarAction {
+    if (task.status !== 'inbox' || task.isFocusedToday === true) return resolveFocusStarAction(task, context);
+    const candidate: Task = { ...task, status: 'next' };
+    const action = resolveFocusStarAction(candidate, { ...context, tasks: withCandidate(context.tasks, candidate) });
+    return action.canToggle ? { ...action, patch: { ...action.patch, status: 'next' } } : action;
 }
 
 /** Resolve an editor's unsaved values against the same Focus rules as a task row. */

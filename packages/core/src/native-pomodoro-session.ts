@@ -1,6 +1,6 @@
 import { strToU8 } from 'fflate';
 import { createPomodoroState, resetPomodoroState, type PomodoroDurations, type PomodoroSessionHistory, type PomodoroState } from './pomodoro';
-import { resolvePomodoroSession, serializePomodoroSession, type StoredPomodoroSession } from './pomodoro-session';
+import { pausePomodoroSession, resolvePomodoroSession, serializePomodoroSession, startPomodoroSession, type ResolvedPomodoroSession, type StoredPomodoroSession } from './pomodoro-session';
 import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { addTimeSpentMinutes, normalizeTimeSpentMinutes } from './time-spent';
 import { nextRevision } from './sync-revision';
@@ -32,6 +32,9 @@ export type NativePomodoroRequest =
         autoStart: { autoStartFocus: boolean; autoStartBreaks: boolean } }
     | { action: 'setDurations'; requestId: string; observedAtMs: number; localDayKey: string;
         autoStart: { autoStartFocus: boolean; autoStartBreaks: boolean }; durations: PomodoroDurations }
+    | { action: 'watch'; requestId: string; observedAtMs: number; localDayKey: string;
+        autoStart: { autoStartFocus: boolean; autoStartBreaks: boolean }; durations: PomodoroDurations;
+        sourceJSON: string; selectedTaskId: string | null }
     | { action: 'toggle' | 'reset' | 'switchPhase'; requestId: string; observedAtMs: number; localDayKey: string;
         autoStart: { autoStartFocus: boolean; autoStartBreaks: boolean } }
     | { action: 'selectTask'; requestId: string; observedAtMs: number; localDayKey: string;
@@ -99,6 +102,27 @@ const parseSession = (raw: string): unknown => {
     walk(0);
     return parsed;
 };
+
+export function parseNativeWatchPomodoroSource(sourceJSON: string): {
+    id: string; action: 'start' | 'pause' | 'reset'; createdAtMs: number; taskId?: string;
+} {
+    if (typeof sourceJSON !== 'string' || !bounded(sourceJSON, 32 * 1024)) invalid();
+    const value = parseSession(sourceJSON);
+    if (!exact(value, ['protocolVersion', 'id', 'source', 'kind', 'createdAt', 'action'], ['taskId'])
+        || value.protocolVersion !== 1 || value.source !== 'apple-watch' || value.kind !== 'pomodoro'
+        || !uuid(value.id)
+        || (value.action !== 'start' && value.action !== 'pause' && value.action !== 'reset')
+        || typeof value.createdAt !== 'string' || value.createdAt.length > 35
+        || !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u.test(value.createdAt)
+        || !day(value.createdAt.slice(0, 10))) invalid();
+    const createdAtMs = Date.parse(value.createdAt);
+    if (!time(createdAtMs) || createdAtMs < Date.parse('2000-01-01T00:00:00.000Z')
+        || createdAtMs > Date.parse('2100-01-01T00:00:00.000Z')) invalid();
+    if (Object.prototype.hasOwnProperty.call(value, 'taskId') && (!identity(value.taskId, 512)
+        || !bounded(value.taskId, 512) || /[\u0000-\u001f\u007f-\u009f]/u.test(value.taskId))) invalid();
+    return { id: value.id, action: value.action, createdAtMs,
+        ...(typeof value.taskId === 'string' ? { taskId: value.taskId } : {}) };
+}
 
 /** Historical fields may be missing, but malformed present values are not defaults. */
 const legacySessionOf = (raw: string | null): StoredPomodoroSession => {
@@ -176,6 +200,16 @@ const requestOf = (value: unknown): NativePomodoroRequest => {
     }
     if (!exact(value.autoStart, ['autoStartFocus', 'autoStartBreaks'])
         || typeof value.autoStart.autoStartFocus !== 'boolean' || typeof value.autoStart.autoStartBreaks !== 'boolean') invalid();
+    if (value.action === 'watch') {
+        if (!exact(value, ['action', 'requestId', 'observedAtMs', 'localDayKey', 'autoStart', 'durations', 'sourceJSON', 'selectedTaskId'])
+            || !durations(value.durations) || typeof value.sourceJSON !== 'string'
+            || (value.selectedTaskId !== null && !identity(value.selectedTaskId, 500))
+            || parseNativeWatchPomodoroSource(value.sourceJSON).id !== value.requestId) invalid();
+        return { action: 'watch', requestId: value.requestId, observedAtMs: value.observedAtMs, localDayKey: value.localDayKey,
+            autoStart: { autoStartFocus: value.autoStart.autoStartFocus, autoStartBreaks: value.autoStart.autoStartBreaks },
+            durations: { focusMinutes: value.durations.focusMinutes, breakMinutes: value.durations.breakMinutes },
+            sourceJSON: value.sourceJSON, selectedTaskId: value.selectedTaskId };
+    }
     if (value.action === 'adoptLegacy') {
         const legacy = value.legacy;
         if (!exact(value, ['action', 'requestId', 'observedAtMs', 'localDayKey', 'autoStart', 'legacy'])
@@ -212,13 +246,30 @@ const targetOf = (value: unknown, id: string | undefined): NativePomodoroTaskBef
     if (!id) { if (value !== null) invalid(); return null; }
     if (!exact(value, ['id', 'row']) || value.id !== id) invalid();
     if (value.row === null) return { id, row: null };
-    const legacyLayout = Array.isArray(value.row) && value.row.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length
+    const legacyLayout = Array.isArray(value.row) && (value.row.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length
+            || (value.row.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length + 1
+                && TASK_SQLITE_COLUMNS[NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length] === 'reminderPolicy')
+            || (value.row.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length + 2
+                && TASK_SQLITE_COLUMNS[NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length] === 'reminderPolicy'
+                && TASK_SQLITE_COLUMNS[NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length + 1] === 'dueReminderLeadMinutes'))
         && NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.every((name, index) => TASK_SQLITE_COLUMNS[index] === name);
     if (!Array.isArray(value.row) || (value.row.length !== TASK_SQLITE_COLUMNS.length && !legacyLayout) || value.row[0] !== id
         || !value.row.every((cell) => cell === null || typeof cell === 'string' || (typeof cell === 'number' && Number.isFinite(cell)))) invalid();
     return { id, row: [...value.row] as (string | number | null)[] };
 };
 const cell = (row: readonly (string | number | null)[], name: string) => row[TASK_SQLITE_COLUMNS.indexOf(name)];
+
+const applyWatchCommand = (current: ResolvedPomodoroSession, request: Extract<NativePomodoroRequest, { action: 'watch' }>) => {
+    const source = parseNativeWatchPomodoroSource(request.sourceJSON);
+    let resolved = current;
+    if (source.action === 'start' && !current.timerState.isRunning)
+        resolved = startPomodoroSession(current, request.observedAtMs, request.autoStart, request.localDayKey);
+    else if (source.action === 'pause')
+        resolved = pausePomodoroSession(current, request.observedAtMs, request.autoStart, request.localDayKey);
+    else if (source.action === 'reset') resolved = { ...current,
+        timerState: resetPomodoroState(current.timerState, current.durations), phaseEndsAt: undefined, lastEvent: null };
+    return { ...resolved, selectedTaskId: request.selectedTaskId ?? undefined };
+};
 
 export function prepareNativePomodoroTransition(input: { request: NativePomodoroRequest; session: NativePomodoroSessionRead;
     target: NativePomodoroTaskBefore | null; deviceId: string | null }): PreparedNativePomodoroTransition | null {
@@ -229,6 +280,7 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
     let creditDisposition: NativePomodoroResult['creditDisposition'] = 'none';
     let deviceId: string | null = null;
     let creditFocusMinutes = 0;
+    let unchangedSessionRaw: string | null = null;
     if (request.action === 'initialize') {
         if (input.session.raw !== null || input.session.state !== null || input.target !== null || input.deviceId !== null) invalid();
         after = { version: 1, sessionID: request.requestId, generation: 0, session: { durations: request.durations,
@@ -249,48 +301,64 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
         after = { version: 1, sessionID: request.requestId, generation: 0,
             session: { ...serializePomodoroSession(resolved), durations: resolved.durations, timerState: resolved.timerState,
                 sessionHistory: resolved.sessionHistory, updatedAtMs: Math.max(0, legacy.updatedAtMs ?? 0) } };
+    } else if (request.action === 'watch' && input.session.raw === null) {
+        if (input.session.state !== null || input.target !== null || (input.deviceId !== null && !identity(input.deviceId, 200))) invalid();
+        const current = resolvePomodoroSession({ durations: request.durations }, request.observedAtMs, request.autoStart, request.localDayKey);
+        const resolved = applyWatchCommand(current, request);
+        after = { version: 1, sessionID: request.requestId, generation: 0,
+            session: { ...serializePomodoroSession(resolved), durations: resolved.durations, timerState: resolved.timerState,
+                sessionHistory: resolved.sessionHistory, updatedAtMs: parseNativeWatchPomodoroSource(request.sourceJSON).createdAtMs } };
     } else {
         if (typeof input.session.raw !== 'string') invalid();
         const before = decodeNativePomodoroSession(input.session.raw);
         if (!taskEditValuesEqual(before, input.session.state)) invalid();
-        target = targetOf(input.target, before.session.selectedTaskId);
+        const watchSource = request.action === 'watch' ? parseNativeWatchPomodoroSource(request.sourceJSON) : null;
+        const staleWatch = watchSource !== null && watchSource.createdAtMs <= before.session.updatedAtMs;
+        if (!staleWatch) target = targetOf(input.target, before.session.selectedTaskId);
         if (input.deviceId !== null && !identity(input.deviceId, 200)) invalid();
-        if (request.action === 'reconcile' && request.observedAtMs < before.session.updatedAtMs) return null;
-        const current = resolvePomodoroSession(before.session, request.observedAtMs, request.autoStart, request.localDayKey);
-        delta = current.sessionHistory.totalCompletedFocusSessions - before.session.sessionHistory.totalCompletedFocusSessions;
-        if (!count(delta)) invalid();
-        creditFocusMinutes = before.session.durations.focusMinutes;
-        let resolved = current;
-        if (request.action === 'setDurations') resolved = { ...current, durations: request.durations,
-            timerState: resetPomodoroState(current.timerState, request.durations), phaseEndsAt: undefined, lastEvent: null };
-        else if (request.action === 'reset' || request.action === 'switchPhase') resolved = { ...current,
-            timerState: resetPomodoroState(current.timerState, current.durations, request.action === 'reset' ? current.timerState.phase
-                : current.timerState.phase === 'focus' ? 'break' : 'focus'), phaseEndsAt: undefined, lastEvent: null };
-        else if (request.action === 'selectTask') resolved = { ...current, selectedTaskId: request.taskId ?? undefined };
-        else if (request.action === 'toggle' && !current.lastEvent) {
-            if (current.timerState.isRunning) resolved = { ...current, timerState: { ...current.timerState, isRunning: false },
-                phaseEndsAt: undefined, lastEvent: null };
-            else {
-                const remainingSeconds = Math.max(1, current.timerState.remainingSeconds);
-                const endMs = request.observedAtMs + remainingSeconds * 1000;
-                if (!time(endMs)) invalid();
-                resolved = { ...current, timerState: { ...current.timerState, isRunning: true, remainingSeconds },
-                    phaseEndsAt: new Date(endMs).toISOString(), lastEvent: null };
+        if (staleWatch) {
+            after = before;
+            unchangedSessionRaw = input.session.raw;
+        } else {
+            if (request.action === 'reconcile' && request.observedAtMs < before.session.updatedAtMs) return null;
+            const current = resolvePomodoroSession(before.session, request.observedAtMs, request.autoStart, request.localDayKey);
+            delta = current.sessionHistory.totalCompletedFocusSessions - before.session.sessionHistory.totalCompletedFocusSessions;
+            if (!count(delta)) invalid();
+            creditFocusMinutes = before.session.durations.focusMinutes;
+            let resolved = current;
+            if (request.action === 'watch') resolved = applyWatchCommand(current, request);
+            else if (request.action === 'setDurations') resolved = { ...current, durations: request.durations,
+                timerState: resetPomodoroState(current.timerState, request.durations), phaseEndsAt: undefined, lastEvent: null };
+            else if (request.action === 'reset' || request.action === 'switchPhase') resolved = { ...current,
+                timerState: resetPomodoroState(current.timerState, current.durations, request.action === 'reset' ? current.timerState.phase
+                    : current.timerState.phase === 'focus' ? 'break' : 'focus'), phaseEndsAt: undefined, lastEvent: null };
+            else if (request.action === 'selectTask') resolved = { ...current, selectedTaskId: request.taskId ?? undefined };
+            else if (request.action === 'toggle' && !current.lastEvent) {
+                if (current.timerState.isRunning) resolved = { ...current, timerState: { ...current.timerState, isRunning: false },
+                    phaseEndsAt: undefined, lastEvent: null };
+                else {
+                    const remainingSeconds = Math.max(1, current.timerState.remainingSeconds);
+                    const endMs = request.observedAtMs + remainingSeconds * 1000;
+                    if (!time(endMs)) invalid();
+                    resolved = { ...current, timerState: { ...current.timerState, isRunning: true, remainingSeconds },
+                        phaseEndsAt: new Date(endMs).toISOString(), lastEvent: null };
+                }
             }
+            if (request.action === 'reconcile') {
+                // A display countdown alone does not own a SQL transition or generation.
+                const structural = { ...serializePomodoroSession(resolved), timerState: { ...resolved.timerState,
+                    remainingSeconds: before.session.timerState.remainingSeconds } };
+                const { updatedAtMs: _mutationClock, ...previous } = before.session;
+                if (taskEditValuesEqual(structural, previous)) return null;
+            }
+            if (before.generation === Number.MAX_SAFE_INTEGER) invalid();
+            const updatedAtMs = watchSource ? watchSource.createdAtMs
+                : request.action === 'reconcile' ? request.observedAtMs : Math.max(request.observedAtMs, before.session.updatedAtMs + 1);
+            if (!time(updatedAtMs)) invalid();
+            after = { version: 1, sessionID: before.sessionID, generation: before.generation + 1,
+                session: { ...serializePomodoroSession(resolved), durations: resolved.durations, timerState: resolved.timerState,
+                    sessionHistory: resolved.sessionHistory, updatedAtMs } };
         }
-        if (request.action === 'reconcile') {
-            // A display countdown alone does not own a SQL transition or generation.
-            const structural = { ...serializePomodoroSession(resolved), timerState: { ...resolved.timerState,
-                remainingSeconds: before.session.timerState.remainingSeconds } };
-            const { updatedAtMs: _mutationClock, ...previous } = before.session;
-            if (taskEditValuesEqual(structural, previous)) return null;
-        }
-        if (before.generation === Number.MAX_SAFE_INTEGER) invalid();
-        const updatedAtMs = request.action === 'reconcile' ? request.observedAtMs : Math.max(request.observedAtMs, before.session.updatedAtMs + 1);
-        if (!time(updatedAtMs)) invalid();
-        after = { version: 1, sessionID: before.sessionID, generation: before.generation + 1,
-            session: { ...serializePomodoroSession(resolved), durations: resolved.durations, timerState: resolved.timerState,
-                sessionHistory: resolved.sessionHistory, updatedAtMs } };
     }
     if (delta > 0) {
         if (!target) creditDisposition = 'unlinked';
@@ -313,7 +381,7 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
             }
         }
     }
-    const sessionAfter = JSON.stringify(after);
+    const sessionAfter = unchangedSessionRaw ?? JSON.stringify(after);
     decodeNativePomodoroSession(sessionAfter);
     const result: NativePomodoroResult = { sessionID: after.sessionID, generation: after.generation,
         completedFocusSessions: after.session.sessionHistory.totalCompletedFocusSessions, creditedMinutes, creditDisposition };

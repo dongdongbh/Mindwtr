@@ -30,6 +30,7 @@ const remoteAttachment = (overrides: Partial<Attachment> = {}): Attachment => ({
 const setup = (options: {
   storage?: Record<string, string>;
   sandbox?: boolean;
+  selectedDropboxDownload?: boolean;
   cloudKit?: MobileAttachmentCloudKitPort;
   preparePlaintextDownload?: MobileAttachmentCommonHost['preparePlaintextDownload'];
   material?: SyncKeyMaterial;
@@ -73,6 +74,7 @@ const setup = (options: {
     encryption: { getSyncEncryptionMaterial: async () => options.material ?? null },
     getDropboxClientId: async () => 'app-key',
     cloudKit: options.cloudKit,
+    ...(options.selectedDropboxDownload ? { selectedDropboxDownload: { fetcher: vi.fn() as unknown as typeof fetch } } : {}),
     core: {
       isSandboxMode: () => options.sandbox === true,
       withRetry: options.withRetry ?? ((operation) => operation()),
@@ -249,24 +251,49 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
   });
 
-  it('keeps terminal404 policy without a source and leaves the original metadata/bytes intact', async () => {
+  it.each([
+    ['WebDAV', webdav, 'webdavGetFile', Object.assign(new Error('Not found'), { status: 404 })],
+    ['self-hosted cloud', { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_URL_KEY]: 'https://cloud.example/v1/data' }, 'cloudGetFile', Object.assign(new Error('Not found'), { status: 404 })],
+    ['Dropbox', { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' }, 'downloadDropboxFile', new DropboxFileNotFoundError()],
+  ] as const)('keeps selected %s not-found unavailable and retries the same live identity', async (_name, storage, fetcher, error) => {
     const preparePlaintextDownload = vi.fn(async () => sourceReply());
-    const { availability, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
-    const requested = remoteAttachment({ fileHash: 'a'.repeat(64) });
+    const ports = setup({ storage, preparePlaintextDownload, selectedDropboxDownload: true });
+    const requested = Object.freeze(remoteAttachment({ fileHash: await computeSha256Hex(REMOTE) }));
     const before = { ...requested };
-    memory.put(`${MANAGED}unrelated.txt`, REMOTE);
-    webdavGetFile.mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }));
+    ports.memory.put(`${MANAGED}unrelated.txt`, REMOTE);
+    ports.files.setWebdavDownloadBackoff(requested.id, { status: 404 });
+    ports[fetcher].mockRejectedValueOnce(error);
 
-    const outcome = await availability.prepareAttachmentAvailableDetailed!(requested);
-
-    expect(outcome).toMatchObject({ status: 'unrecoverable', attachment: { cloudKey: undefined, fileHash: undefined, deletedAt: expect.any(String) } });
+    expect(await ports.availability.prepareAttachmentAvailableDetailed!(requested)).toEqual({ status: 'unavailable' });
     expect(requested).toEqual(before);
-    expect(memory.read(`${MANAGED}unrelated.txt`)).toEqual(REMOTE);
-    expect(mutations(memory.calls)).toEqual([]);
+    expect(ports.files.getWebdavDownloadBackoff(requested.id)).not.toBeNull();
+    expect(ports.memory.read(`${MANAGED}unrelated.txt`)).toEqual(REMOTE);
+    expect(mutations(ports.memory.calls)).toEqual([]);
     expect(preparePlaintextDownload).not.toHaveBeenCalled();
-    if (outcome.status !== 'unrecoverable') throw new Error('Expected terminal outcome');
-    await expect(availability.prepareAttachmentAvailableDetailed!(outcome.attachment)).resolves.toEqual({ status: 'unavailable' });
-    expect(webdavGetFile).toHaveBeenCalledTimes(1);
+    expect(ports.lines).toContainEqual(expect.objectContaining({
+      level: 'warn', extra: expect.objectContaining({ releaseCheck: 'v1.3.8/attachment-not-found-kept' }),
+    }));
+    expect(await ports.availability.prepareAttachmentAvailableDetailed!(requested)).toMatchObject({ status: 'prepared', sourceToken: SOURCE_TOKEN });
+    expect(ports[fetcher]).toHaveBeenCalledTimes(2);
+    expect(ports.files.getWebdavDownloadBackoff(requested.id)).toBeNull();
+    expect(requested).toEqual(before);
+  });
+
+  it.each([
+    ['WebDAV', webdav, 'webdavGetFile', Object.assign(new Error('Not found'), { status: 404 })],
+    ['self-hosted cloud', { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_URL_KEY]: 'https://cloud.example/v1/data' }, 'cloudGetFile', Object.assign(new Error('Not found'), { status: 404 })],
+    ['Dropbox', { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' }, 'downloadDropboxFile', new DropboxFileNotFoundError()],
+  ] as const)('selected %s cancellation wins over a late not-found response', async (_name, storage, fetcher, failure) => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const ports = setup({ storage, preparePlaintextDownload, selectedDropboxDownload: true });
+    const controller = new AbortController(), reason = new Error('Selected download cancelled');
+    const requested = Object.freeze(remoteAttachment({ fileHash: await computeSha256Hex(REMOTE) }));
+    const before = { ...requested };
+    ports[fetcher].mockImplementationOnce(async () => { controller.abort(reason); throw failure; });
+    await expect(ports.availability.prepareAttachmentAvailableDetailed!(requested, controller.signal)).rejects.toBe(reason);
+    expect(requested).toEqual(before);
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(ports.files.getWebdavDownloadBackoff(requested.id)).toBeNull();
   });
 
   it('rejects a plaintext hash mismatch before preparing a source', async () => {
@@ -447,6 +474,140 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
   });
 });
 
+describe('mobile attachment availability: private CloudKit preparation', () => {
+  it('returns a native prepared source from SDK scratch without installing, creating directories, or adopting provider metadata', async () => {
+    const fetchAttachmentAsset = vi.fn<MobileAttachmentCloudKitPort['fetchAttachmentAsset']>();
+    const preparePlaintextDownload = vi.fn(async () => sourceReply()), controller = new AbortController();
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, preparePlaintextDownload,
+      cloudKit: { fetchAttachmentAsset, isAttachmentNotFoundError: () => false } });
+    const requested = Object.freeze(remoteAttachment({ cloudKey: 'cloudkit:selected-record', title: 'Selected title.txt',
+      mimeType: 'text/plain', size: REMOTE.length, contentRev: 4, fileHash: await computeSha256Hex(REMOTE) }));
+    const before = { ...requested }, config = [...ports.values.entries()];
+    ports.files.setWebdavDownloadBackoff(requested.id, { status: 404 });
+    const directory = vi.spyOn(ports.files, 'getAttachmentsDir');
+    const installer = vi.spyOn(ports.common, 'installStagedAttachmentDownload');
+    const cleanup = vi.spyOn(ports.common, 'deleteAttachmentDownloadStageBestEffort');
+    fetchAttachmentAsset.mockImplementationOnce(async (record, stage, options) => {
+      expect(record).toBe('selected-record'); expect(options?.signal).toBe(controller.signal);
+      expect(stage).toContain(`${MANAGED}.mindwtr-download-`);
+      ports.memory.put(stage, REMOTE);
+      return { title: 'Different provider title.bin', mimeType: 'provider/type', size: 999, updatedAt: '1990-01-01T00:00:00Z' };
+    });
+    const statuses: string[] = []; globalProgressTracker.clear(requested.id);
+    const unsubscribe = globalProgressTracker.subscribe(requested.id, (progress) => statuses.push(progress.status));
+    try {
+      await expect(ports.availability.prepareAttachmentAvailableDetailed!(requested, controller.signal)).resolves.toEqual({
+        status: 'prepared', sourceToken: SOURCE_TOKEN, sha256: await computeSha256Hex(REMOTE), size: REMOTE.length,
+        attachment: { ...requested, uri: `${MANAGED}att-1.txt`, localStatus: 'available' },
+      });
+      expect(preparePlaintextDownload).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: requested.id,
+        targetURI: `${MANAGED}att-1.txt`, expectation: { kind: 'absent' } }), REMOTE, controller.signal);
+      expect(statuses).toEqual(['active']);
+      expect(ports.files.getWebdavDownloadBackoff(requested.id)).toBeNull();
+    } finally { unsubscribe(); globalProgressTracker.clear(requested.id); }
+    expect(requested).toEqual(before); expect([...ports.values.entries()]).toEqual(config);
+    expect(ports.memory.read(`${MANAGED}att-1.txt`)).toBeUndefined();
+    expect(ports.memory.files.size).toBe(1); expect(mutations(ports.memory.calls)).toEqual([]);
+    expect(directory).not.toHaveBeenCalled(); expect(installer).not.toHaveBeenCalled(); expect(cleanup).not.toHaveBeenCalled();
+    expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(ports.webdavGetFile).not.toHaveBeenCalled(); expect(ports.cloudGetFile).not.toHaveBeenCalled(); expect(ports.downloadDropboxFile).not.toHaveBeenCalled();
+  });
+
+  it.each(['', `${MANAGED}att-1.txt`])('borrows only the matching current target and preserves conflicts without SDK fetch (%s)', async (uri) => {
+    const fetchAttachmentAsset = vi.fn<MobileAttachmentCloudKitPort['fetchAttachmentAsset']>();
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, preparePlaintextDownload,
+      cloudKit: { fetchAttachmentAsset, isAttachmentNotFoundError: () => false } });
+    ports.memory.put(`${MANAGED}att-1.txt`, REMOTE);
+    const directory = vi.spyOn(ports.files, 'getAttachmentsDir');
+    const base = remoteAttachment({ cloudKey: 'cloudkit:selected-record', uri, fileHash: await computeSha256Hex(REMOTE) });
+    await expect(ports.availability.prepareAttachmentAvailableDetailed!(base)).resolves.toEqual({ status: 'available',
+      attachment: { ...base, uri: `${MANAGED}att-1.txt`, localStatus: 'available' } });
+    for (const fileHash of [undefined, 'a'.repeat(64)]) {
+      await expect(ports.availability.prepareAttachmentAvailableDetailed!({ ...base, fileHash })).resolves.toEqual({ status: 'generation-conflict' });
+    }
+    expect(ports.memory.read(`${MANAGED}att-1.txt`)).toEqual(REMOTE); expect(mutations(ports.memory.calls)).toEqual([]);
+    expect(fetchAttachmentAsset).not.toHaveBeenCalled(); expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(directory).not.toHaveBeenCalled(); expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it('refuses fetched hash mismatch before source handoff without deleting native scratch', async () => {
+    const fetchAttachmentAsset = vi.fn<MobileAttachmentCloudKitPort['fetchAttachmentAsset']>();
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, preparePlaintextDownload,
+      cloudKit: { fetchAttachmentAsset, isAttachmentNotFoundError: () => false } });
+    fetchAttachmentAsset.mockImplementationOnce(async (_record, stage) => { ports.memory.put(stage, REMOTE); });
+    const requested = Object.freeze(remoteAttachment({ cloudKey: 'cloudkit:selected-record', fileHash: 'a'.repeat(64) }));
+    await expect(ports.availability.prepareAttachmentAvailableDetailed!(requested)).resolves.toEqual({ status: 'unavailable' });
+    expect(preparePlaintextDownload).not.toHaveBeenCalled(); expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(ports.memory.read(`${MANAGED}att-1.txt`)).toBeUndefined(); expect(ports.memory.files.size).toBe(1);
+    expect(mutations(ports.memory.calls)).toEqual([]); expect(requested.cloudKey).toBe('cloudkit:selected-record');
+  });
+
+  it.each([false, true])('asset absence and failure leave native scratch and the live row unchanged (%s)', async (notFound) => {
+    const failure = new Error(notFound ? 'Definitive asset absence' : 'Transient provider failure');
+    const fetchAttachmentAsset = vi.fn<MobileAttachmentCloudKitPort['fetchAttachmentAsset']>();
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, preparePlaintextDownload,
+      cloudKit: { fetchAttachmentAsset, isAttachmentNotFoundError: (error) => error === failure && notFound } });
+    fetchAttachmentAsset.mockImplementationOnce(async (_record, stage) => { ports.memory.put(stage, REMOTE); throw failure; });
+    const requested = Object.freeze(remoteAttachment({ cloudKey: 'cloudkit:selected-record', fileHash: await computeSha256Hex(REMOTE) }));
+    const before = { ...requested };
+    const outcome = await ports.availability.prepareAttachmentAvailableDetailed!(requested);
+    expect(outcome).toEqual({ status: 'unavailable' });
+    expect(requested).toEqual(before); expect(ports.memory.files.size).toBe(1);
+    expect(mutations(ports.memory.calls)).toEqual([]); expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it.each(['resolved', 'not-found'])('aborts after the SDK wait before source handoff or terminal classification (%s)', async (mode) => {
+    const controller = new AbortController(), reason = new Error('Retired selected CloudKit owner');
+    const fetchAttachmentAsset = vi.fn<MobileAttachmentCloudKitPort['fetchAttachmentAsset']>();
+    const classify = vi.fn(() => true), preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, preparePlaintextDownload,
+      cloudKit: { fetchAttachmentAsset, isAttachmentNotFoundError: classify } });
+    fetchAttachmentAsset.mockImplementationOnce(async (_record, stage, options) => {
+      expect(options?.signal).toBe(controller.signal); ports.memory.put(stage, REMOTE); controller.abort(reason);
+      if (mode === 'not-found') throw new Error('Asset gone');
+    });
+    const requested = remoteAttachment({ cloudKey: 'cloudkit:selected-record' });
+    await expect(ports.availability.prepareAttachmentAvailableDetailed!(requested, controller.signal)).rejects.toBe(reason);
+    await expect(ports.availability.prepareAttachmentAvailableDetailed!(requested, controller.signal)).rejects.toBe(reason);
+    expect(fetchAttachmentAsset).toHaveBeenCalledOnce(); expect(classify).not.toHaveBeenCalled();
+    expect(preparePlaintextDownload).not.toHaveBeenCalled(); expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(mutations(ports.memory.calls)).toEqual([]); expect(requested.deletedAt).toBeUndefined();
+  });
+
+  it('checks cancellation after reading SDK scratch before the source callback', async () => {
+    const controller = new AbortController(), reason = new Error('Retired during selected scratch read');
+    const fetchAttachmentAsset = vi.fn<MobileAttachmentCloudKitPort['fetchAttachmentAsset']>();
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, preparePlaintextDownload,
+      cloudKit: { fetchAttachmentAsset, isAttachmentNotFoundError: () => true } });
+    fetchAttachmentAsset.mockImplementationOnce(async (_record, stage) => { ports.memory.put(stage, REMOTE); });
+    vi.spyOn(ports.files, 'readFileAsBytes').mockImplementationOnce(async () => { controller.abort(reason); return REMOTE; });
+    await expect(ports.availability.prepareAttachmentAvailableDetailed!(remoteAttachment({ cloudKey: 'cloudkit:selected-record' }), controller.signal)).rejects.toBe(reason);
+    expect(preparePlaintextDownload).not.toHaveBeenCalled(); expect(mutations(ports.memory.calls)).toEqual([]);
+    expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it('keeps ordinary RN CloudKit downloads installed and coalesced with their existing two-argument SDK call', async () => {
+    const fetchAttachmentAsset = vi.fn<MobileAttachmentCloudKitPort['fetchAttachmentAsset']>();
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, preparePlaintextDownload,
+      cloudKit: { fetchAttachmentAsset, isAttachmentNotFoundError: () => false } });
+    fetchAttachmentAsset.mockImplementationOnce(async (_record, stage) => { ports.memory.put(stage, REMOTE); });
+    const requested = remoteAttachment({ cloudKey: 'cloudkit:selected-record', fileHash: await computeSha256Hex(REMOTE) });
+    const [first, second] = await Promise.all([ports.availability.ensureAttachmentAvailableDetailed(requested),
+      ports.availability.ensureAttachmentAvailableDetailed({ ...requested })]);
+    expect(first).toMatchObject({ status: 'available', attachment: { uri: `${MANAGED}att-1.txt`, localStatus: 'available' } });
+    expect(second).toBe(first); expect(fetchAttachmentAsset).toHaveBeenCalledOnce();
+    expect(fetchAttachmentAsset.mock.calls[0]).toHaveLength(2);
+    expect(ports.memory.read(`${MANAGED}att-1.txt`)).toEqual(REMOTE); expect(ports.installAttachmentFileGeneration).toHaveBeenCalledOnce();
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+  });
+});
+
 describe('mobile attachment availability', () => {
   it('downloads a WebDAV attachment into <files>/attachments/ through the installer', async () => {
     const { availability, memory, webdavGetFile, installAttachmentFileGeneration } = setup({ storage: webdav });
@@ -480,49 +641,26 @@ describe('mobile attachment availability', () => {
     expect(deletesOutsideScratch(memory.calls)).toEqual([]);
   });
 
-  it('treats a WebDAV 404 as terminal, as the sync pass does: no second request, no Download, local bytes kept', async () => {
-    const { availability, memory, webdavGetFile, lines } = setup({ storage: webdav });
-    webdavGetFile.mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }));
-    const requested = remoteAttachment({ fileHash: 'a'.repeat(64) });
-
-    const outcome = await availability.ensureAttachmentAvailableDetailed(requested);
-
-    expect(outcome).toMatchObject({
-      status: 'unrecoverable',
-      attachment: { cloudKey: undefined, fileHash: undefined, localStatus: 'missing', deletedAt: expect.any(String) },
-    });
-    expect(requested.cloudKey).toBe('attachments/att-1.txt');
-    expect(deletesOutsideScratch(memory.calls)).toEqual([]);
-    expect(lines).toContainEqual(expect.objectContaining({
-      level: 'warn', extra: expect.objectContaining({ releaseCheck: 'v1.3.4/webdav-download-not-found' }),
-    }));
-    if (outcome.status !== 'unrecoverable') throw new Error('Expected a terminal outcome');
-    await expect(availability.ensureAttachmentAvailableDetailed(outcome.attachment)).resolves.toEqual({ status: 'unavailable' });
-    expect(webdavGetFile).toHaveBeenCalledTimes(1);
-  });
-
   it.each([
-    ['self-hosted cloud', { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_URL_KEY]: 'https://cloud.example/v1/data' }, 'cloudGetFile',
-      Object.assign(new Error('Cloud File GET failed (404)'), { status: 404 }), 'Cloud attachment att-1 is no longer available', 'v1.3.4/cloud-download-not-found'],
-    ['Dropbox', { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' }, 'downloadDropboxFile',
-      new DropboxFileNotFoundError(), 'Dropbox attachment att-1 is no longer available', 'v1.3.4/dropbox-download-not-found'],
-  ] as const)('treats a %s not-found as terminal, as WebDAV: no second request, no Download, local bytes kept', async (_name, storage, fetcher, failure, line, releaseCheck) => {
+    ['WebDAV', webdav, 'webdavGetFile', Object.assign(new Error('Not found'), { status: 404 })],
+    ['self-hosted cloud', { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_URL_KEY]: 'https://cloud.example/v1/data' }, 'cloudGetFile', Object.assign(new Error('Not found'), { status: 404 })],
+    ['Dropbox', { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' }, 'downloadDropboxFile', new DropboxFileNotFoundError()],
+  ] as const)('a %s not-found keeps the row live and a later download recovers it', async (_name, storage, fetcher, error) => {
     const ports = setup({ storage });
-    ports[fetcher].mockRejectedValueOnce(failure);
-    const requested = remoteAttachment({ fileHash: 'a'.repeat(64) });
+    ports[fetcher].mockRejectedValueOnce(error);
+    const requested = Object.freeze(remoteAttachment({ fileHash: await computeSha256Hex(REMOTE) }));
+    const before = { ...requested };
 
-    const outcome = await ports.availability.ensureAttachmentAvailableDetailed(requested);
-
-    expect(outcome).toMatchObject({
-      status: 'unrecoverable',
-      attachment: { cloudKey: undefined, fileHash: undefined, localStatus: 'missing', deletedAt: expect.any(String) },
-    });
-    expect(requested.cloudKey).toBe('attachments/att-1.txt');
+    expect(await ports.availability.ensureAttachmentAvailableDetailed(requested)).toEqual({ status: 'unavailable' });
+    expect(requested).toEqual(before);
     expect(deletesOutsideScratch(ports.memory.calls)).toEqual([]);
-    expect(ports.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: line, extra: expect.objectContaining({ releaseCheck }) }));
-    if (outcome.status !== 'unrecoverable') throw new Error('Expected a terminal outcome');
-    await expect(ports.availability.ensureAttachmentAvailableDetailed(outcome.attachment)).resolves.toEqual({ status: 'unavailable' });
-    expect(ports[fetcher]).toHaveBeenCalledTimes(1);
+    expect(ports.lines).toContainEqual(expect.objectContaining({
+      level: 'warn', extra: expect.objectContaining({ releaseCheck: 'v1.3.8/attachment-not-found-kept' }),
+    }));
+    const recovered = await ports.availability.ensureAttachmentAvailableDetailed(requested);
+    expect(recovered).toMatchObject({ status: 'available', attachment: { ...requested, uri: `${MANAGED}att-1.txt`, localStatus: 'available' } });
+    expect(ports.memory.read(`${MANAGED}att-1.txt`)).toEqual(REMOTE);
+    expect(ports[fetcher]).toHaveBeenCalledTimes(2);
   });
 
   it('keeps a self-hosted cloud failure other than 404 retryable', async () => {
@@ -602,17 +740,20 @@ describe('mobile attachment availability', () => {
     expect(memory.read(`${MANAGED}att-1.txt`)).toEqual(REMOTE);
   });
 
-  it('treats a CloudKit not-found as terminal', async () => {
+  it('a CloudKit not-found keeps its live row and remote identity', async () => {
     const cloudKit = {
       fetchAttachmentAsset: vi.fn(async () => { throw new Error('asset gone'); }),
       isAttachmentNotFoundError: () => true,
     };
-    const { availability } = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, cloudKit });
+    const { availability, lines } = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, cloudKit });
+    const requested = Object.freeze(remoteAttachment({ cloudKey: 'cloudkit:att-1', fileHash: await computeSha256Hex(REMOTE) }));
+    const before = { ...requested };
 
-    const outcome = await availability.ensureAttachmentAvailableDetailed(remoteAttachment({ cloudKey: 'cloudkit:att-1' }));
-
-    expect(outcome.status).toBe('unrecoverable');
-    expect(outcome.status === 'unrecoverable' && outcome.attachment.deletedAt).toBeTruthy();
+    expect(await availability.ensureAttachmentAvailableDetailed(requested)).toEqual({ status: 'unavailable' });
+    expect(requested).toEqual(before);
+    expect(lines).toContainEqual(expect.objectContaining({
+      level: 'warn', extra: expect.objectContaining({ releaseCheck: 'v1.3.8/attachment-not-found-kept' }),
+    }));
   });
 
   it('reports CloudKit attachments unavailable on a host without CloudKit', async () => {

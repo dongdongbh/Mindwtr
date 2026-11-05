@@ -1,17 +1,7 @@
-// On-demand attachment fetch: what runs when a user opens an attachment whose bytes exist
-// only on the sync remote. One branch per backend (File Sync, CloudKit, self-hosted cloud,
-// Dropbox, WebDAV); each downloads into scratch and publishes through the native installer
-// only while the managed target is still absent. It moved here from React Native's
-// `apps/mobile/lib/attachment-sync-availability.ts` so the native apps run the same rules.
-//
-// Data safety: a failed download never deletes local bytes, a target already on disk is used
-// only when its bytes prove they are the current remote generation, and a CloudKit not-found, a
-// WebDAV or self-hosted cloud 404, or a Dropbox path-not-found is terminal (the attachment is marked unrecoverable).
 import type { Attachment } from './types';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
 import { extractExtension, getBaseSyncUrl, getCloudBaseUrl } from './attachment-paths';
 import { reportProgress, validateAttachmentHash } from './attachment-transfer';
-import { markAttachmentUnrecoverable } from './attachment-validation';
 import { cloudGetFile } from './cloud';
 import { parseCloudKitAttachmentKey } from './cloudkit-attachments';
 import { DropboxFileNotFoundError, downloadDropboxFile } from './dropbox';
@@ -103,7 +93,7 @@ export type MobileAttachmentAvailabilityCoreFunctions = {
   withRetry: typeof withRetry;
   cloudGetFile: typeof cloudGetFile;
   webdavGetFile: typeof webdavGetFile;
-  downloadDropboxFile: (accessToken: string, path: string) => Promise<ArrayBuffer>;
+  downloadDropboxFile: typeof downloadDropboxFile;
   /** Dropbox's path-not-found refusal (a host whose Dropbox client throws its own error class says which). */
   isDropboxFileNotFoundError: (error: unknown) => boolean;
 };
@@ -111,11 +101,13 @@ export type MobileAttachmentAvailabilityCoreFunctions = {
 /** iCloud attachment assets (iOS only). */
 export type MobileAttachmentCloudKitPort = {
   /** Downloads the record's asset into `stagedUri`. */
-  fetchAttachmentAsset(recordName: string, stagedUri: string): Promise<unknown>;
+  fetchAttachmentAsset(recordName: string, stagedUri: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   isAttachmentNotFoundError(error: unknown): boolean;
 };
 
 export type MobileAttachmentAvailabilityHost = {
+  /** Explicit source-bound native Dropbox preparation only; absence keeps existing admission closed. */
+  selectedDropboxDownload?: { fetcher: typeof fetch };
   files: MobileAttachmentFiles;
   common: MobileAttachmentCommon;
   /** The device key-value store (React Native: AsyncStorage). */
@@ -134,7 +126,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     withRetry,
     cloudGetFile,
     webdavGetFile,
-    downloadDropboxFile: (accessToken, path) => downloadDropboxFile(accessToken, path),
+    downloadDropboxFile: (...args) => downloadDropboxFile(...args),
     isDropboxFileNotFoundError: (error) => error instanceof DropboxFileNotFoundError,
     ...host.core,
   };
@@ -142,16 +134,11 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
   const prepareAttachmentDownloadBytes = common.prepareAttachmentDownloadBytes;
   const downloadLocks = new Map<string, Promise<AttachmentAvailabilityOutcome>>();
 
-  /**
-   * A failed on-demand download: progress fails, and a remote that answers the file is gone ([notFound]) is terminal, as the
-   * sync pass treats it: the attachment is marked unrecoverable (on a copy; local bytes are never deleted), so a retry asks
-   * the server nothing. Any other failure stays retryable.
-   */
   const downloadFailed = (
     attachment: Attachment,
     error: unknown,
     notFound: boolean,
-    terminalLog: { message: string; releaseCheck: string },
+    notFoundLog: { message: string; releaseCheck: string },
   ): InternalAvailabilityOutcome => {
     reportProgress(
       attachment.id,
@@ -162,9 +149,8 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       notFound ? 'Attachment is no longer available' : error instanceof Error ? error.message : String(error)
     );
     if (notFound) {
-      markAttachmentUnrecoverable(attachment);
-      files.logAttachmentWarn(terminalLog.message, error, { releaseCheck: terminalLog.releaseCheck });
-      return { availabilityStatus: 'unrecoverable', attachment };
+      files.logAttachmentWarn(notFoundLog.message, error, { releaseCheck: notFoundLog.releaseCheck });
+      return null;
     }
     files.logAttachmentWarn(`Failed to download attachment ${attachment.id}`, error);
     return null;
@@ -318,23 +304,38 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
   const ensureCloudKitAttachmentAvailable = async (
     attachment: Attachment,
     cloudKit: MobileAttachmentCloudKitPort,
-  ): Promise<InternalAvailabilityOutcome> => {
+    purpose: 'install' | 'prepare' = 'install',
+    signal?: AbortSignal,
+  ): Promise<InternalPreparationOutcome> => {
+    const preparing = purpose === 'prepare';
+    assertAttachmentSyncNotAborted(signal);
     const recordName = parseCloudKitAttachmentKey(attachment.cloudKey);
     if (!recordName) return null;
-    const attachmentsDir = await files.getAttachmentsDir();
+    const attachmentsDir = preparing ? files.getManagedAttachmentsDir() : await files.getAttachmentsDir();
+    assertAttachmentSyncNotAborted(signal);
     if (!attachmentsDir) return null;
     const extension = extractExtension(attachment.title) || extractExtension(attachment.uri);
     const targetUri = `${attachmentsDir}${attachment.id}${extension}`;
     const targetPresence = await files.getLocalAttachmentPresence(targetUri);
+    assertAttachmentSyncNotAborted(signal);
     if (targetPresence === 'unreadable') return null;
     if (targetPresence === 'present') {
-      return resolveMatchingManagedTarget(attachment, targetUri);
+      return resolveMatchingManagedTarget(attachment, targetUri, signal);
     }
 
     const stagedUri = common.createAttachmentDownloadStagePath(attachmentsDir, attachment);
     let installerOwnsStage = false;
     try {
       reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
+      if (preparing) {
+        await cloudKit.fetchAttachmentAsset(recordName, stagedUri, { signal });
+        assertAttachmentSyncNotAborted(signal);
+        const bytes = await files.readFileAsBytes(stagedUri);
+        assertAttachmentSyncNotAborted(signal);
+        const prepared = await installMissingAttachmentBytes(attachment, attachmentsDir, targetUri, bytes, purpose, signal);
+        assertAttachmentSyncNotAborted(signal);
+        return prepared;
+      }
       await cloudKit.fetchAttachmentAsset(recordName, stagedUri);
       installerOwnsStage = true;
       const installed = await common.installStagedAttachmentDownload({
@@ -353,9 +354,11 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       );
       return { ...attachment, uri: targetUri, localStatus: 'available' };
     } catch (error) {
-      if (!installerOwnsStage) {
+      // Selected scratch belongs to the native owner, including on refusal or cancellation.
+      if (!preparing && !installerOwnsStage) {
         await common.deleteAttachmentDownloadStageBestEffort(stagedUri);
       }
+      assertAttachmentSyncNotAborted(signal);
       const terminalNotFound = cloudKit.isAttachmentNotFoundError(error);
       reportProgress(
         attachment.id,
@@ -368,9 +371,10 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
           : error instanceof Error ? error.message : String(error),
       );
       if (terminalNotFound) {
-        markAttachmentUnrecoverable(attachment);
-        files.logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);
-        return { availabilityStatus: 'unrecoverable', attachment };
+        files.logAttachmentWarn(`CloudKit attachment ${attachment.id} not found; row kept`, error, {
+          releaseCheck: 'v1.3.8/attachment-not-found-kept',
+        });
+        return null;
       }
       files.logAttachmentWarn(`Failed to download CloudKit attachment ${attachment.id}`, error);
       return null;
@@ -391,11 +395,11 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     if (preparing && localAttachment.deletedAt) return null;
     const preparedBackend = preparing ? await host.storage.getItem(SYNC_BACKEND_KEY) : undefined;
     assertAttachmentSyncNotAborted(signal);
-    if (preparing && preparedBackend !== 'webdav') {
+    if (preparing && preparedBackend !== 'webdav' && !(preparedBackend === 'cloudkit' && host.cloudKit)) {
       if (preparedBackend !== 'cloud') return null;
       const provider = (await host.storage.getItem(CLOUD_PROVIDER_KEY))?.trim() || '';
       assertAttachmentSyncNotAborted(signal);
-      if (provider && provider !== 'selfhosted') return null;
+      if (provider && provider !== 'selfhosted' && !(provider === CLOUD_PROVIDER_DROPBOX && host.selectedDropboxDownload)) return null;
     }
     const uri = localAttachment.uri || '';
     if (uri && isHttpAttachmentUri(uri)) {
@@ -431,7 +435,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
 
     if (backend === 'cloudkit') {
       if (!host.cloudKit) return null;
-      return ensureCloudKitAttachmentAvailable(localAttachment, host.cloudKit);
+      return ensureCloudKitAttachmentAvailable(localAttachment, host.cloudKit, purpose, signal);
     }
 
     if (backend === 'cloud' && localAttachment.cloudKey) {
@@ -454,26 +458,31 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
         try {
           const data = await files.runDropboxAuthorized(
             dropboxClientId,
-            (accessToken) => core.downloadDropboxFile(accessToken, localAttachment.cloudKey as string),
+            (accessToken) => preparing && host.selectedDropboxDownload
+              ? core.downloadDropboxFile(accessToken, localAttachment.cloudKey as string, host.selectedDropboxDownload.fetcher, { signal })
+              : core.downloadDropboxFile(accessToken, localAttachment.cloudKey as string),
+            preparing ? host.selectedDropboxDownload?.fetcher : undefined,
           );
           const bytes = await common.openAttachmentBytesFromDownload(
             data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
             await host.encryption.getSyncEncryptionMaterial(),
+            ...(preparing ? [localAttachment.cloudKey] : []),
           );
           const installedAttachment = await installMissingAttachmentBytes(
             localAttachment,
             attachmentsDir,
             targetUri,
-            bytes,
+            bytes, purpose, signal,
           );
           if (installedAttachment === GENERATION_CONFLICT) return GENERATION_CONFLICT;
           if (!installedAttachment) return null;
           reportProgress(localAttachment.id, 'download', bytes.length, bytes.length, 'completed');
           return installedAttachment;
         } catch (error) {
+          assertAttachmentSyncNotAborted(signal);
           return downloadFailed(localAttachment, error, core.isDropboxFileNotFoundError(error), {
-            message: `Dropbox attachment ${localAttachment.id} is no longer available`,
-            releaseCheck: 'v1.3.4/dropbox-download-not-found',
+            message: `Dropbox attachment ${localAttachment.id} not found; row kept`,
+            releaseCheck: 'v1.3.8/attachment-not-found-kept',
           });
         }
       }
@@ -516,8 +525,8 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       } catch (error) {
         assertAttachmentSyncNotAborted(signal);
         return downloadFailed(localAttachment, error, getErrorStatus(error) === 404, {
-          message: `Cloud attachment ${localAttachment.id} is no longer available`,
-          releaseCheck: 'v1.3.4/cloud-download-not-found',
+          message: `Cloud attachment ${localAttachment.id} not found; row kept`,
+          releaseCheck: 'v1.3.8/attachment-not-found-kept',
         });
       }
     }
@@ -575,8 +584,8 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       } catch (error) {
         assertAttachmentSyncNotAborted(signal);
         return downloadFailed(localAttachment, error, getErrorStatus(error) === 404, {
-          message: `WebDAV attachment ${localAttachment.id} is no longer available`,
-          releaseCheck: 'v1.3.4/webdav-download-not-found',
+          message: `WebDAV attachment ${localAttachment.id} not found; row kept`,
+          releaseCheck: 'v1.3.8/attachment-not-found-kept',
         });
       }
     }
@@ -598,6 +607,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       if ('availabilityStatus' in result) {
         return { status: 'unrecoverable', attachment: result.attachment };
       }
+      files.clearWebdavDownloadBackoff(attachment.id);
       return { status: 'available', attachment: result };
     });
     downloadLocks.set(identity, downloadPromise);
@@ -627,6 +637,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     if (!result) return { status: 'unavailable' };
     if ('availabilityStatus' in result) {
       if (result.availabilityStatus === 'prepared') {
+        files.clearWebdavDownloadBackoff(attachment.id);
         return {
           status: 'prepared', attachment: result.attachment, sourceToken: result.sourceToken,
           sha256: result.sha256, size: result.size,
@@ -634,6 +645,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       }
       return { status: 'unrecoverable', attachment: result.attachment };
     }
+    files.clearWebdavDownloadBackoff(attachment.id);
     return { status: 'available', attachment: result };
   } : undefined;
 

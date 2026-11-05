@@ -2173,6 +2173,24 @@ describe('native host contract', () => {
                 expect(storedTask().reminderPolicy).toBe('inherit');
             });
 
+            it('saves a task policy and both advance reminders on that task only', async () => {
+                const timed = { startTime: '2026-09-26T20:00:00.000Z', dueDate: '2026-09-26T21:00:00.000Z', reminderPolicy: 'inherit' as const };
+                const other = task('other', '2026-09-01T00:00:00.000Z', { title: 'Other', status: 'next', ...timed });
+                const host = await activateEditor([editTask(timed), other], { taskReminderDefault: 'skip' });
+                const original = openDraft(host);
+                const next = edited(host, original, { type: 'fields',
+                    patch: { reminderPolicy: 'send', dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 15 } });
+                expect(next.fields.reminders).toMatchObject({ showAdvance: true, advanceValueLabel: '1 day before',
+                    startAdvance: { enabled: true, valueLabel: '15 min before' } });
+                const diff = changes(original, next.draft);
+                expect(diff.patch).toEqual({ reminderPolicy: 'send', dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 15 });
+                expect(await host.saveTaskDraft({ id: 'edit', ...diff, requestId: newRequestId() })).toMatchObject({ ok: true });
+                expect(storedTask()).toMatchObject({ reminderPolicy: 'send', dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 15 });
+                const untouched = storedTask('other');
+                expect([untouched?.reminderPolicy, untouched?.dueReminderLeadMinutes, untouched?.startReminderLeadMinutes]).toEqual(['inherit', undefined, undefined]);
+                expect(openDraft(host)).toMatchObject({ reminderPolicy: 'send', dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 15 });
+            });
+
             it('serves the model for an unsaved draft, as the editor shows it while editing', async () => {
                 freezeClock();
                 const host = await activateEditor([editTask({ projectId: 'p-work', dueDate: '2026-09-25' })], {
@@ -2362,9 +2380,47 @@ describe('native host contract', () => {
                     // The repeated 01:30 on the autumn change takes its first occurrence (EDT).
                     vi.setSystemTime(new Date('2027-11-07T10:00:00'));
                     expect(pickTime('dueDate', '01:30', openDraft(host, 'fall'), 'fall')).toBe('2027-11-07T05:30:00.000Z');
-                    // Review has no time in the mobile editor.
-                    expect(host.editTaskDraft({ id: 'edit', draft, edit: { type: 'pickTime', field: 'reviewAt' as never, time: '14:30' } }))
-                        .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+                    expect(edited(host, draft, { type: 'pickTime', field: 'reviewAt', time: '14:30' }).draft.reviewAt).toBe('2027-03-20T14:30');
+                } finally {
+                    if (originalTz === undefined) delete process.env.TZ;
+                    else process.env.TZ = originalTz;
+                }
+            });
+
+            it.each([
+                ['2027-03-20', '14:30', '2027-03-20T14:30'],
+                ['2027-03-14', '02:30', '2027-03-14T03:30'],
+                ['2027-11-07', '01:30', '2027-11-07T01:30'],
+            ])('sets a review clock on picked day %s without changing start or due', async (day, time, expected) => {
+                const originalTz = process.env.TZ;
+                process.env.TZ = 'America/New_York';
+                try {
+                    freezeClock();
+                    const host = await activateEditor([editTask({
+                        startTime: '2027-03-18T14:00:00.000Z', dueDate: '2027-03-19T21:00:00.000Z', reviewAt: '2027-03-01',
+                    })], { dateFormat: 'ymd', timeFormat: '24h' });
+                    const storedDates = { startTime: storedTask().startTime, dueDate: storedTask().dueDate };
+                    const draft = openDraft(host);
+                    const picked = edited(host, draft, { type: 'pickDate', field: 'reviewAt', date: day });
+                    const timed = edited(host, picked.draft, { type: 'pickTime', field: 'reviewAt', time });
+                    expect(timed.draft).toMatchObject({ reviewAt: expected, startTime: draft.startTime, dueDate: draft.dueDate });
+                    expect(timed.fields.reviewAt).toMatchObject({
+                        dateOnly: day, hasTime: true, time: expected.slice(11), picker: { date: day, time: expected.slice(11) },
+                    });
+                    expect(Object.keys(timed)).toEqual(Object.keys(picked));
+                    expect(Object.keys(timed.fields.reviewAt)).toEqual(Object.keys(picked.fields.reviewAt));
+                    expect(await host.saveTaskDraft({ id: 'edit', ...changes(draft, json(timed.draft)), requestId: newRequestId() }))
+                        .toMatchObject({ ok: true });
+                    expect(storedTask()).toMatchObject({ ...storedDates, reviewAt: expected });
+                    const reopened = openDraft(host);
+                    expect(reopened.reviewAt).toBe(expected);
+                    const dateOnly = edited(host, reopened, { type: 'date', field: 'reviewAt', value: timed.fields.reviewAt.dateOnly });
+                    expect(dateOnly.draft.reviewAt).toBe(day);
+                    expect(dateOnly.fields.reviewAt.hasTime).toBe(false);
+                    expect(await host.saveTaskDraft({ id: 'edit', ...changes(reopened, json(dateOnly.draft)), requestId: newRequestId() }))
+                        .toMatchObject({ ok: true });
+                    expect(openDraft(host).reviewAt).toBe(day);
+                    expect(storedTask()).toMatchObject(storedDates);
                 } finally {
                     if (originalTz === undefined) delete process.env.TZ;
                     else process.env.TZ = originalTz;
@@ -2447,6 +2503,36 @@ describe('native host contract', () => {
                 expect(JSON.parse(JSON.stringify(model.fields))).toEqual(model.fields);
             });
 
+            it('validates advance reminder draft edits and preserves the choice when due time is removed', async () => {
+                const host = await activateEditor([editTask({ dueDate: '2026-09-26T21:00:00.000Z' })]);
+                const draft = openDraft(host);
+                const chosen = edited(host, draft, { type: 'fields', patch: { dueReminderLeadMinutes: 30 } });
+                expect(chosen.fields.reminders.advanceValueLabel).toBe('30 min before');
+                const dateOnly = edited(host, chosen.draft, { type: 'fields', patch: { dueDate: '2026-09-26' } });
+                expect(dateOnly.fields.reminders.showAdvance).toBe(false);
+                expect(dateOnly.draft.dueReminderLeadMinutes).toBe(30);
+                expect(edited(host, chosen.draft, { type: 'fields', patch: { dueReminderLeadMinutes: 0 } }).draft.dueReminderLeadMinutes).toBe(0);
+                expect(edited(host, chosen.draft, { type: 'fields', patch: { dueReminderLeadMinutes: null } }).draft.dueReminderLeadMinutes).toBeUndefined();
+                for (const value of [-1, 0.5, 10081, '30', true]) {
+                    expect(host.editTaskDraft({ id: 'edit', draft, edit: { type: 'fields', patch: { dueReminderLeadMinutes: value } } })).toMatchObject({ ok: false });
+                }
+            });
+
+            it('validates start advance reminder draft edits and preserves the choice when start time is removed', async () => {
+                const host = await activateEditor([editTask({ startTime: '2026-09-26T21:00:00.000Z' })]);
+                const draft = openDraft(host);
+                const chosen = edited(host, draft, { type: 'fields', patch: { startReminderLeadMinutes: 30 } });
+                expect(chosen.fields.reminders.startAdvance?.valueLabel).toBe('30 min before');
+                const dateOnly = edited(host, chosen.draft, { type: 'fields', patch: { startTime: '2026-09-26' } });
+                expect(dateOnly.fields.reminders.startAdvance).toBeNull();
+                expect(dateOnly.draft.startReminderLeadMinutes).toBe(30);
+                expect(edited(host, chosen.draft, { type: 'fields', patch: { startReminderLeadMinutes: 0 } }).draft.startReminderLeadMinutes).toBe(0);
+                expect(edited(host, chosen.draft, { type: 'fields', patch: { startReminderLeadMinutes: null } }).draft.startReminderLeadMinutes).toBeUndefined();
+                for (const value of [-1, 0.5, 61, '30', true]) {
+                    expect(host.editTaskDraft({ id: 'edit', draft, edit: { type: 'fields', patch: { startReminderLeadMinutes: value } } })).toMatchObject({ ok: false });
+                }
+            });
+
             it('refuses an invalid draft or edit, and waits for storage', async () => {
                 const host = createNativeHostContract();
                 expect(host.editTaskDraft({ id: 'edit', draft: {} as TaskDraft })).toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
@@ -2462,7 +2548,8 @@ describe('native host contract', () => {
                     [draft, { type: 'fields', patch: { status: 'archived' } }],
                     [draft, { type: 'date', field: 'completedAt', value: '' }],
                     [draft, { type: 'pickDate', field: 'dueDate', date: '2026-02-30' }],
-                    [draft, { type: 'pickTime', field: 'reviewAt', time: '10:00' }],
+                    [draft, { type: 'pickTime', field: 'completedAt', time: '10:00' }],
+                    ...['24:00', '9:00', '10:60', '00:00:00'].map((time) => [draft, { type: 'pickTime', field: 'reviewAt', time }] satisfies [unknown, unknown]),
                     [draft, { type: 'pickTime', field: 'dueDate', time: '24:00' }],
                     [draft, { type: 'relativeStart', amount: 1, unit: 'month' }],
                     [draft, { type: 'recurrence', edit: { kind: 'rule', rule: 'hourly' } }],
@@ -2643,9 +2730,13 @@ describe('native host contract', () => {
         configureDateFormatting();
     });
 
-    it('matches React Native Upcoming blocked star text in English and Chinese', async () => {
+    it('matches React Native Upcoming blocked star text per row in English and Chinese on initial and paged reads', async () => {
         const host = await activateWith([task('upcoming', '2026-09-01T00:00:00.000Z', {
             status: 'next', startTime: '2026-09-24',
+        }), task('recurring-due', '2026-09-01T00:00:00.000Z', {
+            status: 'next', dueDate: '2026-09-25', recurrence: { rule: 'daily' },
+        }), task('next-now', '2026-09-01T00:00:00.000Z', {
+            status: 'next',
         })]);
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 8, 23, 10));
@@ -2656,8 +2747,24 @@ describe('native host contract', () => {
             if (!result.ok) throw new Error('Focus query failed');
             const rnLabel = getFocusStarBlockedText(getTranslator(expected.language), { blockedReason: 'deferred' }, normalizeFocusTaskLimit(99));
             expect(rnLabel).toBe(expected.focusBlockedLabel);
-            expect(result.value.sections.find(({ key }) => key === 'upcoming')?.focusBlockedLabel).toBe(rnLabel);
+            const upcoming = result.value.sections.find(({ key }) => key === 'upcoming');
+            if (!upcoming) throw new Error('Upcoming section missing');
+            expect(Object.fromEntries(upcoming.rows.map((row) => [row.id, row.focusBlockedLabel])))
+                .toEqual({ upcoming: null, 'recurring-due': rnLabel });
+            expect(upcoming.focusBlockedLabel).toBe(rnLabel);
+            expect(Object.keys(upcoming).sort()).toEqual(['focusBlockedLabel', 'key', 'rows', 'title', 'total']);
             expect(result.value.sections.filter(({ key }) => key !== 'upcoming').every(({ focusBlockedLabel }) => focusBlockedLabel === null)).toBe(true);
+            expect(result.value.sections.filter(({ key }) => key !== 'upcoming')
+                .every(({ rows }) => rows.every(({ focusBlockedLabel }) => focusBlockedLabel === null))).toBe(true);
+            const initial = host.getFocus({ limit: 1 });
+            if (!initial.ok) throw new Error('Initial Focus query failed');
+            expect(initial.value.sections.find(({ key }) => key === 'upcoming')?.rows).toEqual(upcoming.rows.slice(0, 1));
+            for (let offset = 0; offset < upcoming.total; offset++) {
+                const page = host.getFocusSectionWindow({ key: 'upcoming', offset, limit: 1, revision: initial.value.revision });
+                if (!page.ok) throw new Error('Upcoming page query failed');
+                expect(page.value.rows).toEqual(upcoming.rows.slice(offset, offset + 1));
+                expect(Object.keys(page.value).sort()).toEqual(['key', 'revision', 'rows', 'total', 'version']);
+            }
         }
     });
 

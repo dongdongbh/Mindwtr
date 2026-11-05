@@ -13,6 +13,24 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    'version',
+    // ios-dropbox uses only existing releaseCheck/operation/outcome fields; no credential or account fields.
+    // ios-row-focus uses only the existing closed releaseCheck/outcome fields.
+    // ios-row-dates reuses releaseCheck/outcome; no task or date values.
+    // ios-row-destination reuses releaseCheck/outcome; no identifiers or destination content.
+    // ios-task-checklist-move reuses releaseCheck/outcome; no task or checklist content.
+    // ios-row-backdate reuses releaseCheck/outcome; no task content or identifiers.
+    // ios-project-bulk-trash reuses releaseCheck/count/outcome; no selected identifiers or content.
+    // ios-project-organize-destination-create reuses releaseCheck/kind/outcome; no names, draft or identifiers.
+    // ios-project-bulk-organize reuses releaseCheck/count/outcome; no draft, destination or selected content.
+    // ios-project-bulk-tag/remove-tag reuse releaseCheck/count/outcome; never tag content.
+    // ios-project-bulk-status reuses releaseCheck/count/status/outcome; no selected identifiers or text.
+    // ios-row-completion reuses releaseCheck/outcome; closed completed/undone values only.
+    // ios-row-quick-status: closed target status; releaseCheck/outcome below.
+    'target',
+    // ios-inline-checklist reuses releaseCheck/action/outcome; closed values only, never item content or identifiers.
+    // ios-ordinary-project-next-action: closed completion source and project/section scope; outcome below.
+    'completionSource', 'scope',
     // ios-board-drag-geometry: closed guard reasons, ordinal and numeric rectangles, never entity/content fields.
     'originalViewport', 'currentViewport', 'originalArea', 'currentArea', 'originalRow', 'currentRow',
     'rebaseReason', 'columnOrdinal', 'originalColumn', 'currentColumn',
@@ -158,7 +176,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // file-sync-attachment-failure reuses errorType/nativeCode and stage/backend/operation/releaseCheck below.
     // android-system-bars reuses releaseCheck/backend/outcome below.
     // sandbox-workspace (desktop/mobile entry drain and immutable workspace bootstrap)
-    'workspace', 'stage',
+    'workspace', 'stage', 'errno',
     // watcher-property-order reuses releaseCheck below.
     // storage-baseline-equality reuses releaseCheck below.
     // derived-token-timestamps reuses releaseCheck below.
@@ -172,7 +190,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // pending-capture-unfinished: owed or queued; reuses releaseCheck.
     'state',
     // ai-request-stop-once (desktop/mobile AI configuration adapters)
-    'provider', 'timeoutMs',
+    'provider', 'timeoutMs', 'partCount',
     // sync-attachment-copy-elision reuses releaseCheck and count below.
     // project-lifecycle-sync reuses releaseCheck and count below.
     // sync-signature-pruning reuses releaseCheck, elapsedMs, and count below.
@@ -281,11 +299,16 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'taxonomyKind',
     // ios-background-sync-hold reuses releaseCheck, source and outcome; heldMs is how long iOS kept the app running.
     'heldMs',
+    'published', 'downloaded',
 ];
 
 describe('release diagnostics field names', () => {
     it('preserves the saved taxonomy persistence proof without token content', () => {
         const receipt = { releaseCheck: 'v1.3.7/saved-taxonomy', taxonomyKind: 'context', operation: 'create', outcome: 'persisted' };
+        expect(sanitizeLogContext(receipt)).toEqual(receipt);
+    });
+    it('preserves the content-free iOS File Sync attachment pass receipt', () => {
+        const receipt = { releaseCheck: 'v1.3.8/ios-file-sync-attachments', phase: 'post-merge', outcome: 'updated', published: '1', downloaded: '2' };
         expect(sanitizeLogContext(receipt)).toEqual(receipt);
     });
     it('preserves the content-free iOS background sync hold receipt', () => {

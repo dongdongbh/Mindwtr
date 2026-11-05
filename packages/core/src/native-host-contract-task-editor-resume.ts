@@ -1,11 +1,11 @@
 import type { NativeHostResult } from './native-host-contract';
 import { getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
-import { taskEditValuesEqual } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import { createTaskDraft, type TaskDraft, type TaskDraftField } from './task-draft';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 import { normalizeRecurrenceForLoad } from './recurrence';
 import { normalizeTimeSpentMinutes } from './time-spent';
-import { ASSOCIATIONS, LIFECYCLE, RECURRENCE, SCHEDULE, getNativeTaskRecurrenceBase,
+import { ASSOCIATIONS, LIFECYCLE, NATIVE_NULLABLE_DRAFT_FIELDS, RECURRENCE, SCHEDULE, getNativeTaskRecurrenceBase,
     getNativeTaskScheduleBase, readNativeTaskDraftSaveRequest,
     type NativeTaskRecurrenceBase, type NativeTaskScheduleBase } from './native-host-contract-task-save';
 import { isNativeJsonWithinBytes, readChecklist, sameChecklist, toChecklist } from './native-host-contract-task-view';
@@ -99,7 +99,7 @@ export function validateNativeTaskEditorOpeningFields(
         || (own(input, 'recurrenceBase') && !taskEditValuesEqual(input.recurrenceBase, freshRecurrenceBase)))
         return fail('STALE_REVISION', 'Task changed while editor draft was open');
     const matchesOpening = (field: string) => taskEditValuesEqual(freshDraft[field as keyof TaskDraft],
-        input.touchedBase[field] === null && ['relativeStartOffset', 'timeSpentMinutes'].includes(field)
+        input.touchedBase[field] === null && NATIVE_NULLABLE_DRAFT_FIELDS.includes(field)
             ? undefined : input.touchedBase[field]);
     // A matching raw witness makes the current projection the opening projection.
     // Its touched draft half must agree too; otherwise the snapshot is internally inconsistent.

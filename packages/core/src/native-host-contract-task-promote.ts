@@ -8,15 +8,30 @@ import { isStatusListTaskReadOnly } from './menu-views-model';
 import { findSelectableProjectByTitleAndArea } from './project-utils';
 import { projectAreaOrderMax } from './store-projects/project-actions';
 import { ensureDeviceId, getNextProjectOrder } from './store-helpers';
-import { planTaskPromotion, taskEditValuesEqual } from './store-tasks';
+import { planTaskPromotion } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import { taskRevisionOf } from './native-request-receipts';
+import { checklistProjectBlockReason, prepareChecklistProjectConversion, type ChecklistProjectConversion } from './checklist-project-conversion';
+import { generateUUID } from './uuid';
+import { logInfo } from './logger';
 
-export type NativeTaskPromotionRequest = { requestId: string; taskId: string; taskRevision: string; title: string };
+export type NativeTaskPromotionRequest = { requestId: string; taskId: string; taskRevision: string; title: string;
+    expandChecklist?: true };
 export type NativeTaskPromotionResult = { id: string; reused: boolean };
-export type NativePreparedTaskPromotion = PreparedTaskPromotion & {
+export type NativePreparedTaskMove = PreparedTaskPromotion & {
     version: 1; request: NativeTaskPromotionRequest; preparedAt: string; result: NativeTaskPromotionResult;
 };
+export type NativePreparedChecklistPromotion = {
+    version: 2; request: NativeTaskPromotionRequest & { expandChecklist: true };
+    conversion: ChecklistProjectConversion; result: { id: string; reused: false };
+};
+export type NativePreparedTaskPromotion = NativePreparedTaskMove | NativePreparedChecklistPromotion;
 export type NativeTaskPromotionPreparation = { kind: 'prepared'; prepared: NativePreparedTaskPromotion };
+export type NativeTaskPromotionEnvelope = { request: NativeTaskPromotionRequest; prepared: NativePreparedTaskPromotion };
+export type NativeTaskPromotionUndoRequest = { requestId: string; promoteRequestId: string };
+export type NativePreparedTaskPromotionUndo = { version: 1; kind: 'taskPromoteUndo';
+    request: NativeTaskPromotionUndoRequest; promote: NativeTaskPromotionEnvelope; result: { id: string } };
+export type NativeTaskPromotionUndoEnvelope = { request: NativeTaskPromotionUndoRequest; prepared: NativePreparedTaskPromotionUndo };
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -43,7 +58,8 @@ const detach = <T>(value: unknown): T | null => {
 
 const readRequest = (value: unknown): NativeTaskPromotionRequest | null => {
     const request = detach<Record<string, unknown>>(value);
-    return request && exact(request, ['requestId', 'taskId', 'taskRevision', 'title'])
+    return request && (exact(request, ['requestId', 'taskId', 'taskRevision', 'title'])
+        || exact(request, ['requestId', 'taskId', 'taskRevision', 'title', 'expandChecklist']) && request.expandChecklist === true)
         && typeof request.requestId === 'string' && UUID.test(request.requestId)
         && typeof request.taskId === 'string' && Boolean(request.taskId) && request.taskId.length <= 500
         && typeof request.taskRevision === 'string' && Boolean(request.taskRevision) && request.taskRevision.length <= 2000
@@ -52,7 +68,7 @@ const readRequest = (value: unknown): NativeTaskPromotionRequest | null => {
 };
 
 /** Rebuild from frozen consulted rows, never live store/clock/translator. */
-const expectedPromotion = (prepared: NativePreparedTaskPromotion) => {
+const expectedPromotion = (prepared: NativePreparedTaskMove) => {
     const { request, sourceBefore, sourceProject, selectedProject, selectedArea } = prepared;
     const projectWitness: Project[] = [];
     if (sourceProject) projectWitness.push(sourceProject);
@@ -81,7 +97,8 @@ const readPrepared = (value: unknown): NativePreparedTaskPromotion | null => {
     if (!input || !exact(input, ['request', 'prepared']) || !record(input.prepared)) return null;
     const request = readRequest(input.request);
     const raw = input.prepared;
-    if (!request || !exact(raw, ['version', 'request', 'sourceBefore', 'sourceProject', 'selectedArea',
+    if (request && raw.version === 2) return readChecklistPrepared(request, raw);
+    if (!request || request.expandChecklist || !exact(raw, ['version', 'request', 'sourceBefore', 'sourceProject', 'selectedArea',
         'selectedProject', 'projectOrderMax', 'taskOrderMax', 'defaultProjectFlowMode',
         'deviceIdBefore', 'deviceIdToInitialize', 'preparedAt', 'tasks', 'projects', 'sections', 'result'])
         || raw.version !== 1 || !same(raw.request, request)
@@ -104,7 +121,7 @@ const readPrepared = (value: unknown): NativePreparedTaskPromotion | null => {
         || !record(raw.result) || !exact(raw.result, ['id', 'reused'])
         || typeof raw.result.id !== 'string' || typeof raw.result.reused !== 'boolean') return null;
     try {
-        const prepared = raw as unknown as NativePreparedTaskPromotion;
+        const prepared = raw as unknown as NativePreparedTaskMove;
         if (taskRevisionOf(prepared.sourceBefore) !== request.taskRevision
             || prepared.sourceBefore.deletedAt || prepared.sourceBefore.purgedAt
             || isProjectedRecurringTaskId(prepared.sourceBefore.id)
@@ -133,12 +150,92 @@ const readPrepared = (value: unknown): NativePreparedTaskPromotion | null => {
     } catch { return null; }
 };
 
+const readChecklistPrepared = (request: NativeTaskPromotionRequest, raw: Record<string, unknown>): NativePreparedChecklistPromotion | null => {
+    if (request.expandChecklist !== true || !exact(raw, ['version', 'request', 'conversion', 'result'])
+        || !same(raw.request, request) || !record(raw.result) || !exact(raw.result, ['id', 'reused'])
+        || raw.result.id !== request.requestId || raw.result.reused !== false || !record(raw.conversion)) return null;
+    const conversion = raw.conversion;
+    if (!(exact(conversion, ['source', 'retired', 'project', 'tasks', 'deviceId'])
+        || exact(conversion, ['source', 'retired', 'project', 'tasks', 'deviceIdBefore', 'deviceId']) && typeof conversion.deviceIdBefore === 'string')
+        || typeof conversion.deviceId !== 'string' || !conversion.deviceId
+        || !record(conversion.source) || !record(conversion.retired) || !record(conversion.project)
+        || !Array.isArray(conversion.tasks)) return null;
+    const { source, retired, project, tasks } = conversion as unknown as ChecklistProjectConversion;
+    const checklist = source.checklist ?? [];
+    const ids = tasks.map((task) => record(task) ? task.id : undefined);
+    if (source.id !== request.taskId || taskRevisionOf(source) !== request.taskRevision
+        || source.deletedAt || source.purgedAt || isProjectedRecurringTaskId(source.id)
+        || retired.id !== source.id || typeof retired.deletedAt !== 'string' || retired.deletedAt !== retired.updatedAt
+        || project.id !== request.requestId || project.title !== request.title.trim() || project.deletedAt
+        || !checklist.length || tasks.length !== checklist.length
+        || ids.some((id) => typeof id !== 'string' || !UUID.test(id))
+        || new Set([source.id, project.id, ...ids]).size !== ids.length + 2) return null;
+    return tasks.every((task, index) => task.projectId === project.id && task.title === checklist[index].title
+        && task.status === (checklist[index].isCompleted ? 'done' : 'next') && !task.deletedAt)
+        ? raw as unknown as NativePreparedChecklistPromotion : null;
+};
+
+const readPromotionUndoRequest = (value: unknown): NativeTaskPromotionUndoRequest | null => {
+    const request = detach<Record<string, unknown>>(value);
+    return request && exact(request, ['requestId', 'promoteRequestId'])
+        && typeof request.requestId === 'string' && UUID.test(request.requestId)
+        && typeof request.promoteRequestId === 'string' && UUID.test(request.promoteRequestId)
+        && request.requestId !== request.promoteRequestId ? request as NativeTaskPromotionUndoRequest : null;
+};
+
+const readPromotionUndo = (value: unknown): NativePreparedTaskPromotionUndo | null => {
+    const input = detach<Record<string, unknown>>(value);
+    if (!input || !exact(input, ['request', 'prepared']) || !record(input.prepared)) return null;
+    const request = readPromotionUndoRequest(input.request);
+    const raw = input.prepared;
+    if (!request || !exact(raw, ['version', 'kind', 'request', 'promote', 'result']) || raw.version !== 1
+        || raw.kind !== 'taskPromoteUndo' || !same(raw.request, request) || !record(raw.promote)) return null;
+    const promoted = readPrepared(raw.promote);
+    if (!promoted || promoted.version !== 2 || promoted.request.requestId !== request.promoteRequestId
+        || !record(raw.result) || !exact(raw.result, ['id']) || raw.result.id !== promoted.conversion.source.id) return null;
+    return raw as unknown as NativePreparedTaskPromotionUndo;
+};
+
 export function createTaskPromotionMethods(deps: {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
     isReadOnly: (task: Task) => boolean;
+    t: () => (key: string) => string;
 }) {
+    const conversionFailure = (error: string | undefined) => error === 'task.expandChecklistSaveFailed'
+        ? fail('SAVE_FAILED', deps.t()(error)) : fail('STALE_REVISION', deps.t()(error ?? 'task.expandChecklistConflict'));
+    const confirmed = <T,>(operation: 'convert' | 'undo', count: number, value: T): NativeHostResult<T> => {
+        try { logInfo('Native checklist project conversion confirmed', { scope: 'native-host', category: 'storage', force: true,
+            context: { releaseCheck: 'v1.3.8/ios-checklist-project', operation, count, outcome: 'confirmed' } }); }
+        catch {}
+        return { ok: true, value };
+    };
+    const prepareChecklist = (request: NativeTaskPromotionRequest & { expandChecklist: true },
+        sourceBefore: Task): NativeHostResult<NativeTaskPromotionPreparation> => {
+        const state = useTaskStore.getState();
+        const planned = prepareChecklistProjectConversion(state, sourceBefore, request.title,
+            { project: request.requestId, tasks: (sourceBefore.checklist ?? []).map(() => generateUUID()) });
+        if (!planned.success) return fail('INVALID_INPUT', deps.t()(planned.error));
+        const prepared = detach<NativePreparedChecklistPromotion>({ version: 2, request,
+            conversion: planned.command, result: { id: request.requestId, reused: false } });
+        if (!prepared || !readPrepared({ request, prepared })) return fail('INVALID_INPUT', 'Task promotion exceeds the bounded journal');
+        return { ok: true, value: { kind: 'prepared', prepared } };
+    };
     return {
+        getTaskPromotionOptions(input: { taskId: string; taskRevision: string }): NativeHostResult<{ blockedMessage: string | null }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const query = detach<Record<string, unknown>>(input);
+            if (!query || !exact(query, ['taskId', 'taskRevision']) || typeof query.taskId !== 'string' || !query.taskId
+                || query.taskId.length > 500 || typeof query.taskRevision !== 'string' || !query.taskRevision
+                || query.taskRevision.length > 2000) return fail('INVALID_INPUT', 'A bounded task and revision are required');
+            const state = useTaskStore.getState();
+            const task = state._tasksById.get(query.taskId);
+            if (!task || task.deletedAt || task.purgedAt) return fail('TASK_NOT_FOUND', 'Task not found');
+            if (taskRevisionOf(task) !== query.taskRevision) return fail('STALE_REVISION', 'Task changed since it was opened');
+            const blocked = checklistProjectBlockReason(task, state.settings);
+            return { ok: true, value: { blockedMessage: blocked ? deps.t()(blocked) : null } };
+        },
         prepareTaskPromotion(input: NativeTaskPromotionRequest): NativeHostResult<NativeTaskPromotionPreparation> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -151,6 +248,7 @@ export function createTaskPromotionMethods(deps: {
                 || isStatusListTaskReadOnly(sourceBefore, state._allProjects)) return fail('INVALID_INPUT', 'Task is read-only');
             if (taskRevisionOf(sourceBefore) !== request.taskRevision) return fail('STALE_REVISION', 'Task changed since it was opened');
             if (state._projectsById.has(request.requestId) || state._tasksById.has(request.requestId)) return fail('INVALID_INPUT', 'Request identity is already in use');
+            if (request.expandChecklist) return prepareChecklist({ ...request, expandChecklist: true }, sourceBefore);
             const sourceProject = sourceBefore.projectId ? state._projectsById.get(sourceBefore.projectId) ?? null : null;
             const inheritedAreaId = sourceBefore.areaId ?? sourceProject?.areaId;
             const selectedArea = inheritedAreaId
@@ -165,7 +263,7 @@ export function createTaskPromotionMethods(deps: {
                 now: preparedAt, projectId: request.requestId });
             if (!plan.ok) return fail('INVALID_INPUT', plan.error);
             const result = { id: plan.targetProject.id, reused: !plan.createdProject };
-            const prepared: NativePreparedTaskPromotion = {
+            const prepared: NativePreparedTaskMove = {
                 version: 1, request, sourceBefore, sourceProject, selectedArea, selectedProject,
                 projectOrderMax: plan.createdProject ? projectAreaOrderMax(state._allProjects, selectedArea?.id ?? null) : null,
                 taskOrderMax: sourceBefore.projectId === result.id ? null
@@ -192,6 +290,12 @@ export function createTaskPromotionMethods(deps: {
             if (!ready.ok) return ready;
             const prepared = readPrepared(input);
             if (!prepared) return fail('INVALID_INPUT', 'Prepared task promotion request or journal does not match');
+            if (prepared.version === 2) {
+                const converted = await useTaskStore.getState().convertChecklistToProject(prepared.conversion);
+                if (!converted.success) return conversionFailure(converted.error);
+                const saved = await deps.save();
+                return saved.ok ? confirmed('convert', prepared.conversion.tasks.length, prepared.result) : saved;
+            }
             const applied = await useTaskStore.getState().commitPreparedTaskPromotion(prepared);
             if (!applied.success) return fail('STALE_REVISION', applied.error ?? 'Prepared task promotion conflicts with current data');
             try {
@@ -199,6 +303,34 @@ export function createTaskPromotionMethods(deps: {
             } catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
             const saved = await deps.save();
             return saved.ok ? { ok: true, value: prepared.result } : saved;
+        },
+        prepareTaskPromotionUndo(input: { request: NativeTaskPromotionUndoRequest; promote: NativeTaskPromotionEnvelope }): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskPromotionUndo }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const value = detach<Record<string, unknown>>(input);
+            const request = value && exact(value, ['request', 'promote']) ? readPromotionUndoRequest(value.request) : null;
+            const promoted = request ? readPrepared(value!.promote) : null;
+            if (!request || !promoted || promoted.version !== 2 || promoted.request.requestId !== request.promoteRequestId)
+                return fail('INVALID_INPUT', 'Undo needs the confirmed checklist conversion');
+            const prepared: NativePreparedTaskPromotionUndo = { version: 1, kind: 'taskPromoteUndo', request,
+                promote: value!.promote as NativeTaskPromotionEnvelope, result: { id: promoted.conversion.source.id } };
+            return readPromotionUndo({ request, prepared }) ? { ok: true, value: { kind: 'prepared', prepared } }
+                : fail('INVALID_INPUT', 'Checklist conversion Undo exceeds the bounded journal');
+        },
+        validatePreparedTaskPromotionUndo(input: NativeTaskPromotionUndoEnvelope): NativeHostResult<{ id: string }> {
+            const prepared = readPromotionUndo(input);
+            return prepared ? { ok: true, value: prepared.result } : fail('INVALID_INPUT', 'Prepared checklist conversion Undo does not match');
+        },
+        async commitPreparedTaskPromotionUndo(input: NativeTaskPromotionUndoEnvelope): Promise<NativeHostResult<{ id: string }>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const prepared = readPromotionUndo(input);
+            if (!prepared) return fail('INVALID_INPUT', 'Prepared checklist conversion Undo does not match');
+            const promoted = readPrepared(prepared.promote) as NativePreparedChecklistPromotion;
+            const restored = await useTaskStore.getState().undoChecklistToProject(promoted.conversion);
+            if (!restored.success) return conversionFailure(restored.error);
+            const saved = await deps.save();
+            return saved.ok ? confirmed('undo', promoted.conversion.tasks.length, prepared.result) : saved;
         },
     };
 }

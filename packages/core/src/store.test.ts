@@ -853,7 +853,7 @@ describe('TaskStore', () => {
             title: item.title,
             isCompleted: item.isCompleted,
         }))).toEqual([
-            { title: 'Pack charger', isCompleted: false },
+            { title: 'Pack charger', isCompleted: true },
             { title: 'Print agenda', isCompleted: false },
         ]);
         expect(duplicatedTask?.checklist?.map((item) => item.id)).not.toEqual(['c1', 'c2']);
@@ -875,6 +875,47 @@ describe('TaskStore', () => {
             },
         ]);
     });
+
+    it.each([
+        { status: 'next', asNextAction: false },
+        { status: 'reference', asNextAction: false },
+        { status: 'next', asNextAction: true },
+        { status: 'reference', asNextAction: true },
+    ] satisfies { status: Task['status']; asNextAction: boolean }[])(
+        'preserves mixed checklist progress when duplicating $status with asNextAction=$asNextAction',
+        async ({ status, asNextAction }) => {
+            const { addTask, duplicateTask, updateTask } = useTaskStore.getState();
+            const added = await addTask('Reusable checklist', { status, checklist: [
+                { id: 'checked', title: 'Finished step', isCompleted: true },
+                { id: 'unchecked', title: 'Remaining step', isCompleted: false },
+            ] });
+            const source = structuredClone(useTaskStore.getState()._tasksById.get(added.id!)!);
+            const copyId = generateUUID();
+            expect(await duplicateTask(source.id, asNextAction, copyId)).toMatchObject({ success: true, id: copyId });
+            const copy = useTaskStore.getState()._tasksById.get(copyId)!;
+            expect(copy.id).not.toBe(source.id);
+            expect(copy.status).toBe(asNextAction ? 'next' : status);
+            expect(copy.checklist?.map(({ title, isCompleted }) => ({ title, isCompleted })))
+                .toEqual(source.checklist?.map(({ title, isCompleted }) => ({ title, isCompleted })));
+            const sourceIds = new Set([source.id, ...source.checklist!.map((item) => item.id)]);
+            const copyIds = [copy.id, ...copy.checklist!.map((item) => item.id)];
+            expect(copyIds.every((id) => !sourceIds.has(id))).toBe(true);
+            expect(new Set(copyIds).size).toBe(copyIds.length);
+            const beforeReplay = structuredClone(useTaskStore.getState()._allTasks);
+            expect(await duplicateTask(source.id, asNextAction, copyId)).toMatchObject({ success: true, id: copyId });
+            expect(useTaskStore.getState()._allTasks).toEqual(beforeReplay);
+            expect(useTaskStore.getState()._tasksById.get(source.id)).toEqual(source);
+
+            await updateTask(copyId, { checklist: copy.checklist!.map((item, index) => index === 0
+                ? { ...item, title: 'Edited copy step', isCompleted: false } : item) });
+            expect(useTaskStore.getState()._tasksById.get(source.id)).toEqual(source);
+            expect(useTaskStore.getState()._tasksById.get(copyId)?.checklist?.[0])
+                .toMatchObject({ title: 'Edited copy step', isCompleted: false });
+            const beforeRefusedReplay = structuredClone(useTaskStore.getState()._allTasks);
+            expect(await duplicateTask(source.id, asNextAction, copyId)).toMatchObject({ success: false });
+            expect(useTaskStore.getState()._allTasks).toEqual(beforeRefusedReplay);
+        },
+    );
 
     it('shows the duplicated task in the visible list immediately', async () => {
         const { addTask, duplicateTask } = useTaskStore.getState();
@@ -979,7 +1020,7 @@ describe('TaskStore', () => {
         const copy = useTaskStore.getState()._allTasks.find((task) => task.id === duplicateResult.id);
         expect(copy?.status).toBe('inbox');
         expect(copy?.completedAt).toBeUndefined();
-        expect(copy?.checklist?.every((item) => item.isCompleted === false)).toBe(true);
+        expect(copy?.checklist?.every((item) => item.isCompleted === true)).toBe(true);
     });
 
     // focusOrder is a synced field and the *BeforeProjectArchive trio only means
@@ -3131,12 +3172,8 @@ describe('TaskStore', () => {
         expect(useTaskStore.getState()._allTasks.map((task) => task.id).sort()).toEqual(['task-victim-1', 'task-victim-2']);
         const saveCallsAfterFirstLoad = (mockStorage.saveData as unknown as { mock: { calls: any[][] } }).mock.calls.length;
 
-        // The second read drops both existing tasks entirely (simulating a bad or
-        // truncated storage read) while carrying an overdue inbox task, which
-        // always trips the unconditional promote-scheduled-tasks migration --
-        // proving the guard fires on a genuine gap, not just "nothing changed".
         mockStorage.getData = vi.fn().mockResolvedValue({
-            tasks: [createStoreTask('task-trigger', { dueDate: '2020-01-01' })],
+            tasks: [createStoreTask('task-trigger', { dueDate: '2020-01-01', createdAt: '2019-12-01T00:00:00.000Z', updatedAt: '2019-12-01T00:00:00.000Z' })],
             projects: [],
             sections: [],
             areas: [],

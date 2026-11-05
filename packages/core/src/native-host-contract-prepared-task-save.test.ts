@@ -89,6 +89,35 @@ describe('prepared native task draft save', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it('saves task reminder policy and advance reminders through v2 and keeps the sealed v1 grammar', async () => {
+        await seed({ reminderPolicy: 'inherit', startTime: '2026-09-28T13:00:00.000Z', dueDate: '2026-09-28T14:00:00.000Z' });
+        const patch = { reminderPolicy: 'skip', dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 15 } as const;
+        expect(host.prepareTaskDraftSave(request(patch))).toMatchObject({ ok: false });
+        const input = request(patch);
+        expect(input.base).toEqual({ reminderPolicy: 'inherit', dueReminderLeadMinutes: null, startReminderLeadMinutes: null });
+        const plan = await host.prepareTaskDraftSaveV2(input);
+        expect(plan).toMatchObject({ ok: true, value: { kind: 'prepared' } });
+        if (!plan.ok || plan.value.kind !== 'prepared') return;
+        const prepared = json(plan.value.prepared);
+        expect(host.validatePreparedTaskDraftSave({ request: input, prepared })).toMatchObject({ ok: true });
+        expect(await host.commitPreparedTaskDraftSave({ request: input, prepared })).toMatchObject({ ok: true });
+        expect(saved()).toMatchObject({ reminderPolicy: 'skip', suppressMindwtrReminders: true,
+            dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 15, rev: 8 });
+        await open();
+        expect(await host.commitPreparedTaskDraftSave({ request: input, prepared })).toMatchObject({ ok: true });
+        expect(saveData).not.toHaveBeenCalled();
+
+        const off = request({ dueReminderLeadMinutes: 0, startReminderLeadMinutes: 0 });
+        const offPlan = await host.prepareTaskDraftSaveV2(off);
+        expect(offPlan).toMatchObject({ ok: true, value: { kind: 'prepared' } });
+        if (!offPlan.ok || offPlan.value.kind !== 'prepared') return;
+        expect(await host.commitPreparedTaskDraftSave({ request: off, prepared: offPlan.value.prepared })).toMatchObject({ ok: true });
+        expect(saved()).toMatchObject({ dueReminderLeadMinutes: 0, startReminderLeadMinutes: 0 });
+        for (const bad of [{ dueReminderLeadMinutes: 10_081 }, { startReminderLeadMinutes: 13 }, { reminderPolicy: 'never' }]) {
+            expect(await host.prepareTaskDraftSaveV2(request(bad as NativeTaskDraftSaveRequest['patch']))).toMatchObject({ ok: false });
+        }
+    });
+
     it('uses shared Location trimming for set, clear, and whitespace-only no-op', async () => {
         const set = request({ location: '  Clinic A  ' });
         const setPlan = await host.prepareTaskDraftSaveV2(set);

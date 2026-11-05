@@ -5,12 +5,9 @@ import { compareSomedayTasks, compareWaitingTasks } from './menu-views-model';
 import { applyFilter, normalizeSavedFilters } from './saved-filters';
 import { logInfo } from './logger';
 import { sortTasksBy, sortTasksBySavedPreference } from './task-utils';
-import type { AppData, SavedFilter, Task, TaskSortBy } from './types';
+import type { AppData, FocusGroupBy, SavedFilter, Task, TaskSortBy } from './types';
 
-// The lists a placed Tasks widget can show (#1173): Mindwtr's own GTD lists,
-// each in the order its screen uses, plus saved filters and context/tag lists. `focus` is the
-// sectioned Focus layout widget-payload.ts already builds; the others are defined
-// here, once. A single project is covered by a saved filter scoped to it.
+
 export const WIDGET_FIXED_LIST_IDS = ['focus', 'inbox', 'next', 'waiting', 'someday', 'upcoming'] as const;
 export type WidgetFixedListId = (typeof WIDGET_FIXED_LIST_IDS)[number];
 export const WIDGET_SAVED_FILTER_LIST_PREFIX = 'filter:';
@@ -18,7 +15,26 @@ export const WIDGET_SAVED_FILTER_OPTION_CAP = 50;
 export const WIDGET_CONTEXT_LIST_PREFIX = 'context:';
 export const WIDGET_TAG_LIST_PREFIX = 'tag:';
 
-/** Canonical IDs use the same legacy-token normalization as shared filtering. */
+
+export const WIDGET_FOCUS_AVAILABLE_LIST_ID = 'focus:available';
+
+export type WidgetGroupBy = 'none' | 'context' | 'project' | 'priority';
+
+
+export function parseWidgetListSelection(selection: string): { listId: string; groupBy?: WidgetGroupBy } | null {
+    if (!selection.startsWith('group:')) return { listId: selection };
+    const match = /^group:(none|context|project|priority):(.+)$/.exec(selection);
+    if (!match || selection.length > 12 * 1024 + 32) return null;
+    try {
+        const listId = decodeURIComponent(match[2]);
+        if (!listId || listId.length > 1024 || listId === 'focus' || listId.startsWith('group:')) return null;
+        return { listId, groupBy: match[1] as WidgetGroupBy };
+    } catch {
+        return null;
+    }
+}
+
+
 export function normalizeWidgetTokenListId(value: string): string | null {
     const prefix = value.startsWith(WIDGET_CONTEXT_LIST_PREFIX) ? WIDGET_CONTEXT_LIST_PREFIX
         : value.startsWith(WIDGET_TAG_LIST_PREFIX) ? WIDGET_TAG_LIST_PREFIX : null;
@@ -30,8 +46,8 @@ export function normalizeWidgetTokenListId(value: string): string | null {
 
 export function buildWidgetTokenOptions(data: AppData, field: BulkTaskTokenField): { id: string; name: string }[] {
     const prefix = field === 'contexts' ? WIDGET_CONTEXT_LIST_PREFIX : WIDGET_TAG_LIST_PREFIX;
-    // Retained records keep unused labels available; deleted records contribute nothing. Every Android widget refresh runs
-    // this over the whole store, where a few labels repeat thousands of times: each is normalized once.
+
+
     const normalized = new Map<string, string>();
     const normalize = (token: string): string => {
         let value = normalized.get(token);
@@ -45,7 +61,7 @@ export function buildWidgetTokenOptions(data: AppData, field: BulkTaskTokenField
     });
 }
 
-/** Candidate index avoids scanning the whole task store once for every chooser option. */
+
 export function buildWidgetTokenTaskIndex(tasks: Task[]): Map<string, Task[]> {
     const index = new Map<string, Task[]>();
     for (const task of tasks) {
@@ -79,26 +95,35 @@ const LIST_TITLE_KEYS: Record<WidgetFixedListId, [string, string]> = {
     upcoming: ['agenda.upcoming', 'Upcoming'],
 };
 
-// The fixed list titles plus the group label the picker puts above its
-// saved-filter rows.
-export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixedListId | 'savedFilters', string> {
+
+export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixedListId | 'savedFilters' | 'groupBy' | 'groupDefault' | 'groupNone' | 'groupContext' | 'groupProject' | 'groupPriority', string> {
     return {
         ...(Object.fromEntries(
             WIDGET_FIXED_LIST_IDS.map((id) => [id, tr[LIST_TITLE_KEYS[id][0]] ?? LIST_TITLE_KEYS[id][1]]),
         ) as Record<WidgetFixedListId, string>),
         savedFilters: tr['settings.syncPreferenceSavedFilters'] ?? 'Saved filters',
+        groupBy: tr['list.groupBy'] ?? 'Group',
+        groupDefault: tr['sort.default'] ?? 'Default',
+        groupNone: tr['list.groupByNone'] ?? 'No grouping',
+        groupContext: tr['list.groupByContext'] ?? 'Context',
+        groupProject: tr['list.groupByProject'] ?? 'Project',
+        groupPriority: tr['taskEdit.priorityLabel'] ?? 'Priority',
     };
 }
 
 export interface WidgetTaskList {
     title: string;
     tasks: Task[];
+    groupBy?: FocusGroupBy;
+    showStatus?: boolean;
 }
 
 export interface WidgetListContext {
     data: AppData;
-    /** Undeleted, actionable, in an active project: the widget's base pool. */
+
     activeTasks: Task[];
+
+    inboxTasks: Task[];
     focusLists: FocusTaskLists;
     sortBy: TaskSortBy;
     prioritiesEnabled: boolean;
@@ -107,21 +132,19 @@ export interface WidgetListContext {
     tokenTaskIndex?: Map<string, Task[]>;
 }
 
-// The saved filters this build can apply, not deleted: a newer app's view is left out.
+
 const liveSavedFilters = (data: AppData): SavedFilter[] => (
     normalizeSavedFilters(data.settings?.savedFilters).filter((filter) => !filter.deletedAt)
 );
 
-/** Saved filters the configuration screen offers, in the order the app lists them. */
+
 export function buildWidgetSavedFilterOptions(data: AppData): { id: string; name: string }[] {
     return liveSavedFilters(data)
         .slice(0, WIDGET_SAVED_FILTER_OPTION_CAP)
         .map((filter) => ({ id: filter.id, name: filter.name }));
 }
 
-// A saved filter is written against one view, and the app only ever applies it
-// on that view's list, so the widget narrows the pool the same way before
-// matching. Every other view filters the full actionable pool.
+
 const savedFilterStatus: Partial<Record<SavedFilter['view'], Task['status']>> = {
     next: 'next',
     waiting: 'waiting',
@@ -148,19 +171,19 @@ function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): 
             sortOrder: filter.sortOrder,
         })
         : sortTasksBy(matched, sortBy);
-    return { title: filter.name, tasks };
+    return { title: filter.name, tasks, groupBy: filter.groupBy, showStatus: !status };
 }
 
-/** Null when the id names no list (an unknown or deleted saved filter). */
+
 export function buildWidgetTaskList(listId: string, context: WidgetListContext): WidgetTaskList | null {
-    const { data, activeTasks, focusLists, sortBy, tr } = context;
+    const { data, activeTasks, inboxTasks, focusLists, sortBy, tr } = context;
     const titles = widgetListTitles(tr);
     switch (listId) {
         case 'inbox':
-            return { title: titles.inbox, tasks: sortTasksBy(activeTasks.filter((task) => task.status === 'inbox'), sortBy) };
+            return { title: titles.inbox, tasks: sortTasksBy(inboxTasks, sortBy) };
         case 'next':
-            // The app's Next Actions list is the Focus screen's Next section
-            // (sequential-project rules included).
+
+
             return { title: titles.next, tasks: focusLists.nextActions };
         case 'upcoming':
             return { title: titles.upcoming, tasks: focusLists.upcoming };
@@ -178,7 +201,7 @@ export function buildWidgetTaskList(listId: string, context: WidgetListContext):
         const token = tokenListId.slice(prefix.length);
         const candidates = context.tokenTaskIndex?.get(`${prefix}${token.replace(/\/+$/, '')}`)
             ?? (context.tokenTaskIndex ? [] : activeTasks);
-        return { title: token, tasks: sortTasksBy(applyFilter(candidates, { [field]: [token] }, {
+        return { title: token, showStatus: true, tasks: sortTasksBy(applyFilter(candidates, { [field]: [token] }, {
             projects: data.projects || [], tokenMatchMode: 'all',
         }), sortBy) };
     }

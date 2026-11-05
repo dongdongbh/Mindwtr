@@ -52,6 +52,61 @@ async function open(filters: SavedFilter[] = [], shouldFail = () => false) {
 afterEach(async () => { await flushPendingSave().catch(() => undefined); resetForTests(); });
 
 describe('prepared Focus saved filter', () => {
+
+    it('saves complete Contexts criteria with the existing writer and replays after unrelated changes', async () => {
+        const host = await open([filter('sibling')]);
+        const criteria = { statuses: ['someday' as const, 'waiting' as const], excludedProjects: ['missing-project'],
+            locations: ['Home'], timeEstimates: ['custom:45'], dueDateRange: { preset: 'today' as const },
+            futureCriterion: { untouched: true } };
+        const controls = { ...DEFAULT_FOCUS_CONTROL_STATE, preservedCriteria: criteria };
+        const request = host.request({ type: 'save', view: 'contexts' }, controls, ' Contexts ');
+        const prepared = host.prepared(request);
+        expect(prepared.after).toMatchObject({ id: uuid, name: 'Contexts', view: 'contexts', criteria });
+        expect(prepared.result).toMatchObject({ id: uuid, view: 'contexts', controls: { savedFilterId: uuid } });
+        expect(host.methods.validatePreparedFocusSavedFilter({ request, prepared })).toEqual({ ok: true, value: prepared.result });
+        expect(await host.methods.commitPreparedFocusSavedFilter({ request, prepared })).toEqual({ ok: true, value: prepared.result });
+        expect(host.stored().settings.savedFilters?.[0]).toEqual(filter('sibling'));
+        expect(host.stored().settings.savedFilters?.[1]).toEqual(prepared.after);
+        const saves = host.saves();
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, gtd: { focusGroupBy: 'project' } } }));
+        expect(await host.methods.commitPreparedFocusSavedFilter({ request, prepared })).toEqual({ ok: true, value: prepared.result });
+        expect(host.saves()).toBe(saves);
+        const forged = structuredClone(prepared);
+        delete forged.result.view;
+        expect(host.methods.validatePreparedFocusSavedFilter({ request, prepared: forged })).toMatchObject({ ok: false });
+    });
+
+    it('retries a failed Contexts save cold and returns its exact result after later scope changes', async () => {
+        let failing = true;
+        const host = await open([], () => failing);
+        const controls = { ...DEFAULT_FOCUS_CONTROL_STATE, preservedCriteria: {
+            statuses: ['someday' as const], excludedProjects: ['project'], futureCriterion: { retained: true } } };
+        const request = host.request({ type: 'save', view: 'contexts' }, controls, 'Someday');
+        const prepared = host.prepared(request);
+        expect(await host.methods.commitPreparedFocusSavedFilter({ request, prepared })).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        await flushPendingSave();
+        const cold = await open();
+        expect(await cold.methods.commitPreparedFocusSavedFilter({ request, prepared })).toEqual({ ok: true, value: prepared.result });
+        const after = await open([prepared.after]);
+        await flushPendingSave();
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, gtd: { focusGroupBy: 'area' } } }));
+        const saves = after.saves();
+        expect(await after.methods.commitPreparedFocusSavedFilter({ request, prepared })).toEqual({ ok: true, value: prepared.result });
+        expect(after.saves()).toBe(saves);
+    });
+
+    it('refuses Contexts saves without representable active statuses or with task search', async () => {
+        const host = await open();
+        for (const controls of [DEFAULT_FOCUS_CONTROL_STATE,
+            { ...DEFAULT_FOCUS_CONTROL_STATE, preservedCriteria: { statuses: ['done' as const] } },
+            { ...DEFAULT_FOCUS_CONTROL_STATE, filters: { ...DEFAULT_FOCUS_CONTROL_STATE.filters, searchQuery: 'search' },
+                preservedCriteria: { statuses: ['next' as const] } }]) {
+            expect(host.methods.getFocusSavedFilterOptions({ controls, operation: { type: 'save', view: 'contexts' } })).toMatchObject({ ok: false });
+        }
+        expect(host.saves()).toBe(0);
+    });
+
     it('uses ordinal-key JSON and rejects malformed raw criteria before a write', async () => {
         expect(focusSavedFilterToken({ z: { b: 1, a: 2 }, a: 3 }))
             .toBe('{"a":3,"z":{"a":2,"b":1}}');

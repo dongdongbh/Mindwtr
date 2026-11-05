@@ -1474,6 +1474,9 @@ export class SqliteAdapter {
      * its writes and just before COMMIT: a subclass adds rows that must land with that
      * data or not at all. A throw rolls the whole transaction back.
      */
+    /** Optional native snapshot proof, inside BEGIN and before any domain write. */
+    protected async beforeDataWrite(_data: AppData): Promise<void> {}
+
     protected async beforeCommit(_write: { data: AppData } | { task: Task }): Promise<void> {}
 
     /** A specialized writer can keep untrusted document identifiers out of failure diagnostics. */
@@ -1640,6 +1643,8 @@ export class SqliteAdapter {
         try {
             saveStep = 'concurrent-write-check';
             await this.assertObservedSnapshotUnchanged();
+            saveStep = 'before-data-write';
+            await this.beforeDataWrite(data);
             const nowIso = new Date().toISOString();
             if (incomingEntityCount === 0) {
                 saveStep = 'empty-snapshot-check';

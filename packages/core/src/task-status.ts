@@ -1,6 +1,6 @@
 import type { Task, TaskStatus } from './types';
 import { normalizeRecurrenceForLoad } from './recurrence';
-import { normalizeRepeatReminderMinutes } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
 import { normalizeTimeSpentMinutes } from './time-spent';
 import { normalizeRelativeStartOffset } from './task-relative-start';
 import { preserveShallowIdentity, sameShallowRecord } from './shallow-identity';
@@ -214,6 +214,8 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
         orderNum: normalizedOrder,
         recurrence: preserveShallowIdentity(task.recurrence, normalizeRecurrenceForLoad(task.recurrence)),
         repeatReminderMinutes: normalizeRepeatReminderMinutes(task.repeatReminderMinutes),
+        dueReminderLeadMinutes: normalizeDueReminderLeadMinutes(task.dueReminderLeadMinutes),
+        startReminderLeadMinutes: normalizeStartReminderLeadMinutes(task.startReminderLeadMinutes),
         timeSpentMinutes: normalizeTimeSpentMinutes(task.timeSpentMinutes),
         relativeStartOffset,
         rev,

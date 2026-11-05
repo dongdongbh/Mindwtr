@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNativeRequestReceipts, loadNativeRequestReceipts, NativeReceiptSqliteAdapter, pruneNativeRequestReceipts, resetNativeRequestReceipts } from './native-request-receipts';
-import { decodeNativePomodoroSession, nativePomodoroReceiptPayload, prepareNativePomodoroTransition } from './native-pomodoro-session';
+import { decodeNativePomodoroSession, nativePomodoroReceiptPayload, prepareNativePomodoroTransition, type NativePomodoroRequest } from './native-pomodoro-session';
 import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter, type SqliteClient } from './sqlite-adapter';
 import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
@@ -77,15 +77,112 @@ afterEach(() => {
     for (const item of resources.splice(0).reverse()) { item.close(); rmSync(item.directory, { recursive: true, force: true }); }
 });
 
+const watchRequest = (action: 'start' | 'pause' | 'reset' = 'start'): Extract<NativePomodoroRequest, { action: 'watch' }> => ({
+    action: 'watch', requestId: NEXT, observedAtMs: now + 10_000, localDayKey: '2026-10-10',
+    autoStart: { autoStartFocus: false, autoStartBreaks: false }, durations: { focusMinutes: 50, breakMinutes: 10 }, selectedTaskId: null,
+    sourceJSON: JSON.stringify({ protocolVersion: 1, id: NEXT, source: 'apple-watch', kind: 'pomodoro',
+        action, createdAt: new Date(now + 1).toISOString() }),
+});
+const watchPlan = (env: Awaited<ReturnType<typeof open>>, request = watchRequest()) => prepareNativePomodoroTransition({ request,
+    session: { raw: env.plan.sessionBefore!, state: decodeNativePomodoroSession(env.plan.sessionBefore!) },
+    target: env.plan.target, deviceId: 'device' })!;
+
+describe('Watch Pomodoro source receipt recovery', () => {
+    it('looks up genuine absence and refuses an existing non-Watch receipt with the same UUID', async () => {
+        const env = await open(); const request = watchRequest();
+        expect(await env.adapter.readWatchPomodoroPlan(request.sourceJSON)).toBeNull();
+        await env.adapter.savePomodoroTransitionWithReceipt(env.plan);
+        await expect(env.adapter.readWatchPomodoroPlan(request.sourceJSON)).rejects.toThrow('Watch Pomodoro receipt could not be read');
+    });
+    it('cold-loads exact source and replays after later phone edits without repeating timer credit', async () => {
+        const env = await open(); const plan = watchPlan(env);
+        expect((await env.adapter.savePomodoroTransitionWithReceipt(plan)).result.creditedMinutes).toBe(25);
+        const session = await env.adapter.readPomodoroSession();
+        const phone = prepareNativePomodoroTransition({ request: { action: 'reset', requestId: ID, observedAtMs: now + 20_000,
+            localDayKey: '2026-10-10', autoStart: { autoStartFocus: false, autoStartBreaks: false } }, session, target: null, deviceId: null })!;
+        await env.adapter.savePomodoroTransitionWithReceipt(phone);
+        await env.sql.client.run('UPDATE tasks SET title=?,rev=?,timeSpentMinutes=? WHERE id=?', ['Later phone edit', 9, 37, 'task']);
+        resetNativeRequestReceipts(); await loadNativeRequestReceipts(env.sql.client, { durableCommands: ['pomodoroTransition'] });
+        const cold = new NativeReceiptSqliteAdapter(env.client, { rejectConcurrentWrites: true }); setStorageAdapter(cold);
+        const before = await env.state(); env.events.length = 0;
+        const recovered = await cold.readWatchPomodoroPlan(watchRequest().sourceJSON);
+        expect(recovered).toEqual(plan);
+        expect(await cold.savePomodoroTransitionWithReceipt(recovered!, { replayOnly: true })).toMatchObject({ replayed: true, result: plan.result });
+        expect(await env.state()).toEqual(before);
+        expect(env.events.some(statement => /^(UPDATE|INSERT|DELETE)/u.test(statement))).toBe(false);
+        await expect(cold.readWatchPomodoroPlan(` ${watchRequest().sourceJSON}`)).rejects.toThrow('Watch Pomodoro receipt could not be read');
+        await expect(cold.readWatchPomodoroPlan(watchRequest('pause').sourceJSON)).rejects.toThrow('Watch Pomodoro receipt could not be read');
+    });
+    it('refuses missing known durable receipts and malformed saved proof', async () => {
+        const env = await open(); const plan = watchPlan(env);
+        await env.adapter.savePomodoroTransitionWithReceipt(plan);
+        await env.sql.client.run('UPDATE native_request_receipts SET reply=? WHERE request_id=?', ['{}', NEXT]);
+        await expect(env.adapter.readWatchPomodoroPlan(watchRequest().sourceJSON)).rejects.toThrow();
+        await env.sql.client.run('DELETE FROM native_request_receipts WHERE request_id=?', [NEXT]);
+        await expect(env.adapter.readWatchPomodoroPlan(watchRequest().sourceJSON)).rejects.toThrow();
+    });
+    it('refuses missing proof after a lost COMMIT reply without treating the source as new', async () => {
+        const env = await open(); const plan = watchPlan(env);
+        env.hooks.afterRun = async statement => { if (statement === 'COMMIT') throw new Error('lost reply'); };
+        await expect(env.adapter.savePomodoroTransitionWithReceipt(plan)).rejects.toThrow('Pomodoro transition could not be proven');
+        env.hooks.afterRun = undefined;
+        expect(await env.adapter.readWatchPomodoroPlan(watchRequest().sourceJSON)).toEqual(plan);
+        await env.sql.client.run('DELETE FROM native_request_receipts WHERE request_id=?', [NEXT]);
+        await expect(env.adapter.readWatchPomodoroPlan(watchRequest().sourceJSON)).rejects.toThrow();
+    });
+    it('saves a stale receipt without changing expired timer bytes or task credit', async () => {
+        const env = await open(); const state = decodeNativePomodoroSession(env.plan.sessionBefore!);
+        const raw = ` \n${JSON.stringify(state, null, 2)}\n `;
+        await env.sql.client.run('UPDATE native_pomodoro_session SET state_json=? WHERE id=1', [raw]);
+        const request = watchRequest(); request.sourceJSON = request.sourceJSON.replace(new Date(now + 1).toISOString(), AT);
+        const plan = prepareNativePomodoroTransition({ request, session: { raw, state }, target: env.plan.target, deviceId: 'device' })!;
+        const before = await env.state();
+        await env.adapter.savePomodoroTransitionWithReceipt(plan);
+        const after = await env.state();
+        expect(after.tasks).toEqual(before.tasks); expect(after.sessions).toEqual(before.sessions);
+        expect(after.receipts).toHaveLength(before.receipts.length + 1);
+        expect(await env.adapter.readWatchPomodoroPlan(request.sourceJSON)).toEqual(plan);
+        expect(plan.result.creditedMinutes).toBe(0);
+    });
+    it('refuses proof from an uncommitted transaction', async () => {
+        const env = await open(); const plan = watchPlan(env);
+        await env.sql.client.run('BEGIN IMMEDIATE');
+        try {
+            await env.sql.client.run('INSERT INTO native_request_receipts (request_id,method,reply,saved_at) VALUES (?,?,?,?)',
+                [NEXT, nativePomodoroReceiptPayload(plan), JSON.stringify(plan.result), AT]);
+            await expect(env.adapter.readWatchPomodoroPlan(watchRequest().sourceJSON)).rejects.toThrow();
+        } finally { await env.sql.client.run('ROLLBACK'); }
+        expect(await env.adapter.readWatchPomodoroPlan(watchRequest().sourceJSON)).toBeNull();
+    });
+    it.each(['scoped', 'all'] as const)('retains Watch receipt older than 30 days alongside latest ordinary proof (%s)', async scope => {
+        const env = await open(); const plan = watchPlan(env);
+        await env.adapter.savePomodoroTransitionWithReceipt(plan);
+        const session = await env.adapter.readPomodoroSession();
+        const middle = prepareNativePomodoroTransition({ request: { action: 'reset', requestId: '33333333-3333-4333-8333-333333333333',
+            observedAtMs: now + 20_000, localDayKey: '2026-10-10', autoStart: { autoStartFocus: false, autoStartBreaks: false } },
+            session, target: null, deviceId: null })!;
+        await env.adapter.savePomodoroTransitionWithReceipt(middle);
+        const latest = prepareNativePomodoroTransition({ request: { ...middle.request, requestId: ID, observedAtMs: now + 30_000 },
+            session: await env.adapter.readPomodoroSession(), target: null, deviceId: null })!;
+        await env.adapter.savePomodoroTransitionWithReceipt(latest);
+        await env.sql.client.run('UPDATE native_request_receipts SET saved_at=?', ['2026-01-01T00:00:00.000Z']);
+        await env.sql.client.run('UPDATE native_request_receipts SET saved_at=? WHERE request_id=?', ['2026-01-02T00:00:00.000Z', ID]);
+        await loadNativeRequestReceipts(env.sql.client, scope === 'scoped' ? { durableCommands: ['pomodoroTransition'] } : undefined);
+        expect(await pruneNativeRequestReceipts(env.sql.client, new Date(AT))).toBe(1);
+        expect(await env.sql.client.all('SELECT request_id FROM native_request_receipts ORDER BY request_id')).toEqual([{ request_id: ID }, { request_id: NEXT }]);
+        expect(await env.adapter.readWatchPomodoroPlan(watchRequest().sourceJSON)).toEqual(plan);
+    });
+});
+
 describe('native Pomodoro integration with the SQLite and store write gates', () => {
-    it('cold-loads and replays a committed schema4 receipt unchanged after schema5 policy edits', async () => {
+    it('cold-loads and replays a committed schema4 receipt unchanged after policy and advance-reminder edits', async () => {
         const env = await open(); const legacy = structuredClone(env.plan);
-        expect(TASK_SQLITE_COLUMNS).toHaveLength(47); expect(TASK_SQLITE_COLUMNS[46]).toBe('reminderPolicy');
+        expect(TASK_SQLITE_COLUMNS).toHaveLength(49); expect(TASK_SQLITE_COLUMNS[46]).toBe('reminderPolicy');
         legacy.target!.row = legacy.target!.row!.slice(0, 46);
         const payload = JSON.stringify(['pomodoroTransition', legacy]);
-        await env.sql.client.run('UPDATE tasks SET timeSpentMinutes=?,rev=?,revBy=?,updatedAt=?,reminderPolicy=?,title=? WHERE id=?',
+        await env.sql.client.run('UPDATE tasks SET timeSpentMinutes=?,rev=?,revBy=?,updatedAt=?,reminderPolicy=?,dueReminderLeadMinutes=?,startReminderLeadMinutes=?,title=? WHERE id=?',
             [legacy.taskPatch!.timeSpentMinutes, legacy.taskPatch!.rev, legacy.taskPatch!.revBy, legacy.taskPatch!.updatedAt,
-                'skip', 'Later policy edit', 'task']);
+                'skip', 15, 30, 'Later policy edit', 'task']);
         await env.sql.client.run('UPDATE native_pomodoro_session SET state_json=? WHERE id=1', [legacy.sessionAfter]);
         await env.sql.client.run('INSERT INTO native_request_receipts (request_id,method,reply,saved_at) VALUES (?,?,?,?)',
             [legacy.request.requestId, payload, JSON.stringify(legacy.result), AT]);
@@ -102,6 +199,8 @@ describe('native Pomodoro integration with the SQLite and store write gates', ()
         expect((before.receipts[0] as { method: string }).method).toBe(payload);
         expect(nativePomodoroReceiptPayload(legacy)).toBe(payload);
         expect(useTaskStore.getState()._tasksById.get('task')!.reminderPolicy).toBe('skip');
+        expect(useTaskStore.getState()._tasksById.get('task')!.dueReminderLeadMinutes).toBe(15);
+        expect(useTaskStore.getState()._tasksById.get('task')!.startReminderLeadMinutes).toBe(30);
     });
     it('refuses a receiptless schema4 plan and a changed schema5 policy without domain SQL writes', async () => {
         const env = await open(); const legacy = structuredClone(env.plan); legacy.target!.row = legacy.target!.row!.slice(0, 46);

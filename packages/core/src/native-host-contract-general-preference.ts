@@ -1,4 +1,5 @@
-import { buildGeneralSettingsUpdate, isGeneralSettingStored, MOBILE_QUICK_ACCESS_VIEW_OPTIONS, type GeneralSettingsEdit,
+import { logInfo } from './logger';
+import { buildGeneralSettingsUpdate, isGeneralSettingStored, MOBILE_QUICK_ACCESS_VIEW_OPTIONS, MOBILE_APP_LOCK_RELOCK_DELAY_OPTIONS, resolveMobileAppLockRelockDelayMinutes, type GeneralSettingsEdit,
     type GeneralSettingsModel } from './general-settings-model';
 import { generalPreferenceWitness, legacyGeneralPreferenceNumber,
     type GeneralPreferenceType, type GeneralPreferenceWitness } from './general-preference-witness';
@@ -19,18 +20,18 @@ export type GeneralPreferenceEdit = Extract<GeneralSettingsEdit, { type: General
 export type NativeGeneralPreferenceRequest = { requestId: string; edit: GeneralPreferenceEdit;
     expected: GeneralPreferenceWitness };
 export type NativeGeneralPreferenceResult = { type: GeneralPreferenceType;
-    value: boolean | string; changed: boolean };
+    value: boolean | string | number; changed: boolean };
 export type NativePreparedGeneralPreference = { version: 1; request: NativeGeneralPreferenceRequest;
     preparedAt: string; deviceIdBefore: string | null; deviceIdToInitialize: string | null;
-    after: { value: boolean | string; stamp: string }; result: NativeGeneralPreferenceResult };
+    after: { value: boolean | string | number; stamp: string }; result: NativeGeneralPreferenceResult };
 export type NativeGeneralPreferenceOptions = { model: GeneralSettingsModel;
-    expected: Record<GeneralPreferenceType, GeneralPreferenceWitness> };
+    expected: Record<Exclude<GeneralPreferenceType, 'appLockRelockDelay'>, GeneralPreferenceWitness> };
 export type NativeGeneralPreferencePreparation = { kind: 'noop'; result: NativeGeneralPreferenceResult }
     | { kind: 'prepared'; prepared: NativePreparedGeneralPreference };
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-const TYPES: GeneralPreferenceType[] = ['showTaskAge', 'quickAccessView', 'weekStart', 'dateFormat', 'timeFormat', 'calendarSystem', 'theme', 'language'];
-const VALUES: Record<Exclude<GeneralPreferenceType, 'showTaskAge'>, readonly string[]> = {
+const TYPES: Exclude<GeneralPreferenceType, 'appLockRelockDelay'>[] = ['showTaskAge', 'quickAccessView', 'weekStart', 'dateFormat', 'timeFormat', 'calendarSystem', 'theme', 'language'];
+const VALUES: Record<Exclude<GeneralPreferenceType, 'showTaskAge' | 'appLockRelockDelay'>, readonly string[]> = {
     quickAccessView: MOBILE_QUICK_ACCESS_VIEW_OPTIONS,
     weekStart: ['system', 'sunday', 'monday', 'saturday'],
     dateFormat: ['system', 'dmy', 'mdy', 'ymd'],
@@ -46,18 +47,18 @@ const iso = (value: unknown): value is string => bounded(value, 40)
 const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message: string): NativeHostResult<never> =>
     ({ ok: false, error: { code, message } });
 
-const validValue = (type: GeneralPreferenceType, value: unknown): value is boolean | string =>
-    type === 'showTaskAge' ? typeof value === 'boolean'
+const validValue = (type: GeneralPreferenceType, value: unknown): value is boolean | string | number =>
+    type === 'appLockRelockDelay' ? MOBILE_APP_LOCK_RELOCK_DELAY_OPTIONS.includes(value as never) : type === 'showTaskAge' ? typeof value === 'boolean'
         : bounded(value) && VALUES[type].includes(value);
 
 const validEdit = (value: unknown): value is GeneralPreferenceEdit => record(value)
-    && exact(value, ['type', 'value']) && TYPES.includes(value.type as GeneralPreferenceType)
+    && exact(value, ['type', 'value']) && (value.type === 'appLockRelockDelay' || TYPES.includes(value.type as typeof TYPES[number]))
     && validValue(value.type as GeneralPreferenceType, value.value);
 
 const validWitness = (value: unknown, type: GeneralPreferenceType): value is GeneralPreferenceWitness =>
     record(value) && exact(value, ['present', 'value', 'stampPresent', 'stamp'])
     && typeof value.present === 'boolean' && typeof value.stampPresent === 'boolean'
-    && (value.present ? type === 'showTaskAge' ? typeof value.value === 'boolean'
+    && (value.present ? type === 'appLockRelockDelay' ? legacyGeneralPreferenceNumber(value.value) : type === 'showTaskAge' ? typeof value.value === 'boolean'
         : bounded(value.value) || type !== 'quickAccessView' && type !== 'calendarSystem' && type !== 'theme'
             && type !== 'language'
             && legacyGeneralPreferenceNumber(value.value)
@@ -106,6 +107,18 @@ export function createGeneralPreferenceMethods(deps: { readiness: () => NativeHo
     const resultFor = (edit: GeneralPreferenceEdit, changed: boolean): NativeGeneralPreferenceResult =>
         ({ type: edit.type, value: edit.value, changed });
     return {
+        async getAppLockDelayOptions(input: unknown): Promise<NativeHostResult<{
+            row: GeneralSettingsModel['privacy']['appLockRelockDelay']; expected: GeneralPreferenceWitness; value: number;
+        }>> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            if (!record(input) || !exact(input, [])) return fail('INVALID_INPUT', 'App lock delay takes an empty object');
+            const read = await readAreaDurableData(); if (!read.ok) return read;
+            const settings = read.value.authority.snapshot.settings;
+            const expected = generalPreferenceWitness(settings, 'appLockRelockDelay');
+            if (!expected) return fail('INVALID_INPUT', 'Saved App lock delay is malformed');
+            return { ok: true, value: { row: deps.model(settings).privacy.appLockRelockDelay, expected,
+                value: resolveMobileAppLockRelockDelayMinutes(settings.security?.mobileAppLockRelockDelayMinutes) } };
+        },
         async getGeneralPreferenceOptions(input: { deviceTheme?: string | null }): Promise<NativeHostResult<NativeGeneralPreferenceOptions>> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             if (!record(input) || !exact(input, []) && !exact(input, ['deviceTheme'])
@@ -113,7 +126,7 @@ export function createGeneralPreferenceMethods(deps: { readiness: () => NativeHo
                 return fail('INVALID_INPUT', 'General options need an optional bounded device theme');
             const read = await readAreaDurableData(); if (!read.ok) return read;
             const settings = read.value.authority.snapshot.settings;
-            const expected = {} as Record<GeneralPreferenceType, GeneralPreferenceWitness>;
+            const expected = {} as Record<Exclude<GeneralPreferenceType, 'appLockRelockDelay'>, GeneralPreferenceWitness>;
             for (const type of TYPES) {
                 const witness = generalPreferenceWitness(settings, type);
                 if (!witness) return fail('INVALID_INPUT', `Saved ${type} preference has an unsupported value`);
@@ -178,6 +191,11 @@ export function createGeneralPreferenceMethods(deps: { readiness: () => NativeHo
             if (!applied.success) return fail('STALE_REVISION', applied.error ?? 'General preference changed; refresh General');
             const saved = await saves.finish(prepared, read.value.adapter,
                 applied.outcome === 'replayed', read.value.authority.saveBoundary);
+            if (saved.ok && prepared.request.edit.type === 'appLockRelockDelay') {
+                try { logInfo('Native App lock delay saved', { scope: 'native-host', category: 'storage',
+                    context: { releaseCheck: 'v1.3.8/ios-app-lock-delay', outcome: 'saved' } }); }
+                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            }
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
     };

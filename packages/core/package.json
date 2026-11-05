@@ -64,6 +64,8 @@
     "./mobile-notification-open": "./src/mobile-notification-open.ts",
     "./capture-modal-model": "./src/capture-modal-model.ts",
     "./gmail-capture": "./src/gmail-capture.ts",
+    "./gmail-capture-transport": "./src/gmail-capture-transport.ts",
+    "./gmail-receipt-store": "./src/gmail-receipt-store.ts",
     "./email-capture": "./src/email-capture.ts"
   },
   "sideEffects": false,

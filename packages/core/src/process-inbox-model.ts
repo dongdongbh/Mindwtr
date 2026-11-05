@@ -34,7 +34,7 @@ import {
     type ProcessInboxWorkflowEvent,
     type ProcessInboxWorkflowFields,
 } from './process-inbox-workflow';
-import { filterProjectsBySelectedArea, getProjectChoiceState, isSelectableProjectForTaskAssignment } from './project-utils';
+import { filterProjectsBySelectedArea, getProjectChoiceState, getProjectSectionsForView, isSelectableProjectForTaskAssignment } from './project-utils';
 import type { StoreActionResult } from './store-types';
 import { findSimilarTasks, type TaskSimilarityIndex } from './task-similarity';
 import { collectTaskTokenUsage } from './task-token-usage';
@@ -46,6 +46,7 @@ import type {
     Area,
     Person,
     Project,
+    Section,
     Task,
     TaskEnergyLevel,
     TaskPriority,
@@ -327,24 +328,26 @@ export function formatProcessInboxScheduleValue(
     value: Date | string,
     dateOnly: boolean,
     defaultScheduleTime: string,
+    time?: string,
 ): string {
     const dateOnlyValue = createDateFormatter({ calendarSystem: 'gregorian' })(value, 'yyyy-MM-dd');
-    return defaultScheduleTime && !dateOnly ? `${dateOnlyValue}T${defaultScheduleTime}` : dateOnlyValue;
+    const clock = normalizeClockTimeInput(time) || defaultScheduleTime;
+    return clock && !dateOnly ? `${dateOnlyValue}T${clock}` : dateOnlyValue;
 }
 
 const formatProcessInboxStart = (date: ProcessInboxPendingDate, defaultTime: string, stored?: string): string | undefined => {
     if (!date.value) return undefined;
-    if (!stored || date.dateOnly || date.useDefaultTime || !hasTimeComponent(stored)) {
-        return formatProcessInboxScheduleValue(date.value, date.dateOnly, defaultTime);
+    if (!stored || date.dateOnly || date.useDefaultTime || date.time || !hasTimeComponent(stored)) {
+        return formatProcessInboxScheduleValue(date.value, date.dateOnly, defaultTime, date.time);
     }
     const parsed = safeParseDate(stored);
-    if (!parsed) return formatProcessInboxScheduleValue(date.value, date.dateOnly, defaultTime);
+    if (!parsed) return formatProcessInboxScheduleValue(date.value, date.dateOnly, defaultTime, date.time);
     const formatDate = createDateFormatter({ calendarSystem: 'gregorian' });
     const day = formatDate(date.value, 'yyyy-MM-dd');
     return day === formatDate(parsed, 'yyyy-MM-dd') ? stored : `${day}T${formatDate(parsed, 'HH:mm')}`;
 };
 
-export type ProcessInboxPendingDate = { value: Date | string | null; dateOnly: boolean; useDefaultTime?: boolean };
+export type ProcessInboxPendingDate = { value: Date | string | null; dateOnly: boolean; useDefaultTime?: boolean; time?: string };
 
 export function buildProcessInboxScheduleUpdates(
     plan: Pick<ProcessInboxPlan, 'visibleFields'>,
@@ -356,12 +359,12 @@ export function buildProcessInboxScheduleUpdates(
     const updates: Partial<Task> = {};
     for (const field of ['startTime', 'dueDate', 'reviewAt'] as const) {
         if (!plan.visibleFields[field]) continue;
-        const { value, dateOnly } = dates[field];
+        const { value, dateOnly, time } = dates[field];
         updates[field] = field === 'startTime' && task?.startTime
             ? formatProcessInboxStart(dates.startTime, defaultScheduleTime, task.startTime)
             : !dirtyFields.has(field) && task?.[field]
                 ? task[field]
-                : value ? formatProcessInboxScheduleValue(value, dateOnly, defaultScheduleTime) : undefined;
+                : value ? formatProcessInboxScheduleValue(value, dateOnly, defaultScheduleTime, time) : undefined;
     }
     return updates;
 }
@@ -370,6 +373,7 @@ export type ProcessInboxParsedTitle = { title: string; props: Partial<Task>; inv
 
 export type ProcessInboxSelection = {
     projectId: string | null;
+    sectionId?: string | null;
     areaId: string | null;
     contexts: string[];
     tags: string[];
@@ -442,6 +446,10 @@ export function prepareProcessInboxCommit(input: {
     }
     const dirty = input.dirtyScheduleFields;
     const clearStaleReviewAt = options.clearStaleReviewAt && !edits?.explicitDateFields.reviewAt && !dirty.has('reviewAt');
+    const sectionId = selection.sectionId || undefined;
+    const writesSection = Object.prototype.hasOwnProperty.call(selection, 'sectionId')
+        && Boolean(sectionId || task.sectionId)
+        && !Object.prototype.hasOwnProperty.call(options.fields ?? {}, 'sectionId');
     const fields = mergeParsedProcessInboxFields({
         projectId: selection.projectId ?? undefined,
         areaId: selection.areaId ?? undefined,
@@ -454,6 +462,9 @@ export function prepareProcessInboxCommit(input: {
         ...input.scheduleUpdates,
         ...options.fields,
     }, edits?.parsedFields ?? {});
+    if (writesSection) {
+        fields.sectionId = fields.projectId && fields.projectId === (selection.projectId ?? undefined) ? sectionId : undefined;
+    }
     const prepared = prepareProcessInboxDecision({
         task,
         draft: {
@@ -503,7 +514,7 @@ export function buildProcessInboxDecisionRequest(
     },
 ): { ok: true; decision: ProcessInboxDecision; options: ProcessInboxCommitOptions } | { ok: false; reason: 'incubate-date-required' } {
     const format = (date: ProcessInboxPendingDate) => (
-        date.value ? formatProcessInboxScheduleValue(date.value, date.dateOnly, input.defaultScheduleTime) : undefined
+        date.value ? formatProcessInboxScheduleValue(date.value, date.dateOnly, input.defaultScheduleTime, date.time) : undefined
     );
     const staleReviewDate = isDueForReview(input.task.reviewAt, input.now ?? new Date());
     const somedayFields = (): ProcessInboxWorkflowFields => ({
@@ -994,6 +1005,8 @@ export function buildProcessInboxUndoRestoreUpdates(task: Task): Partial<Task> {
         reminderPolicy: getTaskReminderPolicy(task),
         suppressMindwtrReminders: task.suppressMindwtrReminders,
         repeatReminderMinutes: task.repeatReminderMinutes,
+        dueReminderLeadMinutes: task.dueReminderLeadMinutes,
+        startReminderLeadMinutes: task.startReminderLeadMinutes,
         showFutureRecurrence: task.showFutureRecurrence,
         isFocusedToday: task.isFocusedToday,
         focusOrder: task.focusOrder,
@@ -1008,13 +1021,14 @@ export function buildProcessInboxUndoRestoreUpdates(task: Task): Partial<Task> {
 // The draft as plain JSON, and the one commit path both clients run
 
 /** A calendar day, `yyyy-MM-dd` in local time. */
-export type ProcessInboxDateValue = { date: string; dateOnly: boolean; useDefaultTime?: boolean } | null;
+export type ProcessInboxDateValue = { date: string; dateOnly: boolean; useDefaultTime?: boolean; time?: string } | null;
 export type ProcessInboxDateField = ProcessInboxScheduleField | 'followUp';
 
 export type ProcessInboxDraft = {
     title: string;
     description: string;
     projectId: string | null;
+    sectionId?: string | null;
     areaId: string | null;
     projectSearch: string;
     contexts: string[];
@@ -1043,12 +1057,13 @@ const toDateValue = (value: string | null, dateOnly: boolean): ProcessInboxDateV
     return parsed ? { date: safeFormatDate(parsed, 'yyyy-MM-dd'), dateOnly } : null;
 };
 
-export function createProcessInboxDraft(task: Task): ProcessInboxDraft {
+export function createProcessInboxDraft(task: Task, includeDetails = false): ProcessInboxDraft {
     const defaults = getProcessInboxTaskDefaults(task);
     return {
         title: defaults.title,
         description: defaults.description,
         projectId: defaults.projectId,
+        ...(includeDetails && task.projectId && task.sectionId ? { sectionId: task.sectionId } : {}),
         areaId: defaults.areaId,
         projectSearch: '',
         contexts: defaults.contexts,
@@ -1074,7 +1089,8 @@ export function createProcessInboxDraft(task: Task): ProcessInboxDraft {
 
 const pendingDate = (value: ProcessInboxDateValue): ProcessInboxPendingDate => (
     value ? { value: value.date, dateOnly: value.dateOnly,
-        ...(value.useDefaultTime ? { useDefaultTime: true } : {}) } : { value: null, dateOnly: false }
+        ...(value.useDefaultTime ? { useDefaultTime: true } : {}),
+        ...(value.time ? { time: value.time } : {}) } : { value: null, dateOnly: false }
 );
 
 /** The collapsed capture card's plain-text, 200 UTF-16-code-unit preview. */
@@ -1097,6 +1113,7 @@ export type ProcessInboxDraftEdit =
     | { type: 'setEnergyLevel'; value: TaskEnergyLevel | null }
     | { type: 'setTimeEstimate'; value: TimeEstimate | null }
     | { type: 'setSomedaySection'; value: string | null }
+    | { type: 'setSection'; value: string | null }
     | { type: 'setArea'; value: string | null }
     | { type: 'selectProject'; value: string | null }
     | { type: 'toggleContext'; value: string }
@@ -1107,6 +1124,7 @@ export type ProcessInboxDraftEdit =
     | { type: 'applyTokenSuggestion'; value: string }
     | { type: 'setDate'; field: ProcessInboxDateField; value: string | null }
     | { type: 'setPickedDate'; field: ProcessInboxDateField; day: string }
+    | { type: 'setTime'; field: ProcessInboxDateField; time: string }
     | { type: 'setDateOnly'; field: ProcessInboxDateField; value: boolean }
     | { type: 'toggleAdvancedOptions' };
 
@@ -1138,11 +1156,14 @@ export function applyProcessInboxDraftEdit(
             return { ...draft, timeEstimate: edit.value };
         case 'setSomedaySection':
             return { ...draft, somedaySectionId: edit.value };
+        case 'setSection':
+            return draft.projectId ? { ...draft, sectionId: edit.value } : draft;
         case 'setArea':
             return { ...draft, areaId: edit.value };
         case 'selectProject': {
             const { convertToProject, projectId, areaId, projectSearch } = selectProcessInboxProject(edit.value);
-            return { ...draft, convertToProject, projectId, projectSearch, ...(areaId === null ? { areaId } : {}) };
+            return { ...draft, convertToProject, projectId, projectSearch, ...(areaId === null ? { areaId } : {}),
+                ...(draft.sectionId && projectId !== draft.projectId ? { sectionId: null } : {}) };
         }
         case 'toggleContext':
             return { ...draft, contexts: toggleProcessInboxToken(draft.contexts, edit.value) };
@@ -1169,9 +1190,16 @@ export function applyProcessInboxDraftEdit(
         case 'setDate':
             return {
                 ...draft,
-                [edit.field]: edit.value ? { date: edit.value, dateOnly: false } : null,
+                [edit.field]: edit.value ? { date: edit.value, dateOnly: false,
+                    ...(draft[edit.field]?.time ? { time: draft[edit.field]!.time } : {}) } : null,
                 dirtyScheduleFields: markDirty(draft, edit.field),
             };
+        case 'setTime': {
+            const current = draft[edit.field];
+            const time = normalizeClockTimeInput(edit.time);
+            return current && time ? { ...draft, [edit.field]: { date: current.date, dateOnly: false, time },
+                dirtyScheduleFields: markDirty(draft, edit.field) } : draft;
+        }
         case 'setDateOnly': {
             const current = draft[edit.field];
             return {
@@ -1242,6 +1270,7 @@ export function prepareProcessInboxDraftDecision(
         parseTitle: ctx.parseTitle,
         selection: {
             projectId: draft.projectId,
+            ...(Object.prototype.hasOwnProperty.call(draft, 'sectionId') ? { sectionId: draft.sectionId ?? null } : {}),
             areaId: draft.areaId,
             contexts: draft.contexts,
             tags: draft.tags,
@@ -1418,6 +1447,7 @@ export type ProcessInboxViewDateRow = {
     /** Supply the calendar day (yyyy-MM-dd); RN offers no picked time here. */
     pick: Pick<Extract<ProcessInboxDraftEdit, { type: 'setPickedDate' }>, 'type' | 'field'>;
     quickDates: ProcessInboxViewOption[];
+    clock?: { label: string; time: string; timeFormat: string };
 };
 
 export type ProcessInboxViewTokens = {
@@ -1478,6 +1508,7 @@ export type ProcessInboxStepView = {
         areas: ProcessInboxViewOption[];
         search: { label: string; placeholder: string; value: string; createLabel: string | null } | null;
         projects: ProcessInboxViewOption[];
+        sections?: { label: string; options: ProcessInboxViewOption[] };
     } | null;
     somedaySections: { label: string; options: ProcessInboxViewOption[] } | null;
     delegate: {
@@ -1612,6 +1643,8 @@ export type ProcessInboxViewInput = {
     settings: AppSettings | undefined;
     tasks: Task[];
     projects: Project[];
+    sections?: readonly Section[];
+    includeDetails?: boolean;
     areas: Area[];
     people: readonly Person[];
     similarityIndex: TaskSimilarityIndex | null;
@@ -1635,14 +1668,24 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
         const value = draft[field];
         const allowClear = !(step === 'incubate' && field === 'reviewAt');
         const selectedDate = value ? safeParseDate(value.date) : null;
+        const scheduled = !value ? null : field === 'startTime'
+            ? formatProcessInboxStart(pendingDate(value), defaultScheduleTime, input.task.startTime)
+            : field !== 'followUp' && !draft.dirtyScheduleFields.includes(field) && input.task[field]
+                ? input.task[field] : formatProcessInboxScheduleValue(value.date, value.dateOnly, defaultScheduleTime, value.time);
+        const clock = scheduled && hasTimeComponent(scheduled) ? safeFormatDate(scheduled, 'HH:mm') : null;
         return {
             field,
             label,
             date: value?.date ?? null,
-            display: value ? input.formatDate(value.date, 'P') : t('common.notSet'),
+            display: value ? input.formatDate(value.date, 'P')
+                + (input.includeDetails && clock ? ` ${input.formatDate(scheduled!, 'p')}` : '') : t('common.notSet'),
             dateOnly: value?.dateOnly ?? false,
             clear: value && allowClear ? { label: t('common.clear'), selected: false, edit: { type: 'setDate', field, value: null } } : null,
-            timeMode: value && defaultScheduleTime
+            ...(input.includeDetails && value ? { clock: {
+                label: clock ? input.formatDate(scheduled!, 'p') : tf('calendar.changeTime', 'Add time'),
+                time: clock || defaultScheduleTime || '09:00', timeFormat: input.settings?.timeFormat ?? 'system',
+            } } : {}),
+            timeMode: value && (defaultScheduleTime || input.includeDetails && clock)
                 ? {
                     label: value.dateOnly ? defaultScheduleTime : dateOnlyLabel,
                     selected: value.dateOnly,
@@ -1726,6 +1769,14 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
         const areaLabel = t('taskEdit.areaLabel');
         const showAreas = fields.area && !draft.projectId;
         const { filteredProjects, exactMatch } = getProcessInboxProjectChoices(input.projects, draft.areaId, draft.projectSearch);
+        const projectSections = !conversion && fields.project && currentProject
+            ? getProjectSectionsForView(currentProject, input.sections ?? []) : [];
+        const sectionOptions: ProcessInboxViewOption[] = projectSections.length === 0 ? [] : [
+            { label: t('taskEdit.noSectionOption'), selected: !draft.sectionId, color: null,
+                edit: { type: 'setSection', value: null } },
+            ...projectSections.map((section) => ({ label: section.title, selected: draft.sectionId === section.id,
+                color: null, edit: { type: 'setSection' as const, value: section.id } })),
+        ];
         const areaOptions: ProcessInboxViewOption[] = showAreas ? [
             ...(currentArea ? [{ label: `✓ ${currentArea.name}`, selected: true, color: currentArea.color ?? null, edit: { type: 'setArea' as const, value: currentArea.id } }] : []),
             { label: `${!draft.areaId ? '✓ ' : ''}${t('projects.noArea')}`, selected: !draft.areaId, color: null, edit: { type: 'setArea', value: null } },
@@ -1756,6 +1807,7 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
             current: !conversion && fields.project && currentProject
                 ? { label: `✓ ${currentProject.title}`, selected: true, edit: { type: 'selectProject', value: currentProject.id } }
                 : null,
+            ...(sectionOptions.length > 0 ? { sections: { label: t('taskEdit.sectionLabel'), options: sectionOptions } } : {}),
             areaLabel: showAreas ? areaLabel : null,
             areas: areaOptions,
             search: !conversion && fields.project ? {

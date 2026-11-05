@@ -327,6 +327,19 @@ describe('mobile attachment files: upload refusals and download backoff', () => 
     expect(files.shouldAttemptAttachmentUpload(replacement)).toBe(true);
   });
 
+  it('keeps backed-off missing rows idle and configuration changes unblock every row', async () => {
+    const { files } = setup();
+    const remote = attachment({ uri: '', cloudKey: 'attachments/att-1.txt', localStatus: 'missing' });
+    files.setWebdavDownloadBackoff('att-1', { status: 404 });
+    files.setWebdavDownloadBackoff('att-2', { status: 404 });
+    expect(await files.hasPendingAttachmentSyncWork(documentWith([remote]))).toBe(false);
+    expect(await files.hasPendingAttachmentSyncWork(documentWith([{ ...remote, localStatus: 'downloading' }]))).toBe(true);
+    files.clearWebdavDownloadBackoffs();
+    expect(files.getWebdavDownloadBackoff('att-1')).toBeNull();
+    expect(files.getWebdavDownloadBackoff('att-2')).toBeNull();
+    expect(await files.hasPendingAttachmentSyncWork(documentWith([remote]))).toBe(true);
+  });
+
   it('backs a missing remote file off for 15 minutes', () => {
     const { files } = setup();
     const start = Date.now();
@@ -416,7 +429,7 @@ describe('mobile attachment files: File Sync folders', () => {
         : ['content://op/tree/root/document/12'])),
       listChildren: vi.fn(async (uri: string) => (uri === root || uri === 'content://op/tree/root'
         ? [{ uri: 'content://op/tree/root/document/7', name: 'data.json' }, { uri: 'content://op/tree/root/document/9', name: 'attachments' }]
-        : [{ uri: 'content://op/tree/root/document/12', name: 'att-1.txt' }])),
+        : [{ uri: 'content://op/tree/root/document/12', name: 'att-1.txt', size: 3 }])),
       makeDirectory: vi.fn(async () => 'content://created'),
     };
     const { files } = setup({ saf });
@@ -427,7 +440,12 @@ describe('mobile attachment files: File Sync folders', () => {
     });
     expect(saf.makeDirectory).not.toHaveBeenCalled();
     const inventory = await files.inspectSafDirectoryEntriesByName('content://op/tree/root/document/9');
-    expect(inventory).toEqual({ status: 'available', entries: new Map([['att-1.txt', 'content://op/tree/root/document/12']]) });
+    expect(inventory).toEqual({
+      status: 'available',
+      entries: new Map([['att-1.txt', 'content://op/tree/root/document/12']]),
+      sizes: new Map([['att-1.txt', 3]]),
+      directories: new Set(),
+    });
   });
 });
 

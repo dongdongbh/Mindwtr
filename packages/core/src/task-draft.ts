@@ -64,6 +64,8 @@ export type TaskDraft = {
     assignedTo: string;
     reviewAt: string;
     repeatReminderMinutes: number | undefined;
+    dueReminderLeadMinutes: number | undefined;
+    startReminderLeadMinutes: number | undefined;
     reminderPolicy: NonNullable<Task['reminderPolicy']>;
     suppressMindwtrReminders: boolean;
     /** Editor-session data, retained by spread and JSON recovery; never a Task field. */
@@ -237,6 +239,14 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
     energyLevel: { fromTask: (task) => task.energyLevel || '' },
     assignedTo: { fromTask: (task) => task.assignedTo || '' },
     reviewAt: { fromTask: (task) => toTaskDraftDateTimeLocalValue(task.reviewAt) },
+    dueReminderLeadMinutes: {
+        fromTask: (task) => task.dueReminderLeadMinutes,
+        isDirty: (value, task) => value !== undefined && value !== task.dueReminderLeadMinutes,
+    },
+    startReminderLeadMinutes: {
+        fromTask: (task) => task.startReminderLeadMinutes,
+        isDirty: (value, task) => value !== undefined && value !== task.startReminderLeadMinutes,
+    },
     repeatReminderMinutes: {
         fromTask: (task) => task.repeatReminderMinutes,
         isDirty: (value, task) => (value ?? undefined) !== (task.repeatReminderMinutes ?? undefined),
@@ -415,6 +425,10 @@ export function taskDraftToUpdatePatch(
         assignedTo: draft.assignedTo.trim() || undefined,
         reviewAt: serializeDraftDate(draft, task, 'reviewAt'),
         repeatReminderMinutes: draft.repeatReminderMinutes || undefined,
+        ...(draft.dueReminderLeadMinutes !== undefined && draft.dueReminderLeadMinutes !== task.dueReminderLeadMinutes
+            ? { dueReminderLeadMinutes: draft.dueReminderLeadMinutes } : {}),
+        ...(draft.startReminderLeadMinutes !== undefined && draft.startReminderLeadMinutes !== task.startReminderLeadMinutes
+            ? { startReminderLeadMinutes: draft.startReminderLeadMinutes } : {}),
         ...(task.reminderPolicy !== undefined || draft.reminderPolicy !== getTaskReminderPolicy(task)
             ? { reminderPolicy: draft.reminderPolicy } : {}),
         ...attachmentsPatch,

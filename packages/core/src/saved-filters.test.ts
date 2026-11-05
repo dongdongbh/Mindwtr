@@ -24,6 +24,15 @@ const task = (overrides: Partial<Task>): Task => ({
 });
 
 describe('saved filters', () => {
+    it('preserves excluded projects and gives exclusions precedence over includes and No project', () => {
+        const criteria = { projects: ['p1', SAVED_FILTER_NO_PROJECT_ID], excludedProjects: ['p1', SAVED_FILTER_NO_PROJECT_ID], statuses: ['someday' as const] };
+        expect(normalizeFilterCriteria(criteria)).toEqual(criteria);
+        expect(hasActiveFilterCriteria({ excludedProjects: ['p1'] } as never)).toBe(true);
+        const tasks = [task({ id: 'in-p1', projectId: 'p1', status: 'someday' }), task({ id: 'no-project', status: 'someday' }), task({ id: 'other', projectId: 'p2', status: 'someday' })];
+        expect(applyFilter(tasks, criteria).map(item => item.id)).toEqual([]);
+        expect(applyFilter(tasks, { excludedProjects: ['p1', SAVED_FILTER_NO_PROJECT_ID] } as never).map(item => item.id)).toEqual(['other']);
+    });
+
     it('combines criteria with AND and values within a criterion with OR', () => {
         const tasks = [
             task({ id: 'desk-high', contexts: ['@desk'], tags: ['#urgent'], priority: 'high' }),

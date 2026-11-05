@@ -83,15 +83,102 @@ describe('native host contract: Calendar', () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(at));
     };
-    const openHost = async (entry = scenario(), saveData?: (data: unknown) => Promise<void>) => {
+    const openHost = async (entry = scenario(), saveData?: (data: unknown) => Promise<void>, data = fixture) => {
         const recorder = createCalendarRecorder();
-        await seedCalendarStore(fixture, entry, recorder, { saveData });
+        await seedCalendarStore(data, entry, recorder, { saveData });
         const host = createNativeHostContract();
         expect(await host.setLanguage({ storedLanguage: 'en', systemLocale: fixture.deviceLocale })).toMatchObject({ ok: true });
         expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
         recorder.log.length = 0;
         return { host, recorder };
     };
+
+    it('opts Day and Week into counted all-day chips while omitted and false reads keep exact legacy bytes', async () => {
+        freezeClock();
+        const tasks = Array.from({ length: 6 }, (_, index) => ({ id: `lane-${index}`, title: `Lane ${index}`, status: 'next' as const,
+            contexts: [], tags: [], createdAt: fixture.now, updatedAt: fixture.now, dueDate: '2026-10-28' }));
+        const { host } = await openHost(scenario('day'), undefined, { ...fixture, tasks, projects: [], areas: [] });
+        const input = { state: { viewMode: 'day' as const, selectedDate: '2026-10-28', visibleMonth: '2026-10-28' },
+            calendar: { status: 'ready' as const, calendars: [], events: [] }, ...page };
+        const legacy = value(host.getCalendarView(input)), legacyBytes = JSON.stringify(legacy);
+        expect(value(host.getCalendarView({ ...input, includeAllDayLanes: false }))).toEqual(legacy);
+        const detailed = value(host.getCalendarView({ ...input, includeAllDayLanes: true }));
+        expect(detailed.content).toMatchObject({ mode: 'day', allDayLimit: 4, allDayMore: '+2 more' });
+        expect(items(detailed, 'allDay')).toHaveLength(6);
+        expect(detailed.text).toHaveProperty('allDayLess', 'Less');
+        expect(legacy.content).not.toHaveProperty('allDayLimit'); expect(legacy.text).not.toHaveProperty('allDayLess');
+        expect(detailed.revision).not.toBe(legacy.revision);
+        expect(JSON.stringify(value(host.getCalendarView(input)))).toBe(legacyBytes);
+        expect(JSON.stringify(value(host.getCalendarView({ ...input, includeAllDayLanes: false })))).toBe(legacyBytes);
+        expect(host.getCalendarView({ ...input, offset: 1, limit: 1, revision: detailed.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(host.getCalendarView({ ...input, includeAllDayLanes: 'true' } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const weekView = value(host.getCalendarView({ ...input, state: { ...input.state, viewMode: 'week' }, includeAllDayLanes: true }));
+        const day = days(weekView).find((entry) => entry.key === '2026-10-28');
+        expect(day).toMatchObject({ allDayMore: '+3 more', opens: { viewMode: 'day', selectedDate: '2026-10-28' } });
+        expect(items(weekView, 'allDay')).toHaveLength(3);
+        expect(items(weekView, 'allDay')[0].tones).toMatchObject({ fill: 'input', accent: 'danger', struck: false });
+        expect(days(value(host.getCalendarView({ ...input, state: { ...input.state, viewMode: 'week' } })))[0]).not.toHaveProperty('allDayMore');
+    });
+
+    it('forwards opt-in all-day source/completed/projected tones and preserves Month, Schedule and legacy projection fields', async () => {
+        freezeClock('2026-10-27T14:00:00.000Z');
+        const base = { id: 'base', title: 'Base', status: 'next' as const, contexts: [], tags: [], createdAt: fixture.now, updatedAt: fixture.now };
+        const tasks = [{ ...base, id: 'scheduled', startTime: '2026-10-28' },
+            { ...base, id: 'deadline', dueDate: '2026-10-28' },
+            { ...base, id: 'done', title: 'A completed', status: 'done' as const, completedAt: '2026-10-28T04:00:00.000Z' },
+            { ...base, id: 'recurring', title: 'A projection', dueDate: '2026-10-27', recurrence: { rule: 'daily' as const, strategy: 'strict' as const }, showFutureRecurrence: true }];
+        const event = { ...fixture.calendarEvents[0], id: 'all-day-source', start: '2026-10-28T04:00:00.000Z', end: '2026-10-29T04:00:00.000Z', allDay: true };
+        const { host } = await openHost(scenario('completed'), undefined, { ...fixture, tasks, projects: [], areas: [] });
+        const calendar = { status: 'ready' as const, calendars: fixture.calendars, events: [event] };
+        const input = { state: { viewMode: 'day' as const, selectedDate: '2026-10-28', visibleMonth: '2026-10-28' }, calendar, ...page };
+        const day = value(host.getCalendarView({ ...input, includeAllDayLanes: true }));
+        const lane = items(day, 'allDay');
+        const done = lane.find((item) => item.kind === 'completed');
+        expect(done).toMatchObject({ pressable: false, tones: { fill: 'secondary', accent: 'secondary', text: 'secondary', struck: true } });
+        const external = lane.find((item) => item.kind === 'event');
+        expect(external?.sourceColor).toEqual(expect.any(String));
+        expect(external).toMatchObject({ tones: { fill: 'secondary', accent: 'source' } });
+        const projected = lane.find((item) => item.projected);
+        expect(projected).toMatchObject({ pressable: true, tones: { text: 'tint', dashed: true } });
+        expect(lane[lane.length - 1]).toBe(projected);
+        const legacy = value(host.getCalendarView(input));
+        expect(items(legacy, 'allDay').find((item) => item.kind === 'completed')).toMatchObject({ tones: { struck: false, text: 'text' } });
+        expect(items(legacy, 'allDay').find((item) => item.kind === 'event')?.sourceColor).toBeNull();
+        const weekView = value(host.getCalendarView({ ...input, state: { ...input.state, viewMode: 'week' }, includeAllDayLanes: true }));
+        const weekDay = days(weekView).find((entry) => entry.key === '2026-10-28');
+        expect(weekDay).toMatchObject({ allDayMore: '+2 more', opens: { selectedDate: '2026-10-28', viewMode: 'day' } });
+        expect(items(weekView, 'allDay').find((item) => item.kind === 'completed')).toMatchObject({ pressable: false, tones: { text: 'secondary', struck: true } });
+        for (const mode of ['month', 'schedule'] as const) {
+            const old = value(host.getCalendarView({ ...input, state: { ...input.state, viewMode: mode } }));
+            const next = value(host.getCalendarView({ ...input, state: { ...input.state, viewMode: mode }, includeAllDayLanes: true }));
+            expect(next.content).toEqual(old.content); expect(next.items).toEqual(old.items);
+            const { allDayLess: _less, ...text } = next.text; expect(text).toEqual(old.text);
+        }
+        const current = useTaskStore.getState();
+        useTaskStore.setState({ settings: { ...current.settings, calendar: { ...current.settings.calendar, showCompleted: false } }, lastDataChangeAt: current.lastDataChangeAt + 1 });
+        expect(items(value(host.getCalendarView({ ...input, includeAllDayLanes: true })), 'allDay').some((item) => item.kind === 'completed')).toBe(false);
+    });
+
+    it('keeps complete all-day overflow counts across bounded pages and rejects cross-branch paging', async () => {
+        freezeClock();
+        const tasks = Array.from({ length: 63 }, (_, index) => ({ id: `paged-${index}`, title: `Paged ${String(index).padStart(2, '0')}`,
+            status: 'next' as const, contexts: [], tags: [], createdAt: fixture.now, updatedAt: fixture.now,
+            dueDate: index === 62 ? '2026-10-29' : '2026-10-28' }));
+        const { host } = await openHost(scenario('day'), undefined, { ...fixture, tasks, projects: [], areas: [] });
+        const input = { state: { viewMode: 'day' as const, selectedDate: '2026-10-28', visibleMonth: '2026-10-28' },
+            calendar: { status: 'ready' as const, calendars: [], events: [] }, includeAllDayLanes: true, offset: 0, limit: 50 };
+        const first = value(host.getCalendarView(input));
+        expect(first.total).toBe(62); expect(first.items).toHaveLength(50);
+        expect(first.content).toMatchObject({ allDayMore: '+58 more' });
+        const second = value(host.getCalendarView({ ...input, offset: 50, revision: first.revision }));
+        expect(second.items).toHaveLength(12); expect(second.content).toEqual(first.content);
+        const ids = [...first.items, ...second.items].map((entry) => entry.type === 'item' ? entry.item.id : '');
+        expect(new Set(ids).size).toBe(62);
+        expect(host.getCalendarView({ ...input, includeAllDayLanes: false, offset: 50, revision: first.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        const weekView = value(host.getCalendarView({ ...input, state: { ...input.state, viewMode: 'week' }, limit: 100 }));
+        expect(days(weekView).find((entry) => entry.key === '2026-10-28')).toHaveProperty('allDayMore', '+59 more');
+        expect(days(weekView).find((entry) => entry.key === '2026-10-29')).toHaveProperty('allDayMore', null);
+    });
 
     it('emits deadline points separately from durations, including midnight', async () => {
         freezeClock();

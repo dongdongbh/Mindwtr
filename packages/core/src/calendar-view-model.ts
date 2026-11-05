@@ -95,6 +95,7 @@ export const CALENDAR_COMPOSER_CANDIDATE_LIMIT = 10;
 export const CALENDAR_MONTH_PREVIEW_ITEMS = 2;
 export const CALENDAR_MONTH_PREVIEW_HIDDEN_AT = 6;
 export const CALENDAR_WEEK_ALL_DAY_ITEMS = 3;
+export const CALENDAR_DAY_ALL_DAY_ITEMS = 4;
 /** A timeline tap opens the composer with this duration. */
 export const CALENDAR_TAP_DURATION_MINUTES = 30;
 
@@ -854,6 +855,26 @@ export const getCalendarMonthPreviewTones = (item: CalendarDayItem) => {
         text: (item.kind === 'scheduled' || projected ? 'tint' : item.kind === 'completed' ? 'secondary' : 'text') as CalendarTone,
         dashed: projected,
         struck: item.kind === 'completed',
+    };
+};
+
+export const getCalendarAllDayLane = (items: readonly CalendarDayItem[], limit: number, expanded = false) => {
+    const ordered = orderCalendarDayItemsForLimitedSlots(items.filter(isCalendarAllDayItem));
+    return { items: expanded ? ordered : ordered.slice(0, limit), hiddenCount: Math.max(0, ordered.length - limit) };
+};
+
+export const formatCalendarAllDayMore = (hiddenCount: number, t: Translate): string => `+${hiddenCount} ${t('calendar.more')}`;
+
+export const getCalendarAllDayChipTones = (item: CalendarDayItem, mode: 'day' | 'week'): {
+    fill: CalendarTone; accent: CalendarTone; text: CalendarTone; dashed: boolean; struck: boolean; disabled: boolean;
+} => {
+    const projected = item.kind !== 'event' && isProjectedRecurringTask(item.task);
+    const completed = item.kind === 'completed';
+    return {
+        fill: item.kind === 'event' || completed ? 'secondary' : 'input',
+        accent: item.kind === 'event' ? 'source' : completed ? 'secondary' : projected || item.kind === 'scheduled' ? 'tint' : 'danger',
+        text: completed ? 'secondary' : projected ? 'tint' : 'text',
+        dashed: projected, struck: completed, disabled: completed || mode === 'week' && projected,
     };
 };
 

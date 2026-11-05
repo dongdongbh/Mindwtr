@@ -5,6 +5,7 @@ import {
     canStarNewCapture,
     getFocusStarBlockedText,
     resolveFocusStarAction,
+    resolveRowFocusStarAction,
     resolveTaskEditorFocusStar,
     resolveTaskFocusCreation,
     resolveTaskFocusUpdate,
@@ -257,5 +258,27 @@ describe('resolveTaskFocusUpdate', () => {
     it('counts a review-due waiting star like any other star', () => {
         expect(update({ status: 'waiting', reviewAt: '2020-01-01' }, { isFocusedToday: true }, 2)).toEqual({ outcome: 'focused' });
         expect(update({ status: 'waiting', reviewAt: '2020-01-01' }, { isFocusedToday: true }, 3).outcome).toBe('refused-limit');
+    });
+});
+
+describe('resolveRowFocusStarAction', () => {
+    it('stars an Inbox task as Next, with status next in the same patch (#1464)', () => {
+        const action = resolveRowFocusStarAction(makeTask({ status: 'inbox' }), baseContext());
+        expect(action).toMatchObject({ canToggle: true, blockedReason: null, patch: { isFocusedToday: true, status: 'next' } });
+    });
+
+    it('refuses an Inbox task the Next rules refuse', () => {
+        // The plain resolver refuses every Inbox task; the row judges it as Next instead.
+        expect(resolveFocusStarAction(makeTask({ status: 'inbox' }), baseContext()).blockedReason).toBe('clarify');
+        const refused = resolveRowFocusStarAction(makeTask({ status: 'inbox' }), baseContext({ focusedCount: 3 }));
+        expect(refused).toMatchObject({ canToggle: false, blockedReason: 'limit' });
+        // A refused star carries no status: nothing in its patch may move the task out of Inbox.
+        expect(refused.patch).toEqual({ isFocusedToday: true });
+    });
+
+    it('leaves other statuses and star removal to resolveFocusStarAction', () => {
+        for (const task of [makeTask({ status: 'waiting' }), makeTask({ status: 'someday' }), makeTask({ status: 'inbox', isFocusedToday: true })]) {
+            expect(resolveRowFocusStarAction(task, baseContext())).toEqual(resolveFocusStarAction(task, baseContext()));
+        }
     });
 });

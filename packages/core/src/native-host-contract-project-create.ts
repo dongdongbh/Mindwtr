@@ -8,7 +8,7 @@ import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
 import { buildNewProject, projectAreaOrderMax } from './store-projects/project-actions';
 import type { PreparedProjectCreate } from './store-types';
-import { taskEditValuesEqual } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import type { Area, Project } from './types';
 
 export type NativeProjectCreateRequest = { requestId: string; title: string; areaId: string | null };

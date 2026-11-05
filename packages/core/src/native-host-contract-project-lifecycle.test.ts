@@ -89,6 +89,57 @@ async function peerEditTask(id: string, updates: Partial<Task>) {
 afterEach(async () => { await flushPendingSave(); resetForTests(); vi.useRealTimers(); });
 
 describe('prepared Project Complete and Reactivate', () => {
+    it('reads Weekly Review completion without writing and rejects child changes before prepare', async () => {
+        const env = await open();
+        const options = value(env.host.getReviewProjectCompletionOptions({ projectId: ID }));
+        expect(Object.keys(options).sort()).toEqual(['projectId', 'projectRevision', 'requiresConfirmation', 'scopeRevision', 'title']);
+        expect(options).toMatchObject({ projectId: ID, title: 'Saved Project', requiresConfirmation: true });
+        expect(env.saves()).toBe(0);
+        const request = env.request('complete');
+        useTaskStore.setState({ _allTasks: [...env.state()._allTasks, task('new-child')] });
+        expect(env.host.prepareReviewProjectCompletion({ request, scopeRevision: options.scopeRevision })).toMatchObject({
+            ok: false, error: { code: 'STALE_REVISION' },
+        });
+        expect(env.state()._projectsById.get(ID)?.status).toBe('active');
+        expect(env.saves()).toBe(0);
+        const current = value(env.host.getReviewProjectCompletionOptions({ projectId: ID }));
+        const prepared = value(env.host.prepareReviewProjectCompletion({ request, scopeRevision: current.scopeRevision }));
+        expect(Object.keys(prepared.prepared.request).sort()).toEqual(['action', 'projectId', 'projectRevision', 'requestId']);
+        expect(Object.keys(prepared.prepared).sort()).toEqual(['deviceIdBefore', 'deviceIdToInitialize', 'effect', 'request', 'result', 'scope', 'updateAt', 'version']);
+        const envelope = { request, prepared: prepared.prepared };
+        expect(value(await env.host.commitPreparedProjectLifecycle(envelope))).toEqual({ id: ID, status: 'archived' });
+        expect(value(await env.host.commitPreparedProjectLifecycle(envelope))).toEqual({ id: ID, status: 'archived' });
+        expect(env.state()._tasksById.get('new-child')?.status).toBe('done');
+        expect(env.saves()).toBe(1);
+    });
+
+    it('requires confirmation for section-owned children but excludes reference, finished, deleted and foreign tasks', async () => {
+        const source = initial();
+        source.tasks = source.tasks.filter((row) => ['reference', 'done', 'archived', 'deleted', 'foreign'].includes(row.id));
+        const env = await open(source);
+        expect(value(env.host.getReviewProjectCompletionOptions({ projectId: ID })).requiresConfirmation).toBe(false);
+        useTaskStore.setState({ _allTasks: [...env.state()._allTasks, task('owned', { projectId: undefined })] });
+        expect(value(env.host.getReviewProjectCompletionOptions({ projectId: ID })).requiresConfirmation).toBe(true);
+        const options = value(env.host.getReviewProjectCompletionOptions({ projectId: ID }));
+        const request = env.request('complete');
+        useTaskStore.setState({ _allTasks: env.state()._allTasks.map((row) => row.id === 'owned'
+            ? { ...row, status: 'reference', rev: (row.rev ?? 0) + 1 } : row) });
+        expect(env.host.prepareReviewProjectCompletion({ request, scopeRevision: options.scopeRevision })).toMatchObject({
+            ok: false, error: { code: 'STALE_REVISION' },
+        });
+        expect(env.host.prepareReviewProjectCompletion({ request: { ...request, action: 'cancel' }, scopeRevision: options.scopeRevision }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it.each(['waiting', 'someday', 'archived'] as const)('does not admit %s projects from Weekly Review', async (status) => {
+        const source = initial();
+        source.projects[0] = project({ status });
+        const env = await open(source);
+        expect(env.host.getReviewProjectCompletionOptions({ projectId: ID })).toMatchObject({
+            ok: false, error: { code: 'STALE_REVISION' },
+        });
+    });
+
     it.each(['waiting', 'someday'] as const)('completes a live %s Project using the same archived lifecycle', async (status) => {
         const source = initial();
         source.projects[0] = project({ status });

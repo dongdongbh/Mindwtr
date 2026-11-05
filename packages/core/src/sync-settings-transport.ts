@@ -192,6 +192,9 @@ export type SyncSettingsDropboxPort = {
 };
 
 export type SyncSettingsTransportHost = {
+    /** Selected native owner admissions; rollback ports remain usable after retirement. */
+    beforeDropboxPromotion?: () => Promise<void>;
+    beforeActivation?: () => Promise<void>;
     params(): SyncSettingsTransportParams;
     /** The device key-value store (React Native: AsyncStorage). */
     storage: {
@@ -984,6 +987,8 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
     const commitProvenSyncConfiguration = async (p: SyncSettingsTransportParams, config: MobileSyncConfigOverride) => {
         try {
             const dependencies: MobileSyncConfigurationTransactionDependencies = {
+                ...(host.beforeDropboxPromotion ? { beforeDropboxPromotion: host.beforeDropboxPromotion } : {}),
+                ...(host.beforeActivation ? { beforeActivation: host.beforeActivation } : {}),
                 clearConfigCache: () => host.clearSyncConfigCache(),
                 clearDropboxTokens: () => host.dropbox.clearTokens(),
                 deleteSecret: (key) => host.secrets.delete(key),

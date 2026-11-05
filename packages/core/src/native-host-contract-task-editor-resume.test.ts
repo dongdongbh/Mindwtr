@@ -65,6 +65,16 @@ describe('native editor resume opening-base check', () => {
         expect(env.writes()).toBe(writes);
     });
 
+    it('checks reminder policy and absent or set advance reminder bases', async () => {
+        const env = await open(task({ reminderPolicy: 'inherit', dueReminderLeadMinutes: 60 }));
+        const touchedBase = { reminderPolicy: 'inherit', dueReminderLeadMinutes: 60, startReminderLeadMinutes: null };
+        expect(await env.host.checkTaskEditorResume({ id: 'resume', touchedBase })).toMatchObject({ ok: true, value: { kind: 'ready' } });
+        env.external({ dueReminderLeadMinutes: 30 });
+        expect(await env.host.checkTaskEditorResume({ id: 'resume', touchedBase })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await env.host.checkTaskEditorResume({ id: 'resume', touchedBase: { startReminderLeadMinutes: 13 } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     it('preserves complete schedule and checklist witnesses, including duplicate legacy IDs and order', async () => {
         const env = await open();
         const originalChecklist = env.saved().tasks[0].checklist!;

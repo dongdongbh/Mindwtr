@@ -128,12 +128,14 @@ describe('native prepared Board actions', () => {
         expect(value(await commit(await restart(), prepared))).toEqual(prepared.result);
     });
 
-    it('preserves RN duplicate fields and generated identities through clock changes and source-independent replay', async () => {
+    it.each(['next', 'reference'] as const)('preserves %s duplicate fields and generated identities through clock changes and source-independent replay', async (status) => {
         const { host } = await open();
         const state = useTaskStore.getState();
         const source = state._tasksById.get('n-draft')!;
         await state.updateTask(source.id, {
-            checklist: [{ id: 'old-step', title: 'Synthetic step', isCompleted: true }],
+            status,
+            checklist: [{ id: 'old-step', title: 'Synthetic step', isCompleted: true },
+                { id: 'old-open-step', title: 'Unfinished step', isCompleted: false }],
             attachments: [
                 { id: 'old-link', kind: 'link', title: 'Synthetic link', uri: 'https://example.invalid/test', createdAt: fixture.now, updatedAt: fixture.now },
                 { id: 'old-file', kind: 'file', title: 'Synthetic file', uri: 'file:///synthetic', createdAt: fixture.now, updatedAt: fixture.now },
@@ -142,7 +144,11 @@ describe('native prepared Board actions', () => {
         await flushPendingSave();
         const before = clone(useTaskStore.getState()._allTasks);
         const prepared = prepare(host, 'duplicateTask');
-        expect(prepared.after.checklist).toMatchObject([{ title: 'Synthetic step', isCompleted: false }]);
+        expect(prepared.after.checklist).toMatchObject([{ title: 'Synthetic step', isCompleted: true },
+            { title: 'Unfinished step', isCompleted: false }]);
+        const childIds = prepared.after.checklist!.map((item) => item.id);
+        expect(childIds.every((id) => !['old-step', 'old-open-step', source.id, requestId].includes(id))).toBe(true);
+        expect(new Set(childIds).size).toBe(childIds.length);
         expect(prepared.after.attachments).toMatchObject([{ kind: 'link', uri: 'https://example.invalid/test' }]);
         expect(prepared.after.attachments).toHaveLength(1);
         vi.setSystemTime(new Date('2036-10-02T16:00:00.000Z'));
@@ -153,6 +159,54 @@ describe('native prepared Board actions', () => {
         expect(value(await commit(await restart(), prepared))).toEqual(prepared.result);
         expect(clone(useTaskStore.getState()._tasksById.get(requestId))).toEqual(created);
         expect(host.prepareBoardAction(prepared.request)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('recovers exact retained v1 duplicate journals through commit and terminal validation', async () => {
+        const { host } = await open();
+        await useTaskStore.getState().updateTask('n-draft', { status: 'reference', checklist: [
+            { id: 'checked', title: 'Completed step', isCompleted: true },
+            { id: 'open', title: 'Remaining step', isCompleted: false },
+        ] });
+        await flushPendingSave();
+        const current = prepare(host, 'duplicateTask');
+        expect(current.version).toBe(2);
+        const legacy: NativePreparedBoardAction = { ...clone(current), version: 1,
+            after: { ...clone(current.after), checklist: current.after.checklist!.map((item) => ({ ...item, isCompleted: false })) } };
+        const before = clone(useTaskStore.getState()._allTasks);
+        const cold = createNativeHostContract();
+        expect(value(cold.validatePreparedBoardAction({ request: legacy.request, prepared: legacy }))).toEqual(legacy.result);
+        expect(useTaskStore.getState()._allTasks).toEqual(before);
+        const forged = clone(legacy);
+        forged.after.checklist![0].isCompleted = true;
+        expect(cold.validatePreparedBoardAction({ request: forged.request, prepared: forged }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const resetCurrent = { ...clone(legacy), version: 2 as const };
+        expect(cold.validatePreparedBoardAction({ request: resetCurrent.request, prepared: resetCurrent }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const changedCurrent = clone(current);
+        changedCurrent.after.checklist![1].isCompleted = true;
+        expect(cold.validatePreparedBoardAction({ request: changedCurrent.request, prepared: changedCurrent }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+
+        expect(value(await commit(host, legacy))).toEqual(legacy.result);
+        expect(useTaskStore.getState()._tasksById.get(requestId)).toEqual(legacy.after);
+        expect(useTaskStore.getState()._tasksById.get('n-draft')).toEqual(legacy.before);
+        await useTaskStore.getState().deleteTask('n-draft');
+        await flushPendingSave();
+        const landed = clone(useTaskStore.getState()._allTasks);
+        expect(value(createNativeHostContract().validatePreparedBoardAction({ request: legacy.request, prepared: legacy })))
+            .toEqual(legacy.result);
+        expect(value(await commit(await restart(), legacy))).toEqual(legacy.result);
+        expect(useTaskStore.getState()._allTasks).toEqual(landed);
+    });
+
+    it('keeps Trash on version 1 and refuses a version 2 Trash envelope', async () => {
+        const { host } = await open();
+        const prepared = prepare(host, 'trashTask');
+        expect(prepared.version).toBe(1);
+        prepared.version = 2;
+        expect(host.validatePreparedBoardAction({ request: prepared.request, prepared: prepared }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
     it('strictly rejects unsupported requests and forged effects before any save', async () => {

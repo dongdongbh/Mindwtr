@@ -74,6 +74,7 @@ import {
     getAIProviderDefaultsPatch,
     getAIProviderLabel,
     getAnthropicThinkingPatch,
+    getAnthropicThinkingBudgetPresets,
     getFossSpeechCorrection,
     getSelectedMobileWhisperModel,
     getSpeechModelListKind,
@@ -125,6 +126,8 @@ import { taskDraftToUpdatePatch, type TaskDraft } from './task-draft';
 import { parseTaskEditorTokenList } from './task-editor-model';
 import type { AppSettings, ChecklistItem, Task, TimeEstimate } from './types';
 import { deterministicHash128Hex, generateUUID } from './uuid';
+import { exact, isNativeJsonWithinBytes } from './native-json';
+import { abortableAIFetch } from './ai/utils';
 
 type Translate = (key: string) => string;
 type AISettings = NonNullable<AppSettings['ai']>;
@@ -154,6 +157,10 @@ export type NativeAIHost = {
      * reaches the user only after core drops the key from it.
      */
     fetch?: typeof fetch;
+    /** Read-only action loader supplied by hosts that must not migrate existing credentials. Settings keep their normal store. */
+    loadRequestKey?: (provider: AIProviderId) => Promise<string | null>;
+    /** A selected native configuration owner stores the explicit replacement without broad key-store access. */
+    saveConfigurationKey?: (provider: AIProviderId, value: string) => Promise<void>;
     /** The app log (no key is ever passed). */
     log?: {
         warn(message: string): void;
@@ -167,8 +174,8 @@ export type NativeAIHost = {
     };
 };
 
-/** Commands a host must not write to its request journal: they carry an API key, or a URL that may hold a password. */
-export const NATIVE_AI_UNJOURNALED_COMMANDS = ['setAIKey', 'setAIEndpoint'] as const;
+/** Commands carrying credentials, private URLs or arbitrary request JSON stay process-only. */
+export const NATIVE_AI_UNJOURNALED_COMMANDS = ['setAIKey', 'setAIEndpoint', 'setAIExtraBodyParams'] as const;
 
 export type AIDeps = {
     readiness: () => NativeHostResult<null>;
@@ -340,10 +347,23 @@ const EFFORTS: readonly AIReasoningEffort[] = ['low', 'medium', 'high'];
 const MODES: readonly AudioCaptureMode[] = ['smart_parse', 'transcribe_only'];
 const STRATEGIES: readonly AudioFieldStrategy[] = ['smart', 'title_only', 'description_only'];
 const GEMINI_BUDGETS = [0, 128, 256, 512];
-const anthropicBudgets = () => [getAnthropicThinkingPatch(true).thinkingBudget as number, 2048, 4096];
+const anthropicBudgets = getAnthropicThinkingBudgetPresets;
 const EXTRA_BODY_PLACEHOLDER = '{\n  "thinking": { "type": "disabled" }\n}';
 const SPEECH_BASE_URL_PLACEHOLDER = 'http://localhost:8000/v1';
 const TEXT_LIMIT = 4000;
+
+/** Shared private-editor preflight. No input or parser error text crosses its boundary. */
+export function readNativeAIExtraBodyInput(text: unknown): { value: Record<string, unknown> | undefined; formatted: string } | null {
+    if (typeof text !== 'string' || text.length > TEXT_LIMIT) return null;
+    try {
+        const parsed = parseOpenAIExtraBodyParamsInput(text);
+        if (!parsed.ok) return null;
+        const formatted = formatOpenAIExtraBodyParams(parsed.value);
+        return formatted.length <= TEXT_LIMIT && isNativeJsonWithinBytes({ value: formatted }, 16 * 1024)
+            ? { value: parsed.value, formatted } : null;
+    } catch { return null; }
+}
+
 const KEY_LIMIT = 4000;
 
 const mask = (key: string) => '•'.repeat(key.length);
@@ -398,24 +418,24 @@ const readChange = (value: unknown): NativeAISettingChange | null => {
     }
 };
 
-/**
- * [fetcher] that also stops when [signal] aborts (the host no longer wants the answer: an input change, a close, a timeout),
- * whatever signal the request brings of its own.
- */
-const abortable = (fetcher: typeof fetch, signal: AbortSignal | undefined): typeof fetch => (!signal ? fetcher : ((url, init = {}) => {
-    const stop = new AbortController();
-    const forward = () => stop.abort(signal.aborted ? signal.reason : init.signal?.reason);
-    if (signal.aborted || init.signal?.aborted) forward();
-    signal.addEventListener('abort', forward, { once: true });
-    init.signal?.addEventListener('abort', forward, { once: true });
-    return fetcher(url, { ...init, signal: stop.signal });
-}) as typeof fetch);
-
 export function createAIMethods(deps: AIDeps) {
     const receipts = createNativeRequestReceipts({ save: deps.save });
     // Fingerprints of input that holds a key are salted per host: none can be matched against a guess outside it.
     const salt = generateUUID();
     const fingerprint = (value: unknown): string => deterministicHash128Hex(JSON.stringify([salt, value]));
+    const extraBodyRequest = (input: unknown): { requestId: string; text: string; value: Record<string, unknown> | undefined; payload: string } | null => {
+        if (!isObjectRecord(input) || !exact(input, ['requestId', 'text']) || typeof input.requestId !== 'string'
+            || !deps.requestIdPattern.test(input.requestId) || typeof input.text !== 'string') return null;
+        const parsed = readNativeAIExtraBodyInput(input.text);
+        return parsed ? { requestId: input.requestId, text: input.text, value: parsed.value,
+            payload: JSON.stringify(['setAIExtraBodyParams', fingerprint(['extra-body', input.text])]) } : null;
+    };
+    const extraBodySaved = (request: NonNullable<ReturnType<typeof extraBodyRequest>>): NativeHostResult<{ changed: boolean }> | null => {
+        const saved = receipts.saved<{ changed: boolean }>(request.requestId, request.payload);
+        if (!saved || !saved.ok) return saved;
+        return isObjectRecord(saved.value) && exact(saved.value, ['changed']) && typeof saved.value.changed === 'boolean'
+            ? saved : fail('INVALID_INPUT', 'AI extra body parameters result is malformed');
+    };
     let visit: Visit | null = null;
     // One key store per host binding: made on first use.
     let keyStoreFor: { host: NativeAIHost; store: AIKeyStore } | null = null;
@@ -810,7 +830,7 @@ export function createAIMethods(deps: AIDeps) {
         const stored = settings();
         const provider = (stored.ai?.provider ?? 'openai') as AIProviderId;
         if (stored.ai?.enabled !== true) return { gate: 'disabled' as const, apiKey: '' };
-        const apiKey = await keys(host).load(provider);
+        const apiKey = host.loadRequestKey ? await host.loadRequestKey(provider) ?? '' : await keys(host).load(provider);
         if (isAIKeyRequired(stored) && !apiKey) return { gate: 'missingKey' as const, apiKey };
         const build = (): AIProviderConfig => {
             if (isSandboxMode()) throw new Error('Unavailable in sandbox');
@@ -1004,6 +1024,32 @@ export function createAIMethods(deps: AIDeps) {
             });
         },
 
+        /** The private editor's exact input has only a salted process receipt and a Boolean reply. */
+        async setAIExtraBodyParams(input: { requestId: string; text: string }): Promise<NativeHostResult<{ changed: boolean }>> {
+            try {
+                const request = extraBodyRequest(input);
+                if (!request) return fail('INVALID_INPUT', 'A bounded request UUID and JSON object are required');
+                const bound = requireHost();
+                if (!bound.ok) return { ok: false, error: { code: bound.error.code, message: 'AI extra body parameters are unavailable' } };
+                if ((settings().ai?.provider ?? 'openai') !== 'openai')
+                    return fail('INVALID_INPUT', 'The AI screen does not offer extra body parameters now');
+                const result = await receipts.run<{ changed: boolean }>(request.requestId, request.payload, async () => {
+                    const written = await writeAI({ openAIExtraBodyParams: request.value });
+                    return written.ok ? { ok: true, value: { changed: written.value } } : settleWrite(written, { changed: true });
+                });
+                return result.ok ? result : { ok: false, error: { code: result.error.code, message: 'AI extra body parameters could not be confirmed' } };
+            } catch { return fail('ACTION_FAILED', 'AI extra body parameters could not be confirmed'); }
+        },
+
+        /** A saved process receipt may outlive later settings; no equality-only or cold acknowledgment. */
+        probeAIExtraBodyParamsOutcome(input: { requestId: string; text: string }): NativeHostResult<{ changed: boolean }> | null {
+            try {
+                const request = extraBodyRequest(input);
+                if (!request) return fail('INVALID_INPUT', 'A bounded request UUID and JSON object are required');
+                return extraBodySaved(request);
+            } catch { return fail('ACTION_FAILED', 'AI extra body parameters are unavailable'); }
+        },
+
         /**
          * A key field's change: stored in the keystore under the provider's name (blank removes
          * it). `provider` is the one the view shows for that field; another answers STALE_REVISION.
@@ -1023,7 +1069,8 @@ export function createAIMethods(deps: AIDeps) {
                 const shown = field === 'assistant' ? state.aiProvider : state.speechProvider;
                 if (provider !== shown || shown === 'whisper') return fail('STALE_REVISION', 'The provider changed; read the view again');
                 try {
-                    await keys(host).save(shown, value);
+                    if (host.saveConfigurationKey) await host.saveConfigurationKey(shown, value);
+                    else await keys(host).save(shown, value);
                 } catch (error) {
                     return fail('ACTION_FAILED', redactAIError(error, value, settings()).message);
                 }
@@ -1050,7 +1097,7 @@ export function createAIMethods(deps: AIDeps) {
                 opened.models[input.list] = slot;
                 try {
                     slot.models = await fetchProviderModelsCached(wanted.provider, {
-                        apiKey: wanted.apiKey, baseUrl: wanted.baseUrl, kind: wanted.kind, fetchImpl: abortable(host.fetch ?? globalThis.fetch, options.signal),
+                        apiKey: wanted.apiKey, baseUrl: wanted.baseUrl, kind: wanted.kind, fetchImpl: abortableAIFetch(host.fetch ?? globalThis.fetch, options.signal),
                     });
                 } catch {
                     // The built-in list stays; nothing to tell the user. A cancelled load frees its request for the next ask.
@@ -1317,7 +1364,7 @@ export function createAIMethods(deps: AIDeps) {
          * null `suggestions` or `selectedIds` keeps what it shows. Apply sends the chosen suggestions
          * to runReviewAction's applySuggestions.
          */
-        async requestWeeklyReviewAnalysis(options: AIRequestOptions = {}): Promise<NativeHostResult<NativeWeeklyReviewAnalysis>> {
+        async requestWeeklyReviewAnalysis(options: AIRequestOptions = {}, sequenceAware = false): Promise<NativeHostResult<NativeWeeklyReviewAnalysis>> {
             const bound = requireHost();
             if (!bound.ok) return bound;
             const host = bound.value;
@@ -1333,7 +1380,7 @@ export function createAIMethods(deps: AIDeps) {
                 apiKey = ai.apiKey;
                 sent = ai.sent;
                 const { weekStart } = getWeeklyReviewSettings(state.settings);
-                const { staleItems } = getWeeklyReviewBuckets(state.tasks, state.projects, { weekStart });
+                const { staleItems } = getWeeklyReviewBuckets(state.tasks, state.projects, { weekStart, sections: state.sections, sequenceAware });
                 if (staleItems.length === 0) return { ok: true, value: { error: null, suggestions: [], selectedIds: [] } };
                 const response = await createAIProvider(ai.build()).analyzeReview({ items: staleItems }, options);
                 const analysis = readWeeklyReviewAnalysis(response, staleItems);

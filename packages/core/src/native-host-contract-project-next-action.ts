@@ -2,7 +2,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import type { NativeHostResult } from './native-host-contract';
 import type { AppData, Area, Project, Section, Task, TaskStatus } from './types';
 import type { PreparedAreaAuthority, PreparedChecklistEffect, PreparedChecklistRawBefore, PreparedNativeSaveBoundary, PreparedProjectLifecycle } from './store-types';
-import { createTaskChecklistSaveMethods, historyRowLoadProjection, type NativeTaskCompletionEnvelope, type NativeReferenceTaskBackdateEnvelope } from './native-host-contract-task-checklist';
+import { createTaskChecklistSaveMethods, historyRowLoadProjection, type NativeTaskCompletionEnvelope, type NativeReferenceTaskBackdateEnvelope, type NativeRowTaskBackdateEnvelope } from './native-host-contract-task-checklist';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
 import { createNativeRequestReceipts, NativeReceiptSqliteAdapter, taskRevisionOf, revisionOf as rowRevisionOf } from './native-request-receipts';
 import { exact, iso, record, validProject } from './native-host-contract-project-shared';
@@ -32,7 +32,7 @@ import { formatI18nTemplate } from './i18n';
 
 export type NativeReferenceProjectNextActionOriginRef = { kind: 'completion' | 'backdate'; id: string; requestId: string };
 export type NativeReferenceProjectNextActionOrigin = { kind: 'completion'; envelope: NativeTaskCompletionEnvelope }
-    | { kind: 'backdate'; envelope: NativeReferenceTaskBackdateEnvelope };
+    | { kind: 'backdate'; envelope: NativeReferenceTaskBackdateEnvelope | NativeRowTaskBackdateEnvelope };
 export type NativeReferenceProjectNextActionRequest = {
     requestId: string; origin: NativeReferenceProjectNextActionOriginRef; promptRevision: string;
 } & ({ action: 'choose'; candidateId: string; candidateRevision: string }
@@ -64,7 +64,7 @@ type AddOperation = { kind: 'add'; creation: { intent: NativeProjectNextActionRe
     task: Task; deviceIdBefore: string | null; deviceIdToInitialize: string | null; updateAt: string };
 type CompleteOperation = { kind: 'completeProject'; lifecycle: PreparedProjectLifecycle };
 export type NativePreparedReferenceProjectNextAction = {
-    version: 1; kind: 'referenceProjectNextAction'; request: NativeReferenceProjectNextActionRequest;
+    version: 1 | 2; kind: 'referenceProjectNextAction'; request: NativeReferenceProjectNextActionRequest;
     origin: NativeReferenceProjectNextActionOrigin; context: NativeProjectNextActionContext;
     rawBefore: PreparedChecklistRawBefore; operation: ChooseOperation | AddOperation | CompleteOperation;
     result: NativeReferenceProjectNextActionResult;
@@ -72,7 +72,7 @@ export type NativePreparedReferenceProjectNextAction = {
 export type NativeReferenceProjectNextActionEnvelope = { request: NativeReferenceProjectNextActionRequest; prepared: NativePreparedReferenceProjectNextAction };
 export type NativeReferenceProjectNextActionPreparation = { kind: 'prepared'; prepared: NativePreparedReferenceProjectNextAction };
 type OriginMethods = Pick<ReturnType<typeof createTaskChecklistSaveMethods>, 'validatePreparedTaskCompletion' | 'taskCompletionOutcome'
-    | 'validatePreparedReferenceTaskBackdate' | 'referenceTaskBackdateOutcome'>;
+    | 'validatePreparedReferenceTaskBackdate' | 'referenceTaskBackdateOutcome' | 'validatePreparedRowTaskBackdate' | 'rowTaskBackdateOutcome'>;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const same = taskEditValuesEqual;
 const text = (v: unknown, limit: number): v is string => typeof v === 'string' && Boolean(v.trim()) && v.length <= limit;
@@ -94,6 +94,20 @@ const detach = <T,>(v: unknown, cap = 2_100_000): T | null => {
 const validRef = (v: unknown): v is NativeReferenceProjectNextActionOriginRef => record(v) && exact(v, ['kind', 'id', 'requestId'])
     && ['completion', 'backdate'].includes(String(v.kind)) && text(v.id, 500) && typeof v.requestId === 'string' && UUID.test(v.requestId);
 const refOf = (o: NativeReferenceProjectNextActionOrigin): NativeReferenceProjectNextActionOriginRef => ({ kind: o.kind, id: o.envelope.request.id, requestId: o.envelope.request.requestId });
+const promptVersion = (o: NativeReferenceProjectNextActionOrigin): 1 | 2 => o.kind === 'completion'
+    && o.envelope.prepared.kind !== 'referenceComplete' ? 2 : 1;
+const originPrefix = (o: NativeReferenceProjectNextActionOrigin) => o.kind === 'backdate' ? (o.envelope.prepared.kind === 'rowBackdate' ? 'rowTaskBackdate' : 'referenceTaskBackdate')
+    : o.envelope.prepared.kind === 'complete' ? 'taskCompletion'
+        : o.envelope.prepared.kind === 'boardComplete' ? 'boardTaskCompletion'
+            : o.envelope.prepared.kind === 'rowComplete' ? 'rowTaskCompletion' : 'referenceTaskCompletion';
+const matchesCompletionSource = (source: Task, origin: NativeReferenceProjectNextActionOrigin): boolean => {
+    if (origin.kind !== 'completion') return false;
+    const after = origin.envelope.prepared.checklist.effect.tasks.find((row) => row.after.id === origin.envelope.request.id)?.after;
+    return Boolean(after && after.projectId && after.status === 'done' && source.status === 'done'
+        && source.id === after.id && source.projectId === after.projectId
+        && (source.sectionId ?? null) === (after.sectionId ?? null)
+        && source.completedAt === after.completedAt && taskRevisionOf(source) === taskRevisionOf(after));
+};
 const readRequest = (v: unknown): NativeReferenceProjectNextActionRequest | null => {
     const r = detach<Record<string, unknown>>(v, 2_000_000);
     if (!r || !validRef(r.origin) || typeof r.requestId !== 'string' || !UUID.test(r.requestId)
@@ -125,8 +139,9 @@ const contextOf = (data: AppData, lists: Lists, origin: NativeReferenceProjectNe
     const source = lists.tasks.find((r) => r.id === origin.envelope.request.id);
     const raw = data.tasks.find((r) => r.id === source?.id); const rawSource = raw && rawReadTaskSnapshot(raw);
     if (!source || !rawSource || source.deletedAt || source.purgedAt) return null;
-    const forced = { ...source, status: 'done' as const };
-    const policy = getProjectNextActionPromptData(forced, lists.tasks.map((r) => r.id === source.id ? forced : r), lists.projects);
+    if (promptVersion(origin) === 2 && !matchesCompletionSource(rawSource, origin)) return null;
+    const forced = promptVersion(origin) === 1 ? { ...source, status: 'done' as const } : source;
+    const policy = getProjectNextActionPromptData(forced, lists.tasks.map((r) => r.id === source.id ? forced : r), lists.projects, lists.sections);
     if (!policy || policy.project.purgedAt) return null;
     const section = source.sectionId ? lists.sections.find((r) => r.id === source.sectionId) ?? null : null;
     if (source.sectionId && (!section || section.deletedAt || section.projectId !== policy.project.id)) return null;
@@ -135,7 +150,7 @@ const contextOf = (data: AppData, lists: Lists, origin: NativeReferenceProjectNe
     return { source, rawSource, project, section, tasks: lists.tasks.filter((r) => r.projectId === policy.project.id), scope: policy.scope };
 };
 const policyOf = (c: NativeProjectNextActionContext) => getProjectNextActionPromptData({ ...c.source, status: 'done' },
-    c.tasks.map((r) => r.id === c.source.id ? { ...r, status: 'done' as const } : r), [projectProjection(c.project)]);
+    c.tasks.map((r) => r.id === c.source.id ? { ...r, status: 'done' as const } : r), [projectProjection(c.project)], c.section ? [c.section] : []);
 // Only fields consumed by eligibility, candidate order, displayed row revision,
 // and the completed-source/container authority enter the page revision.
 const revisionContent = (c: NativeProjectNextActionContext) => canonical({ source: c.source, rawSource: c.rawSource,
@@ -213,7 +228,7 @@ const validDevice = (op: { deviceIdBefore: string | null; deviceIdToInitialize: 
 const creationKeys = ['status', 'projectId', 'sectionId', 'areaId', 'startTime', 'dueDate', 'reviewAt', 'description', 'contexts', 'tags', 'priority', 'energyLevel', 'assignedTo', 'attachments', 'isFocusedToday', 'timeEstimate'];
 const validResolvedDate = (v: unknown): boolean => iso(v) || typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
     && Number.isFinite(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
-const validIntent = (v: unknown, context: NativeProjectNextActionContext): v is NativeProjectNextActionResolvedIntent => {
+const validIntent = (v: unknown, context: Pick<NativeProjectNextActionContext, 'project' | 'section'>): v is NativeProjectNextActionResolvedIntent => {
     if (!record(v) || !exact(v, ['title', 'props']) || !text(v.title, 100_000) || v.title.trim() !== v.title || !record(v.props)
         || Object.keys(v.props).some((k) => !creationKeys.includes(k)) || !text(v.props.projectId, 500)
         || !['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'].includes(String(v.props.status))) return false;
@@ -256,28 +271,92 @@ const rawBeforeOf = (data: AppData, tasks: { before: Task | null; after: Task }[
 });
 
 /** One prompt coordinator; the existing three writers own all actual effects. */
+export type NativeProjectTaskAddOperation = AddOperation;
+export const isNativeProjectTaskAddOperation = (value: unknown, context: Pick<NativeProjectNextActionContext, 'project' | 'section'>,
+    forbiddenIds: readonly string[] = []): value is NativeProjectTaskAddOperation => {
+    try {
+        if (!record(value) || value.kind !== 'add') return false;
+        const op = value as AddOperation;
+    if (!exact(op, ['kind', 'creation', 'task', 'deviceIdBefore', 'deviceIdToInitialize', 'updateAt']) || !validDevice(op)
+        || !iso(op.updateAt) || !validTask(op.task) || !UUID.test(op.task.id) || !record(op.creation)
+        || !exact(op.creation, ['intent', 'containers', 'projectOrder', 'focus']) || !validIntent(op.creation.intent, context)
+        || !record(op.creation.containers) || !exact(op.creation.containers, ['project', 'section', 'areas'])
+        || !validProjectSnapshot(op.creation.containers.project, op.creation.intent.props.projectId!)
+        || op.creation.containers.project.status === 'archived'
+        || !Array.isArray(op.creation.containers.areas) || !unique(op.creation.containers.areas)
+        || !op.creation.containers.areas.every((a) => record(a) && text(a.id, 500) && typeof a.name === 'string' && !a.deletedAt)
+        || (op.creation.containers.section !== null && (!validSection(op.creation.containers.section, op.creation.intent.props.sectionId!, op.creation.containers.project.id)
+            || op.creation.containers.section.deletedAt || op.creation.containers.section.projectId !== op.creation.containers.project.id))
+        || (op.creation.intent.props.sectionId ?? null) !== (op.creation.containers.section?.id ?? null)
+        || !record(op.creation.projectOrder) || !exact(op.creation.projectOrder, ['projectId', 'max'])
+        || op.creation.projectOrder.projectId !== op.creation.containers.project.id
+        || !Number.isFinite(op.creation.projectOrder.max)) return false;
+    const f = op.creation.focus;
+    const needsFocus = op.creation.intent.props.isFocusedToday === true && op.creation.intent.props.status !== 'reference';
+    if (needsFocus !== (f !== null)) return false;
+    if (f) {
+        const { lists, focusCount, focusLimit, ...clock } = f;
+        if (!exact(f, ['lists', 'focusCount', 'focusLimit', 'preparedLocalDay', 'preparedOffsetMinutes', 'boundaryOffsetMinutes', 'futureBoundary', 'dates'])
+            || !record(lists) || !exact(lists, ['tasks', 'projects', 'sections'])
+            || !validLists({ ...lists, areas: [] }) || !validClock(clock, op.updateAt, [...lists.tasks, { ...op.creation.intent.props, id: op.task.id } as Task])
+            || !Number.isSafeInteger(focusCount) || focusCount < 0 || !Number.isSafeInteger(focusLimit) || focusLimit < 1
+            || countFocusedTasksBeforeBoundary(lists.tasks, clock.futureBoundary, datesOf(clock)) !== focusCount
+            || lists.tasks.some((t) => t.id === op.task.id)
+            || !same(lists.projects.find((p) => p.id === op.creation.containers.project.id), op.creation.containers.project)
+            || op.creation.containers.section && !same(lists.sections.find((s) => s.id === op.creation.containers.section!.id), op.creation.containers.section)) return false;
+    }
+    const ownedIds = [op.task.id, ...(op.creation.intent.props.attachments ?? []).map((a) => a.id)];
+    if (new Set(ownedIds).size !== ownedIds.length || ownedIds.includes(op.deviceIdBefore ?? op.deviceIdToInitialize!)
+        || forbiddenIds.some((id) => ownedIds.includes(id))
+        || !same(addTask(op), op.task)) return false;
+        return true;
+    } catch { return false; }
+};
+
+export const prepareNativeProjectTaskAddOperation = (data: AppData, intent: NativeProjectNextActionResolvedIntent,
+    id: string, updateAt = new Date().toISOString()): NativeProjectTaskAddOperation => {
+    const lists = normalized(data, updateAt);
+    const project = lists.projects.find((r) => r.id === intent.props.projectId);
+    if (!project) throw new Error('Project is no longer available');
+    const section = intent.props.sectionId ? lists.sections.find((r) => r.id === intent.props.sectionId) ?? null : null;
+    const areas = intent.props.areaId ? lists.areas.filter((r) => r.id === intent.props.areaId) : [];
+    const device = ensureDeviceId(data.settings);
+    const focus = intent.props.isFocusedToday === true && intent.props.status !== 'reference'
+        ? { ...clockOf(updateAt, [...lists.tasks, { ...intent.props, id } as Task]),
+            lists: { tasks: lists.tasks, projects: lists.projects, sections: lists.sections },
+            focusCount: 0, focusLimit: normalizeFocusTaskLimit(data.settings.gtd?.focusTaskLimit) } : null;
+    if (focus) focus.focusCount = countFocusedTasksBeforeBoundary(lists.tasks, focus.futureBoundary, datesOf(focus));
+    const op: AddOperation = { kind: 'add', creation: { intent, containers: { project, section, areas },
+        projectOrder: { projectId: project.id, max: (getNextProjectOrder(project.id, lists.tasks) ?? 0) - 1 }, focus },
+        task: { id } as Task, deviceIdBefore: data.settings.deviceId || null,
+        deviceIdToInitialize: device.updated ? device.deviceId : null, updateAt };
+    op.task = addTask(op, getTaskReminderDefault(data.settings));
+    return op;
+};
+
 export function createReferenceProjectNextActionMethods(deps: { readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>; t: () => (key: string) => string; originMethods: OriginMethods }) {
     const readOrigin = (v: unknown): NativeReferenceProjectNextActionOrigin | null => {
         if (!record(v) || !exact(v, ['kind', 'envelope']) || !record(v.envelope)) return null;
         const o = v as unknown as NativeReferenceProjectNextActionOrigin;
         if (o.kind === 'completion') {
-            if (o.envelope.prepared?.version !== 2 || o.envelope.prepared.kind !== 'referenceComplete') return null;
             return deps.originMethods.validatePreparedTaskCompletion(o.envelope).ok ? o : null;
         }
-        if (o.kind !== 'backdate' || o.envelope.prepared?.version !== 2 || o.envelope.prepared.kind !== 'referenceBackdate') return null;
-        return deps.originMethods.validatePreparedReferenceTaskBackdate(o.envelope).ok ? o : null;
+        if (o.kind !== 'backdate' || o.envelope.prepared?.version !== 2) return null;
+        if (o.envelope.prepared.kind === 'rowBackdate') return deps.originMethods.validatePreparedRowTaskBackdate(o.envelope as NativeRowTaskBackdateEnvelope).ok ? o : null;
+        return o.envelope.prepared.kind === 'referenceBackdate' && deps.originMethods.validatePreparedReferenceTaskBackdate(o.envelope as NativeReferenceTaskBackdateEnvelope).ok ? o : null;
     };
     const originSaved = (o: NativeReferenceProjectNextActionOrigin): boolean => {
         const result = o.kind === 'completion' ? deps.originMethods.taskCompletionOutcome(o.envelope)
-            : deps.originMethods.referenceTaskBackdateOutcome(o.envelope);
+            : o.envelope.prepared.kind === 'rowBackdate' ? deps.originMethods.rowTaskBackdateOutcome(o.envelope as NativeRowTaskBackdateEnvelope)
+                : deps.originMethods.referenceTaskBackdateOutcome(o.envelope as NativeReferenceTaskBackdateEnvelope);
         return result.ok && result.value !== null && same(result.value, o.envelope.prepared.result);
     };
     const durableOrigin = async (o: NativeReferenceProjectNextActionOrigin,
         adapter: ReturnType<typeof import('./store')['getStorageAdapter']>): Promise<NativeHostResult<null>> => {
         if (!originSaved(o)) return fail('STALE_REVISION', 'Completion has no exact saved receipt');
         if (!(adapter instanceof NativeReceiptSqliteAdapter)) return fail('SAVE_FAILED', 'Project next action requires readable durable receipts');
-        const prefix = o.kind === 'completion' ? 'referenceTaskCompletion' : 'referenceTaskBackdate';
+        const prefix = originPrefix(o);
         const receipt = await adapter.readDurableReceipt(o.envelope.request.requestId, canonical([prefix, o.envelope]));
         if (!receipt.ok) return receipt;
         return receipt.value !== null && same(receipt.value, o.envelope.prepared.result) ? { ok: true, value: null }
@@ -286,7 +365,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
     const armOrigin = (e: NativeReferenceProjectNextActionEnvelope,
         adapter: ReturnType<typeof import('./store')['getStorageAdapter']>): (() => void) => {
         if (!(adapter instanceof NativeReceiptSqliteAdapter)) throw new Error('Durable receipt storage changed');
-        const origin = e.prepared.origin; const prefix = origin.kind === 'completion' ? 'referenceTaskCompletion' : 'referenceTaskBackdate';
+        const origin = e.prepared.origin; const prefix = originPrefix(origin);
         const key = payload(e);
         adapter.armReceiptPrerequisite(e.request.requestId, key, origin.envelope.request.requestId,
             canonical([prefix, origin.envelope]), origin.envelope.prepared.result);
@@ -297,11 +376,12 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
         if (!e || !record(e) || !exact(e, ['request', 'prepared']) || !record(e.prepared)) return null;
         const r = readRequest(e.request); const p = e.prepared;
         if (!r || !exact(p, ['version', 'kind', 'request', 'origin', 'context', 'rawBefore', 'operation', 'result'])
-            || p.version !== 1 || p.kind !== 'referenceProjectNextAction' || !same(r, p.request)
-            || !readOrigin(p.origin) || !same(refOf(p.origin), r.origin) || !record(p.context)
+            || ![1, 2].includes(p.version) || p.kind !== 'referenceProjectNextAction' || !same(r, p.request)
+            || !readOrigin(p.origin) || p.version !== promptVersion(p.origin) || !same(refOf(p.origin), r.origin) || !record(p.context)
             || !exact(p.context, ['source', 'rawSource', 'project', 'section', 'tasks', 'scope'])
             || !validTask(p.context.source) || !validTask(p.context.rawSource)
             || p.context.source.id !== r.origin.id || p.context.rawSource.id !== r.origin.id
+            || p.version === 2 && (p.context.source.status !== 'done' || !matchesCompletionSource(p.context.rawSource, p.origin))
             || !validProjectSnapshot(p.context.project, p.context.project.id) || p.context.project.status !== 'active'
             || p.context.source.projectId !== p.context.project.id || !Array.isArray(p.context.tasks)
             || !p.context.tasks.every(validTask) || !unique(p.context.tasks)
@@ -330,38 +410,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                 tasks = effect.tasks; projects = effect.projects; sections = effect.sections; at = op.updateAt;
                 expectedResult = { action: 'choose', id: r.candidateId };
             } else if (op.kind === 'add' && r.action === 'add') {
-                if (!exact(op, ['kind', 'creation', 'task', 'deviceIdBefore', 'deviceIdToInitialize', 'updateAt']) || !validDevice(op)
-                    || !iso(op.updateAt) || !validTask(op.task) || !UUID.test(op.task.id) || !record(op.creation)
-                    || !exact(op.creation, ['intent', 'containers', 'projectOrder', 'focus']) || !validIntent(op.creation.intent, p.context)
-                    || !record(op.creation.containers) || !exact(op.creation.containers, ['project', 'section', 'areas'])
-                    || !validProjectSnapshot(op.creation.containers.project, op.creation.intent.props.projectId!)
-                    || op.creation.containers.project.status === 'archived'
-                    || !Array.isArray(op.creation.containers.areas) || !unique(op.creation.containers.areas)
-                    || !op.creation.containers.areas.every((a) => record(a) && text(a.id, 500) && typeof a.name === 'string' && !a.deletedAt)
-                    || (op.creation.containers.section !== null && (!validSection(op.creation.containers.section, op.creation.intent.props.sectionId!, op.creation.containers.project.id)
-                        || op.creation.containers.section.deletedAt || op.creation.containers.section.projectId !== op.creation.containers.project.id))
-                    || (op.creation.intent.props.sectionId ?? null) !== (op.creation.containers.section?.id ?? null)
-                    || !record(op.creation.projectOrder) || !exact(op.creation.projectOrder, ['projectId', 'max'])
-                    || op.creation.projectOrder.projectId !== op.creation.containers.project.id
-                    || !Number.isFinite(op.creation.projectOrder.max)) return null;
-                const f = op.creation.focus;
-                const needsFocus = op.creation.intent.props.isFocusedToday === true && op.creation.intent.props.status !== 'reference';
-                if (needsFocus !== (f !== null)) return null;
-                if (f) {
-                    const { lists, focusCount, focusLimit, ...clock } = f;
-                    if (!exact(f, ['lists', 'focusCount', 'focusLimit', 'preparedLocalDay', 'preparedOffsetMinutes', 'boundaryOffsetMinutes', 'futureBoundary', 'dates'])
-                        || !record(lists) || !exact(lists, ['tasks', 'projects', 'sections'])
-                        || !validLists({ ...lists, areas: [] }) || !validClock(clock, op.updateAt, [...lists.tasks, { ...op.creation.intent.props, id: op.task.id } as Task])
-                        || !Number.isSafeInteger(focusCount) || focusCount < 0 || !Number.isSafeInteger(focusLimit) || focusLimit < 1
-                        || countFocusedTasksBeforeBoundary(lists.tasks, clock.futureBoundary, datesOf(clock)) !== focusCount
-                        || lists.tasks.some((t) => t.id === op.task.id)
-                        || !same(lists.projects.find((p) => p.id === op.creation.containers.project.id), op.creation.containers.project)
-                        || op.creation.containers.section && !same(lists.sections.find((s) => s.id === op.creation.containers.section!.id), op.creation.containers.section)) return null;
-                }
-                const ownedIds = [op.task.id, ...(op.creation.intent.props.attachments ?? []).map((a) => a.id)];
-                if (new Set(ownedIds).size !== ownedIds.length || ownedIds.includes(op.deviceIdBefore ?? op.deviceIdToInitialize!)
-                    || ownedIds.includes(r.origin.id) || ownedIds.includes(p.context.project.id)
-                    || !same(addTask(op), op.task)) return null;
+                if (!isNativeProjectTaskAddOperation(op, p.context, [r.origin.id, p.context.project.id])) return null;
                 tasks = [{ before: null, after: op.task }]; projects = []; sections = []; at = op.updateAt;
                 expectedResult = { action: 'add', id: op.task.id, openAfterSave: r.openAfterSave };
             } else if (op.kind === 'completeProject' && r.action === 'completeProject') {
@@ -549,7 +598,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                     operation = { kind: 'completeProject', lifecycle }; result = { action: 'completeProject', id: context.project.id, status: 'archived' };
                     rawBefore = rawBeforeOf(data, lifecycle.effect.tasks, [lifecycle.effect.project], lifecycle.effect.sections);
                 }
-                const prepared: NativePreparedReferenceProjectNextAction = { version: 1, kind: 'referenceProjectNextAction', request,
+                const prepared: NativePreparedReferenceProjectNextAction = { version: promptVersion(v.origin), kind: 'referenceProjectNextAction', request,
                     origin: v.origin, context, rawBefore, operation, result };
                 const envelope = readEnvelope({ request, prepared });
                 return envelope ? { ok: true, value: { kind: 'prepared', prepared: envelope.prepared } }
@@ -564,7 +613,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const key = payload(e); const saved = receipts.saved<NativeReferenceProjectNextActionResult>(e.request.requestId, key);
             if (saved) { if (saved.ok && !same(saved.value, e.prepared.result)) return fail('INVALID_INPUT', 'Saved next action result differs');
-                if (saved.ok) diagnose(saved.value); return saved; }
+                if (saved.ok && e.prepared.version === 1) diagnose(saved.value); return saved; }
             let prewrite: NativeHostResult<never> | null = null;
             const notLanded = (message: string) => { prewrite = fail('SAVE_FAILED', message); return fail('ACTION_FAILED', message); };
             const confirmed = await receipts.run(e.request.requestId, key, async () => {
@@ -581,7 +630,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                 return { ok: true, value: e.prepared.result };
             });
             if (prewrite) return prewrite;
-            if (confirmed.ok) { if (!same(confirmed.value, e.prepared.result)) return fail('INVALID_INPUT', 'Saved next action result differs'); diagnose(confirmed.value); }
+            if (confirmed.ok) { if (!same(confirmed.value, e.prepared.result)) return fail('INVALID_INPUT', 'Saved next action result differs'); if (e.prepared.version === 1) diagnose(confirmed.value); }
             return confirmed;
         },
         referenceProjectNextActionOutcome(input: NativeReferenceProjectNextActionEnvelope): NativeHostResult<NativeReferenceProjectNextActionResult | null> {
@@ -592,3 +641,30 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
         },
     };
 }
+
+export { normalized as projectTaskCreationLists, validProjectSnapshot as isNativeProjectTaskContainer };
+
+export const checkNativeProjectTaskAddAuthority = (op: NativeProjectTaskAddOperation, data: AppData): NativeHostResult<null> => {
+    try {
+        const at = op.updateAt, lists = normalized(data, at);
+    const c = op.creation; const project = lists.projects.find((r) => r.id === c.containers.project.id);
+    const section = c.containers.section && lists.sections.find((r) => r.id === c.containers.section!.id);
+    if ((data.settings.deviceId ?? null) !== op.deviceIdBefore || !same(project, c.containers.project)
+        || !same(section ?? null, c.containers.section) || c.containers.areas.some((a) => !same(lists.areas.find((r) => r.id === a.id), a))
+        || (getNextProjectOrder(c.projectOrder.projectId, lists.tasks) ?? 0) - 1 !== c.projectOrder.max) throw new Error('Creation context changed');
+    const ids = [op.task.id, ...(c.intent.props.attachments ?? []).map((r) => r.id)];
+    const existing = [...data.tasks, ...data.projects];
+    if (existing.some((r) => ids.includes(r.id) || r.attachments?.some((a) => ids.includes(a.id)))) throw new Error('Creation ID exists');
+    if (c.focus) {
+        const f = c.focus;
+        // Normal loading can consume local-day environment. Refuse an
+        // unlanded stale intent conservatively; never reinterpret it.
+        if (new Date(at).getTimezoneOffset() !== f.preparedOffsetMinutes
+            || normalizeFocusTaskLimit(data.settings.gtd?.focusTaskLimit) !== f.focusLimit
+            || !same({ tasks: lists.tasks, projects: lists.projects, sections: lists.sections }, f.lists)) throw new Error('Focus creation context changed');
+        if (countFocusedTasksBeforeBoundary(lists.tasks, f.futureBoundary, datesOf(f)) !== f.focusCount) throw new Error('Focus count changed');
+    }
+        if (getTaskReminderDefault(data.settings) !== frozenReminderDefault(op.task)) throw new Error('Task reminder default changed');
+        return { ok: true, value: null };
+    } catch { return fail('STALE_REVISION', 'Project task creation context changed'); }
+};

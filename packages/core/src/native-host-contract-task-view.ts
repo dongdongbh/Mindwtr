@@ -35,7 +35,7 @@ import { getTaskEditorFieldLayout, getTaskEditorProjectSections } from './task-e
 import { formatTaskEditorDate } from './task-editor-schedule';
 import { buildTaskViewModel, type TaskViewRow } from './task-view-model';
 import type { Attachment, ChecklistItem, Task } from './types';
-import { readNativeAttachments } from './native-host-contract-attachments';
+import { readNativeAttachments, readNativeSavedAttachmentsForView } from './native-host-contract-attachments';
 import { generateUUID } from './uuid';
 
 export type NativeTaskViewRow =
@@ -239,8 +239,8 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             const readOnly = deps.isReadOnly(task);
             const draft = draftInput ?? createTaskDraft(task);
             const checklist = checklistInput ?? task.checklist;
-            const attachmentsBase = readNativeAttachments(task.attachments ?? []);
-            if (!attachmentsBase) return fail('INVALID_INPUT', 'Saved attachment list exceeds the native response');
+            const attachmentsBase = readNativeSavedAttachmentsForView(task.attachments ?? []);
+            if (!attachmentsBase) return fail('INVALID_INPUT', 'Saved attachments exceed the native response bound or repeat an ID');
             // The editor's task with its draft applied (React Native's mergedTask).
             const shown: Task = readOnly ? task : {
                 ...task,

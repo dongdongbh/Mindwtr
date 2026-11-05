@@ -9,6 +9,7 @@ import * as uuid from './uuid';
 import { copyFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppData, Task } from './types';
+import type { NativeReferenceProjectNextActionOrigin } from './native-host-contract-project-next-action';
 
 const NOW = '2026-10-03T13:00:00.000Z';
 const ORIGIN = '00000000-0000-4000-8000-000000000191';
@@ -106,7 +107,7 @@ describe('Reference project next action', () => {
     });
 });
 
-const followup = async (sqlite: Sqlite, proof: Awaited<ReturnType<typeof origin>>, action: 'choose' | 'add' | 'completeProject') => {
+const followup = async (sqlite: Sqlite, proof: NativeReferenceProjectNextActionOrigin, action: 'choose' | 'add' | 'completeProject') => {
     const options = value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }))!;
     const request = { requestId: WRITE, origin: options.origin, promptRevision: options.promptRevision, action,
         ...(action === 'choose' ? { candidateId: 'candidate', candidateRevision: taskRevisionOf(useTaskStore.getState()._tasksById.get('candidate')!) }
@@ -603,6 +604,223 @@ describe('Reference prompt transactional receipt prerequisite', () => {
             expect(estimated.props.timeEstimate).toBe('30min'); expect(estimated.title).toBe('Draft');
             const assigned = await prepare('00000000-0000-4000-8000-000000000198', 'Ask %John Smith');
             expect(assigned.props.assignedTo).toBe('John Smith'); expect(assigned.title).toBe('Ask');
+        } finally { await sqlite.close(); }
+    });
+});
+
+
+describe('Per section native prompt', () => {
+    it.each(['choose', 'add'] as const)('uses sequential section policy through prepared %s, stale-flow refusal and replay', async action => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const fixture = seed();
+        fixture.projects![0].isSequential = false; fixture.projects![0].perSectionFlow = true;
+        fixture.sections = [
+            { id: 'section', title: 'Sequential', projectId: 'project', order: 0, isSequential: true, createdAt: NOW, updatedAt: NOW },
+            { id: 'other-section', title: 'Parallel', projectId: 'project', order: 1, isSequential: false, createdAt: NOW, updatedAt: NOW },
+        ];
+        fixture.tasks![0].sectionId = 'section'; fixture.tasks![1].sectionId = 'section';
+        fixture.tasks!.push({ ...task('other-next', 'next'), sectionId: 'other-section' },
+            { ...task('other-candidate', 'waiting'), sectionId: 'other-section' }, task('unsectioned-candidate', 'waiting'));
+        const sqlite = await openSqliteHost(fixture);
+        try {
+            const proof = await origin(sqlite); const before = await raw(sqlite);
+            const options = value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }));
+            expect(options).toMatchObject({ scope: 'section', section: { id: 'section' }, completeProject: null,
+                candidates: { total: 1, items: [{ id: 'candidate', status: 'waiting' }] } });
+            if (!options) throw new Error('Expected the sequential section prompt');
+            expect(options.candidates.items.map(row => row.id)).toEqual(['candidate']);
+            const base = { requestId: WRITE, origin: options.origin, promptRevision: options.promptRevision };
+            const request = action === 'choose'
+                ? { ...base, action, candidateId: 'candidate', candidateRevision: options.candidates.items[0].taskRevision }
+                : { ...base, action, text: 'New section action', openAfterSave: true };
+            const prepared = value(await sqlite.host.prepareReferenceProjectNextAction({ request, origin: proof })).prepared;
+            const envelope = { request, prepared };
+            expect(value(sqlite.host.validatePreparedReferenceProjectNextAction(envelope))).toEqual(prepared.result);
+            expect(await raw(sqlite)).toEqual(before); expect(await sqlite.receiptIds()).toEqual([ORIGIN]);
+
+            await sqlite.client().run('UPDATE sections SET isSequential=0 WHERE id=?', ['section']);
+            const drifted = await raw(sqlite);
+            expect(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await raw(sqlite)).toEqual(drifted); expect(await sqlite.receiptIds()).toEqual([ORIGIN]);
+            await sqlite.client().run('UPDATE sections SET isSequential=1 WHERE id=?', ['section']);
+            expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(prepared.result);
+            expect(useTaskStore.getState()._tasksById.get(prepared.result.id)).toMatchObject({ status: 'next', projectId: 'project', sectionId: 'section' });
+            expect(useTaskStore.getState()._tasksById.get('other-next')).toMatchObject({ status: 'next', sectionId: 'other-section' });
+            expect(useTaskStore.getState()._tasksById.get('other-candidate')?.status).toBe('waiting');
+            expect(useTaskStore.getState()._tasksById.get('unsectioned-candidate')?.status).toBe('waiting');
+            const saved = await raw(sqlite); const receipts = await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id');
+            expect(await sqlite.receiptIds()).toEqual([ORIGIN, WRITE]);
+            expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(prepared.result);
+            expect(await raw(sqlite)).toEqual(saved); expect(await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id')).toEqual(receipts);
+            await sqlite.restart(undefined, { recoveryLoad: true });
+            expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(prepared.result);
+            expect(await raw(sqlite)).toEqual(saved); expect(await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id')).toEqual(receipts);
+        } finally { await sqlite.close(); }
+    });
+});
+
+
+const ordinaryFixture = () => {
+    const fixture = seed(); fixture.tasks![0].status = 'next'; return fixture;
+};
+const completionOrigin = async (sqlite: Sqlite, source: 'ordinary' | 'board', confirmed = true) => {
+    const base = { id: 'source', taskRevision: taskRevisionOf(useTaskStore.getState()._tasksById.get('source')!), requestId: ORIGIN };
+    const request = source === 'board' ? { ...base, source: 'board' as const } : base;
+    const prepared = value(await sqlite.host.prepareTaskCompletion(request)).prepared;
+    const envelope = { request, prepared };
+    if (confirmed) value(await sqlite.host.commitPreparedTaskCompletion(envelope));
+    return { kind: 'completion' as const, envelope };
+};
+describe.each(['ordinary', 'board'] as const)('Ordinary next-action origin: %s', source => {
+    it.each(['choose', 'add', 'completeProject'] as const)('admits actual saved completion for %s with v2 journal and exact cold replay', async action => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const sqlite = await openSqliteHost(ordinaryFixture());
+        try {
+            const proof = await completionOrigin(sqlite, source); const before = await raw(sqlite);
+            const options = value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }));
+            expect(options).toMatchObject({ scope: 'project', candidates: { total: 1, items: [{ id: 'candidate' }] }, completeProject: { label: expect.any(String) } });
+            const envelope = await followup(sqlite, proof, action);
+            expect(envelope.prepared.version).toBe(2);
+            expect(Object.keys(envelope.prepared).sort()).toEqual(['version', 'kind', 'request', 'origin', 'context', 'rawBefore', 'operation', 'result'].sort());
+            expect(Object.keys(envelope.prepared.context).sort()).toEqual(['source', 'rawSource', 'project', 'section', 'tasks', 'scope'].sort());
+            expect(value(sqlite.host.validatePreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+            expect(await raw(sqlite)).toEqual(before);
+            expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+            if (action === 'completeProject') expect(useTaskStore.getState()._allProjects[0].status).toBe('archived');
+            else expect(useTaskStore.getState()._tasksById.get(envelope.prepared.result.id)).toMatchObject({ status: 'next', projectId: 'project' });
+            expect(await sqlite.receiptIds()).toEqual([ORIGIN, WRITE]);
+            const landed = await raw(sqlite);
+            expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+            expect(await raw(sqlite)).toEqual(landed);
+            await sqlite.client().run('DELETE FROM native_request_receipts WHERE request_id=?', [ORIGIN]);
+            await sqlite.client().run('UPDATE tasks SET status=?,projectId=NULL,completedAt=NULL WHERE id=?', ['next', 'source']);
+            await sqlite.restart(undefined, { recoveryLoad: true }); const later = await raw(sqlite);
+            expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+            expect(value(sqlite.host.referenceProjectNextActionOutcome(envelope))).toEqual(envelope.prepared.result);
+            expect(await raw(sqlite)).toEqual(later); expect(await sqlite.receiptIds()).toEqual([WRITE]);
+        } finally { await sqlite.close(); }
+    });
+});
+
+
+describe('Ordinary next-action current policy and authority', () => {
+    it.each(['future-next', 'per-section', 'parallel-section', 'recurring-child', 'projectless'] as const)('uses actual completion and shared policy for %s', async kind => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); const fixture = ordinaryFixture();
+        if (kind === 'future-next') fixture.tasks!.push({ ...task('future-next', 'next'), startTime: '2026-10-05T12:00:00.000Z' });
+        if (kind === 'per-section' || kind === 'parallel-section') {
+            fixture.projects![0].perSectionFlow = true;
+            fixture.sections = [
+                { id: 'section', title: 'Section', projectId: 'project', order: 0, isSequential: kind === 'per-section', createdAt: NOW, updatedAt: NOW },
+                { id: 'other-section', title: 'Other', projectId: 'project', order: 1, createdAt: NOW, updatedAt: NOW },
+            ];
+            fixture.tasks![0].sectionId = 'section'; fixture.tasks![1].sectionId = 'section';
+            fixture.tasks!.push({ ...task('other-next', 'next'), sectionId: 'other-section' },
+                { ...task('other-candidate', 'waiting'), sectionId: 'other-section' });
+        }
+        if (kind === 'recurring-child') Object.assign(fixture.tasks![0], { dueDate: '2026-10-03', recurrence: { rule: 'daily', strategy: 'strict' } });
+        if (kind === 'projectless') delete fixture.tasks![0].projectId;
+        const sqlite = await openSqliteHost(fixture);
+        try {
+            const proof = await completionOrigin(sqlite, 'ordinary'); const before = await raw(sqlite);
+            const options = value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }));
+            if (kind === 'per-section') {
+                expect(options).toMatchObject({ scope: 'section', section: { id: 'section' }, completeProject: null, candidates: { total: 1, items: [{ id: 'candidate' }] } });
+                const envelope = await followup(sqlite, proof, 'choose');
+                expect(value(sqlite.host.validatePreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+                value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope));
+                expect(useTaskStore.getState()._tasksById.get('candidate')).toMatchObject({ status: 'next', sectionId: 'section' });
+                expect(useTaskStore.getState()._tasksById.get('other-candidate')?.status).toBe('waiting');
+            } else {
+                expect(options).toBeNull(); expect(await raw(sqlite)).toEqual(before);
+                if (kind === 'recurring-child') expect(proof.envelope.prepared.checklist.effect.tasks.some(row => row.before === null && row.after.status === 'next')).toBe(true);
+            }
+        } finally { await sqlite.close(); }
+    });
+    it.each(['undo', 'reopen', 'move', 'section', 'completedAt', 'revision', 'rescheduled'] as const)('retires fresh ordinary offer after %s without a followup write', async change => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); const fixture = ordinaryFixture();
+        fixture.projects!.push({ ...fixture.projects![0], id: 'other-project', title: 'Other', order: 1 });
+        fixture.sections = [{ id: 'later-section', title: 'Later', projectId: 'project', order: 0, createdAt: NOW, updatedAt: NOW }];
+        const sqlite = await openSqliteHost(fixture);
+        try {
+            const proof = await completionOrigin(sqlite, 'ordinary'); const envelope = await followup(sqlite, proof, 'choose');
+            if (change === 'undo') {
+                const request = { requestId: '00000000-0000-4000-8000-000000000199', completionRequestId: ORIGIN };
+                const prepared = value(await sqlite.host.prepareTaskCompletionUndo({ request, completion: proof.envelope })).prepared;
+                value(await sqlite.host.commitPreparedTaskCompletionUndo({ request, prepared }));
+            } else if (change === 'reopen') await sqlite.client().run('UPDATE tasks SET status=? WHERE id=?', ['next', 'source']);
+            else if (change === 'move') await sqlite.client().run('UPDATE tasks SET projectId=? WHERE id=?', ['other-project', 'source']);
+            else if (change === 'section') await sqlite.client().run('UPDATE tasks SET sectionId=? WHERE id=?', ['later-section', 'source']);
+            else if (change === 'completedAt') await sqlite.client().run('UPDATE tasks SET completedAt=? WHERE id=?', ['2026-10-03T13:00:01.000Z', 'source']);
+            else if (change === 'revision') await sqlite.client().run('UPDATE tasks SET rev=rev+1 WHERE id=?', ['source']);
+            else await sqlite.client().run('UPDATE tasks SET status=?,dueDate=?,recurrence=? WHERE id=?',
+                ['next', '2026-10-04', JSON.stringify({ rule: 'daily', strategy: 'strict' }), 'source']);
+            const before = await raw(sqlite); const receipts = await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id');
+            expect(value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }))).toBeNull();
+            expect(await sqlite.host.prepareReferenceProjectNextAction({ request: envelope.request, origin: proof })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await raw(sqlite)).toEqual(before); expect(await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id')).toEqual(receipts);
+        } finally { await sqlite.close(); }
+    });
+});
+
+describe.each(['ordinary', 'board'] as const)('Ordinary next-action durable proof: %s', source => {
+    it.each(['unconfirmed', 'missing', 'corrupt'] as const)('requires exact %s origin receipt', async state => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); const sqlite = await openSqliteHost(ordinaryFixture());
+        try {
+            const proof = await completionOrigin(sqlite, source, state !== 'unconfirmed');
+            if (state === 'missing') await sqlite.client().run('DELETE FROM native_request_receipts WHERE request_id=?', [ORIGIN]);
+            if (state === 'corrupt') await sqlite.client().run('UPDATE native_request_receipts SET reply=? WHERE request_id=?', [JSON.stringify({ id: 'foreign' }), ORIGIN]);
+            const before = await raw(sqlite); const receipts = await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id');
+            expect(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await raw(sqlite)).toEqual(before); expect(await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id')).toEqual(receipts);
+        } finally { await sqlite.close(); }
+    });
+    it('retries the exact Add after failed COMMIT and cold restart without duplication', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); const fault = { commits: 0 };
+        const sqlite = await openSqliteHost(ordinaryFixture(), client => ({ ...client, run: async (sql, params) => {
+            if (sql === 'COMMIT' && fault.commits > 0) { fault.commits--; throw new Error('owned followup COMMIT failure'); }
+            return client.run(sql, params);
+        } }));
+        try {
+            const proof = await completionOrigin(sqlite, source);
+            await sqlite.restart(undefined, { recoveryLoad: true });
+            const envelope = await followup(sqlite, proof, 'add');
+            const before = await raw(sqlite); const checkpoint = join(sqlite.dir, 'ordinary-before.db'); copyFileSync(join(sqlite.dir, 'mindwtr.db'), checkpoint);
+            fault.commits = 10;
+            expect(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+            expect(await raw(sqlite)).toEqual(before); expect(await sqlite.receiptIds()).toEqual([ORIGIN]);
+            fault.commits = 0; expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+            const saved = await raw(sqlite); const receipts = await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id');
+            await sqlite.restart(checkpoint, { recoveryLoad: true }); fault.commits = 10;
+            expect(await sqlite.receiptIds()).toEqual([ORIGIN]);
+            expect(await raw(sqlite)).toEqual(before);
+            expect(value(sqlite.host.taskCompletionOutcome(proof.envelope))).not.toBeNull();
+            expect(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+            fault.commits = 0; await sqlite.restart(undefined, { recoveryLoad: true });
+            expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+            expect(await raw(sqlite)).toEqual(saved); expect(await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id')).toEqual(receipts);
+            expect(useTaskStore.getState()._allTasks.filter(row => row.id === envelope.prepared.result.id)).toHaveLength(1);
+        } finally { fault.commits = 0; await sqlite.close(); }
+    }, 15_000);
+});
+
+describe('Next-action prepared version admission', () => {
+    it.each(['ordinary', 'board', 'reference'] as const)('seals existing v1 Reference and new v2 %s journals without extra fields', async source => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const sqlite = await openSqliteHost(source === 'reference' ? seed() : ordinaryFixture());
+        try {
+            const proof = source === 'reference' ? await origin(sqlite) : await completionOrigin(sqlite, source);
+            const envelope = await followup(sqlite, proof, 'choose'); const original = JSON.stringify(envelope);
+            expect(envelope.prepared.version).toBe(source === 'reference' ? 1 : 2);
+            expect(value(sqlite.host.validatePreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+            const swapped = structuredClone(envelope); swapped.prepared.version = source === 'reference' ? 2 : 1;
+            expect(sqlite.host.validatePreparedReferenceProjectNextAction(swapped)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            const extra = { ...envelope, prepared: { ...envelope.prepared, fingerprint: 'not-a-wire-field' } };
+            expect(sqlite.host.validatePreparedReferenceProjectNextAction(extra)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            const mismatch = structuredClone(envelope);
+            if (mismatch.prepared.origin.kind === 'completion') mismatch.prepared.origin.envelope.prepared.kind = source === 'ordinary' ? 'boardComplete' : 'complete';
+            expect(sqlite.host.validatePreparedReferenceProjectNextAction(mismatch)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            expect(JSON.stringify(envelope)).toBe(original);
         } finally { await sqlite.close(); }
     });
 });

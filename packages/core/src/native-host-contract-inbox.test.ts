@@ -101,6 +101,263 @@ describe('native host contract: Process Inbox', () => {
         return { host, recorder };
     };
 
+    it.each([
+        ['guided', []], ['guided', ['later']], ['guided', ['someday']], ['guided', ['incubate']],
+        ['guided', ['actionable']], ['guided', ['actionable', 'no']],
+        ['guided', ['actionable', 'no', 'delegate']], ['guided', ['actionable', 'no', 'defer']],
+        ['guided', ['actionable', 'no', 'defer', 'single']], ['quick', []], ['quick', ['delegate']],
+    ] as const)('reloads the full editor at %s %j without losing the current processing step', async (mode, choices) => {
+        freezeClock();
+        const { host } = await openHost(scenario('guided next action'));
+        const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        let view = ok(host.startInboxProcessing({ mode })).view!;
+        for (const choice of choices) {
+            view = ok(await host.commitInboxProcessingStep({ sessionId: view.sessionId, taskId: view.taskId,
+                step: view.step, decision: { choice }, requestId: generateUUID() })).view!;
+        }
+        const request = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'set', field: 'delegateWho', value: 'Kept delegate' } }));
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'set', field: 'nextAction', value: 'Kept action' } }));
+        const before = structuredClone(view);
+        const model = ok(host.getTaskEditorModel({ id: view.taskId }));
+        ok(await host.saveTaskDraft({ id: view.taskId, base: { title: model.draft.title },
+            patch: { title: 'Saved editor title' } }));
+        const reloaded = ok(host.reloadInboxProcessingTask(request)).view!;
+        expect(reloaded).toMatchObject({ sessionId: before.sessionId, taskId: before.taskId, mode, step: before.step,
+            progress: before.progress, draft: { title: 'Saved editor title', delegateWho: 'Kept delegate', nextAction: 'Kept action' } });
+        expect(Object.keys(reloaded).sort()).toEqual(Object.keys(before).sort());
+        expect(ok(host.reloadInboxProcessingTask(request)).view).toEqual(reloaded);
+        expect(host.getInboxProcessingStep(request)).toMatchObject({ ok: true });
+    });
+
+    it('keeps the whole unsaved processing draft when the editor closes unchanged', async () => {
+        freezeClock();
+        const saves = vi.fn().mockResolvedValue(undefined);
+        const { host } = await openHost(scenario('guided next action'), saves);
+        const start = host.startInboxProcessing();
+        if (!start.ok || !start.value.view) throw new Error('missing initial view');
+        const first = start.value.view;
+        const request = { sessionId: first.sessionId, taskId: first.taskId, step: first.step };
+        const edited = host.getInboxProcessingStep({ ...request, edit: { type: 'set', field: 'title', value: 'Unsaved processing title' } });
+        if (!edited.ok) throw new Error(edited.error.message);
+        saves.mockClear();
+        expect(host.reloadInboxProcessingTask(request)).toEqual({ ok: true, value: { view: edited.value, notice: null, toast: null } });
+        expect(saves).not.toHaveBeenCalled();
+    });
+
+    it('advances an item filed by the editor once and refuses a stale return callback', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('guided next action'));
+        const start = host.startInboxProcessing();
+        if (!start.ok || !start.value.view) throw new Error('missing initial view');
+        const first = start.value.view;
+        const request = { sessionId: first.sessionId, taskId: first.taskId, step: first.step };
+        expect(await host.saveTaskDraft({ id: first.taskId, base: { status: 'inbox' }, patch: { status: 'next' } })).toMatchObject({ ok: true });
+        const reload = host.reloadInboxProcessingTask(request);
+        expect(reload).toMatchObject({ ok: true, value: { view: { taskId: 'inbox-c', step: 'actionable' } } });
+        expect(host.reloadInboxProcessingTask(request)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    });
+
+    it.each(['guided', 'quick'] as const)('files into the selected project section in %s while legacy views stay unchanged', async (mode) => {
+        freezeClock();
+        const { host } = await openHost(scenario('guided next action'));
+        const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        const at = fixture.now;
+        useTaskStore.setState({ _allSections: [
+            { id: 'section-launch', projectId: 'p-launch', title: 'Launch section', order: 0, createdAt: at, updatedAt: at },
+            { id: 'section-foreign', projectId: 'p-home', title: 'Foreign section', order: 0, createdAt: at, updatedAt: at },
+        ] });
+        let view = ok(host.startInboxProcessing({ mode, includeDetails: true })).view!;
+        const choose = async (choice: string) => { view = ok(await host.commitInboxProcessingStep({
+            sessionId: view.sessionId, taskId: view.taskId, step: view.step, decision: { choice }, requestId: generateUUID(),
+        })).view!; };
+        if (mode === 'guided') { await choose('actionable'); await choose('no'); await choose('defer'); await choose('single'); }
+        else { await choose('project'); await choose('single'); }
+        const request = () => ({ sessionId: view.sessionId, taskId: view.taskId, step: view.step });
+        view = ok(host.getInboxProcessingStep({ ...request(), edit: { type: 'selectProject', value: 'p-launch' } }));
+        expect(view.project?.sections?.options.map((option) => option.edit)).toEqual([
+            { type: 'setSection', value: null }, { type: 'setSection', value: 'section-launch' },
+        ]);
+        expect(host.getInboxProcessingStep({ ...request(), edit: { type: 'setSection', value: 'section-foreign' } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        view = ok(host.getInboxProcessingStep({ ...request(), edit: { type: 'setSection', value: 'section-launch' } }));
+        expect(view.draft.sectionId).toBe('section-launch');
+        const legacy = ok(host.startInboxProcessing({ mode })).view!;
+        expect(legacy.project?.sections).toBeUndefined();
+        expect(legacy.draft).not.toHaveProperty('sectionId');
+        const preparedRequest = { ...request(), decision: { choice: 'fileIt' }, requestId: generateUUID() };
+        const plan = ok(host.inboxCommitPrepare(preparedRequest));
+        if (plan.kind !== 'prepared') throw new Error('missing prepared section filing');
+        expect(plan.prepared.version).toBe(1);
+        expect(plan.prepared.witness.lists.sections.map((row) => row.id)).toContain('section-launch');
+        ok(await host.inboxPreparedCommit({ request: preparedRequest, prepared: plan.prepared }));
+        expect(useTaskStore.getState()._tasksById.get(view.taskId)).toMatchObject({ status: 'next', projectId: 'p-launch', sectionId: 'section-launch' });
+    });
+
+    it('clears a picked section when its project changes and refuses a section deleted before filing', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('guided next action'));
+        const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        const at = fixture.now;
+        useTaskStore.setState({ _allSections: [{ id: 'section-launch', projectId: 'p-launch', title: 'Launch', order: 0, createdAt: at, updatedAt: at }] });
+        let view = ok(host.startInboxProcessing({ mode: 'guided', includeDetails: true })).view!;
+        for (const choice of ['actionable', 'no', 'defer', 'single']) view = ok(await host.commitInboxProcessingStep({ sessionId: view.sessionId, taskId: view.taskId, step: view.step, decision: { choice }, requestId: generateUUID() })).view!;
+        const request = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'selectProject', value: 'p-launch' } }));
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'setSection', value: 'section-launch' } }));
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'selectProject', value: null } }));
+        expect(view.draft.sectionId).toBeNull();
+        expect(view.project?.sections).toBeUndefined();
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'selectProject', value: 'p-launch' } }));
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'setSection', value: 'section-launch' } }));
+        const input = { ...request, decision: { choice: 'fileIt' }, requestId: generateUUID() };
+        const prepared = ok(host.inboxCommitPrepare(input));
+        if (prepared.kind !== 'prepared') throw new Error('missing section preparation');
+        useTaskStore.setState({ _allSections: useTaskStore.getState()._allSections.map((row) => ({ ...row, deletedAt: at })) });
+        expect(await host.inboxPreparedCommit({ request: input, prepared: prepared.prepared })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(useTaskStore.getState()._tasksById.get(view.taskId)?.status).toBe('inbox');
+    });
+
+    it.each(['startTime', 'dueDate', 'reviewAt', 'followUp'] as const)('files an explicit local %s time without changing its calendar day', async (field) => {
+        freezeClock();
+        const { host } = await openHost(scenario('start later'));
+        const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        let view = ok(host.startInboxProcessing({ mode: 'guided', includeDetails: true })).view!;
+        const choices = field === 'startTime' ? ['later'] : field === 'followUp'
+            ? ['actionable', 'no', 'delegate'] : ['actionable', 'no', 'defer', 'single'];
+        for (const choice of choices) view = ok(await host.commitInboxProcessingStep({ sessionId: view.sessionId,
+            taskId: view.taskId, step: view.step, decision: { choice }, requestId: generateUUID() })).view!;
+        const request = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
+        if (field === 'followUp') view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'set', field: 'delegateWho', value: 'Alice' } }));
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'setPickedDate', field, day: '2030-07-21' } }));
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field, time: '17:35' } }));
+        expect(view.draft[field]).toEqual({ date: '2030-07-21', dateOnly: false, time: '17:35' });
+        expect(host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field, time: '24:01' } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const input = { ...request, decision: { choice: 'fileIt' }, requestId: generateUUID() };
+        const prepared = ok(host.inboxCommitPrepare(input));
+        if (prepared.kind !== 'prepared') throw new Error('missing timed preparation');
+        expect(prepared.prepared.version).toBe(1);
+        ok(await host.inboxPreparedCommit({ request: input, prepared: prepared.prepared }));
+        expect(useTaskStore.getState()._tasksById.get(view.taskId)?.[field === 'followUp' ? 'reviewAt' : field]).toBe('2030-07-21T17:35');
+    });
+
+    it('drops explicit time for Date only or Clear and preserves the clock when changing only the day', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('start later'));
+        const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        let view = ok(host.startInboxProcessing({ includeDetails: true })).view!;
+        const request = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
+        const edit = (value: Parameters<typeof host.getInboxProcessingStep>[0]['edit']) => {
+            view = ok(host.getInboxProcessingStep({ ...request, edit: value }));
+        };
+        edit({ type: 'setPickedDate', field: 'dueDate', day: '2030-07-21' });
+        edit({ type: 'setTime', field: 'dueDate', time: '00:05' });
+        edit({ type: 'setPickedDate', field: 'dueDate', day: '2030-07-22' });
+        expect(view.draft.dueDate).toMatchObject({ date: '2030-07-22', time: '00:05' });
+        edit({ type: 'setDateOnly', field: 'dueDate', value: true });
+        expect(view.draft.dueDate).toEqual({ date: '2030-07-22', dateOnly: true });
+        edit({ type: 'setTime', field: 'dueDate', time: '23:55' });
+        edit({ type: 'setDate', field: 'dueDate', value: null });
+        expect(view.draft.dueDate).toBeNull();
+        const legacy = ok(host.startInboxProcessing()).view!;
+        expect(legacy.draft.dueDate?.time).toBeUndefined();
+        expect(host.getInboxProcessingStep({ sessionId: legacy.sessionId, taskId: legacy.taskId, step: legacy.step,
+            edit: { type: 'setTime', field: 'dueDate', time: '11:30' } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('keeps an untouched stored timestamp exact in detailed processing and formats picked clocks in 12/24 hours', async () => {
+        freezeClock();
+        const { host } = await openHost({ ...scenario('start later'), taskIds: ['inbox-b'] });
+        const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        const stored = fixture.tasks.find((task) => task.id === 'inbox-b')!.startTime!;
+        expect(useTaskStore.getState()._tasksById.get('inbox-b')).toMatchObject({ status: 'inbox', startTime: stored });
+        let view = ok(host.startInboxProcessing({ includeDetails: true })).view!;
+        view = ok(await host.commitInboxProcessingStep({ sessionId: view.sessionId, taskId: view.taskId,
+            step: view.step, decision: { choice: 'later' }, requestId: generateUUID() })).view!;
+        const request = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
+        expect(view.taskId).toBe('inbox-b');
+        expect(view.draft.startTime).not.toHaveProperty('time');
+        const input = { ...request, decision: { choice: 'fileIt' }, requestId: generateUUID() };
+        const prepared = ok(host.inboxCommitPrepare(input));
+        if (prepared.kind !== 'prepared') throw new Error('missing unchanged timed preparation');
+        expect(prepared.prepared.effect.tasks.find((row) => row.after.id === view.taskId)?.after.startTime).toBe(stored);
+        view = ok(host.startInboxProcessing({ includeDetails: true })).view!;
+        view = ok(await host.commitInboxProcessingStep({ sessionId: view.sessionId, taskId: view.taskId,
+            step: view.step, decision: { choice: 'later' }, requestId: generateUUID() })).view!;
+        const formatRequest = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
+        view = ok(host.getInboxProcessingStep({ ...formatRequest, edit: { type: 'setTime', field: 'startTime', time: '17:35' } }));
+        for (const timeFormat of ['12h', '24h']) {
+            useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, timeFormat } });
+            const current = ok(host.getInboxProcessingStep(formatRequest));
+            const formatter = createDateFormatter({ language: 'en', timeFormat });
+            expect(current.dateRow?.clock?.label).toBe(formatter(`${current.draft.startTime!.date}T17:35`, 'p'));
+            expect(current.dateRow?.clock?.timeFormat).toBe(timeFormat);
+        }
+    });
+
+    it('does not reload an editor change until its failed durable save is acknowledged', async () => {
+        freezeClock();
+        const save = vi.fn().mockResolvedValue(undefined);
+        const { host } = await openHost(scenario('guided next action'), save);
+        const started = host.startInboxProcessing();
+        if (!started.ok || !started.value.view) throw new Error('missing processing view');
+        const view = started.value.view;
+        const model = host.getTaskEditorModel({ id: view.taskId });
+        if (!model.ok) throw new Error(model.error.message);
+        const request = { requestId: generateUUID(), id: view.taskId,
+            base: { title: model.value.draft.title }, patch: { title: 'Durable editor title' } };
+        save.mockRejectedValue(new Error('disk unavailable'));
+        expect(await host.saveTaskDraft(request)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        const reload = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
+        expect(host.reloadInboxProcessingTask(reload)).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        save.mockResolvedValue(undefined);
+        expect(await host.saveTaskDraft(request)).toMatchObject({ ok: true });
+        expect(host.reloadInboxProcessingTask(reload)).toMatchObject({ ok: true,
+            value: { view: { taskId: view.taskId, step: view.step, draft: { title: 'Durable editor title' } } } });
+    });
+
+    it('keeps legacy section-task keysets exact and rebases the saved section in detailed processing', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('guided next action'));
+        const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        useTaskStore.setState({ _allSections: [{ id: 'section-kept', projectId: 'p-launch', title: 'Kept',
+            order: 0, createdAt: fixture.now, updatedAt: fixture.now }] });
+        await useTaskStore.getState().updateTask('inbox-a', { projectId: 'p-launch', sectionId: 'section-kept' });
+        await flushPendingSave();
+        const legacy = ok(host.startInboxProcessing()).view!;
+        expect(legacy.draft).not.toHaveProperty('sectionId');
+        expect(legacy.project?.sections).toBeUndefined();
+        let detailed = ok(host.startInboxProcessing({ includeDetails: true })).view!;
+        expect(detailed.draft.sectionId).toBe('section-kept');
+        const model = ok(host.getTaskEditorModel({ id: detailed.taskId }));
+        ok(await host.saveTaskDraft({ id: detailed.taskId, base: { title: model.draft.title }, patch: { title: 'New saved title' } }));
+        detailed = ok(host.reloadInboxProcessingTask({ sessionId: detailed.sessionId, taskId: detailed.taskId, step: detailed.step })).view!;
+        expect(detailed.draft).toMatchObject({ title: 'New saved title', projectId: 'p-launch', sectionId: 'section-kept' });
+    });
+
     const replay = async (entry: ProcessInboxScenario, makeBackend: (toasts: unknown[]) => ReplayBackend, recorder: ReturnType<typeof createWriteRecorder>) => {
         const toasts: unknown[] = [];
         const backend = makeBackend(toasts);

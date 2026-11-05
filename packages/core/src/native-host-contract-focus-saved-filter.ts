@@ -1,3 +1,4 @@
+import { getContextsSaveCriteria } from './contexts-filter';
 import { applyFocusSavedFilter, buildFocusControlsModel, planFocusFilterCriterionRemoval,
     planFocusFilterSave } from './focus-controls';
 import { readNativeFocusControls } from './native-host-contract-focus-controls';
@@ -22,7 +23,7 @@ export type NativeFocusSavedFilterPreparation = { kind: 'noop'; result: FocusSav
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const GROUP = new Set(['none', 'context', 'project', 'area', 'energy', 'priority', 'person', 'tag']);
-const CRITERIA_ARRAYS = ['contexts', 'excludedContexts', 'areas', 'projects', 'tags',
+const CRITERIA_ARRAYS = ['contexts', 'excludedContexts', 'areas', 'projects', 'excludedProjects', 'tags',
     'excludedTags', 'energy', 'priority', 'statuses', 'assignedTo', 'locations', 'timeEstimates'];
 const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message: string): NativeHostResult<never> =>
     ({ ok: false, error: { code, message } });
@@ -31,6 +32,8 @@ const same = (left: unknown, right: unknown) => focusSavedFilterToken(left) === 
 const readOperation = (value: unknown): FocusSavedFilterOperation | null => {
     if (!record(value)) return null;
     if (value.type === 'save' && exact(value, ['type'])) return { type: 'save' };
+    if (value.type === 'save' && exact(value, ['type', 'view']) && value.view === 'contexts')
+        return { type: 'save', view: 'contexts' };
     if (value.type === 'delete' && exact(value, ['type', 'id'])
         && typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 200)
         return { type: 'delete', id: value.id };
@@ -58,7 +61,7 @@ const readRequest = (value: unknown): FocusSavedFilterRequest | null => {
 const validRawFilter = (value: unknown): value is SavedFilter => {
     if (!record(value) || typeof value.id !== 'string' || !value.id || value.id.length > 200
         || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 500
-        || value.view !== 'focus' || !record(value.criteria)
+        || (value.view !== 'focus' && value.view !== 'contexts') || !record(value.criteria)
         || !iso(value.createdAt) || !iso(value.updatedAt)
         || (value.deletedAt != null && !iso(value.deletedAt))
         || (value.sortBy != null && !isSavedFilterSortField(value.sortBy))
@@ -83,12 +86,15 @@ const scopeFor = (model: FocusControlsModel, controls: FocusControlState,
     const raw = state.settings.savedFilters ?? [];
     if (operation.type === 'save') {
         if (!model.perspective.canSavePerspective || model.filter.state.savedFilterId !== null) return null;
-        return { before: null, creation: focusSavedFilterCreation(state, controls) };
+        const creation = focusSavedFilterCreation(state, controls);
+        if (operation.view === 'contexts' && getContextsSaveCriteria(creation.currentCriteria, [], 'all',
+            [controls.filters.searchQuery]) === null) return null;
+        return { before: null, creation };
     }
     const id = operation.type === 'delete' ? operation.id : controls.savedFilterId;
     if (!id) return null;
     const matches = raw.filter((filter) => filter.id === id);
-    if (matches.length !== 1 || !validRawFilter(matches[0]) || matches[0].deletedAt) return null;
+    if (matches.length !== 1 || !validRawFilter(matches[0]) || matches[0].view !== 'focus' || matches[0].deletedAt) return null;
     if (operation.type === 'delete') {
         if (!model.savedFilters.some((filter) => filter.id === id)) return null;
     } else if (model.filter.activeSavedFilter?.id !== id
@@ -102,10 +108,10 @@ const plannedAfter = (request: FocusSavedFilterRequest, scope: PreparedFocusSave
         if (scope.before !== null || !scope.creation?.canSave || request.controls.savedFilterId !== null) return null;
         const plan = planFocusFilterSave({ ...scope.creation, name: request.name!, savedFilters: [],
             id: request.requestId, nowIso: preparedAt });
-        return plan?.filter ?? null;
+        return plan ? { ...plan.filter, view: request.operation.view ?? 'focus' } : null;
     }
     const before = scope.before;
-    if (!before || scope.creation !== null || before.deletedAt) return null;
+    if (!before || before.view !== 'focus' || scope.creation !== null || before.deletedAt) return null;
     if (request.operation.type === 'delete') {
         if (before.id !== request.operation.id) return null;
         return prepareLocalSavedFilterUpdates([before],
@@ -122,6 +128,7 @@ const plannedAfter = (request: FocusSavedFilterRequest, scope: PreparedFocusSave
 
 const plannedResult = (request: FocusSavedFilterRequest, after: SavedFilter): FocusSavedFilterResult => ({
     id: after.id,
+    ...(request.operation.type === 'save' && request.operation.view === 'contexts' ? { view: 'contexts' as const } : {}),
     controls: request.operation.type === 'save' ? applyFocusSavedFilter(request.controls, after)
         : request.operation.type === 'delete' && request.controls.savedFilterId === after.id
             ? { ...request.controls, savedFilterId: null } : request.controls,
@@ -137,7 +144,8 @@ const readPrepared = (value: unknown): PreparedFocusSavedFilter | null => {
         || raw.version !== 1 || !same(raw.request, request) || !record(raw.scope)
         || !exact(raw.scope, ['before', 'creation']) || !iso(raw.preparedAt)
         || !validRawFilter(raw.after) || !record(raw.result)
-        || !exact(raw.result, ['controls', 'id'])) return null;
+        || !exact(raw.result, request.operation.type === 'save' && request.operation.view === 'contexts'
+            ? ['controls', 'id', 'view'] : ['controls', 'id'])) return null;
     const scope = raw.scope;
     if (scope.before !== null && !validRawFilter(scope.before)) return null;
     if (scope.creation !== null) {
@@ -149,10 +157,13 @@ const readPrepared = (value: unknown): PreparedFocusSavedFilter | null => {
         const selections = request.controls.filters;
         const visibleMaximum = { ...criteriaFromSelections({ tokens: selections.tokens,
             excludedTokens: selections.excludedTokens, projects: selections.projects,
+            excludedProjects: selections.excludedProjects, statuses: selections.statuses,
             locations: selections.location.trim() ? [selections.location.trim()] : [],
             priorities: selections.priorities, energyLevels: selections.energyLevels,
             timeEstimates: selections.timeEstimates, contextMatchMode: selections.contextMatchMode,
             tagMatchMode: selections.tagMatchMode, anyDateRange: selections.anyDateRange }), ...request.controls.preservedCriteria };
+        if (request.operation.type === 'save' && request.operation.view === 'contexts'
+            && getContextsSaveCriteria(visibleMaximum, [], 'all', [request.controls.filters.searchQuery]) === null) return null;
         if (!same(scope.creation.currentCriteria, visibleMaximum)
             || !resolveTaskPerspectiveForFeatures({
                 sortBy: scope.creation.effectiveSortBy,

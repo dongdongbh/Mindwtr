@@ -22,6 +22,7 @@ import { computeSha256Hex } from './attachment-hash';
 import { ATTACHMENTS_DIR_NAME } from './attachment-paths';
 import { inspectSyncArtifact } from './sync-crypto';
 import {
+    compareSyncTransitionEntryNames,
     SyncEncryptionRemoteConflictError,
     type SyncEncryptionRemoteEntry,
     type SyncEncryptionRemoteInventory,
@@ -863,7 +864,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             for (const name of desktopRecoveryLocations.keys()) {
                 entries.push({ name, kind: 'attachment' });
             }
-            return entries.sort((left, right) => left.name.localeCompare(right.name));
+            return entries.sort((left, right) => compareSyncTransitionEntryNames(left.name, right.name));
         };
 
         const readListedEntry = async (name: string): Promise<SyncEncryptionRemoteRead> => {

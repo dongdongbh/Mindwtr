@@ -276,9 +276,9 @@ const readPreparedUnrecoverable = (raw: unknown): NativeProjectFileUnrecoverable
 
 /** Private native prerequisite, deliberately not installed on the public contract.
  * Preparation grants metadata intent only; native must prove absence/publication. */
-export function createPreparedProjectAvailabilityMethods(deps: Pick<Deps, 'readiness' | 'revision' | 'save'> & { translate?: (key: string) => string }, mode: 'strict' | 'webdav' = 'strict') {
-    const webdav = mode === 'webdav';
-    const readEnvelope = (raw: unknown) => webdav && record(raw) && record(raw.prepared) && raw.prepared.version === 2
+export function createPreparedProjectAvailabilityMethods(deps: Pick<Deps, 'readiness' | 'revision' | 'save'> & { translate?: (key: string) => string }, mode: 'strict' | 'webdav' | 'dropbox' = 'strict') {
+    const webdav = mode === 'webdav', unrecoverable = webdav || mode === 'dropbox';
+    const readEnvelope = (raw: unknown) => unrecoverable && record(raw) && record(raw.prepared) && raw.prepared.version === 2
         ? readPreparedUnrecoverable(raw) : readPreparedFileAvailability(raw, webdav);
     const saves = createAreaSaveGuard(deps.save);
     const select = async (input: NativeProjectFileAvailabilitySelection) => {
@@ -340,7 +340,7 @@ export function createPreparedProjectAvailabilityMethods(deps: Pick<Deps, 'readi
             return frozen ? { ok: true, value: frozen } : invalidFileAvailability();
         },
         async prepareProjectFileUnrecoverable(raw: unknown): Promise<NativeHostResult<NativeProjectFileUnrecoverableEnvelope>> {
-            const input = webdav && readUnrecoverableRequest(raw); if (!input) return invalidFileAvailability();
+            const input = unrecoverable && readUnrecoverableRequest(raw); if (!input) return invalidFileAvailability();
             const selected = await select(input); if (!selected.ok) return selected;
             const initial = selected.value, device = ensureDeviceId(initial.settings);
             const effect = projectWebDavAvailabilityWritePlan(initial.before, initial.rawBefore, input.attachmentId,

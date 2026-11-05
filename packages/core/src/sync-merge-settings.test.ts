@@ -565,6 +565,14 @@ describe('mergeSettingsForSync > savedFilters', () => {
         expect(v132NormalizeSavedFilters(published.savedFilters)).toEqual(oldPeerList);
     });
 
+    it('keeps excluded projects when an older peer echoes a supported filter without that field', () => {
+        const full = { ...older, criteria: { ...older.criteria, excludedProjects: ['private-project'] } } as SavedFilter;
+        const echoed = { ...full, criteria: { ...full.criteria } };
+        delete echoed.criteria.excludedProjects;
+        expect(mergeSettingsForSync(settingsWith([full], OLDER), settingsWith([echoed], NEWER)).savedFilters).toEqual([full]);
+        expect(mergeSettingsForSync(settingsWith([echoed], NEWER), settingsWith([full], OLDER)).savedFilters).toEqual([full]);
+    });
+
     it('lets a newer edit made on a v1.3.2 peer win by time (documented limit)', () => {
         const full = { ...newer, view: 'calendar', color: 'red' } as unknown as SavedFilter;
         const editedOnOldPeer = { ...v132NormalizeSavedFilters([full])[0]!, name: 'Renamed on v1.3.2', updatedAt: LATEST };

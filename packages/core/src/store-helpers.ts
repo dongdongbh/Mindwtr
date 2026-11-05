@@ -1,3 +1,4 @@
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './schedule-utils';
 import { normalizeTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
 import type { ProjectTaskSummary } from './project-row-meta';
 import { buildNextRecurringTask, canonicalRecurringFollowUp, createNextRecurringTask, normalizeRecurrenceForLoad, type RecurrenceProjection } from './recurrence';
@@ -80,7 +81,7 @@ export const matchesDuplicateSource = (source: Task, copy: Task, asNextAction = 
     const recurrence = typeof source.recurrence === 'object' && source.recurrence
         ? normalizeRecurrenceForLoad({ ...source.recurrence, seriesId: copy.id }) : source.recurrence;
     if (JSON.stringify(recurrence) !== JSON.stringify(copy.recurrence)) return false;
-    const checklist = (source.checklist ?? []).map((item) => ({ ...item, id: '', isCompleted: false }));
+    const checklist = (source.checklist ?? []).map((item) => ({ ...item, id: '' }));
     if (JSON.stringify(checklist) !== JSON.stringify((copy.checklist ?? []).map((item) => ({ ...item, id: '' })))) return false;
     const links = (source.attachments ?? []).filter((item) => item.kind !== 'file').map((item) => ({
         ...item, id: '', createdAt: copy.createdAt, updatedAt: copy.createdAt,
@@ -89,7 +90,7 @@ export const matchesDuplicateSource = (source: Task, copy: Task, asNextAction = 
     return JSON.stringify(links) === JSON.stringify((copy.attachments ?? []).map((item) => ({ ...item, id: '' })));
 };
 
-export const getReferenceTaskFieldClears = (): Partial<Task> => ({
+export const getReferenceTaskFieldClears = (dueReminderLeadMinutes?: number, startReminderLeadMinutes?: number): Partial<Task> => ({
     status: 'reference',
     startTime: undefined,
     dueDate: undefined,
@@ -100,6 +101,8 @@ export const getReferenceTaskFieldClears = (): Partial<Task> => ({
     timeEstimate: undefined,
     suppressMindwtrReminders: undefined,
     repeatReminderMinutes: undefined,
+    dueReminderLeadMinutes: dueReminderLeadMinutes === undefined ? undefined : 0,
+    startReminderLeadMinutes: startReminderLeadMinutes === undefined ? undefined : 0,
     showFutureRecurrence: undefined,
     isFocusedToday: false,
     focusOrder: undefined,
@@ -215,7 +218,9 @@ export function applyTaskUpdates(
     if (incomingStatus === 'reference') {
         finalUpdates = {
             ...finalUpdates,
-            ...getReferenceTaskFieldClears(),
+            ...getReferenceTaskFieldClears(finalUpdates.dueReminderLeadMinutes ?? oldTask.dueReminderLeadMinutes,
+                finalUpdates.startReminderLeadMinutes ?? oldTask.startReminderLeadMinutes),
+            ...(statusChanged ? { dueReminderLeadMinutes: 0, startReminderLeadMinutes: 0 } : {}),
         };
     }
 
@@ -305,6 +310,16 @@ export const normalizeTaskUpdate = (
         futureDates?: import('./task-utils').FocusDateLookup },
 ): Partial<Task> => {
     let adjustedUpdates = updates;
+    if (hasOwnField(updates, 'dueReminderLeadMinutes')) {
+        adjustedUpdates = { ...adjustedUpdates, dueReminderLeadMinutes: updates.dueReminderLeadMinutes === undefined
+            && task.dueReminderLeadMinutes === undefined ? undefined
+            : updates.dueReminderLeadMinutes == null ? 0 : normalizeDueReminderLeadMinutes(updates.dueReminderLeadMinutes) };
+    }
+    if (hasOwnField(updates, 'startReminderLeadMinutes')) {
+        adjustedUpdates = { ...adjustedUpdates, startReminderLeadMinutes: updates.startReminderLeadMinutes === undefined
+            && task.startReminderLeadMinutes === undefined ? undefined
+            : updates.startReminderLeadMinutes == null ? 0 : normalizeStartReminderLeadMinutes(updates.startReminderLeadMinutes) };
+    }
     if (hasOwnField(updates, 'reminderPolicy')) {
         const policy = normalizeTaskReminderPolicy(updates.reminderPolicy);
         if (policy) {

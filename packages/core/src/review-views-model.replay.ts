@@ -224,6 +224,7 @@ async function replayReview(contract: Contract, scenario: ReviewScenario, record
                 rows.push([item.row.id, selection, item.selected]);
                 return;
             }
+            if (item.type === 'later') return;
             texts.push(item.title, item.summary);
             headers.push(item.type === 'area'
                 ? [item.accessibilityLabel, item.expanded, [item.color ?? THEME.tint], [THEME.text, THEME.secondaryText]]
@@ -273,7 +274,7 @@ async function replayReview(contract: Contract, scenario: ReviewScenario, record
 
     const perform = async ([kind, target, ...rest]: [string, ...unknown[]]) => {
         const { view, items } = read();
-        const header = (title: unknown) => items.find((item) => item.type !== 'task' && item.accessibilityLabel.startsWith(`${String(title)}, `));
+        const header = (title: unknown) => items.find((item) => (item.type === 'area' || item.type === 'project') && item.accessibilityLabel.startsWith(`${String(title)}, `));
         switch (kind) {
             case 'expand':
                 read({ type: 'cycle' });

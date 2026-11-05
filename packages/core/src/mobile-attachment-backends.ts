@@ -1,14 +1,3 @@
-// The mobile attachment sync passes, one per remote: WebDAV, the self-hosted cloud, Dropbox and
-// File Sync. Each walks the document's file attachments, uploads local bytes the remote lacks,
-// downloads remote bytes the device lacks and returns the folded document (or `false` when
-// nothing changed). They moved here from React Native's
-// `apps/mobile/lib/attachment-sync-backends/{webdav,cloud,dropbox,file}.ts` so the native apps
-// run the same rules; each host binds them to its file IO, native installer and transports.
-//
-// Data safety: bytes are uploaded before `cloudKey` is recorded, and the metadata is published
-// only after that. A remote 404 is terminal (the attachment is marked unrecoverable), a failed
-// download never deletes local bytes, `pendingContentUpload` survives until the edited bytes
-// are on the remote, and a new WebDAV upload is sent with `If-None-Match: *`.
 import type { AppData, Attachment } from './types';
 import { applyAttachmentContentStat, type LocalFileStat } from './attachment-change-detection';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
@@ -43,6 +32,7 @@ import { isAbortError, isHostResponseTooLargeError, refuseWriteRedirect } from '
 import { withRetry } from './retry-utils';
 import { encryptedSyncArtifactByteLength, inspectSyncArtifact, type SyncKeyMaterial } from './sync-crypto';
 import { isSyncRemoteMutationFenceError } from './sync-remote-fence';
+import { compareSyncTransitionEntryNames, isSyncEncryptionPartlyEncryptedError, SyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import { getErrorStatus, isWebdavRateLimitedError } from './sync-runtime-utils';
 import {
   isWebdavRemoteWriteConflictError,
@@ -156,10 +146,13 @@ export type MobileAttachmentBackendsHost = {
   maxWebdavBufferedUploadBytes?: number;
   /** Optional wire-byte admission for Cloud's plaintext buffered PUT. */
   maxCloudBufferedUploadBytes?: number;
+  /** Optional wire-byte admission for the native Dropbox buffered transport. */
+  maxDropboxBufferedUploadBytes?: number;
   /** The host's fetch refuses a response body over its ceiling while receiving it (the native hosts' HostIo and
    *  NativeHTTPJobs). Only then does a WebDAV upload download an unversioned remote copy to compare it; React Native's
    *  fetch buffers the whole body first, so there it keeps refusing. */
   boundedWebdavResponses?: boolean;
+  eagerFileSyncDownloads?: boolean;
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
 };
 
@@ -255,6 +248,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     if (actual !== expected) return false;
     attachment.uri = targetPath;
     attachment.localStatus = 'available';
+    files.clearWebdavDownloadBackoff(attachment.id);
     files.logAttachmentInfo('Attachment download reused a verified local file', {
       attachmentId: attachment.id,
       kind: 'adopted',
@@ -264,6 +258,9 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
   };
   const maxWebdavBufferedUploadBytes = host.maxWebdavBufferedUploadBytes;
   const maxCloudBufferedUploadBytes = host.maxCloudBufferedUploadBytes;
+  const maxDropboxBufferedUploadBytes = host.maxDropboxBufferedUploadBytes;
+  if (maxDropboxBufferedUploadBytes !== undefined && (!Number.isSafeInteger(maxDropboxBufferedUploadBytes) || maxDropboxBufferedUploadBytes <= 0))
+    throw new Error('Dropbox buffered upload capability is invalid');
   if (maxWebdavBufferedUploadBytes !== undefined
     && (!Number.isSafeInteger(maxWebdavBufferedUploadBytes) || maxWebdavBufferedUploadBytes <= 0)) {
     throw new Error('WebDAV buffered upload capability is invalid');
@@ -360,7 +357,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     if (!attachmentsDir) return false;
     const attachmentsById = collectAttachmentsById(appData);
 
-    files.pruneWebdavDownloadBackoff();
+    if (!options.activationProbe) files.pruneWebdavDownloadBackoff();
     // See `isAttachmentPresenceReconciliationDue`: an uploaded attachment's key is derived
     // from its id and its bytes never change, so the presence pass below can only ever
     // discover a server-side deletion — worth proving daily, not hourly (audit F3). An
@@ -388,7 +385,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     // Preserve mobile's existing gated local prepass, then pass only readable, eligible
     // attachments to the shared tri-state remote proof below.
     for (const attachment of attachmentsById.values()) {
-      if (!reconcilePresence) break;
+      if (!reconcilePresence && !files.getWebdavDownloadBackoff(attachment.id)) continue;
       assertAttachmentSyncNotAborted(signal);
       if (attachment.kind !== 'file' || attachment.deletedAt) continue;
 
@@ -411,11 +408,13 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         exists: existsLocally ? 'true' : 'false',
       });
 
-      if (existsLocally) {
-        files.clearWebdavDownloadBackoff(attachment.id);
+      if (existsLocally && !options.activationProbe && attachment.fileHash && files.getWebdavDownloadBackoff(attachment.id)) {
+        const localHash = await files.computeAttachmentFileHash(uri);
+        assertAttachmentSyncNotAborted(signal);
+        if (localHash === attachment.fileHash.trim().toLowerCase()) files.clearWebdavDownloadBackoff(attachment.id);
       }
 
-      if (hasLocalPath && existsLocally && !isHttp && isAttachmentPresenceRepairCandidate(attachment)) {
+      if (reconcilePresence && hasLocalPath && existsLocally && !isHttp && isAttachmentPresenceRepairCandidate(attachment)) {
         presenceCandidates.push(attachment);
       }
     }
@@ -452,7 +451,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           const patched: Attachment = { ...attachment, cloudKey: undefined };
           allPatches.set(patched.id, patched);
           attachmentsById.set(patched.id, patched);
-          files.clearWebdavDownloadBackoff(attachment.id);
+          if (!options.activationProbe) files.clearWebdavDownloadBackoff(attachment.id);
         },
       });
       files.logAttachmentInfo('WebDAV attachment presence proof finished', {
@@ -806,10 +805,13 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           }
           const status = getErrorStatus(error);
           if (status === 404) {
-            files.clearWebdavDownloadBackoff(attachment.id);
-            const mutated = markAttachmentUnrecoverable(attachment);
-            files.logAttachmentInfo('Cleared missing WebDAV cloud key after 404', { id: attachment.id });
-            return mutated;
+            if (options.activationProbe) return markAttachmentUnrecoverable(attachment);
+            files.setWebdavDownloadBackoff(attachment.id, error);
+            files.logAttachmentInfo('WebDAV attachment not found (404); row kept', {
+              id: attachment.id,
+              releaseCheck: 'v1.3.8/attachment-not-found-kept',
+            });
+            return false;
           }
           throw error;
         }
@@ -841,7 +843,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         if (statusChanged) {
           attachment.localStatus = 'available';
         }
-        files.clearWebdavDownloadBackoff(attachment.id);
+        if (!options.activationProbe) files.clearWebdavDownloadBackoff(attachment.id);
         reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
         return statusChanged;
       },
@@ -849,7 +851,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         // Rate-limit and 404 are handled inside onDownload's own try/catch above, since only
         // onDownload's return value can signal a mutation back to the lifecycle. Only "other"
         // (retry-exhausted / hash-validation / write) errors reach here.
-        files.setWebdavDownloadBackoff(attachment.id, error);
+        if (!options.activationProbe) files.setWebdavDownloadBackoff(attachment.id, error);
         reportProgress(
           attachment.id,
           'download',
@@ -1336,19 +1338,21 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     }
   };
 
-  const syncDropboxAttachments = async (
+  const runDropboxAttachmentPass = async (
     appData: AppData,
     dropboxClientId: string,
     fetcher: typeof fetch,
     options: DropboxAttachmentSyncOptions = {}
   ): Promise<AppData | false> => {
     if (!dropboxClientId) return false;
+    const plaintextLimit = maxDropboxBufferedUploadBytes === undefined ? undefined
+      : Math.max(0, maxDropboxBufferedUploadBytes - (options.material ? encryptedSyncArtifactByteLength(0) : 0));
     const attachmentsDir = await files.getAttachmentsDir();
     const attachmentsById = collectAttachmentsById(appData);
     // This backend runs its own loops rather than the shared lifecycle, so it does the same
     // bookkeeping by hand: write to a per-attachment working copy, record it here, and put it
     // back into `attachmentsById`. The patches are folded into a fresh document at the end.
-    const allPatches = await common.migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal);
+    const allPatches = await common.migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal, plaintextLimit);
     const recordPatch = (attachment: Attachment): void => {
       allPatches.set(attachment.id, attachment);
       attachmentsById.set(attachment.id, attachment);
@@ -1412,6 +1416,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         : 'confirmed-not-found';
       if (localPresence === 'unreadable') continue;
       const existsLocally = localPresence === 'present';
+      if (existsLocally && !options.activationProbe) files.clearWebdavDownloadBackoff(attachment.id);
       const nextStatus = getAttachmentLocalStatus(uri, localPresence);
       if (attachment.localStatus !== nextStatus) {
         attachment.localStatus = nextStatus;
@@ -1427,7 +1432,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         && (attachment.cloudKey || attachment.pendingContentUpload === true)
         && mayUploadLocalFile
       ) {
-        if (await common.prepareBespokeAttachmentContentCandidate(attachment, uri)) {
+        if (await common.prepareBespokeAttachmentContentCandidate(attachment, uri, plaintextLimit)) {
           recordPatch(attachment);
         }
       }
@@ -1439,7 +1444,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         && mayUploadLocalFile
         && attachment.pendingContentUpload !== true
       ) {
-        const contentCheck = await common.checkBespokeAttachmentRemoteWinner(attachment, uri);
+        const contentCheck = await common.checkBespokeAttachmentRemoteWinner(attachment, uri, plaintextLimit);
         if (contentCheck.metadataChanged) recordPatch(attachment);
         if (contentCheck.kind === 'local-edit-race') {
           files.logAttachmentWarn(`Skipped remote attachment replacement after a local edit race (${attachment.id})`);
@@ -1473,7 +1478,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         let snapshot: Awaited<ReturnType<typeof common.createMobileAttachmentUploadSnapshot>> = null;
         try {
           assertDropboxNotAborted(options.signal);
-          snapshot = await common.createMobileAttachmentUploadSnapshot(uri, attachment);
+          snapshot = await common.createMobileAttachmentUploadSnapshotWithLimit(uri, attachment, plaintextLimit);
           if (!snapshot) continue;
           if (
             attachment.pendingContentUpload === true
@@ -1495,7 +1500,9 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           const readResult = await files.readAttachmentBytesForUpload(snapshot.sourcePath);
           if (readResult.readFailed) throw readResult.error;
           const uploadBytes = readResult.data;
+          if (plaintextLimit !== undefined) assertBufferedAttachmentUploadSize(uploadBytes.byteLength, plaintextLimit);
           const wireBytes = await common.sealAttachmentBytesForUpload(uploadBytes, options.material, cloudKey);
+          if (maxDropboxBufferedUploadBytes !== undefined) assertBufferedAttachmentUploadSize(wireBytes.byteLength, maxDropboxBufferedUploadBytes);
           const expectedRev = await files.runDropboxAuthorized(
             dropboxClientId,
             (accessToken) => core.getDropboxFileMetadata(
@@ -1534,7 +1541,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             totalBytes,
           });
         } catch (error) {
-          if (isAbortLikeError(error, options.signal)) {
+          if (isAbortLikeError(error, options.signal) || maxDropboxBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) {
             throw error;
           }
           if (isSyncRemoteMutationFenceError(error) || core.isDropboxConflictError(error)) {
@@ -1603,6 +1610,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         continue;
       }
       if (!options.activationProbe && options.transferAdmission?.has(attachment, 'download')) continue;
+      if (!options.activationProbe && files.getWebdavDownloadBackoff(attachment.id)) continue;
       if (!options.activationProbe && downloadCount >= DROPBOX_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC) {
         files.logAttachmentInfo('Dropbox attachment download limit reached', {
           limit: String(DROPBOX_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC),
@@ -1658,6 +1666,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         }
         attachment.uri = targetUri;
         attachment.localStatus = 'available';
+        if (!options.activationProbe) files.clearWebdavDownloadBackoff(attachment.id);
         await common.refreshBespokeAttachmentDownloadedContentStat(attachment, targetUri);
         recordPatch(attachment);
         reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
@@ -1667,12 +1676,17 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         }
         if (
           expectation.kind === 'absent'
-          && !recoverPendingUpload
           && core.isDropboxFileNotFoundError(error)
           && attachment.cloudKey
         ) {
-          if (markAttachmentUnrecoverable(attachment)) {
-            recordPatch(attachment);
+          if (options.activationProbe) {
+            if (!recoverPendingUpload && markAttachmentUnrecoverable(attachment)) recordPatch(attachment);
+          } else {
+            files.setWebdavDownloadBackoff(attachment.id, { status: 404 });
+            files.logAttachmentInfo('Dropbox attachment not found; row kept', {
+              id: attachment.id,
+              releaseCheck: 'v1.3.8/attachment-not-found-kept',
+            });
           }
         }
         if (
@@ -1704,6 +1718,19 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     }
 
     return foldPatches();
+  };
+
+  const syncDropboxAttachments = async (...args: Parameters<typeof runDropboxAttachmentPass>): Promise<AppData | false> => {
+    try { return await runDropboxAttachmentPass(...args); }
+    catch (error) {
+      if (maxDropboxBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) {
+        try { files.logAttachmentWarn('Dropbox host upload admission refused', undefined, {
+          releaseCheck: 'v1.3.8/ios-dropbox', operation: 'attachment-upload', outcome: 'refused',
+        }); } catch { /* The original refusal is authoritative. */ }
+        throw new Error('Dropbox attachment upload cannot be admitted by this host transport');
+      }
+      throw error;
+    }
   };
 
   const syncFileAttachments = async (
@@ -1755,17 +1782,104 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     // Memoized across the whole pass: every attachment that needs a SAF lookup this round shares
     // one directory listing rather than re-reading it per attachment.
     let safEntriesByName: Map<string, string> | null = null;
+    let safEntrySizes = new Map<string, number | null>();
+    let safEntryDirectories = new Set<string>();
     const refreshSafEntriesByName = async (): Promise<Map<string, string>> => {
       const inventory = await files.inspectSafDirectoryEntriesByName(syncDir.attachmentsDirUri);
       if (inventory.status === 'unreadable') {
         throw new Error('SAF attachment inventory is unreadable');
       }
       safEntriesByName = inventory.entries;
+      safEntrySizes = inventory.sizes;
+      safEntryDirectories = inventory.directories;
       return inventory.entries;
     };
     const getSafEntriesByName = async (): Promise<Map<string, string>> => (
       safEntriesByName ?? refreshSafEntriesByName()
     );
+    type ListedEntry = { uri: string; size: () => Promise<number | null>; directory: () => Promise<boolean> };
+    const statPathEntry = (uri: string) => fs.getInfo(uri).catch((): { exists?: boolean; isDirectory?: boolean; size?: number } => ({}));
+    const listFolder = async (dirUri: string, top: boolean): Promise<Map<string, ListedEntry>> => {
+      const listed = new Map<string, ListedEntry>();
+      if (syncDir.type === 'saf') {
+        const inventory = top ? null : await files.inspectSafDirectoryEntriesByName(dirUri);
+        if (inventory?.status === 'unreadable') return listed;
+        const entries = top ? await getSafEntriesByName() : inventory!.status === 'available' ? inventory!.entries : new Map<string, string>();
+        const sizes = top ? safEntrySizes : inventory?.status === 'available' ? inventory.sizes : new Map<string, number | null>();
+        const folders = top ? safEntryDirectories : inventory?.status === 'available' ? inventory.directories : new Set<string>();
+        for (const [name, uri] of entries) {
+          listed.set(name, { uri, size: async () => sizes.get(name) ?? null, directory: async () => folders.has(name) });
+        }
+      } else {
+        const base = dirUri.endsWith('/') ? dirUri : `${dirUri}/`;
+        for (const name of await fs.readDirectory(base)) {
+          const uri = `${base}${name}`;
+          listed.set(name, {
+            uri,
+            size: async () => { const info = await statPathEntry(uri); return info.exists && typeof info.size === 'number' ? info.size : null; },
+            directory: async () => (await statPathEntry(uri)).isDirectory === true,
+          });
+        }
+      }
+      return listed;
+    };
+    const isRecoveryFolderName = (name: string) => (
+      name.startsWith('.mindwtr-encryption-stage-') || name.startsWith('.mindwtr-encryption-quarantine-')
+    );
+    const isTransitionScratch = (name: string) => name.includes('.mindwtr-et-') || name.endsWith('.enctransition');
+    const isNotAttachment = (name: string) => name === '.mindwtr-attachment-installer.lock' || isTransitionScratch(name) || isRecoveryFolderName(name);
+    const isEntryGoneError = (error: unknown): boolean => {
+      const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code.toUpperCase() : '';
+      if (code === 'ENOENT' || code === 'ERR_FILE_NOT_FOUND') return true;
+      return /\bENOENT\b|no such file or directory|FileNotFoundException|missing file/i.test(error instanceof Error ? error.message : String(error ?? ''));
+    };
+    const sortedNames = (listed: Map<string, ListedEntry>) => [...listed.keys()].sort(compareSyncTransitionEntryNames);
+    let folderProvenPlaintext = false;
+    const assertFolderHoldsNoCiphertext = async (): Promise<void> => {
+      if (options.material || folderProvenPlaintext) return;
+      const top = await listFolder(syncDir.attachmentsDirUri, true);
+      const plaintextSizes = new Map<string, number | null>();
+      for (const item of [...appData.tasks, ...appData.projects]) {
+        for (const attachment of item.attachments ?? []) {
+          if (attachment.kind !== 'file' || !attachment.cloudKey) continue;
+          plaintextSizes.set(remoteFilenameFor(attachment.cloudKey, attachment), typeof attachment.size === 'number' ? attachment.size : null);
+        }
+      }
+      const coreOrder = sortedNames(top).filter((name) => !isNotAttachment(name));
+      const judged = new Map<string, ListedEntry>();
+      for (const name of [coreOrder[0], coreOrder[coreOrder.length - 1], ...coreOrder.filter((each) => plaintextSizes.has(each))]) {
+        if (name !== undefined) judged.set(name, top.get(name)!);
+      }
+      let folder = top;
+      let prefix = '';
+      for (let depth = 0; depth < 8; depth += 1) {
+        const first = sortedNames(folder).find((name) => !isNotAttachment(name));
+        if (first === undefined) break;
+        const entry = folder.get(first)!;
+        if (!(await entry.directory())) {
+          judged.set(`${prefix}${first}`, entry);
+          break;
+        }
+        folder = await listFolder(entry.uri, false);
+        prefix = `${prefix}${first}/`;
+      }
+      for (const [name, entry] of judged) {
+        assertAttachmentSyncNotAborted(signal);
+        const plaintextSize = plaintextSizes.get(name);
+        if (typeof plaintextSize === 'number' && await entry.size() === plaintextSize) continue;
+        if (await entry.directory()) continue;
+        const head = await fs.readBytesRange(entry.uri, 0, 64).catch((error: unknown) => {
+          if (isEntryGoneError(error)) return null;
+          throw error;
+        });
+        if (!head || inspectSyncArtifact(head).kind === 'plaintext') continue;
+        files.logAttachmentWarn('File Sync attachment upload refused: the folder holds encrypted attachments', undefined, {
+          releaseCheck: 'v1.3.8/file-partly-encrypted-upload',
+        });
+        throw new SyncEncryptionPartlyEncryptedError();
+      }
+      folderProvenPlaintext = true;
+    };
     const remoteFilenameFor = (cloudKey: string, attachment: { id: string; title: string }): string =>
       cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
 
@@ -1853,6 +1967,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       isFatalError: (error) => (
         isAttachmentSyncAbortError(error, signal)
         || isAttachmentUploadAdmissionError(error)
+        || isSyncEncryptionPartlyEncryptedError(error)
       ),
       // Normal background sync leaves remote-only files for on-demand fetch. An
       // activation probe is different: its cloned snapshot must prove that every
@@ -1875,7 +1990,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         }
         const remoteExists = remotePresence === 'present';
         if (
-          (attachment.pendingContentUpload === true || expectation.kind === 'present')
+          (attachment.pendingContentUpload === true || expectation.kind === 'present'
+            || (host.eagerFileSyncDownloads === true && !options.activationProbe))
           && remoteUri
           && remoteExists
         ) {
@@ -1955,6 +2071,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       onDownloadError: () => {},
       onUpload: async (attachment, localPath, snapshot) => {
         if (!snapshot) throw new Error('Immutable attachment upload snapshot is unavailable');
+        await assertFolderHoldsNoCiphertext();
         const cloudKey = buildFileSyncGenerationCloudKey(attachment, snapshot.fileHash);
         const recordPublishedGeneration = (): void => {
           attachment.cloudKey = cloudKey;

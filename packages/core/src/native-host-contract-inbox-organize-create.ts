@@ -2,8 +2,8 @@ import type { NativeHostResult } from './native-host-contract';
 import type { AppData, Area, Project, Section, Task } from './types';
 import type { PreparedAreaAuthority, PreparedAreaCreate, PreparedNativeSaveBoundary } from './store-types';
 import type { NativeInboxTasksMoveParams } from './native-host-contract-inbox-bulk-status';
-import type { NativeInboxTasksOrganizeRequest } from './native-host-contract-inbox-bulk-organize';
-import { inboxTasksOrganizeScope } from './native-host-contract-inbox-bulk-organize';
+import type { NativeProjectOrganizeDestinationCreateRequest, NativeProjectOrganizeDestinationCreatePrepared } from './native-host-contract-project-organize-create';
+import { tasksOrganizeScope } from './native-host-contract-inbox-bulk-organize';
 import { exact, iso, record } from './native-host-contract-project-shared';
 import { readBulkOrganizeDraftShape, type createBulkActionMethods } from './native-host-contract-bulk-actions';
 import { BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, EMPTY_BULK_ORGANIZE_DRAFT,
@@ -15,7 +15,7 @@ import { compareProjectsByPickerOrder, getProjectChoiceState } from './project-u
 import { validSection } from './native-host-contract-project-section-rename';
 import { validFrozenFocusDate } from './native-host-contract-task-focus';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
-import { createNativeRequestReceipts, NativeReceiptSqliteAdapter } from './native-request-receipts';
+import { createNativeRequestReceipts, isNativeRequestReceiptDurable, NativeReceiptSqliteAdapter } from './native-request-receipts';
 import { taskEditValuesEqual as same } from './json-value-equality';
 import { ensureDeviceId } from './store-helpers';
 import { getStorageAdapter, useTaskStore } from './store';
@@ -48,25 +48,33 @@ export type NativeInboxOrganizeDestinationCreatePrepared = {
 export type NativeInboxOrganizeDestinationCreateEnvelope = { request: NativeInboxOrganizeDestinationCreateRequest;
     prepared: NativeInboxOrganizeDestinationCreatePrepared };
 export type NativeInboxOrganizeDestinationCreatePreparation = { kind: 'prepared'; prepared: NativeInboxOrganizeDestinationCreatePrepared };
-type Request = NativeInboxOrganizeDestinationCreateRequest;
-type Prepared = NativeInboxOrganizeDestinationCreatePrepared;
-type Envelope = NativeInboxOrganizeDestinationCreateEnvelope;
+type Source = 'inbox' | 'project';
+type Request = NativeInboxOrganizeDestinationCreateRequest | NativeProjectOrganizeDestinationCreateRequest;
+type Prepared = Omit<NativeInboxOrganizeDestinationCreatePrepared, 'request'> & { request: Request };
+type Envelope = { request: Request; prepared: Prepared };
+type Preparation = { kind: 'prepared'; prepared: Prepared };
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const text = (v: unknown, max: number): v is string => typeof v === 'string' && Boolean(v.trim()) && v.length <= max;
 const unique = (rows: { id: string }[]) => new Set(rows.map(row => row.id)).size === rows.length;
 const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message: string): NativeHostResult<never> =>
     ({ ok: false, error: { code, message } });
-const selectionRequest = (r: Request) => ({ requestId: r.requestId, source: r.source, taskIds: r.taskIds,
-    taskRevisions: r.taskRevisions, params: r.params, status: 'next' as const });
-const scopeRequest = (r: Request): NativeInboxTasksOrganizeRequest => ({ requestId: r.requestId, source: r.source,
-    taskIds: r.taskIds, taskRevisions: r.taskRevisions, params: r.params,
-    draft: { ...r.draft, status: BULK_ORGANIZE_KEEP } });
-const readRequest = (value: unknown): Request | null => {
+const selectionRequest = (r: Request) => {
+    const base = { requestId: r.requestId, taskIds: r.taskIds, taskRevisions: r.taskRevisions, status: 'next' as const };
+    return r.source === 'project' ? { ...base, source: r.source, params: r.params }
+        : { ...base, source: r.source, params: r.params };
+};
+const scopeRequest = (r: Request) => {
+    const draft: BulkOrganizeDraft = { ...r.draft, status: BULK_ORGANIZE_KEEP };
+    const base = { requestId: r.requestId, taskIds: r.taskIds, taskRevisions: r.taskRevisions, draft };
+    return r.source === 'project' ? { ...base, source: r.source, params: r.params }
+        : { ...base, source: r.source, params: r.params };
+};
+const readRequest = (value: unknown, source: Source): Request | null => {
     const r = detachReferenceBatchJson<Request>(value);
     return r && exact(r, ['requestId', 'source', 'kind', 'name', 'draft', 'offerRevision', 'taskIds', 'taskRevisions', 'params'])
         && (r.kind === 'project' || r.kind === 'area') && text(r.name, 100_000) && r.name === r.name.trim()
         && text(r.offerRevision, 100_000) && record(r.draft) && exact(r.draft, Object.keys(EMPTY_BULK_ORGANIZE_DRAFT))
-        && readBulkOrganizeDraftShape(r.draft) && readStatusBatchSelectionRequest(selectionRequest(r), 'inbox') ? r : null;
+        && readBulkOrganizeDraftShape(r.draft) && readStatusBatchSelectionRequest(selectionRequest(r), source) ? r : null;
 };
 const normalized = (name: string) => name.trim().toLowerCase();
 const restoreTarget = (r: Request, areas: Area[]) => r.kind === 'area'
@@ -85,8 +93,8 @@ const scopeData = (s: Prepared['scope']): Pick<AppData, 'tasks' | 'projects' | '
 };
 const rawScope = (r: Request, data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>): Prepared['scope'] | null => {
     const all = rawReferenceBatchScope({ tasks: data.tasks, projects: data.projects, sections: data.sections,
-        areas: data.areas, settings: statusBatchSettings(data.settings, 'inbox') });
-    const inbox = rawReferenceBatchScope(inboxTasksOrganizeScope(scopeRequest(r), data));
+        areas: data.areas, settings: statusBatchSettings(data.settings, r.source) });
+    const inbox = rawReferenceBatchScope(tasksOrganizeScope(scopeRequest(r), data));
     if (!all || !inbox) return null;
     const target = restoreTarget(r, all.areas);
     return { inbox, allProjects: all.projects, allAreas: all.areas,
@@ -105,7 +113,7 @@ const offersCreate = (r: Request, scope: Prepared['scope']): boolean => {
             [...scope.allProjects.map(loadedReferenceBatchProject)].sort(compareProjectsByPickerOrder)).exactMatch
         : !areas.some(area => area.name.toLowerCase() === normalized(r.name));
 };
-export const inboxOrganizeDestinationCreateEffect = (p: Omit<Prepared, 'effect' | 'result' | 'resolution'>):
+export const organizeDestinationCreateEffect = (p: Omit<Prepared, 'effect' | 'result' | 'resolution'>):
     Pick<Prepared, 'effect' | 'result' | 'resolution'> | null => {
     const { request: r, scope } = p; const data = scopeData(scope);
     if (!data || !offersCreate(r, scope)) return null;
@@ -128,14 +136,15 @@ export const inboxOrganizeDestinationCreateEffect = (p: Omit<Prepared, 'effect' 
         result: { id: planned.area.id, changed: true }, effect: { tasks: changes.tasks, projects: changes.projects,
             sections: changes.sections, areas: [changes.area] } };
 };
-const requiredDates = (scope: Prepared['scope']) => requiredReferenceBatchDates(scope.inbox);
+const requiredDates = (scope: Prepared['scope'], source: Source) => requiredReferenceBatchDates({ ...scope.inbox,
+    tasks: source === 'project' ? [...scope.inbox.tasks, ...(scope.restoration?.tasks ?? [])] : scope.inbox.tasks });
 const selectedMatch = (p: Pick<Prepared, 'request' | 'scope' | 'preparedAt' | 'futureBoundary' | 'dates'>) =>
     statusBatchSourcesMatch(selectionRequest(p.request), p.scope.inbox, p.preparedAt,
         { futureBoundary: p.futureBoundary, dates: new Map(p.dates.map(row => [row.value, row])) });
-const validScope = (s: unknown): s is Prepared['scope'] => {
+const validScope = (s: unknown, source: Source): s is Prepared['scope'] => {
     if (!record(s) || !exact(s, ['inbox', 'allProjects', 'allAreas', 'restoration', 'defaultProjectFlowMode'])
         || !record(s.inbox) || !exact(s.inbox, ['tasks', 'projects', 'sections', 'areas', 'settings'])
-        || !record(s.inbox.settings) || !same(statusBatchSettings(s.inbox.settings, 'inbox'), s.inbox.settings)
+        || !record(s.inbox.settings) || !same(statusBatchSettings(s.inbox.settings, source), s.inbox.settings)
         || !(s.defaultProjectFlowMode === null || typeof s.defaultProjectFlowMode === 'string')) return false;
     const rows = (value: unknown, valid: (row: unknown) => boolean): boolean => Array.isArray(value) && value.every(valid) && unique(value);
     const section = (row: unknown) => record(row) && text(row.id, 500) && text(row.projectId, 500) && validSection(row, row.id, row.projectId);
@@ -151,7 +160,7 @@ const validScope = (s: unknown): s is Prepared['scope'] => {
 // Inbox and restoration are independently ordered saved witnesses. Their overlapping rows
 // must agree, but an Inbox-first union cannot reconstruct the original restoration order.
 const scopeConsistent = (r: Request, scope: Prepared['scope'], data: NonNullable<ReturnType<typeof scopeData>>): boolean => {
-    const inbox = rawReferenceBatchScope(inboxTasksOrganizeScope(scopeRequest(r), data));
+    const inbox = rawReferenceBatchScope(tasksOrganizeScope(scopeRequest(r), data));
     if (!same(inbox, scope.inbox)) return false;
     const target = restoreTarget(r, scope.allAreas);
     if (!target) return scope.restoration === null;
@@ -161,12 +170,12 @@ const scopeConsistent = (r: Request, scope: Prepared['scope'], data: NonNullable
     return Boolean(tasks && sections && same(selectAreaAdditionScope({ areas: scope.allAreas,
         projects: scope.allProjects, tasks, sections }, target), scope.restoration));
 };
-export const readInboxOrganizeDestinationCreateEnvelope = (input: unknown): Envelope | null => {
+export const readOrganizeDestinationCreateEnvelope = (input: unknown, source: Source): Envelope | null => {
     const e = detachReferenceBatchJson<Envelope>(input); if (!e || !exact(e, ['request', 'prepared']) || !record(e.prepared)) return null;
-    const r = readRequest(e.request); const p = e.prepared;
+    const r = readRequest(e.request, source); const p = e.prepared;
     if (!r || !exact(p, ['version', 'request', 'scope', 'resolution', 'effect', 'deviceIdBefore', 'deviceIdToInitialize',
         'preparedAt', 'updateAt', 'preparedLocalDay', 'preparedOffsetMinutes', 'boundaryOffsetMinutes', 'futureBoundary', 'dates', 'result'])
-        || p.version !== 1 || !same(p.request, r) || !validScope(p.scope)
+        || p.version !== 1 || !same(p.request, r) || !validScope(p.scope, source)
         || (p.deviceIdBefore !== null && !text(p.deviceIdBefore, 500))
         || (p.deviceIdBefore === null ? typeof p.deviceIdToInitialize !== 'string' || !UUID.test(p.deviceIdToInitialize) : p.deviceIdToInitialize !== null)
         || !iso(p.preparedAt) || !iso(p.updateAt) || !iso(p.futureBoundary) || Date.parse(p.updateAt) < Date.parse(p.preparedAt)
@@ -174,66 +183,71 @@ export const readInboxOrganizeDestinationCreateEnvelope = (input: unknown): Enve
         || !Number.isInteger(p.boundaryOffsetMinutes) || Math.abs(p.boundaryOffsetMinutes) > 840
         || !Array.isArray(p.dates) || !p.dates.every(validFrozenFocusDate)) return null;
     try {
-        const data = scopeData(p.scope); const expected = inboxOrganizeDestinationCreateEffect(p);
+        const data = scopeData(p.scope); const expected = organizeDestinationCreateEffect(p);
         return data && scopeConsistent(r, p.scope, data) && selectedMatch(p)
             && (p.scope.inbox.settings.deviceId ?? null) === p.deviceIdBefore
-            && same(requiredDates(p.scope), p.dates.map(row => row.value))
+            && same(requiredDates(p.scope, source), p.dates.map(row => row.value))
             && new Date(Date.parse(p.preparedAt) - p.preparedOffsetMinutes * 60_000).toISOString().slice(0, 10) === p.preparedLocalDay
             && new Date(Date.parse(p.preparedLocalDay + 'T23:59:59.999Z') + p.boundaryOffsetMinutes * 60_000).toISOString() === p.futureBoundary
             && expected && same(p.resolution, expected.resolution) && same(p.effect, expected.effect) && same(p.result, expected.result)
             ? e : null;
     } catch { return null; }
 };
-export const inboxOrganizeDestinationCreateAuthorityMatches = (p: Prepared, data: AppData): boolean => {
+export const organizeDestinationCreateAuthorityMatches = (p: Prepared, data: AppData): boolean => {
     const current = rawScope(p.request, data);
     return Boolean(current && same(current, p.scope) && selectedMatch({ ...p, scope: current })
-        && same(inboxOrganizeDestinationCreateEffect({ ...p, scope: current }), { resolution: p.resolution, effect: p.effect, result: p.result }));
+        && same(organizeDestinationCreateEffect({ ...p, scope: current }), { resolution: p.resolution, effect: p.effect, result: p.result }));
 };
 
-export function createInboxOrganizeDestinationCreateMethods(deps: {
+export function createOrganizeDestinationCreateMethods(deps: {
     readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>;
     getBulkActions: ReturnType<typeof createBulkActionMethods>['getBulkActions'];
-}) {
+}, source: Source) {
+    const label = source === 'project' ? 'Project' : 'Inbox';
+    const family = `${source}OrganizeDestinationCreate`;
     const guardedAdapter = (): NativeHostResult<null> => {
         const adapter = getStorageAdapter();
+        if (source === 'project' && !isNativeRequestReceiptDurable('projectOrganizeDestinationCreate'))
+            return fail('SAVE_FAILED', 'Project destination creation receipt storage is unavailable');
         return adapter instanceof NativeReceiptSqliteAdapter && adapter.concurrentWritesGuarded
-            ? { ok: true, value: null } : fail('SAVE_FAILED', 'Inbox Organize destination creation requires guarded canonical SQLite storage');
+            ? { ok: true, value: null } : fail('SAVE_FAILED', `${label} Organize destination creation requires guarded canonical SQLite storage`);
     };
     const checkForeignKeyAuthority = async (adapter: ReturnType<typeof getStorageAdapter>): Promise<NativeHostResult<null>> => {
-        if (getStorageAdapter() !== adapter) return fail('STALE_REVISION', 'Inbox Organize destination creation storage changed while reading');
+        if (getStorageAdapter() !== adapter) return fail('STALE_REVISION', `${label} Organize destination creation storage changed while reading`);
         if (!(adapter instanceof NativeReceiptSqliteAdapter) || !adapter.concurrentWritesGuarded)
-            return fail('SAVE_FAILED', 'Inbox Organize destination creation requires guarded canonical SQLite storage');
+            return fail('SAVE_FAILED', `${label} Organize destination creation requires guarded canonical SQLite storage`);
         try {
             const invalid = await adapter.hasForeignKeyViolations();
-            if (getStorageAdapter() !== adapter) return fail('STALE_REVISION', 'Inbox Organize destination creation storage changed while reading');
-            return invalid ? fail('SAVE_FAILED', 'Saved Inbox data has invalid container references') : { ok: true, value: null };
-        } catch { return fail('SAVE_FAILED', 'Saved Inbox container references could not be checked'); }
+            if (getStorageAdapter() !== adapter) return fail('STALE_REVISION', `${label} Organize destination creation storage changed while reading`);
+            return invalid ? fail('SAVE_FAILED', `Saved ${label} data has invalid container references`) : { ok: true, value: null };
+        } catch { return fail('SAVE_FAILED', `Saved ${label} container references could not be checked`); }
     };
     const saves = createAreaSaveGuard(deps.save);
     let pending: { envelope: Envelope; adapter: ReturnType<typeof getStorageAdapter>;
         boundary: PreparedNativeSaveBoundary | undefined } | null = null;
-    const payload = (envelope: Envelope): string => JSON.stringify(['inboxOrganizeDestinationCreate', envelope], (_name, item) => record(item)
+    const payload = (envelope: Envelope): string => JSON.stringify([family, envelope], (_name, item) => record(item)
         ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
     const checkAuthority = (envelope: Envelope, authority: PreparedAreaAuthority): NativeHostResult<null> => {
         const guarded = guardedAdapter(); if (!guarded.ok) return guarded;
-        if (!referenceBatchSettingsReadable(authority.snapshot.settings)) return fail('SAVE_FAILED', 'Saved Inbox settings JSON is unreadable');
-        try { return inboxOrganizeDestinationCreateAuthorityMatches(envelope.prepared, authority.snapshot)
-            ? { ok: true, value: null } : fail('STALE_REVISION', 'Inbox Organize destination creation selection, options or saved dependency context changed'); }
-        catch { return fail('STALE_REVISION', 'Inbox Organize destination creation rules changed since preparation'); }
+        if (!referenceBatchSettingsReadable(authority.snapshot.settings)) return fail('SAVE_FAILED', `Saved ${label} settings JSON is unreadable`);
+        try { return organizeDestinationCreateAuthorityMatches(envelope.prepared, authority.snapshot)
+            ? { ok: true, value: null } : fail('STALE_REVISION', `${label} Organize destination creation selection, options or saved dependency context changed`); }
+        catch { return fail('STALE_REVISION', `${label} Organize destination creation rules changed since preparation`); }
     };
-    const apply = (envelope: Envelope, authority: PreparedAreaAuthority) =>
-        useTaskStore.getState().commitPreparedInboxOrganizeDestinationCreate(envelope.prepared, authority);
+    const apply = (envelope: Envelope, authority: PreparedAreaAuthority) => source === 'project'
+        ? useTaskStore.getState().commitPreparedProjectOrganizeDestinationCreate(envelope.prepared as NativeProjectOrganizeDestinationCreatePrepared, authority)
+        : useTaskStore.getState().commitPreparedInboxOrganizeDestinationCreate(envelope.prepared as NativeInboxOrganizeDestinationCreatePrepared, authority);
     const receipts = createNativeRequestReceipts({ save: async requestId => {
         const owned = pending;
-        if (!owned || owned.envelope.request.requestId !== requestId) return fail('SAVE_FAILED', 'Inbox Organize destination creation has no owned raw save');
+        if (!owned || owned.envelope.request.requestId !== requestId) return fail('SAVE_FAILED', `${label} Organize destination creation has no owned raw save`);
         if (useTaskStore.getState().persistenceFailure) {
-            if (!saves.mayApply(owned.envelope, owned.adapter)) return fail('SAVE_FAILED', 'Inbox Organize destination creation has an unrelated persistence failure');
+            if (!saves.mayApply(owned.envelope, owned.adapter)) return fail('SAVE_FAILED', `${label} Organize destination creation has an unrelated persistence failure`);
             const read = await readAreaDurableData(true, true); if (!read.ok) return read;
-            if (read.value.adapter !== owned.adapter) return fail('STALE_REVISION', 'Inbox Organize destination creation storage changed before retry');
+            if (read.value.adapter !== owned.adapter) return fail('STALE_REVISION', `${label} Organize destination creation storage changed before retry`);
             const foreignKeys = await checkForeignKeyAuthority(read.value.adapter); if (!foreignKeys.ok) return foreignKeys;
             const checked = checkAuthority(owned.envelope, read.value.authority); if (!checked.ok) return checked;
             const applied = await apply(owned.envelope, read.value.authority);
-            if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? 'Inbox Organize destination creation retry was superseded');
+            if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? `${label} Organize destination creation retry was superseded`);
             owned.boundary = read.value.authority.saveBoundary;
         }
         const saved = await saves.finish(owned.envelope, owned.adapter, false, owned.boundary);
@@ -241,12 +255,12 @@ export function createInboxOrganizeDestinationCreateMethods(deps: {
         return saved;
     } });
     const offeredNow = (request: Request): NativeHostResult<null> => {
-        const offered = deps.getBulkActions({ list: 'inbox', params: request.params, taskIds: request.taskIds,
+        const offered = deps.getBulkActions({ list: source, params: request.params, taskIds: request.taskIds,
             organize: { draft: request.draft }, picker: { kind: request.kind, query: request.name, offset: 0, limit: 1 } });
         if (!offered.ok) return offered;
         const view = offered.value;
         if (view.revision !== request.offerRevision || !same(view.selectedIds, request.taskIds)
-            || !same(view.taskRevisions, request.taskRevisions)) return fail('STALE_REVISION', 'Inbox creation offer or selection changed');
+            || !same(view.taskRevisions, request.taskRevisions)) return fail('STALE_REVISION', `${label} creation offer or selection changed`);
         if (request.kind === 'area' && view.organize?.area.disabled)
             return fail('INVALID_INPUT', 'Area creation is disabled while a Project is selected');
         return view.picker?.create?.name === request.name && view.picker.submit && 'create' in view.picker.submit
@@ -254,75 +268,93 @@ export function createInboxOrganizeDestinationCreateMethods(deps: {
             : fail('INVALID_INPUT', 'Choose the existing picker option instead of creating it');
     };
     return {
-        async prepareInboxOrganizeDestinationCreate(input: Request): Promise<NativeHostResult<NativeInboxOrganizeDestinationCreatePreparation>> {
+        async prepareOrganizeDestinationCreate(input: Request): Promise<NativeHostResult<Preparation>> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const guarded = guardedAdapter(); if (!guarded.ok) return guarded;
-            const request = readRequest(input); if (!request) return fail('INVALID_INPUT', 'A complete Inbox destination creation request is required');
+            const request = readRequest(input, source); if (!request) return fail('INVALID_INPUT', `A complete ${label} destination creation request is required`);
             const offered = offeredNow(request); if (!offered.ok) return offered;
             const now = new Date(); const end = new Date(now); end.setHours(23, 59, 59, 999);
             const read = await readAreaDurableData(false, true); if (!read.ok) return read;
             const foreignKeys = await checkForeignKeyAuthority(read.value.adapter); if (!foreignKeys.ok) return foreignKeys;
-            if (!referenceBatchSettingsReadable(read.value.authority.snapshot.settings)) return fail('SAVE_FAILED', 'Saved Inbox settings JSON is unreadable');
+            if (!referenceBatchSettingsReadable(read.value.authority.snapshot.settings)) return fail('SAVE_FAILED', `Saved ${label} settings JSON is unreadable`);
             const scope = rawScope(request, read.value.authority.snapshot);
-            if (!scope) return fail('SAVE_FAILED', 'Saved Inbox creation context cannot be read');
-            if (!detachReferenceBatchValue(scope)) return fail('INVALID_INPUT', 'Inbox creation witness exceeds the bounded journal');
+            if (!scope) return fail('SAVE_FAILED', `Saved ${label} creation context cannot be read`);
+            if (!detachReferenceBatchValue(scope)) return fail('INVALID_INPUT', `${label} creation witness exceeds the bounded journal`);
             const rechecked = offeredNow(request); if (!rechecked.ok) return rechecked;
             const device = ensureDeviceId(scope.inbox.settings);
             const base = { version: 1 as const, request, scope, deviceIdBefore: scope.inbox.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null, preparedAt: now.toISOString(), updateAt: now.toISOString(),
                 preparedLocalDay: new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10),
                 preparedOffsetMinutes: now.getTimezoneOffset(), boundaryOffsetMinutes: end.getTimezoneOffset(), futureBoundary: end.toISOString(),
-                dates: projectFocusDateValues(requiredDates(scope)) };
-            const effect = inboxOrganizeDestinationCreateEffect(base);
+                dates: projectFocusDateValues(requiredDates(scope, source)) };
+            const effect = organizeDestinationCreateEffect(base);
             const prepared = effect && detachReferenceBatchValue<Prepared>({ ...base, ...effect });
-            return prepared && readInboxOrganizeDestinationCreateEnvelope({ request, prepared })
+            return prepared && readOrganizeDestinationCreateEnvelope({ request, prepared }, source)
                 ? { ok: true, value: { kind: 'prepared', prepared } }
-                : fail('STALE_REVISION', 'Saved Inbox selection or destination creation context changed');
+                : fail('STALE_REVISION', `Saved ${label} selection or destination creation context changed`);
         },
-        validatePreparedInboxOrganizeDestinationCreate(input: Envelope): NativeHostResult<NativeInboxOrganizeDestinationCreateResult> {
-            const e = readInboxOrganizeDestinationCreateEnvelope(input);
-            return e ? { ok: true, value: e.prepared.result } : fail('INVALID_INPUT', 'Prepared Inbox destination creation is malformed');
+        validatePreparedOrganizeDestinationCreate(input: Envelope): NativeHostResult<NativeInboxOrganizeDestinationCreateResult> {
+            const e = readOrganizeDestinationCreateEnvelope(input, source);
+            return e ? { ok: true, value: e.prepared.result } : fail('INVALID_INPUT', `Prepared ${label} destination creation is malformed`);
         },
-        inboxOrganizeDestinationCreateOutcome(input: Envelope): NativeHostResult<NativeInboxOrganizeDestinationCreateResult | null> {
-            const e = readInboxOrganizeDestinationCreateEnvelope(input);
+        organizeDestinationCreateOutcome(input: Envelope): NativeHostResult<NativeInboxOrganizeDestinationCreateResult | null> {
+            const e = readOrganizeDestinationCreateEnvelope(input, source);
+            if (source === 'project' && !isNativeRequestReceiptDurable('projectOrganizeDestinationCreate'))
+                return fail('SAVE_FAILED', 'Project destination creation receipt storage is unavailable');
             return e ? receipts.saved<NativeInboxOrganizeDestinationCreateResult>(e.request.requestId, payload(e)) ?? { ok: true, value: null }
-                : fail('INVALID_INPUT', 'Prepared Inbox destination creation is malformed');
+                : fail('INVALID_INPUT', `Prepared ${label} destination creation is malformed`);
         },
-        async commitPreparedInboxOrganizeDestinationCreate(input: Envelope): Promise<NativeHostResult<NativeInboxOrganizeDestinationCreateResult>> {
-            const envelope = readInboxOrganizeDestinationCreateEnvelope(input); if (!envelope) return fail('INVALID_INPUT', 'Prepared Inbox Organize destination creation is malformed');
+        async commitPreparedOrganizeDestinationCreate(input: Envelope): Promise<NativeHostResult<NativeInboxOrganizeDestinationCreateResult>> {
+            const envelope = readOrganizeDestinationCreateEnvelope(input, source); if (!envelope) return fail('INVALID_INPUT', `Prepared ${label} Organize destination creation is malformed`);
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const guarded = guardedAdapter(); if (!guarded.ok) return guarded;
             const boundPayload = payload(envelope); const saved = receipts.saved<NativeInboxOrganizeDestinationCreateResult>(envelope.request.requestId, boundPayload);
             if (saved) return saved.ok && !same(saved.value, envelope.prepared.result)
-                ? fail('INVALID_INPUT', 'Saved Inbox Organize destination creation result does not match its journal') : saved;
+                ? fail('INVALID_INPUT', `Saved ${label} Organize destination creation result does not match its journal`) : saved;
             let prewriteFailure: NativeHostResult<never> | null = null;
             const notLanded = (message: string): NativeHostResult<never> => { prewriteFailure = fail('SAVE_FAILED', message);
                 return { ok: false, error: { code: 'ACTION_FAILED', message } }; };
             const confirmed = await receipts.run(envelope.request.requestId, boundPayload, async () => {
-                if (useTaskStore.getState().persistenceFailure) return notLanded('Inbox Organize destination creation has an unresolved persistence failure');
+                if (useTaskStore.getState().persistenceFailure) return notLanded(`${label} Organize destination creation has an unresolved persistence failure`);
                 const read = await readAreaDurableData(false, true);
                 if (!read.ok) return read.error.code === 'SAVE_FAILED' ? notLanded(read.error.message) : read;
                 const foreignKeys = await checkForeignKeyAuthority(read.value.adapter);
                 if (!foreignKeys.ok) return foreignKeys.error.code === 'SAVE_FAILED' ? notLanded(foreignKeys.error.message) : foreignKeys;
                 const checked = checkAuthority(envelope, read.value.authority); if (!checked.ok) return checked;
                 const applied = await apply(envelope, read.value.authority);
-                if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? 'Inbox Organize destination creation conflicts with saved data');
+                if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? `${label} Organize destination creation conflicts with saved data`);
                 pending = { envelope, adapter: read.value.adapter, boundary: read.value.authority.saveBoundary };
                 return { ok: true, value: envelope.prepared.result };
             });
             if (prewriteFailure) return prewriteFailure;
-            if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', 'Saved Inbox Organize destination creation result does not match its journal');
+            if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Organize destination creation result does not match its journal`);
             if (confirmed.ok) {
-                try { logInfo('Native Inbox Organize destination confirmed', { scope: 'native-host', category: 'storage',
-                    context: { releaseCheck: 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
+                try { logInfo(`Native ${label} Organize destination confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' ? { force: true } : {}),
+                    context: { releaseCheck: source === 'project' ? 'v1.3.8/ios-project-organize-destination-create' : 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
                 catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
             }
             return confirmed;
         },
     };
 }
+// Preserve the Inbox API and journal grammar; Project uses the same source-bound engine.
+export const inboxOrganizeDestinationCreateEffect = (p: Omit<NativeInboxOrganizeDestinationCreatePrepared, 'effect' | 'result' | 'resolution'>):
+    Pick<NativeInboxOrganizeDestinationCreatePrepared, 'effect' | 'result' | 'resolution'> | null => organizeDestinationCreateEffect(p);
+export const readInboxOrganizeDestinationCreateEnvelope = (input: unknown): NativeInboxOrganizeDestinationCreateEnvelope | null =>
+    readOrganizeDestinationCreateEnvelope(input, 'inbox') as NativeInboxOrganizeDestinationCreateEnvelope | null;
+export const inboxOrganizeDestinationCreateAuthorityMatches = (p: NativeInboxOrganizeDestinationCreatePrepared, data: AppData): boolean =>
+    organizeDestinationCreateAuthorityMatches(p, data);
+export function createInboxOrganizeDestinationCreateMethods(deps: Parameters<typeof createOrganizeDestinationCreateMethods>[0]) {
+    const methods = createOrganizeDestinationCreateMethods(deps, 'inbox');
+    return {
+        prepareInboxOrganizeDestinationCreate: (input: NativeInboxOrganizeDestinationCreateRequest) => methods.prepareOrganizeDestinationCreate(input) as Promise<NativeHostResult<NativeInboxOrganizeDestinationCreatePreparation>>,
+        validatePreparedInboxOrganizeDestinationCreate: (input: NativeInboxOrganizeDestinationCreateEnvelope) => methods.validatePreparedOrganizeDestinationCreate(input),
+        inboxOrganizeDestinationCreateOutcome: (input: NativeInboxOrganizeDestinationCreateEnvelope) => methods.organizeDestinationCreateOutcome(input),
+        commitPreparedInboxOrganizeDestinationCreate: (input: NativeInboxOrganizeDestinationCreateEnvelope) => methods.commitPreparedOrganizeDestinationCreate(input),
+    };
+}
 referenceBatchModules.inboxOrganizeCreate = input => {
-    const prepared = input as Prepared;
+    const prepared = input as NativeInboxOrganizeDestinationCreatePrepared;
     return { validateEnvelope: () => Boolean(readInboxOrganizeDestinationCreateEnvelope({ request: prepared.request, prepared })),
         authorityMatches: data => inboxOrganizeDestinationCreateAuthorityMatches(prepared, data) };
 };

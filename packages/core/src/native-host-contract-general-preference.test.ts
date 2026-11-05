@@ -44,8 +44,11 @@ async function planned(env: Awaited<ReturnType<typeof open>>,
     edit: NativeGeneralPreferenceRequest['edit']) {
     const options = await env.host.getGeneralPreferenceOptions({});
     if (!options.ok) throw new Error(JSON.stringify(options));
+    const delay = edit.type === 'appLockRelockDelay' ? await env.host.getAppLockDelayOptions({}) : null;
+    if (delay && !delay.ok) throw new Error(JSON.stringify(delay));
     const request: NativeGeneralPreferenceRequest = { requestId: ID, edit,
-        expected: options.value.expected[edit.type] };
+        expected: edit.type === 'appLockRelockDelay' && delay?.ok ? delay.value.expected
+            : options.value.expected[edit.type as keyof typeof options.value.expected] };
     const plan = await env.host.prepareGeneralPreference(request);
     if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
     return { options: options.value, request, prepared: plan.value.prepared,
@@ -55,6 +58,32 @@ async function planned(env: Awaited<ReturnType<typeof open>>,
 afterEach(async () => { await flushPendingSave(); resetForTests(); });
 
 describe('prepared General preferences', () => {
+    it('reads the default delay from an existing enabled App lock with no delay field', async () => {
+        const data = initial(); data.settings.security = { mobileAppLockEnabled: true };
+        const env = await open(data);
+        expect(await env.host.getAppLockDelayOptions({})).toMatchObject({ ok: true, value: {
+            value: 0, expected: { present: false, value: null, stampPresent: false, stamp: null },
+            row: { options: expect.any(Array) },
+        } });
+    });
+
+    it.each([0, 1, 5, 15] as const)('persists App lock delay %s without changing existing option keys or sibling security settings', async value => {
+        const data = initial(); data.settings.security = { mobileAppLockEnabled: true, mobileAppLockRelockDelayMinutes: value === 0 ? 1 : 0 };
+        const env = await open(data);
+        const options = await env.host.getAppLockDelayOptions({});
+        expect(options).toMatchObject({ ok: true, value: { row: { options: expect.any(Array) } } });
+        const legacy = await env.host.getGeneralPreferenceOptions({});
+        if (!legacy.ok) throw new Error(JSON.stringify(legacy));
+        expect(Object.keys(legacy.value.expected).sort()).toEqual(['showTaskAge', 'quickAccessView', 'weekStart', 'dateFormat', 'timeFormat', 'calendarSystem', 'theme', 'language'].sort());
+        const { envelope, prepared } = await planned(env, { type: 'appLockRelockDelay', value });
+        expect(await env.host.commitPreparedGeneralPreference(envelope)).toEqual({ ok: true, value: prepared.result });
+        expect(env.data().settings.security).toEqual({ mobileAppLockEnabled: true, mobileAppLockRelockDelayMinutes: value, mobileAppLockRelockDelayUpdatedAt: prepared.after.stamp });
+        expect(env.data().settings.syncPreferencesUpdatedAt).toEqual({ appearance: AT, language: AT });
+        const cold = await env.reopen();
+        expect(await cold.host.commitPreparedGeneralPreference(envelope)).toEqual({ ok: true, value: prepared.result });
+        expect(cold.saves()).toBe(0);
+    });
+
     it.each([
         { type: 'showTaskAge', value: true, group: 'appearance' },
         { type: 'weekStart', value: 'monday', group: 'language' },

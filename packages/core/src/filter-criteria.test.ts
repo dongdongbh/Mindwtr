@@ -7,6 +7,17 @@ import {
 } from './filter-criteria';
 
 describe('filter-criteria', () => {
+    it('round trips optional status and project exclusion selections without adding empty legacy fields', () => {
+        const selections = { projects: ['included'], excludedProjects: ['excluded'], statuses: ['someday' as const] };
+        const criteria = criteriaFromSelections(selections);
+        expect(criteria).toEqual(selections);
+        expect(selectionsFromCriteria(criteria)).toMatchObject(selections);
+        expect(countActiveFilterCriteria(criteria)).toBe(3);
+        expect(criteriaFromSelections({})).toEqual({});
+        expect(selectionsFromCriteria({})).not.toHaveProperty('excludedProjects');
+        expect(selectionsFromCriteria({})).not.toHaveProperty('statuses');
+    });
+
     it('splits mixed tokens into contexts and tags and omits empty groups', () => {
         expect(criteriaFromSelections({ tokens: ['@office', '#deep', '@phone'] })).toEqual({
             contexts: ['@office', '@phone'],

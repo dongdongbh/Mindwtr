@@ -396,6 +396,8 @@ describe('value parity — a stripped or added key counts as a change', () => {
             suppressMindwtrReminders: false,
             reminderPolicy: undefined,
             repeatReminderMinutes: undefined,
+            dueReminderLeadMinutes: undefined,
+            startReminderLeadMinutes: undefined,
             reviewAt: undefined,
             completedAt: undefined,
             cancelledAt: undefined,

@@ -73,6 +73,90 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
     const rev = (id: string) => taskRevisionOf(task(id));
     const revs = (ids: string[]) => Object.fromEntries(ids.map((id) => [id, rev(id)]));
 
+    it('opts into counted Later rows without changing omitted Review bytes or allowing hidden selection', async () => {
+        freezeClock();
+        const project = { ...part.projects[0], id: 'sequence-project', isSequential: true, status: 'active' as const };
+        const base = { ...part.tasks[0], projectId: project.id, reviewAt: undefined, startTime: undefined };
+        const tasks = [{ ...base, id: 'sequence-head', title: 'Z head', status: 'waiting' as const, order: 0 },
+            ...Array.from({ length: 54 }, (_, index) => ({ ...base, id: `sequence-tail-${index}`, title: `A tail ${index}`, status: 'next' as const, order: index + 1 }))];
+        const { host, recorder } = await openHost(scenario(), undefined, { ...part, tasks, projects: [project] });
+        const areas = value(host.getReviewOverview({ scope: 'all', ...page, expansionEdit: { type: 'cycle' } }));
+        const input = { scope: 'all' as const, expandedAreaIds: areas.expandedAreaIds, expandedProjectIds: [`project:${project.id}`], ...page };
+        const legacy = value(host.getReviewOverview(input)), bytes = JSON.stringify(legacy);
+        const detailed = { ...input, expandedLaterProjectIds: [] as string[] };
+        const collapsed = value(host.getReviewOverview(detailed));
+        expect(collapsed.items.filter((item) => item.type === 'task').map((item) => item.row.id)).toEqual(['sequence-head']);
+        expect(collapsed.items).toContainEqual({ type: 'later', id: `project:${project.id}`, projectId: project.id, label: 'Later in sequence (54)', expanded: false });
+        const expanded = value(host.getReviewOverview({ ...detailed, expandedLaterProjectIds: [`project:${project.id}`] }));
+        expect(expanded.items.filter((item) => item.type === 'task')).toHaveLength(55);
+        const overviewPages = value(host.getReviewOverview({ ...detailed, expandedLaterProjectIds: [`project:${project.id}`], limit: 17 }));
+        const overviewItems = [...overviewPages.items];
+        while (overviewItems.length < overviewPages.total) overviewItems.push(...value(host.getReviewOverview({ ...detailed, expandedLaterProjectIds: [`project:${project.id}`], limit: 17, offset: overviewItems.length, revision: overviewPages.revision })).items);
+        expect(overviewItems).toEqual(expanded.items);
+        for (const ids of [null, 'bad', [project.id, project.id], ['x'.repeat(501)]]) {
+            expect(host.getReviewOverview({ ...input, expandedLaterProjectIds: ids } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            expect(host.getWeeklyReview({ ...page, expandedLaterProjectIds: ids } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+
+        const selected = value(host.getReviewOverview({ ...detailed, selectedIds: ['sequence-tail-0'] }));
+        expect(selected.bulk).toBeNull();
+        expect(JSON.stringify(value(host.getReviewOverview(input)))).toBe(bytes);
+        expect(host.getReviewOverview({ ...detailed, offset: 1, revision: legacy.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        const weeklyInput = { checkpoint: JSON.stringify({ step: 'projects', startedAt: part.now }), expandedProjectId: project.id, includeStaleProjectCards: true, keepProjectsStep: true, ...page };
+        const oldWeekly = JSON.stringify(value(host.getWeeklyReview(weeklyInput)));
+        const weekly = value(host.getWeeklyReview({ ...weeklyInput, expandedLaterProjectIds: [] }));
+        expect(weekly.items.filter((item) => item.type === 'task').map((item) => item.row.id)).toEqual(['sequence-head']);
+        expect(weekly.items).toContainEqual({ type: 'later', id: project.id, projectId: project.id, label: 'Later in sequence (54)', expanded: false });
+        const fullInput = { ...weeklyInput, expandedLaterProjectIds: [project.id], limit: 17 };
+        const first = value(host.getWeeklyReview(fullInput));
+        const collected = [...first.items];
+        while (collected.length < first.total) collected.push(...value(host.getWeeklyReview({ ...fullInput, offset: collected.length, revision: first.revision })).items);
+        expect(collected.filter((item) => item.type === 'task').map((item) => item.row.id)).toEqual(tasks.map((task) => task.id));
+        expect(JSON.stringify(value(host.getWeeklyReview(weeklyInput)))).toBe(oldWeekly);
+        const staleInput = { ...weeklyInput, checkpoint: JSON.stringify({ step: 'stale', startedAt: part.now }), includeStaleProjectCards: false, keepStaleStep: true, expandedLaterProjectIds: [] as string[] };
+        const stale = value(host.getWeeklyReview(staleInput));
+        const nested = value(host.getWeeklyReviewList({ ...staleInput, list: 'staleProjects', revision: stale.revision }));
+        expect(nested.revision).toBe(stale.revision);
+        expect(host.getWeeklyReviewList({ ...staleInput, expandedLaterProjectIds: undefined, list: 'staleProjects', revision: stale.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+
+        expect(recorder.log).toEqual([]);
+    });
+
+    it('opts stale projects into paged expandable cards without changing legacy keysets', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario(), undefined, { ...part, tasks: [...part.tasks,
+            { ...part.tasks[0], id: 'stale-project-child', projectId: 'p-stale', status: 'next', createdAt: '2020-01-01T12:00:00.000Z', updatedAt: '2020-01-01T12:00:00.000Z' }] });
+        const input = { checkpoint: JSON.stringify({ step: 'stale', startedAt: part.now }), calendar: ready, ...page };
+        const legacy = value(host.getWeeklyReview(input));
+        if (legacy.content.step !== 'stale') throw new Error('Expected stale');
+        expect(legacy.content.projects.total).toBeGreaterThan(0);
+        const detailedInput = { ...input, includeStaleProjectCards: true };
+        const detailed = value(host.getWeeklyReview(detailedInput));
+        if (detailed.content.step !== 'stale') throw new Error('Expected stale');
+        expect(detailed.content.projects).toEqual({ total: 0, items: [] });
+        const card = detailed.items.find((item) => item.type === 'project');
+        if (!card || card.type !== 'project') throw new Error('Expected stale project card');
+        expect(card).toMatchObject({ expanded: false, openLabel: expect.stringMatching(/^Open project /),
+            countLabel: expect.stringMatching(/days inactive/) });
+        const expanded = value(host.getWeeklyReview({ ...detailedInput, expandedProjectId: card.id }));
+        expect(expanded.items).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'project', id: card.id, expanded: true }),
+            expect.objectContaining({ type: 'task', projectId: card.id })]));
+        expect(detailed.revision).not.toBe(legacy.revision);
+        expect(host.getWeeklyReview({ ...input, revision: detailed.revision, offset: 1 })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        const projects = value(host.getWeeklyReview({ ...input, checkpoint: JSON.stringify({ step: 'projects', startedAt: part.now }) }));
+        for (const item of projects.items.filter((entry) => entry.type === 'project')) expect(item).not.toHaveProperty('openLabel');
+    });
+
+    it('holds only the explicit stale step after its final item is refreshed', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario(), undefined, { ...part, tasks: [], projects: [] });
+        const input = { checkpoint: JSON.stringify({ step: 'stale', startedAt: part.now }), calendar: ready, ...page };
+        const held = value(host.getWeeklyReview({ ...input, keepStaleStep: true }));
+        expect(held.content.step).toBe('stale'); expect(held.items).toEqual([]);
+        expect(value(host.getWeeklyReview(input)).content.step).not.toBe('stale');
+        expect(host.getWeeklyReview({ ...input, keepStaleStep: 'true' } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     it('returns what core\'s review models return when called directly', async () => {
         freezeClock();
         const { host } = await openHost();
@@ -151,6 +235,25 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
         if (daily.content.step !== 'inbox') return;
         expect(daily.content.count).toBe(1);
         expect(daily.content.unit).toBe('task');
+    });
+
+    it('keeps the final completed Project step visible until the caller releases its session hold', async () => {
+        freezeClock();
+        const { host } = await openHost();
+        const checkpoint = JSON.stringify({ step: 'projects', startedAt: part.now });
+        const before = value(host.getWeeklyReview({ checkpoint, ...page }));
+        expect(before.step.id).toBe('projects');
+        useTaskStore.setState({ _allProjects: useTaskStore.getState()._allProjects.map((row) => ({ ...row, status: 'archived', archivedAt: part.now })) });
+        const held = value(host.getWeeklyReview({ checkpoint, keepProjectsStep: true, ...page }));
+        expect(held.step.id).toBe('projects');
+        expect(held.content).toMatchObject({ step: 'projects', empty: getWeeklyReviewLabels(t).noActiveProjects });
+        expect(held.items).toEqual([]);
+        expect(Object.keys(held).sort()).toEqual(Object.keys(before).sort());
+        const released = value(host.getWeeklyReview({ checkpoint, ...page }));
+        expect(released.step.id).not.toBe('projects');
+        expect(held.revision).not.toBe(released.revision);
+        expect(host.getWeeklyReview({ checkpoint, keepProjectsStep: 'true', ...page } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
     it('moves through the Weekly Review by checkpoints and resumes where it stopped', async () => {
@@ -549,6 +652,15 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
         const aiItems = readAll(staleInputs, staleView.revision, 'aiItems', staleView.content.ai.items.total);
         expect(new Set(aiItems.map((item) => (item as { id: string }).id)).size).toBe(staleView.content.ai.items.total);
         expect(readAll(staleInputs, staleView.revision, 'staleProjects', 102)).toHaveLength(102);
+        const detailedInput = { ...staleInputs, includeStaleProjectCards: true };
+        const detailed = value(host.getWeeklyReview({ ...detailedInput, offset: 0, limit: 1 }));
+        const cards = [];
+        for (let offset = 0; offset < detailed.total; offset += 100) {
+            cards.push(...value(host.getWeeklyReview({ ...detailedInput, offset, limit: 100, revision: detailed.revision })).items
+                .filter((item) => item.type === 'project'));
+        }
+        expect(cards).toHaveLength(102);
+
 
         const contextInputs = { checkpoint: at('contexts'), calendar };
         const contexts = value(host.getWeeklyReview({ ...contextInputs, offset: 0, limit: 100 }));

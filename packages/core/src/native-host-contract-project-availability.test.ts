@@ -831,3 +831,26 @@ describe('private owned WebDAV Project availability compatibility', () => {
         } finally { await env.close(); }
     });
 });
+
+
+describe('private owned Dropbox Project availability', () => {
+    it('adopts shared not-found metadata and cold-replays it while old strict cloud stays closed', async () => {
+        const selected = { ...file, uri: '' };
+        const { env } = await open(undefined, project('target', { attachments: [selected, sibling] }));
+        const api = () => preparedAvailability.createPreparedProjectAvailabilityMethods({ readiness: () => ({ ok: true, value: null }),
+            revision: () => request(env).revision, save: async () => { await flushPendingSave(); return { ok: true, value: null }; }, translate: key => key }, 'dropbox');
+        try {
+            const { sha256: _hash, size: _size, ...selection } = downloadRequest(env), before = await allRows(env);
+            expect(await privateMethods(env).prepareProjectFileUnrecoverable({ ...selection, unrecoverableAt: at })).toMatchObject({ ok: false });
+            const e = value(await api().prepareProjectFileUnrecoverable({ ...selection, unrecoverableAt: at }));
+            expect(e.prepared).toMatchObject({ version: 2, kind: 'project-file-unrecoverable', expectation: { kind: 'metadata-only' } });
+            expect(privateMethods(env).validatePreparedProjectFileAvailability(e)).toMatchObject({ ok: false });
+            expect(await allRows(env)).toEqual(before);
+            await env.restart(undefined, { recoveryLoad: true }); expect(await api().commitPreparedProjectFileAvailability(e)).toMatchObject({ ok: true, value: { status: 'unrecoverable' } });
+            const after = await allRows(env); expect(after.tasks).toEqual(before.tasks); expect(after.settings).toEqual(before.settings);
+            const row = (await env.sql<{ attachments: string }>('SELECT attachments FROM projects WHERE id=?', ['target']))[0];
+            expect(JSON.parse(row.attachments)).toEqual([{ ...selected, cloudKey: undefined, fileHash: undefined, localStatus: 'missing', deletedAt: at, updatedAt: at }, sibling].map(item => JSON.parse(JSON.stringify(item))));
+            await env.restart(undefined, { recoveryLoad: true }); expect(await api().commitPreparedProjectFileAvailability(e)).toMatchObject({ ok: true }); expect(await allRows(env)).toEqual(after);
+        } finally { await env.close(); }
+    });
+});

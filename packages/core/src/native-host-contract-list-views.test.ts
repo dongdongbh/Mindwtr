@@ -29,6 +29,7 @@ import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup } from '
 import { buildTrashTimeline } from './task-utils';
 import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import { generateUUID } from './uuid';
+import { focusSavedFilterToken } from './store-settings';
 
 const fixture = loadListViewsFixture();
 const frozen = (observations: Record<string, unknown>[]) => observations.map(({ text: _text, ...rest }) => rest);
@@ -67,6 +68,86 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
         return { host, recorder };
     };
+
+    it('opts Contexts into status filters while omitted reads keep exact legacy bytes and revisions', async () => {
+        const { host, recorder } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const input = { offset: 0, limit: 100, tokens: ['@phone'], matchMode: 'all' as const };
+        const legacy = value(host.getContextsView(input)), bytes = JSON.stringify(legacy);
+        const detailed = value(host.getContextsView({ ...input, filters: { statuses: ['someday'] } }));
+        expect(detailed).toHaveProperty('filters');
+        expect(detailed.filters?.state).toMatchObject({ statuses: ['someday'] });
+        expect(detailed.rows.every(row => row.status === 'someday')).toBe(true);
+        expect(detailed.revision).not.toBe(legacy.revision);
+        expect(JSON.stringify(value(host.getContextsView(input)))).toBe(bytes);
+        expect(legacy).not.toHaveProperty('filters'); expect(legacy).not.toHaveProperty('canSave');
+        expect(host.getContextsView({ ...input, filters: {}, offset: 1, revision: legacy.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(recorder.log).toEqual([]);
+    });
+
+    it('normalizes cleared sheet statuses before returning the canonical first page', async () => {
+        const { host } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const state = useTaskStore.getState();
+        const tasks = Array.from({ length: 126 }, (_, index) => ({ ...state.tasks[0], id: `ui10-clear-${index}`,
+            title: `Clear ${index}`, status: index % 2 ? 'reference' as const : 'next' as const, projectId: undefined,
+            deletedAt: undefined, contexts: ['@clear'], tags: [] }));
+        useTaskStore.setState({ tasks, projects: [] });
+        const first = value(host.getContextsView({ offset: 0, limit: 50, filters: { statuses: ['next'] },
+            filterSheetOpen: true, filterEdit: { type: 'clear' } }));
+        const canonical = JSON.parse(focusSavedFilterToken(first.filters!.state));
+        const page = host.getContextsView({ offset: 50, limit: 50, filters: canonical,
+            filterSheetOpen: true, savedFilterId: first.savedFilterId, preservedCriteria: first.preservedCriteria, revision: first.revision });
+        expect(page).toMatchObject({ ok: true, value: { revision: first.revision, total: first.total } });
+        expect(first.filters?.state.statuses).toEqual(['inbox', 'next', 'waiting', 'someday']);
+        expect(first.total).toBe(63);
+        const second = value(page);
+        expect(second.rows).toHaveLength(13);
+        expect(new Set([...first.rows, ...second.rows].map(row => row.id)).size).toBe(63);
+        expect([...first.rows, ...second.rows].every(row => row.status === 'next')).toBe(true);
+    });
+
+    it('keeps enhanced paging revisions across native sorted-object serialization', async () => {
+        const { host } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const first = value(host.getContextsView({ offset: 0, limit: 50,
+            filters: { statuses: ['next'], projects: ['excluded-project'] },
+            filterEdit: { type: 'cycleProject', value: 'excluded-project' } }));
+        const canonical = JSON.parse(focusSavedFilterToken(first.filters!.state));
+        const page = host.getContextsView({ offset: 0, limit: 50, filters: canonical,
+            preservedCriteria: first.preservedCriteria, revision: first.revision });
+        expect(page).toMatchObject({ ok: true, value: { revision: first.revision } });
+    });
+
+    it('pages enhanced Contexts with effective edits and more than one hundred projects and saved filters', async () => {
+        const { host, recorder } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const state = useTaskStore.getState(), stamp = fixture.contexts.now;
+        const tasks = Array.from({ length: 126 }, (_, index) => ({ ...state.tasks[0], id: `ui10-${index}`,
+            title: `Someday ${index}`, status: 'someday' as const, projectId: `ui10-project-${index}`, contexts: ['@home'],
+            tags: [], deletedAt: undefined, createdAt: stamp, updatedAt: stamp }));
+        const projects = tasks.map((task, order) => ({ id: task.projectId, title: task.projectId, status: 'active' as const,
+            color: '#123456', order, createdAt: stamp, updatedAt: stamp }));
+        const filters = tasks.map((_, index) => ({ id: `ui10-filter-${index}`, name: `Filter ${index}`, view: 'contexts' as const,
+            criteria: { statuses: ['someday' as const] }, createdAt: stamp, updatedAt: stamp }));
+        useTaskStore.setState({ tasks, projects, settings: { ...state.settings, savedFilters: filters } });
+        const input = { filters: {}, offset: 0, limit: 50 };
+        const first = value(host.getContextsView({ ...input, filterEdit: { type: 'toggleStatus', value: 'someday' } }));
+        expect(first.total).toBe(126); expect(first.rows).toHaveLength(50);
+        expect(first.chips.find(chip => chip.id === '@home')?.count).toBe(126);
+        const canonical = { ...input, filters: first.filters!.state, preservedCriteria: first.preservedCriteria };
+        const second = value(host.getContextsView({ ...canonical, offset: 50, revision: first.revision }));
+        expect(second.revision).toBe(first.revision); expect(second.rows).toHaveLength(50);
+        expect(new Set([...first.rows, ...second.rows].map(row => row.id)).size).toBe(100);
+        expect(host.getContextsView({ ...canonical, filters: { statuses: ['next'] }, offset: 50, revision: first.revision }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(first.savedFilters?.items).toHaveLength(100);
+        const later = value(host.getContextsView({ ...canonical, savedFiltersWindow: { offset: 100, limit: 100, revision: first.revision } }));
+        expect(later.savedFilters?.items).toHaveLength(26);
+        const selected = value(host.getContextsView({ ...input, savedFilterId: 'ui10-filter-125' }));
+        expect(selected.savedFilterId).toBe('ui10-filter-125'); expect(selected.total).toBe(126);
+        const picker = value(host.getContextsView({ ...canonical, filterPicker: { name: 'projects' } }));
+        expect(picker.filterPicker?.total).toBeGreaterThan(100); expect(picker.filterPicker?.items).toHaveLength(100);
+        const last = value(host.getContextsView({ ...canonical, filterPicker: { name: 'projects', offset: 100, limit: 100, revision: picker.revision } }));
+        expect(last.filterPicker?.items.length).toBeGreaterThan(0);
+        expect(recorder.log).toEqual([]);
+    });
 
     it.each(fixture.contexts.scenarios.map((entry) => [entry.name, entry] as const))('Contexts: "%s" like mobile', async (name, entry) => {
         const { host, recorder } = await openHost(fixture.contexts, entry);

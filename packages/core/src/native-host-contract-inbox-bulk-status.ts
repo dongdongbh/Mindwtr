@@ -3,6 +3,8 @@ import { createTasksMoveMethods, readTasksMoveEnvelope, referenceTasksMoveAuthor
     type NativeReferenceTasksMovePrepared } from './native-host-contract-reference-bulk-status';
 import type { ListFilterState } from './list-filter-state';
 import type { TaskGroupBy } from './task-group-sections';
+import type { SomedayGroupBy } from './menu-views-model';
+import type { TaskSortBy, TaskStatus } from './types';
 import { referenceBatchModules } from './store-reference-batch-modules';
 
 export type NativeInboxTasksMoveStatus = 'next' | 'waiting' | 'someday' | 'done' | 'reference';
@@ -10,6 +12,10 @@ export type NativeInboxTasksMoveParams = { groupBy?: TaskGroupBy; collapsedGroup
 export type NativeInboxTasksMoveRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string>;
     source: 'inbox'; status: NativeInboxTasksMoveStatus; params: NativeInboxTasksMoveParams };
 export type NativeInboxTasksMoveResult = { count: number; status: NativeInboxTasksMoveStatus };
+export type NativeStatusListTasksMoveRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string> } & (
+    | { source: 'waiting'; status: Exclude<TaskStatus, 'waiting' | 'archived'>; params: { person?: string } }
+    | { source: 'someday'; status: Exclude<TaskStatus, 'someday' | 'archived'>; params: { sortBy?: TaskSortBy; groupBy?: SomedayGroupBy;
+        showDetails?: boolean; projectsInSections?: boolean; filters?: Partial<ListFilterState> } });
 export type NativeInboxTasksMovePrepared = Omit<NativeReferenceTasksMovePrepared, 'request' | 'result'> & {
     request: NativeInboxTasksMoveRequest; result: NativeInboxTasksMoveResult;
 };

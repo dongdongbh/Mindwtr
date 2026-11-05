@@ -48,6 +48,11 @@ describe('countTasksForIconBadge', () => {
         ], [project({ id: 'waiting', status: 'waiting' }), project({ id: 'someday', status: 'someday' }),
             project({ id: 'active' }), project({ status: 'archived' })], [section], now)).toBe(4);
     });
+    it('ignores Area membership, including tasks and projects detached by an Area delete', () => {
+        expect(countTasksForIconBadge([
+            task({ areaId: 'area' }), task({ projectId: 'project' }), task({ areaId: undefined, projectId: 'detached' }),
+        ], [project({ areaId: 'area' }), project({ id: 'detached', areaId: undefined })], [], now)).toBe(3);
+    });
     it('counts one persisted recurring instance, without expanding future occurrences or mutating data', () => {
         const tasks = [task({ recurrence: { rule: 'daily' } })];
         const before = JSON.stringify(tasks);

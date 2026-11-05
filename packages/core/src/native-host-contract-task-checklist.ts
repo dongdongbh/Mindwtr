@@ -1,22 +1,32 @@
+import { PROJECT_SQLITE_COLUMNS, projectFromSqliteRow } from './project-sync-schema';
+import { SECTION_SQLITE_COLUMNS, sectionFromSqliteRow } from './section-sync-schema';
+import { AREA_SQLITE_COLUMNS, areaFromSqliteRow } from './area-sync-schema';
+import { NATIVE_WIDGET_COMPLETION_BYTES, readNativeWidgetCompletionSource, nativeWidgetSourceTaskID,
+    nativeWidgetCompletionPayload, readNativeWidgetCompletionResult,
+    type NativeWidgetCompletionSource, type NativeWidgetCompletionEnvelope, type NativeWidgetCompletionResult } from './native-widget-completion';
+import { buildWidgetCompletionToken } from './widget-completion-token';
 import type { NativeHostResult } from './native-host-contract';
 import { getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
 import type { PreparedAreaAuthority, PreparedChecklistEffect, PreparedChecklistRawBefore, PreparedNativeSaveBoundary, TaskStore } from './store-types';
 import type { AppData, Area, ChecklistItem, Project, Section, Task } from './types';
-import type { TaskDraftField } from './task-draft';
-import { createTaskDraft } from './task-draft';
+import type { TaskDraft, TaskDraftField } from './task-draft';
+import { createTaskDraft, taskDraftToChangedUpdatePatch, TASK_DRAFT_FIELD_KEYS, isTaskDraftDateInputBaseline } from './task-draft';
+import { applyTaskChecklistEdit, getChecklistEditStatus } from './task-checklist-model';
 import { applyTaskDraftPatch, buildTaskEditUpdatePatch, getTaskEditorBackdatedCompletionStart,
     resolveTaskEditorBackdatedCompletion } from './task-editor-model';
 import {
     nativeTaskDraftPatchValues, readNativeTaskDraftSaveRequest,
-    getNativeTaskScheduleBase, validNativeTaskDraftBases, validNativeTaskDraftScheduleEffect, validRawTask, type NativeTaskDraftSaveRequest,
+    getNativeTaskScheduleBase, validNativeTaskDraftBases, validNativeTaskDraftScheduleEffect, validRawTask, type NativeTaskDraftSaveRequest, type NativeTaskScheduleBase,
 } from './native-host-contract-task-save';
 import { isNativeJsonWithinBytes, readChecklist, toChecklist } from './native-host-contract-task-view';
-import { buildResetTaskChecklistUpdates, planTaskUpdateEffects, prepareTaskUpdatesForStore,
-    planSkippedRecurringOccurrence, planTaskMutations, samePreparedTask, taskEditValuesEqual } from './store-tasks';
-import { createProjectOrderReserver, ensureDeviceId, getNextProjectOrder, getTaskOrder,
+import { buildResetTaskChecklistUpdates, planTaskUpdateEffects, prepareTaskUpdatesForStore, planSkippedRecurringOccurrence, planTaskMutations, samePreparedTask, taskFocusWitnessRow } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
+import { createProjectOrderReserver, ensureDeviceId, getNextProjectOrder, getTaskOrder, selectVisibleProjects, selectVisibleAreas,
     nextRevision } from './store-helpers';
-import { createNativeRequestReceipts, taskRevisionOf, type NativeRequestReceipts } from './native-request-receipts';
-import { compareAreasByOrder, countFocusedTasksBeforeBoundary } from './task-utils';
+import { createNativeRequestReceipts, isNativeRequestReceiptDurable, taskRevisionOf, NativeReceiptSqliteAdapter, type NativeRequestReceipts } from './native-request-receipts';
+import { compareAreasByOrder, countFocusedTasksBeforeBoundary, projectFocusDateValues, type FocusDateProjection } from './task-utils';
+import { validFrozenFocusDate } from './native-host-contract-task-focus';
+import { resolveRowFocusStarAction, getFocusStarBlockedText } from './focus-star';
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { getProjectChoiceState, isSelectableProjectForTaskAssignment } from './project-utils';
 import { buildTaskMovePatch, type TaskMoveDestination } from './task-container-rules';
@@ -26,11 +36,11 @@ import { mergeTaskDraftAttachments } from './attachment-editor-model';
 import { canSkipRecurringTaskOccurrence, matchesAdvanceOneCalendarProjection,
     projectNextRecurringTask, type RecurrenceProjection } from './recurrence';
 import { generateUUID } from './uuid';
-import { getTranslator, resolveI18nText } from './i18n';
+import { getTranslator, resolveI18nText, tFallback } from './i18n';
 import { isTaskActionable, isTaskCancelled, normalizeTaskForLoad, type TaskLoadTemporalContext } from './task-status';
 import { normalizeProjectLifecycleFields } from './project-status';
 import { mapSqliteTaskRow, rawReadTaskSnapshot, TASK_SQLITE_COLUMNS, taskToSqliteRow } from './sqlite-adapter';
-import { rememberRawReadRow } from './sqlite-raw-snapshot';
+import { rememberRawReadRow, rawReadSettingsJson } from './sqlite-raw-snapshot';
 import { sameSectionDeleteJson, sameTaskSqliteRow } from './store-projects/section-actions';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
 import { isProjectedRecurringTaskId } from './recurrence';
@@ -39,6 +49,8 @@ import { formatTaskMarkedDoneMessage } from './undo-task-completion';
 import { logInfo } from './logger';
 import { isTaskEditorTimeSpentEnabled } from './task-editor-schedule';
 import { normalizeTimeSpentMinutes } from './time-spent';
+import { hasTimeComponent } from './date';
+import { normalizeRelativeStartOffset } from './task-relative-start';
 
 export type NativeChecklistSaveRequest = NativeTaskDraftSaveRequest & {
     requestId: string;
@@ -72,6 +84,7 @@ type Witness = {
     direct: Partial<Task>;
     focusCount: number;
     focusLimit: number;
+    focusDates?: FocusDateProjection[];
     cancelMessage?: string;
     cancelUndoLabel?: string;
 };
@@ -97,7 +110,8 @@ export type NativeOwnedCompleteChecklistNoop = {
 };
 export type NativeOwnedCompleteChecklistDecision = { kind: 'changed'; prepared: NativePreparedOwnedCompleteChecklistSave }
     | { kind: 'noop'; prepared: NativeOwnedCompleteChecklistNoop };
-type OwnedChecklistProof = NativePreparedOwnedCompleteChecklistSave | NativeOwnedCompleteChecklistNoop;
+type NativePreparedSelectedChecklistSave = Omit<NativePreparedOwnedCompleteChecklistSave, 'request'> & { request: NativeChecklistSaveRequest };
+type SelectedChecklistProof = NativePreparedSelectedChecklistSave | NativeOwnedCompleteChecklistNoop;
 export type NativeChecklistCancellationEnvelope = {
     request: NativeChecklistSaveRequest & { intent: 'cancel' };
     prepared: NativePreparedChecklistWrite;
@@ -121,9 +135,10 @@ export type NativePreparedOwnedCompleteCancellationUndo = Omit<NativePreparedTas
 export type NativeOwnedCompleteCancellationUndoEnvelope = {
     request: NativeTaskCancellationUndoRequest; prepared: NativePreparedOwnedCompleteCancellationUndo;
 };
-export type NativeTaskCompletionRequest = { id: string; requestId: string; taskRevision: string; source?: 'reference' | 'board' };
+export type NativeTaskCompletionRequest = { id: string; requestId: string; taskRevision: string; source?: 'reference' | 'board' | 'row' };
 type NativeBoardTaskCompletionRequest = NativeTaskCompletionRequest & { source: 'board' };
 type NativeReferenceTaskCompletionRequest = NativeTaskCompletionRequest & { source: 'reference' };
+type NativeRowTaskCompletionRequest = NativeTaskCompletionRequest & { source: 'row' };
 export type NativeTaskCompletionResult = { id: string; completion: {
     completedAt: string; undoEnabled: boolean; message: string; undoLabel: string;
 } };
@@ -139,6 +154,10 @@ export type NativePreparedTaskCompletion = NativePreparedOrdinaryTaskCompletion 
     notice: { message: string; undoLabel: string }; result: NativeTaskCompletionResult;
 } | {
     version: 2; kind: 'boardComplete'; request: NativeBoardTaskCompletionRequest;
+    rawBefore: PreparedChecklistRawBefore; checklist: NativePreparedChecklistWrite;
+    notice: { message: string; undoLabel: string }; result: NativeTaskCompletionResult;
+} | {
+    version: 2; kind: 'rowComplete'; request: NativeRowTaskCompletionRequest;
     rawBefore: PreparedChecklistRawBefore; checklist: NativePreparedChecklistWrite;
     notice: { message: string; undoLabel: string }; result: NativeTaskCompletionResult;
 };
@@ -159,6 +178,10 @@ export type NativePreparedTaskCompletionUndo = NativePreparedOrdinaryTaskComplet
     version: 2; kind: 'boardCompleteUndo'; request: NativeTaskCompletionUndoRequest;
     completion: NativeTaskCompletionEnvelope; rawBefore: PreparedChecklistRawBefore;
     witness: Witness; effect: PreparedChecklistEffect; result: { id: string };
+} | {
+    version: 2; kind: 'rowCompleteUndo'; request: NativeTaskCompletionUndoRequest;
+    completion: NativeTaskCompletionEnvelope; rawBefore: PreparedChecklistRawBefore;
+    witness: Witness; effect: PreparedChecklistEffect; result: { id: string };
 };
 export type NativeTaskCompletionUndoEnvelope = {
     request: NativeTaskCompletionUndoRequest; prepared: NativePreparedTaskCompletionUndo;
@@ -173,6 +196,29 @@ export type NativePreparedReferenceTaskBackdate = {
 export type NativeReferenceTaskBackdateEnvelope = {
     request: NativeReferenceTaskBackdateRequest; prepared: NativePreparedReferenceTaskBackdate;
 };
+export type NativeRowTaskBackdateRequest = NativeRowTaskCompletionRequest & { completedAt: string; timeSpentText: string | null };
+export type NativePreparedRowTaskBackdate = { version: 2; kind: 'rowBackdate'; request: NativeRowTaskBackdateRequest;
+    rawBefore: PreparedChecklistRawBefore; checklist: NativePreparedSelectedChecklistSave; result: { id: string } };
+export type NativeRowTaskBackdateEnvelope = { request: NativeRowTaskBackdateRequest; prepared: NativePreparedRowTaskBackdate };
+export type NativeRowTaskFocusRequest = NativeRowTaskCompletionRequest & { focused: boolean };
+export type NativeRowTaskFocusResult = { id: string; focused: boolean };
+export type NativePreparedRowTaskFocus = { version: 2; kind: 'rowFocus'; request: NativeRowTaskFocusRequest;
+    rawBefore: PreparedChecklistRawBefore; checklist: NativePreparedSelectedChecklistSave; result: NativeRowTaskFocusResult };
+export type NativeRowTaskFocusEnvelope = { request: NativeRowTaskFocusRequest; prepared: NativePreparedRowTaskFocus };
+export type NativeRowTaskFocusPreparation = { kind: 'noop'; result: NativeRowTaskFocusResult }
+    | { kind: 'blocked'; result: { blocked: string; blockedTitle: string } }
+    | { kind: 'prepared'; prepared: NativePreparedRowTaskFocus };
+type RowDatesDraftReader = (value: unknown, source?: Task) => TaskDraft | null;
+export type NativeRowTaskDatesRequest = NativeRowTaskCompletionRequest & { draft: TaskDraft; scheduleBase: NativeTaskScheduleBase };
+export type NativePreparedRowTaskDates = { version: 2; kind: 'rowDates'; request: NativeRowTaskDatesRequest;
+    rawBefore: PreparedChecklistRawBefore; checklist: NativePreparedSelectedChecklistSave; result: { id: string } };
+export type NativeRowTaskDatesEnvelope = { request: NativeRowTaskDatesRequest; prepared: NativePreparedRowTaskDates };
+export type NativeRowTaskDestinationRequest = NativeRowTaskCompletionRequest & { destination: TaskMoveDestination };
+export type NativePreparedRowTaskDestination = { version: 2; kind: 'rowDestination'; request: NativeRowTaskDestinationRequest;
+    rawBefore: PreparedChecklistRawBefore; checklist: NativePreparedSelectedChecklistSave; result: { id: string } };
+export type NativeRowTaskDestinationEnvelope = { request: NativeRowTaskDestinationRequest; prepared: NativePreparedRowTaskDestination };
+export type NativeRowTaskDestinationOptionsInput = NativeReferenceTaskDestinationOptionsInput;
+export type NativeRowTaskDestinationOptions = NativeReferenceTaskDestinationOptions;
 export type NativeReferenceTaskDestinationRequest = NativeReferenceTaskCompletionRequest & { destination: TaskMoveDestination };
 export type NativePreparedReferenceTaskDestination = {
     version: 2; kind: 'referenceDestination'; request: NativeReferenceTaskDestinationRequest;
@@ -223,14 +269,34 @@ export type NativePreparedArchiveTaskCompletedAt = {
 export type NativeArchiveTaskCompletedAtEnvelope = {
     request: NativeArchiveTaskCompletedAtRequest; prepared: NativePreparedArchiveTaskCompletedAt;
 };
+export type NativeInlineChecklistRequest = { id: string; taskRevision: string; requestId: string } & (
+    { action: 'setCompleted'; itemId: string; isCompleted: boolean } | { action: 'append'; title: string }
+);
+export type NativePreparedInlineChecklist = {
+    version: 2; kind: 'inlineChecklist'; request: NativeInlineChecklistRequest;
+    rawBefore: PreparedChecklistRawBefore; checklist: NativePreparedChecklistWrite; result: { id: string };
+};
+export type NativeInlineChecklistEnvelope = { request: NativeInlineChecklistRequest; prepared: NativePreparedInlineChecklist };
+
+export type NativeRowQuickStatusRequest = { id: string; taskRevision: string; requestId: string;
+    status: Exclude<NativeDoneTaskStatus, 'done'> };
+export type NativeRowQuickStatusOptions = { title: string; taskId: string; taskRevision: string; status: Task['status'];
+    options: Array<{ status: NativeDoneTaskStatus; label: string; selected: boolean }> };
+export type NativePreparedRowQuickStatus = Pick<NativePreparedChecklistWrite, 'witness' | 'effect'> & {
+    version: 2; kind: 'rowQuickStatus'; request: NativeRowQuickStatusRequest;
+    rawBefore: PreparedChecklistRawBefore; result: { id: string };
+};
+export type NativeRowQuickStatusEnvelope = { request: NativeRowQuickStatusRequest; prepared: NativePreparedRowQuickStatus };
+
 type NativeHistoryRowEnvelope = NativeDoneTaskStatusEnvelope | NativeDoneTaskCompletedAtEnvelope | NativeArchiveTaskCompletedAtEnvelope;
 type NativeBoundHistoryRowEnvelope = (NativeDoneTaskStatusEnvelope & {
     prepared: NativePreparedDoneTaskStatus & { version: 2 } }) | NativeDoneTaskCompletedAtEnvelope | NativeArchiveTaskCompletedAtEnvelope;
 
 type NativeRawReferenceEnvelope = (NativeTaskCompletionEnvelope & { prepared: NativePreparedTaskCompletion & { version: 2 } })
     | (NativeTaskCompletionUndoEnvelope & { prepared: NativePreparedTaskCompletionUndo & { version: 2 } })
-    | NativeReferenceTaskBackdateEnvelope | NativeReferenceTaskDestinationEnvelope;
-type NativeRawWriteEnvelope = NativeBoundHistoryRowEnvelope | NativeRawReferenceEnvelope;
+    | NativeReferenceTaskBackdateEnvelope | NativeRowTaskBackdateEnvelope | NativeReferenceTaskDestinationEnvelope | NativeRowTaskDestinationEnvelope | NativeRowTaskDatesEnvelope | NativeRowTaskFocusEnvelope;
+type NativeRawChecklistEnvelope = NativeRawReferenceEnvelope | NativeInlineChecklistEnvelope | NativeRowQuickStatusEnvelope;
+type NativeRawWriteEnvelope = NativeBoundHistoryRowEnvelope | NativeRawChecklistEnvelope;
 
 const LIMIT_BYTES = 2_000_000;
 const COMPLETION_BYTES = 2_100_000;
@@ -310,16 +376,66 @@ const readBoardCompletionRequest = (value: unknown): NativeBoardTaskCompletionRe
     const base = readCompletionRequest({ id: input.id, requestId: input.requestId, taskRevision: input.taskRevision });
     return base ? { ...base, source: 'board' } : null;
 };
-const readReferenceBackdateRequest = (value: unknown): NativeReferenceTaskBackdateRequest | null => {
+const readRowCompletionRequest = (value: unknown): NativeRowTaskCompletionRequest | null => {
+    const input = detach(value);
+    if (!isRecord(input) || !exact(input, ['id', 'requestId', 'taskRevision', 'source']) || input.source !== 'row') return null;
+    const base = readCompletionRequest({ id: input.id, requestId: input.requestId, taskRevision: input.taskRevision });
+    return base ? { ...base, source: 'row' } : null;
+};
+const readBackdateRequest = (value: unknown, source: 'reference' | 'row'): NativeReferenceTaskBackdateRequest | NativeRowTaskBackdateRequest | null => {
     const input = detach(value, 4096);
     if (!isRecord(input) || !exact(input, ['id', 'requestId', 'taskRevision', 'source', 'completedAt', 'timeSpentText'])
-        || input.source !== 'reference' || typeof input.completedAt !== 'string' || input.completedAt.length > 200
+        || input.source !== source || typeof input.completedAt !== 'string' || input.completedAt.length > 200
         || !(input.timeSpentText === null || typeof input.timeSpentText === 'string' && input.timeSpentText.length <= 200)
         || !resolveTaskEditorBackdatedCompletion({ completedAt: input.completedAt,
             ...(input.timeSpentText !== null ? { timeSpentText: input.timeSpentText as string } : {}) })) return null;
     const base = readCompletionRequest({ id: input.id, requestId: input.requestId, taskRevision: input.taskRevision });
-    return base ? { ...base, source: 'reference', completedAt: input.completedAt, timeSpentText: input.timeSpentText as string | null } : null;
+    return base ? { ...base, source, completedAt: input.completedAt, timeSpentText: input.timeSpentText as string | null } : null;
 };
+const readReferenceBackdateRequest = (value: unknown): NativeReferenceTaskBackdateRequest | null =>
+    readBackdateRequest(value, 'reference') as NativeReferenceTaskBackdateRequest | null;
+const readRowBackdateRequest = (value: unknown): NativeRowTaskBackdateRequest | null =>
+    readBackdateRequest(value, 'row') as NativeRowTaskBackdateRequest | null;
+const readRowFocusRequest = (value: unknown): NativeRowTaskFocusRequest | null => {
+    const input = detach(value, 4096);
+    if (!isRecord(input) || !exact(input, ['id', 'requestId', 'taskRevision', 'source', 'focused']) || typeof input.focused !== 'boolean') return null;
+    const row = readRowCompletionRequest({ id: input.id, requestId: input.requestId, taskRevision: input.taskRevision, source: input.source });
+    return row ? { ...row, focused: input.focused } : null;
+};
+const rowFocusSaveRequest = (source: Task, request: NativeRowTaskFocusRequest): NativeChecklistSaveRequest => ({
+    id: source.id, requestId: request.requestId,
+    base: { focusedToday: source.isFocusedToday === true, ...(source.status === 'inbox' && request.focused ? { status: source.status } : {}) },
+    patch: { focusedToday: request.focused, ...(source.status === 'inbox' && request.focused ? { status: 'next' as const } : {}) },
+    scheduleBase: getNativeTaskScheduleBase(source), checklist: { base: toChecklist(source.checklist), value: toChecklist(source.checklist) },
+});
+const rowFocusPeers = (lists: Lists, source: Task) => lists.tasks.filter(row => !row.deletedAt && (row.id === source.id
+    || row.isFocusedToday === true || source.projectId && row.projectId === source.projectId && rowDatesSource(row)))
+    .map(taskFocusWitnessRow).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const compactRowFocusPeer = (row: Task): Task => ({
+    id: row.id, title: '', status: row.status, createdAt: row.createdAt, updatedAt: row.createdAt, tags: [], contexts: [],
+    ...Object.fromEntries(['projectId', 'sectionId', 'startTime', 'dueDate', 'reviewAt', 'order', 'orderNum', 'isFocusedToday', 'recurrence']
+        .filter(field => row[field as keyof Task] !== undefined).map(field => [field, row[field as keyof Task]])),
+});
+const rowFocusAction = (witness: Witness) => resolveRowFocusStarAction(witness.source, {
+    tasks: witness.lists.tasks, projects: witness.lists.projects, sections: witness.lists.sections,
+    focusedCount: witness.focusCount, focusTaskLimit: witness.focusLimit, now: new Date(witness.preparedAt),
+    endOfTodayIso: witness.futureBoundary, frozenDates: witnessDates(witness),
+});
+const readRowDatesIdentity = (value: unknown): { input: NativeRowTaskDatesRequest; row: NativeRowTaskCompletionRequest } | null => {
+    const input = detach(value, COMPLETION_BYTES);
+    if (!isRecord(input) || !exact(input, ['id', 'requestId', 'taskRevision', 'source', 'draft', 'scheduleBase'])
+        || !isRecord(input.draft) || !isRecord(input.scheduleBase)) return null;
+    const row = readRowCompletionRequest({ id: input.id, requestId: input.requestId, taskRevision: input.taskRevision, source: input.source });
+    return row ? { input: input as unknown as NativeRowTaskDatesRequest, row } : null;
+};
+const readRowDatesRequest = (value: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean,
+    readDraft: RowDatesDraftReader | undefined, source: Task): NativeRowTaskDatesRequest | null => {
+    const identity = readRowDatesIdentity(value);
+    if (!identity || !readDraft?.(identity.input.draft, source)
+        || !readNativeTaskDraftSaveRequest({ id: identity.row.id, base: {}, patch: {}, scheduleBase: identity.input.scheduleBase }, validateField, true)) return null;
+    return identity.input;
+};
+const rowDatesSource = (source: Task): boolean => ['inbox', 'next', 'waiting', 'someday'].includes(source.status);
 const readReferenceDestinationRequest = (value: unknown): NativeReferenceTaskDestinationRequest | null => {
     const input = detach(value, 4096);
     if (!isRecord(input) || !exact(input, ['id', 'requestId', 'taskRevision', 'source', 'destination'])
@@ -330,6 +446,17 @@ const readReferenceDestinationRequest = (value: unknown): NativeReferenceTaskDes
             || typeof destination.id !== 'string' || !destination.id.trim() || destination.id.length > 500) return null;
     const base = readCompletionRequest({ id: input.id, requestId: input.requestId, taskRevision: input.taskRevision });
     return base ? { ...base, source: 'reference', destination: destination as TaskMoveDestination } : null;
+};
+const readRowDestinationRequest = (value: unknown): NativeRowTaskDestinationRequest | null => {
+    const input = detach(value, 4096);
+    if (!isRecord(input) || !exact(input, ['id', 'requestId', 'taskRevision', 'source', 'destination'])
+        || input.source !== 'row' || !isRecord(input.destination)) return null;
+    const destination = input.destination;
+    if (destination.kind === 'none' ? !exact(destination, ['kind'])
+        : !['project', 'area'].includes(destination.kind as string) || !exact(destination, ['kind', 'id'])
+            || typeof destination.id !== 'string' || !destination.id.trim() || destination.id.length > 500) return null;
+    const base = readCompletionRequest({ id: input.id, requestId: input.requestId, taskRevision: input.taskRevision });
+    return base ? { ...base, source: 'row', destination: destination as TaskMoveDestination } : null;
 };
 const referenceDestinationAvailable = (destination: TaskMoveDestination, lists: Pick<Lists, 'projects' | 'areas'>): boolean =>
     destination.kind === 'none' || (destination.kind === 'project'
@@ -367,20 +494,111 @@ const completedAtSaveRequest = (source: Task, request: NativeDoneTaskCompletedAt
 const referenceCompletionSaveRequest = (source: Task, requestId: string): NativeChecklistSaveRequest => ({
     ...completionSaveRequest(source, requestId), intent: 'referenceComplete',
 });
-const referenceBackdateSaveRequest = (source: Task, request: NativeReferenceTaskBackdateRequest): NativeChecklistSaveRequest => {
+const backdateSaveRequest = (source: Task, request: NativeReferenceTaskBackdateRequest | NativeRowTaskBackdateRequest): NativeChecklistSaveRequest => {
     const resolved = resolveTaskEditorBackdatedCompletion({ completedAt: request.completedAt,
         ...(request.timeSpentText !== null ? { timeSpentText: request.timeSpentText } : {}) })!;
-    return { ...completionSaveRequest(source, request.requestId), intent: 'referenceBackdate',
+    return { ...completionSaveRequest(source, request.requestId), ...(request.source === 'reference' ? { intent: 'referenceBackdate' as const } : {}),
         base: { status: source.status, completedAt: source.completedAt || '',
             ...(request.timeSpentText !== null ? { timeSpentMinutes: source.timeSpentMinutes ?? null } : {}) },
         patch: { status: 'done', completedAt: resolved.completedAt,
             ...(request.timeSpentText !== null ? { timeSpentMinutes: resolved.timeSpentMinutes ?? null } : {}) } };
 };
+const referenceBackdateSaveRequest = (source: Task, request: NativeReferenceTaskBackdateRequest): NativeChecklistSaveRequest => backdateSaveRequest(source, request);
 const referenceDestinationSaveRequest = (source: Task, request: NativeReferenceTaskDestinationRequest): NativeChecklistSaveRequest => {
     const patch = buildTaskMovePatch(request.destination, source);
     return { ...completionSaveRequest(source, request.requestId), intent: 'referenceDestination',
         base: { projectId: source.projectId ?? '', sectionId: source.sectionId ?? '', areaId: source.areaId ?? '' },
         patch: { projectId: patch.projectId ?? '', sectionId: patch.sectionId ?? '', areaId: patch.areaId ?? '' } };
+};
+const rowDestinationSaveRequest = (source: Task, request: NativeRowTaskDestinationRequest): NativeChecklistSaveRequest => {
+    const patch = buildTaskMovePatch(request.destination, source);
+    return { ...completionSaveRequest(source, request.requestId),
+        base: { projectId: source.projectId ?? '', sectionId: source.sectionId ?? '', areaId: source.areaId ?? '' },
+        patch: { projectId: patch.projectId ?? '', sectionId: patch.sectionId ?? '', areaId: patch.areaId ?? '' } };
+};
+const rowDatesSaveRequest = (source: Task, request: NativeRowTaskDatesRequest, readDraft?: RowDatesDraftReader): NativeChecklistSaveRequest | null => {
+    const draft = readDraft?.(request.draft, source), baseline = draft?.dateInputBaseline;
+    if (!draft || !isTaskDraftDateInputBaseline(baseline) || baseline.taskId !== source.id
+        || !same(getNativeTaskScheduleBase(source), request.scheduleBase)
+        || !(['startTime', 'dueDate', 'reviewAt'] as const).every(field => baseline[field].raw === (source[field] ?? null))) return null;
+    const opening = createTaskDraft(source);
+    for (const field of ['startTime', 'dueDate', 'reviewAt'] as const) opening[field] = baseline[field].input;
+    if (TASK_DRAFT_FIELD_KEYS.some(field => !['startTime', 'dueDate', 'relativeStartOffset'].includes(field) && !same(draft[field], opening[field]))
+        || draft.relativeStartOffset !== undefined && !same(draft.relativeStartOffset, opening.relativeStartOffset)) return null;
+    const changed = taskDraftToChangedUpdatePatch(draft, source);
+    if (!changed || Object.keys(changed).some(field => !['startTime', 'dueDate', 'relativeStartOffset'].includes(field))) return null;
+    const fields = Object.keys(changed) as Array<'startTime' | 'dueDate' | 'relativeStartOffset'>;
+    return { id: source.id, requestId: request.requestId, scheduleBase: request.scheduleBase,
+        base: Object.fromEntries(fields.map(field => [field, field === 'relativeStartOffset' ? opening.relativeStartOffset ?? null : baseline[field].input])),
+        patch: Object.fromEntries(fields.map(field => [field, field === 'relativeStartOffset' ? changed[field] ?? null : changed[field] ?? ''])),
+        checklist: { base: toChecklist(source.checklist), value: toChecklist(source.checklist) } };
+};
+// A linked date uses local calendar setters in RN. Retain the nominal wall
+// input as an existing frozen-date record so a cold process never reparses it.
+const rowDatesRelativeNominal = (source: Task, request: NativeChecklistSaveRequest, dates: ReadonlyMap<string, FocusDateProjection>) => {
+    if (!own(request.patch, 'relativeStartOffset') || request.patch.relativeStartOffset == null) return null;
+    const offset = normalizeRelativeStartOffset(request.patch.relativeStartOffset);
+    if (!offset || !same(offset, normalizeRelativeStartOffset(source.relativeStartOffset))) throw new Error('Dates cannot change the relative link');
+    const due = own(request.patch, 'dueDate') ? request.patch.dueDate || undefined : source.dueDate;
+    const parsed = due && dates.get(due);
+    if (!due || !parsed || parsed.parsedAt === null || parsed.parsedOffsetMinutes === null
+        || !hasTimeComponent(due) && ['minute', 'hour'].includes(offset.unit)) throw new Error('Dates relative Due is invalid');
+    const wall = new Date(parsed.parsedAt - parsed.parsedOffsetMinutes * 60_000);
+    if (offset.unit === 'minute') wall.setUTCMinutes(wall.getUTCMinutes() + offset.amount);
+    else if (offset.unit === 'hour') wall.setUTCHours(wall.getUTCHours() + offset.amount);
+    else wall.setUTCDate(wall.getUTCDate() + offset.amount * (offset.unit === 'week' ? 7 : 1));
+    const iso = wall.toISOString(), nominal = hasTimeComponent(due) ? iso.slice(0, -1) : iso.slice(0, 10);
+    return { due, offset, nominal };
+};
+const rowDatesFrozenRelative = (source: Task, request: NativeChecklistSaveRequest, dates: ReadonlyMap<string, FocusDateProjection>) => {
+    const link = rowDatesRelativeNominal(source, request, dates); if (!link) return null;
+    const parsed = dates.get(link.nominal);
+    if (!parsed || !validFrozenFocusDate(parsed) || parsed.parsedAt === null || parsed.parsedOffsetMinutes === null)
+        throw new Error('Dates relative calendar projection is missing');
+    const wall = new Date(parsed.parsedAt - parsed.parsedOffsetMinutes * 60_000).toISOString();
+    const startTime = /(?:Z|[+-]\d{2}:?\d{2})$/.test(link.due) ? new Date(parsed.parsedAt).toISOString()
+        : hasTimeComponent(link.due) ? wall.slice(0, 16) : wall.slice(0, 10);
+    const requested = own(request.patch, 'startTime') ? request.patch.startTime || undefined : source.startTime;
+    if (startTime !== requested) throw new Error('Dates linked Start is not bound to requested calendar result');
+    return { startTime, relativeStartOffset: link.offset };
+};
+// rescheduleTask uses Date.parse: an ISO date-only value is UTC midnight,
+// whereas a floating datetime is local. Keep that distinction separate from
+// Focus's local date-only parser, using an explicit nominal record when local.
+const rowDatesRescheduleParse = (value: string | undefined): { instant: number | null } | { nominal: string } => {
+    if (!value) return { instant: null };
+    if (/^[+-]?\d{4,6}(?:-\d{2}(?:-\d{2})?)?$/.test(value)
+        || /(?:Z|[+-]\d{2}:?\d{2}|\b(?:GMT|UTC|EST|EDT|CST|CDT|MST|MDT|PST|PDT))$/i.test(value)) {
+        const instant = Date.parse(value); return { instant: Number.isFinite(instant) ? instant : null };
+    }
+    const floating = /^\d{4}-\d{2}-\d{2}[T ]/.test(value);
+    const wall = Date.parse(value + (floating ? 'Z' : ' GMT'));
+    if (Number.isFinite(wall)) return { nominal: new Date(wall).toISOString().slice(0, -1) };
+    if (!Number.isFinite(Date.parse(value))) return { instant: null };
+    throw new Error('Dates reschedule parse cannot produce a bounded calendar proof');
+};
+const rowDatesFrozenDateParse = (value: string | undefined, dates: ReadonlyMap<string, FocusDateProjection>): number | null => {
+    const parsed = rowDatesRescheduleParse(value); if ('instant' in parsed) return parsed.instant;
+    const frozen = dates.get(parsed.nominal), raw = value && dates.get(value);
+    if (!frozen || !validFrozenFocusDate(frozen) || frozen.parsedAt === null
+        || raw && raw.parsedAt !== null && raw.parsedAt !== frozen.parsedAt)
+        throw new Error('Dates reschedule parse is not bound to the raw Due');
+    return frozen.parsedAt;
+};
+const rowDatesFrozenPushCount = (source: Task, request: NativeChecklistSaveRequest, dates: ReadonlyMap<string, FocusDateProjection>) => {
+    const oldAt = rowDatesFrozenDateParse(source.dueDate, dates), nextAt = rowDatesFrozenDateParse(request.patch.dueDate || undefined, dates);
+    return oldAt !== null && nextAt !== null && nextAt > oldAt ? (source.pushCount ?? 0) + 1 : source.pushCount;
+};
+const rowDatesFocusDates = (source: Task, request: NativeChecklistSaveRequest, values: string[]): FocusDateProjection[] => {
+    const parseValues = own(request.patch, 'dueDate') ? [source.dueDate, request.patch.dueDate || undefined].flatMap(value => {
+        const parsed = rowDatesRescheduleParse(value); return 'nominal' in parsed ? [parsed.nominal] : [];
+    }) : [];
+    const all = [...values, ...parseValues], initial = projectFocusDateValues(all);
+    const link = rowDatesRelativeNominal(source, request, new Map(initial.map(row => [row.value, row])));
+    if (!link) return initial;
+    const records = projectFocusDateValues([...all, link.nominal]);
+    const relative = rowDatesFrozenRelative(source, request, new Map(records.map(row => [row.value, row])));
+    return relative ? projectFocusDateValues([...all, link.nominal, relative.startTime]) : records;
 };
 const isReferenceMenuRequest = (request: NativeChecklistWriteRequest): boolean =>
     isSave(request) && (request.intent === 'referenceStatus' || request.intent === 'referenceComplete' || request.intent === 'referenceBackdate' || request.intent === 'referenceDestination');
@@ -433,6 +651,9 @@ const sameBoardCompletionContainer = (source: Task, lists: Pick<Lists, 'projects
 export const canCompleteNativeBoardTask = (task: Task, projects: readonly Project[], sections: readonly Section[], readOnly = false): boolean =>
     canCompleteNativeTask(task, projects, readOnly) && ['inbox', 'next', 'waiting', 'someday'].includes(task.status)
     && boardCompletionContainer(task, { projects, sections }) !== null;
+const canCompleteNativeRowTask = (task: Task, projects: readonly Project[], sections: readonly Section[], readOnly = false): boolean =>
+    !readOnly && !task.deletedAt && !task.purgedAt && task.status === 'archived'
+    && !isProjectedRecurringTaskId(task.id) && boardCompletionContainer(task, { projects, sections }) !== null;
 const boardUndoContainerMatches = (completion: NativeTaskCompletionEnvelope, source: Task, lists: Pick<Lists, 'projects' | 'sections'>): boolean => {
     const after = completion.prepared.checklist.effect.tasks.find(row => row.after.id === completion.request.id)?.after;
     if (!after || (source.projectId ?? null) !== (after.projectId ?? null) || (source.sectionId ?? null) !== (after.sectionId ?? null)
@@ -514,9 +735,11 @@ const readRequest = (value: unknown, validateField: (field: TaskDraftField, valu
 
 // This selection is closed by the internal factory, never by a request flag.
 type ChecklistSelection = {
-    readRequest: typeof readRequest; mergeAttachments: typeof mergeNativeTaskLinkHalf;
+    kind: 'ownedComplete' | 'rowQuickStatus' | 'rowBackdate' | 'rowDestination' | 'rowDates' | 'rowFocus';
+    readRequest: typeof readRequest; mergeAttachments?: typeof mergeNativeTaskLinkHalf;
 };
 const ownedChecklistSelection: ChecklistSelection = {
+    kind: 'ownedComplete',
     readRequest: (value, validateField) => {
         const input = detach(value, 8 * 1024 * 1024);
         if (!isRecord(input) || !exact(input, ['id', 'requestId', 'base', 'patch', 'scheduleBase', 'checklist', 'attachments',
@@ -537,6 +760,77 @@ const ownedChecklistSelection: ChecklistSelection = {
     mergeAttachments: (stored, half) => readNativeAttachments(mergeTaskDraftAttachments(stored, half.base, half.value)),
 };
 
+const rowQuickStatusSelection: ChecklistSelection = {
+    kind: 'rowQuickStatus',
+    readRequest: (value, validateField) => {
+        const request = readRequest(value, validateField);
+        return request && isSave(request) && !request.intent && !request.attachments && !request.recurrenceBase
+            && exact(request.base, ['status']) && exact(request.patch, ['status'])
+            && request.patch.status !== 'done' && DONE_STATUS_OPTIONS.includes(request.patch.status as NativeDoneTaskStatus)
+            && same(request.checklist.base, request.checklist.value) ? request : null;
+    },
+};
+// This parser is selected only by the explicit row wrapper. Generic Save keeps
+// its current grammar and cannot validate or commit the selected v2 proof.
+const rowBackdateSelection: ChecklistSelection = {
+    kind: 'rowBackdate',
+    readRequest: (value, validateField) => {
+        const v = detach(value);
+        if (!isRecord(v) || !exact(v, ['id', 'requestId', 'base', 'patch', 'scheduleBase', 'checklist'])
+            || typeof v.requestId !== 'string' || !UUID.test(v.requestId) || !isRecord(v.base) || !isRecord(v.patch)
+            || !isRecord(v.checklist) || !exact(v.checklist, ['base', 'value'])) return null;
+        const minutes = own(v.patch, 'timeSpentMinutes');
+        if (!exact(v.base, ['status', 'completedAt', ...(minutes ? ['timeSpentMinutes'] : [])])
+            || !exact(v.patch, ['status', 'completedAt', ...(minutes ? ['timeSpentMinutes'] : [])])
+            || v.base.status === 'done' || !['inbox', 'next', 'waiting', 'someday', 'reference', 'archived'].includes(String(v.base.status))
+            || v.patch.status !== 'done' || typeof v.patch.completedAt !== 'string'
+            || !resolveTaskEditorBackdatedCompletion({ completedAt: v.patch.completedAt })) return null;
+        const priorCompletedAt = v.base.completedAt;
+        const parsed = readNativeTaskDraftSaveRequest({ id: v.id, base: v.base, patch: v.patch, scheduleBase: v.scheduleBase },
+            (field, input) => field === 'completedAt' ? typeof input === 'string' && input.length <= 200
+                && (input === priorCompletedAt || resolveTaskEditorBackdatedCompletion({ completedAt: input }) !== null) : validateField(field, input), true, false, true);
+        const base = readChecklist(v.checklist.base, true), checklist = readChecklist(v.checklist.value, true);
+        return parsed && base && checklist && same(base, checklist) ? { ...parsed, requestId: v.requestId, checklist: { base, value: checklist } } : null;
+    },
+};
+const rowDestinationSelection: ChecklistSelection = {
+    kind: 'rowDestination',
+    readRequest: (value, validateField) => {
+        const request = readRequest(value, validateField);
+        return request && isSave(request) && !request.intent && !request.attachments && !request.recurrenceBase
+            && exact(request.base, ['projectId', 'sectionId', 'areaId']) && exact(request.patch, ['projectId', 'sectionId', 'areaId'])
+            && same(request.checklist.base, request.checklist.value) ? request : null;
+    },
+};
+const rowDatesSelection: ChecklistSelection = {
+    kind: 'rowDates',
+    readRequest: (value, validateField) => {
+        const request = readRequest(value, validateField);
+        return request && isSave(request) && !request.intent && !request.attachments && !request.recurrenceBase
+            && exact(request.base, Object.keys(request.patch))
+            && Object.keys(request.patch).every(field => ['startTime', 'dueDate', 'relativeStartOffset'].includes(field))
+            && same(request.checklist.base, request.checklist.value) ? request : null;
+    },
+};
+const rowFocusSelection: ChecklistSelection = {
+    kind: 'rowFocus',
+    readRequest: (value, validateField) => {
+        const request = readRequest(value, validateField);
+        const promoted = request && isSave(request) && own(request.patch, 'status');
+        return request && isSave(request) && !request.intent && !request.attachments && !request.recurrenceBase
+            && exact(request.base, ['focusedToday', ...(promoted ? ['status'] : [])])
+            && exact(request.patch, ['focusedToday', ...(promoted ? ['status'] : [])])
+            && typeof request.patch.focusedToday === 'boolean'
+            && (!promoted || request.base.status === 'inbox' && request.patch.status === 'next' && request.patch.focusedToday === true)
+            && same(request.checklist.base, request.checklist.value) ? request : null;
+    },
+};
+const frozenRowSelection = (selection?: ChecklistSelection) => selection?.kind === 'rowQuickStatus' || selection?.kind === 'rowBackdate' || selection?.kind === 'rowDestination' || selection?.kind === 'rowDates' || selection?.kind === 'rowFocus';
+const rowQuickStatusSaveRequest = (source: Task, request: NativeRowQuickStatusRequest): NativeChecklistSaveRequest => ({
+    id: source.id, requestId: request.requestId, base: { status: source.status }, patch: { status: request.status },
+    scheduleBase: getNativeTaskScheduleBase(source), checklist: { base: toChecklist(source.checklist), value: toChecklist(source.checklist) },
+});
+
 const futureBoundary = (preparedAt: string) => {
     const end = new Date(preparedAt);
     end.setHours(23, 59, 59, 999);
@@ -556,9 +850,26 @@ const restoreClears = (value: Partial<Task>, fields: string[]): Partial<Task> =>
 const validClears = (value: Partial<Task>, fields: string[]) => fields.every((field) =>
     typeof field === 'string' && field.length <= 100 && !own(value, field))
     && new Set(fields).size === fields.length;
+const widgetCompletionInstant = (source: NativeWidgetCompletionSource, preparedAt: string): string | undefined =>
+    source.createdAt > 0 && source.createdAt <= Date.parse(preparedAt) ? new Date(source.createdAt).toISOString() : undefined;
 const directSaveUpdates = (source: Task, request: NativeChecklistSaveRequest, preparedAt?: string,
-    selection?: ChecklistSelection, boardCompletion = false): Partial<Task> | null => {
-    if (boardCompletion) return same(request, completionSaveRequest(source, request.requestId)) ? { status: 'done' } : null;
+    selection?: ChecklistSelection, directCompletion = false, widgetSource?: NativeWidgetCompletionSource): Partial<Task> | null => {
+    if (selection?.kind === 'rowFocus') return { isFocusedToday: request.patch.focusedToday, ...(own(request.patch, 'status') ? { status: request.patch.status } : {}) };
+    if (selection?.kind === 'rowQuickStatus') return { status: request.patch.status };
+    if (selection?.kind === 'rowDates') return Object.fromEntries(Object.entries(request.patch).map(([field, value]) => [field,
+        field === 'relativeStartOffset' ? value ?? undefined : value || undefined]));
+    if (selection?.kind === 'rowDestination') return {
+        projectId: request.patch.projectId || undefined, sectionId: request.patch.sectionId || undefined, areaId: request.patch.areaId || undefined,
+    };
+    if (selection?.kind === 'rowBackdate') return { status: 'done', completedAt: request.patch.completedAt,
+        ...(own(request.patch, 'timeSpentMinutes') ? { timeSpentMinutes: request.patch.timeSpentMinutes ?? undefined } : {}) };
+    if (widgetSource) {
+        if (nativeWidgetSourceTaskID(widgetSource) !== source.id || buildWidgetCompletionToken(source) !== widgetSource.token
+            || !same(request, completionSaveRequest(source, widgetSource.actionId)) || !preparedAt) return null;
+        const completedAt = widgetCompletionInstant(widgetSource, preparedAt);
+        return { status: 'done', ...(completedAt ? { completedAt } : {}) };
+    }
+    if (directCompletion) return same(request, completionSaveRequest(source, request.requestId)) ? { status: 'done' } : null;
     if (request.intent === 'referenceDestination') return {
         projectId: request.patch.projectId || undefined, sectionId: request.patch.sectionId || undefined, areaId: request.patch.areaId || undefined,
     };
@@ -587,13 +898,15 @@ const directSaveUpdates = (source: Task, request: NativeChecklistSaveRequest, pr
     return updates;
 };
 const temporal = new Set(['startTime', 'dueDate', 'relativeStartOffset', 'reviewAt']);
-const directIsBound = (source: Task, request: NativeChecklistSaveRequest, witness: Witness, selection?: ChecklistSelection, boardCompletion = false): boolean => {
-    const expected = directSaveUpdates(source, request, witness.preparedAt, selection, boardCompletion);
+const directIsBound = (source: Task, request: NativeChecklistSaveRequest, witness: Witness, selection?: ChecklistSelection, directCompletion = false, widgetSource?: NativeWidgetCompletionSource): boolean => {
+    const expected = directSaveUpdates(source, request, witness.preparedAt, selection, directCompletion, widgetSource);
     if (!expected || !validClears(witness.direct, witness.directClears)) return false;
     const frozen = restoreClears(witness.direct, witness.directClears);
     const names = new Set([...Object.keys(expected), ...Object.keys(frozen)]);
     for (const name of names) {
-        if (temporal.has(name)) {
+        if (selection?.kind === 'rowDates') {
+            if (!same(expected[name as keyof Task], frozen[name as keyof Task]) || own(expected, name) !== own(frozen, name)) return false;
+        } else if (temporal.has(name)) {
             // Date/link projections can depend on the preparing process's zone.
             // Only fields actually requested (and their linked start) may vary.
             if (!own(request.patch, name)
@@ -605,6 +918,11 @@ const directIsBound = (source: Task, request: NativeChecklistSaveRequest, witnes
     return true;
 };
 const deviceId = (witness: Witness) => witness.deviceIdBefore ?? witness.deviceIdToInitialize ?? 'native-noop-calculation';
+const witnessDates = (witness: Witness) => witness.focusDates && new Map(witness.focusDates.map(row => [row.value, row]));
+const witnessTemporal = (witness: Witness): TaskLoadTemporalContext | undefined => {
+    const dates = witnessDates(witness);
+    return dates && { futureBoundary: witness.futureBoundary, dates };
+};
 const effectResult = (kind: 'save' | 'reset', effect: PreparedChecklistEffect,
     request: NativeChecklistWriteRequest, witness: Witness): NativeChecklistResult => {
     const updated = effect.tasks.find((row) => row.after.id === effect.sourceBefore.id)?.after;
@@ -625,11 +943,12 @@ const effectResult = (kind: 'save' | 'reset', effect: PreparedChecklistEffect,
 };
 
 const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witness: Witness,
-    allowIds = false, undo = false, selection?: ChecklistSelection, boardCompletion = false): {
+    allowIds = false, undo = false, selection?: ChecklistSelection, directCompletion = false, widgetSource?: NativeWidgetCompletionSource): {
     effect: PreparedChecklistEffect; result: NativeChecklistResult;
 } => {
     const source = witness.source;
     const lists = witness.lists;
+    const dates = frozenRowSelection(selection) ? witnessDates(witness) : undefined;
     let tasks: Task[];
     let projects: Project[];
     let sections: Section[];
@@ -639,17 +958,33 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
     let direct: Partial<Task> = {};
     let referenceFillsFocusSlot = false;
     if (kind === 'save' && isSave(request)) {
-        if (selection && !undo && !directIsBound(source, request, witness, selection)) throw new Error('Owned direct update is not bound');
-        if (request.intent === 'referenceBackdate'
+        if ((selection || widgetSource) && !undo && !directIsBound(source, request, witness, selection, directCompletion, widgetSource)) throw new Error('Owned direct update is not bound');
+        if ((request.intent === 'referenceBackdate' || selection?.kind === 'rowBackdate')
             && isTaskEditorTimeSpentEnabled(witness.settings) !== own(request.patch, 'timeSpentMinutes'))
             throw new Error('Reference completion minutes feature changed');
         direct = restoreClears(witness.direct, witness.directClears);
+        if (selection?.kind === 'rowFocus') {
+            const action = rowFocusAction(witness);
+            if (!rowDatesSource(source) || source.isFocusedToday === direct.isFocusedToday || !action.canToggle
+                || !same(action.patch, direct) || witness.focusLimit !== normalizeFocusTaskLimit(witness.settings.gtd?.focusTaskLimit)
+                || witness.focusCount !== countFocusedTasksBeforeBoundary(lists.tasks, witness.futureBoundary, dates))
+                throw new Error('Row Focus is not bound to current eligibility');
+        }
         const prepared = prepareTaskUpdatesForStore({ task: source, updates: direct,
             allProjects: lists.projects, allSections: lists.sections, allAreas: lists.areas,
             settings: witness.settings, futureBoundary: witness.futureBoundary,
-            nowMs: Date.parse(witness.preparedAt), reserveProjectOrder: !boardCompletion,
-            projectOrderReserver: boardCompletion || request.intent === 'referenceDestination' ? undefined : createProjectOrderReserver(lists.tasks) });
+            futureDates: dates,
+            nowMs: Date.parse(witness.preparedAt), reserveProjectOrder: !directCompletion,
+            projectOrderReserver: directCompletion || request.intent === 'referenceDestination' || selection?.kind === 'rowDestination' ? undefined : createProjectOrderReserver(lists.tasks) });
         if (!prepared.ok) throw new Error(prepared.error);
+        if (selection?.kind === 'rowQuickStatus') {
+            if (witness.focusLimit !== normalizeFocusTaskLimit(witness.settings.gtd?.focusTaskLimit))
+                throw new Error('Row Focus limit is not bound to settings');
+            referenceFillsFocusSlot = countFocusedTasksBeforeBoundary([source], witness.futureBoundary, dates) === 0
+                && countFocusedTasksBeforeBoundary([{ ...source, ...prepared.updates }], witness.futureBoundary, dates) === 1;
+            if (referenceFillsFocusSlot && witness.focusCount >= witness.focusLimit)
+                throw new Error(`Focus limit of ${witness.focusLimit} reached`);
+        }
         if (isReferenceOperation(request)) {
             if (witness.focusLimit !== normalizeFocusTaskLimit(witness.settings.gtd?.focusTaskLimit))
                 throw new Error('Reference Focus limit is not bound to settings');
@@ -674,13 +1009,21 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
         };
         // A clean Skip has one lifecycle transition. A dirty Skip first resolves
         // the ordinary Save, then archives that row in the same atomic effect.
-        const hasDraftUpdate = selection && !skip ? Object.keys(direct).some((field) => !same(source[field as keyof Task], direct[field as keyof Task]))
+        const hasDraftUpdate = selection?.kind === 'rowDestination' ? true : selection && !skip ? Object.keys(direct).some((field) => !same(source[field as keyof Task], direct[field as keyof Task]))
             : !skip || Object.keys(direct).length > 0;
         const effects = hasDraftUpdate ? planTaskUpdateEffects({ task: source, preparedUpdates: prepared.updates,
             allTasks: lists.tasks, allProjects: lists.projects, allSections: lists.sections,
             now: witness.preparedAt, deviceId: deviceId(witness), createId,
             recurrenceProjection: !skip && prepared.updates.status === 'done' && source.status !== 'done'
                 && source.status !== 'archived' ? witness.recurrenceProjection : undefined }) : null;
+        if (effects && selection?.kind === 'rowDates') {
+            const relative = rowDatesFrozenRelative(source, request, dates!);
+            // Only decisions independently proved from raw/request dates replace
+            // the shared planner's ambient parses; every other effect stays shared.
+            effects.updatedTask = { ...effects.updatedTask, ...(relative ?? {}),
+                ...(own(request.patch, 'dueDate') ? { pushCount: rowDatesFrozenPushCount(source, request, dates!) } : {}) };
+            effects.tasks = effects.tasks.map(row => row.id === source.id ? effects.updatedTask : row);
+        }
         tasks = effects?.tasks ?? lists.tasks;
         projects = effects?.projects ?? lists.projects;
         sections = effects?.sections ?? lists.sections;
@@ -745,7 +1088,7 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
 };
 
 /** Keep only rows the deterministic planner reads; never journal the library. */
-const reduceWitness = (witness: Witness, effect: PreparedChecklistEffect, state: Pick<TaskStore, '_allTasks' | '_allProjects' | '_allSections' | '_allAreas'>, reference = false, retainedContext?: Task): void => {
+const reduceWitness = (witness: Witness, effect: PreparedChecklistEffect, state: Pick<TaskStore, '_allTasks' | '_allProjects' | '_allSections' | '_allAreas'>, reference = false, retainedContext?: Task, rowFocus = false): void => {
     const tasks = new Set<string>([
         witness.source.id,
         ...effect.tasks.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
@@ -757,6 +1100,9 @@ const reduceWitness = (witness: Witness, effect: PreparedChecklistEffect, state:
             .sort((left, right) => (getTaskOrder(right) ?? -1) - (getTaskOrder(left) ?? -1));
         if (ranked[0]) tasks.add(ranked[0].id);
     }
+    const exactTasks = new Set(tasks);
+    if (rowFocus) for (const row of state._allTasks) if (!row.deletedAt && (row.isFocusedToday === true
+        || witness.source.projectId && row.projectId === witness.source.projectId && rowDatesSource(row))) tasks.add(row.id);
     const projects = new Set<string>([
         ...effect.projects.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
         ...[witness.source.projectId, retainedContext?.projectId, effect.guards.selectedProject?.id, effect.guards.reactivation?.projectId,
@@ -768,12 +1114,13 @@ const reduceWitness = (witness: Witness, effect: PreparedChecklistEffect, state:
         ...[witness.source.sectionId, retainedContext?.sectionId, effect.tasks.find((row) => row.after.id === witness.source.id)?.after.sectionId]
             .filter((id): id is string => Boolean(id)),
     ]);
+    if (rowFocus) for (const section of state._allSections) if (!section.deletedAt && section.projectId === witness.source.projectId) sections.add(section.id);
     if (reference) for (const section of state._allSections) if (sections.has(section.id)) projects.add(section.projectId);
     const areas = new Set<string>([witness.source.areaId, effect.guards.selectedArea?.id,
         effect.tasks.find((row) => row.after.id === witness.source.id)?.after.areaId]
         .filter((id): id is string => Boolean(id)));
     witness.lists = {
-        tasks: state._allTasks.filter((row) => tasks.has(row.id)),
+        tasks: state._allTasks.filter((row) => tasks.has(row.id)).map(row => rowFocus && !exactTasks.has(row.id) ? compactRowFocusPeer(row) : row),
         projects: state._allProjects.filter((row) => projects.has(row.id)),
         sections: state._allSections.filter((row) => sections.has(row.id)),
         areas: state._allAreas.filter((row) => areas.has(row.id)),
@@ -784,8 +1131,9 @@ const readChecklistPrepared = (
     input: unknown,
     validateField: (field: TaskDraftField, value: unknown) => boolean,
     selection?: ChecklistSelection,
-    boardCompletion = false,
-): NativePreparedChecklistWrite | OwnedChecklistProof | null => {
+    directCompletion = false,
+    widgetSource?: NativeWidgetCompletionSource,
+): NativePreparedChecklistWrite | SelectedChecklistProof | null => {
     const envelope = detach(input, selection ? 16 * 1024 * 1024 : LIMIT_BYTES);
     if (!isRecord(envelope) || !exact(envelope, ['request', 'prepared']) || !isRecord(envelope.prepared)) return null;
     const request = (selection?.readRequest ?? readRequest)(envelope.request, validateField);
@@ -803,6 +1151,7 @@ const readChecklistPrepared = (
             'source', 'lists', 'settings', 'preparedAt', 'preparedLocalDay', 'preparedOffsetMinutes',
             'boundaryOffsetMinutes', 'futureBoundary', 'deviceIdBefore', 'deviceIdToInitialize',
             'recurrenceProjection', 'ids', 'directClears', 'direct', 'focusCount', 'focusLimit',
+            ...(frozenRowSelection(selection) ? ['focusDates'] : []),
             ...(isSave(request) && request.intent === 'skip' ? ['calendarTimeZone'] : []),
             ...(isSave(request) && request.intent === 'cancel' ? ['cancelMessage', 'cancelUndoLabel'] : []),
         ]) || !isRecord(witness.source) || !isRecord(witness.lists) || !isRecord(witness.settings)
@@ -838,6 +1187,11 @@ const readChecklistPrepared = (
             : witness.deviceIdToInitialize !== null)
         || !Number.isSafeInteger(witness.focusCount) || witness.focusCount < 0
         || !Number.isSafeInteger(witness.focusLimit) || witness.focusLimit < 1
+        || (frozenRowSelection(selection) && (!Array.isArray(witness.focusDates)
+            || witness.focusDates.length > 10_000 || !witness.focusDates.every(validFrozenFocusDate)
+            || !same(witness.focusDates.map(row => row.value), [...new Set(witness.focusDates.map(row => row.value))].sort())
+            || !witness.lists.tasks.every(row => [row.startTime, row.dueDate, row.reviewAt].every(value => !value
+                || witness.focusDates?.some(date => date.value === value)))))
         || (isSave(request) && request.intent === 'cancel' && (!validCancelText(witness.cancelMessage, 512)
             || !validCancelText(witness.cancelUndoLabel, 80) || !canCancelNativeTask(witness.source,
                 witness.lists.projects as Project[])
@@ -849,7 +1203,7 @@ const readChecklistPrepared = (
     if (isSave(request)) {
         if (!validNativeTaskDraftBases(witness.source, draftRequest(request))
             || !same(toChecklist(witness.source.checklist), request.checklist.base)
-            || !directIsBound(witness.source, request, witness, selection, boardCompletion)
+            || !directIsBound(witness.source, request, witness, selection, directCompletion, widgetSource)
             || (isHistoryRowRequest(request) && !validHistoryRowSource(witness.source, request))
             || ((witness.source.status === 'reference' || request.patch.status === 'reference')
                 && (request.patch.priority || request.patch.timeEstimate))) return null;
@@ -858,28 +1212,29 @@ const readChecklistPrepared = (
         || witness.directClears.length > 0 || witness.ids.length > 0
         || witness.recurrenceProjection !== null) return null;
     try {
-        const planned = plan(kind, request, witness, false, false, selection, boardCompletion);
+        const planned = plan(kind, request, witness, false, false, selection, directCompletion, widgetSource);
         if (noop) {
             if (!isSave(request) || request.intent || planned.effect.tasks.length || planned.effect.projects.length
                 || planned.effect.sections.length || !validRawTask(raw.rawBefore, request.id)
-                || !same(historyRowLoadProjection(raw.rawBefore, witness.preparedAt), witness.source)
+                || !same(historyRowLoadProjection(raw.rawBefore, witness.preparedAt, frozenRowSelection(selection) ? witnessTemporal(witness) : undefined), witness.source)
                 || !same(planned.result, prepared.result)) return null;
             return raw as unknown as NativeOwnedCompleteChecklistNoop;
         }
         if (isSave(request)) {
             const after = planned.effect.tasks.find((row) => row.after.id === request.id)?.after;
-            if (!after || !isHistoryRowRequest(request)
+            if (!after || !isHistoryRowRequest(request) && !frozenRowSelection(selection)
                 && !validNativeTaskDraftScheduleEffect(witness.source, draftRequest(request), after, validateField)) return null;
         }
         return same(planned.effect, prepared.effect) && same(planned.result, prepared.result)
-            && (!selection || validOwnedChecklistRawBefore(raw.rawBefore, planned.effect, witness.preparedAt))
-            ? raw as unknown as NativePreparedChecklistWrite | NativePreparedOwnedCompleteChecklistSave : null;
+            && (!selection || validOwnedChecklistRawBefore(raw.rawBefore, planned.effect, witness.preparedAt,
+                frozenRowSelection(selection) ? witnessTemporal(witness) : undefined))
+            ? raw as unknown as NativePreparedChecklistWrite | NativePreparedSelectedChecklistSave : null;
     } catch {
         return null;
     }
 };
-const readPrepared = (input: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean, boardCompletion = false): NativePreparedChecklistWrite | null =>
-    readChecklistPrepared(input, validateField, undefined, boardCompletion) as NativePreparedChecklistWrite | null;
+const readPrepared = (input: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean, directCompletion = false): NativePreparedChecklistWrite | null =>
+    readChecklistPrepared(input, validateField, undefined, directCompletion) as NativePreparedChecklistWrite | null;
 
 /** The actual SQLite display codec followed by the normal load projection. */
 export const historyRowLoadProjection = (task: Task, preparedAt: string, temporal?: TaskLoadTemporalContext): Task => {
@@ -1004,7 +1359,7 @@ const bindRawChecklistRows = (effect: PreparedChecklistEffect, data: AppData): P
     projects: effect.projects.map((row) => ({ id: row.after.id, before: row.before === null ? null : data.projects.find((project) => project.id === row.after.id) ?? null })),
     sections: effect.sections.map((row) => ({ id: row.after.id, before: row.before === null ? null : data.sections?.find((section) => section.id === row.after.id) ?? null })),
 });
-const validOwnedChecklistRawBefore = (value: unknown, effect: PreparedChecklistEffect, at: string): value is PreparedChecklistRawBefore => {
+const validOwnedChecklistRawBefore = (value: unknown, effect: PreparedChecklistEffect, at: string, temporal?: TaskLoadTemporalContext): value is PreparedChecklistRawBefore => {
     if (!isRecord(value) || !exact(value, ['tasks', 'projects', 'sections'])) return false;
     const binds = <T extends { id: string }>(raw: unknown, effects: Array<{ before: T | null; after: T }>,
         project: (value: unknown, id: string) => T | null): boolean => Array.isArray(raw) && raw.length === effects.length
@@ -1019,7 +1374,7 @@ const validOwnedChecklistRawBefore = (value: unknown, effect: PreparedChecklistE
         });
     return binds(value.tasks, effect.tasks, (row, id) => {
         if (!validRawTask(row, id)) return null;
-        try { return historyRowLoadProjection(row, at); } catch { return null; }
+        try { return historyRowLoadProjection(row, at, temporal); } catch { return null; }
     }) && binds(value.projects, effect.projects, (row, id) => isRecord(row) && row.id === id
         ? normalizeProjectLifecycleFields(row as unknown as Project) : null)
         && binds(value.sections, effect.sections, (row, id) => isRecord(row) && row.id === id ? row as unknown as Section : null);
@@ -1083,6 +1438,78 @@ const readReferenceBackdate = (value: unknown,
         || !validReferenceRawBefore(prepared.rawBefore, checklist.effect, checklist.witness.preparedAt)) return null;
     return envelope as NativeReferenceTaskBackdateEnvelope;
 };
+const readRowBackdate = (value: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean): NativeRowTaskBackdateEnvelope | null => {
+    const e = detach(value, COMPLETION_BYTES);
+    if (!isRecord(e) || !exact(e, ['request', 'prepared']) || !isRecord(e.prepared)) return null;
+    const request = readRowBackdateRequest(e.request), p = e.prepared;
+    if (!request || !exact(p, ['version', 'kind', 'request', 'rawBefore', 'checklist', 'result']) || p.version !== 2
+        || p.kind !== 'rowBackdate' || !same(p.request, request) || !isRecord(p.checklist)) return null;
+    const checked = readChecklistPrepared({ request: p.checklist.request, prepared: p.checklist }, validateField, rowBackdateSelection);
+    if (!checked || checked.kind !== 'save' || !isSave(checked.request)) return null;
+    const proof = checked as NativePreparedSelectedChecklistSave, source = proof.witness.source;
+    if (source.id !== request.id || source.status === 'done' || source.deletedAt || source.purgedAt || isProjectedRecurringTaskId(source.id)
+        || referenceContainerReadOnly(source, proof.witness.lists) || taskRevisionOf(source) !== request.taskRevision
+        || isTaskEditorTimeSpentEnabled(proof.witness.settings) !== (request.timeSpentText !== null)
+        || !same(proof.request, backdateSaveRequest(source, request)) || !same(proof.rawBefore, p.rawBefore)
+        || !same(proof.result, { id: request.id }) || !same(p.result, proof.result)) return null;
+    return { request, prepared: { version: 2, kind: 'rowBackdate', request, rawBefore: proof.rawBefore, checklist: proof, result: { id: request.id } } };
+};
+const readRowFocus = (value: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean): NativeRowTaskFocusEnvelope | null => {
+    const e = detach(value, COMPLETION_BYTES);
+    if (!isRecord(e) || !exact(e, ['request', 'prepared']) || !isRecord(e.prepared)) return null;
+    const request = readRowFocusRequest(e.request), p = e.prepared;
+    if (!request || !exact(p, ['version', 'kind', 'request', 'rawBefore', 'checklist', 'result']) || p.version !== 2
+        || p.kind !== 'rowFocus' || !same(p.request, request) || !isRecord(p.checklist)) return null;
+    const checked = readChecklistPrepared({ request: p.checklist.request, prepared: p.checklist }, validateField, rowFocusSelection);
+    if (!checked || checked.kind !== 'save' || !isSave(checked.request)) return null;
+    const proof = checked as NativePreparedSelectedChecklistSave, source = proof.witness.source;
+    const result = { id: request.id, focused: request.focused };
+    if (source.id !== request.id || !rowDatesSource(source) || source.deletedAt || source.purgedAt || isProjectedRecurringTaskId(source.id)
+        || referenceContainerReadOnly(source, proof.witness.lists) || taskRevisionOf(source) !== request.taskRevision
+        || !same(proof.request, rowFocusSaveRequest(source, request)) || !same(proof.rawBefore, p.rawBefore)
+        || proof.effect.tasks.length !== 1 || proof.effect.projects.length || proof.effect.sections.length
+        || proof.witness.ids.length || proof.witness.recurrenceProjection !== null
+        || !same(proof.result, { id: request.id }) || !same(p.result, result)) return null;
+    return { request, prepared: { version: 2, kind: 'rowFocus', request, rawBefore: proof.rawBefore, checklist: proof, result } };
+};
+const readRowDates = (value: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean,
+    readDraft?: RowDatesDraftReader): NativeRowTaskDatesEnvelope | null => {
+    const e = detach(value, COMPLETION_BYTES);
+    if (!isRecord(e) || !exact(e, ['request', 'prepared']) || !isRecord(e.prepared)) return null;
+    const p = e.prepared;
+    if (!exact(p, ['version', 'kind', 'request', 'rawBefore', 'checklist', 'result']) || p.version !== 2
+        || p.kind !== 'rowDates' || !same(p.request, e.request) || !isRecord(p.checklist)) return null;
+    const checked = readChecklistPrepared({ request: p.checklist.request, prepared: p.checklist }, validateField, rowDatesSelection);
+    if (!checked || checked.kind !== 'save' || !isSave(checked.request)) return null;
+    const proof = checked as NativePreparedSelectedChecklistSave, source = proof.witness.source;
+    const request = readRowDatesRequest(e.request, validateField, readDraft, source);
+    if (!request || source.id !== request.id || !rowDatesSource(source) || source.deletedAt || source.purgedAt || isProjectedRecurringTaskId(source.id)
+        || referenceContainerReadOnly(source, proof.witness.lists) || taskRevisionOf(source) !== request.taskRevision
+        || !same(proof.request, rowDatesSaveRequest(source, request, readDraft)) || !same(proof.rawBefore, p.rawBefore)
+        || proof.effect.tasks.length !== 1 || proof.effect.projects.length || proof.effect.sections.length
+        || !validNativeTaskDraftScheduleEffect(source, proof.request, proof.effect.tasks[0].after, validateField)
+        || proof.witness.ids.length || proof.witness.recurrenceProjection !== null
+        || !same(proof.result, { id: request.id }) || !same(p.result, proof.result)) return null;
+    return { request, prepared: { version: 2, kind: 'rowDates', request, rawBefore: proof.rawBefore, checklist: proof, result: { id: request.id } } };
+};
+const readRowDestination = (value: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean): NativeRowTaskDestinationEnvelope | null => {
+    const e = detach(value, COMPLETION_BYTES);
+    if (!isRecord(e) || !exact(e, ['request', 'prepared']) || !isRecord(e.prepared)) return null;
+    const request = readRowDestinationRequest(e.request), p = e.prepared;
+    if (!request || !exact(p, ['version', 'kind', 'request', 'rawBefore', 'checklist', 'result']) || p.version !== 2
+        || p.kind !== 'rowDestination' || !same(p.request, request) || !isRecord(p.checklist)) return null;
+    const checked = readChecklistPrepared({ request: p.checklist.request, prepared: p.checklist }, validateField, rowDestinationSelection);
+    if (!checked || checked.kind !== 'save' || !isSave(checked.request)) return null;
+    const proof = checked as NativePreparedSelectedChecklistSave, source = proof.witness.source;
+    if (source.id !== request.id || source.deletedAt || source.purgedAt || isProjectedRecurringTaskId(source.id)
+        || referenceContainerReadOnly(source, proof.witness.lists) || taskRevisionOf(source) !== request.taskRevision
+        || !referenceDestinationAvailable(request.destination, proof.witness.lists)
+        || !same(proof.request, rowDestinationSaveRequest(source, request)) || !same(proof.rawBefore, p.rawBefore)
+        || proof.effect.tasks.length !== 1 || proof.effect.tasks[0].after.status !== source.status
+        || proof.witness.ids.length || proof.witness.recurrenceProjection !== null
+        || !same(proof.result, { id: request.id }) || !same(p.result, proof.result)) return null;
+    return { request, prepared: { version: 2, kind: 'rowDestination', request, rawBefore: proof.rawBefore, checklist: proof, result: { id: request.id } } };
+};
 const readReferenceDestination = (value: unknown,
     validateField: (field: TaskDraftField, value: unknown) => boolean): NativeReferenceTaskDestinationEnvelope | null => {
     const envelope = detach(value, COMPLETION_BYTES);
@@ -1107,24 +1534,26 @@ const readCompletion = (value: unknown,
     validateField: (field: TaskDraftField, value: unknown) => boolean): NativeTaskCompletionEnvelope | null => {
     const envelope = detach(value, COMPLETION_BYTES);
     if (!isRecord(envelope) || !exact(envelope, ['request', 'prepared']) || !isRecord(envelope.prepared)) return null;
-    const request = readCompletionRequest(envelope.request) ?? readReferenceCompletionRequest(envelope.request) ?? readBoardCompletionRequest(envelope.request);
+    const request = readCompletionRequest(envelope.request) ?? readReferenceCompletionRequest(envelope.request) ?? readBoardCompletionRequest(envelope.request) ?? readRowCompletionRequest(envelope.request);
     const reference = request?.source === 'reference';
     const board = request?.source === 'board';
-    const rawCompletion = reference || board;
+    const row = request?.source === 'row';
+    const rawCompletion = reference || board || row;
     const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'kind', 'request', 'checklist', 'notice', 'result', ...(rawCompletion ? ['rawBefore'] : [])])
-        || raw.version !== (rawCompletion ? 2 : 1) || raw.kind !== (board ? 'boardComplete' : reference ? 'referenceComplete' : 'complete') || !same(raw.request, request)
+        || raw.version !== (rawCompletion ? 2 : 1) || raw.kind !== (row ? 'rowComplete' : board ? 'boardComplete' : reference ? 'referenceComplete' : 'complete') || !same(raw.request, request)
         || !isRecord(raw.checklist) || !isRecord(raw.notice) || !isRecord(raw.result)
         || !exact(raw.notice, ['message', 'undoLabel'])
         || !validCancelText(raw.notice.message, 512) || !validCancelText(raw.notice.undoLabel, 80)
         || !exact(raw.result, ['id', 'completion']) || !isRecord(raw.result.completion)
         || !exact(raw.result.completion, ['completedAt', 'undoEnabled', 'message', 'undoLabel'])) return null;
     const prepared = raw as unknown as NativePreparedTaskCompletion;
-    const checklist = readPrepared({ request: prepared.checklist.request, prepared: prepared.checklist }, validateField, board);
+    const checklist = readPrepared({ request: prepared.checklist.request, prepared: prepared.checklist }, validateField, board || row);
     if (!checklist || checklist.kind !== 'save' || !isSave(checklist.request)
         || !(reference ? checklist.witness.source.status === 'reference'
             && !referenceContainerReadOnly(checklist.witness.source, checklist.witness.lists)
-            && !isProjectedRecurringTaskId(checklist.witness.source.id) : board ? canCompleteNativeBoardTask(checklist.witness.source, checklist.witness.lists.projects, checklist.witness.lists.sections)
+            && !isProjectedRecurringTaskId(checklist.witness.source.id) : row ? canCompleteNativeRowTask(checklist.witness.source, checklist.witness.lists.projects, checklist.witness.lists.sections)
+                : board ? canCompleteNativeBoardTask(checklist.witness.source, checklist.witness.lists.projects, checklist.witness.lists.sections)
                 : canCompleteNativeTask(checklist.witness.source, checklist.witness.lists.projects))
         || taskRevisionOf(checklist.witness.source) !== request.taskRevision
         || !same(checklist.request, reference ? referenceCompletionSaveRequest(checklist.witness.source, request.requestId)
@@ -1133,7 +1562,7 @@ const readCompletion = (value: unknown,
     const after = checklist.effect.tasks.find((row) => row.after.id === request.id)?.after;
     const result = prepared.result;
     return after && after.status === 'done' && typeof after.completedAt === 'string'
-        && after.completedAt === checklist.witness.preparedAt
+        && after.completedAt === (row ? checklist.witness.source.completedAt || checklist.witness.preparedAt : checklist.witness.preparedAt)
         && result.id === request.id && result.completion.completedAt === after.completedAt
         && result.completion.undoEnabled === true
         && result.completion.message === prepared.notice.message
@@ -1173,6 +1602,7 @@ const planCompletionUndo = (completion: NativeTaskCompletionEnvelope, witness: W
 /** Exactly RN's delete-follow-up, moveTask, then conditional Focus update. */
 const planRawCompletionUndo = (completion: NativeTaskCompletionEnvelope, witness: Witness): PreparedChecklistEffect => {
     const board = completion.prepared.kind === 'boardComplete';
+    const row = completion.prepared.kind === 'rowComplete';
     const child = ownedCompletionChild(completion);
     let lists = witness.lists;
     if (child) {
@@ -1183,7 +1613,7 @@ const planRawCompletionUndo = (completion: NativeTaskCompletionEnvelope, witness
             deviceId: deviceId(witness), buildUpdates: (_task, context) => ({ deletedAt: context.now }) });
         lists = { ...lists, tasks: lists.tasks.map((row) => row.id === child.id ? tombstone : row) };
     }
-    const moveWitness = board ? { ...witness, lists,
+    const moveWitness = board || row ? { ...witness, lists,
         direct: { status: completion.prepared.checklist.witness.source.status, isFocusedToday: false },
         directClears: ['focusOrder'] } : { ...witness, lists };
     const moved = plan('save', completion.prepared.checklist.request, moveWitness, false, true).effect;
@@ -1208,9 +1638,10 @@ const readCompletionUndo = (value: unknown,
     const completion = readCompletion(raw.completion, validateField);
     const reference = completion?.prepared.kind === 'referenceComplete';
     const board = completion?.prepared.kind === 'boardComplete';
-    const rawCompletion = reference || board;
+    const row = completion?.prepared.kind === 'rowComplete';
+    const rawCompletion = reference || board || row;
     if (!request || !exact(raw, ['version', 'kind', 'request', 'completion', 'witness', 'effect', 'result', ...(rawCompletion ? ['rawBefore'] : [])])
-        || raw.version !== (rawCompletion ? 2 : 1) || raw.kind !== (board ? 'boardCompleteUndo' : reference ? 'referenceCompleteUndo' : 'undo') || !same(raw.request, request)
+        || raw.version !== (rawCompletion ? 2 : 1) || raw.kind !== (row ? 'rowCompleteUndo' : board ? 'boardCompleteUndo' : reference ? 'referenceCompleteUndo' : 'undo') || !same(raw.request, request)
         || !completion || !same(raw.completion, completion) || request.completionRequestId !== completion.request.requestId
         || !isRecord(raw.witness) || !isRecord(raw.effect) || !isRecord(raw.result)
         || !exact(raw.result, ['id'])) return null;
@@ -1255,7 +1686,7 @@ const readCompletionUndo = (value: unknown,
         || !Number.isSafeInteger(witness.focusLimit) || witness.focusLimit < 1
         || witness.focusLimit !== normalizeFocusTaskLimit((witness.settings.gtd as { focusTaskLimit?: number } | undefined)?.focusTaskLimit)
         || (reference && referenceContainerReadOnly(witness.source, witness.lists))
-        || (board && !boardUndoContainerMatches(completion, witness.source, witness.lists))
+        || ((board || row) && !boardUndoContainerMatches(completion, witness.source, witness.lists))
         || !same(restoreClears(witness.direct, witness.directClears), reference ? { status: 'reference' } : completionUndoDirect(completion, witness))
         || prepared.result.id !== witness.source.id) return null;
     try {
@@ -1327,21 +1758,121 @@ const readCancellationUndoProof = (value: unknown,
 const readPreparedUndo = (value: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean): NativeTaskCancellationUndoEnvelope | null =>
     readCancellationUndoProof(value, validateField) as NativeTaskCancellationUndoEnvelope | null;
 
-const rawWriteEffect = (envelope: NativeRawWriteEnvelope): PreparedChecklistEffect => (envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardCompleteUndo')
+const readInlineRequest = (value: unknown): NativeInlineChecklistRequest | null => {
+    const v = detach(value);
+    if (!isRecord(v) || typeof v.id !== 'string' || !v.id.trim() || v.id.length > 500
+        || typeof v.taskRevision !== 'string' || !v.taskRevision || v.taskRevision.length > 200
+        || typeof v.requestId !== 'string' || !UUID.test(v.requestId)) return null;
+    const fields = ['id', 'taskRevision', 'requestId', 'action'];
+    if (v.action === 'setCompleted' && exact(v, [...fields, 'itemId', 'isCompleted'])
+        && typeof v.itemId === 'string' && v.itemId.length > 0 && v.itemId.length <= 200 && typeof v.isCompleted === 'boolean')
+        return v as NativeInlineChecklistRequest;
+    return v.action === 'append' && exact(v, [...fields, 'title']) && typeof v.title === 'string' && Boolean(v.title.trim())
+        ? v as NativeInlineChecklistRequest : null;
+};
+const inlineSource = (source: Task): boolean => !source.deletedAt && !source.purgedAt && source.status !== 'reference'
+    && !isProjectedRecurringTaskId(source.id) && Boolean(source.checklist?.length)
+    && new Set(source.checklist?.map(item => item.id)).size === source.checklist?.length;
+const inlineSelection = (request: NativeInlineChecklistRequest, source: Task, newId: () => string): ChecklistItem[] | null => {
+    const list = toChecklist(source.checklist);
+    if (request.action === 'append') return applyTaskChecklistEdit(list, { kind: 'append', title: request.title }, { newId })?.checklist ?? null;
+    const index = list.findIndex(item => item.id === request.itemId);
+    if (index < 0) return null;
+    return list[index].isCompleted === request.isCompleted ? list
+        : applyTaskChecklistEdit(list, { kind: 'toggle', index }, { newId })?.checklist ?? null;
+};
+const inlineSaveRequest = (request: NativeInlineChecklistRequest, source: Task, selected: ChecklistItem[]): NativeChecklistSaveRequest => {
+    const status = getChecklistEditStatus({ taskMode: source.taskMode, status: source.status, checklist: selected });
+    return { id: source.id, requestId: request.requestId,
+        base: status === source.status ? {} : { status: source.status }, patch: status === source.status ? {} : { status },
+        scheduleBase: getNativeTaskScheduleBase(source), checklist: { base: toChecklist(source.checklist), value: selected } };
+};
+const readInlineEnvelope = (value: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean): NativeInlineChecklistEnvelope | null => {
+    const e = detach(value, COMPLETION_BYTES);
+    if (!isRecord(e) || !exact(e, ['request', 'prepared']) || !isRecord(e.prepared)) return null;
+    const request = readInlineRequest(e.request), p = e.prepared;
+    if (!request || !exact(p, ['version', 'kind', 'request', 'rawBefore', 'checklist', 'result'])
+        || p.version !== 2 || p.kind !== 'inlineChecklist' || !same(request, p.request) || !isRecord(p.checklist)) return null;
+    const checklist = readPrepared({ request: p.checklist.request, prepared: p.checklist }, validateField);
+    if (!checklist || checklist.kind !== 'save' || !isSave(checklist.request)) return null;
+    const source = checklist.witness.source;
+    if (!inlineSource(source) || source.id !== request.id || taskRevisionOf(source) !== request.taskRevision
+        || !same(p.result, { id: request.id }) || !same(checklist.result, p.result)) return null;
+    const selected = checklist.request.checklist.value;
+    const appended = request.action === 'append' ? selected.at(-1)?.id : undefined;
+    if (request.action === 'append' && (!appended || !UUID.test(appended) || source.checklist?.some(item => item.id === appended))) return null;
+    const expected = inlineSelection(request, source, () => appended ?? '');
+    if (!expected || same(expected, toChecklist(source.checklist)) || !same(checklist.request, inlineSaveRequest(request, source, expected))
+        || !validOwnedChecklistRawBefore(p.rawBefore, checklist.effect, checklist.witness.preparedAt)) return null;
+    return { request, prepared: { version: 2, kind: 'inlineChecklist', request, rawBefore: p.rawBefore, checklist, result: { id: request.id } } };
+};
+const diagnoseInline = (request: NativeInlineChecklistRequest): void => {
+    try { logInfo('Native iOS inline checklist confirmed', { scope: 'native-host', category: 'storage', force: true,
+        context: { releaseCheck: 'v1.3.8/ios-inline-checklist', action: request.action, outcome: 'confirmed' } }); }
+    catch { /* Diagnostics cannot change a durable acknowledgment. */ }
+};
+
+const readRowQuickStatusSourceRef = (value: unknown): { id: string; taskRevision: string } | null => {
+    if (!isRecord(value) || typeof value.id !== 'string' || !value.id.trim() || value.id.length > 500
+        || typeof value.taskRevision !== 'string' || !value.taskRevision || value.taskRevision.length > 200) return null;
+    return { id: value.id, taskRevision: value.taskRevision };
+};
+const readRowQuickStatusRequest = (value: unknown): NativeRowQuickStatusRequest | null => {
+    const v = detach(value, 4_096), ref = readRowQuickStatusSourceRef(v);
+    return ref && isRecord(v) && exact(v, ['id', 'taskRevision', 'requestId', 'status']) && typeof v.requestId === 'string' && UUID.test(v.requestId)
+        && v.status !== 'done' && DONE_STATUS_OPTIONS.includes(v.status as NativeDoneTaskStatus)
+        ? { ...ref, requestId: v.requestId, status: v.status as NativeRowQuickStatusRequest['status'] } : null;
+};
+const readRowQuickStatusEnvelope = (value: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean): NativeRowQuickStatusEnvelope | null => {
+    const e = detach(value, COMPLETION_BYTES);
+    if (!isRecord(e) || !exact(e, ['request', 'prepared']) || !isRecord(e.prepared)) return null;
+    const request = readRowQuickStatusRequest(e.request), p = e.prepared;
+    if (!request || !exact(p, ['version', 'kind', 'request', 'rawBefore', 'witness', 'effect', 'result'])
+        || p.version !== 2 || p.kind !== 'rowQuickStatus' || !same(request, p.request) || !isRecord(p.witness)
+        || !validRawTask(p.witness.source, request.id) || taskRevisionOf(p.witness.source) !== request.taskRevision
+        || p.witness.source.deletedAt || p.witness.source.purgedAt || isProjectedRecurringTaskId(request.id)
+        || p.witness.source.status === request.status || !same(p.result, { id: request.id })) return null;
+    const derived = rowQuickStatusSaveRequest(p.witness.source, request);
+    const checked = readChecklistPrepared({ request: derived, prepared: { version: 2, kind: 'save', request: derived,
+        rawBefore: p.rawBefore, witness: p.witness, effect: p.effect, result: p.result } }, validateField, rowQuickStatusSelection);
+    if (!checked || checked.version !== 2 || checked.kind !== 'save') return null;
+    return { request, prepared: { version: 2, kind: 'rowQuickStatus', request, rawBefore: checked.rawBefore,
+        witness: checked.witness, effect: checked.effect, result: { id: request.id } } };
+};
+const diagnoseRowQuickStatus = (request: NativeRowQuickStatusRequest): void => {
+    try { logInfo('Native iOS row quick status confirmed', { scope: 'native-host', category: 'storage', force: true,
+        context: { releaseCheck: 'v1.3.8/ios-row-quick-status', target: request.status, outcome: 'confirmed' } }); }
+    catch { /* Diagnostics cannot change a durable acknowledgment. */ }
+};
+const diagnoseRowCompletion = (kind: 'rowComplete' | 'rowCompleteUndo'): void => {
+    try { logInfo('Native iOS row completion confirmed', { scope: 'native-host', category: 'storage', force: true,
+        context: { releaseCheck: 'v1.3.8/ios-row-completion', outcome: kind === 'rowComplete' ? 'completed' : 'undone' } }); }
+    catch { /* Diagnostics cannot change a durable acknowledgment. */ }
+};
+
+const rawWriteEffect = (envelope: NativeRawWriteEnvelope): PreparedChecklistEffect => (envelope.prepared.kind === 'rowQuickStatus' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardCompleteUndo' || envelope.prepared.kind === 'rowCompleteUndo')
     ? envelope.prepared.effect : envelope.prepared.checklist.effect;
-const rawWriteWitness = (envelope: NativeRawWriteEnvelope): Witness => (envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardCompleteUndo')
+const rawWriteWitness = (envelope: NativeRawWriteEnvelope): Witness => (envelope.prepared.kind === 'rowQuickStatus' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardCompleteUndo' || envelope.prepared.kind === 'rowCompleteUndo')
     ? envelope.prepared.witness : envelope.prepared.checklist.witness;
 const historyRawSource = (prepared: NativeBoundHistoryRowEnvelope['prepared']): Task =>
     prepared.kind === 'referenceStatus' ? prepared.rawBeforeTask : prepared.rawBefore;
-const rawWritePrefix = (envelope: NativeHistoryRowEnvelope | NativeRawReferenceEnvelope): string => {
+const rawWritePrefix = (envelope: NativeHistoryRowEnvelope | NativeRawChecklistEnvelope): string => {
     switch (envelope.prepared.kind) {
+        case 'rowQuickStatus': return 'iosRowQuickStatus';
+        case 'inlineChecklist': return 'iosInlineChecklist';
         case 'referenceNext': return 'referenceTaskNext';
         case 'referenceStatus': return 'referenceTaskStatus';
         case 'referenceComplete': return 'referenceTaskCompletion';
         case 'referenceCompleteUndo': return 'referenceTaskCompletionUndo';
         case 'boardComplete': return 'boardTaskCompletion';
         case 'boardCompleteUndo': return 'boardTaskCompletionUndo';
+        case 'rowComplete': return 'rowTaskCompletion';
+        case 'rowCompleteUndo': return 'rowTaskCompletionUndo';
         case 'referenceBackdate': return 'referenceTaskBackdate';
+        case 'rowBackdate': return 'rowTaskBackdate';
+        case 'rowDestination': return 'rowTaskDestination';
+        case 'rowDates': return 'rowTaskDates';
+        case 'rowFocus': return 'rowTaskFocus';
         case 'referenceDestination': return 'referenceTaskDestination';
         case 'doneStatus': return 'doneTaskStatus';
         case 'doneCompletedAt': return 'doneTaskCompletedAt';
@@ -1357,19 +1888,22 @@ export type NativeTaskChecklistSaveDependencies = {
     language: () => string;
     receipts: NativeRequestReceipts;
 };
-function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencies) {
+function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencies, readDraft?: RowDatesDraftReader) {
     const historyRowSaves = createAreaSaveGuard(deps.save);
     // A failed save gates fresh writes, so only one owned raw overlay is retained.
     let pendingHistoryRow: { envelope: NativeRawWriteEnvelope;
         adapter: ReturnType<typeof getStorageAdapter>;
         boundary: PreparedNativeSaveBoundary | undefined } | null = null;
-    const checkReferenceAtomicAuthority = (envelope: NativeRawReferenceEnvelope, authority: PreparedAreaAuthority): NativeHostResult<null> => {
+    const checkReferenceAtomicAuthority = (envelope: NativeRawChecklistEnvelope, authority: Pick<PreparedAreaAuthority, 'snapshot'>): NativeHostResult<null> => {
         const prepared = envelope.prepared; const effect = rawWriteEffect(envelope); const witness = rawWriteWitness(envelope);
         const data = authority.snapshot;
-        const board = prepared.kind === 'boardComplete' || prepared.kind === 'boardCompleteUndo';
+        const board = prepared.kind === 'boardComplete' || prepared.kind === 'boardCompleteUndo'
+            || prepared.kind === 'rowComplete' || prepared.kind === 'rowCompleteUndo';
+        if (prepared.kind === 'inlineChecklist' && !inlineSource(witness.source))
+            return fail('STALE_REVISION', 'Inline checklist source is no longer available');
         if (board) {
             if (!sameBoardCompletionContainer(witness.source, witness.lists, data)
-                || prepared.kind === 'boardCompleteUndo' && !sameBoardCompletionContainer(prepared.completion.prepared.checklist.witness.source, witness.lists, data))
+                || (prepared.kind === 'boardCompleteUndo' || prepared.kind === 'rowCompleteUndo') && !sameBoardCompletionContainer(prepared.completion.prepared.checklist.witness.source, witness.lists, data))
                 return fail('STALE_REVISION', 'Board completion container changed since preparation');
         }
         for (const bound of prepared.rawBefore.tasks) {
@@ -1377,7 +1911,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             if (bound.before === null ? current.length !== 0 : current.length !== 1 || !rawReadTaskSnapshot(current[0]) || !sameRawHistoryRowTask(rawReadTaskSnapshot(current[0])!, bound.before))
                 return fail('STALE_REVISION', 'Reference affected saved row changed');
         }
-        if (prepared.kind === 'referenceDestination') {
+        if (prepared.kind === 'referenceDestination' || prepared.kind === 'rowDestination') {
             if (!referenceDestinationAvailable(prepared.request.destination, { projects: data.projects, areas: data.areas ?? [] }))
                 return fail('STALE_REVISION', 'Reference destination is no longer available');
             // This filing action binds only its source/retained Section, never
@@ -1387,27 +1921,37 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                 (data.sections ?? []).find((row) => row.id === sectionId)))
                 return fail('STALE_REVISION', 'Reference source Section changed since preparation');
         }
+        if (prepared.kind === 'rowFocus' && witness.source.sectionId && !same(witness.lists.sections.find(row => row.id === witness.source.sectionId),
+            (data.sections ?? []).find(row => row.id === witness.source.sectionId)))
+            return fail('STALE_REVISION', 'Row Focus source Section changed');
         try {
-            const lists: Lists = { tasks: data.tasks.map((row) => historyRowLoadProjection(row, witness.preparedAt)),
+            const temporal = prepared.kind === 'rowQuickStatus' || prepared.kind === 'rowBackdate' || prepared.kind === 'rowDestination' || prepared.kind === 'rowDates' || prepared.kind === 'rowFocus' ? witnessTemporal(witness) : undefined;
+            const lists: Lists = { tasks: data.tasks.map((row) => historyRowLoadProjection(row, witness.preparedAt, temporal)),
                 projects: data.projects.map(normalizeProjectLifecycleFields), sections: data.sections ?? [], areas: data.areas ?? [] };
             const source = lists.tasks.find((row) => row.id === witness.source.id);
             const memory = useTaskStore.getState()._tasksById.get(witness.source.id);
             if (!source || !memory || source.deletedAt || source.purgedAt || deps.isReadOnly(memory)
+                || prepared.kind === 'inlineChecklist' && !inlineSource(source)
                 || (board ? !boardCompletionContainer(source, lists) : referenceContainerReadOnly(source, lists))) return fail('STALE_REVISION', 'Reference source is no longer writable');
+            if (prepared.kind === 'rowFocus' && (!same(rowFocusPeers(witness.lists, witness.source), rowFocusPeers(lists, source))
+                || !same(witness.lists.sections.filter(row => row.projectId === source.projectId && !row.deletedAt), lists.sections.filter(row => row.projectId === source.projectId && !row.deletedAt))))
+                return fail('STALE_REVISION', 'Row Focus eligibility context changed');
             const currentWitness = { ...witness, source, lists, settings: data.settings,
                 deviceIdBefore: data.settings.deviceId ?? null,
-                focusCount: countFocusedTasksBeforeBoundary(lists.tasks, witness.futureBoundary),
+                focusCount: countFocusedTasksBeforeBoundary(lists.tasks, witness.futureBoundary, prepared.kind === 'rowQuickStatus' || prepared.kind === 'rowBackdate' || prepared.kind === 'rowDestination' || prepared.kind === 'rowDates' || prepared.kind === 'rowFocus' ? witnessDates(witness) : undefined),
                 focusLimit: normalizeFocusTaskLimit(data.settings.gtd?.focusTaskLimit) };
-            const current = prepared.kind === 'boardCompleteUndo' || prepared.kind === 'referenceCompleteUndo'
+            const current = prepared.kind === 'boardCompleteUndo' || prepared.kind === 'rowCompleteUndo' || prepared.kind === 'referenceCompleteUndo'
                 ? planRawCompletionUndo(prepared.completion, currentWitness)
-                : plan('save', prepared.checklist.request, currentWitness, false, false, undefined, prepared.kind === 'boardComplete').effect;
+                : prepared.kind === 'rowQuickStatus'
+                    ? plan('save', rowQuickStatusSaveRequest(witness.source, prepared.request), currentWitness, false, false, rowQuickStatusSelection).effect
+                    : plan('save', prepared.checklist.request, currentWitness, false, false, prepared.kind === 'rowBackdate' ? rowBackdateSelection : prepared.kind === 'rowDestination' ? rowDestinationSelection : prepared.kind === 'rowDates' ? rowDatesSelection : prepared.kind === 'rowFocus' ? rowFocusSelection : undefined, prepared.kind === 'boardComplete' || prepared.kind === 'rowComplete').effect;
             return same(current, effect) ? { ok: true, value: null } : fail('STALE_REVISION', 'Reference guards changed since preparation');
         } catch { return fail('STALE_REVISION', 'Reference destination or recurring follow-up changed'); }
     };
     const checkHistoryRowAuthority = (envelope: NativeRawWriteEnvelope,
     authority: PreparedAreaAuthority): NativeHostResult<null> => {
-        if (envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardComplete' || envelope.prepared.kind === 'boardCompleteUndo' || envelope.prepared.kind === 'referenceBackdate' || envelope.prepared.kind === 'referenceDestination')
-            return checkReferenceAtomicAuthority(envelope as NativeRawReferenceEnvelope, authority);
+        if (envelope.prepared.kind === 'rowQuickStatus' || envelope.prepared.kind === 'inlineChecklist' || envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardComplete' || envelope.prepared.kind === 'boardCompleteUndo' || envelope.prepared.kind === 'rowComplete' || envelope.prepared.kind === 'rowCompleteUndo' || envelope.prepared.kind === 'referenceBackdate' || envelope.prepared.kind === 'rowBackdate' || envelope.prepared.kind === 'referenceDestination' || envelope.prepared.kind === 'rowDestination' || envelope.prepared.kind === 'rowDates' || envelope.prepared.kind === 'rowFocus')
+            return checkReferenceAtomicAuthority(envelope as NativeRawChecklistEnvelope, authority);
         const history = envelope as NativeBoundHistoryRowEnvelope;
         const prepared = history.prepared;
         const reference = prepared.kind === 'referenceNext' || prepared.kind === 'referenceStatus';
@@ -1450,9 +1994,11 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         } catch { return fail('STALE_REVISION', `${reference ? 'Reference Next' : 'Done status'} destination changed since preparation`); }
     };
     const applyHistoryRowOverlay = async (envelope: NativeRawWriteEnvelope, authority: PreparedAreaAuthority) => {
-        if (envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardComplete' || envelope.prepared.kind === 'boardCompleteUndo' || envelope.prepared.kind === 'referenceBackdate' || envelope.prepared.kind === 'referenceDestination')
+        if (envelope.prepared.kind === 'rowQuickStatus' || envelope.prepared.kind === 'inlineChecklist' || envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardComplete' || envelope.prepared.kind === 'boardCompleteUndo' || envelope.prepared.kind === 'rowComplete' || envelope.prepared.kind === 'rowCompleteUndo' || envelope.prepared.kind === 'referenceBackdate' || envelope.prepared.kind === 'rowBackdate' || envelope.prepared.kind === 'referenceDestination' || envelope.prepared.kind === 'rowDestination' || envelope.prepared.kind === 'rowDates' || envelope.prepared.kind === 'rowFocus')
             return useTaskStore.getState().commitPreparedChecklistEffect(rawWriteEffect(envelope),
-                { requireBefore: true, authority, rawBefore: envelope.prepared.rawBefore });
+                { requireBefore: true, authority, rawBefore: envelope.prepared.rawBefore,
+                    ...(envelope.prepared.kind === 'rowQuickStatus' || envelope.prepared.kind === 'rowBackdate' || envelope.prepared.kind === 'rowDestination' || envelope.prepared.kind === 'rowDates' || envelope.prepared.kind === 'rowFocus'
+                        ? { frozenTemporal: witnessTemporal(rawWriteWitness(envelope)) } : {}) });
         const history = envelope as NativeBoundHistoryRowEnvelope; const effect = history.prepared.checklist.effect;
         if (history.prepared.kind === 'referenceStatus') return useTaskStore.getState().commitPreparedChecklistEffect(effect,
             { requireBefore: true, authority, rawBefore: { tasks: [{ id: history.request.id, before: history.prepared.rawBeforeTask }], projects: [], sections: [] } });
@@ -1460,14 +2006,67 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             deviceIdBefore: effect.deviceIdBefore, deviceIdToInitialize: effect.deviceIdToInitialize,
             effect: { task: { before: historyRawSource(history.prepared), after: effect.tasks[0].after } } }, authority);
     };
+    const durableRowCompletion = async (completion: NativeTaskCompletionEnvelope,
+        adapter: ReturnType<typeof getStorageAdapter>): Promise<NativeHostResult<null>> => {
+        if (!(adapter instanceof NativeReceiptSqliteAdapter)) return fail('SAVE_FAILED', 'Row Undo requires durable receipts');
+        const receipt = await adapter.readDurableReceipt(completion.request.requestId,
+            canonicalJSON(['rowTaskCompletion', completion]));
+        if (!receipt.ok) return receipt;
+        return receipt.value !== null && same(receipt.value, completion.prepared.result)
+            ? { ok: true, value: null } : fail('STALE_REVISION', 'Row completion has no exact current durable receipt');
+    };
+    const armRowCompletionUndo = (envelope: NativeRawWriteEnvelope,
+        adapter: ReturnType<typeof getStorageAdapter>): (() => void) | null => {
+        if (envelope.prepared.kind !== 'rowCompleteUndo') return null;
+        if (!(adapter instanceof NativeReceiptSqliteAdapter)) throw new Error('Row Undo receipt storage changed');
+        const payload = canonicalJSON(['rowTaskCompletionUndo', envelope]);
+        const completion = envelope.prepared.completion;
+        adapter.armReceiptPrerequisite(envelope.request.requestId, payload, completion.request.requestId,
+            canonicalJSON(['rowTaskCompletion', completion]), completion.prepared.result);
+        return () => adapter.clearReceiptPrerequisite(envelope.request.requestId, payload);
+    };
+    const armRowFocus = (envelope: NativeRawWriteEnvelope, adapter: ReturnType<typeof getStorageAdapter>, settingsBefore: AppData['settings']): (() => void) | null => {
+        if (envelope.prepared.kind !== 'rowFocus') return null;
+        if (!(adapter instanceof NativeReceiptSqliteAdapter)) throw new Error('Row Focus receipt storage changed');
+        const payload = canonicalJSON(['rowTaskFocus', envelope]);
+        const settingsJson = rawReadSettingsJson(settingsBefore, JSON.stringify(settingsBefore));
+        if (settingsJson === undefined) throw new Error('Row Focus has no complete saved settings proof');
+        const expectedSettings: unknown = settingsJson === null ? null : JSON.parse(settingsJson);
+        adapter.armRowFocusAuthority(envelope.request.requestId, payload, async read => {
+            const [taskRows, projectRows, sectionRows, areaRows, settingsRows] = await Promise.all([
+                read<Record<string, unknown>>(`SELECT ${TASK_SQLITE_COLUMNS.join(',')} FROM tasks`),
+                read<Record<string, unknown>>(`SELECT ${PROJECT_SQLITE_COLUMNS.join(',')} FROM projects`),
+                read<Record<string, unknown>>(`SELECT ${SECTION_SQLITE_COLUMNS.join(',')} FROM sections`),
+                read<Record<string, unknown>>(`SELECT ${AREA_SQLITE_COLUMNS.join(',')} FROM areas`),
+                read<{ data: string }>('SELECT data FROM settings WHERE id = 1'),
+            ]);
+            if (settingsRows.length !== 1 || typeof settingsRows[0].data !== 'string') return false;
+            const settings: unknown = JSON.parse(settingsRows[0].data);
+            if (!isRecord(settings) || !same(settings, expectedSettings)) return false;
+            const tasks = taskRows.map(row => { const task = mapSqliteTaskRow(row); rememberRawReadRow(task, row, TASK_SQLITE_COLUMNS, taskToSqliteRow(task)); return task; });
+            const data: AppData = { tasks, projects: projectRows.map(projectFromSqliteRow), sections: sectionRows.map(sectionFromSqliteRow),
+                areas: areaRows.map(row => areaFromSqliteRow(row)), settings: settings as AppData['settings'] };
+            return checkReferenceAtomicAuthority(envelope as NativeRowTaskFocusEnvelope, { snapshot: data }).ok;
+        });
+        return () => adapter.clearRowFocusAuthority(envelope.request.requestId, payload);
+    };
     const historyRowReceipts = createNativeRequestReceipts({ save: async (requestId) => {
         const pending = pendingHistoryRow;
         if (!pending || pending.envelope.request.requestId !== requestId)
             return fail('SAVE_FAILED', 'Done status has no owned raw save');
-        const action = pending.envelope.prepared.kind.startsWith('reference') ? 'Reference change' : 'Done status';
+        const action = pending.envelope.prepared.kind === 'rowQuickStatus' ? 'Row quick status'
+            : pending.envelope.prepared.kind === 'inlineChecklist' ? 'Inline checklist'
+            : pending.envelope.prepared.kind.startsWith('reference') ? 'Reference change' : 'Done status';
+        armRowCompletionUndo(pending.envelope, pending.adapter);
+        if (pending.envelope.prepared.kind === 'rowCompleteUndo') {
+            const proof = await durableRowCompletion(pending.envelope.prepared.completion, pending.adapter);
+            if (!proof.ok) return proof;
+        }
         if (useTaskStore.getState().persistenceFailure) {
-            if (!historyRowSaves.mayApply(pending.envelope, pending.adapter))
-                return fail('SAVE_FAILED', `${action} has an unrelated persistence failure`);
+            const ownedFailure = (pending.envelope.prepared.kind === 'rowDestination' || pending.envelope.prepared.kind === 'rowDates' || pending.envelope.prepared.kind === 'rowFocus')
+                ? historyRowSaves.refreshSameSnapshotFailure(pending.envelope, pending.adapter)
+                : historyRowSaves.mayApply(pending.envelope, pending.adapter);
+            if (!ownedFailure) return fail('SAVE_FAILED', `${action} has an unrelated persistence failure`);
             const read = await readAreaDurableData(true, true);
             if (!read.ok) return read;
             if (read.value.adapter !== pending.adapter)
@@ -1477,11 +2076,17 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             const applied = await applyHistoryRowOverlay(pending.envelope, read.value.authority);
             if (!applied.success || applied.outcome !== 'applied')
                 return fail('STALE_REVISION', applied.error ?? `${action} raw retry was superseded`);
+            // The old guard stayed armed throughout reapply. Only a validated,
+            // installed owned snapshot may bind a newer complete BEFORE settings row.
+            armRowFocus(pending.envelope, pending.adapter, read.value.authority.snapshot.settings);
             pending.boundary = read.value.authority.saveBoundary;
         }
         // The receipt engine has registered this exact reply before this flush.
         // Flush its raw effect directly; generic retryPersistence projects memory.
+        // A failed save can leave a queued snapshot; its receipt prerequisite must stay armed.
         const saved = await historyRowSaves.finish(pending.envelope, pending.adapter, false, pending.boundary);
+        if (!saved.ok && saved.error.code === 'SAVE_FAILED' && (pending.envelope.prepared.kind === 'rowDestination' || pending.envelope.prepared.kind === 'rowDates' || pending.envelope.prepared.kind === 'rowFocus'))
+            historyRowSaves.rememberSameSnapshotFailure(pending.envelope, pending.adapter);
         if (saved.ok) pendingHistoryRow = null;
         return saved;
     } });
@@ -1505,10 +2110,12 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             return fail('INVALID_INPUT', `${rowLabel} task is read-only`);
         return { ok: true, value: task };
     };
-    const commitHistoryRowWrite = async <T extends { id: string }>(envelope: (NativeHistoryRowEnvelope | NativeRawReferenceEnvelope) & { prepared: { result: T } }): Promise<NativeHostResult<T>> => {
+    const commitHistoryRowWrite = async <T extends { id: string }>(envelope: (NativeHistoryRowEnvelope | NativeRawChecklistEnvelope) & { prepared: { result: T } }): Promise<NativeHostResult<T>> => {
         const ready = deps.readiness();
         if (!ready.ok) return ready;
-        const action = envelope.prepared.kind.startsWith('reference') ? 'Reference change' : 'Done status';
+        const action = envelope.prepared.kind === 'rowQuickStatus' ? 'Row quick status'
+            : envelope.prepared.kind === 'inlineChecklist' ? 'Inline checklist'
+            : envelope.prepared.kind.startsWith('reference') ? 'Reference change' : 'Done status';
         const payload = canonicalJSON([rawWritePrefix(envelope), envelope]);
         const alreadySaved = historyRowReceipts.saved<T>(envelope.request.requestId, payload);
         if (alreadySaved) return alreadySaved.ok && !same(alreadySaved.value, envelope.prepared.result)
@@ -1526,20 +2133,30 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             return { ok: false, error: { code: 'ACTION_FAILED', message } };
         };
         const confirmed = await historyRowReceipts.run(envelope.request.requestId, payload, async () => {
-            if (bound.prepared.kind === 'referenceCompleteUndo' || bound.prepared.kind === 'boardCompleteUndo') {
+            if (bound.prepared.kind === 'referenceCompleteUndo' || bound.prepared.kind === 'boardCompleteUndo' || bound.prepared.kind === 'rowCompleteUndo') {
                 const completion = bound.prepared.completion;
-                const confirmed = historyRowReceipts.saved<NativeTaskCompletionResult>(completion.request.requestId, canonicalJSON([completion.prepared.kind === 'boardComplete' ? 'boardTaskCompletion' : 'referenceTaskCompletion', completion]));
+                const confirmed = historyRowReceipts.saved<NativeTaskCompletionResult>(completion.request.requestId, canonicalJSON([rawWritePrefix(completion as NativeRawReferenceEnvelope), completion]));
                 if (!confirmed?.ok || !same(confirmed.value, completion.prepared.result)) return fail('STALE_REVISION', 'Completion has no saved request receipt');
             }
             if (useTaskStore.getState().persistenceFailure)
                 return notLanded(`${action} has an unresolved persistence failure`);
             const read = await readAreaDurableData(false, true);
             if (!read.ok) return read.error.code === 'SAVE_FAILED' ? notLanded(read.error.message) : read;
+            if (bound.prepared.kind === 'rowCompleteUndo') {
+                const proof = await durableRowCompletion(bound.prepared.completion, read.value.adapter);
+                if (!proof.ok) return proof.error.code === 'SAVE_FAILED' ? notLanded(proof.error.message) : proof;
+            }
             const checked = checkHistoryRowAuthority(bound, read.value.authority);
             if (!checked.ok) return checked;
-            const applied = await applyHistoryRowOverlay(bound, read.value.authority);
-            if (!applied.success || applied.outcome !== 'applied')
+            const disarm = armRowCompletionUndo(bound, read.value.adapter);
+            const disarmFocus = armRowFocus(bound, read.value.adapter, read.value.authority.snapshot.settings);
+            let applied: Awaited<ReturnType<typeof applyHistoryRowOverlay>>;
+            try { applied = await applyHistoryRowOverlay(bound, read.value.authority); }
+            catch (error) { disarm?.(); disarmFocus?.(); throw error; }
+            if (!applied.success || applied.outcome !== 'applied') {
+                disarm?.(); disarmFocus?.();
                 return fail('STALE_REVISION', applied.error ?? `Prepared ${action} conflicts with current data`);
+            }
             pendingHistoryRow = { envelope: bound, adapter: read.value.adapter, boundary: read.value.authority.saveBoundary };
             return { ok: true, value: envelope.prepared.result };
         });
@@ -1557,13 +2174,25 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                 } else if (envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'referenceCompleteUndo') {
                     logInfo('Native Reference Task completion confirmed', { scope: 'native-host', category: 'storage',
                         context: { releaseCheck: 'v1.3.4/ios-reference-completion', outcome: envelope.prepared.kind === 'referenceComplete' ? 'completed' : 'undone' } });
+                } else if (envelope.prepared.kind === 'rowBackdate') {
+                    logInfo('Native iOS row backdated completion confirmed', { scope: 'native-host', category: 'storage', force: true,
+                        context: { releaseCheck: 'v1.3.8/ios-row-backdate', outcome: 'completed' } });
                 } else if (envelope.prepared.kind === 'referenceBackdate') {
                     logInfo('Native Reference Task backdated completion confirmed', { scope: 'native-host', category: 'storage',
                         context: { releaseCheck: 'v1.3.4/ios-reference-backdate', outcome: 'completed' } });
+                } else if (envelope.prepared.kind === 'rowFocus') {
+                    logInfo('Native iOS row Focus confirmed', { scope: 'native-host', category: 'storage', force: true,
+                        context: { releaseCheck: 'v1.3.8/ios-row-focus', outcome: envelope.prepared.request.focused ? 'focused' : 'unfocused' } });
+                } else if (envelope.prepared.kind === 'rowDates') {
+                    logInfo('Native iOS row dates confirmed', { scope: 'native-host', category: 'storage', force: true,
+                        context: { releaseCheck: 'v1.3.8/ios-row-dates', outcome: 'changed' } });
+                } else if (envelope.prepared.kind === 'rowDestination') {
+                    logInfo('Native iOS row destination confirmed', { scope: 'native-host', category: 'storage', force: true,
+                        context: { releaseCheck: 'v1.3.8/ios-row-destination', outcome: 'moved' } });
                 } else if (envelope.prepared.kind === 'referenceDestination') {
                     logInfo('Native Reference Task destination confirmed', { scope: 'native-host', category: 'storage',
                         context: { releaseCheck: 'v1.3.4/ios-reference-destination', outcome: 'moved' } });
-                } else if (envelope.prepared.kind !== 'boardComplete' && envelope.prepared.kind !== 'boardCompleteUndo') {
+                } else if (envelope.prepared.kind !== 'rowQuickStatus' && envelope.prepared.kind !== 'inlineChecklist' && envelope.prepared.kind !== 'boardComplete' && envelope.prepared.kind !== 'boardCompleteUndo' && envelope.prepared.kind !== 'rowComplete' && envelope.prepared.kind !== 'rowCompleteUndo') {
                     logInfo(envelope.prepared.kind === 'doneStatus' ? 'Native Done Task status confirmed'
                         : envelope.prepared.kind === 'doneCompletedAt' ? 'Native Done completion time confirmed' : 'Native Archive completion time confirmed', { scope: 'native-host', category: 'storage',
                         context: { releaseCheck: envelope.prepared.kind === 'doneStatus'
@@ -1576,7 +2205,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         return confirmed;
     };
     const prepareChecklist = (kind: 'save' | 'reset', input: unknown, selection?: ChecklistSelection,
-        durable?: { data: AppData; at: string }, boardCompletion = false): NativeHostResult<NativeChecklistPreparation | { kind: 'prepared'; prepared: NativePreparedOwnedCompleteChecklistSave }
+        durable?: { data: AppData; at: string }, directCompletion = false, widgetSource?: NativeWidgetCompletionSource): NativeHostResult<NativeChecklistPreparation | { kind: 'prepared'; prepared: NativePreparedSelectedChecklistSave }
             | { kind: 'noop'; prepared: NativeOwnedCompleteChecklistNoop }> => {
         const ready = deps.readiness();
         if (!ready.ok) return ready;
@@ -1621,8 +2250,16 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         try {
             const preparedAt = durable?.at ?? new Date().toISOString();
             const boundary = futureBoundary(preparedAt);
+            const focusTasks = selection?.kind === 'rowFocus' ? state._allTasks.filter(row => !row.deletedAt && (row.id === task.id || row.isFocusedToday === true || task.projectId && row.projectId === task.projectId && rowDatesSource(row))) : state._allTasks;
+            const focusValues = frozenRowSelection(selection) ? focusTasks.flatMap(row => [row.startTime, row.dueDate, row.reviewAt].filter((value): value is string => Boolean(value))) : [];
+            const focusDates = frozenRowSelection(selection)
+                ? selection?.kind === 'rowDates' && isSave(request) ? rowDatesFocusDates(task, request, [...focusValues,
+                    ...['startTime', 'dueDate'].flatMap(field => typeof request.patch[field as 'startTime' | 'dueDate'] === 'string' && request.patch[field as 'startTime' | 'dueDate'] ? [request.patch[field as 'startTime' | 'dueDate']!] : [])])
+                    : projectFocusDateValues(focusValues)
+                : undefined;
+            const dates = focusDates && new Map(focusDates.map(row => [row.value, row]));
             const device = ensureDeviceId(state.settings);
-            const direct = isSave(request) ? directSaveUpdates(task, request, preparedAt, selection, boardCompletion) : {};
+            const direct = isSave(request) ? directSaveUpdates(task, request, preparedAt, selection, directCompletion, widgetSource) : {};
             if (!direct) return fail('INVALID_INPUT', 'Checklist edit cannot produce a task update');
             if (isSave(request) && request.intent === 'skip'
                 && !canSkipRecurringTaskOccurrence({ ...task, ...direct })) {
@@ -1632,9 +2269,9 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             const settings = JSON.parse(JSON.stringify({ deviceId: state.settings.deviceId,
                 gtd: { autoArchiveDays: state.settings.gtd?.autoArchiveDays,
                     focusTaskLimit: state.settings.gtd?.focusTaskLimit,
-                    ...(isSave(request) && request.intent === 'referenceBackdate'
+                    ...(isSave(request) && (request.intent === 'referenceBackdate' || selection?.kind === 'rowBackdate')
                         ? { pomodoro: { linkTask: state.settings.gtd?.pomodoro?.linkTask } } : {}) },
-                ...(isSave(request) && request.intent === 'referenceBackdate'
+                ...(isSave(request) && (request.intent === 'referenceBackdate' || selection?.kind === 'rowBackdate')
                     ? { features: { pomodoro: state.settings.features?.pomodoro } } : {}),
                 ...(isSave(request) && request.intent === 'cancel'
                     ? { undoNotificationsEnabled: state.settings.undoNotificationsEnabled } : {}) })) as AppData['settings'];
@@ -1651,37 +2288,39 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                 deviceIdToInitialize: device.updated ? device.deviceId : null,
                 recurrenceProjection: isSave(request) && (!request.intent || request.intent === 'referenceComplete' || request.intent === 'referenceBackdate') && request.patch.status === 'done' && task.status !== 'done'
                     && task.status !== 'archived' ? projectNextRecurringTask(task,
-                        request.intent === 'referenceBackdate' ? request.patch.completedAt! : preparedAt) : null,
+                        request.intent === 'referenceBackdate' || selection?.kind === 'rowBackdate' ? request.patch.completedAt!
+                            : widgetSource ? widgetCompletionInstant(widgetSource, preparedAt) ?? preparedAt : preparedAt) : null,
                 ...(isSave(request) && request.intent === 'skip'
                     ? { calendarTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } : {}),
                 ids: [], directClears: cleared(direct), direct: JSON.parse(JSON.stringify(direct)),
-                focusCount: countFocusedTasksBeforeBoundary(state.tasks, boundary),
+                focusCount: countFocusedTasksBeforeBoundary(state.tasks, boundary, dates),
                 focusLimit: normalizeFocusTaskLimit(state.settings.gtd?.focusTaskLimit),
+                ...(focusDates ? { focusDates } : {}),
                 ...(cancelTranslator ? { cancelMessage: resolveI18nText(cancelTranslator, 'task.cancelledWithRestore'),
                     cancelUndoLabel: resolveI18nText(cancelTranslator, 'common.undo') } : {}),
             };
-            let first = plan(kind, request, witness, true, false, selection, boardCompletion);
+            let first = plan(kind, request, witness, true, false, selection, directCompletion, widgetSource);
             const noop = Boolean(selection && !first.effect.tasks.length && !first.effect.projects.length && !first.effect.sections.length);
             if (noop) {
                 witness.deviceIdToInitialize = null;
-                first = plan(kind, request, witness, false, false, selection, boardCompletion);
+                first = plan(kind, request, witness, false, false, selection, directCompletion, widgetSource);
             }
-            reduceWitness(witness, first.effect, state, isReferenceMenuRequest(request) || boardCompletion);
-            const bounded = plan(kind, request, witness, false, false, selection, boardCompletion);
+            reduceWitness(witness, first.effect, state, isReferenceMenuRequest(request) || directCompletion || selection?.kind === 'rowBackdate' || selection?.kind === 'rowDestination' || selection?.kind === 'rowDates' || selection?.kind === 'rowFocus', undefined, selection?.kind === 'rowFocus');
+            const bounded = plan(kind, request, witness, false, false, selection, directCompletion, widgetSource);
             if (!same(first, bounded)) return fail('INVALID_INPUT', 'Checklist effect exceeds the bounded witness');
             const frozen = detach(JSON.parse(JSON.stringify({ version: selection ? 2 : 1, kind: noop ? 'noop' : kind, request, witness,
                 ...(!noop ? { effect: bounded.effect } : {}), result: bounded.result,
                 ...(selection && durable ? { rawBefore: noop
                     ? rawReadTaskSnapshot(durable.data.tasks.find((row) => row.id === request.id)!)
                     : bindRawChecklistRows(bounded.effect, durable.data) } : {}) })), selection ? 16 * 1024 * 1024 : LIMIT_BYTES);
-            const checked = frozen && readChecklistPrepared({ request, prepared: frozen }, deps.validateField, selection, boardCompletion);
+            const checked = frozen && readChecklistPrepared({ request, prepared: frozen }, deps.validateField, selection, directCompletion, widgetSource);
             if (!checked) {
                 return fail('INVALID_INPUT', 'Checklist effect cannot produce a valid prepared journal');
             }
             return { ok: true, value: noop ? { kind: 'noop', prepared: checked as NativeOwnedCompleteChecklistNoop }
                 : { kind: 'prepared', prepared: checked as NativePreparedChecklistWrite } };
         } catch (error) {
-            if (isReferenceOperation(request) && error instanceof Error && /^Focus limit of \d+ reached$/.test(error.message))
+            if ((isReferenceOperation(request) || selection?.kind === 'rowQuickStatus') && error instanceof Error && /^Focus limit of \d+ reached$/.test(error.message))
                 return fail('INVALID_INPUT', error.message);
             return fail('INVALID_INPUT', 'Checklist could not be prepared');
         }
@@ -1705,25 +2344,105 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             return applied.success ? { ok: true, value: result }
                 : fail('STALE_REVISION', applied.error ?? 'Prepared task change conflicts with current data');
         });
-    const prepareRawCompletion = async (input: NativeReferenceTaskCompletionRequest | NativeBoardTaskCompletionRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion & { version: 2 } }>> => {
+    const widgetSaved = (source: NativeWidgetCompletionSource): NativeHostResult<NativeWidgetCompletionResult> | null => {
+        if (!isNativeRequestReceiptDurable('iosWidgetCompletion')) return fail('SAVE_FAILED', 'Widget receipt storage is unavailable');
+        const saved = deps.receipts.saved<unknown>(source.actionId, nativeWidgetCompletionPayload(source));
+        if (!saved || !saved.ok) return saved;
+        const result = readNativeWidgetCompletionResult(saved.value, source);
+        return result ? { ok: true, value: result } : fail('INVALID_INPUT', 'Saved widget outcome is malformed');
+    };
+    const widgetDiscarded = (source: NativeWidgetCompletionSource): boolean => {
+        const state = useTaskStore.getState(), task = state._tasksById.get(nativeWidgetSourceTaskID(source));
+        return !task || buildWidgetCompletionToken(task) !== source.token
+            || !canCompleteNativeTask(task, state._allProjects, deps.isReadOnly(task));
+    };
+    const readWidgetEnvelope = (input: unknown): NativeWidgetCompletionEnvelope | null => {
+        const raw = detach(input, NATIVE_WIDGET_COMPLETION_BYTES);
+        if (!isRecord(raw) || !exact(raw, ['source', 'checklist'])) return null;
+        const source = readNativeWidgetCompletionSource(raw.source);
+        if (!source) return null;
+        if (raw.checklist === null) return { source, checklist: null };
+        if (!isRecord(raw.checklist) || !exact(raw.checklist, ['request', 'prepared']) || !isRecord(raw.checklist.prepared)) return null;
+        const request = readCompletionRequest(raw.checklist.request);
+        const prepared = readChecklistPrepared({ request: raw.checklist.prepared.request, prepared: raw.checklist.prepared },
+            deps.validateField, undefined, false, source);
+        if (!request || !prepared || prepared.version !== 1 || prepared.kind !== 'save'
+            || request.id !== nativeWidgetSourceTaskID(source) || request.requestId !== source.actionId
+            || request.taskRevision !== taskRevisionOf(prepared.witness.source)
+            || !same(prepared.request, completionSaveRequest(prepared.witness.source, source.actionId))
+            || !canCompleteNativeTask(prepared.witness.source, prepared.witness.lists.projects)) return null;
+        return { source, checklist: { request, prepared } };
+    };
+    const widgetResult = (envelope: NativeWidgetCompletionEnvelope): NativeWidgetCompletionResult => ({
+        actionId: envelope.source.actionId, outcome: envelope.checklist === null ? 'discarded' : 'completed',
+    });
+    const widgetDiagnostic = (result: NativeWidgetCompletionResult) => {
+        try { logInfo('Native iOS widget completion confirmed', { scope: 'widget', force: true,
+            context: { releaseCheck: 'v1.3.8/ios-widget-completion', outcome: result.outcome } }); } catch { /* Diagnostics cannot change a saved result. */ }
+    };
+    const widgetAuthority = {
+        prepareWidgetCompletion(input: unknown): NativeHostResult<{ kind: 'prepared'; prepared: NativeWidgetCompletionEnvelope }
+            | { kind: 'settled'; result: NativeWidgetCompletionResult }> {
+            const source = readNativeWidgetCompletionSource(input);
+            if (!source) return fail('INVALID_INPUT', 'Widget source is malformed');
+            const saved = widgetSaved(source);
+            if (saved) return saved.ok ? { ok: true, value: { kind: 'settled', result: saved.value } } : saved;
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            if (widgetDiscarded(source)) return { ok: true, value: { kind: 'prepared', prepared: { source, checklist: null } } };
+            const task = useTaskStore.getState()._tasksById.get(nativeWidgetSourceTaskID(source))!;
+            const request: NativeTaskCompletionRequest = { id: task.id, requestId: source.actionId, taskRevision: taskRevisionOf(task) };
+            const plan = prepareChecklist('save', completionSaveRequest(task, source.actionId), undefined, undefined, false, source);
+            if (!plan.ok) return plan;
+            if (plan.value.kind !== 'prepared' || plan.value.prepared.version !== 1) return fail('INVALID_INPUT', 'Widget completion made no change');
+            const prepared = readWidgetEnvelope({ source, checklist: { request, prepared: plan.value.prepared } });
+            return prepared ? { ok: true, value: { kind: 'prepared', prepared } } : fail('INVALID_INPUT', 'Widget preparation is invalid');
+        },
+        validatePreparedWidgetCompletion(input: unknown): NativeHostResult<NativeWidgetCompletionResult> {
+            const envelope = readWidgetEnvelope(input);
+            return envelope ? { ok: true, value: widgetResult(envelope) } : fail('INVALID_INPUT', 'Prepared widget completion is malformed');
+        },
+        async commitPreparedWidgetCompletion(input: unknown): Promise<NativeHostResult<NativeWidgetCompletionResult>> {
+            const envelope = readWidgetEnvelope(input);
+            if (!envelope) return fail('INVALID_INPUT', 'Prepared widget completion is malformed');
+            const saved = widgetSaved(envelope.source); if (saved) { if (saved.ok) widgetDiagnostic(saved.value); return saved; }
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const result = widgetResult(envelope), payload = nativeWidgetCompletionPayload(envelope.source);
+            const committed = envelope.checklist ? await commitReceipted(envelope.source.actionId, payload, envelope.checklist.prepared.effect, result)
+                : await deps.receipts.run(envelope.source.actionId, payload, async () => widgetDiscarded(envelope.source)
+                    ? { ok: true, value: result } : fail('STALE_REVISION', 'Widget discard decision changed'));
+            if (committed.ok) widgetDiagnostic(committed.value);
+            return committed;
+        },
+        widgetCompletionOutcome(input: unknown): NativeHostResult<NativeWidgetCompletionResult | null> {
+            const source = readNativeWidgetCompletionSource(input);
+            if (!source) return fail('INVALID_INPUT', 'Widget source is malformed');
+            const saved = widgetSaved(source);
+            if (saved?.ok) widgetDiagnostic(saved.value);
+            return saved ?? { ok: true, value: null };
+        },
+    };
+    const prepareRawCompletion = async (input: NativeReferenceTaskCompletionRequest | NativeBoardTaskCompletionRequest | NativeRowTaskCompletionRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion & { version: 2 } }>> => {
         const board = input.source === 'board';
-        const request = board ? readBoardCompletionRequest(input) : readReferenceCompletionRequest(input);
+        const row = input.source === 'row';
+        const directCompletion = board || row;
+        const request = row ? readRowCompletionRequest(input) : board ? readBoardCompletionRequest(input) : readReferenceCompletionRequest(input);
         if (!request) return fail('INVALID_INPUT', 'Completion source request is malformed');
+        if (row && !isNativeRequestReceiptDurable('rowTaskCompletion')) return fail('SAVE_FAILED', 'Row completion receipt storage is unavailable');
         const ready = deps.readiness(); if (!ready.ok) return ready;
         const state = useTaskStore.getState();
         const matches = state._allTasks.filter(row => row.id === request.id);
         const task = matches.length === 1 ? matches[0] : null;
-        const source = board ? !task ? fail('TASK_NOT_FOUND', 'Board task not found')
+        const source = directCompletion ? !task ? fail('TASK_NOT_FOUND', row ? 'Row task not found' : 'Board task not found')
             : taskRevisionOf(task) !== request.taskRevision ? fail('STALE_REVISION', 'Board task changed since it was shown')
-            : !canCompleteNativeBoardTask(task, state._allProjects, state._allSections, deps.isReadOnly(task))
+            : !(row ? canCompleteNativeRowTask : canCompleteNativeBoardTask)(task, state._allProjects, state._allSections, deps.isReadOnly(task))
                 ? fail('INVALID_INPUT', 'Board task cannot be completed') : { ok: true as const, value: task }
             : readHistoryRowSource({ id: request.id, taskRevision: request.taskRevision }, false, true);
         if (!source.ok) return source;
         const read = await readAreaDurableData(false, true); if (!read.ok) return read;
-        if (board && !sameBoardCompletionContainer(source.value, { projects: state._allProjects, sections: state._allSections }, read.value.authority.snapshot))
+        if (directCompletion && !sameBoardCompletionContainer(source.value, { projects: state._allProjects, sections: state._allSections }, read.value.authority.snapshot))
             return fail('STALE_REVISION', 'Board completion container changed before preparation');
-        const planned = prepare('save', board ? completionSaveRequest(source.value, request.requestId)
-            : referenceCompletionSaveRequest(source.value, request.requestId), board);
+        const planned = prepare('save', directCompletion ? completionSaveRequest(source.value, request.requestId)
+            : referenceCompletionSaveRequest(source.value, request.requestId), directCompletion);
         if (!planned.ok) return planned;
         if (planned.value.kind !== 'prepared') return fail('INVALID_INPUT', 'Reference completion made no change');
         const checklist = planned.value.prepared;
@@ -1733,18 +2452,18 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         const undoLabel = validCancelText(undo, 80) ? undo : 'Undo';
         const completedAt = checklist.effect.tasks.find((row) => row.after.id === request.id)?.after.completedAt;
         if (!completedAt) return fail('INVALID_INPUT', 'Reference completion has no instant');
-        const prepared = detach({ version: 2 as const, kind: board ? 'boardComplete' as const : 'referenceComplete' as const, request,
+        const prepared = detach({ version: 2 as const, kind: row ? 'rowComplete' as const : board ? 'boardComplete' as const : 'referenceComplete' as const, request,
             rawBefore: JSON.parse(JSON.stringify(bindRawChecklistRows(checklist.effect, read.value.authority.snapshot))), checklist,
             notice: { message, undoLabel }, result: { id: request.id, completion: { completedAt, undoEnabled: true, message, undoLabel } } }, COMPLETION_BYTES);
         const envelope = prepared && readCompletion({ request, prepared }, deps.validateField);
         return envelope?.prepared.version === 2 ? { ok: true, value: { kind: 'prepared', prepared: envelope.prepared } }
             : fail('INVALID_INPUT', 'Reference completion cannot produce a valid bounded journal');
     };
-    function prepareCompletion(input: NativeReferenceTaskCompletionRequest | NativeBoardTaskCompletionRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion & { version: 2 } }>>;
+    function prepareCompletion(input: NativeReferenceTaskCompletionRequest | NativeBoardTaskCompletionRequest | NativeRowTaskCompletionRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion & { version: 2 } }>>;
     function prepareCompletion(input: NativeTaskCompletionRequest & { source?: never }): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedOrdinaryTaskCompletion }>;
     function prepareCompletion(input: NativeTaskCompletionRequest): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion }> | Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion }>>;
     function prepareCompletion(input: NativeTaskCompletionRequest): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion }> | Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion }>> {
-        if (input?.source === 'reference' || input?.source === 'board') return prepareRawCompletion(input as NativeReferenceTaskCompletionRequest | NativeBoardTaskCompletionRequest);
+        if (input?.source === 'reference' || input?.source === 'board' || input?.source === 'row') return prepareRawCompletion(input as NativeReferenceTaskCompletionRequest | NativeBoardTaskCompletionRequest | NativeRowTaskCompletionRequest);
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const request = readCompletionRequest(input);
@@ -1781,19 +2500,26 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         const ready = deps.readiness(); if (!ready.ok) return ready;
         const request = readCompletionUndoRequest(input?.request); const completion = readCompletion(input?.completion, deps.validateField);
         const board = completion?.prepared.kind === 'boardComplete';
-        if (!request || !completion || (!board && completion.prepared.kind !== 'referenceComplete') || request.completionRequestId !== completion.request.requestId)
+        const row = completion?.prepared.kind === 'rowComplete';
+        const directCompletion = board || row;
+        if (!request || !completion || (!directCompletion && completion.prepared.kind !== 'referenceComplete') || request.completionRequestId !== completion.request.requestId)
             return fail('INVALID_INPUT', 'A confirmed Reference completion and new Undo UUID are required');
-        const confirmed = historyRowReceipts.saved<NativeTaskCompletionResult>(completion.request.requestId, canonicalJSON([completion.prepared.kind === 'boardComplete' ? 'boardTaskCompletion' : 'referenceTaskCompletion', completion]));
+        if (row && !isNativeRequestReceiptDurable('rowTaskCompletionUndo')) return fail('SAVE_FAILED', 'Row completion Undo receipt storage is unavailable');
+        const confirmed = historyRowReceipts.saved<NativeTaskCompletionResult>(completion.request.requestId, canonicalJSON([rawWritePrefix(completion as NativeRawReferenceEnvelope), completion]));
         if (!confirmed?.ok || !same(confirmed.value, completion.prepared.result)) return fail('STALE_REVISION', 'Completion has no saved request receipt');
         const read = await readAreaDurableData(false, true); if (!read.ok) return read;
+        if (row) {
+            const proof = await durableRowCompletion(completion, read.value.adapter);
+            if (!proof.ok) return proof;
+        }
         const state = useTaskStore.getState(); const task = state._tasksById.get(completion.request.id);
-        if (board && (!task || !sameBoardCompletionContainer(task, { projects: state._allProjects, sections: state._allSections }, read.value.authority.snapshot)
+        if (directCompletion && (!task || !sameBoardCompletionContainer(task, { projects: state._allProjects, sections: state._allSections }, read.value.authority.snapshot)
             || !sameBoardCompletionContainer(completion.prepared.checklist.witness.source, { projects: state._allProjects, sections: state._allSections }, read.value.authority.snapshot)))
             return fail('STALE_REVISION', 'Board Undo container changed before preparation');
         const completed = completion.prepared.checklist.effect.tasks.find((row) => row.after.id === completion.request.id)?.after;
         if (!task || !completed || task.deletedAt || task.purgedAt || task.status !== 'done' || task.completedAt !== completed.completedAt
             || (task.rev ?? 0) < (completed.rev ?? 0) || deps.isReadOnly(task)
-            || (board ? !boardUndoContainerMatches(completion, task, { projects: state._allProjects, sections: state._allSections })
+            || (directCompletion ? !boardUndoContainerMatches(completion, task, { projects: state._allProjects, sections: state._allSections })
                 : referenceContainerReadOnly(task, { projects: state._allProjects, sections: state._allSections })))
             return fail('STALE_REVISION', 'Reference completion was superseded');
         try {
@@ -1801,21 +2527,21 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             const witness: Witness = { source: JSON.parse(JSON.stringify(task)), lists: { tasks: state._allTasks,
                 projects: state._allProjects, sections: state._allSections, areas: state._allAreas },
                 settings: JSON.parse(JSON.stringify({ deviceId: state.settings.deviceId, gtd: { focusTaskLimit: state.settings.gtd?.focusTaskLimit,
-                    ...(board ? { autoArchiveDays: state.settings.gtd?.autoArchiveDays } : {}) } })),
+                    ...(directCompletion ? { autoArchiveDays: state.settings.gtd?.autoArchiveDays } : {}) } })),
                 preparedAt: at, preparedLocalDay: new Date(Date.parse(at) - new Date(at).getTimezoneOffset() * 60_000).toISOString().slice(0, 10),
                 preparedOffsetMinutes: new Date(at).getTimezoneOffset(), boundaryOffsetMinutes: new Date(boundary).getTimezoneOffset(), futureBoundary: boundary,
                 deviceIdBefore: state.settings.deviceId ?? null, deviceIdToInitialize: device.updated ? device.deviceId : null,
                 recurrenceProjection: null, ids: [], directClears: [], direct: { status: 'reference' },
                 focusCount: countFocusedTasksBeforeBoundary(state.tasks, boundary), focusLimit: normalizeFocusTaskLimit(state.settings.gtd?.focusTaskLimit) };
-            if (board) {
+            if (directCompletion) {
                 const direct = completionUndoDirect(completion, witness);
                 witness.directClears = cleared(direct); witness.direct = JSON.parse(JSON.stringify(direct));
             }
             const first = planRawCompletionUndo(completion, witness);
-            reduceWitness(witness, first, state, true, board ? completion.prepared.checklist.witness.source : undefined);
+            reduceWitness(witness, first, state, true, directCompletion ? completion.prepared.checklist.witness.source : undefined);
             const effect = planRawCompletionUndo(completion, witness);
             if (!same(first, effect)) return fail('INVALID_INPUT', 'Reference Undo exceeds bounded witness');
-            const prepared = detach(JSON.parse(JSON.stringify({ version: 2 as const, kind: board ? 'boardCompleteUndo' as const : 'referenceCompleteUndo' as const, request, completion,
+            const prepared = detach(JSON.parse(JSON.stringify({ version: 2 as const, kind: row ? 'rowCompleteUndo' as const : board ? 'boardCompleteUndo' as const : 'referenceCompleteUndo' as const, request, completion,
                 rawBefore: JSON.parse(JSON.stringify(bindRawChecklistRows(effect, read.value.authority.snapshot))), witness, effect, result: { id: task.id } })), COMPLETION_UNDO_BYTES);
             const envelope = prepared && readCompletionUndo({ request, prepared }, deps.validateField);
             return envelope?.prepared.version === 2 ? { ok: true, value: { kind: 'prepared', prepared: envelope.prepared } }
@@ -1825,7 +2551,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
     function prepareCompletionUndo(input: { request: NativeTaskCompletionUndoRequest; completion: NativeTaskCompletionEnvelope & { prepared: NativePreparedOrdinaryTaskCompletion } }): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedOrdinaryTaskCompletionUndo }>;
     function prepareCompletionUndo(input: { request: NativeTaskCompletionUndoRequest; completion: NativeTaskCompletionEnvelope }): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo }> | Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo }>>;
     function prepareCompletionUndo(input: { request: NativeTaskCompletionUndoRequest; completion: NativeTaskCompletionEnvelope }): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo }> | Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo }>> {
-        if (input?.completion?.prepared?.kind === 'referenceComplete' || input?.completion?.prepared?.kind === 'boardComplete') return prepareRawCompletionUndo(input);
+        if (input?.completion?.prepared?.kind === 'referenceComplete' || input?.completion?.prepared?.kind === 'boardComplete' || input?.completion?.prepared?.kind === 'rowComplete') return prepareRawCompletionUndo(input);
 
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -2057,7 +2783,151 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             return saved.ok ? { ok: true, value: checked.prepared.result } : saved;
         },
     };
+    const readRowQuickStatusSource = async (input: { id: string; taskRevision: string }): Promise<NativeHostResult<{ source: Task; data: AppData; at: string }>> => {
+        const ready = deps.readiness(); if (!ready.ok) return ready;
+        const read = await readAreaDurableData(false, true); if (!read.ok) return read;
+        const data = read.value.authority.snapshot, at = new Date().toISOString();
+        const matches = data.tasks.filter(row => row.id === input.id);
+        if (matches.length !== 1 || matches[0].deletedAt || matches[0].purgedAt || isProjectedRecurringTaskId(input.id))
+            return fail('TASK_NOT_FOUND', 'Row status task is unavailable');
+        const state = ownedChecklistState(data, at), source = state._tasksById.get(input.id)!;
+        // The row exposes the normal-load revision (for example, a clock rollback
+        // can clamp its displayed updatedAt). Raw BEFORE authority stays separate.
+        if (taskRevisionOf(source) !== input.taskRevision) return fail('STALE_REVISION', 'Task changed since the row was shown');
+        if (deps.isReadOnly(source) || isStatusListTaskReadOnly(source, state._allProjects)
+            || referenceContainerReadOnly(source, { projects: state._allProjects, sections: state._allSections }))
+            return fail('INVALID_INPUT', 'Row status source is read-only');
+        return { ok: true, value: { source, data, at } };
+    };
     const publicMethods = {
+        async prepareRowTaskFocus(input: NativeRowTaskFocusRequest): Promise<NativeHostResult<NativeRowTaskFocusPreparation>> {
+            const request = readRowFocusRequest(input); if (!request) return fail('INVALID_INPUT', 'An exact row Focus request is required');
+            if (!isNativeRequestReceiptDurable('rowTaskFocus')) return fail('SAVE_FAILED', 'Row Focus receipt storage is unavailable');
+            const read = await readRowQuickStatusSource(request); if (!read.ok) return read;
+            const { source, data, at } = read.value;
+            if (!rowDatesSource(source)) return fail('INVALID_INPUT', 'Focus requires an Inbox, Next, Waiting or Someday row');
+            if ((source.isFocusedToday === true) === request.focused) return { ok: true, value: { kind: 'noop', result: { id: source.id, focused: request.focused } } };
+            const state = ownedChecklistState(data, at), boundary = futureBoundary(at);
+            const dates = new Map(projectFocusDateValues(state._allTasks.flatMap(row => [row.startTime, row.dueDate, row.reviewAt].filter((value): value is string => Boolean(value)))).map(row => [row.value, row]));
+            const limit = normalizeFocusTaskLimit(state.settings.gtd?.focusTaskLimit);
+            const action = resolveRowFocusStarAction(source, { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
+                focusedCount: countFocusedTasksBeforeBoundary(state._allTasks, boundary, dates), focusTaskLimit: limit,
+                now: new Date(at), endOfTodayIso: boundary, frozenDates: dates });
+            if (!action.canToggle) { const t = getTranslator(deps.language()); return { ok: true, value: { kind: 'blocked', result: {
+                blocked: getFocusStarBlockedText(t, action, limit) ?? tFallback(t, 'digest.focus', 'Focus'), blockedTitle: tFallback(t, 'digest.focus', 'Focus') } } }; }
+            const planned = prepareChecklist('save', rowFocusSaveRequest(source, request), rowFocusSelection, { data, at });
+            if (!planned.ok) return planned;
+            if (planned.value.kind !== 'prepared') return fail('INVALID_INPUT', 'Changed Focus made no prepared write');
+            const proof = planned.value.prepared as NativePreparedSelectedChecklistSave;
+            const e = readRowFocus({ request, prepared: { version: 2, kind: 'rowFocus', request, rawBefore: proof.rawBefore,
+                checklist: proof, result: { id: source.id, focused: request.focused } } }, deps.validateField);
+            return e ? { ok: true, value: { kind: 'prepared', prepared: e.prepared } } : fail('INVALID_INPUT', 'Focus cannot produce a bounded proof');
+        },
+        validatePreparedRowTaskFocus(input: NativeRowTaskFocusEnvelope): NativeHostResult<NativeRowTaskFocusResult> {
+            const e = readRowFocus(input, deps.validateField); return e ? { ok: true, value: e.prepared.result } : fail('INVALID_INPUT', 'Invalid row Focus proof');
+        },
+        async commitPreparedRowTaskFocus(input: NativeRowTaskFocusEnvelope): Promise<NativeHostResult<NativeRowTaskFocusResult>> {
+            const e = readRowFocus(input, deps.validateField); if (!e) return fail('INVALID_INPUT', 'Invalid row Focus proof');
+            if (!isNativeRequestReceiptDurable('rowTaskFocus')) return fail('SAVE_FAILED', 'Row Focus receipt storage is unavailable');
+            return commitHistoryRowWrite(e);
+        },
+        rowTaskFocusOutcome(input: NativeRowTaskFocusEnvelope): NativeHostResult<NativeRowTaskFocusResult | null> {
+            const e = readRowFocus(input, deps.validateField); if (!e) return fail('INVALID_INPUT', 'Invalid row Focus proof');
+            if (!isNativeRequestReceiptDurable('rowTaskFocus')) return fail('SAVE_FAILED', 'Row Focus receipt storage is unavailable');
+            const saved = historyRowReceipts.saved<NativeRowTaskFocusResult>(e.request.requestId, canonicalJSON(['rowTaskFocus', e]));
+            return saved?.ok && !same(saved.value, e.prepared.result) ? fail('INVALID_INPUT', 'Saved row Focus result differs') : saved ?? { ok: true, value: null };
+        },
+        async prepareRowTaskDates(input: NativeRowTaskDatesRequest): Promise<NativeHostResult<
+            { kind: 'unchanged'; result: { id: string } } | { kind: 'prepared'; prepared: NativePreparedRowTaskDates }>> {
+            const identity = readRowDatesIdentity(input); if (!identity) return fail('INVALID_INPUT', 'An exact row Dates draft is required');
+            if (!isNativeRequestReceiptDurable('rowTaskDates')) return fail('SAVE_FAILED', 'Row Dates receipt storage is unavailable');
+            const read = await readRowQuickStatusSource(identity.row); if (!read.ok) return read;
+            const { source, data, at } = read.value;
+            if (!rowDatesSource(source)) return fail('INVALID_INPUT', 'Dates requires an Inbox, Next, Waiting or Someday row');
+            const request = readRowDatesRequest(identity.input, deps.validateField, readDraft, source);
+            if (!request) return fail('INVALID_INPUT', 'An existing complete Dates draft and schedule baseline are required');
+            if (!same(request.scheduleBase, getNativeTaskScheduleBase(source))) return fail('STALE_REVISION', 'The opening Dates baseline changed');
+            const saveRequest = rowDatesSaveRequest(source, request, readDraft);
+            if (!saveRequest) return fail('INVALID_INPUT', 'Dates may change only Start, Due and its existing relative link');
+            if (!Object.keys(saveRequest.patch).length) return { ok: true, value: { kind: 'unchanged', result: { id: source.id } } };
+            const planned = prepareChecklist('save', saveRequest, rowDatesSelection, { data, at });
+            if (!planned.ok) return planned;
+            if (planned.value.kind !== 'prepared') return fail('INVALID_INPUT', 'Changed Dates made no prepared write');
+            const proof = planned.value.prepared as NativePreparedSelectedChecklistSave;
+            const e = readRowDates({ request, prepared: { version: 2, kind: 'rowDates', request,
+                rawBefore: proof.rawBefore, checklist: proof, result: { id: source.id } } }, deps.validateField, readDraft);
+            return e ? { ok: true, value: { kind: 'prepared', prepared: e.prepared } } : fail('INVALID_INPUT', 'Dates cannot produce a bounded proof');
+        },
+        validatePreparedRowTaskDates(input: NativeRowTaskDatesEnvelope): NativeHostResult<{ id: string }> {
+            const e = readRowDates(input, deps.validateField, readDraft); return e ? { ok: true, value: e.prepared.result } : fail('INVALID_INPUT', 'Invalid row Dates proof');
+        },
+        async commitPreparedRowTaskDates(input: NativeRowTaskDatesEnvelope): Promise<NativeHostResult<{ id: string }>> {
+            const e = readRowDates(input, deps.validateField, readDraft); if (!e) return fail('INVALID_INPUT', 'Invalid row Dates proof');
+            if (!isNativeRequestReceiptDurable('rowTaskDates')) return fail('SAVE_FAILED', 'Row Dates receipt storage is unavailable');
+            return commitHistoryRowWrite(e);
+        },
+        rowTaskDatesOutcome(input: NativeRowTaskDatesEnvelope): NativeHostResult<{ id: string } | null> {
+            const e = readRowDates(input, deps.validateField, readDraft); if (!e) return fail('INVALID_INPUT', 'Invalid row Dates proof');
+            if (!isNativeRequestReceiptDurable('rowTaskDates')) return fail('SAVE_FAILED', 'Row Dates receipt storage is unavailable');
+            const saved = historyRowReceipts.saved<{ id: string }>(e.request.requestId, canonicalJSON(['rowTaskDates', e]));
+            return saved?.ok && !same(saved.value, e.prepared.result) ? fail('INVALID_INPUT', 'Saved row Dates result differs') : saved ?? { ok: true, value: null };
+        },
+        async getRowTaskDestinationOptions(input: NativeRowTaskDestinationOptionsInput): Promise<NativeHostResult<NativeRowTaskDestinationOptions>> {
+            const parsed = detach(input, 16_384), ref = readRowQuickStatusSourceRef(parsed);
+            if (!ref || !isRecord(parsed) || !exact(parsed, ['id', 'taskRevision', 'query', 'offset', 'limit'])
+                || typeof parsed.query !== 'string' || parsed.query.length > 2000
+                || !Number.isSafeInteger(parsed.offset) || (parsed.offset as number) < 0
+                || !Number.isSafeInteger(parsed.limit) || (parsed.limit as number) < 1 || (parsed.limit as number) > 100)
+                return fail('INVALID_INPUT', 'A displayed row and bounded destination page are required');
+            const read = await readRowQuickStatusSource(ref); if (!read.ok) return read;
+            const source = read.value.source, state = ownedChecklistState(read.value.data, read.value.at), t = getTranslator(deps.language());
+            const query = input.query.trim().toLowerCase();
+            const choices: NativeRowTaskDestinationOptions['choices'] = [
+                { kind: 'none', id: '', label: resolveI18nText(t, 'common.none'), selected: !source.projectId && !source.areaId },
+                ...getProjectChoiceState(selectVisibleProjects(state._allProjects), input.query).filteredProjects.map(row => ({
+                    kind: 'project' as const, id: row.id, label: row.title, selected: source.projectId === row.id })),
+                ...selectVisibleAreas(state._allAreas).filter(row => !row.deletedAt).sort(compareAreasByOrder)
+                    .filter(row => !query || row.name.toLowerCase().includes(query)).map(row => ({
+                        kind: 'area' as const, id: row.id, label: row.name, selected: source.areaId === row.id })),
+            ];
+            const page = choices.slice(input.offset, input.offset + input.limit), hasMore = input.offset + page.length < choices.length;
+            const result: NativeRowTaskDestinationOptions = { version: 1, ...input, total: choices.length, hasMore,
+                nextOffset: hasMore ? input.offset + page.length : null, choices: page,
+                labels: { title: resolveI18nText(t, 'task.destination'), search: resolveI18nText(t, 'common.search'),
+                    projects: resolveI18nText(t, 'nav.projects'), areas: resolveI18nText(t, 'taskEdit.areaLabel'),
+                    cancel: resolveI18nText(t, 'common.cancel'), more: resolveI18nText(t, 'common.more'),
+                    retry: resolveI18nText(t, 'common.retry'), noMatches: resolveI18nText(t, 'common.noMatches') } };
+            return isNativeJsonWithinBytes(result, COMPLETION_BYTES) ? { ok: true, value: result } : fail('SAVE_FAILED', 'Row destination page exceeds the bounded response');
+        },
+        async prepareRowTaskDestination(input: NativeRowTaskDestinationRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedRowTaskDestination }>> {
+            const request = readRowDestinationRequest(input); if (!request) return fail('INVALID_INPUT', 'An exact row destination request is required');
+            if (!isNativeRequestReceiptDurable('rowTaskDestination')) return fail('SAVE_FAILED', 'Row destination receipt storage is unavailable');
+            const read = await readRowQuickStatusSource(request); if (!read.ok) return read;
+            const { source, data, at } = read.value;
+            if (!referenceDestinationAvailable(request.destination, { projects: data.projects, areas: data.areas ?? [] }))
+                return fail('INVALID_INPUT', 'Row destination is not available');
+            const planned = prepareChecklist('save', rowDestinationSaveRequest(source, request), rowDestinationSelection, { data, at });
+            if (!planned.ok) return planned;
+            if (planned.value.kind !== 'prepared') return fail('INVALID_INPUT', 'Row destination made no prepared write');
+            const proof = planned.value.prepared as NativePreparedSelectedChecklistSave;
+            const e = readRowDestination({ request, prepared: { version: 2, kind: 'rowDestination', request,
+                rawBefore: proof.rawBefore, checklist: proof, result: { id: source.id } } }, deps.validateField);
+            return e ? { ok: true, value: { kind: 'prepared', prepared: e.prepared } } : fail('INVALID_INPUT', 'Row destination cannot produce a bounded proof');
+        },
+        validatePreparedRowTaskDestination(input: NativeRowTaskDestinationEnvelope): NativeHostResult<{ id: string }> {
+            const e = readRowDestination(input, deps.validateField); return e ? { ok: true, value: e.prepared.result } : fail('INVALID_INPUT', 'Invalid row destination proof');
+        },
+        async commitPreparedRowTaskDestination(input: NativeRowTaskDestinationEnvelope): Promise<NativeHostResult<{ id: string }>> {
+            const e = readRowDestination(input, deps.validateField); if (!e) return fail('INVALID_INPUT', 'Invalid row destination proof');
+            if (!isNativeRequestReceiptDurable('rowTaskDestination')) return fail('SAVE_FAILED', 'Row destination receipt storage is unavailable');
+            return commitHistoryRowWrite(e);
+        },
+        rowTaskDestinationOutcome(input: NativeRowTaskDestinationEnvelope): NativeHostResult<{ id: string } | null> {
+            const e = readRowDestination(input, deps.validateField); if (!e) return fail('INVALID_INPUT', 'Invalid row destination proof');
+            if (!isNativeRequestReceiptDurable('rowTaskDestination')) return fail('SAVE_FAILED', 'Row destination receipt storage is unavailable');
+            const saved = historyRowReceipts.saved<{ id: string }>(e.request.requestId, canonicalJSON(['rowTaskDestination', e]));
+            return saved?.ok && !same(saved.value, e.prepared.result) ? fail('INVALID_INPUT', 'Saved row destination result differs') : saved ?? { ok: true, value: null };
+        },
         getReferenceTaskDestinationOptions(input: NativeReferenceTaskDestinationOptionsInput): NativeHostResult<NativeReferenceTaskDestinationOptions> {
             const parsed = detach(input);
             if (!isRecord(parsed) || !exact(parsed, ['id', 'taskRevision', 'query', 'offset', 'limit'])
@@ -2128,6 +2998,51 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             const saved = historyRowReceipts.saved<{ id: string }>(envelope.request.requestId, canonicalJSON(['referenceTaskDestination', envelope]));
             return saved?.ok && !same(saved.value, envelope.prepared.result)
                 ? fail('INVALID_INPUT', 'Saved Reference filing result does not match its journal') : saved ?? { ok: true, value: null };
+        },
+        async getRowTaskBackdateOptions(input: { id: string; taskRevision: string }): Promise<NativeHostResult<{
+            title: string; saveLabel: string; cancelLabel: string; taskId: string; taskRevision: string;
+            initialValue: null; initialEpochMilliseconds: null; showTimeSpent: boolean;
+            initialTimeSpentMinutes: number | null; timeSpentLabel: string; timeSpentPlaceholder: string;
+        }>> {
+            const v = detach(input, 4096), ref = readRowQuickStatusSourceRef(v);
+            if (!ref || !isRecord(v) || !exact(v, ['id', 'taskRevision'])) return fail('INVALID_INPUT', 'A displayed row revision is required');
+            const read = await readRowQuickStatusSource(ref); if (!read.ok) return read;
+            if (read.value.source.status === 'done') return fail('INVALID_INPUT', 'Done rows cannot be completed again');
+            const t = getTranslator(deps.language()), task = read.value.source;
+            return { ok: true, value: { title: resolveI18nText(t, 'task.completedAtPromptTitle'), saveLabel: resolveI18nText(t, 'common.save'),
+                cancelLabel: resolveI18nText(t, 'common.cancel'), taskId: task.id, taskRevision: ref.taskRevision,
+                initialValue: null, initialEpochMilliseconds: null, showTimeSpent: isTaskEditorTimeSpentEnabled(read.value.data.settings),
+                initialTimeSpentMinutes: normalizeTimeSpentMinutes(task.timeSpentMinutes) ?? null,
+                timeSpentLabel: resolveI18nText(t, 'taskEdit.timeSpentLabel'), timeSpentPlaceholder: resolveI18nText(t, 'taskEdit.timeSpentPlaceholder') } };
+        },
+        async prepareRowTaskBackdate(input: NativeRowTaskBackdateRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedRowTaskBackdate }>> {
+            const request = readRowBackdateRequest(input); if (!request) return fail('INVALID_INPUT', 'An exact row backdate request is required');
+            if (!isNativeRequestReceiptDurable('rowTaskBackdate')) return fail('SAVE_FAILED', 'Row backdate receipt storage is unavailable');
+            const read = await readRowQuickStatusSource(request); if (!read.ok) return read;
+            const { source, data, at } = read.value;
+            if (source.status === 'done') return fail('INVALID_INPUT', 'Done rows cannot be completed again');
+            if (isTaskEditorTimeSpentEnabled(data.settings) !== (request.timeSpentText !== null)) return fail('STALE_REVISION', 'Time-spent setting changed; reopen Completion time');
+            const planned = prepareChecklist('save', backdateSaveRequest(source, request), rowBackdateSelection, { data, at });
+            if (!planned.ok) return planned;
+            if (planned.value.kind !== 'prepared') return fail('INVALID_INPUT', 'Row completion made no prepared change');
+            const proof = planned.value.prepared as NativePreparedSelectedChecklistSave;
+            const e = readRowBackdate({ request, prepared: { version: 2, kind: 'rowBackdate', request,
+                rawBefore: proof.rawBefore, checklist: proof, result: { id: source.id } } }, deps.validateField);
+            return e ? { ok: true, value: { kind: 'prepared', prepared: e.prepared } } : fail('INVALID_INPUT', 'Row backdate cannot produce a bounded proof');
+        },
+        validatePreparedRowTaskBackdate(input: NativeRowTaskBackdateEnvelope): NativeHostResult<{ id: string }> {
+            const e = readRowBackdate(input, deps.validateField); return e ? { ok: true, value: e.prepared.result } : fail('INVALID_INPUT', 'Invalid row backdate proof');
+        },
+        async commitPreparedRowTaskBackdate(input: NativeRowTaskBackdateEnvelope): Promise<NativeHostResult<{ id: string }>> {
+            const e = readRowBackdate(input, deps.validateField); if (!e) return fail('INVALID_INPUT', 'Invalid row backdate proof');
+            if (!isNativeRequestReceiptDurable('rowTaskBackdate')) return fail('SAVE_FAILED', 'Row backdate receipt storage is unavailable');
+            return commitHistoryRowWrite(e);
+        },
+        rowTaskBackdateOutcome(input: NativeRowTaskBackdateEnvelope): NativeHostResult<{ id: string } | null> {
+            const e = readRowBackdate(input, deps.validateField); if (!e) return fail('INVALID_INPUT', 'Invalid row backdate proof');
+            if (!isNativeRequestReceiptDurable('rowTaskBackdate')) return fail('SAVE_FAILED', 'Row backdate receipt storage is unavailable');
+            const saved = historyRowReceipts.saved<{ id: string }>(e.request.requestId, canonicalJSON(['rowTaskBackdate', e]));
+            return saved?.ok && !same(saved.value, e.prepared.result) ? fail('INVALID_INPUT', 'Saved row backdate result differs') : saved ?? { ok: true, value: null };
         },
         getReferenceTaskBackdateOptions(input: { id: string; taskRevision: string }): NativeHostResult<{
             title: string; saveLabel: string; cancelLabel: string; taskId: string; taskRevision: string;
@@ -2377,6 +3292,12 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             if (!envelope) return fail('INVALID_INPUT', 'Prepared completion is malformed');
             const ready = deps.readiness();
             if (!ready.ok) return ready;
+            if (envelope.prepared.kind === 'rowComplete') {
+                if (!isNativeRequestReceiptDurable('rowTaskCompletion')) return fail('SAVE_FAILED', 'Row completion receipt storage is unavailable');
+                const result = await commitHistoryRowWrite(envelope as NativeRawReferenceEnvelope & { prepared: { result: NativeTaskCompletionResult } });
+                if (result.ok) diagnoseRowCompletion('rowComplete');
+                return result;
+            }
             if (envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'boardComplete') return commitHistoryRowWrite(envelope as NativeRawReferenceEnvelope & { prepared: { result: NativeTaskCompletionResult } });
             const result = await commitReceipted(envelope.request.requestId,
                 canonicalJSON(['taskCompletion', envelope]), envelope.prepared.checklist.effect, envelope.prepared.result);
@@ -2388,6 +3309,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             if (!envelope) return fail('INVALID_INPUT', 'Prepared completion is malformed');
             const saved = (envelope.prepared.version === 2 ? historyRowReceipts : deps.receipts).saved<NativeTaskCompletionResult>(envelope.request.requestId,
                 canonicalJSON([envelope.prepared.version === 2 ? rawWritePrefix(envelope as NativeRawReferenceEnvelope) : 'taskCompletion', envelope]));
+            if (envelope.prepared.kind === 'rowComplete' && saved?.ok && same(saved.value, envelope.prepared.result)) diagnoseRowCompletion('rowComplete');
             return saved?.ok && !same(saved.value, envelope.prepared.result)
                 ? fail('INVALID_INPUT', 'Saved completion result does not match its journal')
                 : saved ?? { ok: true, value: null };
@@ -2403,6 +3325,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             if (!envelope) return fail('INVALID_INPUT', 'Prepared completion Undo is malformed');
             const saved = (envelope.prepared.version === 2 ? historyRowReceipts : deps.receipts).saved<{ id: string }>(envelope.request.requestId,
                 canonicalJSON([envelope.prepared.version === 2 ? rawWritePrefix(envelope as NativeRawReferenceEnvelope) : 'taskCompletionUndo', envelope]));
+            if (envelope.prepared.kind === 'rowCompleteUndo' && saved?.ok && same(saved.value, envelope.prepared.result)) diagnoseRowCompletion('rowCompleteUndo');
             return saved?.ok && !same(saved.value, envelope.prepared.result)
                 ? fail('INVALID_INPUT', 'Saved completion Undo result does not match its journal')
                 : saved ?? { ok: true, value: null };
@@ -2412,6 +3335,12 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             if (!envelope) return fail('INVALID_INPUT', 'Prepared completion Undo is malformed');
             const ready = deps.readiness();
             if (!ready.ok) return ready;
+            if (envelope.prepared.kind === 'rowCompleteUndo') {
+                if (!isNativeRequestReceiptDurable('rowTaskCompletionUndo')) return fail('SAVE_FAILED', 'Row completion Undo receipt storage is unavailable');
+                const result = await commitHistoryRowWrite(envelope as NativeRawReferenceEnvelope);
+                if (result.ok) diagnoseRowCompletion('rowCompleteUndo');
+                return result;
+            }
             if (envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardCompleteUndo') return commitHistoryRowWrite(envelope as NativeRawReferenceEnvelope);
             const payload = canonicalJSON(['taskCompletionUndo', envelope]);
             const savedUndo = deps.receipts.saved<{ id: string }>(envelope.request.requestId, payload);
@@ -2425,6 +3354,94 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                 envelope.prepared.effect, envelope.prepared.result);
             return result.ok && !same(result.value, envelope.prepared.result)
                 ? fail('INVALID_INPUT', 'Saved completion Undo result does not match its journal') : result;
+        },
+        async getRowQuickStatusOptions(input: { id: string; taskRevision: string }): Promise<NativeHostResult<NativeRowQuickStatusOptions>> {
+            const v = detach(input, 4_096), ref = readRowQuickStatusSourceRef(v);
+            if (!ref || !isRecord(v) || !exact(v, ['id', 'taskRevision'])) return fail('INVALID_INPUT', 'A displayed row revision is required');
+            const read = await readRowQuickStatusSource(ref); if (!read.ok) return read;
+            const { source } = read.value, t = getTranslator(deps.language());
+            return { ok: true, value: { title: t('taskStatus.changeStatus'), taskId: source.id, taskRevision: taskRevisionOf(source), status: source.status,
+                options: DONE_STATUS_OPTIONS.map(status => ({ status, label: t(`status.${status}`), selected: status === source.status })) } };
+        },
+        async prepareRowQuickStatusWrite(input: NativeRowQuickStatusRequest): Promise<NativeHostResult<
+            { kind: 'unchanged'; result: { id: string } } | { kind: 'prepared'; prepared: NativePreparedRowQuickStatus }>> {
+            const request = readRowQuickStatusRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'An exact displayed row revision and non-Done target are required');
+            if (!isNativeRequestReceiptDurable('iosRowQuickStatus')) return fail('SAVE_FAILED', 'Row status receipt storage is unavailable');
+            const read = await readRowQuickStatusSource(request); if (!read.ok) return read;
+            const { source, data, at } = read.value;
+            if (source.status === request.status) return { ok: true, value: { kind: 'unchanged', result: { id: source.id } } };
+            const planned = prepareChecklist('save', rowQuickStatusSaveRequest(source, request), rowQuickStatusSelection, { data, at });
+            if (!planned.ok) return planned;
+            if (planned.value.kind !== 'prepared') return fail('INVALID_INPUT', 'Row status made no prepared change');
+            const proof = planned.value.prepared;
+            const e = readRowQuickStatusEnvelope({ request, prepared: { version: 2, kind: 'rowQuickStatus', request,
+                rawBefore: bindRawChecklistRows(proof.effect, data), witness: proof.witness, effect: proof.effect, result: { id: source.id } } }, deps.validateField);
+            return e ? { ok: true, value: { kind: 'prepared', prepared: e.prepared } } : fail('INVALID_INPUT', 'Row status cannot produce a bounded proof');
+        },
+        validatePreparedRowQuickStatusWrite(input: NativeRowQuickStatusEnvelope): NativeHostResult<{ id: string }> {
+            const e = readRowQuickStatusEnvelope(input, deps.validateField);
+            return e ? { ok: true, value: e.prepared.result } : fail('INVALID_INPUT', 'Invalid prepared row status');
+        },
+        async commitPreparedRowQuickStatusWrite(input: NativeRowQuickStatusEnvelope): Promise<NativeHostResult<{ id: string }>> {
+            const e = readRowQuickStatusEnvelope(input, deps.validateField);
+            if (!e) return fail('INVALID_INPUT', 'Invalid prepared row status');
+            if (!isNativeRequestReceiptDurable('iosRowQuickStatus')) return fail('SAVE_FAILED', 'Row status receipt storage is unavailable');
+            const result = await commitHistoryRowWrite(e); if (result.ok) diagnoseRowQuickStatus(e.request); return result;
+        },
+        rowQuickStatusOutcome(input: NativeRowQuickStatusEnvelope): NativeHostResult<{ id: string } | null> {
+            const e = readRowQuickStatusEnvelope(input, deps.validateField);
+            if (!e) return fail('INVALID_INPUT', 'Invalid prepared row status');
+            if (!isNativeRequestReceiptDurable('iosRowQuickStatus')) return fail('SAVE_FAILED', 'Row status receipt storage is unavailable');
+            const saved = historyRowReceipts.saved<{ id: string }>(e.request.requestId, canonicalJSON(['iosRowQuickStatus', e]));
+            if (saved?.ok && !same(saved.value, e.prepared.result)) return fail('INVALID_INPUT', 'Saved row status result differs');
+            if (saved?.ok) diagnoseRowQuickStatus(e.request);
+            return saved ?? { ok: true, value: null };
+        },
+        async prepareInlineChecklistWrite(input: NativeInlineChecklistRequest): Promise<NativeHostResult<
+            { kind: 'unchanged'; result: { id: string } } | { kind: 'prepared'; prepared: NativePreparedInlineChecklist }>> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const request = readInlineRequest(input); if (!request) return fail('INVALID_INPUT', 'An exact bounded inline checklist action is required');
+            if (!isNativeRequestReceiptDurable('iosInlineChecklist')) return fail('SAVE_FAILED', 'Inline checklist receipt storage is unavailable');
+            const read = await readAreaDurableData(false, true); if (!read.ok) return read;
+            const data = read.value.authority.snapshot, at = new Date().toISOString();
+            const rows = data.tasks.filter(row => row.id === request.id);
+            if (rows.length !== 1) return fail('TASK_NOT_FOUND', 'Inline checklist task is missing or duplicated');
+            const state = ownedChecklistState(data, at), source = state._tasksById.get(request.id)!;
+            if (!inlineSource(source) || deps.isReadOnly(source) || isStatusListTaskReadOnly(source, state._allProjects)
+                || referenceContainerReadOnly(source, { projects: state._allProjects, sections: state._allSections }))
+                return fail('INVALID_INPUT', 'Inline checklist source is unavailable');
+            if (taskRevisionOf(source) !== request.taskRevision) return fail('STALE_REVISION', 'Task changed since the checklist was shown');
+            const selected = inlineSelection(request, source, generateUUID);
+            if (!selected) return fail('INVALID_INPUT', 'Inline checklist item is unavailable');
+            if (same(selected, toChecklist(source.checklist))) return { ok: true, value: { kind: 'unchanged', result: { id: source.id } } };
+            const planned = prepareChecklist('save', inlineSaveRequest(request, source, selected), undefined, { data, at });
+            if (!planned.ok) return planned;
+            if (planned.value.kind !== 'prepared' || planned.value.prepared.version !== 1) return fail('INVALID_INPUT', 'Inline checklist made no prepared change');
+            const checklist = planned.value.prepared;
+            const envelope = readInlineEnvelope({ request, prepared: { version: 2, kind: 'inlineChecklist', request,
+                rawBefore: bindRawChecklistRows(checklist.effect, data), checklist, result: { id: source.id } } }, deps.validateField);
+            return envelope ? { ok: true, value: { kind: 'prepared', prepared: envelope.prepared } }
+                : fail('INVALID_INPUT', 'Inline checklist cannot produce a bounded proof');
+        },
+        validatePreparedInlineChecklistWrite(input: NativeInlineChecklistEnvelope): NativeHostResult<{ id: string }> {
+            const e = readInlineEnvelope(input, deps.validateField);
+            return e ? { ok: true, value: e.prepared.result } : fail('INVALID_INPUT', 'Invalid prepared inline checklist');
+        },
+        async commitPreparedInlineChecklistWrite(input: NativeInlineChecklistEnvelope): Promise<NativeHostResult<{ id: string }>> {
+            const e = readInlineEnvelope(input, deps.validateField);
+            if (!e) return fail('INVALID_INPUT', 'Invalid prepared inline checklist');
+            if (!isNativeRequestReceiptDurable('iosInlineChecklist')) return fail('SAVE_FAILED', 'Inline checklist receipt storage is unavailable');
+            const result = await commitHistoryRowWrite(e); if (result.ok) diagnoseInline(e.request); return result;
+        },
+        inlineChecklistOutcome(input: NativeInlineChecklistEnvelope): NativeHostResult<{ id: string } | null> {
+            const e = readInlineEnvelope(input, deps.validateField);
+            if (!e) return fail('INVALID_INPUT', 'Invalid prepared inline checklist');
+            if (!isNativeRequestReceiptDurable('iosInlineChecklist')) return fail('SAVE_FAILED', 'Inline checklist receipt storage is unavailable');
+            const saved = historyRowReceipts.saved<{ id: string }>(e.request.requestId, canonicalJSON(['iosInlineChecklist', e]));
+            if (saved?.ok && !same(saved.value, e.prepared.result)) return fail('INVALID_INPUT', 'Saved inline checklist result differs');
+            if (saved?.ok) diagnoseInline(e.request);
+            return saved ?? { ok: true, value: null };
         },
         prepareTaskChecklistSave: (request: NativeChecklistSaveRequest): NativeHostResult<NativeChecklistPreparation> =>
             isHistoryRowRequest(request) ? fail('INVALID_INPUT', 'Done status requires its row request') : prepare('save', request),
@@ -2459,14 +3476,19 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             return ready.ok ? commitEffect(envelope.prepared.effect, envelope.prepared.result) : ready;
         },
     };
-    return { publicMethods, ownedAuthority };
+    return { publicMethods, ownedAuthority, widgetAuthority };
 }
 
-export function createTaskChecklistSaveMethods(deps: NativeTaskChecklistSaveDependencies) {
-    return createTaskChecklistSaveFactory(deps).publicMethods;
+export function createTaskChecklistSaveMethods(deps: NativeTaskChecklistSaveDependencies, readDraft?: RowDatesDraftReader) {
+    return createTaskChecklistSaveFactory(deps, readDraft).publicMethods;
 }
 
 /** Internal complete-owned factory; ordinary methods cannot select file authority. */
 export function createOwnedCompleteTaskChecklistSaveAuthority(deps: NativeTaskChecklistSaveDependencies) {
     return createTaskChecklistSaveFactory(deps).ownedAuthority;
+}
+
+/** Private widget capability; ordinary completion readers never admit its tap-time context. */
+export function createNativeWidgetCompletionMethods(deps: NativeTaskChecklistSaveDependencies) {
+    return createTaskChecklistSaveFactory(deps).widgetAuthority;
 }

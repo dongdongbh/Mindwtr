@@ -9,6 +9,7 @@ import type {
     MultiValueFilterMatchMode,
     TaskEnergyLevel,
     TaskPriority,
+    TaskStatus,
     TimeEstimate,
 } from './types';
 
@@ -23,6 +24,8 @@ export type ListFilterState = {
     tokens: string[];
     excludedTokens: string[];
     projects: string[];
+    excludedProjects?: string[];
+    statuses?: TaskStatus[];
     priorities: TaskPriority[];
     energyLevels: TaskEnergyLevel[];
     timeEstimates: TimeEstimate[];
@@ -50,6 +53,9 @@ export type ListFilterEdit =
     | { type: 'toggleToken'; value: string }
     | { type: 'removeToken'; value: string }
     | { type: 'toggleProject'; value: string }
+    | { type: 'cycleProject'; value: string }
+    | { type: 'removeProject'; value: string }
+    | { type: 'toggleStatus'; value: TaskStatus }
     | { type: 'togglePriority'; value: TaskPriority }
     | { type: 'toggleEnergyLevel'; value: TaskEnergyLevel }
     | { type: 'toggleTimeEstimate'; value: TimeEstimate }
@@ -88,6 +94,18 @@ export function applyListFilterEdit(state: ListFilterState, edit: ListFilterEdit
         }
         case 'toggleProject':
             return { ...state, projects: toggleValue(state.projects, edit.value) };
+        case 'removeProject':
+            return { ...state, projects: state.projects.filter((id) => id !== edit.value),
+                excludedProjects: (state.excludedProjects ?? []).filter((id) => id !== edit.value) };
+        case 'cycleProject': {
+            const excluded = state.excludedProjects ?? [];
+            if (state.projects.includes(edit.value)) return { ...state,
+                projects: state.projects.filter((id) => id !== edit.value), excludedProjects: [...excluded, edit.value] };
+            if (excluded.includes(edit.value)) return { ...state, excludedProjects: excluded.filter((id) => id !== edit.value) };
+            return { ...state, projects: [...state.projects, edit.value] };
+        }
+        case 'toggleStatus':
+            return { ...state, statuses: toggleValue(state.statuses ?? [], edit.value) };
         case 'togglePriority':
             return { ...state, priorities: toggleValue(state.priorities, edit.value) };
         case 'toggleEnergyLevel':
@@ -159,6 +177,8 @@ export function resolveListFilterState(
         tokens: state.tokens,
         excludedTokens: state.excludedTokens,
         projects: state.projects,
+        excludedProjects: state.excludedProjects,
+        statuses: state.statuses,
         locations: visibility.location && state.location.trim() ? [state.location.trim()] : [],
         priorities: visibility.priority ? state.priorities : [],
         energyLevels: visibility.energyLevel ? state.energyLevels : [],
@@ -190,6 +210,12 @@ export function resolveListFilterState(
         if (!label) return;
         chips.push({ id: `project:${projectId}`, label, excluded: false, edit: { type: 'toggleProject', value: projectId } });
     });
+    state.excludedProjects?.forEach((projectId) => {
+        chips.push({ id: `excluded-project:${projectId}`, label: getProjectLabel?.(projectId) ?? projectId,
+            excluded: true, edit: { type: 'removeProject', value: projectId } });
+    });
+    state.statuses?.forEach((status) => chips.push({ id: `status:${status}`, label: t(`status.${status}`),
+        excluded: false, edit: { type: 'toggleStatus', value: status } }));
     if (visibility.priority) {
         state.priorities.forEach((priority) => {
             chips.push({ id: `priority:${priority}`, label: t(`priority.${priority}`), excluded: false, edit: { type: 'togglePriority', value: priority } });

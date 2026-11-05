@@ -35,6 +35,9 @@ const parseHref = (rawHref: string, collectionUrl: string): URL => {
     }
 };
 
+const comparableOrigin = (url: URL): string => url.origin.toLowerCase()
+    .replace(/^(https:\/\/[^/]+):443$|^(http:\/\/[^/]+):80$/, '$1$2');
+
 const decodePath = (pathname: string): string => {
     try {
         return decodeURIComponent(pathname);
@@ -63,6 +66,7 @@ export const parseWebdavAttachmentInventory = (
     if (responses.length === 0) throw new Error('WebDAV attachment inventory has no DAV:response entries');
     const requested = parseHref(collectionUrl, collectionUrl);
     const collectionPath = decodePath(requested.pathname).replace(/\/+$/, '/');
+    const collectionPathBare = collectionPath.slice(0, -1);
     const seenPaths = new Set<string>();
     const keys = new Set<string>();
     let matchedCollection = false;
@@ -73,15 +77,15 @@ export const parseWebdavAttachmentInventory = (
             throw new Error('WebDAV attachment inventory DAV:response href is ambiguous');
         }
         const href = parseHref(hrefs[0].textContent.trim(), collectionUrl);
-        if (href.origin !== requested.origin || href.search || href.hash) {
+        if (comparableOrigin(href) !== comparableOrigin(requested) || href.search || href.hash) {
             throw new Error('WebDAV attachment inventory returned an unmatched href');
         }
         const path = decodePath(href.pathname);
-        const normalizedPath = path.endsWith('/') ? path.replace(/\/+$/, '/') : path;
-        if (seenPaths.has(normalizedPath)) {
+        const barePath = path.replace(/\/+$/, '');
+        if (seenPaths.has(barePath)) {
             throw new Error('WebDAV attachment inventory returned a duplicate href');
         }
-        seenPaths.add(normalizedPath);
+        seenPaths.add(barePath);
 
         const responseStatuses = directDavChildren(response, 'status');
         if (responseStatuses.length > 0) requireSuccessfulDavStatus(response, `response for ${path}`);
@@ -106,17 +110,23 @@ export const parseWebdavAttachmentInventory = (
             throw new Error(`WebDAV attachment inventory response for ${path} has no DAV:resourcetype`);
         }
         const isCollection = directDavChildren(resourceType, 'collection').length > 0;
-        if (normalizedPath === collectionPath) {
+        if (barePath === collectionPathBare) {
             if (!isCollection || matchedCollection) {
                 throw new Error('WebDAV attachment inventory requested collection is ambiguous');
             }
             matchedCollection = true;
+            if (!path.endsWith('/')) {
+                logInfo('WebDAV attachment inventory matched the folder without a trailing slash', {
+                    scope: 'sync',
+                    context: { releaseCheck: 'v1.3.8/webdav-collection-href-no-slash' },
+                });
+            }
             continue;
         }
-        if (!normalizedPath.startsWith(collectionPath)) {
+        if (!path.startsWith(collectionPath)) {
             throw new Error('WebDAV attachment inventory returned an unmatched href');
         }
-        const leaf = normalizedPath.slice(collectionPath.length).replace(/\/+$/, '');
+        const leaf = path.slice(collectionPath.length).replace(/\/+$/, '');
         if (!leaf || leaf.includes('/')) {
             throw new Error('WebDAV attachment inventory returned a non-child href');
         }

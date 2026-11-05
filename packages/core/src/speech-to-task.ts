@@ -1,5 +1,6 @@
 import type { AudioCaptureMode, AudioFieldStrategy } from './ai/types';
-import { resolveGeminiModel } from './ai/catalog';
+import { strToU8 } from 'fflate';
+import { OPENAI_DEFAULT_MODEL, resolveGeminiModel } from './ai/catalog';
 import { fetchTextWithTimeout } from './ai/utils';
 import {
     openAITranscribeLanguageFieldName,
@@ -67,6 +68,33 @@ export type RemoteSpeechToTaskOptions = {
     onWarn?: (message: string, error: Error) => void;
 };
 
+export type OpenAISpeechTranscriptionRequestConfig = Pick<RemoteSpeechToTaskCaptureConfig, 'model' | 'language' | 'baseUrl'>;
+export type OpenAISpeechTranscriptionRequest = { url: string; method: 'POST'; fields: [string, string][]; timeoutMs: number };
+export type OpenAISpeechParseRequestConfig = Pick<RemoteSpeechToTaskCaptureConfig, 'fieldStrategy' | 'language' | 'now' | 'timeZone'>;
+export type OpenAISpeechParseAPI = 'responses' | 'chat';
+export type OpenAISpeechParseRequest = { url: string; method: 'POST'; headers: [string, string][]; body: string; timeoutMs: number };
+
+export function resolveOpenAIParseModel(value?: string): string {
+    if (!value || value.toLowerCase().startsWith('gpt-4o')) return OPENAI_DEFAULT_MODEL;
+    return value;
+}
+
+/** The adapter owns the binary file and credentials; custom endpoint resolution stays shared. */
+export function buildRemoteOpenAISpeechTranscriptionRequest(config: OpenAISpeechTranscriptionRequestConfig): OpenAISpeechTranscriptionRequest {
+    const language = normalizeSpeechLanguage(config.language);
+    const fields: [string, string][] = [['model', config.model]];
+    if (language !== 'auto') fields.push([openAITranscribeLanguageFieldName(config.model), language]);
+    fields.push(['response_format', 'json']);
+    return { url: resolveOpenAITranscribeEndpoint(config.baseUrl), method: 'POST', timeoutMs: SPEECH_REQUEST_TIMEOUT_MS,
+        fields };
+}
+
+const speechObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export function decodeRemoteOpenAISpeechTranscriptionResponse(json: unknown): string {
+    return speechObject(json) && typeof json.text === 'string' ? json.text.trim() : '';
+}
+
 async function fetchSpeechJson(
     url: string,
     init: RequestInit,
@@ -97,7 +125,7 @@ async function transcribeRemoteOpenAI(
     if (!audio.withOpenAIUpload) {
         throw new Error('OpenAI audio upload adapter missing');
     }
-    const language = normalizeSpeechLanguage(config.language);
+    const request = buildRemoteOpenAISpeechTranscriptionRequest(config);
     return audio.withOpenAIUpload(async ({ part, fileName }) => {
         const form = new FormData();
         if (fileName) {
@@ -105,16 +133,12 @@ async function transcribeRemoteOpenAI(
         } else {
             form.append('file', part as Blob);
         }
-        form.append('model', config.model);
-        if (language !== 'auto') {
-            form.append(openAITranscribeLanguageFieldName(config.model), language);
-        }
-        form.append('response_format', 'json');
+        for (const [name, value] of request.fields) form.append(name, value);
 
         const result = await fetchSpeechJson(
-            resolveOpenAITranscribeEndpoint(config.baseUrl),
+            request.url,
             {
-                method: 'POST',
+                method: request.method,
                 headers: {
                     ...(config.apiKey
                         ? { Authorization: `Bearer ${config.apiKey}` }
@@ -124,10 +148,7 @@ async function transcribeRemoteOpenAI(
             },
             fetcher,
         );
-        const text = typeof (result as { text?: unknown }).text === 'string'
-            ? (result as { text: string }).text
-            : '';
-        return text.trim();
+        return decodeRemoteOpenAISpeechTranscriptionResponse(result);
     });
 }
 
@@ -163,41 +184,56 @@ async function requestRemoteGemini(
         throw new Error('Gemini audio bytes adapter missing');
     }
     const { bytes, mimeType } = await audio.readBytes();
-    const model = resolveGeminiModel(config.model);
-    const result = await fetchSpeechJson(
-        `${GEMINI_SPEECH_BASE_URL}/${model}:generateContent`,
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': config.apiKey,
-            },
-            body: JSON.stringify({
-                contents: [{
-                    role: 'user',
-                    parts: [
-                        { text: prompt },
-                        {
-                            inline_data: {
-                                mime_type: mimeType,
-                                data: speechBytesToBase64(bytes),
-                            },
-                        },
-                    ],
-                }],
-                generationConfig: {
-                    temperature: 0.2,
-                    topP: 0.8,
-                    topK: 20,
-                    candidateCount: 1,
-                    maxOutputTokens: 1024,
-                    responseMimeType: 'application/json',
-                },
-            }),
-        },
-        fetcher,
-    );
-    const text = (result as {
+    const request = geminiSpeechUpload(config.model, speechBytesToBase64(bytes), mimeType, prompt);
+    const result = await fetchSpeechJson(request.url, {
+        method: request.method,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
+        body: request.body,
+    }, fetcher);
+    return decodeRemoteGeminiSpeechResponse(result);
+}
+
+export const NATIVE_VOICE_MAX_AUDIO_BYTES = 4 * 1024 * 1024;
+export const NATIVE_VOICE_MAX_HTTP_BYTES = 8 * 1024 * 1024;
+export type GeminiSpeechRequestConfig = Pick<RemoteSpeechToTaskCaptureConfig, 'model' | 'mode' | 'fieldStrategy' | 'language' | 'now' | 'timeZone'>;
+export type GeminiSpeechRequest = { url: string; method: 'POST'; headers: [string, string][]; body: string; timeoutMs: number };
+
+const geminiSpeechUpload = (modelId: string, audioBase64: string, mimeType: string, prompt: string): GeminiSpeechRequest => ({
+    url: `${GEMINI_SPEECH_BASE_URL}/${resolveGeminiModel(modelId)}:generateContent`, method: 'POST',
+    headers: [['Content-Type', 'application/json']], timeoutMs: SPEECH_REQUEST_TIMEOUT_MS,
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt },
+        { inline_data: { mime_type: mimeType, data: audioBase64 } }] }],
+        generationConfig: { temperature: 0.2, topP: 0.8, topK: 20, candidateCount: 1,
+            maxOutputTokens: 1024, responseMimeType: 'application/json' } }),
+});
+
+/** Bounded native upload projection; no credential or transport is consulted. */
+export function buildRemoteGeminiSpeechRequest(config: GeminiSpeechRequestConfig, audioBase64: string, mimeType: string): GeminiSpeechRequest {
+    if (!config || typeof config.model !== 'string' || !config.model.trim() || config.model.length > 2000
+        || config.mode !== undefined && !['smart_parse', 'transcribe_only'].includes(config.mode)
+        || config.fieldStrategy !== undefined && !['smart', 'title_only', 'description_only'].includes(config.fieldStrategy)
+        || config.language !== undefined && (typeof config.language !== 'string' || config.language.length > 200)
+        || config.timeZone !== undefined && (typeof config.timeZone !== 'string' || config.timeZone.length > 200)
+        || config.now !== undefined && (!(config.now instanceof Date) || !Number.isFinite(config.now.getTime()))
+        || typeof mimeType !== 'string' || !/^audio\/[a-z0-9.+-]{1,50}$/.test(mimeType)
+        || typeof audioBase64 !== 'string' || !audioBase64.length
+        || audioBase64.length > Math.ceil(NATIVE_VOICE_MAX_AUDIO_BYTES / 3) * 4
+        || audioBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(audioBase64)) throw new Error('Voice audio request is invalid');
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const padding = audioBase64.endsWith('==') ? 2 : audioBase64.endsWith('=') ? 1 : 0;
+    const bytes = audioBase64.length / 4 * 3 - padding;
+    if (bytes > NATIVE_VOICE_MAX_AUDIO_BYTES || padding === 2 && alphabet.indexOf(audioBase64.at(-3)!) % 16 !== 0
+        || padding === 1 && alphabet.indexOf(audioBase64.at(-2)!) % 4 !== 0) throw new Error('Voice audio request is invalid');
+    const language = normalizeSpeechLanguage(config.language);
+    const prompt = config.mode === 'transcribe_only' ? buildSpeechTranscriptionPrompt(language)
+        : buildSpeechToTaskPrompt({ fieldStrategy: config.fieldStrategy, language, now: config.now, timeZone: config.timeZone });
+    const request = geminiSpeechUpload(config.model, audioBase64, mimeType, prompt);
+    if (strToU8(request.body).length > NATIVE_VOICE_MAX_HTTP_BYTES) throw new Error('Voice audio request is too large');
+    return request;
+}
+
+export function decodeRemoteGeminiSpeechResponse(json: unknown): SpeechToTaskResult {
+    const text = (json as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     }).candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) {
@@ -207,35 +243,49 @@ async function requestRemoteGemini(
 }
 
 function extractOpenAIResponsesText(result: unknown): string | undefined {
-    const direct = typeof (result as { output_text?: unknown }).output_text === 'string'
-        ? (result as { output_text: string }).output_text
-        : undefined;
+    if (!speechObject(result)) return undefined;
+    const direct = typeof result.output_text === 'string' ? result.output_text : undefined;
     if (direct?.trim()) return direct;
 
-    const output = (result as {
-        output?: Array<{
-            type?: string;
-            content?: Array<{ type?: string; text?: string }>;
-        }>;
-    }).output;
+    const output = result.output;
     if (!Array.isArray(output)) return undefined;
     for (const item of output) {
-        if (item?.type !== 'message' || !Array.isArray(item.content)) continue;
+        if (!speechObject(item) || item.type !== 'message' || !Array.isArray(item.content)) continue;
         const textPart = item.content.find(
-            (part) => part?.type === 'output_text' || part?.type === 'text',
+            (part: unknown) => speechObject(part) && (part.type === 'output_text' || part.type === 'text'),
         );
-        if (textPart?.text?.trim()) return textPart.text;
+        if (speechObject(textPart) && typeof textPart.text === 'string' && textPart.text.trim()) return textPart.text;
     }
     return undefined;
 }
 
-function buildOpenAIParsePrompt(config: RemoteSpeechToTaskCaptureConfig): string {
+function buildOpenAIParsePrompt(config: OpenAISpeechParseRequestConfig): string {
     return buildSpeechToTaskPrompt({
         fieldStrategy: config.fieldStrategy ?? 'smart',
         language: normalizeSpeechLanguage(config.language),
         now: config.now ?? new Date(),
         timeZone: config.timeZone,
     });
+}
+
+export function buildRemoteOpenAISpeechParseRequest(config: OpenAISpeechParseRequestConfig, transcript: string,
+    model: string, api: OpenAISpeechParseAPI): OpenAISpeechParseRequest {
+    if (api !== 'responses' && api !== 'chat') throw new Error('OpenAI speech parse API is invalid');
+    const messages = [{ role: 'system', content: buildOpenAIParsePrompt(config) }, { role: 'user', content: transcript }];
+    return { url: api === 'responses' ? OPENAI_RESPONSES_URL : OPENAI_CHAT_COMPLETIONS_URL, method: 'POST',
+        headers: [['Content-Type', 'application/json']], timeoutMs: SPEECH_REQUEST_TIMEOUT_MS,
+        body: JSON.stringify(api === 'responses' ? { model, temperature: 0.2, input: messages, text: { format: { type: 'json_object' } } }
+            : { model, temperature: 0.2, response_format: { type: 'json_object' }, messages }) };
+}
+
+export function decodeRemoteOpenAISpeechParseResponse(json: unknown, api: OpenAISpeechParseAPI): SpeechToTaskResult {
+    if (api !== 'responses' && api !== 'chat') throw new Error('OpenAI speech parse API is invalid');
+    let content: unknown;
+    if (api === 'responses') content = extractOpenAIResponsesText(json);
+    else if (speechObject(json) && Array.isArray(json.choices) && speechObject(json.choices[0]) && speechObject(json.choices[0].message))
+        content = json.choices[0].message.content;
+    if (typeof content !== 'string' || !content) throw new Error('OpenAI returned no content.');
+    return parseSpeechToTaskResult(content);
 }
 
 async function parseRemoteOpenAIResponses(
@@ -247,31 +297,20 @@ async function parseRemoteOpenAIResponses(
     if (!config.apiKey) {
         throw new Error('OpenAI API key missing');
     }
+    const request = buildRemoteOpenAISpeechParseRequest(config, transcript, model, 'responses');
     const result = await fetchSpeechJson(
-        OPENAI_RESPONSES_URL,
+        request.url,
         {
-            method: 'POST',
+            method: request.method,
             headers: {
-                'Content-Type': 'application/json',
+                ...Object.fromEntries(request.headers),
                 Authorization: `Bearer ${config.apiKey}`,
             },
-            body: JSON.stringify({
-                model,
-                temperature: 0.2,
-                input: [
-                    { role: 'system', content: buildOpenAIParsePrompt(config) },
-                    { role: 'user', content: transcript },
-                ],
-                text: { format: { type: 'json_object' } },
-            }),
+            body: request.body,
         },
         fetcher,
     );
-    const content = extractOpenAIResponsesText(result);
-    if (!content) {
-        throw new Error('OpenAI returned no content.');
-    }
-    return parseSpeechToTaskResult(content);
+    return decodeRemoteOpenAISpeechParseResponse(result, 'responses');
 }
 
 async function parseRemoteOpenAIChat(
@@ -283,33 +322,20 @@ async function parseRemoteOpenAIChat(
     if (!config.apiKey) {
         throw new Error('OpenAI API key missing');
     }
+    const request = buildRemoteOpenAISpeechParseRequest(config, transcript, model, 'chat');
     const result = await fetchSpeechJson(
-        OPENAI_CHAT_COMPLETIONS_URL,
+        request.url,
         {
-            method: 'POST',
+            method: request.method,
             headers: {
-                'Content-Type': 'application/json',
+                ...Object.fromEntries(request.headers),
                 Authorization: `Bearer ${config.apiKey}`,
             },
-            body: JSON.stringify({
-                model,
-                temperature: 0.2,
-                response_format: { type: 'json_object' },
-                messages: [
-                    { role: 'system', content: buildOpenAIParsePrompt(config) },
-                    { role: 'user', content: transcript },
-                ],
-            }),
+            body: request.body,
         },
         fetcher,
     );
-    const content = (result as {
-        choices?: Array<{ message?: { content?: string } }>;
-    }).choices?.[0]?.message?.content;
-    if (!content) {
-        throw new Error('OpenAI returned no content.');
-    }
-    return parseSpeechToTaskResult(content);
+    return decodeRemoteOpenAISpeechParseResponse(result, 'chat');
 }
 
 async function parseRemoteOpenAI(

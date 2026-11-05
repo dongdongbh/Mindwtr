@@ -22,6 +22,44 @@ describe('native row description', () => {
         vi.restoreAllMocks();
     });
 
+    it('uses the existing nullable Status label for the editor preference without changing row shape or actions', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(2026, 8, 23, 10, 0));
+        const source = task('cues', { description: 'Read these notes', recurrence: 'weekly' });
+        const saveData = vi.fn().mockResolvedValue(undefined);
+        setStorageAdapter({ getData: async () => ({ tasks: [source], projects: [], sections: [], areas: [], people: [],
+            settings: { gtd: { taskEditor: { hidden: [] } } } }), saveData } satisfies StorageAdapter);
+        useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
+            settings: {}, error: null, persistenceFailure: null, isLoading: false, editLockCount: 0, lastDataChangeAt: 0 });
+        const host = createNativeHostContract();
+        expect(await host.setLanguage({ storedLanguage: 'en', systemLocale: 'en-US' })).toMatchObject({ ok: true });
+        expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+        const rows = () => {
+            const result = host.getFocus({ limit: 20 });
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value.sections.flatMap((section) => section.rows);
+        };
+        const visible = rows().find((row) => row.id === source.id);
+        if (!visible) throw new Error('Expected the cue task');
+        expect(visible.meta.statusLabel).toBe('Next');
+        expect(visible.meta.descriptionPreview).toBe('Read these notes');
+        expect(visible.meta.parts).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'recurrence', detail: true })]));
+        const before = useTaskStore.getState();
+        useTaskStore.setState({ settings: { ...before.settings, gtd: { ...before.settings.gtd, taskEditor: { hidden: ['status'] } } },
+            lastDataChangeAt: before.lastDataChangeAt + 1 });
+        saveData.mockClear();
+        const hidden = rows().find((row) => row.id === source.id);
+        if (!hidden) throw new Error('Expected the hidden-status task');
+        expect(hidden.meta.statusLabel).toBeNull();
+        expect(Object.keys(hidden).sort()).toEqual(Object.keys(visible).sort());
+        expect(Object.keys(hidden.meta).sort()).toEqual(Object.keys(visible.meta).sort());
+        expect(hidden.meta.swipe).toEqual(visible.meta.swipe);
+        expect(hidden.meta.accessibilityLabel).toBe(visible.meta.accessibilityLabel);
+        expect(hidden.meta.parts).toEqual(visible.meta.parts);
+        expect(hidden.meta.description).toEqual(visible.meta.description);
+        expect(useTaskStore.getState()._allTasks).toBe(before._allTasks);
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
     it('resolves the shared preview on displayed rows and refreshes references when source arrays change', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 8, 23, 10, 0));

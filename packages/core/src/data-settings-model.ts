@@ -6,11 +6,12 @@
  * (SyncBackupSection) use RN's own keys: `tr('settings.syncMobile.…')` for Restore and the imports, `settings.saveToSyncFolder`
  * under Export backup, and RN's import guide link.
  */
+import { getArchiveRetentionPreview, isArchiveRetentionDays } from './archive-retention';
 import { isDiagnosticsLoggingEnabled } from './diagnostics-log';
 import { getDocsGuideUrl } from './docs-guidance';
 import { createSyncSettingsTranslator } from './sync-settings-model';
 import type { ImportPickerSourceId } from './import-runner';
-import type { AppSettings } from './types';
+import type { AppSettings, Project, Section, Task } from './types';
 
 type Translate = (key: string) => string;
 
@@ -65,7 +66,14 @@ export type DataImportRow = {
     label: string; description: string; mimeTypes: readonly string[];
 };
 
-export type DataSettingsEdit = { type: 'debugLogging'; value: boolean } | { type: 'analyticsOptOut'; value: boolean };
+export type DataSettingsEdit = { type: 'debugLogging'; value: boolean } | { type: 'analyticsOptOut'; value: boolean }
+    | { type: 'archiveRetentionDays'; value: number };
+
+/** RN's Archive retention card, read separately to preserve existing Data settings payloads. */
+export type ArchiveRetentionCard = {
+    title: string; description: string; safety: string; current: string; days: number; daysLabel: string; invalid: string;
+    save: string; never: { label: string; edit: DataSettingsEdit }; saveFailed: string;
+};
 
 export type DataSettingsModel = {
     title: string;
@@ -116,6 +124,70 @@ export type DataSettingsModel = {
 };
 
 /** `analyticsAvailable`: the build sends the heartbeat (isMobileAnalyticsHeartbeatConfigured). */
+/** The stored Archive retention days, or 0 for Never and invalid legacy settings. */
+export const archiveRetentionDaysOf = (settings: AppSettings): number => {
+    const days = settings.gtd?.archiveRetentionDays;
+    return isArchiveRetentionDays(days) ? days : 0;
+};
+
+export function buildArchiveRetentionCard(settings: AppSettings, t: Translate): ArchiveRetentionCard {
+    const tr = createSyncSettingsTranslator(t);
+    const days = archiveRetentionDaysOf(settings);
+    return {
+        title: tr('settings.archiveRetention'),
+        description: tr('settings.archiveRetentionDesc'),
+        safety: tr('settings.archiveRetentionSafety'),
+        current: `${tr('settings.archiveRetentionCurrent')}: ${days > 0
+            ? tr('settings.archiveRetentionDays', { days }) : tr('settings.archiveRetentionNever')}`,
+        days,
+        daysLabel: tr('settings.archiveRetentionDaysLabel'),
+        invalid: tr('settings.archiveRetentionInvalid'),
+        save: tr('settings.archiveRetentionSave'),
+        never: { label: tr('settings.archiveRetentionNever'), edit: { type: 'archiveRetentionDays', value: 0 } },
+        saveFailed: tr('settings.archiveRetentionSaveFailed'),
+    };
+}
+
+export type ArchiveRetentionReview = {
+    days: number; title: string; description: string; counts: string; legacy: string; heading: string; lines: string[];
+    cancel: string; confirm: string; edit: DataSettingsEdit;
+};
+
+/** RN reviews enabling retention or shortening it; a longer period and Never save directly. Titles stay on screen. */
+export function buildArchiveRetentionReview(
+    data: { tasks: Task[]; projects: Project[]; sections: Section[]; settings: AppSettings },
+    nextDays: number,
+    t: Translate,
+    nowMs = Date.now(),
+): ArchiveRetentionReview | null {
+    const days = archiveRetentionDaysOf(data.settings);
+    if (!(nextDays > 0 && (days === 0 || nextDays < days))) return null;
+    const tr = createSyncSettingsTranslator(t);
+    const preview = getArchiveRetentionPreview(data, nextDays, nowMs);
+    const taskTitles = new Map(data.tasks.map((task) => [task.id, task.title]));
+    const projectTitles = new Map(data.projects.map((project) => [project.id, project.title]));
+    const sectionTitles = new Map(data.sections.map((section) => [section.id, section.title]));
+    const lines = [
+        ...preview.projectIds.map((id) => `${tr('projects.title')}: ${projectTitles.get(id) ?? id}`),
+        ...preview.sectionIds.map((id) => `${tr('settings.archiveRetentionSection')}: ${sectionTitles.get(id) ?? id}`),
+        ...preview.taskIds.map((id) => `${tr('calendar.tasks')}: ${taskTitles.get(id) ?? id}`),
+    ];
+    return {
+        days: nextDays,
+        title: tr('settings.archiveRetentionConfirmTitle'),
+        description: tr('settings.archiveRetentionConfirmDescription', { days: nextDays }),
+        counts: tr('settings.archiveRetentionCounts', {
+            tasks: preview.taskIds.length, projects: preview.projectIds.length, sections: preview.sectionIds.length,
+        }),
+        legacy: tr('settings.archiveRetentionLegacyCount', { count: preview.legacyTaskIds.length + preview.legacyProjectIds.length }),
+        heading: lines.length ? tr('settings.archiveRetentionCandidates') : tr('settings.archiveRetentionNoCandidates'),
+        lines,
+        cancel: tr('common.cancel'),
+        confirm: tr('settings.archiveRetentionConfirmAction'),
+        edit: { type: 'archiveRetentionDays', value: nextDays },
+    };
+}
+
 export function buildDataSettingsModel(settings: AppSettings, t: Translate, analyticsAvailable = false, language = 'en'): DataSettingsModel {
     const on = isDiagnosticsLoggingEnabled(settings);
     const optedOut = analyticsAvailable && !isAnalyticsHeartbeatEnabled(settings);
@@ -211,7 +283,8 @@ export function buildDataSettingsModel(settings: AppSettings, t: Translate, anal
 export const isAnalyticsHeartbeatEnabled = (settings: AppSettings): boolean => settings.analytics?.heartbeatEnabled !== false;
 
 export const isDataSettingStored = (settings: AppSettings, edit: DataSettingsEdit): boolean => (
-    edit.type === 'analyticsOptOut'
+    edit.type === 'archiveRetentionDays' ? archiveRetentionDaysOf(settings) === edit.value
+        : edit.type === 'analyticsOptOut'
         ? !isAnalyticsHeartbeatEnabled(settings) === edit.value
         : isDiagnosticsLoggingEnabled(settings) === edit.value
 );
@@ -220,7 +293,7 @@ export const isDataSettingStored = (settings: AppSettings, edit: DataSettingsEdi
  * RN's toggleDebugLogging (the switch's value, the other diagnostics fields kept) and its analytics switch (heartbeatEnabled
  * set to the opposite of the opt-out, the other analytics fields kept).
  */
-export const buildDataSettingsUpdate = (settings: AppSettings, edit: DataSettingsEdit): Partial<AppSettings> => (
+export const buildDataSettingsUpdate = (settings: AppSettings, edit: Exclude<DataSettingsEdit, { type: 'archiveRetentionDays' }>): Partial<AppSettings> => (
     edit.type === 'analyticsOptOut'
         ? { analytics: { ...(settings.analytics ?? {}), heartbeatEnabled: !edit.value } }
         : { diagnostics: { ...(settings.diagnostics ?? {}), loggingEnabled: edit.value } }

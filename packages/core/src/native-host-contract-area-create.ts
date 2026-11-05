@@ -6,7 +6,7 @@ import { useTaskStore } from './store';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
 import { areaAdditionEffect, planAreaAddition, selectAreaAdditionScope } from './store-projects/area-actions';
 import type { PreparedAreaCreate } from './store-types';
-import { taskEditValuesEqual } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import type { Area } from './types';
 
 export type NativeAreaCreateRequest = { requestId: string; name: string; color: string; expectedAreaId: string };

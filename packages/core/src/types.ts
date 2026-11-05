@@ -273,6 +273,8 @@ export interface Task {
     timeSpentMinutes?: number; // Total minutes worked on the task (completed focus sessions + manual edits). Absent/0 = none.
     reminderPolicy?: TaskReminderPolicy; // Absent legacy tasks retain their explicit send/skip behavior.
     suppressMindwtrReminders?: boolean; // Legacy choice/compatibility snapshot; reminderPolicy takes precedence.
+    dueReminderLeadMinutes?: number; // Minutes before an explicit due time; 0 = explicitly off, absent = never set. Maximum 10080.
+    startReminderLeadMinutes?: number; // 5/15/30/60 minutes before an explicit start time; 0 = explicitly off, absent = never set.
     repeatReminderMinutes?: number; // Repeat the due-time reminder every N minutes (presets 5|10|15|30|60). Absent/0 = off. Due-time only.
     reviewAt?: string; // Tickler/review date (ISO string). If set, task is due for review at/after this time.
     completedAt?: string; // ISO timestamp when task was last completed/archived.
@@ -327,6 +329,7 @@ export interface FilterCriteria {
     excludedContexts?: string[];
     areas?: string[];
     projects?: string[];
+    excludedProjects?: string[];
     tags?: string[];
     tagMatchMode?: MultiValueFilterMatchMode;
     /** Tags whose presence excludes a task, regardless of tagMatchMode. */
@@ -544,6 +547,8 @@ export interface SecuritySettings {
     mobileAppLockEnabled?: boolean;
     /** Device-local like the whole group. A missing or unknown value reads as 0. */
     mobileAppLockRelockDelayMinutes?: MobileAppLockRelockDelayMinutes;
+    /** Device-local revision used by durable native preference replay. */
+    mobileAppLockRelockDelayUpdatedAt?: string;
 }
 
 export interface NetworkSettings {
