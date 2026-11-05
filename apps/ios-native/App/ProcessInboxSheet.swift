@@ -10,7 +10,6 @@ struct ProcessInboxSheet: View {
     @State private var pickingField: String?
     @State private var pickedDate = Date()
     @State private var pickingTime = false
-    @State private var pickerTimeFormat = "system"
 
     private var view: CoreObject { model.processInboxView }
     private var capture: CoreObject { view.object("capture") }
@@ -335,14 +334,14 @@ struct ProcessInboxSheet: View {
             .accessibilityLabel(row.text("label") + ": " + row.text("display"))
             .accessibilityIdentifier("process-inbox-date-" + row.text("field"))
             AppChipFlow {
-                let clock = row.object("clock")
-                if !clock.isEmpty {
+                let time = row.object("time")
+                if !time.isEmpty {
                     Button { presentDatePicker(row, time: true) } label: {
-                        Label(clock.text("label"), systemImage: "clock").rnFont(13, .semibold)
+                        Label(time.text("label"), systemImage: "clock").rnFont(13, .semibold)
                             .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).disabled(!enabled)
-                    .accessibilityLabel(row.text("label") + ": " + clock.text("label"))
+                    .accessibilityLabel(row.text("label") + ": " + time.text("label"))
                     .accessibilityIdentifier("process-inbox-time-" + row.text("field"))
                 }
                 let quick = row.objects("quickDates")
@@ -715,29 +714,20 @@ struct ProcessInboxSheet: View {
             }
         } else { pickedDate = Date() }
         pickingTime = time
-        pickerTimeFormat = row.object("clock").text("timeFormat")
-        if time {
-            let parts = row.object("clock").text("time").split(separator: ":").compactMap { Int($0) }
-            if parts.count == 2 {
-                var calendar = Calendar(identifier: .gregorian)
-                calendar.timeZone = .current
-                pickedDate = calendar.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: pickedDate) ?? pickedDate
-            }
+        let clock = row.object("time")
+        if time, let hour = clock["hour"] as? Int, let minute = clock["minute"] as? Int {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = .current
+            pickedDate = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: pickedDate) ?? pickedDate
         }
         pickingField = row.text("field")
-    }
-
-    private var pickerLocale: Locale {
-        guard let cycle = ["12h": "h12", "24h": "h23"][pickerTimeFormat] else { return .current }
-        let identifier = Locale.current.identifier
-        return Locale(identifier: identifier + (identifier.contains("@") ? ";" : "@") + "hours=" + cycle)
     }
 
     private var datePickerSheet: some View {
         VStack(spacing: 16) {
             if pickingTime {
                 DatePicker("", selection: $pickedDate, displayedComponents: .hourAndMinute)
-                    .datePickerStyle(.wheel).labelsHidden().environment(\.locale, pickerLocale)
+                    .datePickerStyle(.wheel).labelsHidden()
                     .accessibilityLabel(model.label("calendar.changeTime"))
                     .accessibilityIdentifier("process-inbox-time-picker")
             } else {
@@ -753,7 +743,7 @@ struct ProcessInboxSheet: View {
                 if pickingTime {
                     let parts = calendar.dateComponents([.hour, .minute], from: pickedDate)
                     guard let hour = parts.hour, let minute = parts.minute else { return }
-                    edit = ["type": "setTime", "field": field, "time": String(format: "%02d:%02d", hour, minute)]
+                    edit = ["type": "setTime", "field": field, "value": String(format: "%02d:%02d", hour, minute)]
                 } else {
                     let parts = calendar.dateComponents([.year, .month, .day], from: pickedDate)
                     guard let year = parts.year, let month = parts.month, let day = parts.day else { return }

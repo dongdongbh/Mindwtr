@@ -10816,7 +10816,7 @@ final class CoreHostTests: XCTestCase {
             let beforeEdits = try diagnostics197FullSnapshot()
             for edit: [String: Any] in [
                 ["type": "setPickedDate", "field": "dueDate", "day": "2030-07-21"],
-                ["type": "setTime", "field": "dueDate", "time": "17:35"],
+                ["type": "setTime", "field": "dueDate", "value": "17:35"],
                 ["type": "setPickedDate", "field": "dueDate", "day": "2030-07-22"],
             ] {
                 var input = owner; input["edit"] = edit
@@ -40012,9 +40012,10 @@ extension CoreHostTests {
         let core = host(bundleURL: try dateBundle(at: archive180Clock)); _ = try await core.start()
         let before = try diagnostics197FullSnapshot()
         let data = try await diagnostics197Model(core)
-        XCTAssertEqual(Set(data.keys), Set(["version", "revision", "title", "backup", "importData", "diagnostics"]))
+        XCTAssertEqual(Set(data.keys), Set(["version", "revision", "title", "backup", "archiveRetention", "importData", "diagnostics"]))
         let options = try await archiveRetentionOptions(core)
         XCTAssertEqual(Set(options.keys), Set(["revision", "card"]))
+        XCTAssertEqual(try json(XCTUnwrap(data["archiveRetention"])), try json(XCTUnwrap(options["card"])))
         XCTAssertFalse(try XCTUnwrap(options["revision"] as? String).isEmpty)
         let card = try XCTUnwrap(options["card"] as? [String: Any])
         XCTAssertEqual(card["days"] as? Int, 0)
@@ -42070,7 +42071,7 @@ extension CoreHostTests {
 
 
 extension CoreHostTests {
-    func testCalendarAllDayFlagPreservesLegacyShapesRevisionsAndCacheIsolationWithoutWrites() async throws {
+    func testCalendarAllDayFlagIsAcceptedWithNoEffectOnShapesRevisionsOrPagesWithoutWrites() async throws {
         let source = try await seedCalendarReadFixture(count: 6)
         let localNoon = try XCTUnwrap(Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 12)))
         let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -42087,62 +42088,54 @@ extension CoreHostTests {
             try object(await core.call("menuRead", argumentsJSON: json(["calendar", json(input)])))
         }
         let viewKeys: Set<String> = ["version", "revision", "state", "range", "feedState", "header", "modes", "showCompleted", "text", "content", "total", "items"]
-        let textKeys: Set<String> = ["showCompleted", "showCompletedHint", "allDay", "addTask", "schedulePlaceholder", "searchResultsTitle", "scheduleTitle", "planningTitle", "events", "loading", "noTasks", "done", "detailsHandle", "detailsHandleHint", "weekDensity", "weekDensityHint", "weekDensityMore", "weekDensityFewer", "toasts"]
-        let dayKeys: Set<String> = ["type", "key", "title", "dayNumber", "weekday", "isToday", "selected", "accessibilityLabel", "counts", "preview", "opens"]
+        let textKeys: Set<String> = ["showCompleted", "showCompletedHint", "allDay", "allDayLess", "addTask", "schedulePlaceholder", "searchResultsTitle", "scheduleTitle", "planningTitle", "events", "loading", "noTasks", "done", "detailsHandle", "detailsHandleHint", "weekDensity", "weekDensityHint", "weekDensityMore", "weekDensityFewer", "toasts"]
+        let dayKeys: Set<String> = ["type", "key", "title", "dayNumber", "weekday", "isToday", "selected", "accessibilityLabel", "counts", "preview", "opens", "allDayMore"]
         let contentKeys: [String: Set<String>] = [
             "month": ["mode", "dayNames", "leadingBlanks", "details"],
             "week": ["mode", "visibleDays", "density", "hourLabels", "nowMinutes"],
-            "day": ["mode", "dayKey", "hourLabels", "nowMinutes", "query", "searchTitle"],
+            "day": ["mode", "dayKey", "hourLabels", "nowMinutes", "query", "searchTitle", "allDayLimit", "allDayMore"],
             "schedule": ["mode", "planning", "empty"],
         ]
         for mode in ["month", "week", "day", "schedule"] {
             let state = ["viewMode": mode, "selectedDate": "2026-11-01", "visibleMonth": "2026-11-01"]
             let input: [String: Any] = ["state": state, "offset": 0, "limit": 100]
-            let legacy = try await read(input)
+            let omitted = try await read(input)
             var falseInput = input; falseInput["includeAllDayLanes"] = false
-            let explicitFalse = try await read(falseInput)
-            XCTAssertEqual(try json(explicitFalse), try json(legacy), mode)
-            XCTAssertEqual(Set(legacy.keys), viewKeys, mode)
-            let legacyText = try XCTUnwrap(legacy["text"] as? [String: Any])
-            XCTAssertEqual(Set(legacyText.keys), textKeys, mode)
-            XCTAssertNil(legacyText["allDayLess"])
-            let legacyContent = try XCTUnwrap(legacy["content"] as? [String: Any])
-            XCTAssertEqual(Set(legacyContent.keys), try XCTUnwrap(contentKeys[mode]), mode)
-            XCTAssertNil(legacyContent["allDayLimit"]); XCTAssertNil(legacyContent["allDayMore"])
-            let legacyItems = try XCTUnwrap(legacy["items"] as? [[String: Any]])
-            for day in legacyItems where day["type"] as? String == "day" {
-                XCTAssertEqual(Set(day.keys), dayKeys, mode)
-                XCTAssertNil(day["allDayMore"])
-            }
             var trueInput = input; trueInput["includeAllDayLanes"] = true
-            let enhanced = try await read(trueInput)
-            XCTAssertEqual(Set(enhanced.keys), viewKeys, mode)
-            XCTAssertNotEqual(enhanced["revision"] as? String, legacy["revision"] as? String, mode)
-            var enhancedText = try XCTUnwrap(enhanced["text"] as? [String: Any])
-            XCTAssertEqual(enhancedText.removeValue(forKey: "allDayLess") as? String, "Less")
-            XCTAssertEqual(try json(enhancedText), try json(legacyText), mode)
-            if mode == "month" || mode == "schedule" {
-                XCTAssertEqual(try json(XCTUnwrap(enhanced["content"])), try json(legacyContent), mode)
-                XCTAssertEqual(try json(XCTUnwrap(enhanced["items"])), try json(legacyItems), mode)
+            let explicitFalse = try await read(falseInput), explicitTrue = try await read(trueInput)
+            XCTAssertEqual(try json(explicitFalse), try json(omitted), mode)
+            XCTAssertEqual(try json(explicitTrue), try json(omitted), mode)
+            XCTAssertEqual(Set(omitted.keys), viewKeys, mode)
+            let text = try XCTUnwrap(omitted["text"] as? [String: Any])
+            XCTAssertEqual(Set(text.keys), textKeys, mode)
+            XCTAssertEqual(text["allDayLess"] as? String, "Less", mode)
+            let content = try XCTUnwrap(omitted["content"] as? [String: Any])
+            XCTAssertEqual(Set(content.keys), try XCTUnwrap(contentKeys[mode]), mode)
+            let items = try XCTUnwrap(omitted["items"] as? [[String: Any]])
+            for day in items where day["type"] as? String == "day" {
+                XCTAssertEqual(Set(day.keys), dayKeys, mode)
             }
             if mode == "day" {
-                let completed = try XCTUnwrap(legacyItems.compactMap { $0["item"] as? [String: Any] }.first { $0["taskId"] as? String == "calendar-done" })
-                let tones = try XCTUnwrap(completed["tones"] as? [String: Any])
-                XCTAssertEqual(tones["struck"] as? Bool, false)
-                XCTAssertEqual(tones["text"] as? String, "text")
-                XCTAssertTrue(tones["fill"] is NSNull); XCTAssertTrue(tones["accent"] is NSNull)
+                XCTAssertEqual(content["allDayLimit"] as? Int, 4)
+                XCTAssertEqual(content["allDayMore"] as? String, "+5 more")
+                let completed = try XCTUnwrap(items.compactMap { $0["item"] as? [String: Any] }.first { $0["taskId"] as? String == "calendar-done" })
+                XCTAssertEqual(try json(XCTUnwrap(completed["tones"])), try json(["fill": "secondary", "accent": "secondary", "text": "secondary", "dashed": false, "struck": true, "faded": false]))
                 XCTAssertEqual(completed["pressable"] as? Bool, false)
             }
-            var crossBranch = trueInput
-            crossBranch["offset"] = 1; crossBranch["limit"] = 1; crossBranch["revision"] = try XCTUnwrap(legacy["revision"] as? String)
-            await expectFailure("STALE_REVISION") { _ = try await read(crossBranch) }
-            crossBranch = falseInput
-            crossBranch["offset"] = 1; crossBranch["limit"] = 1; crossBranch["revision"] = try XCTUnwrap(enhanced["revision"] as? String)
-            await expectFailure("STALE_REVISION") { _ = try await read(crossBranch) }
-            let restored = try await read(falseInput), omittedAgain = try await read(input), enhancedAgain = try await read(trueInput)
-            XCTAssertEqual(try json(restored), try json(legacy), mode)
-            XCTAssertEqual(try json(omittedAgain), try json(legacy), mode)
-            XCTAssertEqual(try json(enhancedAgain), try json(enhanced), mode)
+            let revision = try XCTUnwrap(omitted["revision"] as? String)
+            XCTAssertGreaterThan(items.count, 1, mode)
+            for flagged in [falseInput, trueInput, input] {
+                var page = flagged
+                page["offset"] = 1; page["limit"] = 1; page["revision"] = revision
+                let window = try await read(page)
+                XCTAssertEqual(window["revision"] as? String, revision, mode)
+                XCTAssertEqual(try json(XCTUnwrap(window["items"])), try json([items[1]]), mode)
+            }
+            var forged = trueInput
+            forged["offset"] = 1; forged["limit"] = 1; forged["revision"] = revision + ":stale"
+            await expectFailure("STALE_REVISION") { _ = try await read(forged) }
+            let again = try await read(input)
+            XCTAssertEqual(try json(again), try json(omitted), mode)
         }
         XCTAssertEqual(statements, 0); XCTAssertEqual(journals, 0)
         XCTAssertEqual(try diagnostics197FullSnapshot(), before)
@@ -42532,7 +42525,7 @@ extension CoreHostTests {
         return input
     }
 
-    func testContextsFiltersEnhancedReadPreservesLegacyAndPagesWithoutWrites() async throws {
+    func testContextsFiltersReadAlwaysFiltersWithDataRevisionAndPagesWithoutWrites() async throws {
         let source = try await seedContextsFilter10Fixture()
         let faults = HostIOFaults(), core = host(faults, bundleURL: source)
         _ = try await core.start()
@@ -42540,14 +42533,16 @@ extension CoreHostTests {
         let before = try diagnostics197FullSnapshot()
         var statements = 0, journals = 0
         faults.beforeSQL = { _ in statements += 1 }; faults.journalWrite = { journals += 1 }
-        let legacyInput: [String: Any] = ["offset": 0, "limit": 50]
-        let legacyJSON = try await core.call("menuRead", argumentsJSON: json(["contexts", json(legacyInput)]))
-        let legacy = try object(legacyJSON), legacyRevision = try XCTUnwrap(legacy["revision"] as? String)
-        XCTAssertEqual(Set(legacy.keys), Set(["version", "revision", "selection", "searchPlaceholder", "chips", "matchMode", "sort", "total", "rows", "empty", "selectedIds", "taskRevisions", "bulk"]))
-        XCTAssertEqual(legacy["total"] as? Int, 105)
+        let omittedInput: [String: Any] = ["offset": 0, "limit": 50]
+        let omittedJSON = try await core.call("menuRead", argumentsJSON: json(["contexts", json(omittedInput)]))
+        let omitted = try object(omittedJSON), dataRevision = try XCTUnwrap(omitted["revision"] as? String)
+        XCTAssertEqual(Set(omitted.keys), Set(["version", "revision", "selection", "filters", "filterChips", "criteria", "savedFilterId", "savedFilters", "canSave", "saveControls", "filterPicker", "searchPlaceholder", "chips", "matchMode", "sort", "total", "rows", "empty", "selectedIds", "taskRevisions", "bulk"]))
+        XCTAssertEqual(omitted["total"] as? Int, 105)
+        let unfiltered = try await contextsFilter10Read(core, ["filters": [:], "offset": 0, "limit": 50])
+        XCTAssertEqual(try json(unfiltered), try json(omitted))
         let enhanced = try await contextsFilter10Read(core, ["filters": ["excludedProjects": ["ui10-unused-project"]], "filterEdit": ["type": "toggleStatus", "value": "someday"], "offset": 0, "limit": 50])
         let revision = try XCTUnwrap(enhanced["revision"] as? String)
-        XCTAssertNotEqual(revision, legacyRevision)
+        XCTAssertEqual(revision, dataRevision)
         XCTAssertEqual(Set(try XCTUnwrap(enhanced["selection"] as? [String: Any]).keys), Set(["tokens", "matchMode"]))
         XCTAssertEqual(enhanced["total"] as? Int, 103)
         XCTAssertEqual((enhanced["rows"] as? [Any])?.count, 50)
@@ -42568,11 +42563,16 @@ extension CoreHostTests {
         }
         XCTAssertEqual(try rows.map { try XCTUnwrap($0["id"] as? String) }, (0..<103).map { String(format: "ui10-task-%03d", $0) })
         var changed = canonical; changed["filters"] = ["statuses": ["next"]]; changed["offset"] = 50; changed["revision"] = revision
-        await expectFailure("STALE_REVISION") { _ = try await self.contextsFilter10Read(core, changed) }
-        var cross = canonical; cross["offset"] = 50; cross["revision"] = legacyRevision
-        await expectFailure("STALE_REVISION") { _ = try await self.contextsFilter10Read(core, cross) }
-        var legacyPage = legacyInput; legacyPage["offset"] = 50; legacyPage["revision"] = revision
-        await expectFailure("STALE_REVISION") { _ = try await self.contextsFilter10Read(core, legacyPage) }
+        let changedPage = try await contextsFilter10Read(core, changed)
+        XCTAssertEqual(changedPage["revision"] as? String, revision)
+        XCTAssertEqual(changedPage["total"] as? Int, 1)
+        XCTAssertEqual((changedPage["rows"] as? [Any])?.count, 0)
+        var forged = canonical; forged["offset"] = 50; forged["revision"] = revision + ":stale"
+        await expectFailure("STALE_REVISION") { _ = try await self.contextsFilter10Read(core, forged) }
+        var omittedPage = omittedInput; omittedPage["offset"] = 50; omittedPage["revision"] = revision
+        let secondOmitted = try await contextsFilter10Read(core, omittedPage)
+        XCTAssertEqual(secondOmitted["total"] as? Int, 105)
+        XCTAssertEqual((secondOmitted["rows"] as? [Any])?.count, 50)
         let saved = try XCTUnwrap(enhanced["savedFilters"] as? [String: Any])
         XCTAssertEqual(saved["total"] as? Int, 103)
         let firstSaved = try XCTUnwrap(saved["items"] as? [[String: Any]])
@@ -42583,7 +42583,7 @@ extension CoreHostTests {
         let lastSaved = try XCTUnwrap((savedPage["savedFilters"] as? [String: Any])?["items"] as? [[String: Any]])
         XCTAssertEqual(lastSaved.count, 3)
         XCTAssertEqual(Set(try (firstSaved + lastSaved).map { try XCTUnwrap($0["id"] as? String) }), Set((0..<103).map { String(format: "ui10-filter-%03d", $0) }))
-        var staleSaved = savedInput; staleSaved["savedFiltersWindow"] = ["offset": 100, "limit": 100, "revision": legacyRevision]
+        var staleSaved = savedInput; staleSaved["savedFiltersWindow"] = ["offset": 100, "limit": 100, "revision": revision + ":stale"]
         await expectFailure("STALE_REVISION") { _ = try await self.contextsFilter10Read(core, staleSaved) }
         let selected = try await contextsFilter10Read(core, ["filters": [:], "savedFilterId": "ui10-filter-102", "offset": 0, "limit": 50])
         XCTAssertEqual(selected["savedFilterId"] as? String, "ui10-filter-102"); XCTAssertEqual(selected["total"] as? Int, 103)
@@ -42607,8 +42607,8 @@ extension CoreHostTests {
         let sheet = try await contextsFilter10Read(core, ["filters": [:], "filterSheetOpen": true, "offset": 0, "limit": 50])
         XCTAssertEqual(((sheet["filters"] as? [String: Any])?["state"] as? [String: Any])?["statuses"] as? [String], ["inbox", "next", "waiting", "someday"])
         XCTAssertEqual(sheet["canSave"] as? Bool, true)
-        let legacyAgain = try await core.call("menuRead", argumentsJSON: json(["contexts", json(legacyInput)]))
-        XCTAssertEqual(legacyAgain, legacyJSON)
+        let omittedAgain = try await core.call("menuRead", argumentsJSON: json(["contexts", json(omittedInput)]))
+        XCTAssertEqual(omittedAgain, omittedJSON)
         XCTAssertEqual(statements, 0); XCTAssertEqual(journals, 0)
         XCTAssertEqual(try diagnostics197FullSnapshot(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
