@@ -607,7 +607,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         var deleteId = ""
         deleteId = edit(id, "delete", refused = { shell.showToast(t("common.notice"), t("projects.deleteFailed"), "error") }, answer = { reply ->
             val deletion = reply.optJSONObject("reply")?.optJSONObject("deletion") ?: return@edit
-            if (shell.openProjectId == id) shell.closeProject()
+            if (shell.openProjectId == id) shell.backFromProject()
             shell.showToast(t("common.notice"), deletion.getString("message"), "info", deletion.getString("undoLabel"), 5_200) {
                 edit(id, "deleteUndo", refused = { shell.showToast(t("common.notice"), t("projects.restoreFailed"), "error") }) { put("deleteRequestId", deleteId) }
             }

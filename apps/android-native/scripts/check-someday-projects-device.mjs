@@ -201,8 +201,7 @@ try {
         return core('view');
     };
 
-    await sleep(1500);
-    if (!textNode(await screen(), en['someday.title'])) await openSomeday();
+    await waitFor('Someday again', (current) => Boolean(textNode(current, en['someday.title'])), 15_000);
     seen = await moveTo(noSection, true);
     const noSectionHeading = seen.items.findIndex((item) => item[0] === 'heading' && item[2] === noSection);
     check(seen.project?.section === null && noSectionHeading >= 0 && seen.items.slice(noSectionHeading + 1).some((item) => item[0] === 'project' && item[1] === seen.project.id),

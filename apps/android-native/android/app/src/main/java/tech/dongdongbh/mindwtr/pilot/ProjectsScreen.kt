@@ -401,7 +401,7 @@ private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<S
 @Composable
 private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(model) {
 
-    BackHandler(enabled = failedAction == null) { closeProject() }
+    BackHandler(enabled = failedAction == null) { backFromProject() }
     val c = LocalTheme.current.colors
     val detail = project
     val completable = detail?.readOnly == false
@@ -413,7 +413,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
         Row(Modifier.fillMaxWidth().heightIn(min = 64.3.dp).background(c.cardBg).bottomBorder(c.border).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             val back = t("common.back")
-            IconButton(onClick = model::closeProject, enabled = failedAction == null, modifier = Modifier.semantics { contentDescription = back }) {
+            IconButton(onClick = model::backFromProject, enabled = failedAction == null, modifier = Modifier.semantics { contentDescription = back }) {
                 Icon(Lucide.ChevronLeft, null, tint = c.tint, modifier = Modifier.size(24.dp))
             }
             ProjectTitleField(model, projects?.title(openProjectId.orEmpty()).orEmpty(), detail?.readOnly != false, Modifier.weight(1f).padding(start = 8.dp))

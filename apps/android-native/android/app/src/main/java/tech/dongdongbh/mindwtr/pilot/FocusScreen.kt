@@ -262,7 +262,7 @@ private fun ReviewProjectCard(model: InboxViewModel, project: ReviewProject) = w
     val label = "${t("common.open")} ${project.title}"
     Row(
         Modifier.padding(bottom = 8.dp).fillMaxWidth().heightIn(min = 72.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
-            .clickable(enabled = writable && !busy && failedAction == null, role = Role.Button) { show(Screen.Projects); openProject(project.id) }
+            .clickable(enabled = writable && !busy && failedAction == null, role = Role.Button) { menu.openProjects(project.id) }
             .clearAndSetSemantics { contentDescription = label }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
