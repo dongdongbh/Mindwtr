@@ -748,6 +748,8 @@ jobs:
             apps/mobile/modules/watch-connectivity/ios/MindwtrWatchAudioPathResolver.swift \
             apps/mobile/modules/watch-connectivity/ios/MindwtrWatchPayloadValidator.swift \
             apps/mobile/modules/watch-connectivity/ios/MindwtrWatchReceiptStateMachine.swift \
+            apps/mobile/modules/watch-connectivity/ios/MindwtrWatchPendingCommand.swift \
+            apps/mobile/modules/watch-connectivity/ios/MindwtrWatchRetainedAudio.swift \
             apps/mobile/modules/watch-connectivity/ios/MindwtrWatchConnectivityReceiver.swift
 
       - name: Run attachment installer Swift recovery tests

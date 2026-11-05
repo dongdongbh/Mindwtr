@@ -113,6 +113,8 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(iosJob).toContain("name: Validate generated Watch Xcode project");
   expect(iosJob).toContain("name: Typecheck Watch receiver against the iOS SDK");
   expect(iosJob).toContain("apps/mobile/modules/watch-connectivity/ios/MindwtrWatchConnectivityReceiver.swift");
+  expect(iosJob).toContain("apps/mobile/modules/watch-connectivity/ios/MindwtrWatchPendingCommand.swift");
+  expect(iosJob).toContain("apps/mobile/modules/watch-connectivity/ios/MindwtrWatchRetainedAudio.swift");
   expect(workflow).toContain("CODE_SIGNING_ALLOWED=NO");
   expect(iosJob).toContain("name: Run attachment installer Swift recovery tests");
   expect(iosJob).toContain(
