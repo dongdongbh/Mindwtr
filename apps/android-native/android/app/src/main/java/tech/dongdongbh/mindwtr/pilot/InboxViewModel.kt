@@ -196,6 +196,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var projects by mutableStateOf<ProjectsView?>(null); private set
 
     var openProjectId by mutableStateOf(saved.get<String>("project")); private set
+    var projectReturn = projectReturnOf(saved.get<String>("projectReturn")); private set
     var project by mutableStateOf<ProjectDetail?>(null); private set
     private val prefs = app.getSharedPreferences(DEVICE_PREFS, android.content.Context.MODE_PRIVATE)
 
@@ -601,6 +602,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     fun show(target: Screen) {
         val switched = target != screen
+        if (switched) keepProjectReturn(null)
         screen = target
         saved["screen"] = target.name
         if (switched) focused(target)
@@ -1462,7 +1464,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             .put("returnTo", "/projects-screen?projectId=${android.net.Uri.encode(projectId)}")
         perform { runtime ->
             val reply = runtime.menuRead("captureModalOpen", JSONObject().put("params", params).toString())
-            ui { closeProject(); captureModal.opened(params, reply) }
+            ui { val back = projectReturn; closeProject(); keepProjectReturn(back); captureModal.opened(params, reply) }
         }
     }
 
@@ -2051,8 +2053,20 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         }
     }
 
+    fun keepProjectReturn(back: ProjectReturn?) {
+        projectReturn = back
+        saved["projectReturn"] = projectReturnText(back)
+    }
+
+    fun backFromProject() {
+        val back = projectReturn
+        closeProject()
+        back?.let(menu::returnTo)
+    }
+
     fun closeProject() {
         keepProject(null)
+        keepProjectReturn(null)
         project = null
 
         projectDetails.follow(null)

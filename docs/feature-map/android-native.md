@@ -254,7 +254,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `projects-manage-areas`, `project-area-manager`, `project-area-new-name`, `project-area-save`, `project-reorder-list`, `project-actions-menu-button`, `project-actions-sheet`, `project-add-task-button`, `project-completed-heading`, `project-task-filter-button`, `project-task-view-options-button`, `project-view-options-sheet`, `project-view-reorder-option`, `project-task-reorder-toggle`, `project-task-reorder-row`, `project-task-drag-handle`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProjectsScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/AreaOrderSheet.kt`
 - Checks: `apps/android-native/scripts/check-projects-device.mjs`, `apps/android-native/scripts/check-onboarding-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ProjectMovesTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ProjectReorderAnchorTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/StaleMoveTest.kt`
-- Notes: Archived projects show as closed. A project opened from the editor returns to the project on Close.
+- Notes: Archived projects show as closed. A project opened from the editor returns to the project on Close. Back from a project returns to the screen it was opened from (Someday, Review, Focus, a menu list); a project opened from the Projects list returns to the list.
 
 ## Project details
 

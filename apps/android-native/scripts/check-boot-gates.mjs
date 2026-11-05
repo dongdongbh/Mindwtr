@@ -2178,7 +2178,16 @@ assert.match(model, /ProjectsView\.parse\(runtime\.projects\(\)\) else null,\s*a
 
 assert.match(model, /var openProjectId by mutableStateOf\(saved\.get<String>\("project"\)\)/);
 assert.match(model, /openProjectId = id\s+saved\["project"\] = id/);
-assert.match(projectsUi, /BackHandler\(enabled = failedAction == null\) \{ closeProject\(\) \}/);
+assert.match(projectsUi, /BackHandler\(enabled = failedAction == null\) \{ backFromProject\(\) \}/);
+assert.match(projectsUi, /IconButton\(onClick = model::backFromProject, enabled = failedAction == null,/, 'the header Back returns where the project was opened from');
+assert.match(menuModel, /fun openProjects\(projectId: String\?\) \{\s+val back = projectId\?\.let \{ projectReturnFrom\(shell\.screen, screen, quickView == "projects", shell\.openProjectId, shell\.projectReturn\) \}[\s\S]{0,300}?shell\.keepProjectReturn\(back\)/, 'a project opened from Someday or any other screen remembers that screen');
+assert.match(source('InboxViewModel.kt'), /fun backFromProject\(\) \{\s+val back = projectReturn\s+closeProject\(\)\s+back\?\.let\(menu::returnTo\)/);
+assert.doesNotMatch(source('FocusScreen.kt'), /show\(Screen\.Projects\); openProject\(/, 'Focus opens a project through openProjects, so Back returns to Focus');
+assert.match(source('InboxViewModel.kt'), /fun show\(target: Screen\) \{\s+val switched = target != screen\s+if \(switched\) keepProjectReturn\(null\)/, 'a real tab switch forgets where the project came from');
+assert.match(source('InboxViewModel.kt'), /fun closeProject\(\) \{\s+keepProject\(null\)\s+keepProjectReturn\(null\)/, 'a closed project forgets where it came from');
+assert.match(projectsUi, /\)\) \{ keepProjectReturn\(null\); openProject\(row\.id\) \}/, 'a Projects list row opens its project with Back to the list');
+assert.match(source('CaptureModalModel.kt'), /"openInProject" -> \{\s+keep\(null\)\s+reopenProjectWithTask\(reply\.getString\("projectId"\), reply\.getString\("taskId"\)\)/, 'Save and edit from a project reopens it in place, keeping its Back');
+assert.match(source('CaptureModalModel.kt'), /private fun reopenProjectWithTask\(projectId: String, taskId: String\) \{\s+shell\.menu\.whenIdle \{\s+shell\.openProject\(projectId\)\s+shell\.menu\.whenIdle \{ shell\.openEditor\(taskId, "task"\) \}/);
 
 
 assert.match(coreHost, /fun searchTasks\(json: String\): JSONObject = callAsync\("search", json\)/);
@@ -9876,7 +9885,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 
 
     assert.match(header, /\{ openProjectId\?\.let\(::openProjectCapture\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
-    assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String\) \{[\s\S]{0,200}put\("initialProps", JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ closeProject\(\); captureModal\.opened\(params, reply\) \}/);
+    assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String\) \{[\s\S]{0,200}put\("initialProps", JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ val back = projectReturn; closeProject\(\); keepProjectReturn\(back\); captureModal\.opened\(params, reply\) \}/);
     assert.match(source('CaptureModalModel.kt'), /private fun end\(close: JSONObject, leave: Boolean = true\) \{\s+keep\(null\)\s+inFlight = null\s+close\.menuText\("returnToProjectId"\)\?\.let \{ id -> shell\.menu\.whenIdle \{ shell\.openProject\(id\) \} \}/);
 
     assert.doesNotMatch(source('CaptureScreen.kt') + source('InboxViewModel.kt'), /presetPatch|withPreset|val preset: JSONObject/);

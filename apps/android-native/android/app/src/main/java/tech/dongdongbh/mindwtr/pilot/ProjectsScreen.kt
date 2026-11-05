@@ -361,7 +361,7 @@ private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<S
         Column(Modifier.weight(1f)
             .combinedClickable(enabled = canAct, role = Role.Button, onLongClick = if (moves.isEmpty()) null else ({
                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); moveMenu = true
-            })) { openProject(row.id) }
+            })) { keepProjectReturn(null); openProject(row.id) }
             .semantics { customActions = moves.map { (direction, label) -> CustomAccessibilityAction(label) { if (canAct) move(direction); canAct } } }
             .testTag("project-row-open-${row.id}")) {
             Text(row.title, style = rnText(16, 500), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -401,7 +401,7 @@ private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<S
 @Composable
 private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(model) {
 
-    BackHandler(enabled = failedAction == null) { closeProject() }
+    BackHandler(enabled = failedAction == null) { backFromProject() }
     val c = LocalTheme.current.colors
     val detail = project
     val completable = detail?.readOnly == false
@@ -413,7 +413,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
         Row(Modifier.fillMaxWidth().heightIn(min = 64.3.dp).background(c.cardBg).bottomBorder(c.border).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             val back = t("common.back")
-            IconButton(onClick = model::closeProject, enabled = failedAction == null, modifier = Modifier.semantics { contentDescription = back }) {
+            IconButton(onClick = model::backFromProject, enabled = failedAction == null, modifier = Modifier.semantics { contentDescription = back }) {
                 Icon(Lucide.ChevronLeft, null, tint = c.tint, modifier = Modifier.size(24.dp))
             }
             ProjectTitleField(model, projects?.title(openProjectId.orEmpty()).orEmpty(), detail?.readOnly != false, Modifier.weight(1f).padding(start = 8.dp))

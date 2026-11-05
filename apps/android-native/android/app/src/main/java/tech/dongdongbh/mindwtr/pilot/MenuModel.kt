@@ -50,6 +50,19 @@ enum class MenuScreen(val title: String) {
 }
 
 
+data class ProjectReturn(val tab: Screen, val menu: MenuScreen?)
+
+internal fun projectReturnFrom(tab: Screen, menu: MenuScreen?, projectsTab: Boolean, openProject: String?, kept: ProjectReturn?): ProjectReturn? =
+    if (menu == MenuScreen.Projects || (menu == null && tab == Screen.Projects && projectsTab)) kept.takeIf { openProject != null } else ProjectReturn(tab, menu)
+
+internal fun projectReturnText(back: ProjectReturn?): String? = back?.let { "${it.tab.name}|${it.menu?.name.orEmpty()}" }
+
+internal fun projectReturnOf(text: String?): ProjectReturn? {
+    val (tab, menu) = text?.split('|')?.takeIf { it.size == 2 } ?: return null
+    return ProjectReturn(Screen.entries.firstOrNull { it.name == tab } ?: return null, MenuScreen.entries.firstOrNull { it.name == menu })
+}
+
+
 private val AREA_FILTERED = setOf(MenuScreen.Waiting, MenuScreen.Someday, MenuScreen.Reference, MenuScreen.History, MenuScreen.Contexts,
     MenuScreen.Trash, MenuScreen.Review, MenuScreen.Projects, MenuScreen.Calendar, MenuScreen.Board, MenuScreen.SavedSearch)
 fun showsAreaFilter(screen: MenuScreen) = screen in AREA_FILTERED
@@ -312,8 +325,18 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
 
     fun openProjects(projectId: String?) {
+        val back = projectId?.let { projectReturnFrom(shell.screen, screen, quickView == "projects", shell.openProjectId, shell.projectReturn) }
         if (quickView == "projects") { closeSheet(); leave(null); shell.show(Screen.Projects) } else open(MenuScreen.Projects)
         projectId?.let(shell::openProject)
+        shell.keepProjectReturn(back)
+    }
+
+
+    fun returnTo(back: ProjectReturn) {
+        closeSheet()
+        if (screen != back.menu) leave(back.menu)
+        shell.show(back.tab)
+        if (back.menu != null) reload()
     }
 
 

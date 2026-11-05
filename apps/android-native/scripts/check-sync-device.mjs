@@ -295,8 +295,13 @@ try {
     const secondTitles = await second.titles();
     check(phoneTitles.length > 0 && remote.tasks.length >= phoneTitles.length, `(3) the phone uploaded its ${phoneTitles.length} tasks`);
     await second.capture(titles.host);
-    await second.syncNow('webdav', { ...webdavFields, password: null });
-    check(webdavDocument(dav, FOLDER).tasks.some((task) => task.title === titles.host), '(3) the second device wrote its emoji task to the folder');
+    const hostReply = await second.syncNow('webdav', { ...webdavFields, password: null });
+    console.log(`info - the second device's Sync now replied ${JSON.stringify(hostReply)}`);
+    const hostWrote = () => webdavDocument(dav, FOLDER).tasks.some((task) => task.title === titles.host);
+    if (hostReply?.toasts?.some((toast) => toast.title === en['settings.syncQueued'])) {
+        await until('the second device\'s queued retry to write its emoji task', hostWrote, 30_000, 1_000);
+    }
+    check(hostWrote(), '(3) the second device wrote its emoji task to the folder');
     nodes = await openSync();
     await runCommand('sync-now', 'syncNow', 'Sync now', en['settings.syncCompleted']);
     await until('the second device\'s task on the phone', () => phoneTasks()[titles.host] === 'inbox', 30_000);
