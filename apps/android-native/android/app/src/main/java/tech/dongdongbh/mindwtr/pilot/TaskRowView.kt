@@ -515,6 +515,10 @@ internal fun settleTray(start: Float, offset: Float, velocity: Float, threshold:
 internal fun releaseTray(start: Float, dragged: Float, velocity: Float, dragOffset: Float, threshold: Float, left: Float, right: Float): Float =
     if (abs(dragged) < dragOffset) start else settleTray(start, trayDragOffset(start, dragged, dragOffset, left, right), velocity, threshold, left, right)
 
+private fun Tray?.buttonIds() = this?.let { listOf(it.swipeRight.map(TrayAction::id), it.swipeLeft.map(TrayAction::id)) }
+
+internal fun trayOffsetAfterChange(offset: Float, before: Tray?, after: Tray?): Float = if (before.buttonIds() == after.buttonIds()) offset else 0f
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SwipeTray(tray: Tray?, enabled: Boolean, shape: RoundedCornerShape, isEnabled: (TrayAction) -> Boolean, run: (TrayAction) -> Unit,
@@ -538,6 +542,12 @@ private fun SwipeTray(tray: Tray?, enabled: Boolean, shape: RoundedCornerShape, 
         run(action)
     }
     LaunchedEffect(enabled) { if (!enabled) offset.snapTo(0f) }
+    var shownTray by remember { mutableStateOf(tray) }
+    LaunchedEffect(tray) {
+        val kept = trayOffsetAfterChange(offset.targetValue, shownTray, tray)
+        shownTray = tray
+        if (kept != offset.targetValue) offset.snapTo(kept)
+    }
     Box {
         if (tray != null && offset.value > 0f) TrayButtons(tray.swipeRight, Alignment.Start, shape, labels, isEnabled, press,
             onLongDone?.let { long -> { settle(0f); view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); long() } })

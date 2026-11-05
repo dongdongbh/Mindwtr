@@ -66,4 +66,17 @@ class SwipeTrayTest {
         assertEquals(left, releaseTray(0f, 30f, 3000f, 28f, 72f, left, right))
     }
 
+    @Test fun anOpenTrayShutsWhenItsButtonsChange() {
+        val done = TrayAction("done", "Done", "done", false)
+        val focus = TrayAction("focus", "Focus", null, false)
+        val delete = TrayAction("delete", "Delete", null, false)
+        val next = Tray(listOf(done, focus), listOf(delete))
+        val starred = Tray(listOf(done, focus.copy(label = "Remove from focus", focused = true)), listOf(delete))
+        val finished = Tray(listOf(TrayAction("restore", "Restore", "inbox", false)), listOf(delete))
+        assertEquals(166f, trayOffsetAfterChange(166f, next, starred))
+        assertEquals(0f, trayOffsetAfterChange(166f, next, finished))
+        assertEquals(0f, trayOffsetAfterChange(-84f, next, Tray(listOf(done, focus), emptyList())))
+        assertEquals(0f, trayOffsetAfterChange(166f, next, null))
+        assertEquals(-84f, trayOffsetAfterChange(-84f, next, next))
+    }
 }
