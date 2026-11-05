@@ -361,7 +361,7 @@ private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<S
         Column(Modifier.weight(1f)
             .combinedClickable(enabled = canAct, role = Role.Button, onLongClick = if (moves.isEmpty()) null else ({
                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); moveMenu = true
-            })) { openProject(row.id) }
+            })) { keepProjectReturn(null); openProject(row.id) }
             .semantics { customActions = moves.map { (direction, label) -> CustomAccessibilityAction(label) { if (canAct) move(direction); canAct } } }
             .testTag("project-row-open-${row.id}")) {
             Text(row.title, style = rnText(16, 500), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,

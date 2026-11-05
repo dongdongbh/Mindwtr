@@ -2175,6 +2175,11 @@ assert.match(projectsUi, /IconButton\(onClick = model::backFromProject, enabled 
 assert.match(menuModel, /fun openProjects\(projectId: String\?\) \{\s+val back = projectId\?\.let \{ projectReturnFrom\(shell\.screen, screen, quickView == "projects", shell\.openProjectId, shell\.projectReturn\) \}[\s\S]{0,300}?shell\.keepProjectReturn\(back\)/, 'a project opened from Someday or any other screen remembers that screen');
 assert.match(source('InboxViewModel.kt'), /fun backFromProject\(\) \{\s+val back = projectReturn\s+closeProject\(\)\s+back\?\.let\(menu::returnTo\)/);
 assert.doesNotMatch(source('FocusScreen.kt'), /show\(Screen\.Projects\); openProject\(/, 'Focus opens a project through openProjects, so Back returns to Focus');
+assert.match(source('InboxViewModel.kt'), /fun show\(target: Screen\) \{\s+val switched = target != screen\s+if \(switched\) keepProjectReturn\(null\)/, 'a real tab switch forgets where the project came from');
+assert.match(source('InboxViewModel.kt'), /fun closeProject\(\) \{\s+keepProject\(null\)\s+keepProjectReturn\(null\)/, 'a closed project forgets where it came from');
+assert.match(projectsUi, /\)\) \{ keepProjectReturn\(null\); openProject\(row\.id\) \}/, 'a Projects list row opens its project with Back to the list');
+assert.match(source('CaptureModalModel.kt'), /"openInProject" -> \{\s+keep\(null\)\s+reopenProjectWithTask\(reply\.getString\("projectId"\), reply\.getString\("taskId"\)\)/, 'Save and edit from a project reopens it in place, keeping its Back');
+assert.match(source('CaptureModalModel.kt'), /private fun reopenProjectWithTask\(projectId: String, taskId: String\) \{\s+shell\.menu\.whenIdle \{\s+shell\.openProject\(projectId\)\s+shell\.menu\.whenIdle \{ shell\.openEditor\(taskId, "task"\) \}/);
 
 
 assert.match(coreHost, /fun searchTasks\(json: String\): JSONObject = callAsync\("search", json\)/);
@@ -9832,7 +9837,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const header = source('ProjectsScreen.kt'), details = source('ProjectDetails.kt');
     assert.match(header, /ProjectTitleField\([^\n]*\n[\s\S]{0,800}\{ projectDetails\.openActions\(\) \}[\s\S]{0,200}testTag\("project-actions-menu-button"\)/);
     assert.match(details, /"project-duplicate-button"[\s\S]{0,500}"project-convert-to-section-button"[\s\S]{0,300}"project-reactivate-button"[\s\S]{0,300}"project-archive-button"[\s\S]{0,300}"project-cancel-button"[\s\S]{0,300}"project-delete-button"/);
-    assert.match(details, /deleteId = edit\(id, "delete", refused = [^\n]*answer = \{[\s\S]{0,400}shell\.backFromProject\(\)[\s\S]{0,300}edit\(id, "deleteUndo", refused = [^\n]*\) \{ put\("deleteRequestId", deleteId\) \}/);
+    assert.match(details, /deleteId = edit\(id, "delete", refused = [^\n]*answer = \{[\s\S]{0,400}shell\.closeProject\(\)[\s\S]{0,300}edit\(id, "deleteUndo", refused = [^\n]*\) \{ put\("deleteRequestId", deleteId\) \}/);
 
 
     assert.match(details, /answers\.remove\(action\.id\)\?\.let \{ answer -> shell\.ui \{ shell\.menu\.whenIdle \{ answer\(reply\) \} \} \}/);

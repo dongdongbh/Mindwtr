@@ -224,16 +224,31 @@ class CaptureModalModel(private val shell: InboxViewModel, private val saved: Sa
         when (reply.getString("kind")) {
 
 
-            "saved" -> if (reply.optString("next") == "open" || reply.optString("next") == "openInProject") {
-                keep(null)
-                shell.openSavedTask(reply.getString("taskId"), reply.menuText("projectId"))
-            } else end(reply.getJSONObject("close"))
+            "saved" -> when (reply.optString("next")) {
+                "openInProject" -> {
+                    keep(null)
+                    reopenProjectWithTask(reply.getString("projectId"), reply.getString("taskId"))
+                }
+                "open" -> {
+                    keep(null)
+                    shell.openSavedTask(reply.getString("taskId"), reply.menuText("projectId"))
+                }
+                else -> end(reply.getJSONObject("close"))
+            }
             "refused" -> {
                 reply.getJSONObject("notice").let { shell.showToast(it) }
                 keep(fresh)
             }
             "confirmLines" -> keep(fresh.copy(confirm = reply.getJSONObject("confirm"), lineIds = List(reply.getInt("lineCount")) { UUID.randomUUID().toString() }))
             else -> keep(fresh)
+        }
+    }
+
+
+    private fun reopenProjectWithTask(projectId: String, taskId: String) {
+        shell.menu.whenIdle {
+            shell.openProject(projectId)
+            shell.menu.whenIdle { shell.openEditor(taskId, "task") }
         }
     }
 
