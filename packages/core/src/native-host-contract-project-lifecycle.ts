@@ -11,7 +11,7 @@ import { useTaskStore } from './store';
 import { projectLifecycleEffect } from './store-projects/project-actions';
 import { weeklyReviewProjectHasUnfinishedTasks } from './review-views-model';
 import type { PreparedProjectLifecycle } from './store-types';
-import type { Project, Task } from './types';
+import type { Project, Section, Task } from './types';
 
 export type NativeProjectLifecycleRequest = PreparedProjectLifecycle['request'];
 export type NativeProjectLifecycleResult = PreparedProjectLifecycle['result'];
@@ -110,10 +110,11 @@ const projectScope = (project: Project): PreparedProjectLifecycle['scope'] => {
     return { project, sections, tasks: state._allTasks.filter((row) => row.projectId === project.id
         || (!row.projectId && row.sectionId !== undefined && sectionIds.has(row.sectionId))) };
 };
+const scopeEntry = (kind: 'project' | 'section' | 'task', row: Project | Section | Task): string => JSON.stringify([kind, row.id, revisionOf(row)]);
 const scopeRevision = (scope: PreparedProjectLifecycle['scope']): string => revisionsToken([
-    JSON.stringify(['project', scope.project.id, revisionOf(scope.project)]),
-    ...scope.sections.map((row) => JSON.stringify(['section', row.id, revisionOf(row)])),
-    ...scope.tasks.map((row) => JSON.stringify(['task', row.id, revisionOf(row)])),
+    scopeEntry('project', scope.project),
+    ...scope.sections.map((row) => scopeEntry('section', row)),
+    ...scope.tasks.map((row) => scopeEntry('task', row)),
 ].sort());
 
 export function createProjectLifecycleMethods(deps: {

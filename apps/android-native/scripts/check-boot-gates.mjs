@@ -1433,7 +1433,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
-    assert.match(hostEntry, /createNativeHostContract\(\{ reminderPlatform: globalThis\.__mindwtrHostPlatform === 'ios' \? 'ios' : 'android', get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*calendar: iosCalendar \?\? nativeCalendar \?\? undefined,\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected \?\? undefined;/);
+    assert.match(hostEntry, /createNativeHostContract\(\{\s*\.\.\.\(globalThis\.__mindwtrHostPlatform === 'ios' \? \{\s*registerSyncSettingsRetirementStatus: \(read: \(\) => \{ pending: boolean; uncertain: boolean \}\) => \{ readSyncSettingsRetirementStatus = read; \},\s*\} : \{\}\), reminderPlatform: globalThis\.__mindwtrHostPlatform === 'ios' \? 'ios' : 'android', get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, get ai\(\) \{ return nativeAI \?\? iosTaskAI\?\.host \?\? iosInboxAI\?\.host \?\? iosReviewAI\?\.host \?\? iosCaptureAIHost \?\? iosConfigurationAIHost \?\? undefined; \},\s*calendar: iosCalendar \?\? nativeCalendar \?\? undefined,\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected \?\? undefined;/);
     assert.match(hostEntry, /const result = await \(iosSelfHostedProjectAttachments \?\? iosManualSync\)\?\.prepareAttachmentAvailableDetailed\?\.\(attachment\);/);
     assert.match(hostEntry, /\.\.\.\(persistentCapture \? \{ persistentCapture \} : \{\}\) \}\);/);
 
@@ -1507,6 +1507,14 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
                     assert.match(file, /methods\.snoozeReminder\(request\)/);
                     assert.match(file, /receipts\.saved<unknown>\(request\.requestId, snoozePayload\(request\)\)/);
 
+                    continue;
+                }
+                const extraBodyHelper = "payload: JSON.stringify(['setAIExtraBodyParams', ";
+                if (site[1] === 'setAIExtraBodyParams' && site.index === file.indexOf(extraBodyHelper) + 'payload: '.length) {
+                    assert.match(file, /const extraBodyRequest = \(input: unknown\): \{ requestId: string; text: string; value: Record<string, unknown> \| undefined; payload: string \} \| null => \{/);
+                    assert.match(file, /payload: JSON\.stringify\(\['setAIExtraBodyParams', fingerprint\(\['extra-body', input\.text\]\)\]\) \} : null;/);
+                    assert.match(file, /async setAIExtraBodyParams\(input: \{ requestId: string; text: string \}\): Promise<NativeHostResult<\{ changed: boolean \}>> \{\s*try \{\s*const request = extraBodyRequest\(input\);/);
+                    receiptNames.set('setAIExtraBodyParams', ['setAIExtraBodyParams']);
                     continue;
                 }
                 const owner = defs.filter((def) => def.index < site.index).at(-1);
@@ -1971,7 +1979,7 @@ assert.match(owner, /\.put\("error", message\.substringBefore\(':'\)\)\)\s+Start
 assert.match(owner, /runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "drained"\)\.put\("ingested", ingested\)\)/);
 assert.match(owner, /runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "failed"\)\.put\("error", message\.substringBefore\(':'\)\)\)/);
 assert.match(coreHost, /fun logLine\(message: String, context: JSONObject\) \{\s+runCatching \{ callAsync\("logLine", message, context\.toString\(\)\) \}\.onFailure \{ Log\.i\(TAG, "\$message \$context"\) \}/);
-assert.match(hostEntry, /logLine\(message: string, contextJson: string\): string \{\s+return submit\(async \(\) => \{\s+try \{\s+logInfo\(message, \{ scope: globalThis\.__mindwtrHostPlatform === 'ios' \? 'native-ios' : 'native-android', context: JSON\.parse\(contextJson\) as Record<string, unknown> \}\);/);
+assert.match(hostEntry, /logLine\(message: string, contextJson: string\): string \{\s+return submit\(async \(\) => \{\s+try \{\s+logInfo\(message, \{ scope: globalThis\.__mindwtrHostPlatform === 'ios' \? 'native-ios' : 'native-android',\s+\.\.\.\(\['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native Whisper model store initialized', 'Native Whisper model operation failed'\]\.includes\(message\) \? \{ force: true \} : \{\}\), context: JSON\.parse\(contextJson\) as Record<string, unknown> \}\);/);
 assert.match(coreHost, /fun ingestPendingCaptures\(requestId: String\): JSONObject = callAsync\("ingest", requestId\)/);
 assert.equal(kotlinFiles.join('\n').match(/runtime\.language\(|runtime\.strings\(/g).length, 2);
 
@@ -4065,6 +4073,22 @@ export { nameNotifyListener } from ${JSON.stringify(resolve(app, '../../packages
 export { buildShortcutsSnapshot } from ${JSON.stringify(resolve(app, '../../packages/core/src/widget-payload.ts'))};
 export { serializeBackupData } from ${JSON.stringify(resolve(app, '../../packages/core/src/backup-transfer.ts'))};
 export { validateMergedSyncData } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-normalization.ts'))};
+export { createDropboxTokenStore } from ${JSON.stringify(resolve(app, '../../packages/core/src/dropbox-auth-tokens.ts'))};
+export { isDropboxUnauthorizedError, testDropboxAccess } from ${JSON.stringify(resolve(app, '../../packages/core/src/dropbox.ts'))};
+export { isObjectRecord, isValidTimestamp } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-normalization.ts'))};
+export { parseSyncDocument, toRemoteSyncDocument } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-document.ts'))};
+export { base64ToBytes, bytesToBase64 } from ${JSON.stringify(resolve(app, '../../packages/core/src/base64-bytes.ts'))};
+export { FileSyncPathOwnerTerminatedError } from ${JSON.stringify(resolve(app, '../../packages/core/src/mobile-file-sync-remote.ts'))};
+export { getOnboardingGuideUrl, ONBOARDING_TOPIC_COPY } from ${JSON.stringify(resolve(app, '../../packages/core/src/onboarding-guidance.ts'))};
+export { formatOpenAIExtraBodyParams } from ${JSON.stringify(resolve(app, '../../packages/core/src/ai-config.ts'))};
+export { getSelectedMobileWhisperModel } from ${JSON.stringify(resolve(app, '../../packages/core/src/ai-settings-model.ts'))};
+export { normalizeSpeechLanguage } from ${JSON.stringify(resolve(app, '../../packages/core/src/speech-to-task.ts'))};
+export { WHISPER_MODEL_BASE_URLS } from ${JSON.stringify(resolve(app, '../../packages/core/src/whisper-models.ts'))};
+export { buildWatchApplicationContext, WATCH_FOCUS_TASK_LIMIT } from ${JSON.stringify(resolve(app, '../../packages/core/src/watch-snapshot.ts'))};
+export { createPomodoroState, sanitizePomodoroDurations } from ${JSON.stringify(resolve(app, '../../packages/core/src/pomodoro.ts'))};
+export { isTaskActionable, isTaskCancelled } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-status.ts'))};
+export { createWidgetPayloadProjection, createPublishedWidgetProjection, iosWidgetProjectionOptions, IOS_WIDGET_FAMILY_CACHE_ITEMS } from ${JSON.stringify(resolve(app, '../../packages/core/src/widget-payload.ts'))};
+export { focusWidgetFilterKey } from ${JSON.stringify(resolve(app, '../../packages/core/src/focus-widget-filter.ts'))};
 export { getNextFutureStartRevealAt } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-utils.ts'))};
 export { resolveEntityOpenTarget } from ${JSON.stringify(resolve(app, '../../packages/core/src/entry-points.ts'))};
 export { resolveMobileAppLockRelockDelayMinutes } from ${JSON.stringify(resolve(app, '../../packages/core/src/general-settings-model.ts'))};
@@ -5322,7 +5346,7 @@ const poll = async (state, id) => {
     assert.match(query, /worker\.sync \{\}/);
     assert.match(secrets, /let operation = input\["op"\] as\? String, \["get", "set", "delete"\]\.contains\(operation\)/);
     const kv = readFileSync(resolve(app, '../ios-native/Sources/MindwtrNativeCore/NativeDeviceKV.swift'), 'utf8');
-    const selected = kv.slice(kv.indexOf('    func readAIProviderDeviceMetadata('), kv.indexOf('    func readSearchConsent('));
+    const selected = kv.slice(kv.indexOf('    func readAIProviderDeviceMetadata('), kv.indexOf('    func readOpenAIConsentRecorded('));
     assert.match(selected, /pending == nil/); assert.match(selected, /try checkedRead\(\)/);
     assert.match(selected, /current\.values\.keys\.contains/);
     assert.match(selected, /CFGetTypeID\(value\) == CFBooleanGetTypeID\(\) && value\.boolValue/);
@@ -5632,10 +5656,10 @@ const poll = async (state, id) => {
     const owed = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const retained = Array.from({ length: 128 }, (_, index) => index.toString(16).padStart(8, '0') + '-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
     assert.equal((await poll(raw, raw.MindwtrHost.iosPruneReceipts(JSON.stringify(retained), owed))).ok, true);
-    assert.deepEqual(JSON.parse(JSON.stringify(raw.pruneInputs.at(-1))), { retainedRequestIds: [...retained, owed] });
+    assert.deepEqual(JSON.parse(JSON.stringify(raw.pruneInputs.at(-1))), { retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [...retained, owed] });
     assert.equal((await poll(raw, raw.MindwtrHost.iosPruneReceipts('null', owed))).ok, true);
     assert.deepEqual(JSON.parse(JSON.stringify(raw.pruneInputs.at(-1))), {
-        retainedCommands: ['reminderComplete', 'reminderSnooze'], retainedRequestIds: [owed] });
+        retainedCommands: ['reminderComplete', 'reminderSnooze', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [owed] });
     const pruneCount = raw.pruneInputs.length;
     assert.equal((await poll(raw, raw.MindwtrHost.iosPruneReceipts('null', 'NOT-UUID'))).ok, false);
     assert.equal(raw.pruneInputs.length, pruneCount, 'invalid owner never reaches pruning');
@@ -5919,7 +5943,7 @@ const poll = async (state, id) => {
         state.__mindwtrNative.ioBody = () => '';
     };
     const local = makeState(0, [], 'ios', configureHTTP);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform']);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform']);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
     local.MindwtrHost.nativeHTTPDelivered();
     assert.equal(local.logText, null, 'No preboot transport receipt');
@@ -5961,7 +5985,7 @@ for (const [bridge, receipt, operation] of [
         state.__mindwtrNative.ioBody = () => '';
     };
     const local = makeState(0, [], 'ios', configurePort);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform']);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform']);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
     local.MindwtrHost[receipt]();
     assert.equal(local.logText, null, 'No preboot native primitive receipt');
@@ -6005,7 +6029,7 @@ for (const [bridge, receipt, operation] of [
         };
     };
     const local = makeState(0, [], 'ios', configureKV);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform'], 'KV does not enable iOS Sync or AI');
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform'], 'KV does not enable iOS Sync or AI');
     for (const name of names) assert.equal(typeof local.__mindwtrNative[name], 'function');
     for (const [method] of receipts) local.MindwtrHost[method]();
     assert.equal(local.logText, null, 'No preboot device storage receipt');
@@ -6046,6 +6070,8 @@ for (const [bridge, receipt, operation] of [
 {
     const syncFixture = `
 export function createHostSyncCrypto() { return {}; }
+export function createIosDirectoryFileSync() { throw new Error('createIosDirectoryFileSync: directory File Sync is not bound in the download gate'); }
+export function createIosFileSync() { throw new Error('createIosFileSync: File Sync is not bound in the download gate'); }
 export function isNativeIosSelfHostedProvider(value) { return !value?.trim() || value.trim() === 'selfhosted'; }
 export function createNativeSync() {
   globalThis.syncFactoryCalls++;
@@ -6196,7 +6222,7 @@ export function createNativeSync() {
     for (const provider of [undefined, '', 'selfhosted', ' selfhosted ']) {
         foreground.storedProvider = provider;
         const model = await foregroundCommand('openSyncSettings', {});
-        assert.deepEqual(JSON.parse(JSON.stringify(model.value.value.backend.options.map(({ option }) => option))), ['off', 'webdav', 'selfhosted']);
+        assert.deepEqual(JSON.parse(JSON.stringify(model.value.value.backend.options.map(({ option }) => option))), ['off', 'webdav', 'selfhosted', 'file']);
         for (const name of ['saveSyncBackend', 'syncNow', 'testSyncConnection']) {
             const value = { ...request, selfHosted: selfHostedFields };
             assert.equal((await foregroundCommand(name, value)).value.ok, true);
@@ -6449,7 +6475,7 @@ export function createNativeSync() {
     assert.ok(hostEntry.includes("name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }"));
     assert.match(hostEntry, /context: \{ releaseCheck: diagnostic\.releaseCheck, operation: name, outcome:/);
     const local = makeState(0, [], 'ios', configureLocal);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform', 'attachments'], 'local capability enables neither Sync nor AI');
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'attachments'], 'local capability enables neither Sync nor AI');
     assert.equal(local.localShaInstallCount, 1, 'successful local construction installs native SHA once');
     assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
     const owner = { kind: 'task', taskId: 'task215', attachments: [] };
@@ -6495,7 +6521,7 @@ export function createNativeSync() {
             if (variant === 'partial') delete state.__mindwtrNative.ioBody;
             if (variant === 'refused') state.__mindwtrNative.fileDirectories = () => '!MindwtrNativeError:fixed unavailable';
         });
-        assert.deepEqual(Object.keys(unavailable.contractBindings).filter((name) => unavailable.contractBindings[name] !== undefined), ['reminderPlatform'], `${variant} capability offers no local fallback`);
+        assert.deepEqual(Object.keys(unavailable.contractBindings).filter((name) => unavailable.contractBindings[name] !== undefined), [...(variant === 'android' ? [] : ['registerSyncSettingsRetirementStatus']), 'reminderPlatform'], `${variant} capability offers no local fallback`);
         assert.equal(unavailable.localShaInstallCount, 0, 'failed optional discovery leaves SHA binding unchanged');
         assert.equal((await poll(unavailable, unavailable.MindwtrHost.boot())).ok, true, 'optional local failure does not fail boot');
     }
@@ -7857,7 +7883,7 @@ export function createNativeSync() {
                 state.__mindwtrNative[name] = () => { calls++; throw new Error('Unexpected device service activation'); };
             }
         });
-        assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform', 'attachments']);
+        assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'attachments']);
         assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
         assert.equal(local.localShaInstallCount, 1);
         assert.equal(call(local), '{"outcome":"removed"}', 'existing synchronous local Discard remains admitted');
