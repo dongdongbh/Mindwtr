@@ -19,7 +19,7 @@ bash apps/ios-native/scripts/validate.sh
 
 Whisper preparation copies and verifies the already installed, locked native engine into its ignored local Swift package directory. It performs no download and refuses changed existing vendor files. Its license notice is bundled with the native app.
 
-This generates `Resources/core-host.js`, runs the Swift package's real JavaScriptCore/SQLite tests, and compiles the simulator application without signing. This compile-only output does not prove Keychain behavior; runtime simulator tests must keep the Debug target’s signing and simulator entitlements enabled. Build artifacts and temporary files stay under `apps/ios-native/.build/`. The tracked `MindwtrNative.xcodeproj` and shared scheme are independent of Expo prebuild and CocoaPods.
+This generates `Resources/core-host.js` and `Resources/label-keys.json`, runs the Swift package's real JavaScriptCore/SQLite tests, and compiles the simulator application without signing. This compile-only output does not prove Keychain behavior; runtime simulator tests must keep the Debug target’s signing and simulator entitlements enabled. Build artifacts and temporary files stay under `apps/ios-native/.build/`. The tracked `MindwtrNative.xcodeproj` and shared scheme are independent of Expo prebuild and CocoaPods.
 
 ### Development app with Share and Capture widget
 

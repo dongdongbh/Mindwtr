@@ -16724,7 +16724,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
 
         _ = try await query("language", [uiLanguage, Locale.current.identifier])
-        try await readStrings()
+        if uiLanguage != currentLanguage || strings.isEmpty { try await readStrings() }
         currentLanguage = uiLanguage
         if !writes.isEmpty {
             let key = devicePreferencePrefix + "mindwtr-language"
@@ -16733,117 +16733,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
 
+    private static let labelKeys: [String] = Bundle.main.url(forResource: "label-keys", withExtension: "json")
+        .flatMap { try? Data(contentsOf: $0) }
+        .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String] } ?? []
+
     private func readStrings() async throws {
-        let keys = ["tab.next", "tab.inbox", "tab.review", "tab.menu", "nav.addTask", "search.title",
-                    "settings.backupMobile.failedToRestoreBackup", "settings.backupMobile.restoreFailed", "settings.backupMobile.importFailed", "settings.importDiagnostics.limitExceeded", "settings.recoverySnapshotsEmpty",
-                    "appLock.title", "appLock.description", "appLock.prompt", "appLock.enablePrompt", "appLock.unlock",
-                    "appLock.authenticating", "appLock.useDevicePasscode", "appLock.unavailable", "appLock.cancelled", "appLock.failed",
-                    "settings.ai", "settings.aiEnable", "settings.aiProvider", "settings.aiProviderOpenAI", "settings.aiProviderGemini", "settings.aiProviderAnthropic",
-                    "settings.aiReasoning", "settings.aiReasoningHint", "settings.aiEffortLow", "settings.aiEffortMedium", "settings.aiEffortHigh", "settings.aiEffortMinimalSaved",
-                    "settings.aiThinkingBudget", "settings.aiThinkingHint", "settings.aiThinkingEnable", "settings.aiThinkingEnableDesc",
-                    "settings.aiThinkingOff", "settings.aiThinkingLow", "settings.aiThinkingMedium", "settings.aiThinkingHigh",
-                    "settings.aiAdvanced", "settings.aiRequestTimeout", "settings.aiRequestTimeoutDesc", "settings.aiRequestTimeoutSeconds", "settings.aiSummaryReadOnly", "settings.on", "settings.off",
-                    "settings.aiConfigureTextAssistant", "settings.aiRefreshModels", "settings.aiCredentialPresent", "settings.aiCredentialMissing", "settings.aiConsentRecordFailed",
-                    "settings.aiConfigurationSaved", "settings.aiCredentialSaved", "settings.aiCredentialCleared", "settings.aiModel", "settings.aiCopilotModel",
-                    "settings.aiApiKey", "settings.aiApiKeyHint", "settings.aiApiKeyPlaceholder", "settings.aiBaseUrl", "settings.aiBaseUrlHint", "settings.aiBaseUrlPlaceholder", "settings.aiConsentAgree",
-                    "settings.aiExtraBodyParams", "settings.aiExtraBodyParamsDesc", "settings.aiExtraBodyParamsHint", "settings.aiExtraBodyParamsInvalid", "settings.aiExtraBodyParamsSave",
-                    "settings.feedback.loadFailed", "common.save", "common.edit", "common.clear",
-                    "sandbox.open", "sandbox.label", "sandbox.resetShort", "sandbox.exitShort", "sandbox.confirmTitle", "sandbox.confirmDescription",
-                    "sandbox.enter", "sandbox.title", "sandbox.exit", "sandbox.reset", "sandbox.description", "sandbox.notice", "sandbox.unavailable", "sandbox.switching", "sandbox.switchFailed",
-                    "common.open", "common.add", "common.rename", "taskEdit.title", "taskEdit.titleLabel", "taskEdit.descriptionLabel", "focus.schedule", "projects.addPlaceholder", "nav.projects", "settings.saved", "settings.speechTitle", "settings.speechDesc", "settings.speechEnable", "settings.speechProvider",
-                    "settings.speechProviderOffline", "settings.speechProviderParakeet", "settings.speechModel", "settings.speechLanguage",
-                    "settings.speechLanguageHint", "settings.speechLanguageAuto", "settings.speechMode", "settings.speechModeHint",
-                    "settings.speechModeSmart", "settings.speechModeTranscript", "settings.speechFieldStrategy", "settings.speechFieldStrategyHint",
-                    "settings.speechFieldSmart", "settings.speechFieldTitle", "settings.speechFieldDescription", "settings.speechUseGemini",
-                    "settings.speechNativeUnsupported", "settings.speechGeminiDisclosure", "settings.speechGeminiCredentialShared",
-                    "settings.speechOpenAIDisclosure", "settings.speechOpenAICredentialShared", "settings.speechBaseUrl", "settings.speechBaseUrlHint",
-                    "settings.speechOfflineModel", "settings.speechOfflineModelDesc", "settings.speechOfflineReady", "settings.speechOfflineNotDownloaded",
-                    "settings.speechOfflineDownload", "settings.speechOfflineDownloadSuccess", "settings.speechOfflineDelete",
-                    "settings.speechOfflineDownloadError", "settings.speechOfflineDeleteError", "settings.speechOfflineEstimatedSize", "settings.speechOfflineDownloadModel",
-                    "quickAdd.audioCaptureLabel", "quickAdd.audioStopAndSave", "quickAdd.audioRecording", "quickAdd.audioErrorBody",
-                    "quickAdd.audioPermissionTitle", "quickAdd.audioPermissionBody", "quickAdd.audioTooLarge", "quickAdd.audioNoSpeech",
-                    "quickAdd.audioNotRetained", "quickAdd.audioSingleTaskOnly", "quickAdd.speechNotConfigured",
-                    "attachments.transcribing", "attachments.transcriptionFailed", "persistence.failureMessage", "persistence.retrying",
-                    "settings.iosSearchLabel", "settings.iosSearchDesc", "settings.iosSearchPaused", "settings.iosSearchFailed",
-                    "settings.appIconBadge", "settings.appIconBadgeHint", "settings.appIconBadgeDenied", "settings.appIconBadgeError",
-                    "common.all", "common.close", "common.cancel", "common.done", "common.retry", "common.loading", "common.ok", "common.noMatches",
-                    "common.play", "common.pause", "quickAdd.audioNoteTitle", "quickAdd.bulkCreateError", "audio.loading",
-                    "attachments.title", "attachments.missing", "attachments.download", "attachments.addLink", "attachments.addFile",
-                    "settings.attachmentsCleanupPendingDeletesConfirmAction", "persistence.saved",
-                    "attachments.remove", "attachments.linkPlaceholder", "attachments.linkBatchHint",
-                    "task.aria.changeStatus", "task.aria.changeStatusHint", "taskStatus.changeStatus", "quickAdd.audioRecord",
-                    "common.more", "common.share", "agenda.reviewDueProjects", "agenda.laterToday",
-                    "task.copyTaskLink", "task.copyTaskId", "list.taskCopied", "list.taskCopyFailed",
-                    "calendar.eventTaskCreatedTitle", "calendar.eventTaskCreated",
-                    "calendar.cannotOpenEventTitle", "calendar.openUnsupported", "calendar.openFromCalendarApp",
-                    "taskEdit.textDirection.auto",
-                    "agenda.addToFocus", "agenda.removeFromFocus",
-                    "agenda.collapseOtherSections", "agenda.expandOtherSections", "markdown.expand", "markdown.collapse",
-                    "projects.areaFilter", "filters.excluded", "taskEdit.tab.view", "common.notSet", "status.active", "status.waiting", "status.someday",
-                    "common.save", "common.edit", "common.rename", "common.discard", "taskEdit.discardChanges", "taskEdit.discardChangesDesc",
-                    "markdown.edit", "markdown.preview", "common.error", "markdown.openLinkFailed", "markdown.copyLink", "markdown.copyLinkFailed", "taskEdit.titleLabel", "taskEdit.descriptionLabel",
-                    "taskEdit.assignedTo", "taskEdit.priorityLabel", "taskEdit.timeEstimateLabel", "taskEdit.timeSpentLabel",
-                    "taskEdit.contextsLabel", "taskEdit.statusLabel", "taskEdit.reviewDateLabel",
-                    "taskEdit.startModeRelative", "taskEdit.recurrenceLabel", "recurrence.showFutureInCalendar",
-                    "taskEdit.resetChecklistOnRepeat", "taskEdit.resetChecklistOnRepeatHint",
-                    "task.completedAtPromptTitle", "task.editCompletedAt", "task.moveToProjectOrArea", "task.destination", "filters.taskDates", "status.inbox", "status.next", "status.done", "status.reference",
-                    "task.doneCompletedAtOutcomeUnknown", "task.doneStatusOutcomeUnknown", "task.doneTagOutcomeUnknown", "task.destinationOutcomeUnknown",
-                    "task.completionOutcomeUnknown", "task.completionUndoOutcomeUnknown", "task.projectNextActionOutcomeUnknown",
-                     "projects.nextActionPromptChooseExisting", "projects.nextActionPromptAddNew",
-                    "taskEdit.descriptionPlaceholder", "search.placeholder", "search.noResults", "search.searching",
-                    "search.resultProject", "search.resultTask", "search.inProjectSuffix", "search.showingFirst", "search.helpOperators", "search.saveSearch", "search.saveSearchPrompt", "search.savedSearches",
-                    "search.hiddenCompletedMatches", "filters.label", "common.clear", "review.markDone", "review.markReviewedDone",
-                    "nav.projects", "nav.review", "nav.calendar", "nav.board", "nav.contexts", "common.back", "common.tasks",
-                    "task.aria.openContext", "task.aria.openTag",
-                    "projects.title", "projects.deleteConfirm", "projects.duplicate", "projects.duplicated", "projects.complete", "projects.reactivate", "projects.cancel", "projects.cancelConfirmTitle", "projects.cancelConfirmBody", "projects.archiveHelp", "projects.activeSection", "projects.deferredSection", "projects.closed",
-                    "projects.noArea", "projects.empty", "list.noTasks", "projects.noNextAction",
-                    "projects.addPlaceholder", "projects.add", "projects.tagFilter", "projects.allTags", "projects.noTags", "projects.emptyTag",
-                    "filters.show", "filters.hide", "projects.areaLabel",
-                    "projects.areaAvailableSelectToAssign", "common.add",
-                    "taskEdit.details", "projects.statusLabel", "projects.projectTypeLabel", "projects.sequentialScope",
-                    "projects.sequentialAcrossSections", "projects.sequentialWithinSections",
-                    "projects.projectTypeHelpText", "projects.sequentialScopeHelpText",
-                    "projects.parallel", "projects.sequential", "projects.perSection",
-                    "projects.parallelTooltip", "projects.sequentialTooltip", "projects.perSectionTooltip",
-                    "projects.sectionsLabel", "projects.addSection", "projects.sectionPlaceholder", "projects.deleteSectionConfirm", "settings.manage", "settings.general", "settings.gtd", "settings.reviewSettings", "settings.inboxProcessing", "settings.captureSettings", "taskEdit.tagsLabel", "taskEdit.startDateLabel", "taskEdit.dueDateLabel",
-                    "projects.reviewAt", "common.none",
-                    "project.notes",
-                    "areas.manage", "areas.nameExists", "projects.manageAreas", "projects.changeColor", "projects.colorNone",
-                    "projects.sortByName", "projects.sortByColor", "projects.moveUp", "projects.moveDown", "projects.areaInUse",
-                    "common.delete",
-                    "projects.addToFocus", "projects.removeFromFocus", "projects.actionsLabel", "waiting.title",
-                    "someday.title", "board.dragTask", "common.search", "filters.contexts", "filters.projects", "filters.timeEstimate",
-                    "filters.more", "filters.priority", "filters.remove", "filters.active", "filters.clear", "taskEdit.energyLevel",
-                    "savedFilters.saveTitle", "savedFilters.namePlaceholder", "filters.label", "filters.excluded",
-                    "taskEdit.locationLabel", "taskEdit.locationPlaceholder", "reference.title", "nav.history", "nav.trash",
-                    "task.trashOutcomeUnknown", "task.updateFailed",
-                    "filters.matchAny", "filters.contextMatchMode", "filters.tagMatchMode",
-                    "sort.label", "list.groupBy", "taskEdit.moreOptions", "dailyReview.completeDesc",
-                    "settings.about", "settings.officialWebsite", "settings.videoTutorials", "settings.privacy", "settings.terms",
-                    "settings.sponsorProject", "settings.donateLinkValue", "settings.license", "attachments.openLinkFailed",
-                    "settings.checkForUpdates", "settings.checking", "settings.checkFailed", "settings.updateAvailable", "settings.later", "attachments.open",
-                    "settings.aboutMobile.tapToCheck", "settings.aboutMobile.rateOurApp", "settings.aboutMobile.upToDate",
-                    "settings.aboutMobile.appStoreUpdateAvailableWithVersions", "settings.aboutMobile.youAreUsingTheLatestAppStoreVersion",
-                    "settings.aboutMobile.couldNotOpenTheAppStoreRatingPagePleaseTry",
-                    "settings.feedback.saveFailed", "settings.feedback.actionFailed",
-                    "settings.feedback", "settings.feedbackDesc", "settings.feedbackCategory", "settings.feedbackCategoryBug", "settings.feedbackCategoryFeature", "settings.feedbackCategoryOther",
-                    "settings.feedbackMessage", "settings.feedbackMessagePlaceholder", "settings.feedbackMessagePlaceholderBug", "settings.feedbackMessagePlaceholderFeature", "settings.feedbackMessagePlaceholderOther",
-                    "settings.feedbackWhere", "settings.feedbackWherePlaceholder", "settings.feedbackWhereMessagePrefix", "settings.feedbackWhereInbox", "settings.feedbackWhereFocus", "settings.feedbackWhereProjects",
-                    "settings.feedbackWhereReview", "settings.feedbackWhereSettings", "settings.feedbackWhereSync", "settings.feedbackWhereImportExport", "settings.feedbackWhereNotifications", "settings.feedbackWhereOther",
-                    "settings.feedbackNoEmailTitle", "settings.feedbackNoEmailDesc", "settings.feedbackAddEmail", "settings.feedbackSendWithoutEmail",
-                    "settings.feedbackEmail", "settings.feedbackEmailPlaceholder", "settings.feedbackIncludeDiagnostics", "settings.feedbackIncludeDiagnosticsDesc", "settings.feedbackPrivacy",
-                    "settings.feedbackSubmit", "settings.feedbackSending", "settings.feedbackSent", "settings.feedbackFailed", "settings.feedbackUnavailable", "settings.feedbackUnavailableDesc",
-                    "settings.feedbackOpenGitHubIssue", "settings.feedbackGitHubDesc", "settings.feedbackOpenGitHubDiscussion", "settings.feedbackRequired", "settings.feedbackInvalidEmail",
-                    "settings.appleRemindersImport.appleReminders", "settings.appleRemindersImport.captureList", "settings.appleRemindersImport.chooseCaptureList", "settings.appleRemindersImport.deleteAfterImport", "settings.appleRemindersImport.deleteAfterImportDescription", "settings.appleRemindersImport.autoImport", "settings.appleRemindersImport.autoImportDescription", "settings.appleRemindersImport.importIncomplete", "settings.appleRemindersImport.importIncompleteDescription", "settings.appleRemindersImport.permissionRequired", "settings.appleRemindersImport.noListsFound", "settings.appleRemindersImport.importedCount", "settings.appleRemindersImport.skippedCount", "settings.appleRemindersImport.failedCount", "settings.appleRemindersImport.deletedCount", "settings.appleRemindersImport.deleteFailedCount",
-                    "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "viewSections.updateFailed",
-                    "bulk.organize", "common.next", "common.undo", "pomodoro.mobileTitle", "projects.archiveDeleteOutcomeUnknown", "projects.archiveRestoreOutcomeUnknown",
-                    "projects.color", "projects.completeConfirm", "projects.convertColor", "projects.convertDestination", "projects.convertDestinationColor", "projects.convertNamedSection",
-                    "projects.convertSectionName", "projects.convertSettings", "projects.convertToSection", "projects.convertTrash", "projects.projectName", "projects.reorderNeedsDefaultSort",
-                    "projects.reorderTasks", "projects.useAreaColor", "settings.advanced", "settings.autoArchive", "settings.calendar", "settings.calendarAccessRequired",
-                    "settings.calendarMobile.failedToLoadEvents", "settings.calendarMobile.failedToLoadSavedCalendars", "settings.grantCalendarAccess", "settings.notifications", "settings.syncFailureGeneric", "settings.syncMobile.error",
-                    "task.expandChecklist", "task.expandChecklistDescription", "task.keepChecklistDescription", "taskEdit.unsavedChanges",
-                    "task.archiveDeleteOutcomeUnknown", "task.archiveRestoreOutcomeUnknown"]
-        let requested = keys + NativeGmail.stringKeys
+        let requested = Self.labelKeys
+        guard !requested.isEmpty else { throw CocoaError(.fileReadNoSuchFile) }
         var translated: CoreObject = [:]
         for start in stride(from: 0, to: requested.count, by: 500) {
             let result = try await query("strings", [try json(Array(requested[start..<min(start + 500, requested.count)]))])
@@ -38623,7 +38519,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     .allSatisfy({ taskDraftValuesEqual(freshEditor.object("draft")[$0], fresh[$0]) }) else {
                 throw CocoaError(.coderReadCorrupt)
             }
-            try await readTaskEditorLabels(freshEditor)
+            await readTaskEditorSectionHelp(freshEditor)
             try requireOwnedRestore()
             let restoredChecklist = payload["checklistValue"] as? [CoreObject] ?? freshChecklist
             let restoredEditor: CoreObject
@@ -38745,7 +38641,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                let editor = try? await query("editorModel", [snapshot.taskID]),
                !owned || (self.host === host && !appLock.concealed && !Task.isCancelled) {
                 taskRecoveryReviewOptions = editor.object("options")
-                try? await readTaskEditorLabels(editor)
+                await readTaskEditorSectionHelp(editor)
             }
             taskRecoveryConflict = error.localizedDescription
             NSLog("Native iOS editor recovery outcome=retained releaseCheck=v1.3.4/ios-editor-draft-recovery")
@@ -41075,40 +40971,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         taskDestinationCurrent = true
     }
 
-    private func readTaskEditorLabels(_ editor: CoreObject) async throws {
-        let options = editor.object("options")
-        var keys = ["taskEdit.duplicateTask", "task.skipOccurrence", "task.createProjectFromTask", "task.promoteToProjectCreated", "task.promoteToProjectMoved", "task.updateFailed", "common.none", "common.share", "common.more", "share.unavailable", "taskEdit.priorityLabel", "taskEdit.energyLevel", "taskEdit.timeEstimateLabel",
-                    "taskEdit.scheduling", "taskEdit.organization", "taskEdit.details",
-                    "taskEdit.contextsLabel", "taskEdit.contextsPlaceholder", "taskEdit.tagsLabel", "taskEdit.tagsPlaceholder",
-                    "taskEdit.assignedTo", "taskEdit.assignedToPlaceholder", "people.new", "taskEdit.statusLabel", "reference.convertToAction",
-                    "taskEdit.timeSpentLabel", "taskEdit.timeSpentPlaceholder",
-                    "task.completedAtPromptTitle",
-                    "process.waitingFor", "process.waitingForDesc", "common.cancel", "common.save",
-                    "taskEdit.startDateLabel", "taskEdit.dueDateLabel", "taskEdit.reviewDateLabel", "taskEdit.dateOnly",
-                    "taskEdit.startModeAbsolute", "taskEdit.startModeRelative", "taskEdit.relativeStartAmount",
-                    "taskEdit.relativeStartBeforeDue", "task.aria.startTime", "task.aria.dueTime", "task.aria.reviewTime", "calendar.changeTime", "common.done",
-                    "taskEdit.recurrenceLabel", "recurrence.repeatEvery", "recurrence.dayUnit", "recurrence.weekUnit",
-                    "recurrence.monthUnit", "recurrence.yearUnit", "recurrence.monthlyOnDay", "recurrence.custom",
-                    "recurrence.endsLabel", "recurrence.endsNever", "recurrence.endsOnDate", "recurrence.endsAfterCount",
-                    "recurrence.occurrenceUnit", "recurrence.afterCompletion", "recurrence.showFutureInCalendar",
-                    "recurrence.showFutureInCalendarHint", "recurrence.customTitle", "recurrence.onLabel",
-                    "taskEdit.resetChecklistOnRepeat", "taskEdit.resetChecklistOnRepeatHint",
-                    "recurrence.lastDay", "recurrence.lastDayOfMonth", "recurrence.onDayOfMonth", "recurrence.onNthWeekday",
-                    "recurrence.weekdayMonFri", "recurrence.ordinal.first", "recurrence.ordinal.second",
-                    "recurrence.ordinal.third", "recurrence.ordinal.fourth", "recurrence.ordinal.last",
-                    "attachments.title", "attachments.addLink", "attachments.addFile", "attachments.addPhoto", "attachments.remove",
-                    "attachments.download", "attachments.missing", "attachments.downloadConflict", "attachments.unrecoverable",
-                    "attachments.finishDraftBeforeChanges", "common.loading",
-                    "attachments.linkPlaceholder", "attachments.linkBatchHint", "common.edit", "common.ok"]
-        keys += options.objects("recurrences").map { $0.text("labelKey") }
-        keys += (options["statuses"] as? [String] ?? []).map { "status." + $0 }
-        keys += (options["priorities"] as? [String] ?? []).map { "priority." + $0 }
-        keys += (options["energyLevels"] as? [String] ?? []).map { "energyLevel." + $0 }
-        let translated = try await query("strings", [try json(keys)]).object("strings")
-        strings.merge(translated) { _, new in new }
-        await readTaskEditorSectionHelp(editor)
-    }
-
     private func readTaskEditorSectionHelp(_ editor: CoreObject) async {
         guard let owner = host else { return }
         let id = editor.text("id"), session = taskRecoverySession, language = currentLanguage
@@ -41190,7 +41052,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 if taskEditor.isEmpty {
                     let editor = try await query("editorModel", [id])
                     guard ownedGuard?() != false else { return }
-                    try await readTaskEditorLabels(editor)
+                    await readTaskEditorSectionHelp(editor)
                     guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
                     if var intent = taskOpeningIntent {
                         intent["readOnly"] = editor.flag("readOnly")
@@ -42064,8 +41926,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         defer { finishOperation() }
         do {
             let started = try await query("inboxStartDetailed", ["guided"])
-            let translated = try await query("strings", [try json(["task.updateFailed", "common.cancel", "common.ok"])]).object("strings")
-            strings.merge(translated) { _, new in new }
             guard selectedSurface == caller,
                   caller != .review || (reviewGuidePresented && ["daily", "weekly"].contains(reviewKind)
                       && reviewGuide.object("content").text("step") == "inbox") else { return }

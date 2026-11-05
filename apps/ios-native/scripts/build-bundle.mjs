@@ -1,7 +1,8 @@
 import { build } from 'esbuild';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import process from 'node:process';
+import { runInNewContext } from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -34,4 +35,8 @@ if (!cryptoTest && !uploadTest) {
         entryPoints: [resolve(app, 'bundle/sandbox-entry.ts')],
         outfile: resolve(app, 'Sources/MindwtrNativeCore/Resources/sandbox-host.js'),
     });
+    const english = await build({ entryPoints: [resolve(app, '../../packages/core/src/i18n/locales/en.ts')],
+        bundle: true, write: false, format: 'iife', globalName: 'english', tsconfigRaw: {}, logLevel: 'silent' });
+    const { en } = runInNewContext(`${english.outputFiles[0].text};english`);
+    writeFileSync(resolve(app, 'Resources/label-keys.json'), `${JSON.stringify(Object.keys(en))}\n`);
 }

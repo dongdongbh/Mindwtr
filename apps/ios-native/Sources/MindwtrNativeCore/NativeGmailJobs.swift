@@ -22,17 +22,6 @@ public enum NativeGmail {
             enabled: Bundle.main.object(forInfoDictionaryKey: "MindwtrGmailEnabled") as? Bool == true) != nil
     }
 
-    public static let stringKeys = [
-        "settings.gmailCapture", "settings.gmailCaptureDesc", "settings.gmailCaptureDisclosure", "settings.gmailCaptureUnavailable",
-        "settings.gmailCaptureAccount", "settings.gmailCaptureLabel", "settings.gmailCaptureChooseLabel", "settings.gmailCaptureLabelHint",
-        "settings.gmailCaptureActive", "settings.gmailCapturePaused", "settings.gmailCaptureConnect", "settings.gmailCaptureConnecting",
-        "settings.gmailCaptureReconnect", "settings.gmailCaptureDisconnect", "settings.gmailCaptureCheckNow", "settings.gmailCaptureChecking",
-        "settings.gmailCaptureSave", "settings.gmailCaptureSaving", "settings.gmailCaptureLastChecked", "settings.gmailCaptureImportedCount",
-        "settings.gmailCaptureReceiptsReset", "settings.gmailCaptureCancelled", "settings.gmailCaptureDisconnected",
-        "settings.gmailCaptureRevokeManually", "settings.gmailCaptureAuthFailed", "settings.gmailCaptureNetworkFailed",
-        "settings.gmailCaptureConfigFailed", "settings.gmailCaptureStorageFailed", "settings.gmailCaptureFailed",
-    ]
-
     static func receiptFolder(databaseURL: URL, rnAdoptionContainerURL: URL?) -> URL {
         if let rnAdoptionContainerURL {
             return rnAdoptionContainerURL.appendingPathComponent("Documents", isDirectory: true)
