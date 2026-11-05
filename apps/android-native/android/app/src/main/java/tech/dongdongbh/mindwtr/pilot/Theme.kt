@@ -139,7 +139,9 @@ class RnSwitchProps(val trackOff: Color, val trackOn: Color, val thumbOff: Color
 class MindwtrTheme(val colors: ThemeColors, val isDark: Boolean, val isMaterial: Boolean, private val statuses: Map<String, StatusColors>, private val priorities: Map<String, Color>,
                    private val isEink: Boolean = false) {
 
-    fun identityColorOrNull(hex: String?): Color? = coreColorOrNull(hex)?.let { if (isEink) Color.Black else it }
+    fun identityColorOrNull(hex: String?): Color? = coreColorOrNull(hex)?.let(::einkSafe)
+
+    fun einkSafe(color: Color): Color = if (isEink) Color.Black else color
 
     fun status(value: String): StatusColors = statuses[value] ?: StatusColors(colors.filterBg, colors.secondaryText, colors.border)
 
@@ -148,7 +150,7 @@ class MindwtrTheme(val colors: ThemeColors, val isDark: Boolean, val isMaterial:
     val rowRadius = if (isMaterial) 16.dp else 14.dp
     val captureRadius = if (isMaterial) 16.dp else 10.dp
 
-    val star = rgb("#F59E0B")
+    val star = einkSafe(rgb("#F59E0B"))
     val attention = rgb("#F59E0B")
 
     val context = rgb("#3B82F6")
