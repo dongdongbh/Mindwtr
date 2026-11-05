@@ -60,6 +60,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -88,8 +89,16 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
     val shown = page
     val view = shown?.view
     val labels = view?.optJSONObject("labels")
-    DisposableEffect(Unit) { onDispose { if (screen != MenuScreen.Weekly) editOwn("weekly") { remove("keepProjectsStep") } } }
-    Column(Modifier.fillMaxSize().background(c.bg).testTag("weekly-review")) {
+    DisposableEffect(Unit) {
+        onDispose {
+            if (screen != MenuScreen.Weekly) {
+                editOwn("weekly") { remove("keepProjectsStep") }
+                model.projectDetails.dismissReviewCompletion()
+            }
+        }
+    }
+    val covered = dialog?.optString("kind") == WEEKLY_COMPLETE_DIALOG
+    Column(Modifier.fillMaxSize().background(c.bg).then(if (covered) Modifier.clearAndSetSemantics { testTag = "weekly-review" } else Modifier.testTag("weekly-review"))) {
         val current = view?.optJSONObject("step")
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             val close = labels?.optString("closeLabel") ?: t("common.close")
@@ -523,7 +532,6 @@ private fun CompleteProjectLink(model: InboxViewModel, project: JSONObject) {
     val id = project.getString("id")
     val label = t("projects.complete")
     Row(Modifier.fade(if (menu.idle) 1f else 0.5f).clickable(enabled = menu.idle, role = Role.Button) {
-        menu.editOwn("weekly") { put("keepProjectsStep", true) }
         model.projectDetails.askCompleteFromReview(id)
     }.semantics { contentDescription = label }.testTag("review-complete-project-$id").padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -531,6 +539,9 @@ private fun CompleteProjectLink(model: InboxViewModel, project: JSONObject) {
         Text(label, style = rnText(13, 600), color = c.tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
+
+
+internal const val WEEKLY_COMPLETE_DIALOG = "weeklyComplete"
 
 
 @Composable

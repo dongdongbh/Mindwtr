@@ -87,7 +87,8 @@ const core = (mode, db) => JSON.parse(execFileSync('bun', ['-e', `
         const status = (title) => live(store()._allProjects).find((project) => project.title === title)?.status ?? null;
         const weekly = value(host.getWeeklyReview({ checkpoint: JSON.stringify({ step: 'projects', startedAt: new Date().toISOString() }), offset: 0, limit: 100 }));
         const more = value(host.getMoreMenu());
-        out = { busy: status(names.busy), idle: status(names.idle), projectsTitle: weekly.step.title, next: weekly.labels.next,
+        const task = live(store()._allTasks).find((item) => item.title === names.open);
+        out = { busy: status(names.busy), idle: status(names.idle), openTask: task?.status ?? null, projectsTitle: weekly.step.title, next: weekly.labels.next,
             quickAccess: more.quickAccessView, tiles: Object.fromEntries([...more.primary, ...more.utilities].map((item) => [item.id, item.label])) };
     }
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
@@ -106,20 +107,14 @@ const onReview = (nodes) => Boolean(tagged(nodes, 'review-list'));
 const onWeekly = (nodes) => Boolean(tagged(nodes, 'weekly-review')) && Boolean(tagged(nodes, 'review-step-title')?.text);
 const stepTitle = (nodes) => tagged(nodes, 'review-step-title')?.text;
 const prompt = (nodes) => Boolean(tagged(nodes, 'review-complete-project-prompt'));
-const inPrompt = (nodes, label) => {
-    const card = tagged(nodes, 'review-complete-project-prompt');
-    if (!card) return undefined;
-    const [left, top, right, bottom] = box(card);
-    const within = (node) => {
-        const [x1, y1, x2, y2] = box(node);
-        const [x, y] = [(x1 + x2) / 2, (y1 + y2) / 2];
-        return x >= left && x <= right && y >= top && y <= bottom;
-    };
-    return nodes.find((node) => node['content-desc'] === label && within(node));
-};
 
 let injected = false;
+const originalAccelerometer = sh('settings get system accelerometer_rotation');
+const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
+    for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch (error) { console.error(`restore ${name}: ${error.message}`); }
+    }
     if (!injected) return;
     try {
         const current = front();
@@ -192,13 +187,22 @@ try {
     shoot('prompt');
     check(nodes.some((node) => node.text === en['projects.completeConfirm']) && nodes.some((node) => node.text === names.busy),
         `(a) Complete on ${names.busy}, which has an open task, asks first with RN's "${en['projects.completeConfirm']}" (RN d32f16947, #1395)`);
-    nodes = await tapExpecting(inPrompt(nodes, en['common.cancel']) ?? fail('no Cancel in the prompt'), (current) => !prompt(current), 'the prompt to close');
+    nodes = await tapExpecting(withDescription(nodes, en['common.cancel']) ?? fail('no Cancel'), (current) => !prompt(current), 'the prompt to close');
     check(core('read', pullDatabase('cancelled')).busy === 'active', '(a) Cancel closes the prompt and leaves the project active');
     nodes = await tapExpecting(tagged(nodes, `review-complete-project-${ids.busy}`) ?? fail('no Complete'), prompt, 'the completion prompt again');
-    await tap(inPrompt(nodes, en['projects.complete']) ?? fail('no Complete in the prompt'));
+    check(!withDescription(nodes, `${en['task.aria.openProject'].replace('{{name}}', names.busy)}`) && !tagged(nodes, `review-complete-project-${ids.busy}`),
+        '(a) while the prompt is open, the Weekly Review behind it is hidden from accessibility, as RN\'s modal hides it');
+    sh('settings put system accelerometer_rotation 0');
+    sh('settings put system user_rotation 1');
+    await waitFor('the prompt in landscape', prompt, 20_000);
+    sh('settings put system user_rotation 0');
+    nodes = await waitFor('the prompt in portrait', prompt, 20_000);
+    check(true, '(a) the prompt stays open across a rotation');
+    await tap(withDescription(nodes, en['projects.complete']) ?? fail('no Complete in the prompt'));
     nodes = await waitFor(`${names.busy} to leave the step`, (current) => !prompt(current) && !withDescription(current, names.busy), 20_000);
-    check(core('read', pullDatabase('busy-done')).busy === 'archived' && stepTitle(nodes) === seen.projectsTitle,
-        `(a) the prompt's Complete stores ${names.busy} as completed, and the review stays on "${seen.projectsTitle}"`);
+    const completed = core('read', pullDatabase('busy-done'));
+    check(completed.busy === 'archived' && completed.openTask === 'done' && stepTitle(nodes) === seen.projectsTitle,
+        `(a) the prompt's Complete stores ${names.busy} as completed and its open task ${names.open} as done, and the review stays on "${seen.projectsTitle}"`);
 
     nodes = await openCard(names.idle);
     await tap(tagged(nodes, `review-complete-project-${ids.idle}`));

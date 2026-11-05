@@ -163,7 +163,6 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     var actionsOpen by mutableStateOf(false)
     var actionConfirm by mutableStateOf<String?>(null)
 
-    var reviewCompletion by mutableStateOf<JSONObject?>(null); private set
 
 
     var listFilterState by mutableStateOf(JSONObject()); private set
@@ -492,16 +491,18 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     fun askCompleteFromReview(projectId: String) {
         shell.background(emptyList(), { runtime -> runtime.menuRead("weeklyProjectCompletion", JSONObject().put("projectId", projectId).toString()) }) { reply, _ ->
             val completion = reply.optJSONObject("completion") ?: return@background
-            if (completion.isNull("confirm")) completeFromReview(projectId) else reviewCompletion = completion
+            if (completion.isNull("confirm")) completeFromReview(projectId)
+            else shell.menu.keepDialog(JSONObject(completion.toString()).put("kind", WEEKLY_COMPLETE_DIALOG))
         }
     }
 
     fun completeFromReview(projectId: String) {
-        reviewCompletion = null
+        dismissReviewCompletion()
+        shell.menu.editOwn("weekly") { put("keepProjectsStep", true) }
         edit(projectId, "lifecycle", refused = { message -> shell.showToast(t("common.error"), message, "error") }) { put("action", "complete") }
     }
 
-    fun dismissReviewCompletion() { reviewCompletion = null }
+    fun dismissReviewCompletion() { if (shell.menu.dialog?.optString("kind") == WEEKLY_COMPLETE_DIALOG) shell.menu.keepDialog(null) }
 
 
     fun openActions() {

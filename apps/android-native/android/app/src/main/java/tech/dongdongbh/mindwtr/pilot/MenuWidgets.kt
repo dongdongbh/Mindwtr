@@ -156,7 +156,6 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
             }
         }
         MenuDialogs(model)
-        if (screen == MenuScreen.Weekly) model.projectDetails.reviewCompletion?.let { WeeklyProjectCompletePrompt(model, it) }
         StatusMenu(model)
         capture?.let { CapturePopup(model, it) }
         if (areaSheet) AreaSheet(model)
@@ -490,6 +489,7 @@ fun MenuDialogs(model: InboxViewModel) = with(model.menu) {
         "tokens" -> TokenPicker(model, open)
         "startReview", "reviewMove", "reviewTag" -> ReviewDialog(model, open)
         "projectTask" -> ProjectTaskPrompt(model, open)
+        WEEKLY_COMPLETE_DIALOG -> WeeklyProjectCompletePrompt(model, open)
         "confirm" -> AlertDialog(
             onDismissRequest = { keepDialog(null) },
             title = { Text(open.getString("title")) },
